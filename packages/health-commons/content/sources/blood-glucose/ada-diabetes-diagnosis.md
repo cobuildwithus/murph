@@ -14,6 +14,7 @@ categories:
   - diabetes
   - patient-education
 relations:
+
   -
     type: cites
     target: biomarker:blood-glucose

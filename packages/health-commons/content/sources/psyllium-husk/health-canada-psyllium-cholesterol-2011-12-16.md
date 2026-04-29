@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "guideline"
 modality: "psyllium husk / soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:health-canada-psyllium-cholesterol-2011-12-16-health-canada-7g-claim-context"
     sourceKey: "source_artifact:health-canada-psyllium-cholesterol-2011-12-16"

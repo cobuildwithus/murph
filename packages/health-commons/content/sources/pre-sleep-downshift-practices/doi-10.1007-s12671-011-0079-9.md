@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -64,6 +65,7 @@ populationMismatch: "MBSR is a multi-component clinical program, not silent medi
 directnessToProtocol: safety_boundary
 claimUse: safety-only
 sourceFindings:
+
   -
     findingId: finding:doi-10.1007-s12671-011-0079-9:primary-safety-context
     sourceKey: source_artifact:doi-10.1007-s12671-011-0079-9

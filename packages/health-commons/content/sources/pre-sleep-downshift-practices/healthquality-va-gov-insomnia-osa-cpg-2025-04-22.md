@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Most current combined insomnia/OSA boundary guideline found; 
 studyDesign: "guideline"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:healthquality-va-gov-insomnia-osa-cpg-2025-04-22/validated-screening-cbti-boundary"
     sourceKey: "source_artifact:healthquality-va-gov-insomnia-osa-cpg-2025-04-22"

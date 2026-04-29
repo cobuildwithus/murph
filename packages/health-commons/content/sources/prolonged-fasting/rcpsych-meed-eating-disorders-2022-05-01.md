@@ -8,19 +8,17 @@ summary: MEED guidance for recognizing and managing medical emergencies in eatin
 status: draft
 quality: usable
 aliases:
-  - 'MEED 2022 Medical Emergencies in Eating Disorders: Guidance on Re'
-  - 'Medical Emergencies in Eating Disorders: Guidance on Recognition and Management (MEED)'
+- 'MEED 2022 Medical Emergencies in Eating Disorders: Guidance on Re'
+- 'Medical Emergencies in Eating Disorders: Guidance on Recognition and Management (MEED)'
 categories:
-  - prolonged-fasting
-  - refeeding-safety
-  - electrolytes-thiamine
+- prolonged-fasting
+- refeeding-safety
+- electrolytes-thiamine
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: guideline
   title: 'Medical Emergencies in Eating Disorders: Guidance on Recognition and Management (MEED)'
@@ -44,29 +42,29 @@ researchEvidence:
   aggregateRole: synthesis
   cohortKey: rcpsych-meed-eating-disorders-2022-05-01
   notes:
-    - 'Limitations: Eating-disorder emergency guideline; population is adjacent/high-risk, not general wellness fasting.'
-    - 'Population mismatch: Eating-disorder medical emergencies and malnutrition differ from low-risk 24–72 hour fasting.'
+  - 'Limitations: Eating-disorder emergency guideline; population is adjacent/high-risk, not general wellness fasting.'
+  - 'Population mismatch: Eating-disorder medical emergencies and malnutrition differ from low-risk 24–72 hour fasting.'
 evidenceBucket: refeeding, electrolytes, and thiamine safety
 directnessToProtocol: general_guideline
 whyItMatters: Major adjacent eating-disorder emergency guidance; useful for referral/stop boundaries when fasting overlaps with underweight, restriction, purging, bradycardia, ECG, or abnormal labs.
 potentialMurphEndpoints:
-  - biomarker:serum-phosphate
-  - biomarker:serum-potassium
-  - biomarker:serum-magnesium
-  - biomarker:thiamine-status
-  - biomarker:heart-rhythm
-  - biomarker:refeeding-syndrome-symptoms
-  - biomarker:electrolyte-panel
+- biomarker:serum-phosphate
+- biomarker:serum-potassium
+- biomarker:serum-magnesium
+- biomarker:thiamine-status
+- biomarker:heart-rhythm
+- biomarker:refeeding-syndrome-symptoms
+- biomarker:electrolyte-panel
 participantSummary: No participant sample; guideline for eating-disorder medical emergencies in adolescents/adults.
 interventionOrExposure: Recognition, medical risk assessment, refeeding risk assessment, and urgent care pathways in eating-disorder contexts.
 comparatorOrControl: Not applicable or not extracted for this source.
 endpoints:
-  - refeeding symptoms
-  - phosphate
-  - potassium
-  - magnesium
-  - thiamine
-  - cardiac symptoms
+- refeeding symptoms
+- phosphate
+- potassium
+- magnesium
+- thiamine
+- cardiac symptoms
 effectEstimatesOrDirection: MEED guidance is relevant when fasting overlaps with underweight, restriction, purging, bradycardia, ECG abnormalities, abnormal electrolytes, or suspected eating disorder; it supports urgent medical assessment rather than self-guided fasting/refeeding.
 adverseEventsOrSafetyNotes: Eating-disorder medical emergency and refeeding-risk boundaries.
 limitations: Eating-disorder emergency guideline; population is adjacent/high-risk, not general wellness fasting.
@@ -77,18 +75,17 @@ studyDesign: Clinical guideline
 modality: Eating-disorder emergency / refeeding safety
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:rcpsych-meed-eating-disorders-2022-05-01-refeeding-safety
-    sourceKey: source_artifact:rcpsych-meed-eating-disorders-2022-05-01
-    extractedFromArtifactId: art_rcpsych_meed_eating_disorders_2022_05_01
-    findingKind: safety
-    population: No participant sample; guideline for eating-disorder medical emergencies in adolescents/adults.
-    exposure: Recognition, medical risk assessment, refeeding risk assessment, and urgent care pathways in eating-disorder contexts.
-    outcome: Eating-disorder medical emergency and refeeding-risk boundaries.
-    summary: MEED guidance is relevant when fasting overlaps with underweight, restriction, purging, bradycardia, ECG abnormalities, abnormal electrolytes, or suspected eating disorder; it supports urgent medical assessment rather than self-guided fasting/refeeding.
-    evidenceUse:
-      - safety
-      - adjacent_variant
+- findingId: finding:rcpsych-meed-eating-disorders-2022-05-01-refeeding-safety
+  sourceKey: source_artifact:rcpsych-meed-eating-disorders-2022-05-01
+  extractedFromArtifactId: art_rcpsych_meed_eating_disorders_2022_05_01
+  findingKind: safety
+  population: No participant sample; guideline for eating-disorder medical emergencies in adolescents/adults.
+  exposure: Recognition, medical risk assessment, refeeding risk assessment, and urgent care pathways in eating-disorder contexts.
+  outcome: Eating-disorder medical emergency and refeeding-risk boundaries.
+  summary: MEED guidance is relevant when fasting overlaps with underweight, restriction, purging, bradycardia, ECG abnormalities, abnormal electrolytes, or suspected eating disorder; it supports urgent medical assessment rather than self-guided fasting/refeeding.
+  evidenceUse:
+  - safety
+  - adjacent_variant
 murphV1Priority: Medium
 pdfRightsStatus: permission_required
 ---

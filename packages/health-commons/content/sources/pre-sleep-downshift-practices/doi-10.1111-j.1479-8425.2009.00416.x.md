@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -61,6 +62,7 @@ studyDesign: Cross-sectional PSG observational comparison.
 modality: Long-term Vipassana meditation practitioner status assessed with whole-night polysomnography.
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:doi-10.1111-j.1479-8425.2009.00416.x-vipassana-psg-sleep-architecture
     sourceKey: source_artifact:doi-10.1111-j.1479-8425.2009.00416.x

@@ -31,6 +31,7 @@ researchEvidence:
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
+
   -
     artifactId: art_bryan_johnson_saunamaxx_2026_04_14_html_snapshot
     kind: html

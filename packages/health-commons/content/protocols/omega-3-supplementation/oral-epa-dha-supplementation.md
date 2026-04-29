@@ -24,6 +24,7 @@ categories:
 - lab-marker
 - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-04.png
@@ -575,6 +576,7 @@ experimentOnboarding:
     intentSummary: Explore Oral EPA/DHA Supplementation
   contextReview:
     vaultChecks:
+
     -
       id: active_experiments
       label: Active experiments
@@ -620,6 +622,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
     -
       id: antithrombotic_bleeding_or_procedure_context
       prompt: Are you taking an anticoagulant, antiplatelet, regular NSAID, high-dose aspirin, SSRI/SNRI, or bleeding-relevant supplement; do you have a bleeding disorder, thrombocytopenia, history of serious bleeding, recurrent nosebleeds/gum bleeding, abnormal bruising/bleeding, or a planned surgery, dental extraction, endoscopy, biopsy, or other invasive procedure?
@@ -652,6 +655,7 @@ experimentOnboarding:
     - If the user is unsure about medication names, bleeding-relevant supplements, a clinician-managed diagnosis, or a procedure date, treat that as positive until clarified.
     - Do not reassure fish/shellfish allergy, pregnancy/lactation, pediatric use, AF/flutter, severe hypertriglyceridemia, or antithrombotic use into the starter variant; route to clinician-guided variants.
   setupSlots:
+
   -
     id: product_identity
     label: Product identity
@@ -1074,6 +1078,7 @@ researchLandscape:
   primaryClaim: Direct adult oral EPA/DHA evidence supports blood EPA/DHA status change, and triglycerides may fall, especially with elevated baseline triglycerides or higher-dose contexts.
   mainCaveat: Biomarker and lipid changes do not establish cardiovascular-event, mood/cognition, dry-eye, exercise-recovery, or inflammation benefits, and safety boundaries are especially important around AF/flutter or unexplained rhythm symptoms, bleeding/procedure/antithrombotic/NSAID contexts, allergy/hypersensitivity, pregnancy/lactation/pediatric use, liver/LDL monitoring, gout, immunosuppression, and prescription/high-dose care.
   groups:
+
   -
     id: direct-protocol-evidence
     label: Direct oral EPA/DHA evidence

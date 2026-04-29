@@ -18,6 +18,7 @@ categories:
   - "contamination"
   - "dose-uncertainty"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -60,6 +61,7 @@ studyDesign: "Mechanistic contamination investigation"
 modality: "Red yeast rice supplement quality/safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-2183-pjab-101-017:batch-003-primary"
     sourceKey: "source_artifact:doi-10.2183-pjab.101.017"

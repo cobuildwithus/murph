@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Useful as non-primary safety context for trauma-related react
 studyDesign: "book_or_external_practice_framework"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:wwnorton-trauma-sensitive-mindfulness-2026-04-26:context-boundary"
     sourceKey: "source_artifact:wwnorton-trauma-sensitive-mindfulness-2026-04-26"

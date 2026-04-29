@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Ongoing or registered RCT directly testing tactile breath pac
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct06475378-registered-moonbird-cbti"
     sourceKey: "source_artifact:clinicaltrials-nct06475378-2026-04-26"

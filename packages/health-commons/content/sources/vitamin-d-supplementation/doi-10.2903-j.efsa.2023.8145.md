@@ -14,6 +14,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -46,6 +47,7 @@ researchEvidence:
     - Directness: background; claim use: safety-only; priority: backbone
     - Candidate row: candidate:safety:028; shard: safety. Candidate rationale: Recent regulatory upper-limit assessment for vitamin D safety, useful for dose ceiling and monitoring context.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:doi-10.2903-j.efsa.2023.8145:001
     sourceKey: source_artifact:doi-10.2903-j.efsa.2023.8145

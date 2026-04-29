@@ -12,6 +12,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -52,6 +53,7 @@ studyDesign: "external supplement information page"
 modality: "nutraceutical supplement"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:examine-red-yeast-rice-2024-01-03/external-dose-claim"
     sourceKey: "source_artifact:examine-red-yeast-rice-2024-01-03"

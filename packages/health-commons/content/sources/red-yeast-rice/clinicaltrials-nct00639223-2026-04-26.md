@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -70,6 +71,7 @@ adverseEventsOrSafetyNotes: "Withdrawal due to muscle symptoms/CK >500 was 1/21 
 limitations: "Registry result duplicates/contextualizes the published Halbert 2010 trial; active comparator, no placebo."
 populationMismatch: "Statin-intolerant population; safety context only for general users."
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct00639223-2026-04-26-registry-results"
     sourceKey: "source_artifact:clinicaltrials-nct00639223-2026-04-26"

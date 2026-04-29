@@ -7,15 +7,16 @@ title: Sun Exposure in Travelers
 summary: CDC travel guidance flags common medication categories associated with sun photosensitivity. Included for photosensitizing-medication and retinoid safety boundary; claim use is safety-only.
 status: draft
 quality: usable
+aliases:
+- source_artifact:cdc-sun-exposure-photosensitizing-medications-2025-04-23
+- Sun Exposure in Travelers
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
   title: Sun Exposure in Travelers
@@ -34,9 +35,9 @@ researchEvidence:
 evidenceBucket: photosensitizing-medication and retinoid safety boundary
 whyItMatters: Use as a conservative intake checklist and prompt for clinician/pharmacist review.
 potentialMurphEndpoints:
-  - medication category checklist
-  - cancer therapy history
-  - sunburn-like reaction stop rule
+- medication category checklist
+- cancer therapy history
+- sunburn-like reaction stop rule
 protocolTakeaway: CDC travel guidance flags common medication categories associated with sun photosensitivity. Sun/UV photosensitivity does not automatically equal red/NIR PBM photosensitivity.
 murphTakeaway: Use as a conservative intake checklist and prompt for clinician/pharmacist review.
 studyDesign: Public-health guidance for sun exposure and photosensitizing medications

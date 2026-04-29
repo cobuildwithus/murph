@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Specifically includes pre-sleep cognitive arousal and insomni
 studyDesign: "pilot_intervention"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1002-smi.1370-main"
     sourceKey: "source_artifact:doi-10.1002-smi.1370"

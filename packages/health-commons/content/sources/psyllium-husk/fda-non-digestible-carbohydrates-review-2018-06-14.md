@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "narrative_review"
 modality: "psyllium husk / soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:fda-non-digestible-carbohydrates-review-2018-06-14-fda-dietary-fiber-status"
     sourceKey: "source_artifact:fda-non-digestible-carbohydrates-review-2018-06-14"

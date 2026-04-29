@@ -4,29 +4,32 @@ entityType: experiment_family
 key: experiment_family:caffeine-timing
 slug: families/caffeine-timing
 title: Caffeine Timing
-summary: Adult wellness experiments that adjust when ordinary caffeine is consumed, how much is consumed, and how completely caffeine sources are counted, while routing clinical and safety-critical cases elsewhere.
+summary: Protocols that adjust when caffeine is consumed, how much is consumed, or how completely caffeine sources are counted, while separating adult sleep self-experiments from pregnancy, pediatric, dependence, shift-work, and performance variants.
 status: draft
 quality: usable
 aliases:
-  - caffeine curfew
-  - caffeine cutoff
-  - morning-only caffeine
-  - caffeine timing reset
+- caffeine curfew
+- caffeine cutoff
+- morning-only caffeine
+- caffeine timing reset
+- caffeine dose reset
 categories:
-  - sleep
-  - caffeine
-  - circadian
-  - behavior-change
+- sleep
+- caffeine
+- circadian
+- behavior-change
 familyKind: behavior_timing
+canonicalMechanism: reduce_active_caffeine_exposure_near_sleep_window
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:caffeine-timing/caffeine-curfew-dose-reset
-  -
-    type: cites
-    target: source_artifact:pmid-24235903
+- type: related_protocol
+  target: protocol_variant:caffeine-timing/caffeine-curfew-dose-reset
+- type: cites
+  target: source_artifact:caffeine-timing-bibliography
+researchCoverage:
+  bibliographyKey: source_artifact:caffeine-timing-bibliography
+  auditCutoff: '2026-04-27'
 ---
 
-Caffeine Timing covers self-experiments that move ordinary caffeine earlier, reduce late hidden caffeine exposure, or audit dose and source accounting.
+Caffeine Timing is the broader family for experiments that change caffeine timing, dose, source accounting, or abstinence windows.
 
-Keep this family separate from pregnancy/lactation guidance, pediatric protocols, shift-work alertness, medication-interaction management, caffeine-use disorder treatment, athletic performance timing, and high-dose or concentrated caffeine products.
+This family should not collapse every caffeine question into one protocol. A general adult sleep curfew, total abstinence, caffeine-dependence treatment, pregnancy or lactation guidance, pediatric/adolescent use, shift-work alertness plans, athletic ergogenic timing, and medication-interaction management are separate variants with different risks and evidence standards.

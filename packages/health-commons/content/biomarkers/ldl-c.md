@@ -35,6 +35,7 @@ biomarker:
     minimumPoints: 1
     aggregation: "mean"
   explainerCards:
+
     -
       title: "What it is"
       body: "Low-density lipoprotein cholesterol from a blood lipid panel; the primary lab endpoint for cholesterol protocols."
@@ -55,6 +56,7 @@ biomarker:
       - "illness"
       - "laboratory method changes"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"

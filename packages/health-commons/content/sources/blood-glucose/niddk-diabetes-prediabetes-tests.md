@@ -15,6 +15,7 @@ categories:
   - diagnosis
   - professional-reference
 relations:
+
   -
     type: cites
     target: biomarker:blood-glucose

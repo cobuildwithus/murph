@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: background; claim use: safety-only; priority: backbone
     - Deduped from 3 candidate rows across shards: baseline-status, population-subgroups, safety. Candidate rationale: Authoritative current reference for status assessment and safety framing; not a primary trial source.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:nih-ods-vitamin-d-fact-sheet-2025-06-27:001
     sourceKey: source_artifact:nih-ods-vitamin-d-fact-sheet-2025-06-27

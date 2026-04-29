@@ -23,12 +23,14 @@ categories:
   - high-intensity-performance
   - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-04.png
     mediaType: image/png
     caption: Creatine Monohydrate
 relations:
+
   -
     type: parent_family
     target: experiment_family:creatine-supplementation
@@ -1001,6 +1003,7 @@ protocol:
     - Do not continue unsupervised if pregnancy, lactation, pediatric status, bipolar/mania risk, significant muscle disorder, or disease-treatment use applies.
     - Stop or reduce/split dosing if GI symptoms, headaches, unwanted weight gain, or adherence burden makes the experiment not worth continuing.
 testPlans:
+
   -
     planId: strength-and-tolerance-49d
     durationDays: 49
@@ -1036,6 +1039,7 @@ testPlans:
       - Use this lighter plan when the main question is whether daily 3–5 g monohydrate is tolerable and easy to maintain.
       - This plan is not strong enough to judge hypertrophy or long-term strength adaptation.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:training-performance
     description: "Creatine can raise quick energy stores in muscle. That can help with short hard efforts and may improve repeated reps, power, or load under similar conditions."
@@ -1061,6 +1065,7 @@ experimentOnboarding:
     intentSummary: Explore Creatine Monohydrate
   contextReview:
     vaultChecks:
+
       -
         id: active_experiments
         label: Active experiments
@@ -1102,6 +1107,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: kidney_risk_or_abnormal_labs
         prompt: Do you have kidney disease, kidney transplant, dialysis, a single kidney, protein or albumin in urine, unresolved abnormal creatinine/eGFR, or clinician concern about kidney function?
@@ -1152,6 +1158,7 @@ experimentOnboarding:
     notes:
       - The default user is a screened adult. Positive screens do not prove harm; they change the protocol from self-experiment to clinician-guided decision.
   setupSlots:
+
     -
       id: dose_path
       label: Dose path
@@ -1264,6 +1271,7 @@ whyItWorks:
   - 'Taking creatine with carbohydrate or protein/carbohydrate can improve retention or uptake in acute physiology studies, but extracted outcome evidence does not make high-sugar co-ingestion a protocol requirement.'
   - 'Plain monohydrate remains the best-supported protocol boundary; alternative forms and blends should be treated as adjacent variants because superiority over monohydrate is not consistently shown.'
 claims:
+
   -
     claimId: dose-implementation-rapid-loading
     type: intervention_result
@@ -2112,6 +2120,7 @@ researchLandscape:
   primaryClaim: "The default Murph protocol can reasonably test plain creatine monohydrate at 3–5 g/day, with optional split loading, for strength/high-intensity performance and tolerance endpoints in screened adults."
   mainCaveat: "Do not generalize this protocol to alternative forms, cognition, endurance, fat loss, pregnancy/lactation, minors, kidney disease, bipolar/mania risk, muscle disorders, or disease-treatment contexts."
   groups:
+
     -
       id: "dose-implementation"
       label: "Dose implementation: loading, maintenance, timing, and tolerability"

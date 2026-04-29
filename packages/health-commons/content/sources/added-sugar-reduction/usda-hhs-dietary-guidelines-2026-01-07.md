@@ -17,6 +17,7 @@ categories:
   - protein-floor
   - external_guideline_context
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:added-sugar-reduction/no-added-sugar-diet
@@ -73,6 +74,7 @@ safetyNotes: "No adverse-event data extracted."
 modality: "U.S. dietary-pattern guidance"
 studyDesign: Guideline
 sourceFindings:
+
   -
     findingId: finding:usda-hhs-dga-2025-2030-protein-goal
     findingKind: context

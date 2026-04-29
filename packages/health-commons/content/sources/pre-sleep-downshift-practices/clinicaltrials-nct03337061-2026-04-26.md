@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Direct chronic-insomnia trial registry record; source results
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct03337061-mobile-mindfulness-insomnia-protocol"
     sourceKey: "source_artifact:clinicaltrials-nct03337061-2026-04-26"

@@ -16,6 +16,7 @@ categories:
   - "behavior-change"
 familyKind: "intervention"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:consistent-wake-time/consistent-wake-time"
@@ -74,4 +75,4 @@ Four ledger records were excluded or link-only in this run; they have no source 
 
 ## Future Extraction Candidate
 
-source_artifact:latham-wake-time-regularity-2020 was identified as an unusually direct dissertation-level wake-time-regularity candidate, but it was not extracted for this package. Do not use it for protocol claims unless a later extraction creates atomic findings and a rights-safe source page.
+One excluded source was identified as an unusually direct dissertation-level wake-time-regularity candidate, but it was not extracted for this package. Do not use it for protocol claims unless a later extraction creates atomic findings and a rights-safe source page.

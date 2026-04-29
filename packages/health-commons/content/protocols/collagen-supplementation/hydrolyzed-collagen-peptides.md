@@ -29,6 +29,7 @@ categories:
 - field-testing
 - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-04.png
@@ -536,6 +537,7 @@ experimentOnboarding:
     intentSummary: Create a private, target-specific HCP supplement run only after product, safety, measurement, and confounder setup are confirmed.
   contextReview:
     vaultChecks:
+
     -
       id: active_experiments
       label: Active experiments
@@ -577,6 +579,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
     -
       id: collagen_gelatin_or_product_reaction
       prompt: Have you reacted to collagen, gelatin, gummies, marshmallows, capsules, bovine/porcine/fish/marine products, or this exact product before?
@@ -642,6 +645,7 @@ experimentOnboarding:
     - The default population is generally healthy adults using a clearly labeled HCP product with known dose, source, ingredients, allergens, manufacturer, and lot/batch.
     - Plain HCP and multi-ingredient beauty blends are separate experiments; active coingredients should trigger clinician/pharmacist guidance or a separate blend protocol.
   setupSlots:
+
   -
     id: target_outcome
     label: Primary target outcome
@@ -1243,6 +1247,7 @@ researchLandscape:
   primaryClaim: A Murph HCP run can be reasonable as a structured, target-specific supplement self-experiment when the product, dose, source species, target metric, adherence, and confounders are locked before start.
   mainCaveat: Do not merge adjacent collagen variants, clinical nutrition protocols, blends, or non-oral collagen interventions into this HCP evidence base; and do not treat a short self-run as a substitute for clinical care, bone testing, or allergy/product-quality assessment.
   groups:
+
   -
     id: direct-skin-aging-appearance
     label: Direct skin aging and appearance evidence

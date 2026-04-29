@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Registry for the bedtime app-guided meditation pilot; may con
 studyDesign: "other"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct04242771-bedtime-app-guided-pilot-protocol"
     sourceKey: "source_artifact:clinicaltrials-nct04242771-2026-04-26"

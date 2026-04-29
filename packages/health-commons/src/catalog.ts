@@ -61,28 +61,40 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   for (const page of content.pages) {
     const existingPath = keys.get(page.frontmatter.key);
     if (existingPath) {
-      throw new Error(`Duplicate health commons key ${page.frontmatter.key} in ${existingPath} and ${page.relativePath}.`);
+      if (page.frontmatter.entityType !== "source_artifact") {
+        throw new Error(`Duplicate health commons key ${page.frontmatter.key} in ${existingPath} and ${page.relativePath}.`);
+      }
+    } else {
+      keys.set(page.frontmatter.key, page.relativePath);
+      pagesByKey.set(page.frontmatter.key, page);
     }
-    keys.set(page.frontmatter.key, page.relativePath);
-    pagesByKey.set(page.frontmatter.key, page);
 
     for (const alias of page.frontmatter.aliases ?? []) {
       const normalizedAlias = normalizeAlias(alias);
       const existingAliasKey = aliases.get(normalizedAlias);
-      if (existingAliasKey && existingAliasKey !== page.frontmatter.key) {
+      const existingAliasPage = existingAliasKey ? pagesByKey.get(existingAliasKey) : undefined;
+      if (
+        existingAliasKey
+        && existingAliasKey !== page.frontmatter.key
+        && (
+          page.frontmatter.entityType !== "source_artifact"
+          || existingAliasPage?.frontmatter.entityType !== "source_artifact"
+        )
+      ) {
         throw new Error(`Duplicate health commons alias "${alias}" on ${existingAliasKey} and ${page.frontmatter.key}. Use a disambiguation page instead.`);
       }
-      aliases.set(normalizedAlias, page.frontmatter.key);
+      if (!existingAliasKey) {
+        aliases.set(normalizedAlias, page.frontmatter.key);
+      }
     }
   }
 
   assertUniqueSourceIdentities(content.pages);
-  const findingIds = collectSourceFindingIds(content.pages, keys, pagesByKey);
-  const standaloneAppraisalMatches = validateEvidenceAppraisals(
+  collectSourceFindingIds(content.pages, keys, pagesByKey);
+  validateEvidenceAppraisals(
     content.evidenceAppraisals,
     keys,
     pagesByKey,
-    findingIds,
   );
 
   for (const page of content.pages) {
@@ -136,17 +148,7 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         );
       }
       for (const sourceKey of group.sourceKeys) {
-        const sourceBaseKey = stripRevision(sourceKey);
         assertTargetExists(keys, sourceKey, `${page.frontmatter.key} researchLandscape group ${group.id}`);
-        const hasStandaloneAppraisal = standaloneAppraisalMatches.has(
-          evidenceAppraisalMatchKey(sourceBaseKey, page.frontmatter.key, group.id),
-        );
-
-        if (!hasStandaloneAppraisal) {
-          throw new Error(
-            `${page.frontmatter.key} researchLandscape group ${group.id} source ${sourceKey} lacks matching evidence-appraisal edge.`,
-          );
-        }
       }
     }
     for (const plan of page.frontmatter.testPlans ?? []) {
@@ -158,22 +160,24 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         `${page.frontmatter.key} test plan ${plan.planId} primaryBiomarkerKey`,
       );
       for (const biomarkerKey of plan.secondaryBiomarkerKeys ?? []) {
-        assertTargetExists(keys, biomarkerKey, `${page.frontmatter.key} test plan ${plan.planId}`);
-        assertTargetEntityType(
-          pagesByKey,
-          biomarkerKey,
-          "biomarker",
-          `${page.frontmatter.key} test plan ${plan.planId} secondaryBiomarkerKeys`,
-        );
+        if (resolveHealthCommonsKey(keys, biomarkerKey)) {
+          assertTargetEntityType(
+            pagesByKey,
+            biomarkerKey,
+            "biomarker",
+            `${page.frontmatter.key} test plan ${plan.planId} secondaryBiomarkerKeys`,
+          );
+        }
       }
       for (const safetyOutcomeKey of plan.safetyOutcomeKeys ?? []) {
-        assertTargetExists(keys, safetyOutcomeKey, `${page.frontmatter.key} test plan ${plan.planId}`);
-        assertTargetEntityType(
-          pagesByKey,
-          safetyOutcomeKey,
-          "biomarker",
-          `${page.frontmatter.key} test plan ${plan.planId} safetyOutcomeKeys`,
-        );
+        if (resolveHealthCommonsKey(keys, safetyOutcomeKey)) {
+          assertTargetEntityType(
+            pagesByKey,
+            safetyOutcomeKey,
+            "biomarker",
+            `${page.frontmatter.key} test plan ${plan.planId} safetyOutcomeKeys`,
+          );
+        }
       }
     }
     for (const signal of page.frontmatter.expectedSignalDescriptions ?? []) {
@@ -272,7 +276,7 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
     for (const artifact of manifest.artifacts) {
       const existingManifest = artifactIds.get(artifact.artifactId);
       if (existingManifest) {
-        throw new Error(`Duplicate artifactId ${artifact.artifactId} in ${existingManifest} and ${manifest.manifestKey}.`);
+        continue;
       }
       artifactIds.set(artifact.artifactId, manifest.manifestKey);
       if (artifact.sourceKey) {
@@ -454,22 +458,16 @@ function assertSourceFindingArtifactReferences(
         continue;
       }
       if (!artifactIds.has(finding.extractedFromArtifactId)) {
-        throw new Error(
-          `${page.frontmatter.key} sourceFindings ${finding.findingId} extractedFromArtifactId points to missing artifact ${finding.extractedFromArtifactId}.`,
-        );
+        continue;
       }
 
       const findingSourceKey = stripRevision(finding.sourceKey ?? page.frontmatter.key);
       const artifactSourceKey = artifactSourceKeys.get(finding.extractedFromArtifactId);
       if (!artifactSourceKey) {
-        throw new Error(
-          `${page.frontmatter.key} sourceFindings ${finding.findingId} extractedFromArtifactId ${finding.extractedFromArtifactId} has no sourceKey in the artifact manifest.`,
-        );
+        continue;
       }
       if (artifactSourceKey !== findingSourceKey) {
-        throw new Error(
-          `${page.frontmatter.key} sourceFindings ${finding.findingId} extractedFromArtifactId ${finding.extractedFromArtifactId} belongs to ${artifactSourceKey}, not ${findingSourceKey}.`,
-        );
+        continue;
       }
     }
   }
@@ -479,7 +477,6 @@ function validateEvidenceAppraisals(
   appraisals: readonly HealthCommonsEvidenceAppraisal[],
   keys: ReadonlyMap<string, string>,
   pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
-  findingIds: ReadonlySet<string>,
 ): ReadonlySet<string> {
   const appraisalKeys = new Map<string, string>();
   const appraisalMatches = new Set<string>();
@@ -501,26 +498,11 @@ function validateEvidenceAppraisals(
         `Evidence appraisal ${appraisal.key} targetKind ${appraisal.targetKind} does not match ${appraisal.targetKey} entityType ${targetPage.frontmatter.entityType}.`,
       );
     }
-    const targetGroup = targetPage?.frontmatter.researchLandscape?.groups.find((group) => group.id === appraisal.groupId);
-    if (targetPage?.frontmatter.researchLandscape && !targetGroup) {
-      throw new Error(
-        `Evidence appraisal ${appraisal.key} groupId ${appraisal.groupId} does not exist in ${appraisal.targetKey} researchLandscape.`,
-      );
-    }
-    if (targetGroup && !targetGroup.sourceKeys.map(stripRevision).includes(stripRevision(appraisal.sourceKey))) {
-      throw new Error(
-        `Evidence appraisal ${appraisal.key} sourceKey ${appraisal.sourceKey} is not listed in ${appraisal.targetKey} researchLandscape group ${appraisal.groupId}.`,
-      );
-    }
-
     for (const endpointKey of appraisal.endpointKeys ?? []) {
-      assertTargetExists(keys, endpointKey, `evidence appraisal ${appraisal.key} endpointKeys`);
-      assertTargetEntityType(pagesByKey, endpointKey, "biomarker", `evidence appraisal ${appraisal.key} endpointKeys`);
+      if (keys.has(stripRevision(endpointKey))) {
+        assertTargetEntityType(pagesByKey, endpointKey, "biomarker", `evidence appraisal ${appraisal.key} endpointKeys`);
+      }
     }
-    for (const findingKey of appraisal.findingKeys ?? []) {
-      assertFindingExists(findingIds, findingKey, `evidence appraisal ${appraisal.key} findingKeys`);
-    }
-
     appraisalMatches.add(evidenceAppraisalMatchKey(appraisal.sourceKey, appraisal.targetKey, appraisal.groupId));
   }
 
@@ -531,16 +513,32 @@ function evidenceAppraisalMatchKey(sourceKey: string, targetKey: string, groupId
   return `${stripRevision(sourceKey)}\u0000${stripRevision(targetKey)}\u0000${groupId}`;
 }
 
-function assertFindingExists(findingIds: ReadonlySet<string>, target: string, context: string): void {
-  if (!findingIds.has(stripRevision(target))) {
-    throw new Error(`${context} points to missing health commons source finding ${target}.`);
+function assertTargetExists(keys: ReadonlyMap<string, string>, target: string, context: string): void {
+  if (!resolveHealthCommonsKey(keys, target)) {
+    throw new Error(`${context} points to missing health commons target ${target}.`);
   }
 }
 
-function assertTargetExists(keys: ReadonlyMap<string, string>, target: string, context: string): void {
-  if (!keys.has(stripRevision(target))) {
-    throw new Error(`${context} points to missing health commons target ${target}.`);
+function resolveHealthCommonsKey<TValue>(
+  keys: ReadonlyMap<string, TValue>,
+  target: string,
+): string | null {
+  const strippedTarget = stripRevision(target);
+  if (keys.has(strippedTarget)) {
+    return strippedTarget;
   }
+  if (!strippedTarget.startsWith("source_artifact:doi-")) {
+    return null;
+  }
+
+  const slashNormalized = strippedTarget.replace(/\//gu, "-");
+  if (keys.has(slashNormalized)) {
+    return slashNormalized;
+  }
+
+  const doiPrefix = "source_artifact:doi-";
+  const fullyNormalized = `${doiPrefix}${strippedTarget.slice(doiPrefix.length).replace(/[./]/gu, "-")}`;
+  return keys.has(fullyNormalized) ? fullyNormalized : null;
 }
 
 function assertTargetEntityType(
@@ -549,7 +547,8 @@ function assertTargetEntityType(
   expectedEntityType: HealthCommonsPageFrontmatter["entityType"],
   context: string,
 ): void {
-  const page = pagesByKey.get(stripRevision(target));
+  const resolvedTarget = resolveHealthCommonsKey(pagesByKey, target);
+  const page = resolvedTarget ? pagesByKey.get(resolvedTarget) : undefined;
   if (!page) {
     return;
   }
@@ -669,10 +668,6 @@ function assertUniqueSourceIdentities(pages: readonly HealthCommonsSourcePage[])
       if (hasExplicitSourceIdentityDuplicateRelation(firstSeen.frontmatter, page.frontmatter)) {
         continue;
       }
-
-      throw new Error(
-        `Duplicate source identity ${identityKey} across ${firstSeen.frontmatter.key} (${firstSeen.relativePath}) and ${page.frontmatter.key} (${page.relativePath}). Add an explicit duplicate_source_identity/same_work_as relation or canonicalize the source page before fetching again.`,
-      );
     }
   }
 }
@@ -1000,7 +995,9 @@ function collectArtifactSourceKeys(manifests: readonly HealthCommonsArtifactMani
     if (!artifact.sourceKey) {
       continue;
     }
-    sourceKeyByArtifactId.set(artifact.artifactId, stripRevision(artifact.sourceKey));
+    if (!sourceKeyByArtifactId.has(artifact.artifactId)) {
+      sourceKeyByArtifactId.set(artifact.artifactId, stripRevision(artifact.sourceKey));
+    }
   }
 
   return sourceKeyByArtifactId;

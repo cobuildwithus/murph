@@ -12,6 +12,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -54,6 +55,7 @@ studyDesign: Clinical practice guideline
 modality: Clinical insomnia/OSA guideline; mindfulness boundary
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:va-dod-insomnia-osa-guideline-2019-10-01-mindfulness-neither-for-nor-against-2019
     sourceKey: source_artifact:va-dod-insomnia-osa-guideline-2019-10-01

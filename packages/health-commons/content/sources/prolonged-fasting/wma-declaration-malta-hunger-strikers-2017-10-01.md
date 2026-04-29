@@ -8,17 +8,15 @@ summary: Use only for safety/ethical boundaries; not for efficacy claims or rout
 status: draft
 quality: usable
 aliases:
-  - WMA Declaration of Malta on Hunger Strikers
-  - World Medical Association Declaration of Malta
+- WMA Declaration of Malta on Hunger Strikers
+- World Medical Association Declaration of Malta
 categories:
-  - prolonged-fasting
+- prolonged-fasting
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: guideline
   title: WMA Declaration of Malta on Hunger Strikers
@@ -42,50 +40,48 @@ researchEvidence:
   aggregateRole: context
   cohortKey: wma-declaration-malta-hunger-strikers-2017-10-01
   notes:
-    - 'Comparator/control: Not applicable.'
-    - 'Directness to Prolonged Fasting (24-72 Hours): general_guideline'
-    - 'Population mismatch: High contextual mismatch due to detention, coercion, and political hunger-strike context.'
-    - 'Limitations: Ethical policy for hunger strikes, not a wellness fasting clinical protocol.'
+  - 'Comparator/control: Not applicable.'
+  - 'Directness to Prolonged Fasting (24-72 Hours): general_guideline'
+  - 'Population mismatch: High contextual mismatch due to detention, coercion, and political hunger-strike context.'
+  - 'Limitations: Ethical policy for hunger strikes, not a wellness fasting clinical protocol.'
 evidenceBucket: safety and adverse events
 whyItMatters: Authoritative ethical/medical boundary source for prolonged food refusal and refeeding.
 potentialMurphEndpoints:
-  - monitoring
-  - capacity
-  - autonomy
-  - dehydration
-  - thiamine/fluid intake
-  - refeeding
-  - forced feeding
+- monitoring
+- capacity
+- autonomy
+- dehydration
+- thiamine/fluid intake
+- refeeding
+- forced feeding
 protocolTakeaway: Use only for safety/ethical boundaries; not for efficacy claims or routine wellness guidance.
 murphTakeaway: Use only for safety/ethical boundaries; not for efficacy claims or routine wellness guidance.
 studyDesign: Ethical and medical guideline
 modality: Ethical and medical guidance for hunger strikes and prolonged food refusal.
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:wma-declaration-malta-hunger-strikers-2017-10-01-wma-prolonged-fasting-risk
-    sourceKey: source_artifact:wma-declaration-malta-hunger-strikers-2017-10-01
-    extractedFromArtifactId: art_wma_declaration_malta_hunger_strikers_2017_10_01_html
-    findingKind: safety
-    population: Hunger strikers, especially detained persons
-    exposure: Prolonged food refusal
-    outcome: Death or permanent damage risk
-    summary: The WMA declaration states that prolonged fasting risks death or permanent damage, while short-term refusals rarely raise the same ethical problems.
-    evidenceUse:
-      - safety
-      - context
-  -
-    findingId: finding:wma-declaration-malta-hunger-strikers-2017-10-01-wma-monitoring-autonomy-refeeding
-    sourceKey: source_artifact:wma-declaration-malta-hunger-strikers-2017-10-01
-    extractedFromArtifactId: art_wma_declaration_malta_hunger_strikers_2017_10_01_html
-    findingKind: safety
-    population: Hunger strikers and clinicians
-    exposure: Clinical care during hunger strike and refeeding
-    outcome: Capacity, monitoring, autonomy, and refeeding
-    summary: The declaration recommends early medical history, baseline examination, regular monitoring when consented, daily communication, respect for competent refusal, and use of up-to-date refeeding guidance when oral feeding begins.
-    evidenceUse:
-      - safety
-      - context
+- findingId: finding:wma-declaration-malta-hunger-strikers-2017-10-01-wma-prolonged-fasting-risk
+  sourceKey: source_artifact:wma-declaration-malta-hunger-strikers-2017-10-01
+  extractedFromArtifactId: art_wma_declaration_malta_hunger_strikers_2017_10_01_html
+  findingKind: safety
+  population: Hunger strikers, especially detained persons
+  exposure: Prolonged food refusal
+  outcome: Death or permanent damage risk
+  summary: The WMA declaration states that prolonged fasting risks death or permanent damage, while short-term refusals rarely raise the same ethical problems.
+  evidenceUse:
+  - safety
+  - context
+- findingId: finding:wma-declaration-malta-hunger-strikers-2017-10-01-wma-monitoring-autonomy-refeeding
+  sourceKey: source_artifact:wma-declaration-malta-hunger-strikers-2017-10-01
+  extractedFromArtifactId: art_wma_declaration_malta_hunger_strikers_2017_10_01_html
+  findingKind: safety
+  population: Hunger strikers and clinicians
+  exposure: Clinical care during hunger strike and refeeding
+  outcome: Capacity, monitoring, autonomy, and refeeding
+  summary: The declaration recommends early medical history, baseline examination, regular monitoring when consented, daily communication, respect for competent refusal, and use of up-to-date refeeding guidance when oral feeding begins.
+  evidenceUse:
+  - safety
+  - context
 murphV1Priority: Medium
 pdfRightsStatus: permission_required
 ---

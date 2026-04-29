@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -79,6 +80,7 @@ endpoints:
   - "triglycerides"
   - "waist circumference"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1016-j.jff.2023.105685-main"
     sourceKey: "source_artifact:doi-10.1016-j.jff.2023.105685"

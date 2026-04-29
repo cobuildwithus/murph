@@ -17,6 +17,7 @@ categories:
   - "manual-metric"
   - "recovery"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
@@ -57,6 +58,7 @@ biomarker:
     minimumPoints: 1
     aggregation: "median"
   explainerCards:
+
     -
       title: "What it is"
       body: "A manual check after each prescribed HBOT session for ear/sinus pressure symptoms, vision change, anxiety or claustrophobia, glucose/BP issues if relevant, and any staff intervention or stopped session."
@@ -78,6 +80,7 @@ biomarker:
       - "medication changes"
       - "device compatibility issues"
 claims:
+
   -
     claimId: "hbot-tolerability-primary-safety-signal"
     type: "safety"

@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "Scheduling decision record"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Australian regulatory context for red yeast rice for human therapeutic use"
@@ -71,6 +73,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_tga_red_yeast_rice_schedule_4_2009_10_20_pdf"
     sourceKey: "source_artifact:tga-red-yeast-rice-schedule-4-2009-10-20"

@@ -14,6 +14,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -47,6 +48,7 @@ researchEvidence:
     - Directness: background; claim use: safety-only; priority: backbone
     - Deduped from 3 candidate rows across shards: baseline-status, direct-intervention, safety. Snowball correction: canonical key uses DOI 10.17226/13050; PMID 21796828 retained as metadata only. Candidate rationale: Foundational DRI and safety reference for intake targets, adequacy thresholds, and upper intake boundaries.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:doi-10.17226-13050:001
     sourceKey: source_artifact:doi-10.17226-13050

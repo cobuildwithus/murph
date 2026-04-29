@@ -22,6 +22,7 @@ categories:
 - metabolic-health
 - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-no-added-sugar.jpeg
@@ -518,6 +519,7 @@ experimentOnboarding:
     intentSummary: Explore No Added Sugar
   contextReview:
     vaultChecks:
+
     -
       id: active_experiments
       label: Active experiments
@@ -560,6 +562,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
     -
       id: glucose_medication_or_lows
       prompt: Do you have diabetes or prediabetes, type 1 diabetes, gestational diabetes, use insulin, sulfonylureas, SGLT2 inhibitors, other glucose-lowering medication, have CGM/glucose lows, or have a history of significant low blood sugar or an uncertain hypoglycemia treatment plan?
@@ -587,6 +590,7 @@ experimentOnboarding:
     - Offer a lighter sugar-source-awareness experiment or clinician-aligned nutrition plan when the strict path is a poor fit.
     - When strict avoidance is unsafe or unrealistic, route to sugar-source awareness or clinician-guided adaptation rather than treating the run as failed.
   setupSlots:
+
   -
     id: boundary_rule
     label: Boundary rule
@@ -1302,6 +1306,7 @@ researchLandscape:
   primaryClaim: A label-defined no-added-sugar experiment can test whether a user can measurably reduce added-sugar intake while preserving adequate nutrition; it should not promise weight loss, glucose improvement, dental reversal, disease prevention, or a taste reset.
   mainCaveat: The corpus combines free-sugar guidance, sugar-sweetened-beverage trials, clinical NAFLD and dental studies, sweetener-substitution studies, observational cohorts, safety-only sources, and external guidelines. These should not be collapsed into one direct adult efficacy claim.
   groups:
+
   -
     id: dose-label-and-implementation-supports
     label: Dose, labels, and implementation supports

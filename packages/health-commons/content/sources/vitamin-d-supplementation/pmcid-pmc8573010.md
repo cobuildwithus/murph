@@ -14,6 +14,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -46,6 +47,7 @@ researchEvidence:
     - Directness: clinical_supervised; claim use: safety-only; priority: high
     - Candidate row: candidate:adjacent-variants:031; shard: adjacent-variants. Clinical-supervised/CKD or active-analogue context only; do not use as native over-the-counter cholecalciferol evidence. Candidate rationale: Focused safety synthesis for active vitamin D; preserves adverse-event boundary evidence.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:pmcid-PMC8573010:001
     sourceKey: source_artifact:pmcid-PMC8573010

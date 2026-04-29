@@ -15,6 +15,7 @@ categories:
   - self-report
   - manual-checkin
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:cold-water-immersion/cold-plunge
@@ -55,6 +56,7 @@ biomarker:
       - major_caffeine_change
       - expectancy_or_novelty
 claims:
+
   -
     claimId: cold-plunge-perceived-stress-is-best-fit-primary-endpoint
     type: design_guardrail

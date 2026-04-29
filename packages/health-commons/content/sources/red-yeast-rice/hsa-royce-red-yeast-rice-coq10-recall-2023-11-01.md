@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Product recall"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Consumers of Royce Red Yeast Rice & CoQ10 batch RY30203"
@@ -70,6 +72,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_hsa_royce_red_yeast_rice_coq10_recall_2023_11_01_html"
     sourceKey: "source_artifact:hsa-royce-red-yeast-rice-coq10-recall-2023-11-01"

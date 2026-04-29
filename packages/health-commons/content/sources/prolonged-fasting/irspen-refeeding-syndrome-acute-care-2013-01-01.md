@@ -8,19 +8,17 @@ summary: Acute-care guideline covering refeeding-syndrome prevention and treatme
 status: draft
 quality: usable
 aliases:
-  - Boland K 2013 Prevention and Treatment of Refeeding Syndrome in the A
-  - 'Prevention and Treatment of Refeeding Syndrome in the Acute Care Setting: IrSPEN Guideline Document No. 1'
+- Boland K 2013 Prevention and Treatment of Refeeding Syndrome in the A
+- 'Prevention and Treatment of Refeeding Syndrome in the Acute Care Setting: IrSPEN Guideline Document No. 1'
 categories:
-  - prolonged-fasting
-  - refeeding-safety
-  - electrolytes-thiamine
+- prolonged-fasting
+- refeeding-safety
+- electrolytes-thiamine
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: guideline
   title: 'Prevention and Treatment of Refeeding Syndrome in the Acute Care Setting: IrSPEN Guideline Document No. 1'
@@ -44,29 +42,29 @@ researchEvidence:
   aggregateRole: synthesis
   cohortKey: irspen-refeeding-syndrome-acute-care-2013-01-01
   notes:
-    - 'Limitations: Professional guideline; hospital acute-care emphasis; not designed for unsupervised healthy fasting experiments.'
-    - 'Population mismatch: Applies to acute-care adults at risk of refeeding syndrome rather than routine low-risk 24–72 hour fasting.'
+  - 'Limitations: Professional guideline; hospital acute-care emphasis; not designed for unsupervised healthy fasting experiments.'
+  - 'Population mismatch: Applies to acute-care adults at risk of refeeding syndrome rather than routine low-risk 24–72 hour fasting.'
 evidenceBucket: refeeding, electrolytes, and thiamine safety
 directnessToProtocol: general_guideline
 whyItMatters: Professional acute-care guideline with explicit prevention/treatment orientation and electrolyte/thiamine scope; useful as a safety boundary comparator to NICE and ASPEN.
 potentialMurphEndpoints:
-  - biomarker:serum-phosphate
-  - biomarker:serum-potassium
-  - biomarker:serum-magnesium
-  - biomarker:thiamine-status
-  - biomarker:fluid-balance
-  - biomarker:heart-rhythm
-  - biomarker:refeeding-risk
+- biomarker:serum-phosphate
+- biomarker:serum-potassium
+- biomarker:serum-magnesium
+- biomarker:thiamine-status
+- biomarker:fluid-balance
+- biomarker:heart-rhythm
+- biomarker:refeeding-risk
 participantSummary: No participant sample; acute-care guideline for adults at risk of refeeding syndrome.
 interventionOrExposure: Acute-care refeeding prevention and treatment guidance, including electrolytes and thiamine.
 comparatorOrControl: Not applicable or not extracted for this source.
 endpoints:
-  - phosphate
-  - potassium
-  - magnesium
-  - sodium and fluid balance
-  - thiamine
-  - cardiac symptoms
+- phosphate
+- potassium
+- magnesium
+- sodium and fluid balance
+- thiamine
+- cardiac symptoms
 effectEstimatesOrDirection: The guideline recommends identifying high-risk patients and managing early nutrition restart with conservative energy initiation, fluid balance attention, thiamine, and potassium/phosphate/magnesium monitoring and replacement.
 adverseEventsOrSafetyNotes: Acute-care refeeding prevention/treatment guardrails.
 limitations: Professional guideline; hospital acute-care emphasis; not designed for unsupervised healthy fasting experiments.
@@ -77,17 +75,16 @@ studyDesign: Clinical guideline
 modality: Acute-care refeeding safety
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:irspen-refeeding-syndrome-acute-care-2013-01-01-refeeding-safety
-    sourceKey: source_artifact:irspen-refeeding-syndrome-acute-care-2013-01-01
-    extractedFromArtifactId: art_irspen_refeeding_syndrome_acute_care_2013_01_01
-    findingKind: safety
-    population: No participant sample; acute-care guideline for adults at risk of refeeding syndrome.
-    exposure: Acute-care refeeding prevention and treatment guidance, including electrolytes and thiamine.
-    outcome: Acute-care refeeding prevention/treatment guardrails.
-    summary: The guideline recommends identifying high-risk patients and managing early nutrition restart with conservative energy initiation, fluid balance attention, thiamine, and potassium/phosphate/magnesium monitoring and replacement.
-    evidenceUse:
-      - safety
+- findingId: finding:irspen-refeeding-syndrome-acute-care-2013-01-01-refeeding-safety
+  sourceKey: source_artifact:irspen-refeeding-syndrome-acute-care-2013-01-01
+  extractedFromArtifactId: art_irspen_refeeding_syndrome_acute_care_2013_01_01
+  findingKind: safety
+  population: No participant sample; acute-care guideline for adults at risk of refeeding syndrome.
+  exposure: Acute-care refeeding prevention and treatment guidance, including electrolytes and thiamine.
+  outcome: Acute-care refeeding prevention/treatment guardrails.
+  summary: The guideline recommends identifying high-risk patients and managing early nutrition restart with conservative energy initiation, fluid balance attention, thiamine, and potassium/phosphate/magnesium monitoring and replacement.
+  evidenceUse:
+  - safety
 murphV1Priority: High
 pdfRightsStatus: permission_required
 ---

@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -73,6 +74,7 @@ adverseEventsOrSafetyNotes: "Mild heartburn, flatulence, and dizziness were repo
 limitations: "Older study, active comparator rather than placebo, proprietary/traditional preparation, and limited safety-detail extraction."
 populationMismatch: "Adults with hyperlipidemia; applicability depends on matching product monacolin content and clinical setting."
 sourceFindings:
+
   -
     findingId: "finding:doi-10-1016-s0011-393x-97-80063-x-lipids"
     sourceKey: "source_artifact:doi-10.1016-s0011-393x-97-80063-x"

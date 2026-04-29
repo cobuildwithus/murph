@@ -7,15 +7,16 @@ title: Is red light therapy right for your skin?
 summary: AAD guidance supports cautious red/NIR PBM use with dermatologist review for darker skin, photosensitive conditions, medications, and eye protection. Included for skin safety and screening boundary; claim use is safety-only.
 status: draft
 quality: usable
+aliases:
+- source_artifact:aad-red-light-therapy-safety-2024-09-13
+- Is red light therapy right for your skin?
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
   title: Is red light therapy right for your skin?
@@ -34,10 +35,10 @@ researchEvidence:
 evidenceBucket: skin safety and screening boundary
 whyItMatters: Use for user-facing safety boundaries and referral language.
 potentialMurphEndpoints:
-  - skin irritation log
-  - darker-skin hyperpigmentation watch
-  - photosensitive condition screen
-  - eye-protection adherence
+- skin irritation log
+- darker-skin hyperpigmentation watch
+- photosensitive condition screen
+- eye-protection adherence
 protocolTakeaway: AAD guidance supports cautious red/NIR PBM use with dermatologist review for darker skin, photosensitive conditions, medications, and eye protection. FDA-cleared/public-risk language should not be interpreted as proof of effectiveness.
 murphTakeaway: Use for user-facing safety boundaries and referral language.
 studyDesign: Public dermatology guidance on red light therapy safety

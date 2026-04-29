@@ -14,6 +14,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -46,6 +47,7 @@ researchEvidence:
     - Directness: same_mechanism; claim use: context-only; priority: high
     - Candidate row: candidate:baseline-status:014; shard: baseline-status. Candidate rationale: Focused specifically on baseline 25(OH)D as a determinant of vitamin D3 dose and achieved treatment outcome.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:doi-10.1038-s41430-022-01159-6:001
     sourceKey: source_artifact:doi-10.1038-s41430-022-01159-6

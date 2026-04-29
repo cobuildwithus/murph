@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: adjacent_variant; claim use: context-only; priority: medium
     - Deduped from 2 candidate rows across shards: direct-intervention, safety. Candidate rationale: Registry anchor for the STURDY dose-finding fall-prevention trial.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:clinicaltrials-nct02166333-sturdy-2026-04-25:001
     sourceKey: source_artifact:clinicaltrials-nct02166333-sturdy-2026-04-25

@@ -13,6 +13,7 @@ aliases:
 categories:
   - creatine-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:creatine-supplementation/creatine-monohydrate
@@ -60,7 +61,7 @@ This source is included for **repeated_sprint_power_trials**.
 
 **Endpoints:** repeated-sprint/intermittent exercise performance, power output, fatigue during repeated efforts.
 
-**Safety notes:** No adverse-event extraction was available from the accessible record for this batch. 
+**Safety notes:** No adverse-event extraction was available from the accessible record for this batch.
 
 **Limitations:** Paywalled abstract/full text limited extraction of sample size and effect estimates. Older acute physiology design may not generalize to all sport settings.
 

@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:dry-sauna/bryan-johnson-blueprint
 slug: protocols/dry-sauna/bryan-johnson-blueprint
 title: Bryan Johnson Sauna
-summary: "Source-attributed Blueprint dry-sauna routine with hydration and source-specific cooling tactics; read the research as heat-load and safety context, not proof of Bryan Johnson's personal outcomes."
+summary: Source-attributed Blueprint dry-sauna routine with hydration and source-specific cooling tactics; read the research as heat-load and safety context, not proof of Bryan Johnson's personal outcomes.
 status: field-testing
 quality: usable
 aliases:
@@ -20,12 +20,14 @@ categories:
   - source-attributed
   - dry-sauna
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-bryan-johnson-sauna.jpg
     mediaType: image/jpeg
     caption: Bryan Johnson Sauna
 relations:
+
   -
     type: parent_family
     target: experiment_family:dry-sauna
@@ -172,6 +174,7 @@ protocol:
     - Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, shortness of breath, or intolerable heat distress occurs.
     - End the protocol and seek appropriate care if severe or repeated symptoms occur.
 testPlans:
+
   -
     planId: source-attributed-rhr-hrv-21d
     durationDays: 21
@@ -186,6 +189,7 @@ testPlans:
       - This test plan is an observation wrapper around an external named routine, not proof that the source routine is broadly advisable.
       - Compare the intervention window against your own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:resting-heart-rate
     description: Daily high heat after workouts makes the heart work harder to move heat out. If heat adaptation improves cooling, resting pulse may fall; if recovery lags, it may rise.
@@ -195,10 +199,11 @@ expectedSignalDescriptions:
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: "Hey Murph, I want to explore doing the Bryan Johnson sauna protocol."
-    intentSummary: "Explore Bryan Johnson Sauna"
+    displayPrompt: Hey Murph, I want to explore doing the Bryan Johnson sauna protocol.
+    intentSummary: Explore Bryan Johnson Sauna
   contextReview:
     vaultChecks:
+
       -
         id: active_experiments
         label: Active experiments
@@ -253,6 +258,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: cardiovascular_or_bp_red_flags
         prompt: known serious cardiovascular disease, exertional chest pain or pressure, fainting or near-fainting, significant palpitations, uncontrolled blood pressure, recent heart attack or stroke, heart failure, or unusual shortness of breath with heat or exercise
@@ -273,6 +279,7 @@ experimentOnboarding:
     notes:
       - A positive or uncertain high-caution screen means Murph should not create an unsupervised active Blueprint sauna run. Offer clinician guidance, postponing, or a lower-burden sauna protocol instead.
   setupSlots:
+
     -
       id: sauna_available
       label: Dry sauna available
@@ -310,7 +317,7 @@ experimentOnboarding:
       valueType: enum
       askPolicy: ask_if_unknown
       required: true
-      question: "What temperature can you realistically use: around 93 C / 200 F, 80-100 C, or lower/unsure?"
+      question: What temperature can you realistically use: around 93 C / 200 F, 80-100 C, or lower/unsure?
       options:
         - around_93c_200f
         - between_80c_and_100c
@@ -373,7 +380,7 @@ experimentOnboarding:
       valueType: enum
       askPolicy: ask_if_unknown
       required: true
-      question: "What will you use for rehydration after each session: water plus electrolytes or minerals, water only, or no plan yet?"
+      question: What will you use for rehydration after each session: water plus electrolytes or minerals, water only, or no plan yet?
       options:
         - water_plus_electrolytes_or_minerals
         - water_only
@@ -471,7 +478,7 @@ experimentOnboarding:
       - pre_session
       - pre_session_plus_same_day_missing_log_check
     weeklyDigestDefault: true
-    missedLogFollowupCopy: "Did you end up doing today's sauna session? Totally fine either way, I just want the experiment record to be accurate."
+    missedLogFollowupCopy: Did you end up doing today's sauna session? Totally fine either way, I just want the experiment record to be accurate.
     confirmationPrompt: Show the source-attributed nature of the protocol, safety-screen outcome, chosen run variant, sauna access and temperature, schedule, hydration plan, logging fields, stop conditions, baseline/intervention dates, selected testPlanId, and reminder policy before creating the active experiment or automations.
 whyItWorks:
   - This routine uses the same dry-sauna engine as Finnish sauna, but with a stronger dose: 93 °C / 200 °F, daily exposure, and usually post-workout timing. Skin blood vessels open, sweating accelerates, heart rate rises, and the cardiovascular system has to support cooling while exercise residue may already be raising heat, catecholamines, and fluid loss.
@@ -479,6 +486,7 @@ whyItWorks:
   - With daily repetition, the plausible adaptation target is heat acclimation: earlier sweating, larger plasma volume, better tolerance of skin blood-flow shifts, and less heart-rate strain at the same heat exposure. The same dose can also become too much if workout load, dehydration, or poor sleep keeps the recovery side from catching up.
   - The groin-cooling tactic is a source-specific local-temperature guardrail. Independent human sauna studies show that repeated sauna heat can temporarily affect semen and sperm markers, while Bryan Johnson reports fertility-marker problems without groin cooling and describes groin ice as part of his routine. That combination supports a fertility safety boundary, not a claim that groin ice makes the protocol fertility-safe.
 claims:
+
   -
     claimId: source-routine-spec
     type: design_guardrail
@@ -572,7 +580,7 @@ claims:
   -
     claimId: post-workout-sauna-needs-training-context
     type: mixed_evidence
-    text: "Post-exercise sauna evidence is mixed: some repeated post-exercise sauna interventions report cardiovascular or endurance-performance benefits, while other recovery and HRV studies find no clear advantage or worse next-day performance."
+    text: Post-exercise sauna evidence is mixed: some repeated post-exercise sauna interventions report cardiovascular or endurance-performance benefits, while other recovery and HRV studies find no clear advantage or worse next-day performance.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-35785965
@@ -606,89 +614,90 @@ claims:
       - These reviews are general safety context, not evidence that the Blueprint routine is safe for every user.
       - A hot post-workout session can stack exercise stress, dehydration, and heat strain.
 researchLandscape:
-  bottomLine: "The exact Blueprint routine is documented by Bryan Johnson / Blueprint sources, while the stronger independent literature is indirect: it supports sauna as a real heat-load and cardiovascular stimulus, adds fertility and safety boundaries, and gives mixed post-workout expectations. No trial validates the exact daily 93 C / 200 F post-workout routine or Bryan Johnson's personal outcome claims."
-  confidenceLabel: "limited"
-  primaryClaim: "Use this as a source-attributed, higher-burden sauna comparison and track tolerability, resting heart rate, HRV, symptoms, hydration, and training context rather than expecting Bryan Johnson's reported outcomes."
-  mainCaveat: "The independent studies use different temperatures, session lengths, populations, and exercise pairings; the long-term Finnish cohort studies are observational; and the Blueprint outcome claims are one-person self-reports."
+  bottomLine: The exact Blueprint routine is documented by Bryan Johnson / Blueprint sources, while the stronger independent literature is indirect: it supports sauna as a real heat-load and cardiovascular stimulus, adds fertility and safety boundaries, and gives mixed post-workout expectations. No trial validates the exact daily 93 C / 200 F post-workout routine or Bryan Johnson's personal outcome claims.
+  confidenceLabel: limited
+  primaryClaim: Use this as a source-attributed, higher-burden sauna comparison and track tolerability, resting heart rate, HRV, symptoms, hydration, and training context rather than expecting Bryan Johnson's reported outcomes.
+  mainCaveat: The independent studies use different temperatures, session lengths, populations, and exercise pairings; the long-term Finnish cohort studies are observational; and the Blueprint outcome claims are one-person self-reports.
   groups:
+
     -
-      id: "source-routine-spec"
-      label: "What the Blueprint routine says"
-      stance: "supports"
-      summary: "These sources establish the external routine itself: about 20 minutes in a 200 F / 93 C dry sauna, daily, usually after a workout, with low humidity, hydration, and source-specific cooling tactics. They are the right sources for provenance and dose wording, not broad clinical proof."
+      id: source-routine-spec
+      label: What the Blueprint routine says
+      stance: supports
+      summary: These sources establish the external routine itself: a high-temperature dry-sauna session around 20 minutes daily, usually after exercise, with low humidity, rehydration, and source-specific cooling tactics. The clearest direct Blueprint sources give the 200 F / 93 C default wording; a January 2026 protocol extraction has a 175 F / 93 C unit mismatch. Use these sources for dose provenance, not clinical efficacy.
       sourceKeys:
-        - "source_artifact:bryan-johnson-morning-routine-2026-04-08"
-        - "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
+        - source_artifact:bryan-johnson-morning-routine-2026-04-08
+        - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
       defaultOpen: true
     -
-      id: "personal-outcomes-not-causal"
-      label: "Personal outcomes, not causal proof"
-      stance: "does_not_confirm"
-      summary: "Johnson reports toxin, microplastic, fertility, vascular, blood, and resting-heart-rate observations around his sauna practice. Those sources explain the protocol's motivation, but they are one-person reports with many confounders and should not be rendered as expected user outcomes."
+      id: personal-outcomes-not-causal
+      label: Personal outcomes, not causal proof
+      stance: does_not_confirm
+      summary: Johnson reports toxin, microplastic, fertility, vascular, blood, and resting-heart-rate observations around his sauna practice. Those sources explain the protocol's motivation, but they are one-person reports with many confounders and should not be rendered as expected user outcomes.
       sourceKeys:
-        - "source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06"
-        - "source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06"
-        - "source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12"
+        - source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06
+        - source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06
+        - source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12
     -
-      id: "independent-sauna-physiology-context"
-      label: "Independent heat-load context"
-      stance: "context_only"
-      summary: "Independent reviews and acute physiology studies make the basic mechanism easier to trust: sauna raises heat strain, heart rate, sweating, vascular demand, and recovery burden. This supports tracking pulse, blood pressure, symptoms, and cooldown context, but it does not validate the exact daily Blueprint dose."
+      id: independent-sauna-physiology-context
+      label: Independent heat-load context
+      stance: context_only
+      summary: Independent reviews and acute physiology studies make the basic mechanism easier to trust: sauna raises heat strain, heart rate, sweating, vascular demand, and recovery burden. This supports tracking pulse, blood pressure, symptoms, and cooldown context, but it does not validate the exact daily Blueprint dose.
       sourceKeys:
-        - "source_artifact:doi-10.1155-2014-106049"
-        - "source_artifact:mayo-2018-sauna-review"
-        - "source_artifact:pmid-29269746"
-        - "source_artifact:pmid-31126559"
+        - source_artifact:doi-10.1155-2014-106049
+        - source_artifact:mayo-2018-sauna-review
+        - source_artifact:pmid-29269746
+        - source_artifact:pmid-31126559
       defaultOpen: true
     -
-      id: "long-term-cohort-context"
-      label: "Long-term cohort context"
-      stance: "context_only"
-      summary: "Large Finnish cohort studies link more frequent sauna bathing with lower long-term cardiovascular and hypertension risk, which helps explain why sauna is interesting. These are not randomized tests and cannot prove a 21-day Blueprint-style self-experiment caused a wearable change."
+      id: long-term-cohort-context
+      label: Long-term cohort context
+      stance: context_only
+      summary: Large Finnish cohort studies link more frequent sauna bathing with lower long-term cardiovascular and hypertension risk, which helps explain why sauna is interesting. These are not randomized tests and cannot prove a 21-day Blueprint-style self-experiment caused a wearable change.
       sourceKeys:
-        - "source_artifact:pmid-25705824"
-        - "source_artifact:pmid-28633297"
+        - source_artifact:pmid-25705824
+        - source_artifact:pmid-28633297
     -
-      id: "post-workout-training-context"
-      label: "Post-workout and recovery evidence"
-      stance: "mixed"
-      summary: "The post-exercise literature is not one-note: a modern exercise-plus-sauna RCT found cardiovascular add-on benefits, a newer HRV RCT found no extra HRV benefit, a swim-recovery crossover found worse next-day sprint performance, and a tiny runner crossover found endurance benefit. That is why this page asks users to log training load and next-workout performance."
+      id: post-workout-training-context
+      label: Post-workout and recovery evidence
+      stance: mixed
+      summary: The post-exercise literature is not one-note: a modern exercise-plus-sauna RCT found cardiovascular add-on benefits, a newer HRV RCT found no extra HRV benefit, a swim-recovery crossover found worse next-day sprint performance, and a tiny runner crossover found endurance benefit. That is why this page asks users to log training load and next-workout performance.
       sourceKeys:
-        - "source_artifact:pmid-16877041"
-        - "source_artifact:pmid-31869820"
-        - "source_artifact:pmid-35785965"
-        - "source_artifact:pmid-40611569"
+        - source_artifact:pmid-16877041
+        - source_artifact:pmid-31869820
+        - source_artifact:pmid-35785965
+        - source_artifact:pmid-40611569
       defaultOpen: true
     -
-      id: "core-temperature-dose-variant"
-      label: "Core-temperature dose variant"
-      stance: "mixed"
-      summary: "The April 2026 core-temperature posts change the interpretation of the original 20-minute routine: Johnson reports that reaching roughly 102.4 F / 39 C took closer to 31 minutes, and longer with face or neck cooling. This makes the threshold-targeted saunamaxx version a higher-burden variant rather than a silent replacement for the default page protocol."
+      id: core-temperature-dose-variant
+      label: Core-temperature dose variant
+      stance: mixed
+      summary: The April 2026 core-temperature posts change the interpretation of the original 20-minute routine: Johnson reports that reaching roughly 102.4 F / 39 C took closer to 31 minutes, and longer with face or neck cooling. This makes the threshold-targeted saunamaxx version a higher-burden variant rather than a silent replacement for the default page protocol.
       sourceKeys:
-        - "source_artifact:bryan-johnson-saunamaxx-2026-04-14"
-        - "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16"
-        - "source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03"
-        - "source_artifact:x-bryan-johnson-core-temp-2026-04-16"
-        - "source_artifact:x-bryan-johnson-core-temp-update-2026-04-03"
-        - "source_artifact:x-bryan-johnson-fired-review-2026-04-06"
+        - source_artifact:bryan-johnson-saunamaxx-2026-04-14
+        - source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
+        - source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03
+        - source_artifact:x-bryan-johnson-core-temp-2026-04-16
+        - source_artifact:x-bryan-johnson-core-temp-update-2026-04-03
+        - source_artifact:x-bryan-johnson-fired-review-2026-04-06
     -
-      id: "safety-fertility-cooling-boundary"
-      label: "Fertility and groin-cooling boundary"
-      stance: "safety_boundary"
-      summary: "The independent fertility studies make the heat-risk caveat real, while Johnson's groin-cooling posts explain why his named routine includes an ice-pack tactic. Together they support a warning, not a promise that groin cooling prevents sauna-related fertility effects."
+      id: safety-fertility-cooling-boundary
+      label: Fertility and groin-cooling boundary
+      stance: safety_boundary
+      summary: The independent fertility studies make the heat-risk caveat real, while Johnson's groin-cooling posts explain why his named routine includes an ice-pack tactic. Together they support a warning, not a promise that groin cooling prevents sauna-related fertility effects.
       sourceKeys:
-        - "source_artifact:pmid-23411620"
-        - "source_artifact:pmid-9972494"
-        - "source_artifact:x-bryan-johnson-ice-balls-2026-04-09"
+        - source_artifact:pmid-23411620
+        - source_artifact:pmid-9972494
+        - source_artifact:x-bryan-johnson-ice-balls-2026-04-09
       defaultOpen: true
     -
-      id: "general-sauna-safety-screening"
-      label: "General sauna safety screen"
-      stance: "safety_boundary"
-      summary: "General safety reviews support a conservative screen for cardiovascular disease, uncontrolled blood pressure, dehydration, alcohol or drug use, heat intolerance, pregnancy, medication issues, and red-flag symptoms. This matters more for a daily 200 F post-workout routine than for a gentler starter protocol."
+      id: general-sauna-safety-screening
+      label: General sauna safety screen
+      stance: safety_boundary
+      summary: General safety reviews support a conservative screen for cardiovascular disease, uncontrolled blood pressure, dehydration, alcohol or drug use, heat intolerance, pregnancy, medication issues, and red-flag symptoms. This matters more for a daily 200 F post-workout routine than for a gentler starter protocol.
       sourceKeys:
-        - "source_artifact:pmid-11165553"
-        - "source_artifact:pmid-16871826"
+        - source_artifact:pmid-11165553
+        - source_artifact:pmid-16871826
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
@@ -716,7 +725,6 @@ safety:
     - This is source-attributed and higher-burden, so interpret it more cautiously than the simpler dry-sauna experiment.
     - Groin cooling, face and neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics, not general rules.
 ---
-
 This is a higher-burden sauna routine publicly described by Bryan Johnson / Blueprint. It is included as an external comparison, not as the easiest place to start.
 
 ## Source-attributed routine

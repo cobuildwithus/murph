@@ -17,6 +17,7 @@ familyKind: intervention_family
 canonicalModality: plain_creatine_monohydrate
 canonicalMechanism: increase_creatine_phosphocreatine_availability
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:creatine-supplementation/creatine-monohydrate
@@ -194,17 +195,17 @@ Creatine supplementation is the umbrella family for protocols that intentionally
 
 ## Family boundary
 
-The family includes daily monohydrate dosing, optional loading, maintenance dosing, and measurement of training-performance, body-weight, lean-mass proxy, tolerance, and safety context. The strongest default protocol boundary is healthy-adult resistance-training or repeated high-intensity work. Sources: source_artifact:pmid-8828669, source_artifact:pmid-12660409, source_artifact:pmid-39074168, source_artifact:pmid-40944139, source_artifact:pmid-36041731.
+The family includes daily monohydrate dosing, optional loading, maintenance dosing, and measurement of training-performance, body-weight, lean-mass proxy, tolerance, and safety context. The strongest default protocol boundary is healthy-adult resistance-training or repeated high-intensity work.
 
 ## What stays separate
 
-Creatine HCl, ethyl ester, buffered creatine, nitrate, chelates, citrate/pyruvate, liquid serums, and multi-ingredient products should be separate variants unless their evidence can cleanly bridge to monohydrate with creatine-equivalent dosing and no co-ingredient attribution problem. Sources: source_artifact:pmid-36000773, source_artifact:pmid-35268011, source_artifact:pmid-22971354, source_artifact:pmid-19228401, source_artifact:pmid-17986903.
+Creatine HCl, ethyl ester, buffered creatine, nitrate, chelates, citrate/pyruvate, liquid serums, and multi-ingredient products should be separate variants unless their evidence can cleanly bridge to monohydrate with creatine-equivalent dosing and no co-ingredient attribution problem.
 
-Cognition-only, bone-health, pregnancy/perinatal, pediatric, psychiatric, renal-disease, muscle-disorder, Parkinson disease, and other clinical disease-treatment uses are boundary or context evidence, not default healthy-adult self-experiment claims. Sources: source_artifact:doi-10.2903-j.efsa.2024.9100, source_artifact:govuk-creatine-cognitive-function-2024-08-14, source_artifact:pmid-30547033, source_artifact:pmid-24766646, source_artifact:pmid-41199218, source_artifact:pmid-41558805.
+Cognition-only, bone-health, pregnancy/perinatal, pediatric, psychiatric, renal-disease, muscle-disorder, Parkinson disease, and other clinical disease-treatment uses are boundary or context evidence, not default healthy-adult self-experiment claims.
 
 ## Evidence posture
 
-The family has a large research corpus, but the actionable landing page should be conservative: source pages preserve supportive, null, mixed, safety-only, and population-mismatch findings. The clearest default use is a monitored monohydrate experiment, not a universal supplement claim. Sources: source_artifact:pmid-39074168, source_artifact:pmid-40944139, source_artifact:pmid-40198156, source_artifact:pmid-36000773.
+The family has a large research corpus, but the actionable landing page should be conservative: source pages preserve supportive, null, mixed, safety-only, and population-mismatch findings. The clearest default use is a monitored monohydrate experiment, not a universal supplement claim.
 
 ## Research-run notes
 

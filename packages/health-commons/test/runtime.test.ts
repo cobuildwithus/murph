@@ -523,7 +523,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(context?.sources).toHaveLength(5);
     expect(context?.sources.every((entry) => entry.source.entityType === "source_artifact")).toBe(true);
     expect(context?.sources[0]?.reasons[0]).toMatchObject({
-      claimId: "research-base-is-broad-but-mixed",
+      claimId: "dry-sauna-evidence-broad-but-mixed",
       kind: "claim",
     });
 

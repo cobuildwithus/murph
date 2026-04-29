@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -59,6 +60,7 @@ studyDesign: "case_report"
 modality: "oral psyllium husk / ispaghula husk safety, tolerability, label, or adjacent context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:ismpcanada-psyllium-choking-2025-06-24-ismp-fatal-dysphagia"
     sourceKey: "source_artifact:ismpcanada-psyllium-choking-2025-06-24"

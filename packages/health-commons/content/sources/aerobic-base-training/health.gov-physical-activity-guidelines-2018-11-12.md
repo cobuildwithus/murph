@@ -14,6 +14,7 @@ aliases:
 categories:
   - "aerobic-base-training"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block"
@@ -59,6 +60,7 @@ studyDesign: "guideline"
 modality: "Moderate-intensity aerobic physical activity guidance"
 claimUse: "supports-protocol"
 sourceFindings:
+
   -
     findingId: "finding:health.gov-physical-activity-guidelines-2018-adult-dose-anchor"
     sourceKey: "source_artifact:health.gov-physical-activity-guidelines-2018-11-12"

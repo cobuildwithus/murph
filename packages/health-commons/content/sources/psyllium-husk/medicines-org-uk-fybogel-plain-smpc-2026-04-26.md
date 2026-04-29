@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "other"
 modality: "oral psyllium husk / ispaghula husk safety, tolerability, label, or adjacent context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:medicines-org-uk-fybogel-plain-smpc-2026-04-26-fybogel-dose-liquid"
     sourceKey: "source_artifact:medicines-org-uk-fybogel-plain-smpc-2026-04-26"

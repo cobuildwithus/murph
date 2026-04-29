@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -54,6 +55,7 @@ studyDesign: "Regulatory ingredient directory"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "context"
     population: "Dietary supplement consumers and stakeholders"
@@ -69,6 +71,7 @@ sourceFindings:
 murphV1Priority: "Medium"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_fda_dietary_supplement_ingredient_directory_red_yeast_rice_2025_05_23_html"
     sourceKey: "source_artifact:fda-dietary-supplement-ingredient-directory-red-yeast-rice-2025-05-23"

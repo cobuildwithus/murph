@@ -37,6 +37,7 @@ biomarker:
     label: Target is the planned number of alcohol-free days for the selected challenge.
     nuance: Completion is useful adherence data; a lower number can still identify cues, friction, withdrawal-like symptoms, or support needs.
   privateMetricBindings:
+
   -
     source: browser_vault_metric
     domain: body_state

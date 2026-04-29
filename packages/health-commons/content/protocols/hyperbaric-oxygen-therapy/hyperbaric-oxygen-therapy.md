@@ -19,7 +19,15 @@ categories:
   - "acute-care"
   - "safety-sensitive"
   - "murph-canonical"
+media:
+
+  -
+    kind: image
+    relativePath: design-assets/hero-hyperbaric-oxygen-therapy.jpeg
+    mediaType: image/jpeg
+    caption: Hyperbaric Oxygen Therapy
 relations:
+
   -
     type: "parent_family"
     target: "experiment_family:hyperbaric-oxygen-therapy"
@@ -514,7 +522,7 @@ lineage:
   rationale: "Canonical Murph tracking page for supervised systemic chamber HBOT, kept separate from mild/soft chambers, topical oxygen, normobaric oxygen, exercise-with-oxygen, and named external wellness protocols."
 attribution:
   ownerType: "murph"
-  note: "Drafted from the 2026-04-23 Hyperbaric Oxygen Therapy research run; source keys are restricted to the canonical ledger, extraction drafts, and section synthesis artifacts in the uploaded snapshot."
+  note: "Drafted from the 2026-04-23 Hyperbaric Oxygen Therapy research run; traceability is restricted to the canonical ledger, extraction drafts, and section synthesis artifacts in the uploaded snapshot."
 protocol:
   doseSignature: "Clinician-prescribed systemic chamber HBOT · log ATA/oxygen/session/air breaks · 60-90 min common outpatient sessions · 5x/week and 20-session defaults are tracking placeholders · course is indication-specific"
   target: "Use the treating clinician’s prescription for pressure, oxygen fraction, chamber type, session length, air breaks, frequency, and course length; replace Murph defaults with the facility plan before starting."
@@ -568,6 +576,7 @@ protocol:
     - "Tell staff immediately and stop or defer as directed for severe ear or sinus pain, inability to equalize, dizziness or faintness, cough or new pulmonary symptoms, chest pain, shortness of breath, neurologic symptoms, seizure-like symptoms, confusion, severe headache, vision changes, severe anxiety or panic, hypoglycemia symptoms, unsafe glucose or blood-pressure reading if relevant, device alarm, prohibited-material concern, or any staff safety concern."
     - "Pause the Murph experiment and seek clinician/facility guidance if symptoms persist after a session, adverse events recur, sessions are repeatedly shortened, BP/glucose readings are unsafe, or the care plan changes."
 testPlans:
+
   -
     planId: "clinician-supervised-hbot-tolerance-49d"
     durationDays: 49
@@ -586,18 +595,19 @@ testPlans:
       - "The primary Murph outcome is session tolerability/adverse-event burden. Disease-specific benefit should be judged by clinician-defined outcomes, not by wearable proxies."
       - "Sleep efficiency, resting heart rate, and HRV are recovery context and confounders, not promised HBOT benefits."
 expectedSignalDescriptions:
+
   -
     biomarkerKey: "biomarker:hbot-session-tolerability"
-    description: "HBOT changes pressure and oxygen exposure. Ear or sinus pressure, vision changes, distress in the chamber, glucose or blood-pressure issues, and stopped sessions show how the dose is landing."
+    description: "Higher pressure can stress the ears and sinuses. High oxygen and chamber stress can also affect vision, glucose, blood pressure, anxiety, or session completion."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
-    description: "A prescribed HBOT course can add time, symptoms, and recovery stress. If sessions disturb or ease that load, sleep continuity may change."
+    description: "A prescribed HBOT course adds travel, time in the chamber, and possible symptoms. That load can break up sleep, while symptom relief may let sleep settle."
   -
     biomarkerKey: "biomarker:resting-heart-rate"
-    description: "Pressure, high oxygen dosing, symptoms, and the care context can change overall strain. Resting pulse may shift if the course changes recovery load."
+    description: "Ear pain, chamber anxiety, glucose or blood-pressure swings, and post-session fatigue can raise overnight pulse. If sessions are well tolerated, resting pulse may stay stable or ease."
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "HBOT sessions can affect nervous-system strain through oxygen dose, pressure, symptoms, and recovery load. HRV may move as context, not as proof that treatment worked."
+    description: "HRV may fall when pressure changes, symptoms, anxiety, or fatigue keep the nervous system activated after sessions. It may stabilize if the course adds little stress."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -605,6 +615,7 @@ experimentOnboarding:
     intentSummary: "Track clinician-supervised HBOT"
   contextReview:
     vaultChecks:
+
       -
         id: "active_experiments"
         label: "Active experiments"
@@ -646,6 +657,7 @@ experimentOnboarding:
     mode: "ask_each_item"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
+
       -
         id: "unsupervised_start"
         prompt: "Are you considering HBOT without a current clinician prescription or without a medically supervised chamber facility?"
@@ -676,6 +688,7 @@ experimentOnboarding:
     notes:
       - "A positive or uncertain screen is not a diagnosis; it means Murph must not create or continue HBOT tracking until the treating clinician/facility has reviewed the issue and cleared the plan."
   setupSlots:
+
     -
       id: "clinical_indication"
       label: "Clinical indication"
@@ -788,10 +801,11 @@ experimentOnboarding:
     missedLogFollowupCopy: "Did you complete today's prescribed HBOT session, and were there any ear, sinus, vision, anxiety, glucose, blood-pressure, or other safety notes to log?"
     confirmationPrompt: "Show the protocol key, chosen testPlanId, safety-screen outcome, clinician/facility status, prescribed dose fields, baseline/intervention dates, session target/minimum, log fields, and reminder policy before creating the tracking experiment."
 whyItWorks:
-  - "The mechanistic premise is pressure-dependent oxygen delivery: clinical HBOT is defined as systemic chamber exposure with oxygen and elevated pressure rather than ordinary supplemental oxygen or local/topical devices. Sources: source_artifact:pmid-38092370; source_artifact:uhms-hbo-indications-2020-01-01; source_artifact:cms-ncd-20-29-hyperbaric-oxygen-2017-11-17."
-  - "Potential clinical benefit is indication- and tissue-context-specific: wound and radiation-injury rationales often invoke tissue oxygenation, fibroblast/collagen activity, angiogenesis or neovascularization, and ischemia-reperfusion biology, but mechanisms are plausibility rather than proof of outcome benefit. Sources: source_artifact:pmid-33227840; source_artifact:pmid-28116225; source_artifact:pmid-16799386; source_artifact:pmid-20957342."
-  - "The same exposure can create harm through pressure, oxygen toxicity, device/fire risk, and course burden, which is why this page treats supervision, safety screening, and adverse-event logging as core protocol elements. Sources: source_artifact:pmid-37275378; source_artifact:pmid-32491593; source_artifact:fda-safe-use-hbot-devices-2025-08-25; source_artifact:uhms-clinical-hyperbaric-facility-accreditation-manual-2018-06-04."
+  - "The mechanistic premise is pressure-dependent oxygen delivery: clinical HBOT is defined as systemic chamber exposure with oxygen and elevated pressure rather than ordinary supplemental oxygen or local/topical devices."
+  - "Potential clinical benefit is indication- and tissue-context-specific: wound and radiation-injury rationales often invoke tissue oxygenation, fibroblast/collagen activity, angiogenesis or neovascularization, and ischemia-reperfusion biology, but mechanisms are plausibility rather than proof of outcome benefit."
+  - "The same exposure can create harm through pressure, oxygen toxicity, device/fire risk, and course burden, which is why this page treats supervision, safety screening, and adverse-event logging as core protocol elements."
 claims:
+
   -
     claimId: "clinical-systemic-hbot-definition"
     type: "design_guardrail"
@@ -1361,9 +1375,10 @@ claims:
 researchLandscape:
   bottomLine: "HBOT is best represented as a high-caution, clinician-supervised medical therapy with indication-specific evidence, not as a general wellness or longevity protocol."
   confidenceLabel: "mixed"
-  primaryClaim: "The most defensible Murph page is a tracking wrapper for prescribed systemic chamber HBOT: it can document dose fidelity, supervision, tolerability, and adverse events while keeping efficacy claims tied to specific clinical indications and source keys."
+  primaryClaim: "The most defensible Murph page is a tracking wrapper for prescribed systemic chamber HBOT: it can document dose fidelity, supervision, tolerability, and adverse events while keeping efficacy claims tied to specific clinical indications."
   mainCaveat: "Evidence strength varies sharply by indication and comparator; adjacent oxygen variants and commercial wellness claims should not inherit systemic clinical HBOT evidence."
   groups:
+
     -
       id: "clinical-hbot-definition-and-supervision"
       label: "Clinical HBOT definition and supervision boundary"

@@ -13,6 +13,7 @@ aliases:
 categories:
   - creatine-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:creatine-supplementation/creatine-monohydrate
@@ -62,7 +63,7 @@ This source is included for **repeated_sprint_power_trials**.
 
 **Endpoints:** bench press strength, full squat strength, fat- and bone-free lean mass, body composition.
 
-**Safety notes:** No adverse-event extraction was available from the accessible record for this batch. 
+**Safety notes:** No adverse-event extraction was available from the accessible record for this batch.
 
 **Limitations:** Small sample. Field-sport off-season training study, not isolated repeated-sprint testing. Body-composition effect was not clearly positive.
 

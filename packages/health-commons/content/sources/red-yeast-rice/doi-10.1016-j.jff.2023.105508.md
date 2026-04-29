@@ -14,6 +14,7 @@ categories:
   - "red-yeast-rice"
   - "adjacent-combination-evidence"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -62,6 +63,7 @@ studyDesign: "overview of systematic reviews and network meta-analysis"
 modality: "synthesis of preparation variants"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1016-j.jff.2023.105508-adjacent"
     sourceKey: "source_artifact:doi-10.1016-j.jff.2023.105508"

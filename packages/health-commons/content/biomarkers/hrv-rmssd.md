@@ -38,6 +38,7 @@ biomarker:
     label: Higher or stable can be better, but context matters.
     nuance: "A rising personal baseline can reflect improved recovery capacity or aerobic adaptation, while acute drops can reflect strain. Very high, very low, or abrupt values still need context and signal-quality checks."
   privateMetricBindings:
+
     -
       source: browser_vault_metric
       domain: recovery
@@ -63,6 +64,7 @@ biomarker:
     minimumPoints: 7
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: HRV is variation in the timing between consecutive heartbeats. RMSSD is a time-domain HRV metric that emphasizes short-term beat-to-beat variation and is commonly used as a vagal or recovery-oriented signal.
@@ -102,6 +104,7 @@ biomarker:
       - device changes
       - signal quality
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:norwegian-4x4/norwegian-4x4
@@ -110,7 +113,7 @@ relations:
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
   -
     type: related_protocol
-    target: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/bryan-johnson-blueprint
@@ -160,6 +163,7 @@ relations:
     type: cites
     target: source_artifact:pmid-40611569
 claims:
+
   -
     claimId: hrv_definition_and_metric_scope
     type: evidence_scope
@@ -208,6 +212,7 @@ protocolRanking:
   version: deterministic-v0
   scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
   candidates:
+
     -
       protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
       expectedDirection: up_or_stable
@@ -239,7 +244,7 @@ protocolRanking:
         burdenLabel: Moderate
         cautionLabel: Moderate
     -
-      protocolKey: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
       expectedDirection: mixed_or_contextual
       relationship: secondary_biomarker
       mechanism: "Evening light reduction could indirectly improve overnight HRV if it improves sleep timing or reduces bedtime arousal, but HRV is not a direct or primary endpoint for this protocol."

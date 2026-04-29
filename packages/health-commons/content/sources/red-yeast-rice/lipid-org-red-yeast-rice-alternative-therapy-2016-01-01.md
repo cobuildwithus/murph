@@ -15,6 +15,7 @@ categories:
   - "safety"
   - "pharmacovigilance"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -58,6 +59,7 @@ directness: "general_guideline"
 claimUse: "safety-only"
 claimUseBoundary: "Contains efficacy summaries, but this batch uses it only for safety/product-quality and monitoring boundaries."
 sourceFindings:
+
   -
     findingId: "finding:red-yeast-rice-batch-004-lipid-org-efficacy-context"
     sourceKey: "source_artifact:lipid-org-red-yeast-rice-alternative-therapy-2016-01-01"

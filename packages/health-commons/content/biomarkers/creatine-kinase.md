@@ -35,6 +35,7 @@ biomarker:
     minimumPoints: 1
     aggregation: "mean"
   explainerCards:
+
     -
       title: "What it is"
       body: "Creatine kinase is a lab marker used to interpret cholesterol and safety experiments."
@@ -55,6 +56,7 @@ biomarker:
       - "weight change"
       - "illness"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"

@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Recent representative-sample incidence and predictor paper; u
 studyDesign: "other"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1177-21677026241298269:primary-safety-context"
     sourceKey: "source_artifact:doi-10.1177-21677026241298269"

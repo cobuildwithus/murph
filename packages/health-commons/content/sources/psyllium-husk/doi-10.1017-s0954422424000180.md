@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Systematic scoping review of human pectin intervention studies"
 modality: "Adjacent soluble fiber: pectin"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1017-s0954422424000180-structure-heterogeneity"
     sourceKey: "source_artifact:doi-10.1017-s0954422424000180"

@@ -8,19 +8,17 @@ summary: NICE CG32 is an authoritative adult nutrition-support guideline with ex
 status: draft
 quality: usable
 aliases:
-  - 'NICE 2006 Nutrition support for adults: oral nutrition support, e'
-  - 'Nutrition support for adults: oral nutrition support, enteral tube feeding and parenteral nutrition (CG32)'
+- 'NICE 2006 Nutrition support for adults: oral nutrition support, e'
+- 'Nutrition support for adults: oral nutrition support, enteral tube feeding and parenteral nutrition (CG32)'
 categories:
-  - prolonged-fasting
-  - refeeding-safety
-  - electrolytes-thiamine
+- prolonged-fasting
+- refeeding-safety
+- electrolytes-thiamine
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: guideline
   title: 'Nutrition support for adults: oral nutrition support, enteral tube feeding and parenteral nutrition (CG32)'
@@ -44,29 +42,29 @@ researchEvidence:
   aggregateRole: synthesis
   cohortKey: nice-nutrition-support-cg32-2006-02-22
   notes:
-    - 'Limitations: Guideline recommendation base; adult clinical nutrition settings; updated over time only through surveillance rather than a fasting-specific trial.'
-    - 'Population mismatch: Malnourished or at-risk adults receiving nutrition support differ from low-risk adults completing a 24–72 hour fast.'
+  - 'Limitations: Guideline recommendation base; adult clinical nutrition settings; updated over time only through surveillance rather than a fasting-specific trial.'
+  - 'Population mismatch: Malnourished or at-risk adults receiving nutrition support differ from low-risk adults completing a 24–72 hour fast.'
 evidenceBucket: refeeding, electrolytes, and thiamine safety
 directnessToProtocol: general_guideline
 whyItMatters: Authoritative clinical boundary for refeeding risk, electrolytes, thiamine, and monitoring after prolonged restriction.
 potentialMurphEndpoints:
-  - biomarker:serum-phosphate
-  - biomarker:serum-potassium
-  - biomarker:serum-magnesium
-  - biomarker:thiamine-status
-  - biomarker:fluid-balance
-  - biomarker:refeeding-syndrome-symptoms
-  - biomarker:electrolyte-panel
-  - biomarker:refeeding-risk
+- biomarker:serum-phosphate
+- biomarker:serum-potassium
+- biomarker:serum-magnesium
+- biomarker:thiamine-status
+- biomarker:fluid-balance
+- biomarker:refeeding-syndrome-symptoms
+- biomarker:electrolyte-panel
+- biomarker:refeeding-risk
 participantSummary: No participant sample; NICE adult nutrition-support guideline.
 interventionOrExposure: Nutrition support, refeeding-risk identification, feeding initiation and monitoring
 comparatorOrControl: Not applicable or not extracted for this source.
 endpoints:
-  - refeeding_syndrome
-  - electrolytes
-  - thiamine
-  - fluid_balance
-  - monitoring
+- refeeding_syndrome
+- electrolytes
+- thiamine
+- fluid_balance
+- monitoring
 effectEstimatesOrDirection: NICE identifies high-risk refeeding features such as very low BMI, substantial weight loss, prolonged negligible intake, or low baseline potassium/phosphate/magnesium; it recommends cautious initial feeding with thiamine and electrolyte support in high-risk patients.
 adverseEventsOrSafetyNotes: Refeeding risk criteria and clinical nutrition restart recommendations.
 limitations: Guideline recommendation base; adult clinical nutrition settings; updated over time only through surveillance rather than a fasting-specific trial.
@@ -77,17 +75,16 @@ studyDesign: Clinical guideline
 modality: Adult nutrition support / refeeding safety
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:nice-nutrition-support-cg32-2006-02-22-refeeding-safety
-    sourceKey: source_artifact:nice-nutrition-support-cg32-2006-02-22
-    extractedFromArtifactId: art_nice_nutrition_support_cg32_2006_02_22
-    findingKind: safety
-    population: No participant sample; NICE adult nutrition-support guideline.
-    exposure: Nutrition support, refeeding-risk identification, feeding initiation and monitoring
-    outcome: Refeeding risk criteria and clinical nutrition restart recommendations.
-    summary: NICE identifies high-risk refeeding features such as very low BMI, substantial weight loss, prolonged negligible intake, or low baseline potassium/phosphate/magnesium; it recommends cautious initial feeding with thiamine and electrolyte support in high-risk patients.
-    evidenceUse:
-      - safety
+- findingId: finding:nice-nutrition-support-cg32-2006-02-22-refeeding-safety
+  sourceKey: source_artifact:nice-nutrition-support-cg32-2006-02-22
+  extractedFromArtifactId: art_nice_nutrition_support_cg32_2006_02_22
+  findingKind: safety
+  population: No participant sample; NICE adult nutrition-support guideline.
+  exposure: Nutrition support, refeeding-risk identification, feeding initiation and monitoring
+  outcome: Refeeding risk criteria and clinical nutrition restart recommendations.
+  summary: NICE identifies high-risk refeeding features such as very low BMI, substantial weight loss, prolonged negligible intake, or low baseline potassium/phosphate/magnesium; it recommends cautious initial feeding with thiamine and electrolyte support in high-risk patients.
+  evidenceUse:
+  - safety
 murphV1Priority: High
 pdfRightsStatus: permission_required
 ---

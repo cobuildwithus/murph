@@ -18,6 +18,7 @@ categories:
   - "contamination"
   - "dose-uncertainty"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -60,6 +61,7 @@ studyDesign: "HPLC-DAD analytical method"
 modality: "Red yeast rice supplement quality/safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-3390-molecules31010016:batch-003-primary"
     sourceKey: "source_artifact:doi-10.3390-molecules31010016"

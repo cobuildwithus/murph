@@ -24,12 +24,14 @@ categories:
   - recovery
   - wearable-measured
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-red-light-therapy.jpeg
     mediaType: image/jpeg
     caption: Red Light Therapy
 relations:
+
   -
     type: parent_family
     target: experiment_family:whole-body-photobiomodulation
@@ -277,6 +279,7 @@ protocol:
     - End the experiment if repeated sessions are followed by clearly worse sleep, insomnia, agitation, irritability, hypomania or mania-like symptoms, lowered mood, or mood instability without a better explanation.
     - Do not continue to meet an adherence target after any stop condition; missed sessions are preferable to pushing through symptoms.
 testPlans:
+
   -
     planId: whole-body-pbm-rhr-sleep-42d
     durationDays: 42
@@ -295,6 +298,7 @@ testPlans:
       - Keep session timing and exposure setup consistent enough that you can interpret either a positive or null result.
       - Because the direct literature is thin, subjective sleep quality and daytime sleepiness should be logged alongside wearable signals.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:resting-heart-rate
     description: If sessions reduce soreness, inflammation, or late-day arousal enough to lower overnight recovery demand, resting pulse may drift lower.
@@ -314,6 +318,7 @@ experimentOnboarding:
     intentSummary: Explore Red Light Therapy
   contextReview:
     vaultChecks:
+
       -
         id: active_experiments
         label: Active experiments
@@ -354,6 +359,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: pregnancy_lactation_or_minor
         prompt: Are you under 18, pregnant, trying to become pregnant, breastfeeding, or lactating?
@@ -417,6 +423,7 @@ experimentOnboarding:
       - A positive screen does not diagnose risk; it means Murph should keep the user in planning, postponement, or clinician-guidance mode rather than activating the experiment by default.
       - This starter is not cleared for minors, pregnancy, lactation, active/recent cancer treatment, suspicious lesions, photosensitizing medications, recent PDT, active eye symptoms, unavailable eye protection, seizure/light-triggered symptoms, implanted-device concerns, unstable disease, glucose-medication constraints, open or irritated skin, or impaired heat/symptom sensing.
   setupSlots:
+
     -
       id: device_model
       label: Device model
@@ -617,6 +624,7 @@ whyItWorks:
   - "Sleep-relevant PBM mechanisms are usually discussed through mitochondrial signaling, adenosine, nitric-oxide and vascular pathways, antioxidant effects, and inflammatory modulation, but most human sleep evidence is transcranial, cervical, special-population, or otherwise indirect; the whole-body human sleep literature remains early and heterogeneous."
   - "Whole-body or large-area exposure has produced measurable non-sleep signals in narrow contexts, but the signal varies by population and endpoint: acute resting-metabolic effects have been reported in women with obesity, while stronger repeated-session symptom gains come from small supervised fibromyalgia studies rather than generic healthy-adult sleep trials."
 claims:
+
   -
     claimId: page-scope-is-one-variant-not-all-red-light
     type: evidence_scope
@@ -754,6 +762,7 @@ researchLandscape:
   primaryClaim: "A cautious, explicitly logged whole-body red/NIR routine can support a gated measurement-first field test, not a validated sleep or recovery intervention."
   mainCaveat: "Much of the stronger or more positive literature belongs to sibling variants, adjacent modalities, or narrow populations rather than to a general healthy-adult whole-body protocol."
   groups:
+
     -
       id: "family-definition-and-boundaries"
       label: "Family definition and boundaries"

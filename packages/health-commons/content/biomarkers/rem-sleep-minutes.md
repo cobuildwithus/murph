@@ -34,6 +34,7 @@ biomarker:
     label: Enough REM opportunity matters; more is not automatically better.
     nuance: REM is concentrated later in the night, so low REM often reflects curtailed sleep, early wake time, fragmentation, alcohol, medications, sleep apnea, circadian disruption, or device classification changes rather than a simple deficit to hack.
   privateMetricBindings:
+
     -
       source: browser_vault_metric
       domain: sleep
@@ -50,6 +51,7 @@ biomarker:
     minimumPoints: 5
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: REM sleep is a recurring sleep stage marked in the lab by rapid eye movements, low muscle tone, and an activated EEG pattern. Consumer wearables usually report an inferred REM duration for each sleep episode.
@@ -86,9 +88,10 @@ biomarker:
       - naps
       - device or algorithm change
 relations:
+
   -
     type: related_protocol
-    target: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
@@ -123,8 +126,9 @@ protocolRanking:
   version: deterministic-v0
   scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
   candidates:
+
     -
-      protocolKey: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
       expectedDirection: up_or_stable
       relationship: secondary_biomarker
       mechanism: Evening light reduction may improve circadian timing and sleep opportunity. REM is later-night weighted, so the most plausible benefit is indirect; more consistent bedtime, fewer late-night light delays, or less curtailed final-cycle sleep.

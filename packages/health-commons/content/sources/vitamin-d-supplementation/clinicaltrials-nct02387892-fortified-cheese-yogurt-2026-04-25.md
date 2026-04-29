@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: adjacent_variant; claim use: context-only; priority: medium
     - Candidate row: candidate:adjacent-variants:058; shard: adjacent-variants. Adjacent route/vehicle variant; use only to separate daily oral supplement evidence from UVB/sunlight or fortified-food evidence. Candidate rationale: Registry record for fortified dairy products in children; useful as population-mismatch source if child fortification literature is scoped.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:clinicaltrials-nct02387892-fortified-cheese-yogurt-2026-04-25:001
     sourceKey: source_artifact:clinicaltrials-nct02387892-fortified-cheese-yogurt-2026-04-25

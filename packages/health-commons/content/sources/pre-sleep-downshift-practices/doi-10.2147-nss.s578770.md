@@ -12,6 +12,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -57,6 +58,7 @@ studyDesign: Randomized controlled trial
 modality: therapist-guided internet-delivered MBCT-I
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:doi-10.2147-nss.s578770-imbct-i-insomnia-improvement
     sourceKey: source_artifact:doi-10.2147-nss.s578770

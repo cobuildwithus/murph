@@ -3,773 +3,830 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
 slug: protocols/iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-title: IT Band Rehab
-summary: Use symptom-guided load reduction, hip and glute strengthening, movement-control work, and a cautious run/walk progression for suspected runner ITBS while routing red flags and escalation care away from self-guided rehab.
-status: field-testing
+title: Iliotibial Band Syndrome Rehab And Return To Run
+summary: A conservative, symptom-guided ITBS rehab tracker that reduces provocative running, builds hip/glute control, and returns to run-walk exposure only when lateral knee pain stays mild and does not rebound.
+status: draft
 quality: usable
 aliases:
-  - IT band syndrome rehab
-  - iliotibial band syndrome rehab
-  - ITBS return to run
-  - iliotibial band friction syndrome rehab
-  - runner ITBS rehab
+- IT band syndrome rehab
+- ITBS rehab
+- iliotibial band syndrome rehabilitation
+- iliotibial band friction syndrome rehab
+- ITB friction syndrome conservative treatment
+- return to running after ITBS
+- return to run after IT band syndrome
+- hip abductor strengthening for ITBS
+- glute strengthening for ITBS
+- gait retraining for ITBS
+- step-rate retraining for ITBS
 categories:
-  - exercise
-  - rehabilitation
-  - knee-pain
-  - physical-therapy
-  - murph-canonical
-media:
-  -
-    kind: image
-    relativePath: design-assets/hero-it-band-rehab.jpeg
-    mediaType: image/jpeg
-    caption: IT Band Rehab
+- rehab
+- running
+- injury-rehab
+- lateral-knee-pain
+- load-management
+- strength-training
+- murph-canonical
 relations:
-  -
-    type: parent_family
-    target: experiment_family:iliotibial-band-syndrome-rehabilitation
-  -
-    type: primary_biomarker
-    target: biomarker:lateral-knee-pain
-  -
-    type: secondary_biomarker
-    target: biomarker:running-tolerance
-  -
-    type: secondary_biomarker
-    target: biomarker:training-volume
-  -
-    type: secondary_biomarker
-    target: biomarker:adherence
-  -
-    type: cites
-    target: source_artifact:pmid-20145781
-  -
-    type: cites
-    target: source_artifact:pmid-22994651
-  -
-    type: cites
-    target: source_artifact:pmid-24226623
-  -
-    type: cites
-    target: source_artifact:pmid-24790783
-  -
-    type: cites
-    target: source_artifact:pmid-32448384
-  -
-    type: cites
-    target: source_artifact:pmid-34375405
-  -
-    type: cites
-    target: source_artifact:pmid-37300970
-  -
-    type: cites
-    target: source_artifact:pmid-39247485
-  -
-    type: cites
-    target: source_artifact:pmid-39593548
-  -
-    type: cites
-    target: source_artifact:doi-10.1007/s40141-024-00442-w
-  -
-    type: cites
-    target: source_artifact:doi-10.32098/mltj.01.2021.04
-  -
-    type: cites
-    target: source_artifact:doi-10.33438/ijdshs.1249364
-  -
-    type: cites
-    target: source_artifact:doi-10.4102/sajp.v67i2.42
-  -
-    type: cites
-    target: source_artifact:pmid-15896092
-  -
-    type: cites
-    target: source_artifact:pmid-16558617
-  -
-    type: cites
-    target: source_artifact:pmid-16778549
-  -
-    type: cites
-    target: source_artifact:pmid-17208506
-  -
-    type: cites
-    target: source_artifact:pmid-19706004
-  -
-    type: cites
-    target: source_artifact:pmid-26075154
-  -
-    type: cites
-    target: source_artifact:pmid-26464876
-  -
-    type: cites
-    target: source_artifact:pmid-30898786
-  -
-    type: cites
-    target: source_artifact:pmid-35007886
-  -
-    type: cites
-    target: source_artifact:pmid-15155424
-  -
-    type: cites
-    target: source_artifact:pmid-20836867
-  -
-    type: cites
-    target: source_artifact:pmid-32875305
-  -
-    type: cites
-    target: source_artifact:pmid-40015722
-  -
-    type: cites
-    target: source_artifact:pmid-10512211
-  -
-    type: cites
-    target: source_artifact:pmid-16902230
-  -
-    type: cites
-    target: source_artifact:pmid-19286912
-  -
-    type: cites
-    target: source_artifact:pmid-2028354
-  -
-    type: cites
-    target: source_artifact:pmid-24156006
-  -
-    type: cites
-    target: source_artifact:pmid-2610280
-  -
-    type: cites
-    target: source_artifact:pmid-14530229
-  -
-    type: cites
-    target: source_artifact:pmid-14734335
-  -
-    type: cites
-    target: source_artifact:pmid-19147613
-  -
-    type: cites
-    target: source_artifact:pmid-21509133
-  -
-    type: cites
-    target: source_artifact:pmid-22134205
-  -
-    type: cites
-    target: source_artifact:pmid-23015995
-  -
-    type: cites
-    target: source_artifact:pmid-23821708
-  -
-    type: cites
-    target: source_artifact:pmid-30325638
-  -
-    type: cites
-    target: source_artifact:pmid-31194342
-  -
-    type: cites
-    target: source_artifact:pmid-31728373
-  -
-    type: cites
-    target: source_artifact:pmid-32222797
-  -
-    type: cites
-    target: source_artifact:pmid-32370956
-  -
-    type: cites
-    target: source_artifact:pmid-39219463
-  -
-    type: cites
-    target: source_artifact:albertahealthservices-provincial-knee-primary-care-clinical-pathway-2026-01
-  -
-    type: cites
-    target: source_artifact:health-qld-acute-knee-pain-2024-02-13
-  -
-    type: cites
-    target: source_artifact:hweclinicalguidance-knee-pain-2024-03
-  -
-    type: cites
-    target: source_artifact:mskdorset-lateral-knee-pain-itbs-2026-04-24
-  -
-    type: cites
-    target: source_artifact:nice-cks-knee-pain-assessment-2026-04-24
-  -
-    type: cites
-    target: source_artifact:patient-info-swollen-knee-2023-07-20
-  -
-    type: cites
-    target: source_artifact:pmid-23804342
-  -
-    type: cites
-    target: source_artifact:pmid-27172085
-  -
-    type: cites
-    target: source_artifact:pmid-29385940
-  -
-    type: cites
-    target: source_artifact:pmid-29872355
-  -
-    type: cites
-    target: source_artifact:pmid-30392599
-  -
-    type: cites
-    target: source_artifact:pmid-31475628
-  -
-    type: cites
-    target: source_artifact:pmid-32809682
-  -
-    type: cites
-    target: source_artifact:pmid-33418617
-  -
-    type: cites
-    target: source_artifact:pmid-35072941
-  -
-    type: cites
-    target: source_artifact:pmid-38095838
-  -
-    type: cites
-    target: source_artifact:pmid-39488356
-  -
-    type: cites
-    target: source_artifact:pmid-39897984
-  -
-    type: cites
-    target: source_artifact:pmid-9656942
-  -
-    type: cites
-    target: source_artifact:pmid-25157051
-  -
-    type: cites
-    target: source_artifact:pmid-17134904
-  -
-    type: cites
-    target: source_artifact:pmid-17728030
-  -
-    type: cites
-    target: source_artifact:pmid-23954385
-  -
-    type: cites
-    target: source_artifact:pmid-24450366
-  -
-    type: cites
-    target: source_artifact:pmid-26573859
-  -
-    type: cites
-    target: source_artifact:pmid-27693442
-  -
-    type: cites
-    target: source_artifact:pmid-29373059
-  -
-    type: cites
-    target: source_artifact:pmid-36758425
-  -
-    type: cites
-    target: source_artifact:pmid-38618688
-  -
-    type: cites
-    target: source_artifact:doi-10.16965/ijpr.2015.105
-  -
-    type: cites
-    target: source_artifact:pmid-29234554
-  -
-    type: cites
-    target: source_artifact:pmid-33344012
-  -
-    type: cites
-    target: source_artifact:pmid-39304615
-  -
-    type: cites
-    target: source_artifact:pmid-8129101
-  -
-    type: cites
-    target: source_artifact:pmid-8166785
+- type: parent_family
+  target: experiment_family:iliotibial-band-syndrome-rehabilitation
+- type: primary_biomarker
+  target: biomarker:lateral-knee-pain
+- type: secondary_biomarker
+  target: biomarker:running-tolerance
+- type: secondary_biomarker
+  target: biomarker:training-volume
+- type: secondary_biomarker
+  target: biomarker:adherence
+- type: cites
+  target: source_artifact:pmid-20145781
+- type: cites
+  target: source_artifact:pmid-22994651
+- type: cites
+  target: source_artifact:pmid-24226623
+- type: cites
+  target: source_artifact:pmid-24790783
+- type: cites
+  target: source_artifact:pmid-32448384
+- type: cites
+  target: source_artifact:pmid-34375405
+- type: cites
+  target: source_artifact:pmid-37300970
+- type: cites
+  target: source_artifact:pmid-39247485
+- type: cites
+  target: source_artifact:pmid-39593548
+- type: cites
+  target: source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01
+- type: cites
+  target: source_artifact:massgeneral-return-to-running-program-2026-04-24
+- type: cites
+  target: source_artifact:osu-basic-return-to-running-guideline-2019-10-01
+- type: cites
+  target: source_artifact:brighamandwomens-itbs-standard-of-care-2007-01-01
+- type: cites
+  target: source_artifact:brighamandwomens-running-injury-prevention-return-to-running-2007-01-01
+- type: cites
+  target: source_artifact:pmid-17134904
+- type: cites
+  target: source_artifact:pmid-17728030
+- type: cites
+  target: source_artifact:pmid-23954385
+- type: cites
+  target: source_artifact:pmid-26573859
+- type: cites
+  target: source_artifact:pmid-36758425
+- type: cites
+  target: source_artifact:pmid-38618688
+- type: cites
+  target: source_artifact:pmid-14530229
+- type: cites
+  target: source_artifact:pmid-14734335
+- type: cites
+  target: source_artifact:pmid-19147613
+- type: cites
+  target: source_artifact:pmid-22134205
+- type: cites
+  target: source_artifact:pmid-23015995
+- type: cites
+  target: source_artifact:pmid-23821708
+- type: cites
+  target: source_artifact:pmid-30325638
+- type: cites
+  target: source_artifact:pmid-31194342
+- type: cites
+  target: source_artifact:pmid-32222797
+- type: cites
+  target: source_artifact:pmid-32370956
+- type: cites
+  target: source_artifact:pmid-15155424
+- type: cites
+  target: source_artifact:pmid-20836867
+- type: cites
+  target: source_artifact:pmid-32875305
+- type: cites
+  target: source_artifact:pmid-40015722
+- type: cites
+  target: source_artifact:pmid-8129101
+- type: cites
+  target: source_artifact:pmid-8166785
+- type: cites
+  target: source_artifact:pmid-33344012
+- type: cites
+  target: source_artifact:pmid-39304615
+- type: cites
+  target: source_artifact:aaos-orthoinfo-it-band-syndrome-2026-04-24
+- type: cites
+  target: source_artifact:aapmr-iliotibial-band-syndrome-2024-08-22
+- type: cites
+  target: source_artifact:choosept-it-band-syndrome-guide-2026-04-24
+- type: cites
+  target: source_artifact:hss-it-band-syndrome-2022-06-20
+- type: cites
+  target: source_artifact:dartmouth-hitchcock-it-band-exercises-2020-12-01
+- type: cites
+  target: source_artifact:pmid-2028354
+- type: cites
+  target: source_artifact:doi-10-1016-s0031-9406-10-61197-2
+- type: cites
+  target: source_artifact:doi-10-1080-15438629509512030
+- type: cites
+  target: source_artifact:pmid-26406193
+- type: cites
+  target: source_artifact:pmid-34123517
+- type: cites
+  target: source_artifact:pmid-35855103
+- type: cites
+  target: source_artifact:pmid-41167567
+- type: cites
+  target: source_artifact:clinicaltrials-nct02296151-2026-04-24
+- type: cites
+  target: source_artifact:clinicaltrials-nct03067545-2026-04-24
+- type: cites
+  target: source_artifact:clinicaltrials-nct05915754-2026-04-24
+- type: cites
+  target: source_artifact:clinicaltrials-nct05973708-2026-04-24
+- type: cites
+  target: source_artifact:clinicaltrials-nct06131658-2026-04-24
+- type: cites
+  target: source_artifact:clinicaltrials-nct06269757-2026-04-24
+- type: cites
+  target: source_artifact:pmid-39219463
 lineage:
   relationship: root
-  rationale: Murph root variant for active conservative runner ITBS rehabilitation and return-to-run tracking. Cyclist bike-fit care, passive modalities, injections, medication, and surgery remain separate evidence buckets or escalation contexts.
+  rationale: Murph canonical starter protocol for conservative, symptom-guided ITBS rehab and return-to-run tracking; external institutional protocols stay as context sources, not forks.
 attribution:
   ownerType: murph
-  note: Canonical Murph protocol synthesized from the ITBS research package audited on 2026-04-24.
+  note: Drafted from the ITBS Health Commons research run using the canonical source ledger and normalized local fallback source drafts. Full-text sample sizes, effect sizes, adverse-event rates, and exact source-level results were not added unless present in the supplied inputs.
 protocol:
-  doseSignature: 3 strength/control sessions per week plus symptom-guided run/walk reintroduction after a short deload; progress only when pain stays mild and does not rebound the next day
-  target: suspected or clinician-diagnosed runner iliotibial band syndrome without acute-trauma or swollen-knee red flags
+  doseSignature: 6 weeks · 3 strength/control sessions per week · 2–3 run/walk re-entry sessions when symptoms allow · progress only with mild lateral-knee pain and no next-day rebound
+  target: symptom-guided return to running after suspected or clinician-diagnosed ITBS
   frequency:
     sessionsPerWeek: 3
-  interventionSessionsMinimum: 8
+  durationMinutes:
+    min: 20
+    max: 45
+  interventionSessionsMinimum: 12
   interventionSessionsTarget: 18
   steps:
-    - Screen first. Do not start this protocol after acute trauma, with inability to bear weight, a locked knee, major swelling, fever, rapidly worsening pain, major loss of motion, or symptoms that do not fit lateral running-related knee pain.
-    - Reduce running enough that ordinary walking and daily activity do not keep flaring lateral knee pain. Keep cycling, hills, speed work, trail camber, and long downhills out or clearly logged while symptoms settle.
-    - Do hip and glute strengthening plus movement-control work three times per week. Use exercises such as side-lying hip abduction, clamshell or bridge progressions, lateral step-downs, single-leg control, and controlled squats within a pain-tolerable range.
-    - Add mobility or soft-tissue work only as an adjunct for comfort. Do not treat stretching, foam rolling, taping, injections, or medication as the core protocol signal.
-    - Restart running with short run/walk intervals only when lateral knee pain is low at baseline and strength/control sessions are not flaring symptoms. Keep the first sessions flat, easy, and short.
-    - Progress one variable at a time: duration first, then frequency, then hills or pace. Step back if pain changes your gait, rises during the run, or rebounds later that day or the next morning.
-    - If gait changes are part of the plan, treat cadence or step-rate changes as a small experiment for selected runners, not as a universal requirement.
+  - Screen first. Do not start this self-guided protocol if knee pain followed major injury or a sudden pop, the knee is locked or very swollen, weight bearing is unsafe, fever or a hot/red/warm swollen joint is present, neurologic symptoms appear, focal bony/rest/night pain is present, or the diagnosis is unclear.
+  - For 7 baseline days, log lateral knee pain, walking or stair symptoms, recent running exposure, terrain, hills, shoes, and any cross-training. Avoid running that clearly escalates pain while this baseline is being captured.
+  - Reduce the current running dose until lateral knee pain stays mild during daily activity. If running reliably triggers sharp or escalating pain, substitute walking or low-irritation cross-training and keep the return-to-run branch paused.
+  - Complete three weekly strength/control sessions. Emphasize tolerable hip abductor, glute, external-rotator, trunk, and single-leg control work rather than trying to aggressively stretch or compress the iliotibial band itself.
+  - Start the run/walk branch only after normal walking, the current rehab phase, and lateral-knee palpation are pain-free. Use short, flat, alternate-day run/walk sessions first, and keep hills, downhill running, cambered roads, speed work, sudden mileage jumps, and long strides out until flat running is repeatedly symptom-free.
+  - Begin with short run/walk intervals, such as 1 minute easy running and 2 minutes walking repeated 6–10 times. Stop the session if lateral knee pain rises above the agreed threshold, changes gait, becomes sharp, keeps increasing, appears at rest, or comes with swelling, warmth, redness, locking, catching, buckling, numbness, weakness, or inability to bear weight.
+  - Progress only one variable at a time. Add a small interval step, a few total minutes, or another easy run/walk exposure only after the current phase is symptom-free during the session and does not rebound later that day or the next morning; if symptoms recur, rest/reset and restart from the last pain-free phase.
+  - 'Optional movement experiment: if symptoms repeatedly appear at the same point in easy running, trial one small cue such as slightly higher cadence, shorter stride, or quieter landing. Do not stack multiple gait changes at once, and stop if the cue increases pain.'
+  - Keep strength/control work in place while the run/walk branch progresses. Once easy running is consistently tolerated for several weeks, taper rehab to maintenance instead of abruptly stopping it.
   tips:
-    - Use the same pain scale every day so symptom response is easier to interpret.
-    - Flat easy run/walk sessions are easier to interpret than hills, speed work, or long downhills.
-    - Keep cycling-related lateral knee pain separate; bike fit and saddle setback sources belong to an adjacent variant.
-    - External protocols are useful implementation templates, but they are not proof that one exact timeline works for everyone.
+  - Use a simple pain rule agreed before the experiment starts, but treat the numeric pain cap as a conservative Murph safety heuristic rather than a validated ITBS-specific threshold. Sharp pain, gait change, or next-day rebound should stop progression even if the number is low.
+  - Flat routes, predictable surfaces, stable shoes, and easy pace make the signal easier to interpret.
+  - Do not introduce a new shoe, aggressive foam-rolling routine, NSAID/acetaminophen pain-masking, injection, shockwave treatment, dry needling, manual-therapy plan, major bike-fit change, or separate knee protocol during the same experiment unless it is clinician-directed and intentionally logged as a confounder.
+  - A single better run is not proof of recovery. Look for repeated tolerance across sessions and the next morning.
+  - Clinician or physical-therapist input is appropriate when symptoms are recurrent, worsening, diagnostically uncertain, persistent after deload and rehab, or important to a race/work requirement.
   keepInMind:
-    - The evidence supports a conservative active-rehab direction more strongly than a single exact dose schedule.
-    - Direct gait-retraining evidence is case-report-heavy, so use it selectively and cautiously.
-    - Biomechanics and hip-strength findings are context and mechanism evidence, not proof that changing one metric guarantees recovery.
-    - Safety and differential-diagnosis boundaries should override the experiment when symptoms are atypical or escalating.
+  - The evidence supports active conservative components more than it validates one exact dose schedule or one guaranteed return-to-run timeline.
+  - Runner ITBS rehab is the core protocol. Cycling-specific bike-fit and return-to-cycling evidence is adjacent and should not be merged into this runner protocol.
+  - Biomechanics and hip-strength sources explain plausible targets, but they do not prove that one isolated correction fixes ITBS for everyone.
+  - External named protocols help with implementation but are not Murph canonical efficacy evidence.
+  - Medication, corticosteroid injection, shockwave or dry-needling modalities, manual or passive soft-tissue care, and surgery are clinician-directed escalation, adjacent treatment, or confounder pathways, not self-experiment steps.
   logFields:
-    - lateral knee pain before session
-    - peak lateral knee pain during session
-    - next-day lateral knee pain
-    - run/walk duration
-    - run interval length
-    - walk interval length
-    - terrain and camber
-    - hills or downhill exposure
-    - pace or effort
-    - footwear change
-    - strength/control session completed
-    - exercises completed
-    - symptom flare during strength work
-    - gait change or limping
-    - cycling or cross-training exposure
-    - medication, injection, taping, or other adjunct use
-    - stop-condition event
+  - pain location and onset pattern
+  - onset mile or minute during run
+  - lateral knee pain before session
+  - peak lateral knee pain during session
+  - pain after session
+  - next-day pain
+  - walking and stair tolerance
+  - swelling, warmth, redness, locking, catching, buckling, numbness, weakness, rest pain, or night pain
+  - clinician or physical-therapist ITBS confirmation status
+  - run/walk minutes
+  - run/walk interval pattern
+  - weekly mileage and recent mileage jump
+  - long-run distance
+  - route surface, hills, downhill, or camber
+  - pace, speedwork, or intensity
+  - shoe model, shoe age, recent shoe change, orthotics, or terrain
+  - strength/control exercise names, sets, reps, load, side-to-side differences, RPE, and pain response
+  - gait cue used
+  - cross-training or cycling exposure
+  - sleep, fatigue, illness, and competing training load
+  - stop-condition event
+  - stretching, foam rolling, manual therapy, shockwave, dry needling, medication, injection, or other treatment change
   stopConditions:
-    - Stop and seek clinical evaluation for acute trauma, inability to bear weight, a locked knee, major swelling, fever/systemic symptoms, rapidly worsening pain, major loss of knee motion, new neurologic symptoms, or suspected fracture/infection/internal derangement.
-    - Stop the running progression and step back if lateral knee pain changes your gait, climbs during the run, or is clearly worse later that day or the next morning.
-    - End the experiment and get assessed if symptoms do not improve with reduced running load, repeatedly flare despite regressions, or no longer fit the expected lateral-knee pattern.
+  - Do not start, or stop and seek appropriate care, after acute trauma, sudden swelling, deformity, a pop at injury, inability to bear weight, severe pain, a locked knee, major swelling, fever, hot/red/warm joint, major loss of motion, neurologic symptoms, focal bony pain, rest/night pain, or rapidly worsening pain.
+  - Do not use this page as a self-diagnosis protocol for locking, catching, true giving-way, recurrent swelling, adolescent knee pain with hip pain, suspected stress fracture, suspected meniscal/ligament/cartilage injury, patellofemoral mimic, or unclear knee/hip/spine pain.
+  - Stop the run or exercise immediately if lateral knee pain becomes sharp, rapidly worsens, rises above the agreed ceiling, changes gait, causes limping, appears at rest, spreads beyond the expected lateral-knee pattern, or comes with swelling, warmth, redness, locking, catching, buckling, numbness, weakness, or inability to bear weight.
+  - If symptoms are worse later the same day or the next morning, do not progress; return to the last pain-free phase and reduce running load.
+  - End the experiment and route to clinical review if symptoms worsen despite reducing running, persistently block ordinary walking or stairs, repeatedly recur whenever running resumes, or remain diagnostically unclear.
+  - Do not use NSAIDs, acetaminophen, corticosteroid injection, or other pain-relieving treatment to pass a run-readiness test.
 testPlans:
-  -
-    planId: itbs-return-to-run-42d
-    durationDays: 42
-    baselineDays: 7
-    interventionDays: 35
-    primaryBiomarkerKey: biomarker:lateral-knee-pain
-    secondaryBiomarkerKeys:
-      - biomarker:running-tolerance
-      - biomarker:training-volume
-      - biomarker:adherence
-    minimumAdherenceSessions: 8
-    targetAdherenceSessions: 18
-    notes:
-      - Use the baseline week to log normal pain pattern, current running exposure, terrain, footwear, and cross-training.
-      - During the intervention, treat strength/control sessions and pain-guided running exposure as the main signals.
-      - Do not interpret a faster pace or longer run as success if next-day pain or gait compensation worsens.
-expectedSignalDescriptions:
-  -
-    biomarkerKey: biomarker:lateral-knee-pain
-    description: "Reducing the running load that triggers symptoms can give the outside-knee area time to settle. Hip, glute, and movement-control work may also reduce running strain."
-  -
-    biomarkerKey: biomarker:running-tolerance
-    description: "A run/walk progression gives the knee small, repeated exposures below the flare threshold. Tolerance may improve as strength and control catch up."
-  -
-    biomarkerKey: biomarker:training-volume
-    description: "The protocol first cuts back provocative running, then rebuilds volume gradually. Training volume may rise again if pain stays controlled."
-  -
-    biomarkerKey: biomarker:adherence
-    description: "Short strength/control sessions and clear step-back rules can make rehab easier to complete. Adherence may improve when the plan does not require pushing through pain."
+- planId: symptom-guided-return-to-run-49d
+  durationDays: 49
+  baselineDays: 7
+  interventionDays: 42
+  primaryBiomarkerKey: biomarker:lateral-knee-pain
+  secondaryBiomarkerKeys:
+  - biomarker:running-tolerance
+  - biomarker:training-volume
+  - biomarker:adherence
+  minimumAdherenceSessions: 12
+  targetAdherenceSessions: 18
+  notes:
+  - Use manual symptom and function tracking as the primary readout; no extracted evidence supports a standalone wearable biomarker for ITBS recovery.
+  - Compare the 6-week intervention against the user’s own 7-day baseline and inspect trend stability, not a single run.
+  - 'Running load is both the exposure and a confounder: keep route, hills, pace, shoes, and cross-training visible.'
+  - Treat the test as conservative self-management for appropriate users, not diagnostic triage or a cure claim.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: Hey Murph, I want to explore an IT Band Rehab experiment.
-    intentSummary: Explore IT Band Rehab
+    displayPrompt: Hey Murph, I want to explore an IT band syndrome rehab and return-to-run plan.
+    intentSummary: Explore ITBS Rehab And Return To Run
   contextReview:
     vaultChecks:
-      -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid stacking another meaningful rehab or training experiment on top of an active one unless the user accepts weaker attribution.
-        readHints:
-          - experiment list --status active
-      -
-        id: knee_red_flags
-        label: Knee red flags
-        reason: Acute trauma, inability to bear weight, locking, swelling, fever, or major motion loss changes whether self-guided rehab is appropriate.
-        freshnessDays: 14
-        readHints:
-          - memory show
-          - search query "knee trauma swelling locked knee unable to bear weight fever lateral knee pain"
-      -
-        id: running_load_context
-        label: Running load context
-        reason: Recent mileage, terrain, shoes, hills, pace, and cross-training are the main confounders for ITBS symptom response.
-        freshnessDays: 14
-        readHints:
-          - search query "running mileage hills shoes cycling lateral knee pain"
+    - id: active_experiments
+      label: Active experiments
+      reason: Avoid stacking a rehab experiment on top of another meaningful intervention unless the user accepts weaker attribution.
+      readHints:
+      - experiment list --status active --format json
+    - id: recent_knee_symptoms
+      label: Recent knee symptoms
+      reason: Confirm that the symptom pattern is lateral-knee pain consistent with ITBS rather than urgent or unclear knee pain.
+      freshnessDays: 30
+      readHints:
+      - search query "knee pain lateral knee IT band ITBS swelling locking trauma" --format json
+    - id: recent_running_load
+      label: Recent running load
+      reason: Understand current mileage, hills, speed work, terrain, and the dose that provokes symptoms before selecting a starting branch.
+      freshnessDays: 45
+      readHints:
+      - timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json
+      - search query "run running workout route hills intervals" --format json
+    - id: injury_or_clinician_context
+      label: Injury or clinician context
+      reason: A clinician diagnosis, imaging result, recent injection, medication, or surgical advice changes the safety and interpretation posture.
+      freshnessDays: 180
+      readHints:
+      - search query "ITBS iliotibial knee diagnosis imaging injection surgery physical therapy" --format json
+    - id: wearable_activity_sources
+      label: Wearable and activity sources
+      reason: Activity data can help quantify running exposure, but symptom response remains the primary outcome.
+      freshnessDays: 14
+      readHints:
+      - wearables sources list --format json
+      - wearables day <YYYY-MM-DD> --format json
+    - id: medication_and_procedure_changes
+      label: Medication or procedure changes
+      reason: New NSAID use, corticosteroid injection, shockwave, or manual therapy can confound symptom changes and may need clinician guidance.
+      freshnessDays: 30
+      readHints:
+      - search query "NSAID ibuprofen steroid injection shockwave physical therapy knee" --format json
+    notes:
+    - Do not infer diagnosis from logs alone.
+    - If red flags are present, the assistant should route away from experiment creation before asking setup details.
   safetyScreen:
     cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    mode: ask_each_item
+    dispositionIfAnyPositive: do_not_start_unsupervised
     mustAsk:
-      -
-        id: acute_or_red_flag_knee_pain
-        prompt: Any recent trauma, inability to bear weight, locking, major swelling, fever, major motion loss, rapidly worsening pain, or new neurologic symptoms?
-        ifPositive: do_not_start_unsupervised
-        why: These features can indicate fracture, infection, internal derangement, or another condition that should not be handled as self-guided ITBS rehab.
-      -
-        id: considering_injection_medication_or_surgery
-        prompt: Are you considering injection, prescription medication, imaging, or surgery for this knee pain?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Those are clinician-directed escalation pathways, not Murph self-experiment steps.
+    - id: acute_trauma_or_pop
+      prompt: Did this knee pain begin after a fall, collision, twist, sudden pop, or other acute traumatic event?
+      ifPositive: do_not_start_unsupervised
+      why: Acute traumatic knee pain may require evaluation before any return-to-run plan.
+    - id: bear_weight_locked_swollen
+      prompt: Do you have inability to bear weight, a locked knee, major swelling, marked instability, or major loss of knee motion?
+      ifPositive: do_not_start_unsupervised
+      why: These features are outside a self-guided ITBS rehab experiment.
+    - id: infection_or_systemic_signs
+      prompt: Do you have fever, a hot or red joint, spreading redness, systemic illness, or severe unexplained night/rest pain?
+      ifPositive: do_not_start_unsupervised
+      why: These signs can indicate urgent or non-ITBS conditions.
+    - id: neurologic_or_spreading_symptoms
+      prompt: Do you have new numbness, weakness, progressive neurologic symptoms, or pain spreading in a pattern that is not lateral knee pain during running?
+      ifPositive: do_not_start_unsupervised
+      why: A changing or non-lateral symptom pattern should not be treated as simple ITBS.
+    - id: worsening_despite_deload
+      prompt: Has pain kept worsening even after reducing running or avoiding the activities that trigger it?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Failure to improve with load reduction can mean the starting assumption or progression is wrong.
+    - id: mechanical_focal_or_mimic_features
+      prompt: Do you have true locking, catching, buckling/giving way, recurrent swelling, rest or night pain, focal bony tenderness, hip/back pain, anterior-knee symptoms, or anything that makes this feel unlike typical lateral running-related ITBS pain?
+      ifPositive: do_not_start_unsupervised
+      why: Mechanical, focal bony, referred, or unclear patterns need assessment before a self-guided ITBS return-to-run experiment.
+    - id: separate_clinical_variant_needed
+      prompt: Are you pregnant or postpartum, an adolescent, post-surgical, managing inflammatory arthritis/gout/significant osteoarthritis, a cyclist with bike-fit-driven symptoms, or currently planning medication, injection, shockwave, dry needling, manual therapy, imaging-driven care, or surgery for this knee?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: These cases require a separate pathway or clinician-guided plan rather than the ordinary self-guided running variant.
     stopIf:
       inheritFromProtocolSafety: true
+      additionalConditions:
+      - Pain changes gait or causes limping
+      - Pain appears at rest, persists after the session, or rebounds later that day or the next morning
+      - Symptoms spread beyond expected lateral-knee pattern
+      - Swelling, warmth, redness, fever, buckling, true locking, catching, inability to bear weight, numbness, weakness, or major motion loss appears
+      - User adds medication, injection, shockwave, dry needling, manual therapy, surgery planning, or another major treatment
     notes:
-      - Keep screening stronger than efficacy language; this protocol does not diagnose knee pain.
+    - Keep safety stronger than efficacy. A positive screen should route away from unsupervised experiment creation.
   setupSlots:
-    -
-      id: current_running_exposure
-      label: Current running exposure
-      purpose: context
-      valueType: free_text
-      askPolicy: ask_if_unknown_or_stale
-      required: true
-      question: What is your current weekly running, terrain, hills, shoes, and what reliably triggers lateral knee pain?
-      target:
-        object: onboardingCapture
-        field: setupAnswers.currentRunningExposure
-    -
-      id: pain_scale_commitment
-      label: Pain scale commitment
-      purpose: measurement_fidelity
-      valueType: boolean
-      askPolicy: ask_at_confirmation
-      required: true
-      question: Can you log lateral knee pain before, during, after, and the next morning using the same 0-10 scale?
-      target:
-        object: onboardingCapture
-        field: setupAnswers.painScaleCommitment
+  - id: symptom_pattern
+    label: Symptom pattern
+    purpose: safety
+    valueType: free_text
+    askPolicy: ask_if_unknown
+    required: true
+    question: Briefly describe where the knee pain is, when it appears during running, and what makes it settle.
+    writePath: onboarding.answers.symptomPattern
+  - id: pain_ceiling
+    label: Pain ceiling
+    purpose: safety
+    valueType: integer
+    askPolicy: ask_if_unknown
+    required: true
+    question: What pain ceiling should stop a run session? Use a 0 to 10 scale, with 0 as no pain and 10 as worst pain.
+    constraints:
+      min: 0
+      max: 10
+      recommendedMax: 3
+    writePath: runPlan.painCeiling
+  - id: starting_branch
+    label: Starting branch
+    purpose: personalization
+    valueType: enum
+    askPolicy: ask_if_unknown
+    required: true
+    question: 'Where should the plan start: no running yet, short run/walk re-entry, or already tolerating easy runs?'
+    options:
+    - no_running_yet
+    - run_walk_reentry
+    - easy_runs_tolerated
+    writePath: runPlan.startingBranch
+  - id: rehab_days
+    label: Rehab days
+    purpose: logistics
+    valueType: weekly_time_windows
+    askPolicy: ask_if_unknown
+    required: true
+    question: Which three weekly windows are realistic for strength and control sessions?
+    writePath: runPlan.rehabDays
+  - id: run_walk_windows
+    label: Run/walk windows
+    purpose: logistics
+    valueType: weekly_time_windows
+    askPolicy: ask_if_unknown
+    required: false
+    question: Which two or three weekly windows could hold easy run/walk sessions once symptoms allow?
+    writePath: runPlan.runWalkWindows
+  - id: route_controls
+    label: Route controls
+    purpose: confounder_control
+    valueType: free_text
+    askPolicy: ask_if_unknown
+    required: false
+    question: What flat, predictable route or surface can you use early, and are there hills, camber, or speed-work triggers to avoid?
+    writePath: runPlan.routeControls
+  - id: reminder_policy
+    label: Reminder policy
+    purpose: assistant_support
+    valueType: reminder_policy
+    askPolicy: ask_at_confirmation
+    required: true
+    question: Do you want rehab/run reminders and a next-day symptom check if no log appears?
+    options:
+    - none
+    - session_reminders
+    - session_reminders_plus_next_day_check
+    writePath: assistantSupport.reminderPolicy
   planDefaults:
-    testPlanId: itbs-return-to-run-42d
+    testPlanId: symptom-guided-return-to-run-49d
     baselineDays: 7
-    interventionDays: 35
+    interventionDays: 42
     sessionsPerWeek: 3
     targetSessions: 18
-    minimumUsefulSessions: 8
-    firstSessionGuidance: Start with safety screening, running-load reduction, and a pain-tolerable strength/control session before reintroducing run/walk intervals.
+    minimumUsefulSessions: 12
+    firstSessionGuidance: Start with screening, baseline logging, and a low-irritation strength/control session. Do not force a run on day one if walking or stairs are still provocative.
   logging:
     sessionFields:
-      - lateral_knee_pain_before
-      - peak_lateral_knee_pain_during
-      - next_day_lateral_knee_pain
-      - run_walk_duration
-      - strength_control_completed
-      - stop_condition_event
+    - pain_location_and_onset_pattern
+    - onset_mile_or_minute
+    - lateral_knee_pain_before
+    - peak_lateral_knee_pain
+    - pain_after_session
+    - next_day_pain
+    - walking_and_stair_tolerance
+    - red_flag_or_mimic_symptoms
+    - run_walk_minutes
+    - interval_pattern
+    - strength_control_completed
+    - exercise_sets_reps_load_rpe_pain_response
+    - gait_cue_used
+    - stop_condition_event
     confounders:
-      - hills_downhill
-      - terrain_camber
-      - footwear_change
-      - cycling_load
-      - medication_or_injection
+    - route_surface_hills_downhill_camber
+    - pace_speedwork_or_intensity
+    - weekly_mileage_long_run_and_recent_mileage_jump
+    - shoe_age_model_orthotics_or_equipment_change
+    - cross_training_or_cycling_exposure
+    - sleep_fatigue_illness_or_competing_training_load
+    - new_nsaid_acetaminophen_or_other_pain_medication
+    - injection_shockwave_dry_needling_manual_therapy_or_other_treatment
     notes:
-      - Step back when pain changes gait or rebounds the next day.
+    - Symptoms and function are primary; wearable activity data is context.
+    - Next-day pain is part of session interpretation, not an optional extra.
   assistantPolicy:
+    maxSetupQuestionsPerTurn: 2
     askBeforeCreatingAutomations: true
     missedLogFollowup: opt_in_only
+    reminderOptions:
+    - none
+    - session_reminders
+    - session_reminders_plus_next_day_check
     weeklyDigestDefault: true
-    confirmationPrompt: Confirm that no red flags are present and that this is a conservative tracking protocol, not a diagnosis or cure promise.
+    missedLogFollowupCopy: Did knee pain stay mild after the last rehab or run/walk session, and how did it feel the next morning?
+    confirmationPrompt: Before creating the experiment, show the safety screen outcome, starting branch, pain ceiling, weekly rehab/run windows, logging fields, stop conditions, and reminder policy.
 whyItWorks:
-  - The protocol reduces provocative running load while rebuilding hip and glute capacity, movement control, and running tolerance.
-  - The strongest claim is not that one exercise cures ITBS, but that a symptom-guided active progression is a safer default than pushing through lateral knee pain.
+- 'ITBS return-to-run work is load-sensitive: reducing the running dose that provokes lateral knee pain can lower irritability enough to rebuild tolerance.'
+- Hip/glute strengthening and single-leg control work are plausible active components because the direct and mechanism corpus points toward strength, movement-control, and running-biomechanics targets, but those targets should not be oversold as a single proven cause.
+- Run/walk re-entry converts return to running into graded exposure. The useful signal is whether pain stays mild during the run and does not rebound later that day or the next morning.
+- Gait cues such as slightly higher cadence or shorter stride can be explored for selected runners, but they are optional experiments rather than universal requirements.
 claims:
-  -
-    claimId: itbs-active-rehab-direction
-    type: intervention_result
-    text: Active conservative care for runner ITBS commonly combines load modification, hip/glute strengthening, neuromuscular control, and graded return to running, but no single standardized dose protocol is established.
-    strength: moderate
-    sourceKeys:
-      - source_artifact:pmid-20145781
-      - source_artifact:pmid-22994651
-      - source_artifact:pmid-32448384
-      - source_artifact:pmid-34375405
-      - source_artifact:pmid-37300970
-      - source_artifact:pmid-39247485
-  -
-    claimId: itbs-gait-retraining-caution
-    type: mixed_evidence
-    text: Gait retraining and cadence or step-rate changes are plausible tools for selected runners, but direct evidence is case-report-heavy.
-    strength: low
-    sourceKeys:
-      - source_artifact:pmid-24226623
-      - source_artifact:pmid-24790783
-      - source_artifact:pmid-17134904
-      - source_artifact:pmid-23954385
-  -
-    claimId: itbs-safety-boundaries
-    type: safety
-    text: Acute trauma, inability to bear weight, locked knee, major swelling, fever, or suspected internal derangement should be routed away from self-guided ITBS rehab.
-    strength: high
-    sourceKeys:
-      - source_artifact:pmid-14530229
-      - source_artifact:pmid-14734335
-      - source_artifact:pmid-19147613
-      - source_artifact:pmid-30325638
-      - source_artifact:pmid-32370956
+
+- claimId: active-rehab-components-not-standardized
+  type: evidence_scope
+  text: Direct runner rehab and review sources support a cautious active-rehab rationale that includes reducing provocative running, hip/glute or neuromuscular-control work, optional gait work, and graded return-to-run tracking; external protocols provide implementation context. The supplied evidence does not establish one standardized dose protocol, guaranteed return-to-run timeline, or single best exercise recipe.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-20145781
+  - source_artifact:pmid-22994651
+  - source_artifact:pmid-24226623
+  - source_artifact:pmid-24790783
+  - source_artifact:pmid-32448384
+  - source_artifact:pmid-34375405
+  - source_artifact:pmid-37300970
+  - source_artifact:pmid-39247485
+  - source_artifact:pmid-39593548
+  - source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01
+  - source_artifact:massgeneral-return-to-running-program-2026-04-24
+  - source_artifact:osu-basic-return-to-running-guideline-2019-10-01
+  - source_artifact:brighamandwomens-itbs-standard-of-care-2007-01-01
+  caveats:
+  - Evidence is heterogeneous and includes case reports, reviews, external protocols, and pilot or supervised clinical work.
+  - External protocols are context-only implementation templates, not efficacy proof.
+
+- claimId: pain-guided-progression-over-mileage-promises
+  type: design_guardrail
+  text: A practical Murph protocol should begin return-to-run only after walking, the current rehab phase, and lateral-knee palpation are pain-free, then use flat alternate-day run/walk exposure, next-day symptom checks, and reset rules rather than promising a fixed weekly mileage progression or universal return-to-run timeline.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-31194342
+  - source_artifact:pmid-32448384
+  - source_artifact:pmid-34375405
+  - source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01
+  - source_artifact:massgeneral-return-to-running-program-2026-04-24
+  - source_artifact:osu-basic-return-to-running-guideline-2019-10-01
+  caveats:
+  - External return-to-run templates are implementation context, not proof of efficacy.
+  - Numeric pain caps are Murph safety heuristics unless a later ITBS-specific pain-monitoring source is extracted.
+- claimId: outcomes-are-symptom-and-function-based
+  type: evidence_scope
+  text: 'The practical outcome set for self-guided runner ITBS rehab is symptom and function based: lateral knee pain, pain-free running duration, return-to-run tolerance, adherence, and stop-condition events.'
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-20145781
+  - source_artifact:pmid-24226623
+  - source_artifact:pmid-24790783
+  - source_artifact:pmid-32448384
+  - source_artifact:pmid-39247485
+  - source_artifact:pmid-39593548
+  caveats:
+  - The fallback extraction does not support precise MCID, effect-size, or recurrence claims.
+- claimId: no-standalone-wearable-biomarker
+  type: evidence_scope
+  text: No supplied extraction supports a standalone wearable biomarker for ITBS recovery; wearable activity data can contextualize running exposure but should not replace symptom response.
+  strength: low
+  sourceKeys:
+  - source_artifact:pmid-37300970
+  - source_artifact:pmid-39247485
+  - source_artifact:pmid-23954385
+  - source_artifact:pmid-26573859
+  - source_artifact:pmid-36758425
+  - source_artifact:pmid-38618688
+  caveats:
+  - Biomechanical and risk-factor evidence is mostly context rather than intervention validation.
+- claimId: gait-retraining-optional-selected-runners
+  type: mixed_evidence
+  text: Gait retraining and cadence or step-rate changes are plausible tools for selected runners, but they should be framed as optional movement experiments rather than universal requirements.
+  strength: low
+  sourceKeys:
+  - source_artifact:pmid-24226623
+  - source_artifact:pmid-24790783
+  - source_artifact:pmid-17134904
+  - source_artifact:pmid-17728030
+  - source_artifact:pmid-23954385
+  caveats:
+  - Direct gait evidence is case-report-heavy and mechanism evidence does not prove a one-size-fits-all correction.
+- claimId: biomechanics-risk-context-not-causal-proof
+  type: association_not_causation
+  text: Biomechanics, hip strength, and running risk-factor sources can explain plausible targets but should not be treated as proof that changing one metric prevents or resolves ITBS.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-17134904
+  - source_artifact:pmid-17728030
+  - source_artifact:pmid-23954385
+  - source_artifact:pmid-26573859
+  - source_artifact:pmid-36758425
+  - source_artifact:pmid-38618688
+  caveats:
+  - Mostly observational or mechanistic evidence; intervention effect details were not extracted.
+
+- claimId: red-flags-route-out
+  type: safety
+  text: Do not start self-guided ITBS return-to-run work after acute trauma or with inability to bear weight, locked knee, major swelling, hot/red/warm joint, fever or systemic illness, sudden swelling or deformity, rapidly worsening pain, focal bony pain, rest or night pain, neurologic symptoms, major loss of motion, or mechanical symptoms such as true locking, catching, buckling, or recurrent swelling.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-14530229
+  - source_artifact:pmid-14734335
+  - source_artifact:pmid-19147613
+  - source_artifact:pmid-22134205
+  - source_artifact:pmid-23015995
+  - source_artifact:pmid-23821708
+  - source_artifact:pmid-30325638
+  - source_artifact:pmid-31194342
+  - source_artifact:pmid-32222797
+  - source_artifact:pmid-32370956
+  - source_artifact:pmid-39219463
+  caveats:
+  - These are conservative knee-pain triage boundaries, not ITBS efficacy findings.
+
+- claimId: procedures-outside-self-experiment
+  type: design_guardrail
+  text: Medication, corticosteroid injection, shockwave or dry-needling modalities, manual or passive soft-tissue care, and surgery should stay outside the core self-guided active rehab plan unless clinician-directed or intentionally logged as confounders; these sources are escalation, passive-adjunct, context-only, or safety-boundary evidence, not proof of active return-to-run efficacy.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-2028354
+  - source_artifact:pmid-15155424
+  - source_artifact:pmid-20836867
+  - source_artifact:pmid-32875305
+  - source_artifact:pmid-40015722
+  - source_artifact:doi-10-1016-s0031-9406-10-61197-2
+  - source_artifact:doi-10-1080-15438629509512030
+  - source_artifact:pmid-26406193
+  - source_artifact:pmid-34123517
+  - source_artifact:pmid-35855103
+  - source_artifact:pmid-41167567
+  caveats:
+  - Do not imply passive or procedural modalities create durable return-to-run capacity unless later extraction separates that outcome from cointerventions.
+  - Injection, medication, shockwave, and surgery records are escalation or confounder context, not self-directed protocol steps.
+
+- claimId: external-protocols-context-not-efficacy-proof
+  type: evidence_scope
+  text: External protocol templates and selected clinical trial registry records can help implementation comparison and research-gap tracking, but external protocols are not Murph canonical efficacy evidence and registry records should not be treated as completed efficacy evidence unless linked results are extracted.
+  strength: high
+  sourceKeys:
+  - source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01
+  - source_artifact:massgeneral-return-to-running-program-2026-04-24
+  - source_artifact:osu-basic-return-to-running-guideline-2019-10-01
+  - source_artifact:brighamandwomens-itbs-standard-of-care-2007-01-01
+  - source_artifact:aaos-orthoinfo-it-band-syndrome-2026-04-24
+  - source_artifact:choosept-it-band-syndrome-guide-2026-04-24
+  - source_artifact:clinicaltrials-nct02296151-2026-04-24
+  - source_artifact:clinicaltrials-nct03067545-2026-04-24
+  - source_artifact:clinicaltrials-nct05915754-2026-04-24
+  - source_artifact:clinicaltrials-nct05973708-2026-04-24
+  - source_artifact:clinicaltrials-nct06131658-2026-04-24
+  - source_artifact:clinicaltrials-nct06269757-2026-04-24
+  caveats:
+  - External named protocols stay separate from Murph canonical protocol claims.
+  - Registry records are gap-tracking context unless linked results are extracted.
+- claimId: cycling-evidence-adjacent
+  type: evidence_scope
+  text: Cycling ITBS and bike-fit sources should remain adjacent variants rather than direct evidence for this runner return-to-run protocol.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-8129101
+  - source_artifact:pmid-8166785
+  - source_artifact:pmid-33344012
+  - source_artifact:pmid-39304615
+  caveats:
+  - Cycling-specific mechanisms and progression decisions can differ from running rehabilitation.
 researchLandscape:
-  bottomLine: "Direct runner ITBS rehab evidence supports a cautious active-rehab direction, while safety and differential-diagnosis sources should bound who uses it."
-  confidenceLabel: "limited"
-  primaryClaim: "Symptom-guided load reduction, strengthening, movement control, and gradual run/walk return are reasonable to track for appropriate runner ITBS cases."
-  mainCaveat: "The evidence does not validate one universal timeline, one curative exercise, or a wearable biomarker for recovery."
+  bottomLine: The corpus supports a conservative active rehab and return-to-run tracker, but the direct runner evidence is limited and heterogeneous; safety and differential-diagnosis boundaries should read stronger than efficacy language.
+  confidenceLabel: limited
+  primaryClaim: For appropriate runners with lateral knee pain consistent with ITBS, a symptom-guided plan that reduces provocative running, builds hip/glute control, and reintroduces run/walk exposure is a reasonable conservative tracking protocol.
+  mainCaveat: The supplied source extraction does not justify a guaranteed timeline, a single best exercise dose, a specific biomechanical cure, or wearable biomarker recovery targets.
   groups:
-    -
-      id: "direct-runner-rehab"
-      label: "Direct runner rehab and return-to-run"
-      stance: "supports"
-      summary: "Direct trials, case reports, and reviews support active rehab components but leave dose-response and recurrence uncertainty."
-      sourceKeys:
-        - "source_artifact:aaos-orthoinfo-it-band-syndrome-2026-04-24"
-        - "source_artifact:aapmr-iliotibial-band-syndrome-2024-08-22"
-        - "source_artifact:brighamandwomens-itbs-standard-of-care-2007-01-01"
-        - "source_artifact:brighamandwomens-running-injury-prevention-return-to-running-2007-01-01"
-        - "source_artifact:choosept-it-band-syndrome-guide-2026-04-24"
-        - "source_artifact:clinicaltrials-nct02296151-2026-04-24"
-        - "source_artifact:clinicaltrials-nct05915754-2026-04-24"
-        - "source_artifact:clinicaltrials-nct05973708-2026-04-24"
-        - "source_artifact:clinicaltrials-nct06131658-2026-04-24"
-        - "source_artifact:clinicaltrials-nct06269757-2026-04-24"
-        - "source_artifact:dartmouth-hitchcock-it-band-exercises-2020-12-01"
-        - "source_artifact:doi-10.1007/s40141-024-00442-w"
-        - "source_artifact:doi-10.32098/mltj.01.2021.04"
-        - "source_artifact:doi-10.32098/mltj.02.2019.05"
-        - "source_artifact:doi-10.33438/ijdshs.1249364"
-        - "source_artifact:doi-10.4102/sajp.v67i2.42"
-        - "source_artifact:hss-it-band-syndrome-2022-06-20"
-        - "source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01"
-        - "source_artifact:massgeneral-return-to-running-program-2026-04-24"
-        - "source_artifact:osu-basic-return-to-running-guideline-2019-10-01"
-        - "source_artifact:pmid-10405728"
-        - "source_artifact:pmid-15864895"
-        - "source_artifact:pmid-15896092"
-        - "source_artifact:pmid-16558617"
-        - "source_artifact:pmid-16778549"
-        - "source_artifact:pmid-17208506"
-        - "source_artifact:pmid-19706004"
-        - "source_artifact:pmid-20145781"
-        - "source_artifact:pmid-21509133"
-        - "source_artifact:pmid-21665168"
-        - "source_artifact:pmid-22994651"
-        - "source_artifact:pmid-24226623"
-        - "source_artifact:pmid-24790783"
-        - "source_artifact:pmid-26075154"
-        - "source_artifact:pmid-26464876"
-        - "source_artifact:pmid-30898786"
-        - "source_artifact:pmid-32448384"
-        - "source_artifact:pmid-32514741"
-        - "source_artifact:pmid-32769015"
-        - "source_artifact:pmid-34375405"
-        - "source_artifact:pmid-35007886"
-        - "source_artifact:pmid-37300970"
-        - "source_artifact:pmid-39247485"
-        - "source_artifact:pmid-39593548"
-        - "source_artifact:pmid-465909"
-        - "source_artifact:pmid-7237678"
-        - "source_artifact:pmid-7396052"
-      defaultOpen: true
-    -
-      id: "mechanism-risk-context"
-      label: "Biomechanics and risk context"
-      stance: "context_only"
-      summary: "Biomechanics and hip-strength sources help explain targets but should not be treated as proof that one metric change cures ITBS."
-      sourceKeys:
-        - "source_artifact:doi-10.1111/j.1600-0838.2009.01045.x"
-        - "source_artifact:doi-10.1123/ijatt.2016-0075"
-        - "source_artifact:doi-10.16965/ijpr.2015.105"
-        - "source_artifact:doi-10.30621/jbachs.1298818"
-        - "source_artifact:doi-10.3390/physiologia4040032"
-        - "source_artifact:pmid-10959926"
-        - "source_artifact:pmid-11103969"
-        - "source_artifact:pmid-1201997"
-        - "source_artifact:pmid-12649036"
-        - "source_artifact:pmid-12782549"
-        - "source_artifact:pmid-12839207"
-        - "source_artifact:pmid-13549519"
-        - "source_artifact:pmid-16533314"
-        - "source_artifact:pmid-16558169"
-        - "source_artifact:pmid-16996312"
-        - "source_artifact:pmid-17023254"
-        - "source_artifact:pmid-17134904"
-        - "source_artifact:pmid-17728030"
-        - "source_artifact:pmid-18050060"
-        - "source_artifact:pmid-18583001"
-        - "source_artifact:pmid-18843156"
-        - "source_artifact:pmid-20118523"
-        - "source_artifact:pmid-20617908"
-        - "source_artifact:pmid-21063495"
-        - "source_artifact:pmid-21615188"
-        - "source_artifact:pmid-21962907"
-        - "source_artifact:pmid-23312729"
-        - "source_artifact:pmid-23677835"
-        - "source_artifact:pmid-23954385"
-        - "source_artifact:pmid-24183546"
-        - "source_artifact:pmid-24450366"
-        - "source_artifact:pmid-24923269"
-        - "source_artifact:pmid-25622800"
-        - "source_artifact:pmid-25701012"
-        - "source_artifact:pmid-26317300"
-        - "source_artifact:pmid-26573859"
-        - "source_artifact:pmid-26755689"
-        - "source_artifact:pmid-27239728"
-        - "source_artifact:pmid-27490817"
-        - "source_artifact:pmid-27693442"
-        - "source_artifact:pmid-27718393"
-        - "source_artifact:pmid-28217413"
-        - "source_artifact:pmid-28238018"
-        - "source_artifact:pmid-28609131"
-        - "source_artifact:pmid-28618309"
-        - "source_artifact:pmid-29234554"
-        - "source_artifact:pmid-29373059"
-        - "source_artifact:pmid-29920153"
-        - "source_artifact:pmid-30556469"
-        - "source_artifact:pmid-30662495"
-        - "source_artifact:pmid-30743163"
-        - "source_artifact:pmid-30973056"
-        - "source_artifact:pmid-31141437"
-        - "source_artifact:pmid-31439366"
-        - "source_artifact:pmid-31999979"
-        - "source_artifact:pmid-32388078"
-        - "source_artifact:pmid-32566382"
-        - "source_artifact:pmid-32938222"
-        - "source_artifact:pmid-33344012"
-        - "source_artifact:pmid-34249647"
-        - "source_artifact:pmid-34540268"
-        - "source_artifact:pmid-34706617"
-        - "source_artifact:pmid-35247202"
-        - "source_artifact:pmid-36232250"
-        - "source_artifact:pmid-36758425"
-        - "source_artifact:pmid-38618688"
-        - "source_artifact:pmid-39007893"
-        - "source_artifact:pmid-39285616"
-        - "source_artifact:pmid-39304615"
-        - "source_artifact:pmid-40628903"
-        - "source_artifact:pmid-7564981"
-        - "source_artifact:pmid-8298633"
-        - "source_artifact:pmid-8734891"
-      defaultOpen: false
-    -
-      id: "safety-escalation"
-      label: "Differential diagnosis and escalation care"
-      stance: "safety_boundary"
-      summary: "Safety sources define when self-guided rehab is inappropriate and when injection, imaging, medication, or surgery belongs outside the core protocol."
-      sourceKeys:
-        - "source_artifact:albertahealthservices-provincial-knee-primary-care-clinical-pathway-2026-01"
-        - "source_artifact:health-qld-acute-knee-pain-2024-02-13"
-        - "source_artifact:hweclinicalguidance-knee-pain-2024-03"
-        - "source_artifact:mskdorset-lateral-knee-pain-itbs-2026-04-24"
-        - "source_artifact:nice-cks-knee-pain-assessment-2026-04-24"
-        - "source_artifact:patient-info-swollen-knee-2023-07-20"
-        - "source_artifact:pmid-10512211"
-        - "source_artifact:pmid-14530229"
-        - "source_artifact:pmid-14734335"
-        - "source_artifact:pmid-15155424"
-        - "source_artifact:pmid-16902230"
-        - "source_artifact:pmid-19147613"
-        - "source_artifact:pmid-19286912"
-        - "source_artifact:pmid-2028354"
-        - "source_artifact:pmid-20836867"
-        - "source_artifact:pmid-22134205"
-        - "source_artifact:pmid-23015995"
-        - "source_artifact:pmid-23804342"
-        - "source_artifact:pmid-23821708"
-        - "source_artifact:pmid-24156006"
-        - "source_artifact:pmid-25157051"
-        - "source_artifact:pmid-2610280"
-        - "source_artifact:pmid-27172085"
-        - "source_artifact:pmid-29385940"
-        - "source_artifact:pmid-29872355"
-        - "source_artifact:pmid-30325638"
-        - "source_artifact:pmid-30392599"
-        - "source_artifact:pmid-31194342"
-        - "source_artifact:pmid-31475628"
-        - "source_artifact:pmid-31728373"
-        - "source_artifact:pmid-32222797"
-        - "source_artifact:pmid-32370956"
-        - "source_artifact:pmid-32809682"
-        - "source_artifact:pmid-32875305"
-        - "source_artifact:pmid-33418617"
-        - "source_artifact:pmid-35072941"
-        - "source_artifact:pmid-38095838"
-        - "source_artifact:pmid-39219463"
-        - "source_artifact:pmid-39488356"
-        - "source_artifact:pmid-39897984"
-        - "source_artifact:pmid-40015722"
-        - "source_artifact:pmid-9656942"
-      defaultOpen: true
-    -
-      id: "context-and-variant-boundaries"
-      label: "Context And Variant Boundaries"
-      stance: "context_only"
-      summary: "Merged 1 candidate row(s) from shard(s): passive-modalities-adjacent. Registry tracking only; do not use as efficacy evidence unless a linked publication/res... Merged 5 candidate row(s) from shard(s): direct-conservative-rehab-runners, external-clinical-protocols, gait-movement-retraining, load-management-return-to-... The Context And Variant Boundaries group currently links 46 appraisal-backed sources with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
-      sourceKeys:
-        - "source_artifact:clinicaltrials-gov-myofascial-release-mets-itbs-2026-04-24"
-        - "source_artifact:clinicaltrials-gov-radial-eswt-itbs-2026-04-24"
-        - "source_artifact:clinicaltrials-nct03067545-2026-04-24"
-        - "source_artifact:clinicaltrials-nct04164316-2026-04-24"
-        - "source_artifact:clinicaltrials-nct05427110-2026-04-24"
-        - "source_artifact:clinicaltrials-nct05459623-2026-04-24"
-        - "source_artifact:clinicaltrials-nct06089005-2026-04-24"
-        - "source_artifact:clinicaltrials-nct06867159-2026-04-24"
-        - "source_artifact:clinicaltrials-nct06980324-2026-04-24"
-        - "source_artifact:clinicaltrials-nct07118371-2026-04-24"
-        - "source_artifact:clinicaltrials-nct07534605-2026-04-24"
-        - "source_artifact:doi-10.1016/j.jbmt.2005.01.007"
-        - "source_artifact:doi-10.1016/s0031-9406-10-61197-2"
-        - "source_artifact:doi-10.1080/15438629509512030"
-        - "source_artifact:doi-10.1089/acu.2016.1212"
-        - "source_artifact:doi-10.12968/ijtr.2014.21.12.569"
-        - "source_artifact:doi-10.14260/jemds/2014/3186"
-        - "source_artifact:doi-10.15621/ijphy/2017/v4i6/163919"
-        - "source_artifact:doi-10.26603/ijspt20180652"
-        - "source_artifact:doi-10.4085/1062-6050-0463.25"
-        - "source_artifact:else-moodley-foam-rolling-itbfs-2016"
-        - "source_artifact:mospace-itbs-cyclist-2007"
-        - "source_artifact:pmid-11916889"
-        - "source_artifact:pmid-11994795"
-        - "source_artifact:pmid-18063715"
-        - "source_artifact:pmid-19966104"
-        - "source_artifact:pmid-20847225"
-        - "source_artifact:pmid-22389869"
-        - "source_artifact:pmid-25155475"
-        - "source_artifact:pmid-25184012"
-        - "source_artifact:pmid-26406193"
-        - "source_artifact:pmid-29791183"
-        - "source_artifact:pmid-30312310"
-        - "source_artifact:pmid-30682136"
-        - "source_artifact:pmid-34123517"
-        - "source_artifact:pmid-34142644"
-        - "source_artifact:pmid-34422283"
-        - "source_artifact:pmid-35151569"
-        - "source_artifact:pmid-35855103"
-        - "source_artifact:pmid-36362725"
-        - "source_artifact:pmid-36498062"
-        - "source_artifact:pmid-37367238"
-        - "source_artifact:pmid-41167567"
-        - "source_artifact:pmid-8111852"
-        - "source_artifact:pmid-8129101"
-        - "source_artifact:pmid-8166785"
+  - id: direct-runner-rehab
+    label: Direct runner rehab and return-to-run
+    stance: supports
+    summary: Direct trials, case reports, and reviews support active conservative rehab components while leaving dose-response, recurrence, and self-guided translation uncertain.
+    sourceKeys:
+    - source_artifact:pmid-20145781
+    - source_artifact:pmid-22994651
+    - source_artifact:pmid-24226623
+    - source_artifact:pmid-24790783
+    - source_artifact:pmid-32448384
+    - source_artifact:pmid-34375405
+    - source_artifact:pmid-37300970
+    - source_artifact:pmid-39247485
+    - source_artifact:pmid-39593548
+    defaultOpen: true
+  - id: implementation-and-dose
+    label: Symptom-guided implementation and dose
+    stance: mixed
+    summary: Direct runner sources support cautious active-rehab components; external protocols provide implementation templates for phased progression and pain-rule language. The exact dose should remain adjustable by symptom response rather than presented as an evidence-proven mileage progression.
+    sourceKeys:
+    - source_artifact:pmid-20145781
+    - source_artifact:pmid-22994651
+    - source_artifact:pmid-24226623
+    - source_artifact:pmid-24790783
+    - source_artifact:pmid-32448384
+    - source_artifact:pmid-34375405
+    - source_artifact:pmid-37300970
+    - source_artifact:pmid-39247485
+    - source_artifact:pmid-39593548
+    - source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01
+    - source_artifact:massgeneral-return-to-running-program-2026-04-24
+    - source_artifact:osu-basic-return-to-running-guideline-2019-10-01
+    - source_artifact:brighamandwomens-itbs-standard-of-care-2007-01-01
+    - source_artifact:brighamandwomens-running-injury-prevention-return-to-running-2007-01-01
+    defaultOpen: true
+  - id: outcomes-and-test-plan
+    label: Symptom, function, and running-load tracking
+    stance: supports
+    summary: Track lateral knee pain and running tolerance directly; use wearable or activity data as exposure context rather than a recovery biomarker.
+    sourceKeys:
+    - source_artifact:pmid-20145781
+    - source_artifact:pmid-22994651
+    - source_artifact:pmid-24226623
+    - source_artifact:pmid-24790783
+    - source_artifact:pmid-32448384
+    - source_artifact:pmid-34375405
+    - source_artifact:pmid-37300970
+    - source_artifact:pmid-39247485
+    - source_artifact:pmid-39593548
+    - source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01
+    - source_artifact:massgeneral-return-to-running-program-2026-04-24
+    - source_artifact:osu-basic-return-to-running-guideline-2019-10-01
+    - source_artifact:pmid-17134904
+    - source_artifact:pmid-17728030
+    - source_artifact:pmid-23954385
+    - source_artifact:pmid-26573859
+    - source_artifact:pmid-36758425
+    - source_artifact:pmid-38618688
+    defaultOpen: true
+  - id: mechanism-risk-context
+    label: Biomechanics and risk context
+    stance: context_only
+    summary: Mechanism and risk-factor sources explain why hip control, cadence, load, and movement choices are monitored, but they are not direct proof that one metric correction resolves ITBS.
+    sourceKeys:
+    - source_artifact:pmid-17134904
+    - source_artifact:pmid-17728030
+    - source_artifact:pmid-23954385
+    - source_artifact:pmid-26573859
+    - source_artifact:pmid-36758425
+    - source_artifact:pmid-38618688
+    defaultOpen: false
+  - id: cycling-adjacent-variant
+    label: Cycling-specific adjacent variant
+    stance: context_only
+    summary: Cycling sources help separate bike-fit and cycling-specific mechanics from this runner return-to-run protocol.
+    sourceKeys:
+    - source_artifact:pmid-8129101
+    - source_artifact:pmid-8166785
+    - source_artifact:pmid-33344012
+    - source_artifact:pmid-39304615
+    defaultOpen: false
+  - id: passive-adjuncts-and-procedures
+    label: Passive adjuncts and escalation pathways
+    stance: context_only
+    summary: Passive modalities, manual therapy, stretching or foam rolling, shockwave, dry needling, medication, injections, and surgery should stay separate from the active rehab and graded return-to-run evidence layer; the ledger classifies these sources as adjacent, context-only, or safety-only unless active effects are separable.
+    sourceKeys:
+    - source_artifact:pmid-2028354
+    - source_artifact:pmid-15155424
+    - source_artifact:pmid-20836867
+    - source_artifact:pmid-32875305
+    - source_artifact:pmid-40015722
+    - source_artifact:doi-10-1016-s0031-9406-10-61197-2
+    - source_artifact:doi-10-1080-15438629509512030
+    - source_artifact:pmid-26406193
+    - source_artifact:pmid-34123517
+    - source_artifact:pmid-35855103
+    - source_artifact:pmid-41167567
+    defaultOpen: false
+  - id: external-protocol-context
+    label: External protocols and registry context
+    stance: context_only
+    summary: Institutional protocols and selected registry records help implementation comparison and gap tracking, but external named protocols remain separate from Murph canonical efficacy claims and registry records are not completed efficacy evidence unless linked results are extracted.
+    sourceKeys:
+    - source_artifact:massgeneral-itbs-rehab-protocol-2021-11-01
+    - source_artifact:massgeneral-return-to-running-program-2026-04-24
+    - source_artifact:osu-basic-return-to-running-guideline-2019-10-01
+    - source_artifact:brighamandwomens-itbs-standard-of-care-2007-01-01
+    - source_artifact:brighamandwomens-running-injury-prevention-return-to-running-2007-01-01
+    - source_artifact:aaos-orthoinfo-it-band-syndrome-2026-04-24
+    - source_artifact:aapmr-iliotibial-band-syndrome-2024-08-22
+    - source_artifact:choosept-it-band-syndrome-guide-2026-04-24
+    - source_artifact:hss-it-band-syndrome-2022-06-20
+    - source_artifact:dartmouth-hitchcock-it-band-exercises-2020-12-01
+    - source_artifact:clinicaltrials-nct02296151-2026-04-24
+    - source_artifact:clinicaltrials-nct03067545-2026-04-24
+    - source_artifact:clinicaltrials-nct05915754-2026-04-24
+    - source_artifact:clinicaltrials-nct05973708-2026-04-24
+    - source_artifact:clinicaltrials-nct06131658-2026-04-24
+    - source_artifact:clinicaltrials-nct06269757-2026-04-24
+    defaultOpen: false
+  - id: safety-boundaries
+    label: Red flags and escalation boundaries
+    stance: safety_boundary
+    summary: Safety and differential sources define who should not use the self-guided protocol, when mimics need assessment, and when injection, imaging, medication, procedures, or surgery belongs outside the core active rehab plan.
+    sourceKeys:
+    - source_artifact:pmid-14530229
+    - source_artifact:pmid-14734335
+    - source_artifact:pmid-19147613
+    - source_artifact:pmid-22134205
+    - source_artifact:pmid-23015995
+    - source_artifact:pmid-23821708
+    - source_artifact:pmid-30325638
+    - source_artifact:pmid-31194342
+    - source_artifact:pmid-32222797
+    - source_artifact:pmid-32370956
+    - source_artifact:pmid-15155424
+    - source_artifact:pmid-20836867
+    - source_artifact:pmid-32875305
+    - source_artifact:pmid-40015722
+    - source_artifact:pmid-39219463
+    defaultOpen: true
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-    - acute trauma or suspected fracture
-    - inability to bear weight
-    - locked knee or major loss of motion
-    - large swelling or hot swollen joint
-    - fever or systemic symptoms with knee pain
-    - rapidly worsening pain or new neurologic symptoms
+  - Acute traumatic onset, fall, twist, sudden pop, high-energy injury, immediate or sudden swelling, deformity, instability, severe pain, or inability to bear weight
+  - Hot, red, warm, or swollen knee; fever; systemic illness; spreading redness; markedly limited range of motion; or severe unexplained night/rest pain
+  - True locking, inability to fully extend, recurrent swelling, painful clicking/catching, buckling/giving way, numbness, weakness, or progressive neurologic symptoms
+  - Focal bony tenderness, suspected stress fracture, suspected meniscal/ligament/cartilage injury, patellofemoral mimic, hip/back referral, or any pattern that is not typical lateral running-related knee pain
+  - Adolescent knee pain, especially with hip pain or limp
+  - Prior knee surgery or replacement, known meniscus/ligament injury, inflammatory arthritis, gout/crystal arthritis, significant osteoarthritis, infection history, or immunosuppression
+  - Symptoms that last beyond a short deload period, recur whenever running resumes, or do not clearly improve after several weeks of appropriate load reduction
+  - Pregnancy/postpartum return-to-run, elite/high-mileage or tactical/military loading, cyclist bike-fit-driven symptoms, or post-surgical knees
+  - Current or planned NSAID/acetaminophen pain-masking, prescription medication, corticosteroid injection, shockwave therapy, dry needling, clinician-directed manual therapy, imaging-driven decisions, or surgery planning
   stopIf:
-    - lateral knee pain changes gait during running
-    - pain rises during the run or rebounds the next day
-    - symptoms spread, become constant, or stop fitting the expected lateral running-related pattern
+  - Lateral knee pain becomes sharp, rapidly worsens, alters gait, causes limping, exceeds the protocol pain cap, or keeps increasing during a run
+  - Pain appears at rest, persists after the session, or is worse later that day or the next morning after a run/walk or rehab session
+  - Swelling, warmth, redness, fever, buckling, true locking, catching, inability to bear weight, numbness, weakness, or major motion loss appears
+  - Pain spreads, changes location, or becomes diagnostically unclear
+  - Walking, stairs, or ordinary daily activity become meaningfully worse
+  - The user starts a new medication, injection, shockwave, dry needling, manual-therapy plan, surgery pathway, or another major treatment that changes attribution
   notes:
-    - Use conservative triage and stop conditions. This is not a diagnosis or an escalation-care pathway.
+  - This is not a diagnostic tool. The page should route unclear, traumatic, mechanically symptomatic, systemic, or urgent knee pain away from self-guided experiment creation.
+  - Numeric pain caps are conservative self-experiment safety rules, not proven ITBS-specific thresholds unless separately cited.
+  - Adverse-event rates for active rehab were not extracted in detail; stop conditions are intentionally conservative.
+  - Safety and differential-diagnosis language should be more forceful than efficacy language.
 ---
 
-## What This Is
+This protocol is a **conservative, symptom-guided return-to-run tracker** for runners whose lateral knee pain is consistent with iliotibial band syndrome (ITBS) or who already have a clinician diagnosis.
 
-A conservative active-rehab and return-to-run plan for runner ITBS. It starts with safety screening, then uses load reduction, strength and movement-control work, and a gradual run/walk reintroduction.
+It is not a diagnosis, a cure claim, or a race-timeline promise. The goal is to make the next steps observable: lower the running load that provokes symptoms, build tolerable hip/glute and single-leg control capacity, and reintroduce easy running only when the knee response stays mild during the session and the next day.
 
-## What Could Improve
+Do not start this self-guided protocol, and seek urgent clinical care, if knee pain followed a major injury or is accompanied by sudden swelling, deformity, a pop at injury, inability to bear weight, severe pain, fever, a hot/red/warm swollen joint, or major loss of knee motion.
 
-Running tolerance can improve when painful loading is reduced and strength/control work is performed consistently, but the evidence does not validate one universal timeline or one magic exercise.
+Do not use this page as a self-diagnosis protocol for locking, catching, true giving-way, recurrent swelling, pain at rest or night, focal bony tenderness, adolescent knee pain with hip pain, or unclear knee/hip/spine pain. Get assessed first.
 
-## What To Watch
+## Who this is for
 
-The main signal is lateral knee pain during running and the next-day response. Step back if pain changes gait, escalates during the run, or rebounds the next day.
+This ordinary self-guided variant is for adults with likely uncomplicated lateral iliotibial-band pain that settles with load reduction and has no red flags. Use this when the practical question is: “Can I rebuild easy running without lateral knee pain escalating?”
 
-## What Not To Conclude
+## Who this is not for
 
-Do not treat this as a diagnosis, a cure promise, a cyclist bike-fit protocol, or a substitute for clinical care when red flags are present.
+Do not use this as a workaround for urgent, traumatic, mechanically symptomatic, systemic, or unclear knee pain. Acute trauma, inability to bear weight, a locked or very swollen knee, fever or a hot/red joint, neurologic symptoms, rapidly worsening pain, major motion loss, stress-fracture-like focal bony pain, suspected meniscal, ligament, cartilage, or patellofemoral mimic, adolescent knee/hip pain, or symptoms that do not behave like lateral running-related knee pain should route to appropriate clinical evaluation before self-guided return-to-run work.
+
+Cycling ITBS, bike-fit adjustment, pregnancy/postpartum return-to-run, post-surgical knees, persistent or refractory symptoms, injection, medication, shockwave, dry needling, clinician-directed manual therapy, and surgical pathways are adjacent, clinician-guided, or escalation variants. They can be logged as context, but they are not steps inside this Murph protocol.
+
+## How to run the protocol
+
+Start with a 7-day baseline. Log lateral knee pain location, onset minute or mile, walking and stair symptoms, running exposure, weekly mileage, recent mileage jumps, terrain, hills, downhill, camber, shoes, cross-training, sleep/fatigue/illness, and any treatment changes. During the baseline, avoid runs that clearly flare symptoms.
+
+For this 6-week Murph template, complete three weekly strength/control sessions. Keep the first sessions tolerable and boring: lateral-hip and glute work, trunk control, and single-leg control are reasonable targets to test, but the goal is repeatable loading rather than heroic soreness.
+
+Foam rolling or soft-tissue work is optional comfort work. Keep pressure mild, avoid bruising, numbness, or sharp pain, and do not treat rolling as required or as proof that the iliotibial band has been lengthened.
+
+Begin return-to-run only after normal walking, the current rehab phase, and lateral-knee palpation are pain-free. Start with short, flat, alternate-day run-walk sessions. Keep hills, downhill running, cambered roads, speedwork, sudden mileage jumps, and long strides out until flat running is consistently symptom-free. If symptoms recur, stop the progression, rest/reset, and restart from the last pain-free phase.
+
+## What to measure
+
+The primary signal is lateral knee pain during and after running. The supporting signals are pain-free run/walk duration, weekly running exposure, rehab adherence, and stop-condition events.
+
+Wearable activity data can help quantify exposure, but no supplied extraction supports a wearable biomarker that proves ITBS recovery.
+
+## Evidence stance
+
+Evidence for ITBS rehabilitation is heterogeneous and often limited. Hip-abductor strengthening is a common conservative-care component, but this page should not claim that weak glutes are the cause for every runner or that any single exercise cures ITBS.
+
+The evidence landscape is useful but not definitive. Direct runner rehab sources, recent reviews, and case reports support a cautious active-rehab rationale; external clinical protocols help with implementation structure; and mechanism or biomechanics sources explain why load, hip control, and gait cues are plausible monitoring targets. The package does not justify exact effect sizes, universal timelines, or a single best exercise recipe.
+
+## Practical safety rule
+
+When in doubt, regress before you progress. A run that feels tolerable during the session but rebounds the next day is not yet a successful progression.
+
+Stop the run or exercise now if lateral knee pain becomes sharp, rapidly worsens, changes your gait, causes limping, appears at rest, or is accompanied by swelling, warmth, redness, locking, catching, buckling, numbness, weakness, or inability to bear weight. If symptoms are worse later the same day or the next morning, do not progress.
+
+The numeric pain cap used here is a conservative safety rule for this self-experiment, not a proven ITBS-specific threshold. Do not use NSAIDs, acetaminophen, corticosteroid injection, or other pain-relieving treatment to pass a run-readiness test.
+
+Ask a clinician or physical therapist if symptoms do not clearly improve after an appropriate deload and rehab trial, if pain recurs whenever running resumes, if diagnosis is uncertain, or if you cannot progress without symptoms. Persistent or refractory symptoms are outside this ordinary self-guided variant.

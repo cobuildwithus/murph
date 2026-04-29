@@ -3,26 +3,27 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27
 slug: sources/skin-photobiomodulation/fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27
-title: 510(k) Summary: Shenzhen Siken LED Light Therapy Mask
+title: '510(k) Summary: Shenzhen Siken LED Light Therapy Mask'
 summary: FDA 510(k) summary for an LED mask documenting red, blue, and infrared LEDs and an incorporated protective eye shield.
 status: draft
 quality: usable
+aliases:
+- FDA K243040
+- Shenzhen Siken LED Light Therapy Mask
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
-  title: 510(k) Summary: Shenzhen Siken LED Light Therapy Mask
+  title: '510(k) Summary: Shenzhen Siken LED Light Therapy Mask'
   authors: U.S. Food and Drug Administration; Shenzhen Siken 3D Technology Development Co., Ltd.
   year: 2024
   journal: FDA 510(k) Premarket Notification
-  citation: U.S. Food and Drug Administration. 510(k) Summary: Shenzhen Siken LED Light Therapy Mask (K243040). Decision date September 27, 2024.
+  citation: 'U.S. Food and Drug Administration. 510(k) Summary: Shenzhen Siken LED Light Therapy Mask (K243040). Decision date September 27, 2024.'
   url: https://www.accessdata.fda.gov/cdrh_docs/pdf24/K243040.pdf
 researchEvidence:
   designKind: other
@@ -34,10 +35,10 @@ researchEvidence:
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It shows that consumer LED masks may incorporate protective eye shields and optical-radiation testing.
 potentialMurphEndpoints:
-  - protective eye shield
-  - auto shutoff
-  - eye-safety standard
-  - wavelength mode
+- protective eye shield
+- auto shutoff
+- eye-safety standard
+- wavelength mode
 protocolTakeaway: Use as safety-only or context-only evidence; do not use for direct skin-outcome claims.
 murphTakeaway: Treat new eye symptoms during facial light use as stop-use signals.
 studyDesign: FDA 510(k) summary and nonclinical performance documentation

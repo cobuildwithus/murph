@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -76,6 +77,7 @@ adverseEventsOrSafetyNotes: "Registry lists CPK and liver function outcomes for 
 limitations: "Trial registry record duplicates/contextualizes the published trial and should not be double-counted."
 populationMismatch: "Statin-intolerant clinical trial population."
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct00405769-2026-04-26-registry-design"
     sourceKey: "source_artifact:clinicaltrials-nct00405769-2026-04-26"

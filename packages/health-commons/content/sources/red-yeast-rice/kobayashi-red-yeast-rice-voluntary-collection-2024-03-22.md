@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Company safety notice / voluntary recall"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "adverse_event"
     population: "Consumers of named Kobayashi Beni-koji products"
@@ -70,6 +72,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "permission_required"
 artifacts:
+
   -
     artifactId: "art_kobayashi_red_yeast_rice_voluntary_collection_2024_03_22_pdf"
     sourceKey: "source_artifact:kobayashi-red-yeast-rice-voluntary-collection-2024-03-22"

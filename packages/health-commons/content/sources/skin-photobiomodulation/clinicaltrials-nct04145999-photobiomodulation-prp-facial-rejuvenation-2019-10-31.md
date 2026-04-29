@@ -7,15 +7,17 @@ title: Association of Photobiomodulation With Platelet Rich Plasma for Facial Re
 summary: ClinicalTrials.gov registry for PBM combined with intradermal platelet-rich plasma; do-not-use as LED-only protocol evidence.
 status: draft
 quality: usable
+aliases:
+- NCT04145999
+- PBM with PRP facial rejuvenation
+- Photobiomodulation platelet rich plasma facial rejuvenation
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: external_protocol
   title: Association of Photobiomodulation With Platelet Rich Plasma for Facial Rejuvenation
@@ -31,14 +33,14 @@ researchEvidence:
   durationLabel: Registry record; extraction did not confirm completed results or a peer-reviewed follow-up window.
   aggregateRole: context
   cohortKey: nct04145999-pbm-prp-facial-rejuvenation
-evidenceBucket: exclusion anchor: PDT-like, photoconverter, or adjunctive PRP protocol
+evidenceBucket: 'exclusion anchor: PDT-like, photoconverter, or adjunctive PRP protocol'
 whyItMatters: Prevents adjunctive injectable protocols from being folded into a home red/NIR skin-texture evidence base.
 potentialMurphEndpoints:
-  - why-excluded
-  - PRP-adjunct
-  - facial-rejuvenation
-  - trial-status
-  - combination-procedure
+- why-excluded
+- PRP-adjunct
+- facial-rejuvenation
+- trial-status
+- combination-procedure
 protocolTakeaway: Do not use for direct protocol claims; keep as a why-excluded adjunctive-procedure registry.
 murphTakeaway: May be relevant to a future PRP-plus-PBM protocol, not this red/NIR LED-only protocol.
 studyDesign: Trial registration for photobiomodulation combined with intradermal PRP.

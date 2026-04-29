@@ -15,6 +15,7 @@ categories:
   - "safety"
   - "pharmacovigilance"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -58,6 +59,7 @@ directness: "same_mechanism"
 claimUse: "safety-only"
 claimUseBoundary: "Consumer information page; not primary research and not efficacy evidence."
 sourceFindings:
+
   -
     findingId: "finding:red-yeast-rice-batch-004-clevelandclinic-contraindications"
     sourceKey: "source_artifact:clevelandclinic-red-yeast-rice-2026-04-26"

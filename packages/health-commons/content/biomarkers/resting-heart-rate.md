@@ -31,6 +31,7 @@ biomarker:
     label: Lower can be better, but context matters.
     nuance: Illness, under-recovery, alcohol, travel, dehydration, medication changes, and device changes can all raise resting heart rate temporarily.
   privateMetricBindings:
+
     -
       source: browser_vault_metric
       domain: recovery
@@ -47,6 +48,7 @@ biomarker:
     minimumPoints: 5
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: Resting heart rate is your pulse when your body is at rest. Murph treats it as a trend signal, not a one-morning verdict.
@@ -75,6 +77,7 @@ biomarker:
       - medication changes
       - device changes
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:norwegian-4x4/norwegian-4x4
@@ -83,7 +86,7 @@ relations:
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
   -
     type: related_protocol
-    target: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
   -
     type: cites
     target: source_artifact:pmid-32814462
@@ -100,6 +103,7 @@ protocolRanking:
   version: deterministic-v0
   scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
   candidates:
+
     -
       protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
       expectedDirection: down
@@ -131,7 +135,7 @@ protocolRanking:
         burdenLabel: Moderate
         cautionLabel: Moderate
     -
-      protocolKey: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
       expectedDirection: mixed_or_contextual
       relationship: secondary_biomarker
       mechanism: Evening light reduction may indirectly lower overnight strain if sleep timing or sleep quality improves, but RHR is not the primary endpoint.

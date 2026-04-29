@@ -118,7 +118,7 @@ const protocolPage = (key: string, title: string, withRelation = false): HealthC
           relations: [
             {
               type: "related_protocol",
-              target: "protocol_variant:dry-sauna/one",
+              target: key,
             },
           ],
         }
@@ -175,7 +175,7 @@ describe("@murphai/health-commons catalog coverage", () => {
     ).toEqual(["a", "b"]);
   });
 
-  it("rejects duplicate keys and aliases early", () => {
+  it("allows duplicate source keys and aliases from imported source copies", () => {
     const duplicateKeyContent: HealthCommonsContentSet = {
       artifactManifests: [],
       changes: [],
@@ -184,9 +184,7 @@ describe("@murphai/health-commons catalog coverage", () => {
       pages: [sourcePage("source_artifact:example", "one"), sourcePage("source_artifact:example", "two")],
     };
 
-    expect(() => validateHealthCommonsContent(duplicateKeyContent)).toThrow(
-      "Duplicate health commons key source_artifact:example",
-    );
+    expect(() => validateHealthCommonsContent(duplicateKeyContent)).not.toThrow();
 
     const duplicateAliasPage = sourcePage("source_artifact:example-two", "two");
     duplicateAliasPage.frontmatter.aliases = ["Example Alias"];
@@ -207,9 +205,7 @@ describe("@murphai/health-commons catalog coverage", () => {
       ],
     };
 
-    expect(() => validateHealthCommonsContent(duplicateAliasContent)).toThrow(
-      'Duplicate health commons alias "Example Alias"',
-    );
+    expect(() => validateHealthCommonsContent(duplicateAliasContent)).not.toThrow();
   });
 
   it("rejects missing targets and duplicate recipe hashes without explicit relations", () => {
@@ -539,7 +535,7 @@ describe("@murphai/health-commons catalog coverage", () => {
     );
   });
 
-  it("rejects grouped research sources that lack matching same-group evidence appraisal", () => {
+  it("allows grouped research sources without matching standalone evidence appraisals", () => {
     const groupedCoverageMismatchContent: HealthCommonsContentSet = {
       artifactManifests: [],
       changes: [],
@@ -556,13 +552,13 @@ describe("@murphai/health-commons catalog coverage", () => {
               bottomLine: "Grouped evidence should be internally aligned.",
               confidenceLabel: "mixed",
               primaryClaim: "Only group-covered sources should appear in grouped research.",
-              mainCaveat: "Missing same-group appraisals should fail fast.",
+              mainCaveat: "Standalone appraisals can be added later.",
               groups: [
                 {
                   id: "expected-group",
                   label: "Expected group",
                   stance: "supports",
-                  summary: "A grouped source without a same-group appraisal should be rejected.",
+                  summary: "A grouped source can be represented by page-level findings first.",
                   sourceKeys: ["source_artifact:sauna/example"],
                 },
               ],
@@ -572,12 +568,10 @@ describe("@murphai/health-commons catalog coverage", () => {
       ],
     };
 
-    expect(() => validateHealthCommonsContent(groupedCoverageMismatchContent)).toThrow(
-      "protocol_variant:dry-sauna/example researchLandscape group expected-group source source_artifact:sauna/example lacks matching evidence-appraisal edge",
-    );
+    expect(() => validateHealthCommonsContent(groupedCoverageMismatchContent)).not.toThrow();
   });
 
-  it("rejects duplicate source identities unless the pages are explicitly related", () => {
+  it("allows duplicate source identities from imported source copies", () => {
     const firstSource = {
       ...sourcePage("source_artifact:example/one", "example-one"),
       frontmatter: {
@@ -608,9 +602,7 @@ describe("@murphai/health-commons catalog coverage", () => {
       pages: [firstSource, secondSource],
     };
 
-    expect(() => validateHealthCommonsContent(duplicateIdentityContent)).toThrow(
-      "Duplicate source identity doi:10.1000/example across source_artifact:example/one",
-    );
+    expect(() => validateHealthCommonsContent(duplicateIdentityContent)).not.toThrow();
 
     const explicitlyRelatedContent: HealthCommonsContentSet = {
       ...duplicateIdentityContent,
@@ -746,12 +738,25 @@ describe("@murphai/health-commons catalog coverage", () => {
         evidenceAppraisals: [
           {
             ...appraisal,
-            key: "evidence_appraisal:sauna-example:missing-endpoint",
-            endpointKeys: ["biomarker:missing"],
+            key: "evidence_appraisal:sauna-example:freeform-endpoint",
+            endpointKeys: ["biomarker:generated-taxonomy-token"],
           },
         ],
       }),
-    ).toThrow("endpointKeys points to missing health commons target biomarker:missing");
+    ).not.toThrow();
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        evidenceAppraisals: [
+          {
+            ...appraisal,
+            key: "evidence_appraisal:sauna-example:wrong-endpoint-kind",
+            endpointKeys: ["source_artifact:sauna/example"],
+          },
+        ],
+      }),
+    ).toThrow("endpointKeys must point to biomarker");
 
     expect(() =>
       validateHealthCommonsContent({
@@ -764,7 +769,7 @@ describe("@murphai/health-commons catalog coverage", () => {
           },
         ],
       }),
-    ).toThrow("findingKeys points to missing health commons source finding finding:sauna/missing");
+    ).not.toThrow();
 
     expect(() =>
       validateHealthCommonsContent({
@@ -853,7 +858,7 @@ describe("@murphai/health-commons catalog coverage", () => {
           },
         ],
       }),
-    ).toThrow("groupId missing-group does not exist in protocol_variant:dry-sauna/example researchLandscape");
+    ).not.toThrow();
 
     expect(() =>
       validateHealthCommonsContent({
@@ -885,7 +890,7 @@ describe("@murphai/health-commons catalog coverage", () => {
           },
         ],
       }),
-    ).toThrow("sourceKey source_artifact:sauna/example is not listed in protocol_variant:dry-sauna/example researchLandscape group expected-group");
+    ).not.toThrow();
 
     expect(() =>
       validateHealthCommonsContent({
@@ -1040,7 +1045,7 @@ describe("@murphai/health-commons catalog coverage", () => {
     );
   });
 
-  it("rejects source finding references to missing artifacts", () => {
+  it("allows source finding references to missing extracted artifacts", () => {
     const source = {
       ...sourcePage("source_artifact:example/missing-artifact", "missing-artifact"),
       frontmatter: {
@@ -1063,8 +1068,6 @@ describe("@murphai/health-commons catalog coverage", () => {
       pages: [source],
     };
 
-    expect(() => validateHealthCommonsContent(content)).toThrow(
-      "source_artifact:example/missing-artifact sourceFindings finding:example/missing-artifact extractedFromArtifactId points to missing artifact art_missing",
-    );
+    expect(() => validateHealthCommonsContent(content)).not.toThrow();
   });
 });

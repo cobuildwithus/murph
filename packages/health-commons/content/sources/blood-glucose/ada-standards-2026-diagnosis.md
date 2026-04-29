@@ -16,6 +16,7 @@ categories:
   - diagnosis
   - guideline
 relations:
+
   -
     type: cites
     target: biomarker:blood-glucose

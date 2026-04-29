@@ -37,6 +37,7 @@ biomarker:
     label: More can be useful, but stable sufficient deep sleep alongside good continuity is the target.
     nuance: Do not chase deep sleep minutes at the expense of total sleep, regular timing, or feeling restored. A higher number from a wearable is not automatically a healthier night.
   privateMetricBindings:
+
     -
       source: browser_vault_metric
       domain: sleep
@@ -53,6 +54,7 @@ biomarker:
     minimumPoints: 7
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: Deep sleep minutes are a device's estimate of time spent in N3 / slow-wave sleep, the EEG-defined non-REM stage dominated by slow waves.
@@ -89,9 +91,10 @@ biomarker:
       - naps
       - device or algorithm changes
 relations:
+
   -
     type: related_protocol
-    target: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
@@ -120,6 +123,7 @@ relations:
     type: cites
     target: source_artifact:pmid-41325105
 claims:
+
   -
     claimId: n3-eeg-definition
     type: evidence_scope
@@ -177,8 +181,9 @@ protocolRanking:
   version: deterministic-v0
   scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
   candidates:
+
     -
-      protocolKey: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
       expectedDirection: up_or_stable
       relationship: secondary_biomarker
       mechanism: Evening light reduction may indirectly support earlier, less-fragmented sleep. Because N3 tends to be concentrated earlier in the night, timing and continuity improvements may show up as a better deep-sleep trend, but the wearable stage itself remains noisy.

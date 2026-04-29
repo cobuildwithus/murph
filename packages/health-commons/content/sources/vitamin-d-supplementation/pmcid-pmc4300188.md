@@ -14,6 +14,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -46,6 +47,7 @@ researchEvidence:
     - Directness: adjacent_variant; claim use: context-only; priority: high
     - Candidate row: candidate:adjacent-variants:014; shard: adjacent-variants. Schedule/bolus variant: do not generalize effects directly to ordinary daily D3 supplementation without extraction caveats. Candidate rationale: Synthesis focused on high-dose intermittent dosing in older adults; important for preserving mixed or negative boundary evidence.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:pmcid-PMC4300188:001
     sourceKey: source_artifact:pmcid-PMC4300188

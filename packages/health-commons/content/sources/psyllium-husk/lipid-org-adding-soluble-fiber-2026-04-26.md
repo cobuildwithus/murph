@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "guideline"
 modality: "psyllium husk / soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:lipid-org-adding-soluble-fiber-2026-04-26-soluble-fiber-handout-dose-hydration"
     sourceKey: "source_artifact:lipid-org-adding-soluble-fiber-2026-04-26"

@@ -14,6 +14,7 @@ categories:
   - "red-yeast-rice"
   - "adjacent-combination-evidence"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -62,6 +63,7 @@ studyDesign: "clinical study of nutraceutical combination versus no active treat
 modality: "oral nutraceutical combination"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1016-j.phanu.2013.02.003-adjacent"
     sourceKey: "source_artifact:doi-10.1016-j.phanu.2013.02.003"

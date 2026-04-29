@@ -14,6 +14,7 @@ categories:
   - "red-yeast-rice"
   - "lipid-measurement"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -77,6 +78,7 @@ limitations:
   - "Excluded prior red yeast rice intolerance and prior cardiovascular disease, limiting safety generalizability."
 populationMismatch: "Moderate hypercholesterolemia primary-prevention adults aged 18-70 may not match all red yeast rice users, and the low-dose monacolin K formulation is an adjacent variant."
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct02603276-2026-04-26-registry-ryr-phytosterol-arms"
     sourceKey: "source_artifact:clinicaltrials-nct02603276-2026-04-26"

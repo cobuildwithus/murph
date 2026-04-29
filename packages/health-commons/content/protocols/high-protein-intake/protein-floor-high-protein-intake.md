@@ -21,6 +21,7 @@ categories:
 - satiety
 - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-high-protein-intake.jpeg
@@ -198,6 +199,7 @@ experimentOnboarding:
     intentSummary: Explore High Protein Intake
   contextReview:
     vaultChecks:
+
     -
       id: active_experiments
       label: Active experiments
@@ -247,6 +249,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
     -
       id: kidney_or_protein_restriction
       prompt: known kidney disease, reduced eGFR, renal hyperfiltration, mild renal insufficiency, abnormal creatinine or kidney labs, albuminuria or proteinuria, diabetes with kidney risk or uncertain kidney status, dialysis, kidney transplant history, or a clinician-directed protein restriction
@@ -276,6 +279,7 @@ experimentOnboarding:
     - A no answer to the fiber guardrail should route to redesign, lowering the target, or pausing rather than proceeding with a low-fiber plan.
     - Choosing 1.8–2.0 g/kg/day requires a negative screen and documented rationale; choosing 2.0 g/kg/day is not the default.
   setupSlots:
+
   -
     id: body_weight_kg
     label: Body-weight denominator value
@@ -769,6 +773,7 @@ researchLandscape:
   primaryClaim: For appropriate adults, the most defensible evidence-based reason to test High Protein Intake is body-composition partitioning, satiety or meal-structure support, and adherence learning—not guaranteed weight loss, lean-mass gain, or cardiometabolic improvement.
   mainCaveat: The strongest direct anchors are mostly hypocaloric, overweight/obesity, or controlled contexts near 1.5–1.6 g/kg/day, while many other sources are adjacent variants, mechanisms, safety boundaries, or external guidelines.
   groups:
+
   -
     id: direct-target-dose-evidence
     label: Direct, near-direct, and adjacent target-dose boundary evidence
@@ -1358,6 +1363,7 @@ expectedSignal:
     - source_artifact:pmid-28340516
     - source_artifact:pmid-34141717
   secondary:
+
   -
     biomarkerKey: biomarker:body-weight
     direction: mixed

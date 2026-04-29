@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -76,6 +77,7 @@ endpoints:
   - "hypertension"
   - "body weight"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12349-009-0056-1-main"
     sourceKey: "source_artifact:doi-10.1007-s12349-009-0056-1"

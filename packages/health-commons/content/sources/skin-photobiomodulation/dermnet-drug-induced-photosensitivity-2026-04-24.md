@@ -7,15 +7,16 @@ title: Drug-induced photosensitivity
 summary: DermNet provides practical symptom and timing language for drug-induced photosensitivity. Included for photosensitizing-medication and retinoid safety boundary; claim use is safety-only.
 status: draft
 quality: usable
+aliases:
+- source_artifact:dermnet-drug-induced-photosensitivity-2026-04-24
+- Drug-induced photosensitivity
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
   title: Drug-induced photosensitivity
@@ -32,13 +33,13 @@ researchEvidence:
   aggregateRole: primary
   cohortKey: cohort:dermnet-drug-induced-photosensitivity-2026-04-24
 evidenceBucket: photosensitizing-medication and retinoid safety boundary
-whyItMatters: Use for stop-condition language: burning, swelling, blistering, or persistent hyperpigmentation after light exposure should stop the protocol and prompt care.
+whyItMatters: 'Use for stop-condition language: burning, swelling, blistering, or persistent hyperpigmentation after light exposure should stop the protocol and prompt care.'
 potentialMurphEndpoints:
-  - minutes-to-hours symptom timing
-  - blister stop rule
-  - PIH persistence tracking
+- minutes-to-hours symptom timing
+- blister stop rule
+- PIH persistence tracking
 protocolTakeaway: DermNet provides practical symptom and timing language for drug-induced photosensitivity. Wavelength relevance must be considered for red/NIR devices.
-murphTakeaway: Use for stop-condition language: burning, swelling, blistering, or persistent hyperpigmentation after light exposure should stop the protocol and prompt care.
+murphTakeaway: 'Use for stop-condition language: burning, swelling, blistering, or persistent hyperpigmentation after light exposure should stop the protocol and prompt care.'
 studyDesign: Clinical dermatology reference on drug-induced photosensitivity
 modality: photosensitizing medications plus UV/visible light
 claimUse: safety-only

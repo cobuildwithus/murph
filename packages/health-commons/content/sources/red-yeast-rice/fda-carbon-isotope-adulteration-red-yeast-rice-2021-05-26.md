@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Analytical method / adulteration detection"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "measurement_validation"
     population: "Red yeast rice supplement samples; no human participants"
@@ -71,6 +73,7 @@ sourceFindings:
 murphV1Priority: "Medium"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_fda_carbon_isotope_adulteration_red_yeast_rice_2021_05_26_html"
     sourceKey: "source_artifact:fda-carbon-isotope-adulteration-red-yeast-rice-2021-05-26"

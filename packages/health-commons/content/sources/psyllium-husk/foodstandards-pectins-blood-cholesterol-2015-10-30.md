@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -54,6 +55,7 @@ studyDesign: "systematic_review"
 modality: "adjacent soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:foodstandards-pectins-blood-cholesterol-2015-10-30-pectin-adjacent-review-context"
     sourceKey: "source_artifact:foodstandards-pectins-blood-cholesterol-2015-10-30"

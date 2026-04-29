@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -54,6 +55,7 @@ studyDesign: "guideline"
 modality: "psyllium husk / soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:fda-authorized-health-claims-ssa-2024-03-28-ssa-authorized-claim-framework"
     sourceKey: "source_artifact:fda-authorized-health-claims-ssa-2024-03-28"

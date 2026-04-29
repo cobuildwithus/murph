@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "guideline"
 modality: "psyllium husk / soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:nhlbi-tlc-soluble-fiber-2026-04-26-tlc-soluble-fiber-dose-context"
     sourceKey: "source_artifact:nhlbi-tlc-soluble-fiber-2026-04-26"

@@ -24,12 +24,14 @@ categories:
   - vo2max
   - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-tabata-20-10-interval-training.jpeg
     mediaType: image/jpeg
     caption: Tabata 20/10 Interval Training
 relations:
+
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
@@ -426,6 +428,7 @@ protocol:
     - End the experiment and seek medical evaluation for severe or disproportionate muscle pain, swelling, weakness, dark or brown urine, suspected exertional rhabdomyolysis, suspected heat illness, repeated cardiopulmonary or neurologic warning symptoms, or recovery that is unusually impaired after 24-48 hours.
     - Do not resume the protocol after any cardiopulmonary, neurologic, heat-illness, rhabdomyolysis, or unsafe-movement red flag without clinician guidance.
 testPlans:
+
   -
     planId: wearable-cardio-fitness-and-recovery-49d
     durationDays: 49
@@ -445,6 +448,7 @@ testPlans:
       - Resting heart rate, HRV, sleep efficiency, and morning blood pressure are secondary context signals that can be confounded by sleep, illness, heat, stress, alcohol, medication changes, and other training.
       - Stop and seek appropriate care when protocol stop conditions occur; a clean trend is not worth overriding safety signals.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:estimated-vo2max
     description: "A true 20/10 block can push oxygen demand high in a short time. Repeated sessions may improve cardio fitness if enough work is completed safely."
@@ -467,6 +471,7 @@ experimentOnboarding:
     intentSummary: Explore Tabata 20/10 Interval Training
   contextReview:
     vaultChecks:
+
       -
         id: active_experiments
         label: Active experiments
@@ -541,6 +546,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: vigorous_exercise_red_flags
         prompt: Do you have known cardiovascular, metabolic, or kidney disease, uncontrolled blood pressure, or any recent chest pain, fainting, severe dizziness, palpitations, neurologic symptoms, or unusual shortness of breath with exertion?
@@ -575,6 +581,7 @@ experimentOnboarding:
     notes:
       - A positive screen does not diagnose a condition; it changes the disposition toward clinician guidance, lower-intensity alternatives, or not starting unsupervised.
   setupSlots:
+
     -
       id: modality
       label: Interval modality
@@ -700,6 +707,7 @@ whyItWorks:
   - Completed rounds, modality, and true rests matter because very high nominal intensity can change total completed work and time near high oxygen uptake.
   - Recovery context matters because acute autonomic load, soreness, heat, rhabdomyolysis, and musculoskeletal evidence show that short workouts can still carry meaningful burden.
 claims:
+
   -
     claimId: original-lab-evidence-is-small-supervised-cycling
     type: intervention_result
@@ -915,6 +923,7 @@ researchLandscape:
   primaryClaim: "For people for whom vigorous exercise is appropriate, one conservative 8-round 20/10 block twice weekly may be a time-efficient way to test wearable cardio-fitness or work-capacity trends, but exact original-lab benefits are not guaranteed."
   mainCaveat: "Direct protocol evidence, adjacent practical variants, external public workouts, generic HIIT, clinical HIIT, and safety-only sources must stay separated."
   groups:
+
     -
       id: "exact-original-20-10-cycling"
       label: "Original or close 20/10 cycling evidence"

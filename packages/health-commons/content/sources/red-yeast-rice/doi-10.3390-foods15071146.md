@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -59,6 +60,7 @@ modality: "Red yeast rice / monacolin K-containing nutraceutical"
 directness: "same_mechanism"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.3390-foods15071146-standardization"
     sourceKey: "source_artifact:doi-10.3390-foods15071146"

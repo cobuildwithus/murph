@@ -12,6 +12,7 @@ categories:
   - study
   - experimental-physiology
 relations:
+
   -
     type: parent_family
     target: experiment_family:dry-sauna

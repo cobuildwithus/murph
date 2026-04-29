@@ -21,12 +21,14 @@ categories:
   - behavior-change
   - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-zone-2-cardio.jpeg
     mediaType: image/jpeg
     caption: Zone 2 Cardio
 relations:
+
   -
     type: parent_family
     target: experiment_family:aerobic-base-training
@@ -107,6 +109,7 @@ protocol:
     - pain that does not settle after backing off
     - suspected significant heat illness or heat symptoms not resolving with cooling
 testPlans:
+
   -
     planId: zone2-aerobic-base-readout
     primaryBiomarkerKey: biomarker:estimated-vo2max
@@ -118,6 +121,7 @@ testPlans:
     baselineDays: 7
     interventionDays: 28
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:estimated-vo2max
     description: "Regular easy cardio trains the heart, blood vessels, and muscles to deliver and use oxygen better. Over several weeks, that may lift a wearable cardio-fitness estimate."
@@ -138,6 +142,7 @@ safety:
   stopIf:
     - chest pain, anginal-equivalent symptoms, fainting, unexplained exercise-related dizziness, severe breathlessness, palpitations, neurologic symptoms, glucose safety symptoms, pain that does not settle, or heat illness signs occur
 claims:
+
   -
     claimId: easy-cardio-volume-is-a-plausible-starter-dose
     type: evidence_scope
@@ -168,6 +173,7 @@ researchLandscape:
   primaryClaim: A short block of easy conversational cardio may help establish repeatable aerobic volume and produce early fitness or recovery signals for some users.
   mainCaveat: Nearby evidence supports the components more than the exact Murph protocol, and safety screening matters for users with clinical, pregnancy/postpartum, glucose, heat, pain, or exertional-symptom contexts.
   groups:
+
     -
       id: dose-and-guideline-context
       label: Dose and guideline context

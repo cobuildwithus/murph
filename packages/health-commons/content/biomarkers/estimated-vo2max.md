@@ -27,6 +27,7 @@ categories:
   - wearable-metric
   - clinical-context
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:norwegian-4x4/norwegian-4x4
@@ -79,6 +80,7 @@ biomarker:
     label: Higher usually means better cardiorespiratory fitness.
     nuance: The number is only interpretable in context. A lower value after illness, detraining, device changes, weight change, or poor sensor data may not mean your cardiovascular system truly worsened.
   privateMetricBindings:
+
     -
       source: browser_vault_metric
       domain: activity
@@ -95,6 +97,7 @@ biomarker:
     minimumPoints: 2
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: VO₂ max is the maximal rate your body can take in, transport, and use oxygen during intense large-muscle exercise. It is usually expressed relative to body mass as ml/kg/min.
@@ -132,6 +135,7 @@ biomarker:
       - inadequate aerobic data
       - lab protocol differences
 claims:
+
   -
     claimId: vo2max_definition_reference_standard
     type: evidence_scope
@@ -185,6 +189,7 @@ protocolRanking:
   version: deterministic-v1-vo2max
   scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
   candidates:
+
     -
       protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
       expectedDirection: up

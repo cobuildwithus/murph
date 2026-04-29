@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Population-mismatch review for psychiatric comorbidity; usefu
 studyDesign: "narrative_review"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s11920-022-01370-z-main"
     sourceKey: "source_artifact:doi-10.1007-s11920-022-01370-z"

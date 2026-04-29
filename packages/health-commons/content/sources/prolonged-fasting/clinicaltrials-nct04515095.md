@@ -8,17 +8,15 @@ summary: 'Water-only Fasting in the Treatment of Hypertension Patients is includ
 status: draft
 quality: usable
 aliases:
-  - Water-only Fasting in the Treatment of Hypertension Patients
-  - NCT04515095
+- Water-only Fasting in the Treatment of Hypertension Patients
+- NCT04515095
 categories:
-  - prolonged-fasting
+- prolonged-fasting
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: web_page
   title: Water-only Fasting in the Treatment of Hypertension Patients
@@ -46,29 +44,28 @@ researchEvidence:
 evidenceBucket: Clinical/residential supervised fasting boundary
 whyItMatters: Defines a modern clinical water-only fasting boundary where long fasts are paired with supervision, adverse-event monitoring, and refeeding.
 potentialMurphEndpoints:
-  - hydration
-  - electrolytes
-  - refeeding
-  - red flags
-  - user-facing safety
+- hydration
+- electrolytes
+- refeeding
+- red flags
+- user-facing safety
 protocolTakeaway: Use for supervision and duration-boundary context, not as direct evidence that a 24–72 hour wellness fast improves blood pressure.
 murphTakeaway: Use for supervision and duration-boundary context, not as direct evidence that a 24–72 hour wellness fast improves blood pressure.
 studyDesign: trial registry; prospective open-label single-arm intervention
 modality: water-only fasting plus refeeding
 claimUse: context-only
 sourceFindings:
-  -
-    findingId: finding:clinicaltrials-nct04515095-01
-    sourceKey: source_artifact:clinicaltrials-nct04515095
-    extractedFromArtifactId: art_clinicaltrials_nct04515095
-    findingKind: context
-    population: Adults with hypertension
-    exposure: Prolonged water-only fasting followed by whole-plant-food refeeding
-    outcome: safety, feasibility, and blood pressure
-    summary: Registry describes a prospective open-label single-arm clinical intervention in hypertension with safety/feasibility and blood-pressure outcomes; fast length exceeds the target 24–72 hour protocol.
-    evidenceUse:
-      - context
-      - safety
+- findingId: finding:clinicaltrials-nct04515095-01
+  sourceKey: source_artifact:clinicaltrials-nct04515095
+  extractedFromArtifactId: art_clinicaltrials_nct04515095
+  findingKind: context
+  population: Adults with hypertension
+  exposure: Prolonged water-only fasting followed by whole-plant-food refeeding
+  outcome: safety, feasibility, and blood pressure
+  summary: Registry describes a prospective open-label single-arm clinical intervention in hypertension with safety/feasibility and blood-pressure outcomes; fast length exceeds the target 24–72 hour protocol.
+  evidenceUse:
+  - context
+  - safety
 murphV1Priority: High
 pdfRightsStatus: unknown
 ---

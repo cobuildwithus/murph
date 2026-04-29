@@ -13,6 +13,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -44,6 +45,7 @@ researchEvidence:
     - Directness: direct_protocol; claim use: context-only; priority: high
     - Candidate row: candidate:snowball-gap-fill:008; shard: 10-snowball-gap-fill. Candidate rationale: Snowball source for maintenance and withdrawal timing; DOI-only key required.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:doi-10.1007-bf02554828:001
     sourceKey: source_artifact:doi-10.1007-bf02554828

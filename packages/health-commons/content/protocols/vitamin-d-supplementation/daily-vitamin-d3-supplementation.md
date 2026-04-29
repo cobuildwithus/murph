@@ -21,12 +21,14 @@ categories:
   - biomarker-feedback
   - lab-guided
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-04.png
     mediaType: image/png
     caption: Daily Vitamin D3 Supplementation
 relations:
+
   -
     type: parent_family
     target: experiment_family:vitamin-d-supplementation
@@ -96,6 +98,7 @@ protocol:
     - Pause if total vitamin D intake may exceed 4000 IU/day, or if you start calcium products, calcifediol, active vitamin D analogues, prescription/high-dose vitamin D, weekly/monthly/bolus/loading schedules, or medication changes requiring calcium/kidney review.
     - Do not continue unsupervised if a new kidney, calcium, urine-calcium, parathyroid, granulomatous, pregnancy/lactation, pediatric/adolescent, malabsorption/bariatric, clinician-flagged vitamin D/calcium risk, deficiency-treatment, or active-analogue context arises.
 testPlans:
+
   -
     planId: 25ohd-lab-feedback-91d
     durationDays: 91
@@ -109,6 +112,7 @@ testPlans:
       - The baseline week is for context capture; the dose-change signal usually needs weeks rather than days.
       - Secondary notes should capture adverse symptoms, supplement stacking, calcium intake changes, sun exposure, travel, and diet changes.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:serum-25-hydroxyvitamin-d
     description: Daily D3 gives the body vitamin D it can convert into the blood marker 25(OH)D over weeks.
@@ -119,6 +123,7 @@ experimentOnboarding:
     intentSummary: Run a daily D3 protocol with 25(OH)D as the primary endpoint.
   contextReview:
     vaultChecks:
+
       -
         id: recent_25ohd_result
         label: Recent 25(OH)D lab
@@ -145,6 +150,7 @@ experimentOnboarding:
     mode: ask_each_item
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: kidney_disease_or_stones
         prompt: Do you have chronic kidney disease, reduced kidney function, abnormal creatinine/eGFR, or a history of kidney stones?
@@ -198,6 +204,7 @@ experimentOnboarding:
     notes:
       - Any positive safety question should block casual experiment creation until clinician guidance is documented.
   setupSlots:
+
     -
       id: daily_dose_iu
       label: Daily D3 dose in IU
@@ -315,6 +322,7 @@ whyItWorks:
   - Baseline status, body size, sun exposure, diet, season, and population context modify response, so Murph treats the protocol as a logged N-of-1 lab-feedback experiment rather than a fixed-dose guarantee.
   - Safety is calcium-centered: adult upper-intake guidance is a ceiling, and higher daily doses or special medical contexts require caution rather than casual escalation.
 claims:
+
   -
     claimId: dose-implementation-001-direct-daily-d3-dose-response
     type: intervention_result
@@ -814,6 +822,7 @@ researchLandscape:
   primaryClaim: The protocol is best justified as a vitamin D status / 25(OH)D biomarker experiment.
   mainCaveat: Do not present daily D3 as a guaranteed symptom, fracture, infection, mood, fatigue, cardiovascular, or longevity intervention.
   groups:
+
     -
       id: dose-implementation-001-direct-daily-d3-dose-response
       label: Direct Daily D3 Dose Response

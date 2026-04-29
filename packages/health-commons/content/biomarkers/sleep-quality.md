@@ -19,6 +19,7 @@ categories:
   - recovery
   - sleep-diary
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:morning-light-exposure/morning-outdoor-light-exposure
@@ -61,6 +62,7 @@ biomarker:
     minimumPoints: 5
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: Subjective sleep quality is a quick rating of how well you slept or how restored you felt. It is not the same as a sleep-stage estimate.
@@ -90,6 +92,7 @@ protocolRanking:
   version: 2026-04-24
   scoreFormula: Manual seed: evidenceWeight + biomarkerRelevance + wearableMeasurability - burdenPenalty - safetyCautionPenalty; subjective sleep quality is favored because direct outdoor-light studies used subjective sleep outcomes.
   candidates:
+
     -
       protocolKey: protocol_variant:morning-light-exposure/morning-outdoor-light-exposure
       expectedDirection: up_or_stable
@@ -111,8 +114,8 @@ communityOutcomeSummary:
   placeholder: No Murph community outcome is available yet for Morning Outdoor Light Exposure and subjective sleep quality.
 ---
 
-Subjective sleep quality is a practical primary outcome for morning-light experiments because it is low-burden and close to the outcomes used in the closest outdoor/natural-light sources (`source_artifact:pmid-28786887`, `source_artifact:doi-10.31086-tjgeri.2020.147`, `source_artifact:pmid-19560724`).
+Subjective sleep quality is a practical primary outcome for morning-light experiments because it is low-burden and close to the outcomes used in the closest outdoor/natural-light sources.
 
 Use it as a **same-person trend**, not a diagnosis. A useful Murph log can be as simple as: “How was your sleep quality last night?” on a stable 1-5 or 1-10 scale, plus bedtime, final wake time, morning alertness, and a short confounder note.
 
-For Morning Outdoor Light Exposure, subjective sleep quality should be interpreted alongside exposure adherence, sleep timing, evening-light changes, symptoms, UV/heat constraints, and whether the exposure was truly outdoors rather than through a window (`source_artifact:pmid-41053799`, `source_artifact:pmid-39077837`).
+For Morning Outdoor Light Exposure, subjective sleep quality should be interpreted alongside exposure adherence, sleep timing, evening-light changes, symptoms, UV/heat constraints, and whether the exposure was truly outdoors rather than through a window.

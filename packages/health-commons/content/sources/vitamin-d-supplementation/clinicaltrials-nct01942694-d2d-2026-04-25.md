@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: adjacent_variant; claim use: context-only; priority: medium
     - Candidate row: candidate:safety:006; shard: safety. Candidate rationale: Registry anchor for the D2d daily high-dose D3 trial and safety-monitoring context.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:clinicaltrials-nct01942694-d2d-2026-04-25:001
     sourceKey: source_artifact:clinicaltrials-nct01942694-d2d-2026-04-25

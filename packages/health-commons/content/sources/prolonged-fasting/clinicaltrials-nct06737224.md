@@ -8,17 +8,15 @@ summary: Trial registry for a randomized crossover study testing whether exercis
 status: draft
 quality: usable
 aliases:
-  - The Impact of a 48-hour Fast with or Without Exercise on Immune Cell Metabolism and Glycemic Control in Healthy Active Adults
-  - NCT06737224
+- The Impact of a 48-hour Fast with or Without Exercise on Immune Cell Metabolism and Glycemic Control in Healthy Active Adults
+- NCT06737224
 categories:
-  - prolonged-fasting
+- prolonged-fasting
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: other
   title: The Impact of a 48-hour Fast with or Without Exercise on Immune Cell Metabolism and Glycemic Control in Healthy Active Adults
@@ -47,29 +45,28 @@ researchEvidence:
 evidenceBucket: direct protocol and dose evidence
 whyItMatters: Defines a contemporary, closely matched 48-hour human protocol with exercise as an implementation modifier, but registry data are not efficacy evidence.
 potentialMurphEndpoints:
-  - immune cell bioenergetics
-  - immune cell function
-  - whole-body glycemic control
-  - continuous glucose monitoring
-  - standardized-meal responses
+- immune cell bioenergetics
+- immune cell function
+- whole-body glycemic control
+- continuous glucose monitoring
+- standardized-meal responses
 protocolTakeaway: Use as context for protocol design and outcome selection only until peer-reviewed results are available.
 murphTakeaway: Good template for tracking CGM and immune/metabolic endpoints across fasting-only and fasting-plus-exercise variants; not a result source.
 studyDesign: randomized crossover trial registry
 modality: water-only / zero-calorie fasting with exercise comparator
 claimUse: context-only
 sourceFindings:
-  -
-    findingId: finding:nct06737224-48h-fast-exercise-registry
-    sourceKey: source_artifact:clinicaltrials-nct06737224
-    extractedFromArtifactId: art_clinicaltrials_nct06737224
-    findingKind: context
-    population: Healthy active adults, 19–35 years, physically active, BMI <=30, screened for fasting/exercise contraindications
-    exposure: 'Two 48-hour fast conditions: fasting only and fasting plus daily 60-minute cycling exercise'
-    outcome: registered immunometabolic and glycemic outcomes
-    summary: NCT06737224 registers a randomized crossover 48-hour fast in healthy active adults, comparing fasting alone with fasting plus cycling exercise and measuring immune-cell metabolism/function and glycemic control; no outcomes were posted in the extracted record.
-    evidenceUse:
-      - context
-      - measurement
+- findingId: finding:nct06737224-48h-fast-exercise-registry
+  sourceKey: source_artifact:clinicaltrials-nct06737224
+  extractedFromArtifactId: art_clinicaltrials_nct06737224
+  findingKind: context
+  population: Healthy active adults, 19–35 years, physically active, BMI <=30, screened for fasting/exercise contraindications
+  exposure: 'Two 48-hour fast conditions: fasting only and fasting plus daily 60-minute cycling exercise'
+  outcome: registered immunometabolic and glycemic outcomes
+  summary: NCT06737224 registers a randomized crossover 48-hour fast in healthy active adults, comparing fasting alone with fasting plus cycling exercise and measuring immune-cell metabolism/function and glycemic control; no outcomes were posted in the extracted record.
+  evidenceUse:
+  - context
+  - measurement
 murphV1Priority: Medium
 pdfRightsStatus: open_access
 extractionNotes:
@@ -78,11 +75,11 @@ extractionNotes:
   comparatorOrControl: Within-participant comparison of 48-hour fasting alone versus 48-hour fasting with exercise; no completed outcome results posted in the extracted record
   durationOrFollowUp: Two 48-hour fast periods separated by washout
   endpoints:
-    - immune cell bioenergetics
-    - immune cell function
-    - whole-body glycemic control
-    - continuous glucose monitoring
-    - standardized-meal responses
+  - immune cell bioenergetics
+  - immune cell function
+  - whole-body glycemic control
+  - continuous glucose monitoring
+  - standardized-meal responses
   effectEstimatesOrDirection: NCT06737224 registers a randomized crossover 48-hour fast in healthy active adults, comparing fasting alone with fasting plus cycling exercise and measuring immune-cell metabolism/function and glycemic control; no outcomes were posted in the extracted record.
   adverseEventsOrSafetyNotes: Registry exclusions and supervised exercise/fasting procedures imply safety screening, but the extracted registry record does not provide adverse-event results.
   limitations: Registry-only source; planned or ongoing protocol information cannot support outcome claims.

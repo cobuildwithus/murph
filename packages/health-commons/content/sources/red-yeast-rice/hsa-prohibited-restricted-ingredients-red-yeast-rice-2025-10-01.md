@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -54,6 +55,7 @@ studyDesign: "Regulatory guideline"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Singapore health supplements/traditional medicines containing red yeast rice"
@@ -69,6 +71,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_hsa_prohibited_restricted_ingredients_red_yeast_rice_2025_10_01_pdf"
     sourceKey: "source_artifact:hsa-prohibited-restricted-ingredients-red-yeast-rice-2025-10-01"

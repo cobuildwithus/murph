@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Helps specify dose boundaries around ratio and pauses; not a 
 studyDesign: "acute_physiology"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.3390-su13147775-batch006-primary"
     sourceKey: "source_artifact:doi-10.3390-su13147775"

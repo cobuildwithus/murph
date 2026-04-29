@@ -17,6 +17,7 @@ categories:
   - "photoaging"
   - "self-assessment"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
@@ -54,6 +55,7 @@ biomarker:
     minimumPoints: 2
     aggregation: "median"
   explainerCards:
+
     -
       title: "What it is"
       body: "A region-specific score for crow's-feet or periocular line visibility using standardized photos or a consistent self-rating rubric."

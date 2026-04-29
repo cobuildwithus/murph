@@ -12,6 +12,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -67,6 +68,7 @@ limitations:
   - Limited extractable detail beyond abstract-level results.
 populationMismatch: Community insomnia sample and historical treatment context.
 sourceFindings:
+
   -
     findingId: finding:doi-10.1016-s0005-7894-76-80064-0/sleep-onset-latency
     sourceKey: source_artifact:doi-10.1016-s0005-7894-76-80064-0

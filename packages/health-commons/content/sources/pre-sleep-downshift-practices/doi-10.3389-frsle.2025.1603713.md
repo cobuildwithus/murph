@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Recent broad review useful for source-chaining and boundary m
 studyDesign: "narrative_review"
 claimUse: "supports-protocol"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.3389-frsle.2025.1603713-breathing-review-context"
     sourceKey: "source_artifact:doi-10.3389-frsle.2025.1603713"

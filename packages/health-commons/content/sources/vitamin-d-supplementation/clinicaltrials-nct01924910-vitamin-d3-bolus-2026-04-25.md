@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: adjacent_variant; claim use: context-only; priority: medium
     - Candidate row: candidate:adjacent-variants:054; shard: adjacent-variants. Candidate rationale: Registry record for a single-bolus winter trial; useful for matching published bolus reports and checking protocol details.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:clinicaltrials-nct01924910-vitamin-d3-bolus-2026-04-25:001
     sourceKey: source_artifact:clinicaltrials-nct01924910-vitamin-d3-bolus-2026-04-25

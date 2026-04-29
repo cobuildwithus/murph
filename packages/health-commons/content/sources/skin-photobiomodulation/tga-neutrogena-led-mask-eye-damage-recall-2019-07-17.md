@@ -3,22 +3,23 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17
 slug: sources/skin-photobiomodulation/tga-neutrogena-led-mask-eye-damage-recall-2019-07-17
-title: Neutrogena Visibly Clear Light Therapy Acne Mask and Activator: potential for eye damage recall notice
+title: 'Neutrogena Visibly Clear Light Therapy Acne Mask and Activator: potential for eye damage recall notice'
 summary: Australian TGA recall notice for a red-and-blue LED acne mask, citing potential eye damage in susceptible users and possible ocular symptoms.
 status: draft
 quality: usable
+aliases:
+- TGA Neutrogena LED mask recall
+- Neutrogena Visibly Clear Light Therapy Acne Mask
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
-  title: Neutrogena Visibly Clear Light Therapy Acne Mask and Activator: potential for eye damage recall notice
+  title: 'Neutrogena Visibly Clear Light Therapy Acne Mask and Activator: potential for eye damage recall notice'
   authors: Therapeutic Goods Administration; Johnson & Johnson Pacific
   year: 2019
   journal: Therapeutic Goods Administration recall notice
@@ -34,11 +35,11 @@ researchEvidence:
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It names consumer-mask ocular symptoms and susceptible populations that belong in conservative safety boundaries.
 potentialMurphEndpoints:
-  - eye pain
-  - tearing
-  - blurred vision
-  - spots or flashes
-  - retinal disorder history
+- eye pain
+- tearing
+- blurred vision
+- spots or flashes
+- retinal disorder history
 protocolTakeaway: Use as safety-only or context-only evidence; do not use for direct skin-outcome claims.
 murphTakeaway: Treat new eye symptoms during facial light use as stop-use signals.
 studyDesign: Regulatory recall and safety notice

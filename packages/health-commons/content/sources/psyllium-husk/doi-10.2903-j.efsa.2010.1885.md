@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -58,6 +59,7 @@ studyDesign: "guideline"
 modality: "adjacent soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.2903-j.efsa.2010.1885-oat-beta-glucan-adjacent-claim"
     sourceKey: "source_artifact:doi-10.2903-j.efsa.2010.1885"

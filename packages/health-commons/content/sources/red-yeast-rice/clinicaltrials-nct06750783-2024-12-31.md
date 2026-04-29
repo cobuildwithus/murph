@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -72,6 +73,7 @@ adverseEventsOrSafetyNotes: "Planned monitoring includes liver function, renal f
 limitations: "Xuezhikang proprietary RYR-derived preparation and active statin comparator; recruiting/future evidence context only."
 populationMismatch: "Prediabetes/dyslipidemia population and Xuezhikang product are adjacent to RYR-only consumer supplement protocol."
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct06750783-2024-12-31-planned-xuezhikang-trial"
     sourceKey: "source_artifact:clinicaltrials-nct06750783-2024-12-31"

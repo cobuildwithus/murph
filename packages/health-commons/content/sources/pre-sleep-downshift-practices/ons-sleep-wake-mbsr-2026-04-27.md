@@ -12,6 +12,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -62,6 +63,7 @@ populationMismatch: Cancer patient/caregiver populations and MBSR bundles are no
 directnessToProtocol: safety_boundary
 claimUse: safety-only
 sourceFindings:
+
   -
     findingId: finding:ons-sleep-wake-mbsr-2026-04-27:primary-safety-context
     sourceKey: source_artifact:ons-sleep-wake-mbsr-2026-04-27

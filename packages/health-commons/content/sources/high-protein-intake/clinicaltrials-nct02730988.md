@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - trial_registry_context
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -39,6 +40,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-015; priority: medium; claimUse: context-only; directness: measurement_context"
 sourceFindings:
+
   -
     findingId: finding:clinicaltrials-nct02730988-registry-design
     sourceKey: source_artifact:clinicaltrials-nct02730988

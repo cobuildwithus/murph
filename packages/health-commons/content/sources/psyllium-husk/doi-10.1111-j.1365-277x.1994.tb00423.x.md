@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -70,6 +71,7 @@ limitations:
   - "Between-group differences in TC, LDL-C, and HDL-C were not significant."
 safetyNotes: "Accessible extraction did not identify adverse-event details."
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1111-j.1365-277x.1994.tb00423.x-non-significant-between-group"
     sourceKey: "source_artifact:doi-10.1111-j.1365-277x.1994.tb00423.x"

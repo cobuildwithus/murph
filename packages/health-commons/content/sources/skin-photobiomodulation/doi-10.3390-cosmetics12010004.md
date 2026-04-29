@@ -7,15 +7,17 @@ title: In Vivo Application of the Effects of Red-to-Near-Infrared Light Spectros
 summary: Open-access 2025 facial LED mask study in 21 female volunteers, reporting improvements in brightness/anti-aging measures and no irritation, with comparator/blinding limitations.
 status: draft
 quality: usable
+aliases:
+- DOI 10.3390/cosmetics12010004
+- Lee 2025 red-to-near-infrared LED facial mask
+- Cosmetics 2025 LED facial mask anti-aging
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: journal_article
   title: In Vivo Application of the Effects of Red-to-Near-Infrared Light Spectroscopy on Skin-Brightening and Anti-Aging Properties via LED Facial Masks
@@ -37,11 +39,11 @@ researchEvidence:
 evidenceBucket: direct home/facial red+NIR or LED-mask benefit evidence
 whyItMatters: It is a recent open-access facial LED mask study with directly relevant red-to-NIR exposure, skin-brightening, anti-aging, and tolerability endpoints.
 potentialMurphEndpoints:
-  - Skin brightness
-  - Eye-wrinkle appearance
-  - Elasticity
-  - Facial lifting/global appearance
-  - Irritation or discomfort
+- Skin brightness
+- Eye-wrinkle appearance
+- Elasticity
+- Facial lifting/global appearance
+- Irritation or discomfort
 protocolTakeaway: Use cautiously as direct supportive mask evidence, but do not treat it as sham-controlled proof unless comparator details are verified in the full text.
 murphTakeaway: The study highlights practical endpoints for a user-facing run, but the protocol should separate facial endpoints from scalp endpoints and require standardized photos.
 studyDesign: Small in vivo facial mask study without an extracted sham-controlled design.

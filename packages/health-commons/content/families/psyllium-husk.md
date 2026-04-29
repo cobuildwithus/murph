@@ -25,6 +25,7 @@ categories:
 familyKind: "single_intervention_family"
 canonicalIntervention: "psyllium_husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -62,6 +63,7 @@ attribution:
   ownerType: "murph"
   note: "Murph canonical family page assembled from psyllium cholesterol research extraction outputs."
 claims:
+
   -
     claimId: "family-direct-lipid-evidence"
     type: "evidence_scope"
@@ -87,6 +89,6 @@ claims:
 ---
 Psyllium husk is treated as a **family**, not a single universal protocol. A cholesterol-focused variant is different from a constipation-relief use case, a generic soluble-fiber comparison, a portfolio-diet protocol, a diabetes/glycemic-control protocol, or an external named commercial protocol.
 
-For cholesterol work, Murph should preserve the details that make the experiment interpretable: active psyllium/ispaghula husk grams per day, formulation, divided dosing, liquid volume, medication spacing, diet and lipid-medication stability, and pre/post lab lipid panels. The direct family signal is strongest for LDL-C and total cholesterol, with non-HDL-C and apoB useful when available; HDL-C and triglycerides should be tracked as context rather than promised outcomes [source_artifact:doi-10.1016-j.jff.2023.105878; source_artifact:pmid-30239559; source_artifact:pmid-10648260; source_artifact:pmid-18985059].
+For cholesterol work, Murph should preserve the details that make the experiment interpretable: active psyllium/ispaghula husk grams per day, formulation, divided dosing, liquid volume, medication spacing, diet and lipid-medication stability, and pre/post lab lipid panels. The direct family signal is strongest for LDL-C and total cholesterol, with non-HDL-C and apoB useful when available; HDL-C and triglycerides should be tracked as context rather than promised outcomes.
 
-Safety is part of the family definition. Psyllium should not be represented as a harmless add-on: users need at least 8 oz / 240 mL liquid or stricter product-label directions per dose, prompt swallowing before thickening, swallowing and obstruction screening, allergy/sensitization screening, and medication-spacing guidance before it is turned into an experiment [source_artifact:cornell-law-cfr-201-319-2026-04-26; source_artifact:dailymed-metamucil-psyllium-label-2026-04-26; source_artifact:pmid-12681118; source_artifact:pmid-14700444].
+Safety is part of the family definition. Psyllium should not be represented as a harmless add-on: users need at least 8 oz / 240 mL liquid or stricter product-label directions per dose, prompt swallowing before thickening, swallowing and obstruction screening, allergy/sensitization screening, and medication-spacing guidance before it is turned into an experiment.

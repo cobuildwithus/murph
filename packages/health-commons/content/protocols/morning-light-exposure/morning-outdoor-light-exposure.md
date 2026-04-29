@@ -23,12 +23,14 @@ categories:
   - morning-routine
   - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-morning-outdoor-light-exposure.jpeg
     mediaType: image/jpeg
     caption: Morning Outdoor Light Exposure
 relations:
+
   -
     type: parent_family
     target: experiment_family:morning-light-exposure
@@ -297,6 +299,7 @@ protocol:
     - Stop if heat, dehydration, dizziness, faintness, confusion, or unsafe weather or route conditions occur.
     - Do not continue the experiment as unsupervised self-care if you are using clinician-guided light therapy, have bipolar disorder or recent mania/hypomania, or have new or concerning eye, skin, or mood symptoms.
 testPlans:
+
   -
     planId: sleep-quality-timing-28d
     durationDays: 28
@@ -314,6 +317,7 @@ testPlans:
       - Sleep onset latency and sleep efficiency are secondary context; a wearable or sleep diary can be used, but consumer sleep stages are not promised endpoints.
       - Record evening light changes, travel, illness, alcohol, caffeine, exercise, stress, heat, UV, and weather as confounders.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:sleep-quality
     description: Morning outdoor light anchors the body clock early in the day. That can make evening sleep timing feel steadier and the next night more restorative.
@@ -330,6 +334,7 @@ experimentOnboarding:
     intentSummary: Explore Morning Outdoor Light Exposure
   contextReview:
     vaultChecks:
+
       -
         id: active_experiments
         label: Active experiments
@@ -373,6 +378,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: mood_activation_or_bipolar
         prompt: bipolar disorder, past mania or hypomania, rapid cycling, mixed symptoms, recent severe mood instability, suicidal thoughts, or unusual activation with bright light
@@ -403,6 +409,7 @@ experimentOnboarding:
     notes:
       - A positive or uncertain screen does not diagnose anything; it means Murph should not set up this as an unsupervised default protocol without appropriate guidance or a safer route.
   setupSlots:
+
     -
       id: usual_wake_time
       label: Usual wake time
@@ -545,6 +552,7 @@ whyItWorks:
   - The expected user-level signal is modest and personal: more consistent morning light may help sleep timing, subjective sleep quality, or morning alertness for some users, but direct evidence is sparse and broader adult data are observational or mixed.
   - Because evening light, bedtime drift, exercise, caffeine, alcohol, travel, stress, illness, heat, and UV protection can change both exposure and sleep, the protocol treats adherence and confounder logging as part of the mechanism rather than administrative overhead.
 claims:
+
   -
     claimId: direct-older-adult-natural-light-sleep-quality
     type: intervention_result
@@ -758,6 +766,7 @@ researchLandscape:
   primaryClaim: "A repeatable outdoor morning-light habit is a plausible low-burden self-experiment for subjective sleep quality, sleep timing, morning alertness, and tolerability, not a proven treatment or a guaranteed wearable-sleep-stage intervention."
   mainCaveat: "Direct outdoor morning-light trials are sparse; indoor light, light boxes, dawn simulators, clinical light therapy, and bundled walking/exercise routines should not be pooled into the default outdoor protocol claim."
   groups:
+
     -
       id: "direct-outdoor-natural-light"
       label: "Direct outdoor or natural-light protocols"
@@ -948,6 +957,7 @@ expectedSignal:
       - source_artifact:pmid-41053799
       - source_artifact:pmid-39077837
   secondary:
+
     -
       biomarkerKey: biomarker:sleep-onset-latency
       direction: mixed_or_no_clear_change

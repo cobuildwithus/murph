@@ -28,12 +28,14 @@ categories:
   - "wearable-measured"
   - "murph-canonical"
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-consistent-wake-time.jpeg
     mediaType: image/jpeg
     caption: Consistent Wake Time
 relations:
+
   -
     type: "parent_family"
     target: "experiment_family:consistent-wake-time"
@@ -312,6 +314,7 @@ protocol:
     - "Stop and seek appropriate guidance for signs of mania or hypomania, unusual agitation, risky activation, or mood destabilization linked to shorter or shifted sleep."
     - "Adapt or defer the protocol during rotating shifts, long work hours, jet lag, acute illness, caregiving nights, or other contexts where a rigid wake window is unsafe or unrealistic."
 testPlans:
+
   -
     planId: "wake-regularity-35d"
     durationDays: 35
@@ -334,6 +337,7 @@ testPlans:
       - "The 7-day baseline and 28-day intervention are Murph-pragmatic defaults, not source-validated optimum lengths."
       - "Interpret the 20/28 minimum only after separating unsafe or medically appropriate safety overrides from ordinary missed adherence days."
 expectedSignalDescriptions:
+
   -
     biomarkerKey: "biomarker:wake-time-variability"
     description: "The protocol directly targets wake timing. If the chosen window is realistic and followed often enough, wake times should tighten."
@@ -359,6 +363,7 @@ experimentOnboarding:
     intentSummary: "Explore Consistent Wake Time"
   contextReview:
     vaultChecks:
+
       -
         id: "active_experiments"
         label: "Active experiments"
@@ -410,6 +415,7 @@ experimentOnboarding:
     mode: "ask_compact_then_expand_if_positive"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
+
       -
         id: "insufficient_sleep_opportunity"
         prompt: "Would the proposed wake window routinely leave you short on sleep because bedtime cannot realistically move earlier?"
@@ -443,6 +449,7 @@ experimentOnboarding:
     notes:
       - "A positive or uncertain screen is not a diagnosis; it means the self-directed default run is not the right next step without adjustment, postponement, or clinician/occupational guidance."
   setupSlots:
+
     -
       id: "target_wake_window"
       label: "Target wake/rise window"
@@ -553,6 +560,7 @@ whyItWorks:
   - "Protecting sleep opportunity is the mechanism guardrail: a stable wake window is only useful when it does not create chronic short sleep or daytime impairment."
   - "Regularity metrics, diaries, and wearables can make the behavior visible over repeated nights, but measurement sources require diary correction and caution against diagnostic interpretations."
 claims:
+
   -
     claimId: "direct-evidence-is-broader-regularization"
     type: "evidence_scope"
@@ -695,6 +703,7 @@ researchLandscape:
   primaryClaim: "The most defensible target is improved wake-time regularity, with possible short-term subjective sleepiness or diary-continuity benefits in people whose current schedule is irregular."
   mainCaveat: "No extracted source establishes a pure wake-time-only protocol as a treatment for insomnia, disease prevention, metabolic risk, cardiovascular risk, mortality, or sleep-stage improvement."
   groups:
+
     -
       id: "direct-sleep-wake-regularization"
       label: "Direct and near-direct timing regularization"

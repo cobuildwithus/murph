@@ -36,6 +36,7 @@ biomarker:
     label: Lower abnormal alcohol-sensitive markers can be encouraging, but interpretation depends on baseline status and clinical context.
     nuance: Do not compare isolated ALT, AST, or GGT values without the lab range, timing, medications, illness, and clinician context.
   privateMetricBindings:
+
   -
     source: browser_vault_metric
     domain: body_state

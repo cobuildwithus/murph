@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Explicit before-sleep body-scan practice with sleep-quality o
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-2174-1874944502013010232-dbm-sleep-qol"
     sourceKey: "source_artifact:doi-10.2174-1874944502013010232"

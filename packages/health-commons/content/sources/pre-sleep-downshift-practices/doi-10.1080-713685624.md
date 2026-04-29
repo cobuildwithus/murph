@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -65,6 +66,7 @@ populationMismatch: Yoga/Zen case-report exposure is not a low-dose silent bedti
 directnessToProtocol: safety_boundary
 claimUse: safety-only
 sourceFindings:
+
   -
     findingId: finding:doi-10.1080-713685624:primary-safety-context
     sourceKey: source_artifact:doi-10.1080-713685624

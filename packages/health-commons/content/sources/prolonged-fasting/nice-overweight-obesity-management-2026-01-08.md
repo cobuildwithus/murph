@@ -8,16 +8,14 @@ summary: NICE recommends low-energy and very-low-energy diets only as nutritiona
 status: draft
 quality: usable
 aliases:
-  - nice-overweight-obesity-management-2026-01-08
+- nice-overweight-obesity-management-2026-01-08
 categories:
-  - prolonged-fasting
+- prolonged-fasting
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: guideline
   title: 'Overweight and obesity management: physical activity and diet recommendations, including very-low-energy diets'
@@ -43,29 +41,28 @@ researchEvidence:
 evidenceBucket: FMD/VLCD and modified-fasting boundary
 whyItMatters: Provides the safety and supervision boundary for very-low-energy diets, which are sometimes confused with fasting protocols.
 potentialMurphEndpoints:
-  - safety:supervision
-  - safety:medication-review
-  - safety:refeeding-transition
-  - symptom:fatigue
-  - symptom:constipation
+- safety:supervision
+- safety:medication-review
+- safety:refeeding-transition
+- symptom:fatigue
+- symptom:constipation
 protocolTakeaway: Use as safety-boundary guidance; it is not efficacy evidence for a self-directed 24–72 hour prolonged fast.
 murphTakeaway: Supports screening, medication-review, eating-disorder caution, and refeeding-transition language for severe restriction.
 studyDesign: Clinical guideline for overweight and obesity management
 modality: Clinical guideline for very-low-energy diets
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:nice-overweight-obesity-management-2026-01-08:batch-004-boundary
-    sourceKey: source_artifact:nice-overweight-obesity-management-2026-01-08
-    extractedFromArtifactId: art_batch004_nice_overweight_obesity_management_2026_01_08
-    findingKind: safety
-    population: Children, young people, and adults covered by NICE overweight and obesity management guidance; low-energy/VLED recommendations apply to adults.
-    exposure: Low-energy and very-low-energy diets as clinical weight-management tools.
-    outcome: safety:supervision; safety:medication-review; safety:refeeding-transition; symptom:fatigue; symptom:constipation
-    summary: 'NICE recommends low-energy and very-low-energy diets only as nutritionally complete, time-limited, clinically supported interventions with supervision and transition back to sustainable eating. Limitations/directness: Guideline recommendations are for weight management services, not single water-only fast experiments. Population mismatch: Applies to clinical obesity management and VLED/LED programs rather than a discrete 24–72 hour zero-calorie protocol.'
-    evidenceUse:
-      - safety
-      - context
+- findingId: finding:nice-overweight-obesity-management-2026-01-08:batch-004-boundary
+  sourceKey: source_artifact:nice-overweight-obesity-management-2026-01-08
+  extractedFromArtifactId: art_batch004_nice_overweight_obesity_management_2026_01_08
+  findingKind: safety
+  population: Children, young people, and adults covered by NICE overweight and obesity management guidance; low-energy/VLED recommendations apply to adults.
+  exposure: Low-energy and very-low-energy diets as clinical weight-management tools.
+  outcome: safety:supervision; safety:medication-review; safety:refeeding-transition; symptom:fatigue; symptom:constipation
+  summary: 'NICE recommends low-energy and very-low-energy diets only as nutritionally complete, time-limited, clinically supported interventions with supervision and transition back to sustainable eating. Limitations/directness: Guideline recommendations are for weight management services, not single water-only fast experiments. Population mismatch: Applies to clinical obesity management and VLED/LED programs rather than a discrete 24–72 hour zero-calorie protocol.'
+  evidenceUse:
+  - safety
+  - context
 murphV1Priority: High
 pdfRightsStatus: open_access
 ---

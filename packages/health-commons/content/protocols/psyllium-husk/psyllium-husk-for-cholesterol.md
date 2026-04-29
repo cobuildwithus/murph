@@ -26,12 +26,14 @@ categories:
   - "lab-measured"
   - "diet-adjunct"
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-03.png
     mediaType: image/png
     caption: Psyllium Husk For Cholesterol
 relations:
+
   -
     type: "parent_family"
     target: "experiment_family:psyllium-husk"
@@ -152,6 +154,7 @@ protocol:
     - "Pause and reassess if GI symptoms remain unacceptable despite slower titration or lower dosing."
     - "Do not escalate above 10.5 g/day active psyllium husk in the ordinary self-experiment setup without clinician-guided adaptation."
 testPlans:
+
   -
     planId: "lipid-panel-12-week"
     durationDays: 91
@@ -188,6 +191,7 @@ testPlans:
       - "Use when a 12-week lab window is impractical."
       - "A shorter follow-up may be less stable; avoid interpreting it if diet, weight, or lipid medication changed materially."
 expectedSignalDescriptions:
+
   -
     biomarkerKey: "biomarker:ldl-c"
     description: "Psyllium gel can bind bile acids in the gut and carry them out in stool. The liver may then pull more LDL from blood to replace them."
@@ -213,6 +217,7 @@ experimentOnboarding:
     intentSummary: "Explore Psyllium Husk For Cholesterol"
   contextReview:
     vaultChecks:
+
       -
         id: "recent_lipid_panel"
         label: "Recent lipid panel"
@@ -245,6 +250,7 @@ experimentOnboarding:
     mode: "ask_compact_then_expand_if_positive"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
+
       -
         id: "swallowing_or_obstruction_risk"
         prompt: "Any swallowing difficulty/dysphagia, prior choking with powders or capsules, esophageal narrowing, bowel obstruction or narrowing, fecal impaction, severe constipation, reduced gut motility, prior GI obstruction/bezoar, GI surgery or clinician-supervised bowel care?"
@@ -286,6 +292,7 @@ experimentOnboarding:
     notes:
       - "A positive or uncertain screen means Murph should keep this as planning or recommend clinician/pharmacist guidance before setting reminders or tracking an active run."
   setupSlots:
+
     -
       id: "baseline_lipid_panel_date"
       label: "Baseline lipid panel date"
@@ -481,6 +488,7 @@ whyItWorks:
   - "Psyllium-specific lipid trials and meta-analyses make LDL-C and total cholesterol the most defensible endpoints for this variant."
   - "The experiment remains interpretable only if product, dose, lab timing, diet, weight, and lipid-medication changes are visible."
 claims:
+
   -
     claimId: "direct-protocol-evidence-scope"
     type: "evidence_scope"
@@ -707,6 +715,7 @@ researchLandscape:
   primaryClaim: "Use psyllium husk as a bounded 8–12-week lab-lipid experiment centered on LDL-C and total cholesterol, not as a broad lipid, weight-loss, glucose, or cardiovascular-outcome claim."
   mainCaveat: "Evidence is heterogeneous across products, dose schedules, populations, diet backgrounds, and formulations; safety labels and case reports require hydration, swallowing, obstruction, allergy, and medication-spacing boundaries."
   groups:
+
     -
       id: "direct-protocol-synthesis-dose-response"
       label: "Direct psyllium lipid syntheses"

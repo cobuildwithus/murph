@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "Consumer evidence page / narrative review"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Consumers considering red yeast rice supplements"
@@ -72,6 +74,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_nccih_red_yeast_rice_2026_04_26_html"
     sourceKey: "source_artifact:nccih-red-yeast-rice-2026-04-26"

@@ -18,6 +18,7 @@ categories:
   - "sleep-regularity"
   - "self-experiment-metric"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:consistent-wake-time/consistent-wake-time"

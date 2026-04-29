@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -54,6 +55,7 @@ studyDesign: "Legal decision"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "context"
     population: "U.S. red yeast rice regulatory/legal context"
@@ -69,6 +71,7 @@ sourceFindings:
 murphV1Priority: "Medium"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_justia_pharmanex_v_shalala_2000_07_21_html"
     sourceKey: "source_artifact:justia-pharmanex-v-shalala-2000-07-21"

@@ -16,6 +16,7 @@ categories:
   - "contamination"
   - "dose-uncertainty"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "Dyslipidemia clinical practice guideline"
 modality: "Red yeast rice supplement quality/safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:healthquality-va-dod-lipid-management-2025-12-01:batch-003-primary"
     sourceKey: "source_artifact:healthquality-va-dod-lipid-management-2025-12-01"

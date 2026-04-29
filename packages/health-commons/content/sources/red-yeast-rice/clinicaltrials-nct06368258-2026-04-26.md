@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -78,6 +79,7 @@ adverseEventsOrSafetyNotes: "Planned safety labs include AST, ALT, gamma-GT, and
 limitations: "Registry watchlist item; status and results require refresh before use."
 populationMismatch: "Suboptimal cholesterolemia, low-to-moderate risk; no completed results in this source batch."
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct06368258-2026-04-26-planned-trial"
     sourceKey: "source_artifact:clinicaltrials-nct06368258-2026-04-26"

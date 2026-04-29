@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -54,6 +55,7 @@ studyDesign: "Regulation / contaminant limit"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "EU red-yeast-rice food supplements"
@@ -69,6 +71,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_eur_lex_regulation_2023_915_citrinin_red_yeast_rice_2023_04_25_pdf"
     sourceKey: "source_artifact:eur-lex-regulation-2023-915-citrinin-red-yeast-rice-2023-04-25"

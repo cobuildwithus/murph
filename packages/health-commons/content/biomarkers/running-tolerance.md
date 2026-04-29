@@ -12,6 +12,7 @@ categories:
   - rehabilitation
   - manual-log
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run

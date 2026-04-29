@@ -15,6 +15,7 @@ categories:
   - "red-yeast-rice"
   - "lipid-measurement"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "Laboratory standardization context"
 modality: "Lipid measurement and cholesterol test-plan context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:cdc-cvd-reference-laboratory-2024-04-24-lipid-panel-standardization"
     sourceKey: "source_artifact:cdc-cvd-reference-laboratory-2024-04-24"

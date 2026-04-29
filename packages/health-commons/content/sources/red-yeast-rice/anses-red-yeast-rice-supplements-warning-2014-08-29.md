@@ -16,6 +16,7 @@ categories:
   - "contamination"
   - "dose-uncertainty"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "Consumer/regulatory warning"
 modality: "Red yeast rice supplement quality/safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:anses-red-yeast-rice-supplements-warning-2014-08-29:batch-003-primary"
     sourceKey: "source_artifact:anses-red-yeast-rice-supplements-warning-2014-08-29"

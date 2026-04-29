@@ -17,6 +17,7 @@ categories:
   - "measurement-method"
   - "clinic"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
@@ -47,6 +48,7 @@ measurementMethod:
     - "biomarker:skin-texture-roughness-score"
     - "biomarker:skin-tolerability-symptoms"
   outputs:
+
     -
       outputId: "blinded_clinical_photoaging_scale"
       label: "Blinded clinical photoaging scale"

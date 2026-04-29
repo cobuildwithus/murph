@@ -7,15 +7,16 @@ title: Combined visible light and infrared light-emitting diode (LED) therapy en
 summary: Adjunctive post-ablative-resurfacing LED source suggesting faster wound healing with combined visible/NIR LED; relevant only to recent-procedure boundaries.
 status: draft
 quality: usable
+aliases:
+- Trelles Allones Mayo 2006 Medical Laser Application
+- 10.1016/j.mla.2006.06.001
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: journal_article
   title: Combined visible light and infrared light-emitting diode (LED) therapy enhances wound healing after laser ablative resurfacing of photodamaged facial skin
@@ -37,12 +38,12 @@ researchEvidence:
 evidenceBucket: adjunctive recent-procedure or filler context
 whyItMatters: The source is commonly adjacent to red/NIR facial LED claims but addresses recovery after ablative procedures, not primary anti-photoaging.
 potentialMurphEndpoints:
-  - days-to-healing
-  - post-resurfacing-sequelae
-  - wound-healing
-  - six-month-wrinkle-comparison
+- days-to-healing
+- post-resurfacing-sequelae
+- wound-healing
+- six-month-wrinkle-comparison
 protocolTakeaway: Do not use as direct protocol support; cite only when discussing recent laser-resurfacing boundaries or adjunctive recovery.
-murphTakeaway: Good cautionary example: a positive wound-healing result after ablation is not the same as anti-aging benefit in intact skin.
+murphTakeaway: 'Good cautionary example: a positive wound-healing result after ablation is not the same as anti-aging benefit in intact skin.'
 studyDesign: Clinical post-procedure study in laser-ablated photodamaged facial skin.
 modality: 830 nm plus 633 nm LED after ablative laser resurfacing
 claimUse: safety-only

@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Recent quantitative synthesis for nonclinical slow-paced brea
 studyDesign: "meta_analysis"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12671-023-02294-2-batch006-primary"
     sourceKey: "source_artifact:doi-10.1007-s12671-023-02294-2"

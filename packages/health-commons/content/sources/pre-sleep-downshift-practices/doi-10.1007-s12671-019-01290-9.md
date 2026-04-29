@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Separable body-scan component within a digital CBT-I context;
 studyDesign: "other"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-1007-s12671-019-01290-9-primary"
     sourceKey: "source_artifact:doi-10.1007-s12671-019-01290-9"

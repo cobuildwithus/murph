@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -80,6 +81,7 @@ adverseEventsOrSafetyNotes: "Eligibility excluded dyslipidemia, chronic/metaboli
 artifactCandidates:
   - "art-clinicaltrials-gov-nct05825963-2026-04-26"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-gov-nct05825963-acute-meatball-postprandial-lipids"
     sourceKey: "source_artifact:clinicaltrials-gov-nct05825963-2026-04-26"

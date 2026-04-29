@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "Evidence digest / narrative review"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "context"
     population: "People considering natural products for high cholesterol"
@@ -72,6 +74,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_nccih_high_cholesterol_natural_products_2026_04_25_html"
     sourceKey: "source_artifact:nccih-high-cholesterol-natural-products-2026-04-25"

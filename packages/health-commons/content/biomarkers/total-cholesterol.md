@@ -37,6 +37,7 @@ biomarker:
     minimumPoints: 1
     aggregation: "mean"
   explainerCards:
+
     -
       title: "What it is"
       body: "Total cholesterol from a blood lipid panel; a supportive endpoint for cholesterol protocols, not the most specific marker."
@@ -57,6 +58,7 @@ biomarker:
       - "illness"
       - "laboratory method changes"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
