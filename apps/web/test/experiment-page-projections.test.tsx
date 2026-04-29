@@ -112,7 +112,7 @@ describe("experiment page projections", () => {
         experimentId: "finnish-sauna",
       }),
     })).resolves.toEqual(expect.objectContaining({
-      description: expect.stringContaining("traditional dry-sauna"),
+      description: expect.stringContaining("steady, tolerable heat"),
       title: "Finnish Dry Sauna — Murph Experiments",
     }));
 
@@ -163,7 +163,7 @@ describe("experiment page projections", () => {
         experimentId: "finnish-sauna",
       }),
     })).resolves.toEqual(expect.objectContaining({
-      description: expect.stringContaining("traditional dry-sauna"),
+      description: expect.stringContaining("steady, tolerable heat"),
       title: "Finnish Dry Sauna results — Murph Experiments",
     }));
 
