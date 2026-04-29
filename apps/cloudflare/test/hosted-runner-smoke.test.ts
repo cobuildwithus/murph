@@ -41,6 +41,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             childCwdIsIsolated: options.cwd.includes("hosted-runner-smoke-launch-"),
             codexAppServerHelpBytes: 2048,
             codexCommandDiscovered: true,
+            codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
             codexVersion: "codex-cli 0.125.0",
             healthCommonsCatalogHash: "sha256:catalog",
             healthCommonsCliProtocolListBytes: 768,
@@ -83,6 +84,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
     expect(result.childCwdIsIsolated).toBe(true);
     expect(result.codexAppServerHelpBytes).toBe(2048);
     expect(result.codexCommandDiscovered).toBe(true);
+    expect(result.codexHostedConfigShellEnvironmentPolicyAllowlisted).toBe(true);
     expect(result.codexVersion).toBe("codex-cli 0.125.0");
     expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
     expect(result.murphCommandDiscovered).toBe(true);

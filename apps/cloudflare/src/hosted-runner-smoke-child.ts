@@ -1,6 +1,6 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -91,6 +91,8 @@ async function runSmokeChecks(input: {
   await runTextCommand("murph", ["--help"]);
   await runTextCommand("vault-cli", ["--help"]);
   const codexPreflight = await runCodexPreflight();
+  const hostedCodexConfig =
+    await runHostedCodexConfigShellEnvironmentPolicySmoke(input.workspaceRoot);
 
   const vaultShowOutput = await runTextCommand("vault-cli", [
     "vault",
@@ -133,6 +135,8 @@ async function runSmokeChecks(input: {
     childCwdIsIsolated: true,
     codexAppServerHelpBytes: codexPreflight.appServerHelpBytes,
     codexCommandDiscovered: true,
+    codexHostedConfigShellEnvironmentPolicyAllowlisted:
+      hostedCodexConfig.shellEnvironmentPolicyAllowlisted,
     codexVersion: codexPreflight.version,
     healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
     healthCommonsCliProtocolListBytes: healthCommonsCli.protocolListBytes,
@@ -362,6 +366,260 @@ async function runCodexPreflight(): Promise<{
     throw new Error(
       "Hosted runner smoke Codex CLI preflight failed. Install Codex CLI in the hosted runner image and ensure `codex app-server --help` succeeds.",
     );
+  }
+}
+
+async function runHostedCodexConfigShellEnvironmentPolicySmoke(
+  workspaceRoot: string,
+): Promise<{ shellEnvironmentPolicyAllowlisted: boolean }> {
+  const codexHome = path.join(workspaceRoot, "hosted-codex-config-smoke-home", ".codex-hosted");
+  await mkdir(codexHome, {
+    mode: 0o700,
+    recursive: true,
+  });
+  await chmod(codexHome, 0o700);
+
+  const codexConfigPath = path.join(codexHome, "config.toml");
+  await writeFile(codexConfigPath, buildHostedRunnerSmokeCodexConfigToml(), { mode: 0o600 });
+  await chmod(codexConfigPath, 0o600);
+
+  const config = await readFile(codexConfigPath, "utf8");
+  if (!/^\[shell_environment_policy\]$/mu.test(config)) {
+    throw new Error("Hosted runner smoke Codex config is missing [shell_environment_policy].");
+  }
+
+  if (!/^inherit\s*=\s*"all"$/mu.test(config)) {
+    throw new Error(
+      "Hosted runner smoke Codex config must set shell_environment_policy.inherit to all.",
+    );
+  }
+
+  if (
+    !/^include_only\s*=\s*\[/mu.test(config)
+    || !/"PATH"/u.test(config)
+    || !/"VAULT"/u.test(config)
+    || !/"WHISPER_COMMAND"/u.test(config)
+    || /include_only\s*=\s*\[[^\]]*"VERCEL_AI_API_KEY"/mu.test(config)
+  ) {
+    throw new Error(
+      "Hosted runner smoke Codex config must allowlist PATH, VAULT, and WHISPER_COMMAND without provider credentials.",
+    );
+  }
+
+  if (config.includes("hosted-runner-smoke-secret")) {
+    throw new Error("Hosted runner smoke Codex config leaked the provider credential value.");
+  }
+
+  await runCodexAppServerShellEnvironmentProbe({
+    codexHome,
+    runtimeEnv: {
+      PATH: process.env.PATH ?? "",
+      VAULT: process.env.VAULT ?? "",
+      VERCEL_AI_API_KEY: "hosted-runner-smoke-secret",
+      WHISPER_COMMAND: process.env.WHISPER_COMMAND ?? "hosted-runner-smoke-whisper",
+    },
+    vaultRoot: process.env.VAULT ?? "",
+  });
+
+  return {
+    shellEnvironmentPolicyAllowlisted: true,
+  };
+}
+
+function buildHostedRunnerSmokeCodexConfigToml(): string {
+  return [
+    'model = "gpt-5.5"',
+    'model_provider = "vercel-ai-gateway"',
+    'model_reasoning_effort = "medium"',
+    "",
+    '[model_providers."vercel-ai-gateway"]',
+    'name = "Vercel AI Gateway"',
+    'base_url = "https://ai-gateway.vercel.sh/v1"',
+    'env_key = "VERCEL_AI_API_KEY"',
+    'wire_api = "responses"',
+    "",
+    "[shell_environment_policy]",
+    'inherit = "all"',
+    'include_only = ["PATH", "VAULT", "WHISPER_COMMAND"]',
+    "",
+  ].join("\n");
+}
+
+async function runCodexAppServerShellEnvironmentProbe(input: {
+  codexHome: string;
+  runtimeEnv: Record<string, string>;
+  vaultRoot: string;
+}): Promise<void> {
+  const child = spawn("codex", ["app-server"], {
+    env: {
+      ...process.env,
+      ...input.runtimeEnv,
+      CODEX_HOME: input.codexHome,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const childStdin = child.stdin;
+  const childStdout = child.stdout;
+  const childStderr = child.stderr;
+  if (!childStdin || !childStdout || !childStderr) {
+    child.kill();
+    throw new Error("Codex app-server shell env probe failed to open stdio pipes.");
+  }
+  childStdout.setEncoding("utf8");
+  childStderr.setEncoding("utf8");
+
+  let stdoutBuffer = "";
+  let stderr = "";
+  let settled = false;
+
+  const completed = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for Codex app-server shell env probe. stderr: ${stderr}`));
+    }, 10_000);
+
+    const finish = (error?: Error): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    };
+
+    child.once("error", finish);
+    child.once("exit", (code, signal) => {
+      if (!settled) {
+        finish(new Error(
+          `Codex app-server exited before shell env probe completed: ${code ?? signal}. stderr: ${stderr}`,
+        ));
+      }
+    });
+    childStderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    childStdout.on("data", (chunk) => {
+      stdoutBuffer += String(chunk);
+      const lines = stdoutBuffer.split(/\r?\n/u);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+
+        const message = JSON.parse(trimmed) as Record<string, unknown>;
+        if (message.id !== 2) {
+          continue;
+        }
+
+        if (message.error) {
+          finish(new Error(`Codex app-server shell env probe failed: ${JSON.stringify(message.error)}`));
+          return;
+        }
+
+        const result = readCodexCommandExecResult(message.result);
+        assertCodexShellEnvironmentProbeResult({
+          result,
+          vaultRoot: input.vaultRoot,
+        });
+        finish();
+      }
+    });
+  });
+
+  try {
+    childStdin.write(`${JSON.stringify({
+      id: 1,
+      method: "initialize",
+      params: {
+        clientInfo: {
+          name: "hosted-runner-smoke",
+          version: "1",
+        },
+      },
+    })}\n`);
+    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({
+      id: 2,
+      method: "command/exec",
+      params: {
+        command: [
+          "/bin/sh",
+          "-c",
+          [
+            "command -v vault-cli",
+            "command -v murph",
+            "printf '%s\\n' \"${VAULT:-}\"",
+            "printf '%s\\n' \"${WHISPER_COMMAND:-}\"",
+            "printf '%s\\n' \"${VERCEL_AI_API_KEY:-}\"",
+          ].join("; "),
+        ],
+        timeoutMs: 5_000,
+      },
+    })}\n`);
+    await completed;
+  } finally {
+    childStdin.end();
+    child.kill();
+  }
+}
+
+function readCodexCommandExecResult(value: unknown): {
+  exitCode: number;
+  stdout: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Codex app-server shell env probe result must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.exitCode !== "number") {
+    throw new TypeError("Codex app-server shell env probe result.exitCode must be a number.");
+  }
+
+  if (typeof record.stdout !== "string") {
+    throw new TypeError("Codex app-server shell env probe result.stdout must be a string.");
+  }
+
+  return {
+    exitCode: record.exitCode,
+    stdout: record.stdout,
+  };
+}
+
+function assertCodexShellEnvironmentProbeResult(input: {
+  result: {
+    exitCode: number;
+    stdout: string;
+  };
+  vaultRoot: string;
+}): void {
+  if (input.result.exitCode !== 0) {
+    throw new Error(`Codex app-server shell env probe exited ${input.result.exitCode}.`);
+  }
+
+  const [vaultCliPath, murphPath, vaultRoot, whisperCommand, providerCredential, ...extra] =
+    input.result.stdout.split(/\r?\n/u);
+  if (!vaultCliPath || !murphPath || extra.some((line) => line.trim().length > 0)) {
+    throw new Error("Codex app-server shell env probe did not resolve vault-cli and murph cleanly.");
+  }
+
+  if (vaultRoot !== input.vaultRoot) {
+    throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
+  }
+
+  if (whisperCommand !== (process.env.WHISPER_COMMAND ?? "hosted-runner-smoke-whisper")) {
+    throw new Error("Codex app-server shell env probe did not inherit the parser command env.");
+  }
+
+  if (providerCredential && providerCredential.trim().length > 0) {
+    throw new Error("Codex app-server shell env probe leaked the provider credential env.");
   }
 }
 

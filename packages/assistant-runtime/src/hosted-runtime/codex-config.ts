@@ -26,6 +26,32 @@ const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
+const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "all";
+const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
+  "CI",
+  "CODEX_HOME",
+  "COLORTERM",
+  "CURL_CA_BUNDLE",
+  "FFMPEG_COMMAND",
+  "FORCE_COLOR",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "NODE_EXTRA_CA_CERTS",
+  "NO_COLOR",
+  "PATH",
+  "REQUESTS_CA_BUNDLE",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "TEMP",
+  "TERM",
+  "TMP",
+  "TMPDIR",
+  "VAULT",
+  "WHISPER_COMMAND",
+  "WHISPER_MODEL_PATH",
+] as const;
 const DEFAULT_HOSTED_CODEX_PATH =
   "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
@@ -493,6 +519,10 @@ export function buildHostedCodexConfigToml(input: {
     `env_key = ${tomlString(input.provider.envKey)}`,
     `wire_api = ${tomlString(input.provider.wireApi)}`,
     "",
+    "[shell_environment_policy]",
+    `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    `include_only = ${tomlStringArray(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
+    "",
   ].join("\n");
 }
 
@@ -507,4 +537,8 @@ function tomlQuotedKey(value: string): string {
 
 function tomlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function tomlStringArray(values: readonly string[]): string {
+  return `[${values.map(tomlString).join(", ")}]`;
 }
