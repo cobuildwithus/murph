@@ -96,6 +96,10 @@ let cachedRouteIndex: GeneratedRouteIndex | null = null;
 const cachedExperimentProjections = new Map<string, GeneratedExperimentProjection | null>();
 
 export function getGeneratedExperimentIndex(): GeneratedExperimentIndex {
+  if (!shouldUseGeneratedArtifactMemoryCache()) {
+    return readGeneratedExperimentIndex();
+  }
+
   cachedExperimentIndex ??= readGeneratedExperimentIndex();
   return cachedExperimentIndex;
 }
@@ -170,6 +174,10 @@ function readCachedExperimentProjection(
   cacheKey: string,
   readArtifact: () => GeneratedExperimentProjection | null,
 ): GeneratedExperimentProjection | null {
+  if (!shouldUseGeneratedArtifactMemoryCache()) {
+    return readArtifact();
+  }
+
   if (cachedExperimentProjections.has(cacheKey)) {
     return cachedExperimentProjections.get(cacheKey) ?? null;
   }
@@ -195,8 +203,16 @@ function resolveGeneratedExperimentRoute(
 }
 
 function getGeneratedRouteIndex(): GeneratedRouteIndex {
+  if (!shouldUseGeneratedArtifactMemoryCache()) {
+    return readGeneratedRouteIndex();
+  }
+
   cachedRouteIndex ??= readGeneratedRouteIndex();
   return cachedRouteIndex;
+}
+
+function shouldUseGeneratedArtifactMemoryCache(): boolean {
+  return process.env.NODE_ENV === "production";
 }
 
 function readGeneratedExperimentIndex(): GeneratedExperimentIndex {
