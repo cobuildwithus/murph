@@ -223,7 +223,8 @@ export function buildHostedLocalDevOverrides(
   cloudflareDevVars: Record<string, string>,
 ): NodeJS.ProcessEnv {
   const webOrigin = `http://${config.webHost}:${config.webPort}`;
-  const workerBaseUrl = `${config.workerProtocol}://${config.workerHost}:${config.workerPort}`;
+  const workerBaseUrl =
+    `${config.workerProtocol}://${resolveLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
   const callbackPrivateJwkJson = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
   const callbackKeyId = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim();
   const hostedWakeEncryptionKey = cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY?.trim();
@@ -262,6 +263,20 @@ export function buildHostedLocalDevOverrides(
     ...(callbackKeyId ? { HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackKeyId } : {}),
     VERCEL_PROJECT_PRODUCTION_URL: `${config.webHost}:${config.webPort}`,
   };
+}
+
+function resolveLocalClientWorkerHost(workerHost: string): string {
+  const normalized = workerHost.trim().toLowerCase();
+
+  if (normalized === "0.0.0.0") {
+    return "127.0.0.1";
+  }
+
+  if (normalized === "::" || normalized === "::1") {
+    return "[::1]";
+  }
+
+  return workerHost;
 }
 
 export function normalizeLocalDatabaseUrl(

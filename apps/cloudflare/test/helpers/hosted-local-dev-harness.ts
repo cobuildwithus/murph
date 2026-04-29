@@ -155,6 +155,7 @@ export async function startHostedLocalDevHarness(input: {
         const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
+        let nextLagNudgeAt = startedAt;
 
         while ((Date.now() - startedAt) < timeoutMs) {
           const status = await readHostedUserStatus({
@@ -171,6 +172,12 @@ export async function startHostedLocalDevHarness(input: {
             && !status.lastErrorCode
           ) {
             return status;
+          }
+
+          const now = Date.now();
+          if (now >= nextLagNudgeAt && hostedStatusHasMailboxLag(status)) {
+            nextLagNudgeAt = now + 2_000;
+            await nudgeHostedUserBestEffort(userId);
           }
 
           await sleep(pollIntervalMs);
@@ -295,10 +302,31 @@ export async function startHostedLocalDevHarness(input: {
       });
     }
   }
+
+  async function nudgeHostedUserBestEffort(userId: string): Promise<void> {
+    await requestJsonForRuntime(`/internal/users/${encodeURIComponent(userId)}/nudge`, {
+      body: "{}",
+      headers: {
+        ...statusHeaders(userId),
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    }).catch(() => {});
+  }
 }
 
 function resolveLocalHarnessBaseHost(host: string): string {
   return host === "0.0.0.0" ? "127.0.0.1" : host;
+}
+
+function hostedStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean {
+  return status.mailboxLag.some((lane) => {
+    try {
+      return BigInt(lane.lag) > 0n;
+    } catch {
+      return lane.lag !== "0";
+    }
+  });
 }
 
 function resolveHostedLocalHarnessDistDir(
