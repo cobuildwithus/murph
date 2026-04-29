@@ -212,21 +212,30 @@ The local hosted signup flow uses real Stripe Checkout against Stripe's test
 environment; it does not use an in-process fake checkout service. To complete
 the flow without moving real money:
 
-1. Configure test-mode Stripe values in Vercel Development env, shell env, or
-   repo-local env:
+1. Configure test-mode Stripe values in `.tmp/.env.hosted-local-stripe`,
+   `apps/web/.env.local`, or shell env:
    - `STRIPE_SECRET_KEY=sk_test_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL=price_...`
-2. Install and log in to the Stripe CLI once with `stripe login`.
-3. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
+2. Leave `HOSTED_AI_USAGE_BILLING_MODE=disabled` locally unless you are also
+   testing the legacy Stripe meter fallback with matching usage-price ids.
+3. Install and log in to the Stripe CLI once with `stripe login`.
+4. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
    orchestrator starts `stripe listen` and injects the captured
    `STRIPE_WEBHOOK_SECRET` into the web process.
-4. Use a real hosted onboarding invite and continue to checkout. The dev-only
+5. Use a real hosted onboarding invite and continue to checkout. The dev-only
    `/join/<inviteCode>?preview=checkout` URL is only a UI preview; pressing its
    checkout button still calls the real checkout API.
-5. On the Stripe-hosted Checkout page, use Stripe's interactive test card
+6. On the Stripe-hosted Checkout page, use Stripe's interactive test card
    `4242 4242 4242 4242` with any future expiration date and any three-digit
    CVC. Stripe test cards are valid only in test environments.
+
+Root `pnpm dev` loads Stripe env in this precedence order: repo-root `.env`,
+Vercel Development env, `apps/web/.env`, `apps/web/.env.local`,
+`.tmp/.env.hosted-local-stripe`, then the shell env. Local dev refuses
+`sk_live_...` and `rk_live_...` keys by default so test checkout cannot
+accidentally move real money; set `MURPH_DEV_ALLOW_LIVE_STRIPE=1` only for an
+intentional live-mode local run.
 
 Stripe's docs for this contract are:
 

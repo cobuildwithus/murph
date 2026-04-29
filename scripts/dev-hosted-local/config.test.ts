@@ -84,6 +84,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
     expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
+    expect(output).toContain("MURPH_DEV_STRIPE_ENV_FILE=.tmp/.env.hosted-local-stripe");
     expect(output).toContain("stripe listen");
   });
 });

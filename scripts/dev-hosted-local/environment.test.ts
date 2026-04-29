@@ -11,6 +11,7 @@ import {
   normalizeLocalDatabaseUrl,
   parseEnvText,
   resolveHostedLocalDatabaseUrl,
+  resolveHostedLocalStripeEnvFilePath,
   shouldSyncLocalDatabaseSchema,
 } from "./environment.ts";
 import type {
@@ -92,6 +93,32 @@ describe("parseEnvText", () => {
         "}",
       ].join("\n"),
     });
+  });
+});
+
+describe("resolveHostedLocalStripeEnvFilePath", () => {
+  it("defaults to the repo-local ignored Stripe env file", () => {
+    expect(resolveHostedLocalStripeEnvFilePath({}, { root: "/repo" })).toBe(
+      "/repo/.tmp/.env.hosted-local-stripe",
+    );
+  });
+
+  it("allows disabling the local Stripe env overlay", () => {
+    expect(
+      resolveHostedLocalStripeEnvFilePath(
+        { MURPH_DEV_STRIPE_ENV_FILE: "off" },
+        { root: "/repo" },
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects env file paths outside the repo", () => {
+    expect(() =>
+      resolveHostedLocalStripeEnvFilePath(
+        { MURPH_DEV_STRIPE_ENV_FILE: "../outside.env" },
+        { root: "/repo" },
+      )
+    ).toThrow("MURPH_DEV_STRIPE_ENV_FILE must resolve inside the repo.");
   });
 });
 

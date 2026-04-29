@@ -5,6 +5,7 @@ import {
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
   DEFAULT_WORKER_PROTOCOL,
+  DEFAULT_STRIPE_ENV_FILE,
 } from "./constants.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
 
@@ -72,6 +73,7 @@ export function printHelp(): void {
       "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
       "  MURPH_DEV_SKIP_RUNNER_SMOKE=1       Skip the runner container deploy-smoke readiness proof",
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",
+      `  MURPH_DEV_STRIPE_ENV_FILE=${DEFAULT_STRIPE_ENV_FILE}  Load local Stripe test checkout env after Vercel env pull`,
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",
       "  MURPH_DEV_WEB_HOST=127.0.0.1        Hosted web listen host",
       "  MURPH_DEV_WEB_PORT=3000             Hosted web listen port",

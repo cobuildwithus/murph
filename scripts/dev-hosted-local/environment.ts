@@ -5,9 +5,11 @@ import {
   cloudflareDir,
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
+  DEFAULT_STRIPE_ENV_FILE,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
   WRANGLER_VAR_ALLOWLIST,
+  webDir,
 } from "./constants.ts";
 import {
   HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
@@ -46,18 +48,63 @@ export async function loadHostedLocalBaseEnvironment(
   } = {},
 ): Promise<NodeJS.ProcessEnv> {
   const source = input.source ?? process.env;
-  const [repoEnv, webEnv, webLocalEnv] = await Promise.all([
+  const [repoEnv, webEnv, webLocalEnv, stripeEnv] = await Promise.all([
     readOptionalSimpleEnvFile(path.join(repoRoot, ".env")),
-    readOptionalSimpleEnvFile(path.join(repoRoot, "apps/web/.env")),
-    readOptionalSimpleEnvFile(path.join(repoRoot, "apps/web/.env.local")),
+    readOptionalSimpleEnvFile(path.join(webDir, ".env")),
+    readOptionalSimpleEnvFile(path.join(webDir, ".env.local")),
+    readHostedLocalStripeEnvFile(source),
   ]);
 
   return normalizeHostedLocalBaseEnvironment({
     ...repoEnv,
     ...webEnv,
     ...webLocalEnv,
+    ...stripeEnv,
     ...source,
   });
+}
+
+export async function readHostedLocalStripeEnvFile(
+  env: NodeJS.ProcessEnv,
+): Promise<Record<string, string>> {
+  const stripeEnvPath = resolveHostedLocalStripeEnvFilePath(env);
+  if (stripeEnvPath === null) {
+    return {};
+  }
+
+  return await readOptionalSimpleEnvFile(stripeEnvPath);
+}
+
+export function resolveHostedLocalStripeEnvFilePath(
+  env: NodeJS.ProcessEnv,
+  options: {
+    root?: string;
+  } = {},
+): string | null {
+  const root = options.root ?? repoRoot;
+  const configuredPath = env.MURPH_DEV_STRIPE_ENV_FILE?.trim();
+
+  if (
+    configuredPath
+    && ["0", "false", "off", "none"].includes(configuredPath.toLowerCase())
+  ) {
+    return null;
+  }
+
+  const candidate = configuredPath || DEFAULT_STRIPE_ENV_FILE;
+  const resolved = path.resolve(root, candidate);
+  const relative = path.relative(root, resolved);
+
+  if (
+    relative.length === 0
+    || relative === "."
+    || relative.startsWith("..")
+    || path.isAbsolute(relative)
+  ) {
+    throw new Error("MURPH_DEV_STRIPE_ENV_FILE must resolve inside the repo.");
+  }
+
+  return resolved;
 }
 
 export function mergeCloudflareLocalEnv(input: {

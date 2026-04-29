@@ -159,6 +159,7 @@ vi.mock("./environment.ts", () => ({
   readOptionalSimpleEnvFile: vi.fn(async () => ({
     HOSTED_ASSISTANT_PROVIDER: "venice",
   })),
+  readHostedLocalStripeEnvFile: vi.fn(async () => ({})),
   readSimpleEnvFile: vi.fn(async () => ({})),
   requireEnvValue: vi.fn(),
   resolveCloudflareLocalEnv: vi.fn(async (input: { overrides?: Record<string, string | undefined> }) => ({
@@ -686,6 +687,64 @@ describe("hosted local dev stack", () => {
         HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
+      expect.any(Object),
+    );
+  });
+
+  it("loads the local Stripe env overlay after pulled Vercel env and below shell env", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 351 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 352 }));
+
+    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL", "price_shell_annual");
+
+    const environmentModule = await import("./environment.ts");
+    vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
+      STRIPE_SECRET_KEY: "sk_test_vercel",
+    });
+    vi.mocked(environmentModule.readHostedLocalStripeEnvFile).mockResolvedValueOnce({
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_local_annual",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
+      STRIPE_SECRET_KEY: "sk_test_local",
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "web",
+      "pnpm",
+      expect.any(Array),
+      expect.objectContaining({
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_shell_annual",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
+        STRIPE_SECRET_KEY: "sk_test_local",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("refuses live Stripe keys in local hosted dev unless explicitly allowed", async () => {
+    const environmentModule = await import("./environment.ts");
+    vi.mocked(environmentModule.readHostedLocalStripeEnvFile).mockResolvedValueOnce({
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_live_like_monthly",
+      STRIPE_SECRET_KEY: "sk_live_not_for_local_dev",
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: process.env,
+    })).rejects.toThrow("refuses to start with a live Stripe secret key");
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "prisma:generate"],
       expect.any(Object),
     );
   });
