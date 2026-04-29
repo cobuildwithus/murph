@@ -140,6 +140,12 @@ Opt-in runtime integrations and tool overrides:
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_FILE_BASE_URL`
 - `FFMPEG_COMMAND`
+- `FILE_COMMAND`
+- `MUTOOL_COMMAND`
+- `PDFINFO_COMMAND`
+- `PDFTOPPM_COMMAND`
+- `PDFTOTEXT_COMMAND`
+- `QPDF_COMMAND`
 - `WHISPER_COMMAND`
 - `WHISPER_MODEL_PATH`
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
@@ -262,8 +268,8 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is tagged `murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en`.
-It contains Node, pinned `@openai/codex`, `ffmpeg`, `whisper.cpp`, and the default Whisper model, but no app bundle or worker secrets.
-The base image build runs `codex app-server --help` under the runner user, and the Docker smoke repeats that check inside the final image before deploy.
+It contains Node, pinned `@openai/codex`, `ffmpeg`, `whisper.cpp`, the default Whisper model, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle or worker secrets.
+The base image build runs `codex app-server --help` under the runner user, and the Docker smoke repeats that check inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
 
 When you need to backstop lifecycle rules locally or in CI:
 

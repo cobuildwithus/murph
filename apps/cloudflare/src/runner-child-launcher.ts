@@ -8,14 +8,23 @@ import {
 } from "@murphai/assistant-runtime";
 
 const HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS = [
+  "FFMPEG_COMMAND",
+  "FILE_COMMAND",
   "LANG",
   "LC_ALL",
   "LC_CTYPE",
+  "MUTOOL_COMMAND",
   "NODE_EXTRA_CA_CERTS",
+  "PDFINFO_COMMAND",
+  "PDFTOPPM_COMMAND",
+  "PDFTOTEXT_COMMAND",
   "PATH",
+  "QPDF_COMMAND",
   "SSL_CERT_DIR",
   "SSL_CERT_FILE",
   "TZ",
+  "WHISPER_COMMAND",
+  "WHISPER_MODEL_PATH",
 ] as const;
 
 export interface HostedRunnerChildLauncherDirectories {

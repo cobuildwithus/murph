@@ -200,6 +200,7 @@ describe("hosted runner secrets policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
 
     expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("PDFTOTEXT_COMMAND")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_LOG_FINGERPRINT_SECRET")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
@@ -211,6 +212,7 @@ describe("hosted runner secrets policy", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
         "FFMPEG_COMMAND",
+        "PDFTOTEXT_COMMAND",
         "HOSTED_AI_USAGE_REPORTING_SECRET",
         "HOSTED_LOG_FINGERPRINT_SECRET",
         "WHISPER_COMMAND",
@@ -219,6 +221,7 @@ describe("hosted runner secrets policy", () => {
     };
 
     expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("PDFTOTEXT_COMMAND", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_LOG_FINGERPRINT_SECRET", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND", source)).toBe(false);
@@ -228,6 +231,7 @@ describe("hosted runner secrets policy", () => {
   it("filters operator-only keys out of runner secrets before execution", () => {
     expect(filterHostedRunnerSecrets({
       FFMPEG_COMMAND: "/tmp/evil-ffmpeg",
+      PDFTOTEXT_COMMAND: "/tmp/evil-pdftotext",
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       NODE_OPTIONS: "--require /tmp/evil-loader.js",

@@ -27,9 +27,11 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking unrelated worker vars", () => {
     expect(buildHostedRunnerContainerEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
     })).toEqual({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -40,6 +42,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(buildHostedRunnerContainerEnv({
       BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
@@ -48,6 +51,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",

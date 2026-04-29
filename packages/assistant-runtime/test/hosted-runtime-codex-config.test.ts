@@ -65,6 +65,7 @@ test("hosted Codex runtime config writes Vercel AI Gateway Responses config with
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "all"/u);
   assert.match(config, /include_only = \[/u);
+  assert.match(config, /"PDFTOTEXT_COMMAND"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
   assert.match(config, /"WHISPER_COMMAND"/u);
@@ -306,7 +307,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
-      'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FFMPEG_COMMAND", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT", "WHISPER_COMMAND", "WHISPER_MODEL_PATH"]',
+      'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FFMPEG_COMMAND", "FILE_COMMAND", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "MUTOOL_COMMAND", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "PDFINFO_COMMAND", "PDFTOPPM_COMMAND", "PDFTOTEXT_COMMAND", "QPDF_COMMAND", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT", "WHISPER_COMMAND", "WHISPER_MODEL_PATH"]',
       "",
     ].join("\n"),
   );

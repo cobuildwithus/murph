@@ -44,6 +44,7 @@ export {
   createConfiguredParserRegistry,
   discoverParserToolchain,
   ffmpegOptionsFromDoctor,
+  popplerPdfOptionsFromDoctor,
 } from "./toolchain/discover.js";
 export type {
   ParserToolName,
@@ -59,6 +60,8 @@ export {
 } from "./toolchain/config.js";
 export type { FfmpegToolOptions } from "./adapters/ffmpeg.js";
 export { prepareAudioInput, resolveFfmpegCommand } from "./adapters/ffmpeg.js";
+export type { PopplerPdfProviderOptions } from "./adapters/poppler-pdf.js";
+export { createPopplerPdfProvider } from "./adapters/poppler-pdf.js";
 export type { WhisperCppProviderOptions } from "./adapters/whisper-cpp.js";
 export { createWhisperCppProvider } from "./adapters/whisper-cpp.js";
 export type {
@@ -87,6 +90,7 @@ export type { CommandResult } from "./shared.js";
 export { runCommand } from "./shared.js";
 
 import { createTextFileProvider } from "./adapters/text-file.js";
+import { createPopplerPdfProvider, type PopplerPdfProviderOptions } from "./adapters/poppler-pdf.js";
 import {
   createZxingWasmProvider,
   type ZxingWasmProviderOptions,
@@ -95,6 +99,7 @@ import { createWhisperCppProvider, type WhisperCppProviderOptions } from "./adap
 import { createParserRegistry } from "./registry/registry.js";
 
 export interface DefaultParserRegistryOptions {
+  popplerPdf?: PopplerPdfProviderOptions;
   whisper?: WhisperCppProviderOptions;
   zxingWasm?: ZxingWasmProviderOptions;
 }
@@ -102,6 +107,7 @@ export interface DefaultParserRegistryOptions {
 export function createDefaultParserRegistry(options: DefaultParserRegistryOptions = {}) {
   return createParserRegistry([
     createTextFileProvider(),
+    createPopplerPdfProvider(options.popplerPdf),
     createZxingWasmProvider(options.zxingWasm),
     createWhisperCppProvider(options.whisper),
   ]);

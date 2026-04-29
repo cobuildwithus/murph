@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { FfmpegToolOptions } from "../adapters/ffmpeg.js";
+import { createPopplerPdfProvider } from "../adapters/poppler-pdf.js";
 import { createTextFileProvider } from "../adapters/text-file.js";
 import { createWhisperCppProvider } from "../adapters/whisper-cpp.js";
 import { createZxingWasmProvider } from "../adapters/zxing-wasm.js";
@@ -80,6 +81,22 @@ async function discoverParserToolchainStateFromContext(input: {
     availableReason: "ffmpeg CLI available.",
     missingReason: "ffmpeg CLI not found.",
   });
+  const pdfinfo = await discoverCommandTool({
+    config: input.config?.tools.pdfinfo,
+    vaultRoot: input.vaultRoot,
+    envValue: readConfiguredEnvValue(process.env, ["PDFINFO_COMMAND"]),
+    fallbackCommands: ["pdfinfo"],
+    availableReason: "pdfinfo CLI available.",
+    missingReason: "pdfinfo CLI not found.",
+  });
+  const pdftotext = await discoverCommandTool({
+    config: input.config?.tools.pdftotext,
+    vaultRoot: input.vaultRoot,
+    envValue: readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND"]),
+    fallbackCommands: ["pdftotext"],
+    availableReason: "pdftotext CLI available.",
+    missingReason: "pdftotext CLI not found.",
+  });
   const whisper = await discoverWhisperTool(input.config, input.vaultRoot);
 
   return {
@@ -88,6 +105,8 @@ async function discoverParserToolchainStateFromContext(input: {
       discoveredAt: new Date().toISOString(),
       tools: {
         ffmpeg,
+        pdfinfo,
+        pdftotext,
         whisper: toPublicWhisperToolDiscovery(whisper),
       },
     },
@@ -113,6 +132,7 @@ export async function createConfiguredParserRegistry(input: {
     doctor: state.doctor,
     registry: createParserRegistry([
       createTextFileProvider(),
+      createPopplerPdfProvider(popplerPdfOptionsFromDoctor(state.doctor)),
       createZxingWasmProvider(),
       createWhisperCppProvider(
         whisperProviderOptionsFromDiscovery(state.whisper),
@@ -145,6 +165,32 @@ export function ffmpegOptionsFromDoctor(
   return {
     commandCandidates: [command],
     allowSystemLookup: doctor.tools.ffmpeg.source !== "config",
+  };
+}
+
+export function popplerPdfOptionsFromDoctor(
+  doctor: ParserDoctorReport,
+) {
+  const pdfInfoCommand = normalizeNullableString(doctor.tools.pdfinfo.command);
+  const pdfToTextCommand = normalizeNullableString(doctor.tools.pdftotext.command);
+  const available = Boolean(
+    doctor.tools.pdfinfo.available &&
+    doctor.tools.pdftotext.available &&
+    pdfInfoCommand &&
+    pdfToTextCommand,
+  );
+
+  return {
+    resolvedToolState: {
+      available,
+      reason: available
+        ? "Poppler PDF text extraction tools available."
+        : !pdfInfoCommand
+          ? doctor.tools.pdfinfo.reason
+          : doctor.tools.pdftotext.reason,
+      pdfInfoCommandPath: pdfInfoCommand,
+      pdfToTextCommandPath: pdfToTextCommand,
+    },
   };
 }
 
