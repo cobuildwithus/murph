@@ -363,7 +363,11 @@ https://join.example.test/join/code_first_text`);
       expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
       expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
       expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-      expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+      expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        signal: undefined,
+        timeoutMs: 750,
+      });
       expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
         memberId: "member_123",
         occurredAt: "2026-03-26T12:00:00.000Z",
@@ -534,7 +538,7 @@ https://join.example.test/join/code_first_text`);
     ).toBe(true);
   });
 
-  it("does not send an ingress Linq read receipt before a deferred Cloudflare handoff", async () => {
+  it("sends an ingress Linq read receipt before a deferred Cloudflare handoff", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -558,11 +562,12 @@ https://join.example.test/join/code_first_text`);
       },
     });
     const deferred: Array<() => Promise<void>> = [];
+    const defer = vi.fn((drain: () => Promise<void>) => {
+      deferred.push(drain);
+    });
 
     await expect(handleHostedOnboardingLinqWebhook({
-      defer: (drain) => {
-        deferred.push(drain);
-      },
+      defer,
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         eventId: "evt_ingress_read_receipt",
@@ -574,12 +579,33 @@ https://join.example.test/join/code_first_text`);
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+      timeoutMs: 750,
+    });
+    expect(mocks.sendHostedLinqReadReceipt.mock.invocationCallOrder[0]).toBeLessThan(
+      defer.mock.invocationCallOrder[0],
+    );
     expect(deferred).toHaveLength(1);
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.startHostedOnboardingTiming).not.toHaveBeenCalledWith(
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.ingress-read-receipt",
-      expect.anything(),
+      expect.objectContaining({
+        chatIdPresent: true,
+        responseReason: "wake-appended-active-member",
+        timeoutMs: 750,
+      }),
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "sent",
+      expect.objectContaining({
+        httpStatus: 204,
+        responseReason: "wake-appended-active-member",
+      }),
     );
   });
 
@@ -624,12 +650,21 @@ https://join.example.test/join/code_first_text`);
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+      timeoutMs: 750,
+    });
     expect(deferred).toHaveLength(1);
-    expect(mocks.finishHostedOnboardingTiming).not.toHaveBeenCalledWith(
-      expect.objectContaining({ step: "hosted-onboarding.webhook.linq.ingress-read-receipt" }),
-      expect.anything(),
-      expect.anything(),
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "failed",
+      expect.objectContaining({
+        errorName: "Error",
+        responseReason: "wake-appended-active-member",
+      }),
     );
 
     await deferred[0]?.();
@@ -712,7 +747,11 @@ https://join.example.test/join/code_first_text`);
     expect(transactionReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+      timeoutMs: 750,
+    });
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
