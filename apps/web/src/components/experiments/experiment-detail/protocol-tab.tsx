@@ -627,7 +627,6 @@ function ExpectedSignalContextPills({
           <span className="font-semibold text-foreground">
             {signal.label}
           </span>
-          <span className="text-muted-foreground">{signal.expected}</span>
         </span>
       ))}
     </div>

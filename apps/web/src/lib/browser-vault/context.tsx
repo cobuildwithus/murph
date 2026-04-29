@@ -170,6 +170,10 @@ async function loadBrowserVaultReplica(knownDataVersion: string | null): Promise
     method: "POST",
   });
 
+  if (response.status === 401 || response.status === 403) {
+    return { state: "empty" };
+  }
+
   if (!response.ok) {
     throw new Error(await readJsonErrorMessage(response));
   }
