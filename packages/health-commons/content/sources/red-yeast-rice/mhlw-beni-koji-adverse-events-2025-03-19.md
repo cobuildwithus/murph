@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Government adverse-event information page"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Consumers of specified Beni-koji products in Japan"
@@ -71,6 +73,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_mhlw_beni_koji_adverse_events_2025_03_19_html"
     sourceKey: "source_artifact:mhlw-beni-koji-adverse-events-2025-03-19"

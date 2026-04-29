@@ -14,6 +14,7 @@ aliases:
 categories:
   - tabata-interval-training
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
@@ -62,6 +63,7 @@ claimUse: context-only
 murphV1Priority: Medium
 pdfRightsStatus: unknown
 relatedPublications:
+
   -
     citation: Liu X, Tsuji K, Xu Y, Iemitsu M, Tabata I. Effects of high-intensity intermittent cross-training on maximal oxygen uptake. Sports Medicine and Health Science. 2024 Nov 9;7(3):185-189.
     doi: 10.1016/j.smhs.2024.11.003

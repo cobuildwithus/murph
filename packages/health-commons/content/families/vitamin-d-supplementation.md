@@ -18,6 +18,7 @@ categories:
   - biomarker-feedback
   - vitamin-d
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,12 +42,12 @@ Vitamin D Supplementation is the parent family for protocols that use supplement
 
 ## Canonical child protocol
 
-- **Daily Vitamin D3 Supplementation** (`protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation`) is the current Murph canonical variant for a general adult, daily oral cholecalciferol experiment with serum 25(OH)D as the primary measurable endpoint. Its direct evidence base is strongest for changing 25(OH)D, not for broad disease-prevention claims (`source_artifact:pmid-12499343`, `source_artifact:pmid-19064513`, `source_artifact:pmid-26037521`, `source_artifact:pmid-32365732`, `source_artifact:pmid-37764770`).
+- **Daily Vitamin D3 Supplementation** (`protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation`) is the current Murph canonical variant for a general adult, daily oral cholecalciferol experiment with serum 25(OH)D as the primary measurable endpoint. Its direct evidence base is strongest for changing 25(OH)D, not for broad disease-prevention claims.
 
 ## What belongs in separate variants
 
-- Vitamin D2, calcifediol, calcitriol or active analogues, large bolus schedules, UVB exposure, fortified-food trials, pregnancy or pediatric protocols, CKD-MBD care, osteoporosis drug co-therapy, and clinically supervised correction should be kept out of this canonical daily D3 variant unless a dedicated page is created (`source_artifact:pmid-22552031`, `source_artifact:pmid-22552038`, `source_artifact:pmid-24516879`, `source_artifact:pmid-34008842`, `source_artifact:pmid-24424073`, `source_artifact:pmcid-PMC4300188`, `source_artifact:pmid-37120684`, `source_artifact:pmid-21706518`, `source_artifact:pmid-27788053`, `source_artifact:pmid-24092833`, `source_artifact:pmid-33427961`, `source_artifact:pmid-30675420`, `source_artifact:doi-10.3390-ijerph17051684`).
+- Vitamin D2, calcifediol, calcitriol or active analogues, large bolus schedules, UVB exposure, fortified-food trials, pregnancy or pediatric protocols, CKD-MBD care, osteoporosis drug co-therapy, and clinically supervised correction should be kept out of this canonical daily D3 variant unless a dedicated page is created.
 
 ## Evidence posture
 
-The cleanest self-experiment endpoint is serum or plasma 25(OH)D. Bone, falls, respiratory, mood, fatigue, cardiovascular, kidney-stone, and mortality outcomes are mixed, long-horizon, population-specific, or safety-context evidence and should not be promoted as guaranteed benefits (`source_artifact:pmid-30415629`, `source_artifact:pmid-31923341`, `source_artifact:pmid-35939577`, `source_artifact:pmid-33847712`, `source_artifact:pmid-38828931`).
+The cleanest self-experiment endpoint is serum or plasma 25(OH)D. Bone, falls, respiratory, mood, fatigue, cardiovascular, kidney-stone, and mortality outcomes are mixed, long-horizon, population-specific, or safety-context evidence and should not be promoted as guaranteed benefits.

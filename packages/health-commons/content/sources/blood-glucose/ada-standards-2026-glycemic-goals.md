@@ -16,6 +16,7 @@ categories:
   - glycemic-goals
   - guideline
 relations:
+
   -
     type: cites
     target: biomarker:blood-glucose

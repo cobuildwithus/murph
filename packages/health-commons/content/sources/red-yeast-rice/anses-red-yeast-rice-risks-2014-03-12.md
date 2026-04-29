@@ -15,6 +15,7 @@ categories:
   - "safety"
   - "pharmacovigilance"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -61,6 +62,7 @@ directness: "general_guideline"
 claimUse: "safety-only"
 claimUseBoundary: "Safety and product-quality guidance only; do not infer population incidence from nutrivigilance counts."
 sourceFindings:
+
   -
     findingId: "finding:red-yeast-rice-batch-004-anses-2014-statins-like-risk"
     sourceKey: "source_artifact:anses-red-yeast-rice-risks-2014-03-12"

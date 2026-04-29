@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - safety_boundaries_labs
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -40,6 +41,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-013; priority: medium; claimUse: safety-only; directness: measurement_context"
 sourceFindings:
+
   -
     findingId: finding:doi-10-1016-j-metabol-2014-02-007-hormone-decrements-not-attenuated
     sourceKey: source_artifact:doi-10.1016-j.metabol.2014.02.007

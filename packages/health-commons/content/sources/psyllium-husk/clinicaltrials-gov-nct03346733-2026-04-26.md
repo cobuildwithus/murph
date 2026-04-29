@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -81,6 +82,7 @@ adverseEventsOrSafetyNotes: "No adverse-event extraction in the registry/protoco
 artifactCandidates:
   - "art-clinicaltrials-gov-nct03346733-2026-04-26"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-gov-nct03346733-psyllium-review-eligibility"
     sourceKey: "source_artifact:clinicaltrials-gov-nct03346733-2026-04-26"

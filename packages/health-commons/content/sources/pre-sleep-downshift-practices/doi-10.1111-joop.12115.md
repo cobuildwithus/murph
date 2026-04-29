@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -71,6 +72,7 @@ limitations:
   - Does not isolate silent practice immediately before bed.
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:doi-10.1111-joop.12115-low-dose-work-recovery-sleep
     sourceKey: source_artifact:doi-10.1111-joop.12115

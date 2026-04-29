@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Contextual source for framing adverse experiences without col
 studyDesign: "narrative_review"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12671-017-0878-8:context-boundary"
     sourceKey: "source_artifact:doi-10.1007-s12671-017-0878-8"

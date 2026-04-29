@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - meal_distribution_pacing
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -40,6 +41,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-007; priority: medium; claimUse: context-only; directness: adjacent_variant"
 sourceFindings:
+
   -
     findingId: finding:doi-10-1016-j-nutos-2025-05-008-promiss-distribution-performance-null
     findingKind: context

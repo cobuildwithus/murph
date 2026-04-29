@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Regulation / monacolin restriction"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "EU foods and supplements containing monacolins from red yeast rice"
@@ -70,6 +72,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_eur_lex_regulation_2022_860_monacolins_red_yeast_rice_2022_06_01_html"
     sourceKey: "source_artifact:eur-lex-regulation-2022-860-monacolins-red-yeast-rice-2022-06-01"

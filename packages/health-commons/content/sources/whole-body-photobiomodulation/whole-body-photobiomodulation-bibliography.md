@@ -10,6 +10,7 @@ quality: usable
 categories:
   - whole-body-photobiomodulation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure

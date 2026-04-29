@@ -3,26 +3,28 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:fda-biophotas-celluma3-k171323-2017-09-01
 slug: sources/skin-photobiomodulation/fda-biophotas-celluma3-k171323-2017-09-01
-title: 510(k) Summary: BioPhotas Celluma3
+title: '510(k) Summary: BioPhotas Celluma3'
 summary: FDA 510(k) context for a visible/infrared LED panel or flexible light-therapy device with a full-face wrinkle indication; useful for dose and ergonomics boundaries only.
 status: draft
 quality: usable
+aliases:
+- BioPhotas Celluma3
+- K171323
+- Celluma3 510(k)
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: other
-  title: 510(k) Summary: BioPhotas Celluma3
+  title: '510(k) Summary: BioPhotas Celluma3'
   authors: U.S. Food and Drug Administration; BioPhotas Inc.
   year: 2017
   journal: FDA 510(k) Premarket Notification
-  citation: U.S. Food and Drug Administration; BioPhotas Inc. 510(k) Summary: BioPhotas Celluma3. FDA 510(k) Premarket Notification; 2017. K171323.
+  citation: 'U.S. Food and Drug Administration; BioPhotas Inc. 510(k) Summary: BioPhotas Celluma3. FDA 510(k) Premarket Notification; 2017. K171323.'
   url: https://www.accessdata.fda.gov/cdrh_docs/pdf17/K171323.pdf
 researchEvidence:
   designKind: other
@@ -34,11 +36,11 @@ researchEvidence:
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Adds a non-mask LED form factor with explicit red/NIR wavelength and dose context, helping separate ergonomics from biological claims.
 potentialMurphEndpoints:
-  - panel-vs-mask
-  - power-density
-  - fluence
-  - session-length
-  - weekly-frequency
+- panel-vs-mask
+- power-density
+- fluence
+- session-length
+- weekly-frequency
 protocolTakeaway: Use as a dose and form-factor context source for red/NIR full-face LED implementation; do not cite as efficacy evidence.
 murphTakeaway: Helpful for parameter comparison between consumer masks and flexible/panel LED devices.
 studyDesign: Regulatory 510(k) summary for a visible/infrared LED therapy device with wrinkle indication.

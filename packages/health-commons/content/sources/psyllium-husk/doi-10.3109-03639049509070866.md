@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "mechanistic"
 modality: "oral psyllium husk / ispaghula husk safety, tolerability, label, or adjacent context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.3109-03639049509070866-ispaghula-carbamazepine-bioavailability"
     sourceKey: "source_artifact:doi-10.3109-03639049509070866"

@@ -14,6 +14,7 @@ categories:
   - "red-yeast-rice"
   - "adjacent-combination-evidence"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -67,6 +68,7 @@ studyDesign: "open-label randomized single-site post-market study"
 modality: "oral multi-ingredient monacolin supplement"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1039-c8fo00415c-adjacent"
     sourceKey: "source_artifact:doi-10.1039-c8fo00415c"

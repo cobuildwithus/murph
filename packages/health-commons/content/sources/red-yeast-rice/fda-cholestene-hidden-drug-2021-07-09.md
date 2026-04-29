@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Regulatory public notification"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Consumers exposed to Cholestene"
@@ -70,6 +72,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_fda_cholestene_hidden_drug_2021_07_09_html"
     sourceKey: "source_artifact:fda-cholestene-hidden-drug-2021-07-09"

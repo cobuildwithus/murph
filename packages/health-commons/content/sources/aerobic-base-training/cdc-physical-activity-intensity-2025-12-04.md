@@ -14,6 +14,7 @@ aliases:
 categories:
   - "aerobic-base-training"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block"
@@ -59,6 +60,7 @@ studyDesign: "guideline"
 modality: "Talk-test physical activity intensity guidance"
 claimUse: "supports-protocol"
 sourceFindings:
+
   -
     findingId: "finding:cdc-physical-activity-intensity-talk-test"
     sourceKey: "source_artifact:cdc-physical-activity-intensity-2025-12-04"

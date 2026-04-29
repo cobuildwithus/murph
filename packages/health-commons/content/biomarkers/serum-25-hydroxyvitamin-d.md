@@ -19,6 +19,7 @@ categories:
   - vitamin-d
   - supplements
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -70,6 +71,6 @@ biomarker:
       - kidney disease or calcium disorders
 ---
 
-Serum 25-hydroxyvitamin D is the main outcome for Daily Vitamin D3 Supplementation because direct daily-D3 trials repeatedly measure a change in this biomarker over weeks to months (`source_artifact:pmid-12499343`, `source_artifact:pmid-19064513`, `source_artifact:pmid-26037521`, `source_artifact:pmid-32365732`, `source_artifact:pmid-37764770`).
+Serum 25-hydroxyvitamin D is the main outcome for Daily Vitamin D3 Supplementation because direct daily-D3 trials repeatedly measure a change in this biomarker over weeks to months.
 
-Use it as a **status and response marker**, not as proof that symptoms or disease risks changed. Thresholds and target ranges differ across sources, and assay/unit differences can make comparisons noisy (`source_artifact:pmid-38828931`).
+Use it as a **status and response marker**, not as proof that symptoms or disease risks changed. Thresholds and target ranges differ across sources, and assay/unit differences can make comparisons noisy.

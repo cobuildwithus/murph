@@ -7,15 +7,16 @@ title: The Effects of an LED Face Mask & Neck and Chest Mask on Skin Health
 summary: ClinicalTrials.gov single-group iRestore LED face and neck/chest mask registry, included as adjacent protocol-design context.
 status: draft
 quality: usable
+aliases:
+- The Effects of an LED Face Mask & Neck and Chest Mask on Skin Health
+- NCT07025837
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: external_protocol
   title: The Effects of an LED Face Mask & Neck and Chest Mask on Skin Health
@@ -36,16 +37,16 @@ researchEvidence:
 evidenceBucket: adjacent device or combination-intervention evidence
 whyItMatters: It is close to consumer mask use and includes face plus neck/chest anatomy, but the single-group registry design prevents efficacy claims in this extraction.
 potentialMurphEndpoints:
-  - dermatologist grading
-  - participant perception of plumpness
-  - fine lines/wrinkles
-  - pigmentation
-  - tone/texture
-  - redness
-  - firmness
-  - radiance
-  - crepey skin
-  - baseline/Week 12 photos
+- dermatologist grading
+- participant perception of plumpness
+- fine lines/wrinkles
+- pigmentation
+- tone/texture
+- redness
+- firmness
+- radiance
+- crepey skin
+- baseline/Week 12 photos
 protocolTakeaway: Use for protocol-design and device-geometry context only; do not use as outcome evidence without results extraction.
 murphTakeaway: A daily 10-minute schedule can be tracked with questionnaires and standardized photos, but a single-group registry cannot establish causal effects.
 studyDesign: Single-group virtual trial registry/protocol.

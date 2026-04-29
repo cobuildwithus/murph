@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Directly relevant to adherence and burden differences for bri
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12671-017-0717-y-batch006-primary"
     sourceKey: "source_artifact:doi-10.1007-s12671-017-0717-y"

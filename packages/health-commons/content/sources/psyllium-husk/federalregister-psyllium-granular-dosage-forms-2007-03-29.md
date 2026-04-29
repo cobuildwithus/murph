@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "guideline"
 modality: "oral psyllium husk / ispaghula husk safety, tolerability, label, or adjacent context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:federalregister-psyllium-granular-dosage-forms-2007-03-29-fr-granular-nongrase"
     sourceKey: "source_artifact:federalregister-psyllium-granular-dosage-forms-2007-03-29"

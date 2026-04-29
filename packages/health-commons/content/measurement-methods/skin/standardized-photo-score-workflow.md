@@ -17,6 +17,7 @@ categories:
   - "measurement-method"
   - "standardized-photo"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
@@ -57,6 +58,7 @@ measurementMethod:
     - "biomarker:skin-texture-roughness-score"
     - "biomarker:skin-tolerability-symptoms"
   outputs:
+
     -
       outputId: "standardized_skin_photo_score"
       label: "Standardized skin photo score"

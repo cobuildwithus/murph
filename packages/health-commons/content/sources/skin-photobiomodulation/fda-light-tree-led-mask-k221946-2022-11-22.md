@@ -3,26 +3,28 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:fda-light-tree-led-mask-k221946-2022-11-22
 slug: sources/skin-photobiomodulation/fda-light-tree-led-mask-k221946-2022-11-22
-title: 510(k) Summary: LED Light Therapy Mask, Model MK66R-B
+title: '510(k) Summary: LED Light Therapy Mask, Model MK66R-B'
 summary: FDA 510(k) context for a full-face OTC red/NIR LED mask, including wavelength, intensity, treatment-time, and label-use details; not clinical efficacy evidence.
 status: draft
 quality: usable
+aliases:
+- LED Light Therapy Mask Model MK66R-B
+- K221946
+- Light Tree Ventures LED mask
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: other
-  title: 510(k) Summary: LED Light Therapy Mask, Model MK66R-B
+  title: '510(k) Summary: LED Light Therapy Mask, Model MK66R-B'
   authors: U.S. Food and Drug Administration; Light Tree Ventures Europe B.V.
   year: 2022
   journal: FDA 510(k) Premarket Notification
-  citation: U.S. Food and Drug Administration; Light Tree Ventures Europe B.V. 510(k) Summary: LED Light Therapy Mask, Model MK66R-B. FDA 510(k) Premarket Notification; 2022. K221946.
+  citation: 'U.S. Food and Drug Administration; Light Tree Ventures Europe B.V. 510(k) Summary: LED Light Therapy Mask, Model MK66R-B. FDA 510(k) Premarket Notification; 2022. K221946.'
   url: https://www.accessdata.fda.gov/cdrh_docs/pdf22/K221946.pdf
 researchEvidence:
   designKind: other
@@ -34,11 +36,11 @@ researchEvidence:
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Provides a concrete consumer-mask implementation profile near common red/NIR protocol ranges while preserving the regulatory/evidence boundary.
 potentialMurphEndpoints:
-  - consumer-device-dose
-  - session-length
-  - weekly-frequency
-  - cumulative-dose
-  - eye-protection
+- consumer-device-dose
+- session-length
+- weekly-frequency
+- cumulative-dose
+- eye-protection
 protocolTakeaway: Use as context for a 630/830 nm OTC full-face mask schedule and power-density range; do not cite as direct clinical outcome evidence.
 murphTakeaway: Good device-parameter anchor for consumer masks, especially 10-minute sessions and cumulative-dose framing.
 studyDesign: Regulatory 510(k) summary comparing an OTC wrinkle mask with predicate devices.

@@ -3,67 +3,45 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
 slug: protocols/prolonged-fasting/prolonged-fasting-24-72-hours
-title: Prolonged Fasting
-summary: Run one carefully screened, hydrated fast as an acute metabolic-and-safety experiment, with explicit stop rules, symptom logging, and a planned refeed rather than durable benefit promises.
+title: Prolonged Fasting (24–72 Hours)
+summary: Run one carefully screened, hydrated 24–72 hour water-only fast by default as an acute metabolic-and-safety experiment, with explicit stop rules, symptom logging, and a planned refeed rather than durable benefit promises.
 status: draft
 quality: usable
 aliases:
-  - 24-hour fast
-  - 36-hour fast
-  - 48-hour fast
-  - 60-hour fast
-  - 72-hour fast
-  - short-term water fast
-  - prolonged fast 24–72 hours
-  - water-only fast
-  - zero-calorie fast
+- 36-hour fast
+- 60-hour fast
+- short-term water fast
+- prolonged fast 24–72 hours
+- water-only fast
+- zero-calorie fast
 categories:
-  - fasting
-  - nutrition
-  - metabolic-health
-  - safety-screened
-  - symptom-log
-  - murph-canonical
-media:
-  -
-    kind: image
-    relativePath: design-assets/hero-prolonged-fasting.jpeg
-    mediaType: image/jpeg
-    caption: Prolonged Fasting
+- fasting
+- nutrition
+- metabolic-health
+- safety-screened
+- symptom-log
+- murph-canonical
 relations:
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
-  -
-    type: primary_biomarker
-    target: biomarker:fasting-tolerance-symptom-log
-  -
-    type: secondary_biomarker
-    target: biomarker:refeed-tolerance-symptom-log
-  -
-    type: secondary_biomarker
-    target: biomarker:continuous-glucose
-  -
-    type: secondary_biomarker
-    target: biomarker:blood-ketones-beta-hydroxybutyrate
-  -
-    type: secondary_biomarker
-    target: biomarker:body-weight
-  -
-    type: secondary_biomarker
-    target: biomarker:morning-blood-pressure
-  -
-    type: secondary_biomarker
-    target: biomarker:resting-heart-rate
-  -
-    type: secondary_biomarker
-    target: biomarker:hrv-rmssd
-  -
-    type: secondary_biomarker
-    target: biomarker:sleep-efficiency
-  -
-    type: safety_outcome
-    target: biomarker:refeed-tolerance-symptom-log
+- type: parent_family
+  target: experiment_family:prolonged-fasting
+- type: primary_biomarker
+  target: biomarker:fasting-tolerance-symptom-log
+- type: secondary_biomarker
+  target: biomarker:refeed-tolerance-symptom-log
+- type: secondary_biomarker
+  target: biomarker:continuous-glucose
+- type: secondary_biomarker
+  target: biomarker:blood-ketones-beta-hydroxybutyrate
+- type: secondary_biomarker
+  target: biomarker:body-weight
+- type: secondary_biomarker
+  target: biomarker:morning-blood-pressure
+- type: secondary_biomarker
+  target: biomarker:resting-heart-rate
+- type: secondary_biomarker
+  target: biomarker:hrv-rmssd
+- type: safety_outcome
+  target: biomarker:refeed-tolerance-symptom-log
 lineage:
   relationship: root
   rationale: Default Murph 24–72 hour hydrated fasting variant, kept separate from dry fasting, fasting-mimicking diets, very-low-calorie diets, TRE, ADF, Ramadan fasting, fasted exercise, and supervised disease-treatment fasting programs.
@@ -71,416 +49,417 @@ attribution:
   ownerType: murph
   note: Synthesized from the prolonged-fasting research run dated 2026-04-27/28 using canonical ledger, extracted source pages, SOURCE_FINDINGS_V1, and standalone EVIDENCE_APPRAISALS_V1 records.
 protocol:
-  doseSignature: One continuous 24–72 h hydrated water-only or zero-calorie fast · exact duration selected before start · planned refeed · safety screen required
-  target: one hydrated water-only or zero-calorie fast lasting 24, 36, 48, 60, or 72 hours
+  doseSignature: One continuous 24–72 h hydrated water-only fast by default · zero-calorie variants require explicit exposure logging and separate interpretation · exact duration selected before start · planned refeed · safety screen required
+  target: one hydrated water-only fast lasting 24, 36, 48, 60, or 72 hours; any zero-calorie beverage or electrolyte variant must be logged and interpreted separately from water-only evidence
   durationMinutes:
     min: 1440
     max: 4320
   interventionSessionsMinimum: 1
   interventionSessionsTarget: 1
   steps:
-    - "Choose the exact fast length before starting: 24, 36, 48, 60, or 72 hours. Do not auto-extend the fast during the run."
-    - Define the fasting type before starting. The default Murph variant is hydrated water-only or zero-calorie fasting; dry fasting, fasting-mimicking diets, very-low-calorie diets, and calorie-containing modified fasts are separate variants.
-    - Complete the safety screen. If any red flag is present or uncertain, do not create an unsupervised run; route to clinician guidance, postponement, or a lower-risk non-fasting alternative.
-    - Plan the start time, planned end time, first refeed window, fluids access, rest access, transportation, and how you will stop the fast if symptoms occur.
-    - During the fast, avoid strenuous exercise, heat stress, dehydration, alcohol, and stacking other major experiments. Keep fluids available and keep activity gentle.
-    - Log the actual start time, symptoms, hydration context, caffeine change, exercise or heat exposure, pulse or blood pressure if available, glucose if already monitored or clinician-directed, and sleep disruption.
-    - End the fast at the planned time or earlier if a stop condition occurs. Earlier stopping is a valid safety outcome, not a failed experiment.
-    - Use a planned first refeed instead of an improvised binge or duration extension. Log first refeed time, what you ate, and symptoms after refeeding.
-    - Do not repeat, extend, or escalate the protocol based only on weight loss, ketones, or “mental clarity.” Review safety, refeed response, and confounders first.
+  - 'Choose the exact fast length before starting: 24, 36, 48, 60, or 72 hours. Do not auto-extend the fast during the run.'
+  - Define the fasting type before starting. The default Murph variant is hydrated water-only fasting; any zero-calorie beverage or electrolyte variant must be logged separately, and dry fasting, fasting-mimicking diets, very-low-calorie diets, and calorie-containing modified fasts are separate variants.
+  - Complete the safety screen. If any red flag is present or uncertain, do not create an unsupervised run; route to clinician guidance, postponement, or a lower-risk non-fasting alternative.
+  - Plan the start time, planned end time, first refeed window, fluids access, rest access, transportation, and how you will stop the fast if symptoms occur.
+  - During the fast, avoid strenuous exercise, heat or sauna exposure, prolonged immobility, alcohol, dehydration, deliberate fluid restriction, forced water-loading, and stacking other major experiments. Keep fluids available, drink normally/to thirst, keep activity gentle, and do not add salt, electrolyte, thiamine, supplement, or medication changes unless clinician-directed.
+  - Log the actual start time, symptoms, hydration context, caffeine change, exercise or heat exposure, pulse or blood pressure if available, glucose if already monitored or clinician-directed, and sleep disruption.
+  - End the fast at the planned time or earlier if a stop condition occurs. Earlier stopping is a valid safety outcome, not a failed experiment.
+  - Use a planned first refeed instead of an improvised binge, large catch-up meal, or duration extension. Log first refeed time, amount/composition context, and symptoms after refeeding; high-risk refeeding features route to clinician-guided care, not Murph supplement or calorie advice.
+  - Do not repeat, extend, or escalate the protocol based only on weight loss, ketones, or “mental clarity.” Review safety, refeed response, and confounders first.
   safetyNotes:
-    - This is a high-caution wellness self-experiment for generally healthy adults only; it is not a treatment plan.
-    - Medication changes, glucose-threshold decisions, electrolyte prescriptions, thiamine dosing, and high-risk refeeding plans are clinician-guided and should not be generated by Murph.
-    - Dry fasting and deliberate fluid restriction are outside this protocol.
+  - This is a high-caution wellness self-experiment for generally healthy adults only; it is not a treatment plan.
+  - Medication changes, glucose-threshold decisions, electrolyte prescriptions, thiamine dosing, and high-risk refeeding plans are clinician-guided and should not be generated by Murph.
+  - Dry fasting and deliberate fluid restriction are outside this protocol.
   tips:
-    - Treat the first run as a tolerance-and-safety read, not a proof of willpower or a durable metabolic intervention.
-    - Choose the shortest duration that answers the question you care about; longer is not automatically better.
-    - Keep training load, heat exposure, alcohol, major diet changes, sleep schedule, new supplements, and other experiments as stable as practical.
-    - Have a simple stop plan and a first-refeed plan before the fast starts.
-    - Use glucose, ketone, blood-pressure, or wearable data as context, not as permission to override symptoms or clinician guidance.
+  - Treat the first run as a tolerance-and-safety read, not a proof of willpower or a durable metabolic intervention.
+  - Choose the shortest duration that answers the question you care about; longer is not automatically better.
+  - Keep training load, heat exposure, alcohol, major diet changes, sleep schedule, new supplements, and other experiments as stable as practical.
+  - Have a simple stop plan and a first-refeed plan before the fast starts.
+  - Use wearables, CGM/glucose, ketone, blood-pressure, weight, or lab data as context only; they never override symptoms, red flags, or clinician guidance.
+  - Do not use a large catch-up meal after the fast; the first refeed is a safety and tolerability checkpoint.
   keepInMind:
-    - The closest evidence is mostly acute physiology, biomarkers, small direct studies, secondary analyses, registries, and safety-boundary literature.
-    - Positive findings from fasting-mimicking, very-low-calorie, alternate-day, time-restricted, Ramadan, or supervised clinical fasting literature do not prove this unsupervised 24–72 hour water-only protocol.
-    - A flat or negative glucose, weight, HRV, sleep, or symptom signal should be preserved; mixed evidence is part of the protocol record.
-    - Safe completion through refeed is the primary practical read. Severe symptoms override adherence.
+  - The closest evidence is mostly acute physiology, biomarkers, small direct studies, secondary analyses, registries, and safety-boundary literature.
+  - Positive findings from fasting-mimicking, very-low-calorie, alternate-day, time-restricted, Ramadan, or supervised clinical fasting literature do not prove this unsupervised 24–72 hour water-only protocol.
+  - A flat or negative glucose, weight, HRV, resting-heart-rate, sleep-disruption, or symptom signal should be preserved; mixed evidence is part of the protocol record.
+  - Safe completion through refeed is the primary practical read. Severe symptoms override adherence.
   logFields:
-    - fast start time
-    - planned duration hours
-    - actual end time
-    - fasting type
-    - fluids available and used
-    - caffeine change or withdrawal
-    - strenuous exercise or heat exposure
-    - hunger level
-    - headache
-    - dizziness or lightheadedness
-    - faintness or near-syncope
-    - palpitations
-    - chest pain or pressure
-    - unusual shortness of breath
-    - confusion or neurologic symptoms
-    - mood or stress
-    - sleep disruption
-    - blood pressure if available
-    - pulse if available
-    - glucose or CGM if already monitored or clinician-directed
-    - body weight if measured
-    - first refeed time
-    - first refeed notes
-    - symptoms after refeed
+  - fast start time
+  - planned duration hours
+  - actual end time
+  - fasting type
+  - fluids available and used
+  - caffeine change or withdrawal
+  - strenuous exercise or heat exposure
+  - hunger level
+  - headache
+  - dizziness or lightheadedness
+  - faintness or near-syncope
+  - palpitations
+  - chest pain or pressure
+  - unusual shortness of breath
+  - confusion or neurologic symptoms
+  - mood or stress
+  - sleep disruption
+  - blood pressure if available
+  - pulse if available
+  - glucose or CGM if already monitored or clinician-directed
+  - body weight if measured
+  - first refeed time
+  - first refeed notes
+  - symptoms after refeed
+  - unusually high or forced water intake
+  - intentional fluid restriction or dry fasting attempt
+  - electrolyte, salt, thiamine, supplement, or medication change
+  - NSAID use or other new medication
+  - antihypertensive, diuretic, anticoagulant, lithium, psychotropic, or anticonvulsant use
+  - known or recent abnormal electrolytes, kidney, liver, or glucose labs
+  - long travel or prolonged immobility
+  - prior DVT, PE, or clotting risk if disclosed
+  - refeed amount, composition, timing, and loss-of-control eating
+  - rapid weight loss, low body weight, or malnutrition history
+  - orthostatic symptoms or fall risk
+  - planned driving, operating machinery, heat, or sauna during fast
+  - prior fast adverse symptoms or refeed symptoms
   stopConditions:
-    - Stop the fast and seek appropriate care for fainting, near-fainting, confusion, neurologic symptoms, chest pain or pressure, unusual shortness of breath, significant palpitations, severe weakness, or severe or persistent dizziness.
-    - Stop or do not start if fever, acute illness, vomiting, diarrhea, dehydration, or inability to keep fluids down occurs.
-    - If glucose monitoring is part of a clinician-directed plan, follow that plan; clinically significant low glucose, very high glucose, ketones, or symptoms of hypoglycemia or ketoacidosis are not self-experiment problems.
-    - After refeeding, seek care for confusion, ataxia, severe weakness, new swelling, breathlessness, palpitations, or other severe symptoms.
-    - End the experiment if fasting increases restriction urges, binge/restrict cycling, compensatory motives, anxiety, or fixation around food or body weight.
+  - Stop the fast and seek appropriate care for fainting, near-fainting, confusion, neurologic symptoms, chest pain or pressure, unusual shortness of breath, significant palpitations, severe weakness, or severe or persistent dizziness.
+  - Stop or do not start if fever, acute illness, vomiting, diarrhea, dehydration, or inability to keep fluids down occurs.
+  - If glucose monitoring is part of a clinician-directed plan, follow that plan; clinically significant low glucose, very high glucose, ketones, or symptoms of hypoglycemia or ketoacidosis are not self-experiment problems.
+  - After refeeding, seek care for confusion, ataxia, severe weakness, new swelling, breathlessness, palpitations, or other severe symptoms.
+  - End the experiment if fasting increases restriction urges, binge/restrict cycling, compensatory motives, anxiety, or fixation around food or body weight.
+  - Stop the fast and seek urgent care for seizure, severe headache with confusion or repeated vomiting, new irregular heartbeat, severe or persistent muscle cramps/spasms with weakness, or any concern for electrolyte disturbance.
+  - Stop or do not start if you have known low sodium, potassium, phosphate, or magnesium; abnormal kidney or liver results; or a clinician lab concern before the fast or during the fast.
+  - Stop and seek care for new double vision, trouble walking, gait instability, ataxia, eye-movement symptoms, or new confusion during the fast or after refeeding.
+  - Stop and seek care for one-sided leg swelling or pain, sudden chest pain, or shortness of breath, especially after long travel or prolonged immobility.
+  - 'Stop or postpone if safe logistics fail: no fluid access, no rest access, dizziness or confusion while needing to drive, operate machinery, supervise dependents alone, unavoidable heat exposure, or no practical way to stop early.'
+  - Stop and seek clinician guidance for new severe gout-like joint pain or a severe suspected gout flare.
 testPlans:
-  -
-    planId: acute-fast-tolerance-14d
-    durationDays: 14
-    baselineDays: 7
-    interventionDays: 7
-    primaryBiomarkerKey: biomarker:fasting-tolerance-symptom-log
-    secondaryBiomarkerKeys:
+- planId: acute-fast-tolerance-14d
+  durationDays: 14
+  baselineDays: 7
+  interventionDays: 7
+  primaryBiomarkerKey: biomarker:fasting-tolerance-symptom-log
+  secondaryBiomarkerKeys:
+  - biomarker:refeed-tolerance-symptom-log
+  - biomarker:continuous-glucose
+  - biomarker:blood-ketones-beta-hydroxybutyrate
+  - biomarker:body-weight
+  - biomarker:morning-blood-pressure
+  - biomarker:resting-heart-rate
+  - biomarker:hrv-rmssd
+  safetyOutcomeKeys:
+  - biomarker:fasting-tolerance-symptom-log
+  - biomarker:refeed-tolerance-symptom-log
+  minimumAdherenceSessions: 1
+  targetAdherenceSessions: 1
+  notes:
+  - Use 7 days of baseline context where practical, then one selected fasting run and a post-refeed observation window.
+  - The primary read is safe completion and refeed tolerance, not durable metabolic improvement.
+  - CGM, ketones, blood pressure, and body weight are optional or risk-driven context, not required for every user.
+  - Do not compare a 24-hour run directly with a 72-hour run as if they were the same dose.
+experimentOnboarding:
+  schemaVersion: murph.commons.experiment-onboarding.v1
+  startIntent:
+    displayPrompt: Hey Murph, I want to explore doing a 24–72 hour fast.
+    intentSummary: Explore Prolonged Fasting (24–72 Hours)
+  contextReview:
+    vaultChecks:
+    - id: active_experiments
+      label: Active experiments
+      reason: Avoid stacking a fasting experiment on top of another meaningful intervention unless the user accepts weaker attribution.
+      readHints:
+      - experiment list --status active --format json
+    - id: recent_fasting_or_restriction_history
+      label: Recent fasting, dieting, or restriction history
+      reason: Prior tolerance, binge/restrict cycling, rapid weight loss, or compensatory fasting motives change safety.
+      freshnessDays: 180
+      readHints:
+      - search query "fast fasting water-only intermittent fasting eating disorder binge purge restriction laxative diet pill rapid weight loss" --format json
+    - id: diabetes_glucose_and_medications
+      label: Diabetes, glucose monitoring, and medication context
+      reason: Diabetes, hypoglycemia history, insulin, sulfonylureas, SGLT2 inhibitors, and related medication changes are clinician-guided boundaries.
+      freshnessDays: 90
+      readHints:
+      - search query "diabetes insulin sulfonylurea SGLT2 hypoglycemia ketoacidosis CGM glucometer metformin dapagliflozin empagliflozin canagliflozin" --format json
+    - id: hydration_blood_pressure_kidney_gout_context
+      label: Hydration, blood pressure, kidney, and gout context
+      reason: Hypovolemia, orthostatic symptoms, kidney risk, and hyperuricemia or gout history affect fasting safety and interpretation.
+      freshnessDays: 90
+      readHints:
+      - search query "dehydration fainting syncope orthostatic low blood pressure kidney disease renal gout uric acid nephrolithiasis diuretic antihypertensive" --format json
+    - id: pregnancy_postpartum_lactation
+      label: Pregnancy, postpartum, or lactation context
+      reason: Pregnancy, postpartum, and lactation are not routine self-experiment fasting contexts.
+      freshnessDays: 90
+      readHints:
+      - memory show --format json
+      - search query "pregnancy postpartum breastfeeding lactation" --format json
+    - id: recent_illness_or_poor_intake
+      label: Recent illness, dehydration, or poor intake
+      reason: Fever, vomiting, diarrhea, infection, dehydration, and prolonged poor intake can change fasting and refeeding risk.
+      freshnessDays: 30
+      readHints:
+      - search query "fever infection illness vomiting diarrhea dehydration poor intake appetite loss" --format json
+    - id: monitoring_sources
+      label: Monitoring sources
+      reason: Confirm whether blood pressure, pulse, CGM/glucose, wearable sleep, or symptom logs exist before asking for redundant setup data.
+      freshnessDays: 30
+      readHints:
+      - wearables sources list --format json
+      - search query "blood pressure cuff CGM glucose glucometer pulse weight sleep symptoms" --format json
+  safetyScreen:
+    cautionLevel: high
+    mode: ask_compact_then_expand_if_positive
+    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    mustAsk:
+    - id: adult_age_and_capacity
+      prompt: Are you under 18, or not able to reliably understand the plan, hydrate normally, notice symptoms, stop early, or get help if needed?
+      ifPositive: do_not_start_unsupervised
+      why: This wellness variant is adult-only and depends on capacity to stop and seek help.
+    - id: diabetes_glucose_medication
+      prompt: Do you have diabetes, hypoglycemia history, ketoacidosis history, or use insulin, sulfonylureas, other glucose-lowering medication, or an SGLT2 inhibitor?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Glucose-lowering medication and ketoacidosis risk can make fasting unsafe without clinical guidance.
+    - id: broader_medication_review
+      prompt: Do you use antihypertensives, diuretics, anticoagulants, lithium or other psychotropics, anticonvulsants, diabetes medications, SGLT2 inhibitors, or any medication that must be taken with food, hydration, or meal timing?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Medication adjustment or monitoring during fasting is clinician-guided; Murph should not provide medication-change instructions.
+    - id: pregnancy_lactation_postpartum
+      prompt: Are you pregnant, trying to become pregnant, recently postpartum, or breastfeeding?
+      ifPositive: do_not_start_unsupervised
+      why: Pregnancy, postpartum, and lactation are not routine self-experiment fasting contexts.
+    - id: eating_disorder_restriction_risk
+      prompt: Do you have an active or past eating disorder, binge/purge or binge/restrict cycling, low body weight, recent rapid weight loss, or fasting motives tied to compensating for eating?
+      ifPositive: do_not_start_unsupervised
+      why: Restriction-risk contexts should stop unsupervised run creation.
+    - id: kidney_heart_gout_syncope
+      prompt: Do you have kidney disease, gout or uric-acid kidney stones, heart disease, arrhythmia, fainting, low blood pressure, orthostatic intolerance, or significant dehydration susceptibility?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Hydration, kidney, cardiovascular, and orthostatic risk affect fasting safety.
+    - id: endocrine_neuro_liver_frailty_cachexia
+      prompt: Do you have uncontrolled thyroid disease, advanced liver disease, advanced kidney disease, stroke/cerebrovascular disease, dementia or cognitive impairment, frailty or fall risk, cachexia, involuntary weight loss, or low functional reserves?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: These are fasting-therapy contraindication or low-reserve contexts that do not belong in an unsupervised wellness fast.
+    - id: acute_illness_dehydration
+      prompt: Are you currently ill, feverish, vomiting, having diarrhea, dehydrated, unable to keep fluids down, or recovering from prolonged poor intake?
+      ifPositive: do_not_start_unsupervised
+      why: Acute illness, dehydration, and poor intake raise fasting and refeeding risk.
+    - id: prior_severe_fast_symptoms
+      prompt: Has a previous fast caused fainting, confusion, chest symptoms, palpitations, severe dizziness, severe weakness, inability to hydrate, or severe symptoms after refeeding?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Prior severe symptoms change the risk profile.
+    - id: electrolyte_lab_or_refeeding_risk
+      prompt: Have you had known low sodium, potassium, phosphate, or magnesium; abnormal kidney or liver labs; very low BMI; substantial recent weight loss; several days of negligible intake; malnutrition; prior refeeding problems; or a clinician concern about labs?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: High-risk refeeding or electrolyte contexts require clinical management, not Murph-generated supplement or calorie instructions.
+    - id: cancer_clot_and_immobility_risk
+      prompt: Are you in active cancer care, chemotherapy, radiation, or immunotherapy, or do you have prior DVT/PE, a clotting disorder, or planned long travel/prolonged immobility during the fast?
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Oncology fasting and thrombosis-risk contexts require separate clinical handling.
+    stopIf:
+      inheritFromProtocolSafety: true
+      additionalConditions:
+      - positive_or_uncertain_red_flag
+      - dry_fasting_intent
+      - medication_change_request
+      - high_risk_refeeding_features
+      - minor_or_lacks_capacity_to_stop_seek_help_or_hydrate
+      - broader_medication_review_needed
+      - active_cancer_treatment_or_oncology_context
+      - known_electrolyte_or_lab_concern
+      - prior_dvt_pe_clotting_or_immobility_risk
+    notes:
+    - Any yes, maybe, or unclear safety answer should prevent unsupervised private-run creation.
+    - Murph should not provide medication-change, electrolyte, thiamine, or high-risk refeeding instructions.
+    - Wearables, CGM, blood pressure, or labs are context only and never override symptoms, red flags, or clinician guidance.
+    - High-risk refeeding features route to clinician-guided care; Murph should not provide electrolyte, salt, thiamine, supplement, or calorie prescriptions.
+  setupSlots:
+  - id: goal
+    label: Goal
+    purpose: personalization
+    valueType: free_text
+    askPolicy: always
+    required: true
+    question: 'What are you trying to learn from this fast: tolerance, symptoms, refeed response, sleep disruption as context, appetite context, or optional glucose context if already monitored? If the goal is weight loss, compensating for eating, detox, proving willpower, pushing ketones, or pushing duration, do not create an unsupervised run.'
+    target:
+      object: onboardingCapture
+      field: goal
+  - id: selected_duration_hours
+    label: Selected duration
+    purpose: logistics
+    valueType: enum
+    askPolicy: always
+    required: true
+    question: What duration are you actually considering for this run?
+    options:
+    - twenty_four_hours
+    - thirty_six_hours
+    - forty_eight_hours
+    - sixty_hours
+    - seventy_two_hours
+    constraints:
+      durationGatingNotes:
+      - For a first unsupervised run, default to the shortest duration that answers the question.
+      - Selecting 60 or 72 hours requires prior tolerance of at least a 24-hour fast, no safety-screen red flags, a safe stop plan, and a planned refeed. Do not select a longer duration to intensify weight loss, ketones, willpower, or mental-clarity effects.
+    target:
+      object: experimentRun
+      field: selectedDurationHours
+  - id: fasting_type
+    label: Fasting type
+    purpose: safety
+    valueType: enum
+    askPolicy: always
+    required: true
+    question: What exactly would count as fasting for this run? Selecting dry fasting records a route-out condition and must not create this protocol run.
+    options:
+    - water_only_hydrated
+    - zero_calorie_hydrated
+    - modified_or_calorie_containing_fast
+    - dry_fast
+    constraints:
+      routing:
+        dry_fast: do_not_create_this_protocol_run
+        modified_or_calorie_containing_fast: route_to_separate_variant
+        zero_calorie_hydrated: allow_only_as_logged_implementation_variant_with_separate_interpretation
+      notes:
+      - Dry fasting or deliberate fluid restriction is not a selectable implementation of this protocol.
+    target:
+      object: experimentRun
+      field: fastingType
+  - id: start_end_refeed_window
+    label: Start, end, and refeed window
+    purpose: logistics
+    valueType: free_text
+    askPolicy: always
+    required: true
+    question: When would the fast start, when would it end, and when would the first planned refeed happen?
+    target:
+      object: experimentRun
+      field: startEndRefeedWindow
+  - id: prior_tolerance
+    label: Prior fasting tolerance
+    purpose: safety
+    valueType: free_text
+    askPolicy: always
+    required: true
+    question: Have you completed a 24-hour or longer fast before, and did it cause severe symptoms?
+    target:
+      object: onboardingCapture
+      field: priorTolerance
+  - id: hydration_activity_plan
+    label: Hydration and activity plan
+    purpose: safety
+    valueType: free_text
+    askPolicy: always
+    required: true
+    question: During the fast, will you have easy access to fluids, rest, and a way to stop the fast, and will you avoid strenuous training or heat stress?
+    target:
+      object: experimentRun
+      field: hydrationActivityPlan
+  - id: monitoring_available
+    label: Monitoring available
+    purpose: measurement_fidelity
+    valueType: free_text
+    askPolicy: always
+    required: true
+    question: 'What can you realistically log: symptoms only, wearable pulse or sleep-disruption context, home blood pressure, body weight, CGM/glucose, or clinician-directed labs?'
+    target:
+      object: experimentRun
+      field: monitoringPlan
+  - id: reminder_policy
+    label: Reminder policy
+    purpose: assistant_support
+    valueType: reminder_policy
+    askPolicy: ask_at_confirmation
+    required: true
+    question: What reminder support should Murph use, if any?
+    options:
+    - none
+    - start_and_refeed_reminders
+    - start_refeed_plus_one_symptom_check
+    - weekly_digest_only
+    target:
+      object: assistantSupport
+      field: reminderPolicy
+  adaptationPolicy:
+    fields:
+    - id: selected_duration_hours
+      label: Selected duration
+      target:
+        object: experimentRun
+        field: selectedDurationHours
+      sourceSlotIds:
+      - selected_duration_hours
+      requiredForRunSpec: true
+      protocolReusable: false
+      guidance: Store the exact selected duration. Do not auto-escalate from 24 hours to 48 or 72 hours inside the same run.
+    - id: fasting_type
+      label: Fasting type
+      target:
+        object: experimentRun
+        field: fastingType
+      sourceSlotIds:
+      - fasting_type
+      requiredForRunSpec: true
+      protocolReusable: true
+      guidance: Hydrated water-only fasting is the default target variant. Zero-calorie beverages or electrolyte variants must be logged and interpreted separately from water-only evidence. Dry fasting is unsupported for unsupervised setup and must route out. Modified, VLCD, or FMD-style fasting needs a separate adaptation or protocol.
+    - id: safety_screen_outcome
+      label: Safety screen outcome
+      target:
+        object: experimentRun
+        field: safetyScreenOutcome
+      requiredForRunSpec: true
+      protocolReusable: false
+      guidance: Positive or uncertain screen means no unsupervised private run.
+    - id: refeed_plan
+      label: Refeed plan
+      target:
+        object: experimentRun
+        field: refeedPlan
+      sourceSlotIds:
+      - start_end_refeed_window
+      requiredForRunSpec: true
+      protocolReusable: false
+      guidance: The run must include a planned end time, first refeed window, and post-refeed symptom watch. High-risk refeeding features route to clinician guidance.
+    - id: monitoring_plan
+      label: Monitoring plan
+      target:
+        object: experimentRun
+        field: monitoringPlan
+      sourceSlotIds:
+      - monitoring_available
+      requiredForRunSpec: true
+      protocolReusable: true
+      guidance: Symptom logging is required; BP, pulse, glucose/CGM, ketones, labs, and body weight are optional or risk-driven context and are never a substitute for clinical care or stop rules.
+    - id: assistant_support
+      label: Assistant support
+      target:
+        object: assistantSupport
+        field: reminderPolicy
+      sourceSlotIds:
+      - reminder_policy
+      requiredForRunSpec: true
+      protocolReusable: false
+      guidance: Reminders or follow-ups are only created after explicit confirmation, and missed-log follow-up should be neutral and easy to opt out of.
+    measurementPlan:
+      testPlanId: acute-fast-tolerance-14d
+      requiredSignals:
+      - biomarker:fasting-tolerance-symptom-log
       - biomarker:refeed-tolerance-symptom-log
+      optionalSignals:
       - biomarker:continuous-glucose
       - biomarker:blood-ketones-beta-hydroxybutyrate
       - biomarker:body-weight
       - biomarker:morning-blood-pressure
       - biomarker:resting-heart-rate
       - biomarker:hrv-rmssd
-      - biomarker:sleep-efficiency
-    safetyOutcomeKeys:
-      - biomarker:fasting-tolerance-symptom-log
-      - biomarker:refeed-tolerance-symptom-log
-    minimumAdherenceSessions: 1
-    targetAdherenceSessions: 1
-    notes:
-      - Use 7 days of baseline context where practical, then one selected fasting run and a post-refeed observation window.
-      - The primary read is safe completion and refeed tolerance, not durable metabolic improvement.
-      - CGM, ketones, blood pressure, and body weight are optional or risk-driven context, not required for every user.
-      - Do not compare a 24-hour run directly with a 72-hour run as if they were the same dose.
-expectedSignalDescriptions:
-  -
-    biomarkerKey: biomarker:fasting-tolerance-symptom-log
-    description: A 24-72 hour fast stresses fuel intake, hydration, and the body's stress state. Symptoms can rise when the duration is too much.
-  -
-    biomarkerKey: biomarker:refeed-tolerance-symptom-log
-    description: After fasting, the first meals restart gut work and shift glucose, insulin, fluid, and electrolytes. Symptoms can rise if refeeding is too abrupt.
-  -
-    biomarkerKey: biomarker:continuous-glucose
-    description: With no incoming calories, glucose may fall as stored carbohydrate drops, or rise if stress hormones push it up.
-  -
-    biomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
-    description: As stored carbohydrate and insulin fall, the body may make more beta-hydroxybutyrate, a blood ketone, from fat. Higher ketones confirm fuel switching, not better health by themselves.
-  -
-    biomarkerKey: biomarker:body-weight
-    description: Body weight often drops during a fast from less gut content, lower glycogen, and water shifts, not just fat loss.
-  -
-    biomarkerKey: biomarker:morning-blood-pressure
-    description: Fasting changes fluid balance, salt intake, stress hormones, and standing tolerance, so blood pressure can drop or become less stable.
-  -
-    biomarkerKey: biomarker:resting-heart-rate
-    description: Resting pulse can rise with dehydration, poor sleep, or stress during fasting; it can fall if the fast feels easy and recovery stays stable.
-  -
-    biomarkerKey: biomarker:hrv-rmssd
-    description: Fasting can lower HRV when hunger, poor sleep, dehydration, or stress add strain. It may rise if the fast feels calm and recovery stays stable.
-  -
-    biomarkerKey: biomarker:sleep-efficiency
-    description: Hunger, caffeine changes, stress, and ketone shifts can break up sleep during a fast.
-experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
-  startIntent:
-    displayPrompt: Hey Murph, I want to explore doing a 24–72 hour fast.
-    intentSummary: Explore Prolonged Fasting
-  contextReview:
-    vaultChecks:
-      -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid stacking a fasting experiment on top of another meaningful intervention unless the user accepts weaker attribution.
-        readHints:
-          - experiment list --status active --format json
-      -
-        id: recent_fasting_or_restriction_history
-        label: Recent fasting, dieting, or restriction history
-        reason: Prior tolerance, binge/restrict cycling, rapid weight loss, or compensatory fasting motives change safety.
-        freshnessDays: 180
-        readHints:
-          - search query "fast fasting water-only intermittent fasting eating disorder binge purge restriction laxative diet pill rapid weight loss" --format json
-      -
-        id: diabetes_glucose_and_medications
-        label: Diabetes, glucose monitoring, and medication context
-        reason: Diabetes, hypoglycemia history, insulin, sulfonylureas, SGLT2 inhibitors, and related medication changes are clinician-guided boundaries.
-        freshnessDays: 90
-        readHints:
-          - search query "diabetes insulin sulfonylurea SGLT2 hypoglycemia ketoacidosis CGM glucometer metformin dapagliflozin empagliflozin canagliflozin" --format json
-      -
-        id: hydration_blood_pressure_kidney_gout_context
-        label: Hydration, blood pressure, kidney, and gout context
-        reason: Hypovolemia, orthostatic symptoms, kidney risk, and hyperuricemia or gout history affect fasting safety and interpretation.
-        freshnessDays: 90
-        readHints:
-          - search query "dehydration fainting syncope orthostatic low blood pressure kidney disease renal gout uric acid nephrolithiasis diuretic antihypertensive" --format json
-      -
-        id: pregnancy_postpartum_lactation
-        label: Pregnancy, postpartum, or lactation context
-        reason: Pregnancy, postpartum, and lactation are not routine self-experiment fasting contexts.
-        freshnessDays: 90
-        readHints:
-          - memory show --format json
-          - search query "pregnancy postpartum breastfeeding lactation" --format json
-      -
-        id: recent_illness_or_poor_intake
-        label: Recent illness, dehydration, or poor intake
-        reason: Fever, vomiting, diarrhea, infection, dehydration, and prolonged poor intake can change fasting and refeeding risk.
-        freshnessDays: 30
-        readHints:
-          - search query "fever infection illness vomiting diarrhea dehydration poor intake appetite loss" --format json
-      -
-        id: monitoring_sources
-        label: Monitoring sources
-        reason: Confirm whether blood pressure, pulse, CGM/glucose, wearable sleep, or symptom logs exist before asking for redundant setup data.
-        freshnessDays: 30
-        readHints:
-          - wearables sources list --format json
-          - search query "blood pressure cuff CGM glucose glucometer pulse weight sleep symptoms" --format json
-  safetyScreen:
-    cautionLevel: high
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
-    mustAsk:
-      -
-        id: diabetes_glucose_medication
-        prompt: Do you have diabetes, hypoglycemia history, ketoacidosis history, or use insulin, sulfonylureas, other glucose-lowering medication, or an SGLT2 inhibitor?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Glucose-lowering medication and ketoacidosis risk can make fasting unsafe without clinical guidance.
-      -
-        id: pregnancy_lactation_postpartum
-        prompt: Are you pregnant, trying to become pregnant, recently postpartum, or breastfeeding?
-        ifPositive: do_not_start_unsupervised
-        why: Pregnancy, postpartum, and lactation are not routine self-experiment fasting contexts.
-      -
-        id: eating_disorder_restriction_risk
-        prompt: Do you have an active or past eating disorder, binge/purge or binge/restrict cycling, low body weight, recent rapid weight loss, or fasting motives tied to compensating for eating?
-        ifPositive: do_not_start_unsupervised
-        why: Restriction-risk contexts should stop unsupervised run creation.
-      -
-        id: kidney_heart_gout_syncope
-        prompt: Do you have kidney disease, gout or uric-acid kidney stones, heart disease, arrhythmia, fainting, low blood pressure, orthostatic intolerance, or significant dehydration susceptibility?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Hydration, kidney, cardiovascular, and orthostatic risk affect fasting safety.
-      -
-        id: acute_illness_dehydration
-        prompt: Are you currently ill, feverish, vomiting, having diarrhea, dehydrated, unable to keep fluids down, or recovering from prolonged poor intake?
-        ifPositive: do_not_start_unsupervised
-        why: Acute illness, dehydration, and poor intake raise fasting and refeeding risk.
-      -
-        id: prior_severe_fast_symptoms
-        prompt: Has a previous fast caused fainting, confusion, chest symptoms, palpitations, severe dizziness, severe weakness, inability to hydrate, or severe symptoms after refeeding?
-        ifPositive: clinician_guidance_before_unsupervised_start
-        why: Prior severe symptoms change the risk profile.
-    stopIf:
-      inheritFromProtocolSafety: true
-      additionalConditions:
-        - positive_or_uncertain_red_flag
-        - dry_fasting_intent
-        - medication_change_request
-        - high_risk_refeeding_features
-    notes:
-      - Any yes, maybe, or unclear safety answer should prevent unsupervised private-run creation.
-      - Murph should not provide medication-change, electrolyte, thiamine, or high-risk refeeding instructions.
-  setupSlots:
-    -
-      id: goal
-      label: Goal
-      purpose: personalization
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: "What are you trying to learn from this fast: tolerance, glucose response, weight trend, appetite, mental clarity, sleep/recovery, or something else?"
-      target:
-        object: onboardingCapture
-        field: goal
-    -
-      id: selected_duration_hours
-      label: Selected duration
-      purpose: logistics
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: What duration are you actually considering for this run?
-      options:
-        - twenty_four_hours
-        - thirty_six_hours
-        - forty_eight_hours
-        - sixty_hours
-        - seventy_two_hours
-      target:
-        object: experimentRun
-        field: selectedDurationHours
-    -
-      id: fasting_type
-      label: Fasting type
-      purpose: safety
-      valueType: enum
-      askPolicy: always
-      required: true
-      question: What exactly would count as fasting for this run?
-      options:
-        - water_only_hydrated
-        - zero_calorie_hydrated
-        - modified_or_calorie_containing_fast
-        - dry_fast
-      target:
-        object: experimentRun
-        field: fastingType
-    -
-      id: start_end_refeed_window
-      label: Start, end, and refeed window
-      purpose: logistics
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: When would the fast start, when would it end, and when would the first planned refeed happen?
-      target:
-        object: experimentRun
-        field: startEndRefeedWindow
-    -
-      id: prior_tolerance
-      label: Prior fasting tolerance
-      purpose: safety
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: Have you completed a 24-hour or longer fast before, and did it cause severe symptoms?
-      target:
-        object: onboardingCapture
-        field: priorTolerance
-    -
-      id: hydration_activity_plan
-      label: Hydration and activity plan
-      purpose: safety
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: During the fast, will you have easy access to fluids, rest, and a way to stop the fast, and will you avoid strenuous training or heat stress?
-      target:
-        object: experimentRun
-        field: hydrationActivityPlan
-    -
-      id: monitoring_available
-      label: Monitoring available
-      purpose: measurement_fidelity
-      valueType: free_text
-      askPolicy: always
-      required: true
-      question: "What can you realistically log: symptoms only, wearable pulse/sleep, home blood pressure, body weight, CGM/glucose, or clinician-directed labs?"
-      target:
-        object: experimentRun
-        field: monitoringPlan
-    -
-      id: reminder_policy
-      label: Reminder policy
-      purpose: assistant_support
-      valueType: reminder_policy
-      askPolicy: ask_at_confirmation
-      required: true
-      question: What reminder support should Murph use, if any?
-      options:
-        - none
-        - start_and_refeed_reminders
-        - start_refeed_plus_one_symptom_check
-        - weekly_digest_only
-      target:
-        object: assistantSupport
-        field: reminderPolicy
-  adaptationPolicy:
-    fields:
-      -
-        id: selected_duration_hours
-        label: Selected duration
-        target:
-          object: experimentRun
-          field: selectedDurationHours
-        sourceSlotIds:
-          - selected_duration_hours
-        requiredForRunSpec: true
-        protocolReusable: false
-        guidance: Store the exact selected duration. Do not auto-escalate from 24 hours to 48 or 72 hours inside the same run.
-      -
-        id: fasting_type
-        label: Fasting type
-        target:
-          object: experimentRun
-          field: fastingType
-        sourceSlotIds:
-          - fasting_type
-        requiredForRunSpec: true
-        protocolReusable: true
-        guidance: Hydrated water-only or zero-calorie fasting is the default target variant. Dry fasting is unsupported for unsupervised setup. Modified, VLCD, or FMD-style fasting needs a separate adaptation or protocol.
-      -
-        id: safety_screen_outcome
-        label: Safety screen outcome
-        target:
-          object: experimentRun
-          field: safetyScreenOutcome
-        requiredForRunSpec: true
-        protocolReusable: false
-        guidance: Positive or uncertain screen means no unsupervised private run.
-      -
-        id: refeed_plan
-        label: Refeed plan
-        target:
-          object: experimentRun
-          field: refeedPlan
-        sourceSlotIds:
-          - start_end_refeed_window
-        requiredForRunSpec: true
-        protocolReusable: false
-        guidance: The run must include a planned end time, first refeed window, and post-refeed symptom watch. High-risk refeeding features route to clinician guidance.
-      -
-        id: monitoring_plan
-        label: Monitoring plan
-        target:
-          object: experimentRun
-          field: monitoringPlan
-        sourceSlotIds:
-          - monitoring_available
-        requiredForRunSpec: true
-        protocolReusable: true
-        guidance: Symptom logging is required; BP, pulse, glucose/CGM, ketones, and body weight are optional or risk-driven, not a substitute for clinical care.
-      -
-        id: assistant_support
-        label: Assistant support
-        target:
-          object: assistantSupport
-          field: reminderPolicy
-        sourceSlotIds:
-          - reminder_policy
-        requiredForRunSpec: true
-        protocolReusable: false
-        guidance: Reminders or follow-ups are only created after explicit confirmation, and missed-log follow-up should be neutral and easy to opt out of.
-    measurementPlan:
-      testPlanId: acute-fast-tolerance-14d
-      requiredSignals:
-        - biomarker:fasting-tolerance-symptom-log
-        - biomarker:refeed-tolerance-symptom-log
-      optionalSignals:
-        - biomarker:continuous-glucose
-        - biomarker:blood-ketones-beta-hydroxybutyrate
-        - biomarker:body-weight
-        - biomarker:morning-blood-pressure
-        - biomarker:resting-heart-rate
-        - biomarker:hrv-rmssd
-        - biomarker:sleep-efficiency
       notes:
-        - Primary measurement is safety and tolerability through refeed.
-        - Optional metabolic signals should not override symptoms or clinician guidance.
+      - Primary measurement is safety and tolerability through refeed.
+      - Optional metabolic signals should not override symptoms or clinician guidance.
+      - Sleep disruption is logged as a confounder or symptom-context variable, not as a direct evidence-backed outcome for this protocol.
     reusableSetup:
       enabled: false
       notes:
-        - Do not silently reuse a prior fasting plan without rechecking duration, safety screen, hydration, monitoring, and refeed details.
+      - Do not silently reuse a prior fasting plan without rechecking duration, safety screen, hydration, monitoring, and refeed details.
   planDefaults:
     testPlanId: acute-fast-tolerance-14d
     baselineDays: 7
@@ -490,507 +469,818 @@ experimentOnboarding:
     firstSessionGuidance: Choose the shortest duration that answers the question, keep hydration and stop rules visible, and treat early stopping as a valid safety outcome.
   logging:
     sessionFields:
-      - fast_start_time
-      - planned_duration_hours
-      - actual_end_time
-      - fasting_type
-      - fluids_available_and_used
-      - caffeine_change_or_withdrawal
-      - strenuous_exercise_or_heat_exposure
-      - hunger_level
-      - headache
-      - dizziness_or_lightheadedness
-      - faintness_or_near_syncope
-      - palpitations
-      - chest_pain_or_pressure
-      - unusual_shortness_of_breath
-      - confusion_or_neurologic_symptoms
-      - mood_or_stress
-      - sleep_disruption
-      - blood_pressure_if_available
-      - pulse_if_available
-      - glucose_or_cgm_if_available_or_clinician_directed
-      - body_weight_if_measured
-      - first_refeed_time
-      - first_refeed_notes
-      - symptoms_after_refeed
+    - fast_start_time
+    - planned_duration_hours
+    - actual_end_time
+    - fasting_type
+    - fluids_available_and_used
+    - caffeine_change_or_withdrawal
+    - strenuous_exercise_or_heat_exposure
+    - hunger_level
+    - headache
+    - dizziness_or_lightheadedness
+    - faintness_or_near_syncope
+    - palpitations
+    - chest_pain_or_pressure
+    - unusual_shortness_of_breath
+    - confusion_or_neurologic_symptoms
+    - mood_or_stress
+    - sleep_disruption
+    - blood_pressure_if_available
+    - pulse_if_available
+    - glucose_or_cgm_if_available_or_clinician_directed
+    - body_weight_if_measured
+    - first_refeed_time
+    - first_refeed_notes
+    - symptoms_after_refeed
     confounders:
-      - acute_illness_or_fever
-      - vomiting_or_diarrhea
-      - dehydration
-      - alcohol_last_24h
-      - unusual_training_load
-      - travel_or_heat_exposure
-      - medication_change
-      - unusually_high_stress
+    - acute_illness_or_fever
+    - vomiting_or_diarrhea
+    - dehydration
+    - alcohol_last_24h
+    - unusual_training_load
+    - travel_or_heat_exposure
+    - medication_change
+    - unusually_high_stress
     notes:
-      - Missed logs should be treated neutrally; do not shame or pressure duration completion.
+    - Missed logs should be treated neutrally; do not shame or pressure duration completion.
   assistantPolicy:
     maxSetupQuestionsPerTurn: 2
     askBeforeCreatingAutomations: true
     missedLogFollowup: opt_in_only
     reminderOptions:
-      - none
-      - start_and_refeed_reminders
-      - start_refeed_plus_one_symptom_check
-      - weekly_digest_only
+    - none
+    - start_and_refeed_reminders
+    - start_refeed_plus_one_symptom_check
+    - weekly_digest_only
     weeklyDigestDefault: false
     missedLogFollowupCopy: Did you end up continuing or ending the fast? Totally fine either way — I just want the experiment record and safety notes to be accurate.
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, selected duration, fasting type, safety-screen outcome, exact start/end/refeed windows, monitoring/logging fields, stop conditions, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-  - "A 24–72 hour fast is mainly an acute fuel-availability challenge: as incoming energy stops, glucose, glycogen, fat oxidation, ketone production, appetite signals, autonomic state, hydration, and refeeding response can shift over hours to days."
-  - That physiology is not automatically a health benefit. Some direct sources show expected fasting-time-course changes, while others preserve mixed glucose/insulin, performance, hypovolemia, and refeed-response concerns.
-  - For a community Murph run, the most defensible mechanism to test is personal acute response and safe completion through refeed, not disease treatment, “detox,” immune reset, or guaranteed fat loss.
-  - Wearables and home measures can provide useful context, but symptoms, stop conditions, medication risk, and refeeding risk outrank optimization of ketones, weight, glucose, HRV, or duration.
+- Source-backed mechanism, measurement, mixed-evidence, and safety interpretation belongs in the `claims` entries below; do not add uncited mechanism, benefit, safety, or measurement claims here.
 claims:
-  -
-    claimId: scope-24-72h-operational-not-consensus-prolonged
-    type: evidence_scope
-    text: This Murph protocol uses 24–72 hours as an operational dose window for one continuous fast, while acknowledging that consensus terminology may classify parts of the window as intermittent or short-term fasting rather than four-or-more-day prolonged fasting.
-    strength: high
-    sourceKeys:
-      - source_artifact:pmid-39059384
-      - source_artifact:pmid-32700827
-      - source_artifact:pmid-25857868
-    caveats:
-      - The page title is a Murph operational label, not a claim that every source uses the same taxonomy.
-  -
-    claimId: direct-evidence-is-acute-biomarker-and-physiology
-    type: evidence_scope
-    text: The closest direct 24–72 hour evidence is mostly acute human physiology, biomarker, secondary-analysis, and registry evidence; it can support time-course and monitoring language but not durable clinical-outcome promises.
-    strength: moderate
-    sourceKeys:
-      - source_artifact:pmid-23220077
-      - source_artifact:pmid-30678028
-      - source_artifact:pmid-37745091
-      - source_artifact:pmid-22140269
-      - source_artifact:pmid-41650389
-      - source_artifact:pmid-11133906
-      - source_artifact:clinicaltrials-nct06737224
-      - source_artifact:drks-drks00037060
-    caveats:
-      - Direct studies are small, selected, often short physiology studies or registries.
-      - The evidence does not establish broad community safety or long-term disease-risk reduction.
-  -
-    claimId: glucose-and-insulin-effects-are-mixed-not-simply-improved
-    type: mixed_evidence
-    text: Glucose and insulin outcomes should be described as mixed and time-dependent, because direct 60–72 hour physiology includes fasting-induced insulin-resistance signals and hypoglycemia/counterregulatory contexts rather than a simple “glucose gets better” story.
-    strength: moderate
-    sourceKeys:
-      - source_artifact:pmid-20573749
-      - source_artifact:pmid-22028408
-      - source_artifact:pmid-3894423
-      - source_artifact:pmid-2694325
-      - source_artifact:pmid-29931424
-      - source_artifact:pmid-11133906
-    caveats:
-      - These studies do not authorize fasting for diabetes treatment.
-      - Medication users and people with hypoglycemia risk belong in clinician-guided pathways.
-  -
-    claimId: duration-dose-must-be-explicit
-    type: design_guardrail
-    text: A runnable fast should store the selected duration explicitly—24, 36, 48, 60, or 72 hours—because evidence and risk interpretation change across the window and should not be blurred into one generic “fast.”
-    strength: moderate
-    sourceKeys:
-      - source_artifact:pmid-11915777
-      - source_artifact:pmid-2694325
-      - source_artifact:pmid-29931424
-      - source_artifact:pmid-11133906
-      - source_artifact:pmid-29097329
-      - source_artifact:pmid-37862821
-    caveats:
-      - The listed sources do not provide duration-specific community adverse-event rates.
-  -
-    claimId: hydrated-not-dry-fasting-boundary
-    type: safety
-    text: The Murph protocol should be a hydrated water-only or zero-calorie fast; dry fasting and fluid restriction are separate safety-relevant variants and should not be silently treated as this protocol.
-    strength: moderate
-    sourceKeys:
-      - source_artifact:drks-drks00037060
-      - source_artifact:pmid-38126086
-      - source_artifact:pmid-34307843
-      - source_artifact:healthpromoting-water-only-fasting-2026-04-27
-    caveats:
-      - DRKS00037060 is registry context without extracted outcome results.
-      - Case-report and external-protocol sources are safety/context signals, not efficacy evidence.
-  -
-    claimId: hypovolemia-orthostatic-heat-exertion-stop-rules
-    type: safety
-    text: A direct 24-hour fast study reduced tolerance to an experimental central hypovolemia stressor, so hydration access, orthostatic symptoms, heat exposure, strenuous exercise, and stop rules should remain prominent.
-    strength: moderate
-    sourceKeys:
-      - source_artifact:pmid-38126086
-    caveats:
-      - This is an experimental stressor finding, not a field adverse-event rate.
-  -
-    claimId: adjacent-variants-do-not-prove-this-protocol
-    type: evidence_scope
-    text: FMD, VLCD, modified fasting, ADF, TRE, Ramadan/religious fasting, fasted exercise, and supervised disease-treatment fasting are adjacent variants or contexts; positive findings in those literatures should not be promoted into direct claims for an unsupervised 24–72 hour water-only fast.
-    strength: high
-    sourceKeys:
-      - source_artifact:pmid-39059384
-      - source_artifact:pmid-32700827
-      - source_artifact:nice-overweight-obesity-management-2026-01-08
-      - source_artifact:pmid-28202779
-      - source_artifact:pmid-15640462
-      - source_artifact:pmid-31813824
-      - source_artifact:pmid-30813495
-    caveats:
-      - Adjacent sources can still help define endpoints, safety boundaries, and variant separation.
-  -
-    claimId: supervised-clinical-programs-are-boundaries-not-home-safety-rates
-    type: safety
-    text: Clinical and residential fasting programs may report blood-pressure, symptom, or tolerability signals, but their supervision, screening, longer duration, refeeding structure, and disease populations prevent converting them into home-safety rates or treatment claims for this protocol.
-    strength: high
-    sourceKeys:
-      - source_artifact:pmid-11416824
-      - source_artifact:pmid-12470446
-      - source_artifact:pmid-33222606
-      - source_artifact:pmid-36296997
-      - source_artifact:pmid-36325269
-      - source_artifact:pmid-40765844
-    caveats:
-      - Use these records for boundary language and supervision context, not unsupervised disease treatment.
-  -
-    claimId: diabetes-medication-and-sglt2-are-clinician-guided
-    type: safety
-    text: Diabetes, hypoglycemia history, ketoacidosis history, insulin or insulin-secretagogue use, and SGLT2 inhibitor use should trigger clinician guidance before any unsupervised prolonged-fast setup; Murph should not provide medication-change instructions.
-    strength: high
-    sourceKeys:
-      - source_artifact:niddk-fasting-safely-with-diabetes-2020-08-26
-      - source_artifact:pmid-35816600
-      - source_artifact:pmid-32943440
-      - source_artifact:pmid-32971151
-      - source_artifact:pmid-40106615
-      - source_artifact:pmid-41358892
-      - source_artifact:pmid-41358900
-    caveats:
-      - Much of the diabetes evidence comes from Ramadan, procedural fasting, inpatient, or expert-guideline contexts rather than this exact home protocol.
-  -
-    claimId: restriction-risk-stops-unsupervised-setup
-    type: safety
-    text: Active or suspected eating disorder, eating-disorder history, binge/purge or binge/restrict cycling, low body weight, recent rapid weight loss, youth restriction risk, or compensatory fasting motives should stop unsupervised run creation and route to clinical support.
-    strength: high
-    sourceKeys:
-      - source_artifact:aed-medical-care-standards-guide-2021-4th-edition
-      - source_artifact:nice-eating-disorders-ng69-2020-12-16
-      - source_artifact:pmid-19025239
-      - source_artifact:pmid-26431904
-      - source_artifact:pmid-35289875
-      - source_artifact:pmid-36722117
-      - source_artifact:pmid-39530408
-    caveats:
-      - Observational fasting/restriction associations are not proof of causality, but they are enough to justify conservative screening.
-      - A brief safety screen is not a diagnostic clearance.
-  -
-    claimId: refeed-plan-required-but-no-universal-supplement-prescription
-    type: safety
-    text: Every run should include a planned refeed and post-refeed symptom watch, while high-risk refeeding features such as malnutrition, very low BMI, substantial recent weight loss, prolonged negligible intake, low electrolytes, serious illness, or eating-disorder risk should route to clinician-guided refeeding rather than home supplement advice.
-    strength: high
-    sourceKeys:
-      - source_artifact:nice-nutrition-support-cg32-2006-02-22
-      - source_artifact:pmid-32115791
-      - source_artifact:bapen-thiamine-refeeding-syndrome-2024-05-01
-      - source_artifact:pmid-40090863
-      - source_artifact:pmid-18583681
-      - source_artifact:clevelandclinic-refeeding-syndrome-2022-06-06
-    caveats:
-      - Refeeding-syndrome literature mostly comes from clinical malnutrition, inpatient nutrition, hunger strike, eating-disorder, or extreme-duration contexts.
-      - Do not invent a universal electrolyte, salt, thiamine, or calorie prescription for low-risk short fasting.
+- claimId: scope-24-72h-operational-not-consensus-prolonged
+  type: evidence_scope
+  text: This Murph protocol uses 24–72 hours as an operational dose window for one continuous fast, while acknowledging that consensus terminology may classify parts of the window as intermittent or short-term fasting rather than four-or-more-day prolonged fasting.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-39059384
+  - source_artifact:pmid-32700827
+  - source_artifact:pmid-25857868
+  caveats:
+  - The page title is a Murph operational label, not a claim that every source uses the same taxonomy.
+- claimId: direct-evidence-is-acute-biomarker-and-physiology
+  type: evidence_scope
+  text: The closest direct 24–72 hour evidence is mostly acute human physiology, biomarker, secondary-analysis, and registry evidence; it can support time-course and monitoring language but not durable clinical-outcome promises.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-23220077
+  - source_artifact:pmid-30678028
+  - source_artifact:pmid-37745091
+  - source_artifact:pmid-22140269
+  - source_artifact:pmid-41650389
+  - source_artifact:pmid-11133906
+  - source_artifact:clinicaltrials-nct06737224
+  - source_artifact:drks-drks00037060
+  caveats:
+  - Direct studies are small, selected, often short physiology studies or registries.
+  - The evidence does not establish broad community safety or long-term disease-risk reduction.
+- claimId: glucose-and-insulin-effects-are-mixed-not-simply-improved
+  type: mixed_evidence
+  text: Glucose and insulin outcomes should be described as mixed and time-dependent, because direct 60–72 hour physiology includes fasting-induced insulin-resistance signals and hypoglycemia/counterregulatory contexts rather than a simple “glucose gets better” story.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-20573749
+  - source_artifact:pmid-22028408
+  - source_artifact:pmid-3894423
+  - source_artifact:pmid-2694325
+  - source_artifact:pmid-29931424
+  - source_artifact:pmid-11133906
+  caveats:
+  - These studies do not authorize fasting for diabetes treatment.
+  - Medication users and people with hypoglycemia risk belong in clinician-guided pathways.
+- claimId: duration-dose-must-be-explicit
+  type: design_guardrail
+  text: A runnable fast should store the selected duration explicitly—24, 36, 48, 60, or 72 hours—because the extracted sources test different durations, populations, endpoints, and refeed contexts, and their findings should not be blurred into one generic “fast.”
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-11915777
+  - source_artifact:pmid-2694325
+  - source_artifact:pmid-29931424
+  - source_artifact:pmid-11133906
+  - source_artifact:pmid-29097329
+  - source_artifact:pmid-37862821
+  caveats:
+  - The listed sources do not provide duration-specific community adverse-event rates.
+- claimId: hydrated-not-dry-fasting-boundary
+  type: safety
+  text: The Murph protocol should default to hydrated water-only fasting; dry fasting and fluid restriction are separate safety-relevant variants, and any zero-calorie beverage or electrolyte variant should be logged and interpreted separately rather than silently treated as study-equivalent to water-only fasting.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:drks-drks00037060
+  - source_artifact:pmid-38126086
+  - source_artifact:pmid-34307843
+  - source_artifact:healthpromoting-water-only-fasting-2026-04-27
+  caveats:
+  - DRKS00037060 is registry context without extracted outcome results.
+  - Case-report and external-protocol sources are safety/context signals, not efficacy evidence.
+  - The external protocol source is context only and does not establish efficacy or home safety for Murph users.
+- claimId: hypovolemia-orthostatic-heat-exertion-stop-rules
+  type: safety
+  text: A direct 24-hour fast study reduced tolerance to an experimental central-hypovolemia stressor; use it to support conservative hydration access and orthostatic/lightheadedness stop-rule language, while treating heat exposure and strenuous-exercise avoidance as precautionary implementation guardrails rather than measured outcomes.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-38126086
+  caveats:
+  - This is an experimental stressor finding, not a field adverse-event rate.
+- claimId: adjacent-variants-do-not-prove-this-protocol
+  type: evidence_scope
+  text: FMD, VLCD, modified fasting, ADF, TRE, Ramadan/religious fasting, fasted exercise, and supervised disease-treatment fasting are adjacent variants or contexts; positive findings in those literatures should not be promoted into direct claims for an unsupervised 24–72 hour water-only fast.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-39059384
+  - source_artifact:pmid-32700827
+  - source_artifact:nice-overweight-obesity-management-2026-01-08
+  - source_artifact:pmid-28202779
+  - source_artifact:pmid-15640462
+  - source_artifact:pmid-31813824
+  - source_artifact:pmid-30813495
+  caveats:
+  - Adjacent sources can still help define endpoints, safety boundaries, and variant separation.
+- claimId: supervised-clinical-programs-are-boundaries-not-home-safety-rates
+  type: safety
+  text: Clinical and residential fasting programs may report blood-pressure, symptom, or tolerability signals, but their supervision, screening, longer duration, refeeding structure, and disease populations prevent converting them into home-safety rates or treatment claims for this protocol.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-11416824
+  - source_artifact:pmid-12470446
+  - source_artifact:pmid-33222606
+  - source_artifact:pmid-36296997
+  - source_artifact:pmid-36325269
+  - source_artifact:pmid-40765844
+  caveats:
+  - Use these records for boundary language and supervision context, not unsupervised disease treatment.
+- claimId: diabetes-medication-and-sglt2-are-clinician-guided
+  type: safety
+  text: Diabetes, hypoglycemia history, ketoacidosis history, insulin or insulin-secretagogue use, and SGLT2 inhibitor use should trigger clinician guidance before any unsupervised prolonged-fast setup; Murph should not provide medication-change instructions.
+  strength: high
+  sourceKeys:
+  - source_artifact:niddk-fasting-safely-with-diabetes-2020-08-26
+  - source_artifact:pmid-35816600
+  - source_artifact:pmid-32943440
+  - source_artifact:pmid-32971151
+  - source_artifact:pmid-40106615
+  - source_artifact:pmid-41358892
+  - source_artifact:pmid-41358900
+  caveats:
+  - Much of the diabetes evidence comes from Ramadan, procedural fasting, inpatient, or expert-guideline contexts rather than this exact home protocol.
+- claimId: restriction-risk-stops-unsupervised-setup
+  type: safety
+  text: Active or suspected eating disorder, eating-disorder history, binge/purge or binge/restrict cycling, low body weight, recent rapid weight loss, youth restriction risk, or compensatory fasting motives should stop unsupervised run creation and route to clinical support.
+  strength: high
+  sourceKeys:
+  - source_artifact:aed-medical-care-standards-guide-2021-4th-edition
+  - source_artifact:nice-eating-disorders-ng69-2020-12-16
+  - source_artifact:pmid-19025239
+  - source_artifact:pmid-26431904
+  - source_artifact:pmid-35289875
+  - source_artifact:pmid-36722117
+  - source_artifact:pmid-39530408
+  caveats:
+  - Observational fasting/restriction associations are not proof of causality, but they are enough to justify conservative screening.
+  - A brief safety screen is not a diagnostic clearance.
+- claimId: refeed-plan-required-but-no-universal-supplement-prescription
+  type: safety
+  text: Every run should include a planned refeed and post-refeed symptom watch, while high-risk refeeding features such as malnutrition, very low BMI, substantial recent weight loss, prolonged negligible intake, low electrolytes, serious illness, or eating-disorder risk should route to clinician-guided refeeding rather than home supplement advice.
+  strength: high
+  sourceKeys:
+  - source_artifact:nice-nutrition-support-cg32-2006-02-22
+  - source_artifact:pmid-32115791
+  - source_artifact:bapen-thiamine-refeeding-syndrome-2024-05-01
+  - source_artifact:pmid-40090863
+  - source_artifact:pmid-18583681
+  - source_artifact:clevelandclinic-refeeding-syndrome-2022-06-06
+  caveats:
+  - Refeeding-syndrome literature mostly comes from clinical malnutrition, inpatient nutrition, hunger strike, eating-disorder, or extreme-duration contexts.
+  - Do not invent a universal electrolyte, salt, thiamine, or calorie prescription for low-risk short fasting.
+- claimId: adult-only-and-capacity-boundary
+  type: safety
+  text: This ordinary wellness variant is adult-only and requires the ability to understand the plan, hydrate normally, stop early, and seek help; minors/adolescents or users without reliable capacity belong in specialist-guided care, if anywhere.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-19025239
+  - source_artifact:pmid-27550979
+  - source_artifact:pmid-33386343
+  - source_artifact:pmid-36058805
+  - source_artifact:pmid-36368052
+  - source_artifact:pmid-36806880
+  - source_artifact:pmid-39186289
+  - source_artifact:wma-declaration-malta-hunger-strikers-2017-10-01
+- claimId: broad-medication-and-clinical-contraindication-review-required
+  type: safety
+  text: Fasting-therapy guidance flags contraindications and medication-monitoring needs beyond diabetes drugs, including cachexia, uncontrolled hyperthyroidism, advanced cerebrovascular insufficiency or dementia, advanced liver or kidney insufficiency, pregnancy/nursing, antihypertensives, antidiabetics, anticoagulants, lithium/psychotropics, anticonvulsants, and other medications.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-24434758
+  - source_artifact:niddk-fasting-safely-with-diabetes-2020-08-26
+  - source_artifact:pmid-41358900
+  - source_artifact:pmid-32971151
+- claimId: hydrated-does-not-mean-water-loading
+  type: safety
+  text: Hydrated fasting should not be framed as either deliberate fluid restriction or forced water-loading; dehydration, hypovolemia, hyponatremia, water-loading context, and inability to hydrate normally are safety boundaries.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-38126086
+  - source_artifact:pmid-34307843
+  - source_artifact:pmid-23232813
+  - source_artifact:pmid-34414015
+- claimId: high-risk-refeeding-features-route-to-clinician-guided-care
+  type: safety
+  text: High-risk refeeding features such as very low BMI, substantial recent weight loss, prolonged negligible intake, low potassium/phosphate/magnesium, malnutrition, serious illness, eating-disorder risk, or prior refeeding problems require clinician-guided refeeding rather than Murph-generated calorie, electrolyte, salt, or thiamine prescriptions.
+  strength: high
+  sourceKeys:
+  - source_artifact:nice-nutrition-support-cg32-2006-02-22
+  - source_artifact:pmid-32115791
+  - source_artifact:bapen-thiamine-refeeding-syndrome-2024-05-01
+  - source_artifact:irspen-refeeding-syndrome-acute-care-2013-01-01
+  - source_artifact:pmid-40090863
+  - source_artifact:pmid-31895785
+  - source_artifact:pmid-25524882
+  - source_artifact:pmid-41132629
+- claimId: electrolyte-and-neurologic-stop-rules-required
+  type: safety
+  text: Stop rules should explicitly include severe electrolyte-warning symptoms, irregular heartbeat, severe muscle cramps/spasms with weakness, seizure, severe headache with confusion or vomiting, double vision, gait instability, ataxia, and other neurologic symptoms during fasting or after refeeding.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-24434758
+  - source_artifact:pmid-34307843
+  - source_artifact:pmid-23232813
+  - source_artifact:nice-nutrition-support-cg32-2006-02-22
+  - source_artifact:pmid-32115791
+  - source_artifact:pmid-25524882
+  - source_artifact:pmid-41132629
+- claimId: upper-window-60-72h-needs-extra-caution
+  type: safety
+  text: The 60–72 hour end of this protocol should not be treated as an equal default choice for first unsupervised runs because direct physiology sources show work-capacity, autonomic, glucose/counterregulatory, hypoglycemia-threshold, refeed-glucose, and muscle-protein-metabolism concerns.
+  strength: moderate
+  sourceKeys:
+  - source_artifact:pmid-11915777
+  - source_artifact:pmid-17201801
+  - source_artifact:pmid-2694325
+  - source_artifact:pmid-29931424
+  - source_artifact:pmid-11133906
+  - source_artifact:pmid-25020082
+- claimId: oncology-and-active-disease-fasting-are-separate-clinical-variants
+  type: safety
+  text: Fasting around chemotherapy, active cancer treatment, or cancer-related malnutrition is a separate clinician-guided oncology context and should not be routed through an ordinary wellness prolonged-fasting protocol.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-34788373
+  - source_artifact:pmid-27282289
+  - source_artifact:pmid-20157582
+  - source_artifact:pmid-26438237
+  - source_artifact:pmid-29699509
+  - source_artifact:pmid-32571329
+  - source_artifact:pmid-34439167
+  - source_artifact:pmid-33946039
+- claimId: supervised-ae-data-do-not-clear-home-safety
+  type: evidence_scope
+  text: Supervised fasting cohorts and adjacent intermittent-fasting adverse-event syntheses cannot be converted into broad home-safety reassurance because they involve screening, monitoring, structured refeeding, different fasting variants, different populations, longer durations, or uncertain adverse-event evidence.
+  strength: high
+  sourceKeys:
+  - source_artifact:pmid-29458369
+  - source_artifact:pmid-30601864
+  - source_artifact:pmid-38987755
+  - source_artifact:pmid-41692034
+  - source_artifact:pmid-40268190
+- claimId: thrombosis-and-immobility-are-low-certainty-safety-boundaries
+  type: safety
+  text: Prior DVT/PE, clotting disorder, and prolonged immobility or long travel during a fast should trigger clinician guidance or postponement; this is a conservative boundary supported by case-report evidence, not an incidence estimate.
+  strength: low
+  sourceKeys:
+  - source_artifact:pmid-37091135
 researchLandscape:
   bottomLine: Evidence exists for acute 24–72 hour fasting physiology, biomarkers, and safety boundaries, but it is not strong enough to promise durable cardiometabolic benefit or broad unsupervised safety. Treat this as a high-caution, safety-first acute experiment.
   confidenceLabel: limited
   primaryClaim: For a generally healthy adult who clears the safety screen, one planned hydrated 24–72 hour fast can be logged as an acute metabolic-and-tolerability experiment with explicit stop rules and refeed monitoring.
   mainCaveat: Direct evidence is mostly small, selected, acute, surrogate-marker, or registry evidence; adjacent fasting variants, supervised programs, and disease-treatment studies must not be treated as direct proof for this home protocol.
   groups:
-    -
-      id: direct-24-72-hour-fast-evidence
-      label: Direct 24–72 hour fast evidence
-      stance: mixed
-      summary: Closest protocol-matched studies and registries. Use these first, but phrase the evidence as acute biomarker/physiology and small-sample protocol-context evidence rather than durable outcome proof.
-      sourceKeys:
-        - source_artifact:pmid-23220077
-        - source_artifact:pmid-30678028
-        - source_artifact:pmid-37745091
-        - source_artifact:pmid-22140269
-        - source_artifact:pmid-41650389
-        - source_artifact:pmid-2186256
-        - source_artifact:pmid-11133906
-        - source_artifact:pmid-36771218
-        - source_artifact:pmid-29097329
-        - source_artifact:pmid-39991046
-        - source_artifact:clinicaltrials-nct06737224
-        - source_artifact:drks-drks00037060
-      defaultOpen: true
-    -
-      id: direct-24-72-hour-fast-safety-boundary
-      label: Direct acute safety boundary
-      stance: safety_boundary
-      summary: A direct 24-hour fasting study flags reduced tolerance to central hypovolemia, supporting conservative hydration, activity, and stop-rule framing.
-      sourceKeys:
-        - source_artifact:pmid-38126086
-      defaultOpen: true
-    -
-      id: direct_60_72h_insulin_resistance_boundary
-      label: Direct 60–72 hour insulin-resistance boundary
-      stance: mixed
-      summary: Direct 60–72 hour physiology studies show fasting-induced insulin-resistance signals; treat glucose/insulin outcomes as mixed rather than simply improved.
-      sourceKeys:
-        - source_artifact:pmid-20573749
-        - source_artifact:pmid-22028408
-        - source_artifact:pmid-3894423
-      defaultOpen: true
-    -
-      id: metabolic-timecourse-and-mechanisms
-      label: Metabolic time-course and mechanisms
-      stance: mixed
-      summary: Mechanistic sources explain fuel switching, ketone/endocrine/autonomic signals, and metabolomic or proteomic changes, but they are plausibility evidence rather than clinical efficacy proof.
-      sourceKeys:
-        - source_artifact:pmid-11360139
-        - source_artifact:pmid-16848698
-        - source_artifact:doi-10.1186/1755-8794-4-24
-        - source_artifact:doi-10.3389/fnut.2026.1779113
-        - source_artifact:pmid-10837292
-        - source_artifact:pmid-11551856
-        - source_artifact:pmid-17684102
-        - source_artifact:pmid-21521350
-        - source_artifact:pmid-33284087
-        - source_artifact:pmid-36791323
-        - source_artifact:pmid-40700575
-      defaultOpen: false
-    -
-      id: variant-taxonomy
-      label: Variant taxonomy
-      stance: context_only
-      summary: Terminology sources help keep prolonged fasting separate from TRE, ADF, Ramadan, religious fasting, and longer starvation or clinical fasting protocols.
-      sourceKeys:
-        - source_artifact:pmid-32700827
-        - source_artifact:pmid-25857868
-        - source_artifact:pmid-39059384
-      defaultOpen: false
-    -
-      id: research_landscape:fmd-vlcd-modified-fasting-boundary
-      label: FMD, VLCD, and modified-fasting boundary
-      stance: mixed
-      summary: Modified fasting and very-low-calorie evidence is abundant and sometimes positive, but the calorie dose, clinical supervision, and populations differ from this protocol.
-      sourceKeys:
-        - source_artifact:pmid-28202779
-        - source_artifact:pmid-28459931
-        - source_artifact:pmid-27569118
-        - source_artifact:pmid-33882506
-        - source_artifact:pmid-38546821
-        - source_artifact:pmid-40287774
-        - source_artifact:pmid-40533200
-        - source_artifact:pmid-40816210
-      defaultOpen: false
-    -
-      id: adjacent-adf
-      label: Alternate-day fasting context
-      stance: context_only
-      summary: ADF sources are adjacent cardiometabolic and implementation context; they should not be used as direct evidence for one 24–72 hour prolonged fast.
-      sourceKeys:
-        - source_artifact:pmid-15640462
-        - source_artifact:pmid-32777443
-        - source_artifact:pmid-31471173
-      defaultOpen: false
-    -
-      id: adjacent-tre-metabolic
-      label: Time-restricted eating context
-      stance: context_only
-      summary: TRE evidence is feeding-window evidence, not prolonged-fasting evidence, even when metabolic outcomes look favorable.
-      sourceKeys:
-        - source_artifact:pmid-31813824
-        - source_artifact:pmid-32673591
-        - source_artifact:pmid-29754952
-        - source_artifact:pmid-35939311
-      defaultOpen: false
-    -
-      id: adjacent-ramadan-fasting
-      label: Ramadan fasting context
-      stance: mixed
-      summary: Ramadan fasting is a distinct dry/daytime-fast plus nocturnal-feeding exposure; useful for mismatch and safety context but not direct protocol proof.
-      sourceKeys:
-        - source_artifact:pmid-30813495
-        - source_artifact:pmid-32157368
-        - source_artifact:pmid-32446800
-        - source_artifact:pmid-34167865
-      defaultOpen: false
-    -
-      id: clinical_supervised_boundary
-      label: Clinical supervised fasting boundary
-      stance: mixed
-      summary: Supervised therapeutic fasting sources may show blood-pressure or symptom signals, but they use screening, monitoring, longer durations, disease populations, or multi-component care.
-      sourceKeys:
-        - source_artifact:pmid-33222606
-        - source_artifact:pmid-11416824
-        - source_artifact:pmid-12470446
-        - source_artifact:clinicaltrials-nct04515095
-        - source_artifact:pmid-16131283
-      defaultOpen: false
-    -
-      id: residential_supervised_boundary
-      label: Residential fasting boundary
-      stance: mixed
-      summary: Residential water-only or Buchinger-style sources provide safety and measurement context, but their supervision and longer protocols limit directness.
-      sourceKeys:
-        - source_artifact:pmid-36296997
-        - source_artifact:pmid-36325269
-        - source_artifact:pmid-35348108
-        - source_artifact:pmid-37602022
-        - source_artifact:pmid-40765844
-      defaultOpen: false
-    -
-      id: implementation-hydration-refeed-context
-      label: Clinic implementation context
-      stance: context_only
-      summary: Clinic-facing implementation sources emphasize daily checks, hydration, rest, symptom escalation, and refeeding; use as boundary context, not efficacy proof.
-      sourceKeys:
-        - source_artifact:buchinger-wilhelmi-fasting-schedule-2023-04-28
-        - source_artifact:buchinger-wilhelmi-fasting-tips-2023-09-06
-      defaultOpen: false
-    -
-      id: refeeding-electrolytes-thiamine-safety
-      label: Refeeding, electrolytes, and thiamine safety
-      stance: safety_boundary
-      summary: Clinical nutrition and refeeding sources are safety guardrails for risk screening, electrolyte/thiamine planning, and conservative refeed language.
-      sourceKeys:
-        - source_artifact:nice-nutrition-support-cg32-2006-02-22
-        - source_artifact:pmid-32115791
-        - source_artifact:bapen-thiamine-refeeding-syndrome-2024-05-01
-        - source_artifact:irspen-refeeding-syndrome-acute-care-2013-01-01
-        - source_artifact:pmid-40090863
-        - source_artifact:pmid-31895785
-        - source_artifact:pmid-25524882
-        - source_artifact:pmid-41132629
-      defaultOpen: true
-    -
-      id: diabetes-medication-safety-boundary
-      label: Diabetes and medication safety boundary
-      stance: safety_boundary
-      summary: Diabetes fasting guidance is safety-only for medication review, risk stratification, monitoring, and clinician involvement.
-      sourceKeys:
-        - source_artifact:pmid-32922560
-        - source_artifact:pmid-41358900
-        - source_artifact:niddk-fasting-safely-with-diabetes-2020-08-26
-        - source_artifact:pmid-28347497
-        - source_artifact:pmid-35016991
-        - source_artifact:pmid-40512040
-      defaultOpen: true
-    -
-      id: sglt2-ketoacidosis-fasting-boundary
-      label: SGLT2 and ketoacidosis boundary
-      stance: safety_boundary
-      summary: SGLT2 sources make ketoacidosis and dehydration risk a hard medication-specific boundary during prolonged fasting or fasting-like procedures.
-      sourceKeys:
-        - source_artifact:pmid-32943440
-        - source_artifact:pmid-32971151
-        - source_artifact:pmid-35346357
-        - source_artifact:pmid-36789141
-        - source_artifact:pmid-40106615
-        - source_artifact:pmid-41358892
-      defaultOpen: true
-    -
-      id: glucose-monitoring-thresholds
-      label: Glucose monitoring thresholds
-      stance: safety_boundary
-      summary: Glucose definitions and CGM consensus sources support stop-rule and measurement language; they are not efficacy evidence.
-      sourceKeys:
-        - source_artifact:pmid-23589542
-        - source_artifact:pmid-27872948
-        - source_artifact:pmid-31177185
-      defaultOpen: false
-    -
-      id: eating-disorder-restriction-risk-boundary
-      label: Eating-disorder and restriction-risk boundary
-      stance: safety_boundary
-      summary: ED and restriction-risk sources support exclusion, screening, and referral language, especially for youth, prior restriction, low weight, or active symptoms.
-      sourceKeys:
-        - source_artifact:pmid-33386343
-        - source_artifact:pmid-36722117
-        - source_artifact:pmid-36058805
-        - source_artifact:nice-eating-disorders-ng69-2020-12-16
-        - source_artifact:aed-medical-care-standards-guide-2021-4th-edition
-        - source_artifact:pmid-19025239
-        - source_artifact:pmid-36368052
-        - source_artifact:pmid-39530408
-        - source_artifact:doi-10.3390/nu16244275
-        - source_artifact:trialx-fastomics-prolonged-fasting-2025-10-21
-      defaultOpen: true
-    -
-      id: safety-and-adverse-events
-      label: Adverse-event and longer-fast safety context
-      stance: safety_boundary
-      summary: Safety sources include supervised cohorts, case reports, hunger-strike guidance, and IF adverse-event reviews; use them to avoid overclaiming community safety.
-      sourceKeys:
-        - source_artifact:pmid-29458369
-        - source_artifact:pmid-30601864
-        - source_artifact:pmid-23232813
-        - source_artifact:pmid-34307843
-        - source_artifact:pmid-37091135
-        - source_artifact:pmid-38987755
-        - source_artifact:pmid-41692034
-        - source_artifact:pmid-40268190
-        - source_artifact:wma-declaration-malta-hunger-strikers-2017-10-01
-      defaultOpen: true
-    -
-      id: measurement-and-behavioral-context
-      label: Measurement and behavioral context
-      stance: context_only
-      summary: Behavioral and measurement-context sources help select appetite, intake, metabolite, and symptom monitoring without supporting causal benefit claims.
-      sourceKeys:
-        - source_artifact:pmid-24454949
-        - source_artifact:pmid-36811567
-      defaultOpen: false
+  - id: direct-24-72-hour-fast-evidence
+    label: Direct 24–72 hour fast evidence
+    stance: mixed
+    summary: Closest protocol-matched studies and registries. Use these first, but phrase the evidence as acute biomarker/physiology and small-sample protocol-context evidence rather than durable outcome proof.
+    sourceKeys:
+    - source_artifact:pmid-23220077
+    - source_artifact:pmid-30678028
+    - source_artifact:pmid-37745091
+    - source_artifact:pmid-22140269
+    - source_artifact:pmid-41650389
+    - source_artifact:pmid-2186256
+    - source_artifact:pmid-11133906
+    - source_artifact:pmid-36771218
+    - source_artifact:pmid-29097329
+    - source_artifact:pmid-39991046
+    - source_artifact:clinicaltrials-nct06737224
+    - source_artifact:drks-drks00037060
+    - source_artifact:pmid-16763003
+    - source_artifact:pmid-16931880
+    - source_artifact:pmid-23403876
+    - source_artifact:pmid-23512807
+    - source_artifact:pmid-27525514
+    - source_artifact:pmid-30161009
+    - source_artifact:pmid-35361560
+    - source_artifact:pmid-37727698
+    - source_artifact:pmid-8238506
+    defaultOpen: true
+  - id: direct-24-72-hour-fast-safety-boundary
+    label: Direct acute safety boundary
+    stance: safety_boundary
+    summary: Direct 24–72 hour studies and challenge protocols preserve acute safety-relevant signals, including reduced tolerance to central hypovolemia after 24 hours, reduced work capacity around 72 hours, hypoglycemia/counterregulatory contexts, autonomic activation, and muscle-protein turnover markers; they do not provide community adverse-event rates.
+    sourceKeys:
+    - source_artifact:pmid-38126086
+    - source_artifact:pmid-11915777
+    - source_artifact:pmid-2694325
+    - source_artifact:pmid-29931424
+    - source_artifact:pmid-17201801
+    - source_artifact:pmid-25020082
+    defaultOpen: true
+  - id: direct_60_72h_insulin_resistance_boundary
+    label: Direct 60–72 hour insulin-resistance boundary
+    stance: mixed
+    summary: Direct 60–72 hour physiology studies show fasting-induced insulin-resistance signals; treat glucose/insulin outcomes as mixed rather than simply improved.
+    sourceKeys:
+    - source_artifact:pmid-20573749
+    - source_artifact:pmid-22028408
+    - source_artifact:pmid-3894423
+    defaultOpen: true
+  - id: metabolic-timecourse-and-mechanisms
+    label: Metabolic time-course and mechanisms
+    stance: mixed
+    summary: Mechanistic sources explain fuel switching, ketone/endocrine/autonomic signals, metabolomic/proteomic changes, and population-difference context, but they are plausibility and measurement evidence rather than clinical efficacy proof.
+    sourceKeys:
+    - source_artifact:pmid-11360139
+    - source_artifact:pmid-16848698
+    - source_artifact:doi-10.1186/1755-8794-4-24
+    - source_artifact:doi-10.3389/fnut.2026.1779113
+    - source_artifact:pmid-10837292
+    - source_artifact:pmid-11551856
+    - source_artifact:pmid-17684102
+    - source_artifact:pmid-21521350
+    - source_artifact:pmid-33284087
+    - source_artifact:pmid-36791323
+    - source_artifact:pmid-40700575
+    - source_artifact:pmid-12107252
+    - source_artifact:pmid-12388154
+    - source_artifact:pmid-15917861
+    - source_artifact:pmid-176179
+    - source_artifact:pmid-17784905
+    - source_artifact:pmid-27245338
+    - source_artifact:pmid-28273723
+    - source_artifact:pmid-2926306
+    - source_artifact:pmid-30183740
+    - source_artifact:pmid-37862821
+    - source_artifact:pmid-8017334
+    - source_artifact:pmid-8172872
+    - source_artifact:doi-10.3389/fnut.2026.1772246
+    - source_artifact:pmid-11120658
+    - source_artifact:pmid-11701450
+    - source_artifact:pmid-18945215
+    - source_artifact:pmid-19369940
+    - source_artifact:pmid-23074240
+    - source_artifact:pmid-2405717
+    - source_artifact:pmid-26529252
+    - source_artifact:pmid-34705313
+    - source_artifact:pmid-3540009
+    - source_artifact:pmid-3661473
+    - source_artifact:pmid-36866742
+    - source_artifact:pmid-39328508
+    - source_artifact:pmid-39443278
+    - source_artifact:pmid-40234969
+    - source_artifact:pmid-41637755
+    - source_artifact:pmid-24434759
+    - source_artifact:pmid-32519900
+    - source_artifact:pmid-40484176
+    - source_artifact:pmid-38429390
+    - source_artifact:pmid-40596030
+    defaultOpen: false
+  - id: variant-taxonomy
+    label: Variant taxonomy
+    stance: context_only
+    summary: Terminology sources help keep prolonged fasting separate from TRE, ADF, Ramadan, religious fasting, and longer starvation or clinical fasting protocols.
+    sourceKeys:
+    - source_artifact:pmid-32700827
+    - source_artifact:pmid-25857868
+    - source_artifact:pmid-39059384
+    - source_artifact:pmid-40604163
+    - source_artifact:pmid-39369112
+    - source_artifact:pmid-40647166
+    defaultOpen: false
+  - id: research_landscape:fmd-vlcd-modified-fasting-boundary
+    label: FMD, VLCD, and modified-fasting boundary
+    stance: mixed
+    summary: Modified fasting and very-low-calorie evidence is abundant and sometimes positive, but the calorie dose, clinical supervision, and populations differ from this protocol.
+    sourceKeys:
+    - source_artifact:pmid-28202779
+    - source_artifact:pmid-28459931
+    - source_artifact:pmid-27569118
+    - source_artifact:pmid-33882506
+    - source_artifact:pmid-38546821
+    - source_artifact:pmid-40287774
+    - source_artifact:pmid-40533200
+    - source_artifact:pmid-40816210
+    - source_artifact:doi-10.1186/1475-2891-9-35
+    - source_artifact:doi-10.33607/bjshs.v112i1.777
+    - source_artifact:doi-10.33607/bjshs.v2i105.26
+    - source_artifact:nice-overweight-obesity-management-2026-01-08
+    - source_artifact:pmid-19793855
+    - source_artifact:pmid-20921964
+    - source_artifact:pmid-23497604
+    - source_artifact:pmid-23591120
+    - source_artifact:pmid-24215592
+    - source_artifact:pmid-26094889
+    - source_artifact:pmid-27708846
+    - source_artifact:pmid-27833048
+    - source_artifact:pmid-30646030
+    - source_artifact:pmid-31779987
+    - source_artifact:pmid-32003649
+    - source_artifact:pmid-34726317
+    - source_artifact:pmid-34789537
+    - source_artifact:pmid-36349432
+    - source_artifact:pmid-37275639
+    - source_artifact:pmid-38378685
+    - source_artifact:pmid-39934050
+    - source_artifact:pmid-39970875
+    - source_artifact:pmid-40020647
+    - source_artifact:pmid-40137116
+    - source_artifact:pmid-40604264
+    - source_artifact:pmid-41372565
+    - source_artifact:pmid-32576828
+    - source_artifact:pmid-34439167
+    - source_artifact:pmid-39703333
+    defaultOpen: false
+  - id: adjacent-adf
+    label: Intermittent and alternate-day fasting context
+    stance: context_only
+    summary: ADF and broader intermittent-fasting sources are adjacent cardiometabolic and implementation context; they should not be used as direct evidence for one 24–72 hour water-only fast.
+    sourceKeys:
+    - source_artifact:pmid-15640462
+    - source_artifact:pmid-32777443
+    - source_artifact:pmid-31471173
+    - source_artifact:pmid-29419624
+    - source_artifact:pmid-32428841
+    - source_artifact:pmid-33512717
+    - source_artifact:pmid-34919135
+    - source_artifact:pmid-38308923
+    - source_artifact:pmid-38500840
+    - source_artifact:pmid-38904963
+    - source_artifact:pmid-39229586
+    - source_artifact:pmid-39501676
+    - source_artifact:pmid-39533312
+    - source_artifact:pmid-40705196
+    defaultOpen: false
+  - id: adjacent-tre-metabolic
+    label: Time-restricted eating context
+    stance: context_only
+    summary: TRE evidence is feeding-window evidence, not prolonged-fasting evidence; null and no-clear-advantage findings should be preserved as adjacent context.
+    sourceKeys:
+    - source_artifact:pmid-31813824
+    - source_artifact:pmid-32673591
+    - source_artifact:pmid-29754952
+    - source_artifact:pmid-35939311
+    - source_artifact:pmid-32986097
+    - source_artifact:pmid-35443107
+    - source_artifact:pmid-39408357
+    defaultOpen: false
+  - id: adjacent-ramadan-fasting
+    label: Ramadan fasting context
+    stance: mixed
+    summary: Ramadan fasting is a distinct dry/daytime-fast plus nocturnal-feeding exposure; useful for mismatch and safety context but not direct protocol proof.
+    sourceKeys:
+    - source_artifact:pmid-30813495
+    - source_artifact:pmid-32157368
+    - source_artifact:pmid-32446800
+    - source_artifact:pmid-34167865
+    defaultOpen: false
+  - id: clinical_supervised_boundary
+    label: Clinical supervised fasting boundary
+    stance: mixed
+    summary: Supervised therapeutic fasting sources may show blood-pressure or symptom signals, but they use screening, monitoring, longer durations, disease populations, or multi-component care.
+    sourceKeys:
+    - source_artifact:pmid-33222606
+    - source_artifact:pmid-11416824
+    - source_artifact:pmid-12470446
+    - source_artifact:clinicaltrials-nct04515095
+    - source_artifact:pmid-16131283
+    - source_artifact:pmid-34788373
+    - source_artifact:pmid-11252685
+    - source_artifact:pmid-1681264
+    - source_artifact:pmid-24434755
+    - source_artifact:pmid-24434756
+    - source_artifact:pmid-33963431
+    - source_artifact:pmid-34380725
+    - source_artifact:pmid-36012990
+    - source_artifact:pmid-12608732
+    - source_artifact:pmid-12748412
+    - source_artifact:pmid-17263085
+    defaultOpen: false
+  - id: residential_supervised_boundary
+    label: Residential fasting boundary
+    stance: mixed
+    summary: Residential water-only or Buchinger-style sources provide safety and measurement context, but their supervision and longer protocols limit directness.
+    sourceKeys:
+    - source_artifact:pmid-36296997
+    - source_artifact:pmid-36325269
+    - source_artifact:pmid-35348108
+    - source_artifact:pmid-37602022
+    - source_artifact:pmid-40765844
+    defaultOpen: false
+  - id: implementation-hydration-refeed-context
+    label: Clinic implementation context
+    stance: context_only
+    summary: Clinic-facing implementation sources emphasize daily checks, hydration, rest, symptom escalation, and refeeding; use as boundary context, not efficacy proof.
+    sourceKeys:
+    - source_artifact:buchinger-wilhelmi-fasting-schedule-2023-04-28
+    - source_artifact:buchinger-wilhelmi-fasting-tips-2023-09-06
+    - source_artifact:healthpromoting-water-only-fasting-2026-04-27
+    defaultOpen: false
+  - id: refeeding-electrolytes-thiamine-safety
+    label: Refeeding, electrolytes, and thiamine safety
+    stance: safety_boundary
+    summary: Clinical nutrition and refeeding sources are safety guardrails for risk screening, electrolyte/thiamine planning, and conservative refeed language.
+    sourceKeys:
+    - source_artifact:nice-nutrition-support-cg32-2006-02-22
+    - source_artifact:pmid-32115791
+    - source_artifact:bapen-thiamine-refeeding-syndrome-2024-05-01
+    - source_artifact:irspen-refeeding-syndrome-acute-care-2013-01-01
+    - source_artifact:pmid-40090863
+    - source_artifact:pmid-31895785
+    - source_artifact:pmid-25524882
+    - source_artifact:pmid-41132629
+    - source_artifact:doi-10.1097/tin.0000000000000235
+    - source_artifact:pmid-11448586
+    - source_artifact:pmid-16306300
+    - source_artifact:pmid-17700652
+    - source_artifact:pmid-18583681
+    - source_artifact:pmid-19284691
+    - source_artifact:pmid-20122539
+    - source_artifact:pmid-20886063
+    - source_artifact:pmid-2109122
+    - source_artifact:pmid-22307490
+    - source_artifact:pmid-23090653
+    - source_artifact:pmid-23315514
+    - source_artifact:pmid-25280415
+    - source_artifact:pmid-25280426
+    - source_artifact:pmid-26597128
+    - source_artifact:pmid-28087222
+    - source_artifact:pmid-29429529
+    - source_artifact:pmid-30348463
+    - source_artifact:pmid-31847205
+    - source_artifact:pmid-31895231
+    - source_artifact:pmid-32794628
+    - source_artifact:pmid-32884632
+    - source_artifact:pmid-33074463
+    - source_artifact:pmid-33232094
+    - source_artifact:pmid-34134001
+    - source_artifact:pmid-34742138
+    - source_artifact:pmid-36482748
+    - source_artifact:pmid-39187889
+    - source_artifact:pmid-41735500
+    - source_artifact:pmid-6782855
+    - source_artifact:rcpsych-meed-eating-disorders-2022-05-01
+    - source_artifact:sps-thiamine-refeeding-syndrome-2025-03-11
+    - source_artifact:clevelandclinic-refeeding-syndrome-2022-06-06
+    - source_artifact:pmid-41470894
+    - source_artifact:pmid-41476191
+    - source_artifact:pmid-6758355
+    defaultOpen: true
+  - id: diabetes-medication-safety-boundary
+    label: Diabetes and medication safety boundary
+    stance: safety_boundary
+    summary: Diabetes fasting guidance is safety-only for medication review, risk stratification, monitoring, and clinician involvement.
+    sourceKeys:
+    - source_artifact:pmid-32922560
+    - source_artifact:pmid-41358900
+    - source_artifact:niddk-fasting-safely-with-diabetes-2020-08-26
+    - source_artifact:pmid-28347497
+    - source_artifact:pmid-35016991
+    - source_artifact:pmid-40512040
+    - source_artifact:pmid-12161056
+    - source_artifact:pmid-15451892
+    - source_artifact:pmid-16815586
+    - source_artifact:pmid-20668157
+    - source_artifact:pmid-25581456
+    - source_artifact:pmid-26003888
+    - source_artifact:pmid-26113983
+    - source_artifact:pmid-28685515
+    - source_artifact:pmid-28783529
+    - source_artifact:pmid-29405359
+    - source_artifact:pmid-29804943
+    - source_artifact:pmid-31003482
+    - source_artifact:pmid-33319233
+    - source_artifact:pmid-33493579
+    - source_artifact:pmid-34391831
+    - source_artifact:pmid-35816600
+    - source_artifact:pmid-36508320
+    - source_artifact:pmid-36537522
+    - source_artifact:pmid-37313231
+    - source_artifact:pmid-37867270
+    defaultOpen: true
+  - id: sglt2-ketoacidosis-fasting-boundary
+    label: SGLT2 and ketoacidosis boundary
+    stance: safety_boundary
+    summary: SGLT2 sources make ketoacidosis and dehydration risk a hard medication-specific boundary during prolonged fasting or fasting-like procedures.
+    sourceKeys:
+    - source_artifact:pmid-32943440
+    - source_artifact:pmid-32971151
+    - source_artifact:pmid-35346357
+    - source_artifact:pmid-36789141
+    - source_artifact:pmid-40106615
+    - source_artifact:pmid-41358892
+    - source_artifact:pmid-29802956
+    - source_artifact:pmid-31316777
+    - source_artifact:pmid-34953158
+    - source_artifact:pmid-38495948
+    defaultOpen: true
+  - id: glucose-monitoring-thresholds
+    label: Glucose monitoring thresholds
+    stance: safety_boundary
+    summary: Glucose definitions and CGM consensus sources support stop-rule and measurement language; they are not efficacy evidence.
+    sourceKeys:
+    - source_artifact:pmid-23589542
+    - source_artifact:pmid-27872948
+    - source_artifact:pmid-31177185
+    - source_artifact:pmid-41358894
+    defaultOpen: false
+  - id: eating-disorder-restriction-risk-boundary
+    label: Eating-disorder and restriction-risk boundary
+    stance: safety_boundary
+    summary: ED and restriction-risk sources support exclusion, screening, and referral language, especially for youth, prior restriction, low weight, or active symptoms.
+    sourceKeys:
+    - source_artifact:pmid-33386343
+    - source_artifact:pmid-36722117
+    - source_artifact:pmid-36058805
+    - source_artifact:nice-eating-disorders-ng69-2020-12-16
+    - source_artifact:aed-medical-care-standards-guide-2021-4th-edition
+    - source_artifact:pmid-19025239
+    - source_artifact:pmid-36368052
+    - source_artifact:pmid-39530408
+    - source_artifact:doi-10.3390/nu16244275
+    - source_artifact:trialx-fastomics-prolonged-fasting-2025-10-21
+    - source_artifact:doi-10.1080/10640266.2023.2293504
+    - source_artifact:pmid-10999971
+    - source_artifact:pmid-19642214
+    - source_artifact:pmid-21703378
+    - source_artifact:pmid-21764035
+    - source_artifact:pmid-25530605
+    - source_artifact:pmid-26431904
+    - source_artifact:pmid-27550979
+    - source_artifact:pmid-27709979
+    - source_artifact:pmid-31131531
+    - source_artifact:pmid-32127440
+    - source_artifact:pmid-32171414
+    - source_artifact:pmid-32520822
+    - source_artifact:pmid-33410207
+    - source_artifact:pmid-33636417
+    - source_artifact:pmid-33864277
+    - source_artifact:pmid-34191688
+    - source_artifact:pmid-35010751
+    - source_artifact:pmid-35289875
+    - source_artifact:pmid-35289876
+    - source_artifact:pmid-35999438
+    - source_artifact:pmid-36526039
+    - source_artifact:pmid-36610542
+    - source_artifact:pmid-36650572
+    - source_artifact:pmid-36806880
+    - source_artifact:pmid-37377031
+    - source_artifact:pmid-37865786
+    - source_artifact:pmid-38264193
+    - source_artifact:pmid-39186289
+    - source_artifact:pmid-39388984
+    defaultOpen: true
+  - id: safety-and-adverse-events
+    label: Adverse-event and longer-fast safety context
+    stance: safety_boundary
+    summary: Safety sources include supervised cohorts, case reports, hunger-strike guidance, and IF adverse-event reviews; use them to avoid overclaiming community safety.
+    sourceKeys:
+    - source_artifact:pmid-29458369
+    - source_artifact:pmid-30601864
+    - source_artifact:pmid-23232813
+    - source_artifact:pmid-34307843
+    - source_artifact:pmid-37091135
+    - source_artifact:pmid-38987755
+    - source_artifact:pmid-41692034
+    - source_artifact:pmid-40268190
+    - source_artifact:wma-declaration-malta-hunger-strikers-2017-10-01
+    - source_artifact:pmid-27282289
+    - source_artifact:pmid-35670159
+    - source_artifact:clinicaltrials-nct00936364
+    - source_artifact:pmid-20157582
+    - source_artifact:pmid-24434758
+    - source_artifact:pmid-26438237
+    - source_artifact:pmid-29699509
+    - source_artifact:pmid-32571329
+    - source_artifact:pmid-33059765
+    - source_artifact:pmid-33946039
+    - source_artifact:pmid-37375570
+    - source_artifact:pmid-19472450
+    - source_artifact:pmid-22987064
+    - source_artifact:pmid-26135345
+    - source_artifact:pmid-28025637
+    - source_artifact:pmid-29455546
+    - source_artifact:pmid-31428564
+    - source_artifact:pmid-32457696
+    - source_artifact:pmid-33396948
+    - source_artifact:pmid-34308107
+    - source_artifact:pmid-34350876
+    - source_artifact:pmid-34414015
+    - source_artifact:pmid-34459130
+    - source_artifact:pmid-35334843
+    - source_artifact:pmid-35380473
+    - source_artifact:pmid-35919268
+    - source_artifact:pmid-36145236
+    - source_artifact:pmid-39599745
+    - source_artifact:pmid-4925695
+    - source_artifact:pmid-5762322
+    defaultOpen: true
+  - id: measurement-and-behavioral-context
+    label: Measurement and behavioral context
+    stance: context_only
+    summary: Behavioral and measurement-context sources help select appetite, intake, metabolite, and symptom monitoring without supporting causal benefit claims.
+    sourceKeys:
+    - source_artifact:pmid-24454949
+    - source_artifact:pmid-36811567
+    defaultOpen: false
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
-    - pregnancy_or_breastfeeding_or_early_postpartum
-    - adolescent_or_minor
-    - active_or_suspected_eating_disorder
-    - eating_disorder_history_or_binge_restrict_cycle
-    - low_body_weight_or_underweight
-    - recent_rapid_weight_loss
-    - malnutrition_or_low_reserves
-    - prolonged_poor_intake
-    - diabetes_or_hypoglycemia_history
-    - insulin_or_insulin_secretagogue_use
-    - sglt2_inhibitor_use
-    - ketoacidosis_history
-    - kidney_disease_or_reduced_kidney_function
-    - gout_hyperuricemia_or_urate_kidney_stones
-    - heart_disease_arrhythmia_or_heart_failure
-    - syncope_orthostatic_intolerance_or_low_blood_pressure
-    - diuretic_or_high_risk_blood_pressure_medication_use
-    - acute_illness_fever_vomiting_or_diarrhea
-    - dehydration_or_inability_to_keep_fluids_down
-    - advanced_liver_or_kidney_insufficiency
-    - active_cancer_malnutrition_risk
-    - planned_strenuous_training_heat_stress_or_dry_fasting
-    - need_for_medication_adjustment
-    - high_risk_refeeding_features
+  - pregnancy_or_breastfeeding_or_early_postpartum
+  - adolescent_or_minor
+  - active_or_suspected_eating_disorder
+  - eating_disorder_history_or_binge_restrict_cycle
+  - low_body_weight_or_underweight
+  - recent_rapid_weight_loss
+  - malnutrition_or_low_reserves
+  - prolonged_poor_intake
+  - diabetes_or_hypoglycemia_history
+  - insulin_or_insulin_secretagogue_use
+  - sglt2_inhibitor_use
+  - ketoacidosis_history
+  - kidney_disease_or_reduced_kidney_function
+  - gout_hyperuricemia_or_urate_kidney_stones
+  - heart_disease_arrhythmia_or_heart_failure
+  - syncope_orthostatic_intolerance_or_low_blood_pressure
+  - diuretic_or_high_risk_blood_pressure_medication_use
+  - acute_illness_fever_vomiting_or_diarrhea
+  - dehydration_or_inability_to_keep_fluids_down
+  - advanced_liver_or_kidney_insufficiency
+  - planned_strenuous_training_heat_stress_or_dry_fasting
+  - need_for_medication_adjustment
+  - high_risk_refeeding_features
+  - active_cancer_or_current_chemotherapy_radiation_or_immunotherapy
+  - cancer_cachexia_or_malnutrition_risk
+  - trying_to_conceive_or_fertility_treatment
+  - uncontrolled_hyperthyroidism
+  - advanced_cerebrovascular_disease_dementia_or_impaired_decision_capacity
+  - cachexia_or_unintentional_weight_loss
+  - frailty_sarcopenia_fall_risk_or_low_functional_reserve
+  - known_electrolyte_abnormality_or_pending_clinician_lab_concern
+  - anticoagulant_lithium_psychotropic_or_anticonvulsant_use
+  - antihypertensive_or_other_medication_requiring_food_hydration_or_timing_review
+  - history_of_hyponatremia_water_intoxication_or_forced_water_loading
+  - prior_dvt_pe_clotting_disorder_or_current_prolonged_immobility
   stopIf:
-    - fainting_or_near_fainting
-    - confusion_or_neurologic_symptoms
-    - chest_pain_or_pressure
-    - unusual_shortness_of_breath
-    - significant_palpitations
-    - severe_weakness
-    - severe_or_persistent_dizziness
-    - fever_vomiting_diarrhea_or_dehydration
-    - inability_to_keep_fluids_down
-    - clinician_defined_glucose_or_ketone_stop_threshold
-    - hypoglycemia_or_ketoacidosis_symptoms
-    - severe_symptoms_after_refeeding
-    - new_swelling_breathlessness_ataxia_or_palpitations_after_refeed
-    - restriction_urges_binge_restrict_cycle_or_compensatory_fasting_motives
+  - fainting_or_near_fainting
+  - confusion_or_neurologic_symptoms
+  - chest_pain_or_pressure
+  - unusual_shortness_of_breath
+  - significant_palpitations
+  - severe_weakness
+  - severe_or_persistent_dizziness
+  - fever_vomiting_diarrhea_or_dehydration
+  - inability_to_keep_fluids_down
+  - clinician_defined_glucose_or_ketone_stop_threshold
+  - hypoglycemia_or_ketoacidosis_symptoms
+  - severe_symptoms_after_refeeding
+  - new_swelling_breathlessness_ataxia_or_palpitations_after_refeed
+  - restriction_urges_binge_restrict_cycle_or_compensatory_fasting_motives
+  - seizure_or_severe_headache_with_confusion_or_repeated_vomiting
+  - new_irregular_heartbeat
+  - severe_muscle_cramps_spasms_or_electrolyte_warning_symptoms
+  - known_low_sodium_potassium_phosphate_or_magnesium
+  - abnormal_kidney_liver_or_clinician_lab_concern
+  - double_vision_gait_instability_ataxia_or_eye_movement_symptoms
+  - one_sided_leg_swelling_or_pain
+  - unsafe_logistics_no_fluids_rest_transport_or_heat_escape
+  - new_severe_gout_like_joint_pain
   notes:
-    - This protocol is not for treating diabetes, hypertension, obesity, cancer, autoimmune disease, or any other medical condition.
-    - Do not use this protocol to change medication, override clinician instructions, or self-manage glucose-lowering drugs.
-    - Do not run this as dry fasting or deliberate fluid restriction.
-    - Do not extend beyond 72 hours inside this variant. Longer or supervised therapeutic fasting is a separate clinical protocol.
-    - High-risk refeeding is clinical care; Murph should not invent electrolyte, thiamine, salt, or calorie prescriptions.
+  - This protocol is not for treating diabetes, hypertension, obesity, cancer, autoimmune disease, or any other medical condition.
+  - Do not use this protocol to change medication, override clinician instructions, or self-manage glucose-lowering drugs.
+  - Do not run this as dry fasting or deliberate fluid restriction.
+  - Do not extend beyond 72 hours inside this variant. Longer or supervised therapeutic fasting is a separate clinical protocol.
+  - High-risk refeeding is clinical care; Murph should not invent electrolyte, thiamine, salt, or calorie prescriptions.
+  - Hydrated means drinking normally/to thirst, not deliberate fluid restriction or forced water-loading.
+  - Wearables, CGM, BP, or labs are context only and never override symptoms, red flags, or clinician guidance.
 researchCoverage:
-  bibliographyKey: source_artifact:prolonged-fasting-research-ledger-2026-04-28
   corpusStats:
     canonicalLedgerRecords: 334
     extractedAndAppraisedRecords: 331
@@ -1002,57 +1292,87 @@ researchCoverage:
     adjacentVariantRecords: 126
     clinicalSupervisedRecords: 38
     generalGuidelineRecords: 89
-    auditCutoff: 2026-04-28
+    auditCutoff: '2026-04-28'
+  artifactManifestKey: source_artifact:prolonged-fasting/research-artifacts
 sessionLoggingFields:
-  - fast_start_time
-  - planned_duration_hours
-  - actual_end_time
-  - fasting_type
-  - fluids_available_and_used
-  - caffeine_change_or_withdrawal
-  - strenuous_exercise_or_heat_exposure
-  - hunger_level
-  - headache
-  - dizziness_or_lightheadedness
-  - faintness_or_near_syncope
-  - palpitations
-  - chest_pain_or_pressure
-  - unusual_shortness_of_breath
-  - confusion_or_neurologic_symptoms
-  - mood_or_stress
-  - sleep_disruption
-  - blood_pressure_if_available
-  - pulse_if_available
-  - glucose_or_cgm_if_available_or_clinician_directed
-  - body_weight_if_measured
-  - first_refeed_time
-  - first_refeed_notes
-  - symptoms_after_refeed
+- fast_start_time
+- planned_duration_hours
+- actual_end_time
+- fasting_type
+- fluids_available_and_used
+- caffeine_change_or_withdrawal
+- strenuous_exercise_or_heat_exposure
+- hunger_level
+- headache
+- dizziness_or_lightheadedness
+- faintness_or_near_syncope
+- palpitations
+- chest_pain_or_pressure
+- unusual_shortness_of_breath
+- confusion_or_neurologic_symptoms
+- mood_or_stress
+- sleep_disruption
+- blood_pressure_if_available
+- pulse_if_available
+- glucose_or_cgm_if_available_or_clinician_directed
+- body_weight_if_measured
+- first_refeed_time
+- first_refeed_notes
+- symptoms_after_refeed
+- unusually_high_or_forced_water_intake
+- intentional_fluid_restriction_or_dry_fasting_attempt
+- electrolyte_salt_thiamine_or_supplement_change
+- nsaid_use_or_other_new_medication
+- antihypertensive_diuretic_anticoagulant_lithium_psychotropic_or_anticonvulsant_use
+- known_or_recent_abnormal_electrolytes_kidney_liver_or_glucose_labs
+- long_travel_or_prolonged_immobility
+- prior_dvt_pe_or_clotting_risk_if_disclosed
+- refeed_amount_composition_timing_and_loss_of_control_eating
+- rapid_weight_loss_low_body_weight_or_malnutrition_history
+- orthostatic_symptoms_or_fall_risk
+- planned_driving_operating_machinery_heat_or_sauna_during_fast
+- prior_fast_adverse_symptoms_or_refeed_symptoms
 confoundersToTrack:
-  - acute_illness_or_fever
-  - vomiting_or_diarrhea
-  - dehydration
-  - alcohol_last_24h
-  - unusual_training_load
-  - travel_or_heat_exposure
-  - medication_change
-  - unusually_high_stress
-  - poor_sleep
-  - caffeine_withdrawal
-  - menstrual_cycle_context_if_relevant
-  - recent_low_food_intake
+- acute_illness_or_fever
+- vomiting_or_diarrhea
+- dehydration
+- alcohol_last_24h
+- unusual_training_load
+- travel_or_heat_exposure
+- medication_change
+- unusually_high_stress
+- poor_sleep
+- caffeine_withdrawal
+- menstrual_cycle_context_if_relevant
+- recent_low_food_intake
+- unusually_high_or_forced_water_intake
+- intentional_fluid_restriction_or_dry_fasting_attempt
+- electrolyte_salt_thiamine_or_supplement_change
+- nsaid_use_or_other_new_medication
+- antihypertensive_diuretic_anticoagulant_lithium_psychotropic_or_anticonvulsant_use
+- known_or_recent_abnormal_electrolytes_kidney_liver_or_glucose_labs
+- long_travel_or_prolonged_immobility
+- prior_dvt_pe_or_clotting_risk_if_disclosed
+- refeed_amount_composition_timing_and_loss_of_control_eating
+- rapid_weight_loss_low_body_weight_or_malnutrition_history
+- orthostatic_symptoms_or_fall_risk
+- planned_driving_operating_machinery_heat_or_sauna_during_fast
+- prior_fast_adverse_symptoms_or_refeed_symptoms
 ---
-
 Use this protocol only as a high-caution, safety-first self-experiment. The key question is not “How long can I endure?” but “What happens during a clearly bounded, hydrated fast, and can I complete the planned refeed without safety signals?”
 
 ## Scope
 
-This page covers one continuous 24–72 hour hydrated water-only or zero-calorie fast. It does not cover dry fasting, fasting-mimicking diets, very-low-calorie diets, time-restricted eating, alternate-day fasting programs, Ramadan or other religious fasting patterns, fasted exercise protocols, chemotherapy-support fasting, supervised disease-treatment fasting, or residential long-fast programs.
+This protocol is for one continuous 24–72 hour hydrated water-only fast by default. A zero-calorie variant may be logged as a separate implementation exposure, but direct water-only evidence should not be treated as establishing all noncaloric beverage, sweetener, coffee/tea, or electrolyte allowances. It does not cover dry fasting, fasting-mimicking diets, very-low-calorie diets, time-restricted eating, alternate-day fasting programs, Ramadan or other religious fasting patterns, fasted exercise protocols, chemotherapy-support fasting, supervised disease-treatment fasting, or residential long-fast programs.
+
+## Do not start unsupervised if…
+
+This ordinary wellness variant is only for generally healthy adults who clear the safety screen. Do not start unsupervised if you are under 18; pregnant, trying to conceive, postpartum, or breastfeeding; have active or past eating-disorder risk, binge/restrict cycling, low body weight, recent rapid weight loss, cachexia, malnutrition, or involuntary weight loss; have diabetes, hypoglycemia, ketoacidosis risk, active cancer treatment, significant kidney/liver/heart/cerebrovascular disease, uncontrolled hyperthyroidism, dementia/cognitive impairment, known electrolyte abnormalities, prior severe fasting or refeeding symptoms, or medications that need clinical review during fasting. A “yes,” “maybe,” or unclear answer routes to clinician guidance or a lower-risk non-fasting alternative.
 
 ## What counts as success
 
-A useful run has an explicit duration, a clear start and end time, symptom logs, hydration and activity context, and a planned refeed. Earlier stopping because of symptoms is a valid safety outcome. The primary read is tolerance and safety through refeed; optional glucose, ketone, blood pressure, weight, HRV, resting heart rate, and sleep signals are context.
+A useful run has an explicit duration, a clear start and end time, symptom logs, hydration and activity context, and a planned refeed. Success never means reaching 72 hours. For a first unsupervised run, the safer default is the shortest preselected duration that answers the question. Stopping early is a valid safety-preserving result and should be logged without shame or pressure to resume. The primary read is tolerance and safety through refeed. Optional glucose, ketone, blood-pressure, weight, HR/HRV, and resting-heart-rate signals are context only; sleep disruption should be logged as a confounder or symptom-context variable, not treated as a direct evidence-backed outcome for this protocol.
 
 ## What not to overread
 
-Do not treat acute weight loss as durable fat loss, ketones as proof of benefit, lower glucose as automatically good, or supervised clinic results as home safety data. Do not use the protocol for medication changes, disease treatment, or compensation for eating.
+Do not treat acute weight loss as durable fat loss, ketones as proof of benefit, lower glucose as automatically good, or supervised clinic results as home safety data. Do not treat 60–72 hours as an equal default choice for a first unsupervised run, and do not ignore work-capacity, orthostatic, hypoglycemia/counterregulation, autonomic, refeed-glucose, muscle-protein, or population-mismatch cautions. Do not use the protocol for medication changes, disease treatment, or compensation for eating.

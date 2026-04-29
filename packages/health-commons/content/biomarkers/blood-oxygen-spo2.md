@@ -42,6 +42,7 @@ biomarker:
     label: "Stable in your normal range is usually the goal."
     nuance: "For many healthy sea-level adults, SpO₂ already sits near a physiological ceiling. Higher is not an experiment target; repeated lows, drops from baseline, or lows paired with shortness of breath, chest pain, confusion, bluish lips or nails, or unusual fatigue deserve medical context."
   privateMetricBindings:
+
     -
       source: browser_vault_metric
       domain: sleep
@@ -63,6 +64,7 @@ biomarker:
     minimumPoints: 5
     aggregation: median
   explainerCards:
+
     -
       title: "What it is"
       body: "SpO₂ is a pulse-oximetry estimate of the percentage of hemoglobin carrying oxygen. Murph treats it as a respiratory, sleep, altitude, illness, and safety-context signal rather than a performance score."
@@ -106,9 +108,10 @@ biomarker:
       - supplemental oxygen
       - device firmware changes
 relations:
+
   -
     type: related_protocol
-    target: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
@@ -134,6 +137,7 @@ relations:
     type: cites
     target: source_artifact:pmid-28162150
 claims:
+
   -
     claimId: spo2-readings-are-estimates
     type: design_guardrail
@@ -181,8 +185,9 @@ protocolRanking:
   version: deterministic-v0
   scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
   candidates:
+
     -
-      protocolKey: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
       expectedDirection: stable
       relationship: related_protocol
       mechanism: "Evening light reduction may improve sleep timing or continuity, but it does not treat sleep apnea or hypoxemia. SpO₂ should remain stable; repeated overnight drops would be a safety-context signal rather than proof the protocol is working."

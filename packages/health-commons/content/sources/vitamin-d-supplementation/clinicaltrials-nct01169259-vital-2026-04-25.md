@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -44,6 +45,7 @@ researchEvidence:
     - Directness: direct_protocol; claim use: context-only; priority: high
     - Deduped from 3 candidate rows across shards: baseline-status, direct-intervention, safety. Candidate rationale: Registry anchor for VITAL and its major daily D3 ancillary outcomes.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:clinicaltrials-nct01169259-vital-2026-04-25:001
     sourceKey: source_artifact:clinicaltrials-nct01169259-vital-2026-04-25

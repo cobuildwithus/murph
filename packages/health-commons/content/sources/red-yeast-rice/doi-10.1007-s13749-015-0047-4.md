@@ -14,6 +14,7 @@ categories:
   - "red-yeast-rice"
   - "adjacent-combination-evidence"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -59,6 +60,7 @@ studyDesign: "product-development and standardization study"
 modality: "product-quality / standardized extract context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s13749-015-0047-4-quality"
     sourceKey: "source_artifact:doi-10.1007-s13749-015-0047-4"

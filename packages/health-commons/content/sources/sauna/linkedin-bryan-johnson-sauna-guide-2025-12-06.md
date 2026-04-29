@@ -14,6 +14,7 @@ categories:
   - sauna
   - linkedin
 relations:
+
   -
     type: mirror_of
     target: source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06
@@ -34,6 +35,7 @@ researchEvidence:
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
+
   -
     artifactId: art_linkedin_bryan_johnson_sauna_guide_2025_12_06_html_snapshot
     kind: html

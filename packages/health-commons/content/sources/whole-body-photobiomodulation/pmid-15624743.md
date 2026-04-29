@@ -13,6 +13,7 @@ categories:
   - whole-body-photobiomodulation
   - skin-photobiomodulation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure

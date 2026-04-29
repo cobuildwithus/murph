@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "guideline"
 modality: "oral psyllium husk / ispaghula husk safety, tolerability, label, or adjacent context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:fda-otc-monograph-m007-laxative-2023-05-02-m007-psyllium-active"
     sourceKey: "source_artifact:fda-otc-monograph-m007-laxative-2023-05-02"

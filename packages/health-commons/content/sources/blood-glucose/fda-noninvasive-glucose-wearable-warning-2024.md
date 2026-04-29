@@ -15,6 +15,7 @@ categories:
   - safety
   - noninvasive-wearables
 relations:
+
   -
     type: cites
     target: biomarker:blood-glucose

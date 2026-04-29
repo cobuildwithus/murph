@@ -19,6 +19,7 @@ categories:
 familyKind: "intervention"
 canonicalModality: "supervised_systemic_chamber_hbot"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"

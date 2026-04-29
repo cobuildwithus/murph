@@ -7,15 +7,17 @@ title: Evaluation of the Efficacy of a Cosmetic Light Mask
 summary: ClinicalTrials.gov registry context for a recent at-home cosmetic LED light-mask study; direct protocol-adjacent but not peer-reviewed outcome evidence in this extraction.
 status: draft
 quality: usable
+aliases:
+- NCT07054710
+- TheraFace Mask Glo trial
+- Cosmetic Light Mask trial
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: external_protocol
   title: Evaluation of the Efficacy of a Cosmetic Light Mask
@@ -36,12 +38,12 @@ researchEvidence:
 evidenceBucket: contemporary cosmetic light-mask registry context
 whyItMatters: Provides a current, direct-protocol registry anchor for a consumer LED mask and highlights outcome domains likely to matter for Murph tracking.
 potentialMurphEndpoints:
-  - wrinkle-score
-  - skin-texture
-  - photographs
-  - consumer-perception
-  - tolerability
-  - recent-procedure-exclusions
+- wrinkle-score
+- skin-texture
+- photographs
+- consumer-perception
+- tolerability
+- recent-procedure-exclusions
 protocolTakeaway: Use as design and exclusion-context evidence only until peer-reviewed results or registry results are available and verified.
 murphTakeaway: Good source for modern study structure and practical endpoints; keep efficacy claims out of the protocol synthesis for now.
 studyDesign: Trial registration for a 12-week at-home cosmetic light-mask evaluation.

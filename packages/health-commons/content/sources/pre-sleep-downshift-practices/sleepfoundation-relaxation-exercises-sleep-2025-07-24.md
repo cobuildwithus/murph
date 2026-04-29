@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -57,6 +58,7 @@ studyDesign: Consumer health education page with references to secondary evidenc
 modality: "Relaxation exercises for sleep, including breathing, visualization, body scan, yoga nidra, progressive muscle relaxation, and NSDR."
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:sleepfoundation-relaxation-exercises-adjacent-techniques
     sourceKey: source_artifact:sleepfoundation-relaxation-exercises-sleep-2025-07-24

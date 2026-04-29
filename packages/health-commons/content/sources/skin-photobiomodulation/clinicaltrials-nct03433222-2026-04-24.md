@@ -7,15 +7,16 @@ title: Phase 1 Study of High Fluence LED-Red Light in Fitzpatrick Skin Types I t
 summary: The registry documents Fitzpatrick I-III high-fluence red LED safety testing. Included for red-light skin safety and dose-escalation boundary; claim use is safety-only.
 status: draft
 quality: usable
+aliases:
+- source_artifact:clinicaltrials-nct03433222-2026-04-24
+- Phase 1 Study of High Fluence LED-Red Light in Fitzpatrick Skin Types I to III
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: external_protocol
   title: Phase 1 Study of High Fluence LED-Red Light in Fitzpatrick Skin Types I to III
@@ -36,9 +37,9 @@ researchEvidence:
 evidenceBucket: red-light skin safety and dose-escalation boundary
 whyItMatters: Use with the protocol/publication to preserve the lighter-skin versus darker-skin safety distinction.
 potentialMurphEndpoints:
-  - Fitzpatrick I-III registry criteria
-  - registered safety endpoints
-  - dose-escalation provenance
+- Fitzpatrick I-III registry criteria
+- registered safety endpoints
+- dose-escalation provenance
 protocolTakeaway: The registry documents Fitzpatrick I-III high-fluence red LED safety testing. Do not use registry alone to claim effectiveness.
 murphTakeaway: Use with the protocol/publication to preserve the lighter-skin versus darker-skin safety distinction.
 studyDesign: Clinical trial registration for phase I high-fluence LED-red light in Fitzpatrick I-III

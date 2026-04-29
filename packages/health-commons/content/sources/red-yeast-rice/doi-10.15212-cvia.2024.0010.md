@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -67,6 +68,7 @@ studyDesign: "Planned multicenter randomized open-label Xuezhikang-versus-atorva
 modality: "Proprietary Chinese red-yeast-rice preparation"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-15212-cvia-2024-0010-trial-design"
     sourceKey: "source_artifact:doi-10.15212-cvia.2024.0010"

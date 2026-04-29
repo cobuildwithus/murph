@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "FDA warning letter / product testing"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Consumers of CholesLo red yeast rice capsules"
@@ -71,6 +73,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_fda_dr_sam_robbins_red_yeast_rice_2020_08_28_html"
     sourceKey: "source_artifact:fda-dr-sam-robbins-red-yeast-rice-2020-08-28"

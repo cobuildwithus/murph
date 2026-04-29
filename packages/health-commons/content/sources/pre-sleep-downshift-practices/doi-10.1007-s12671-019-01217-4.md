@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Directly relevant pre-sleep cognitive arousal outcome, althou
 studyDesign: "controlled_trial"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12671-019-01217-4/mindfulness-course-presleep-cognitive-arousal"
     sourceKey: "source_artifact:doi-10.1007-s12671-019-01217-4"

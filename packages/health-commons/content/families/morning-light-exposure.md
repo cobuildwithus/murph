@@ -22,6 +22,7 @@ categories:
 familyKind: modality
 canonicalModality: morning_outdoor_ambient_light
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:morning-light-exposure/morning-outdoor-light-exposure
@@ -94,16 +95,16 @@ Morning Light Exposure is the family for early-day light protocols that use ligh
 
 ## What belongs in this family
 
-The default Murph protocol belongs here when the behavior is simple and repeatable: go outdoors soon after waking, receive ambient natural daylight without sun-gazing, and log timing, duration, outdoor-versus-window status, weather/brightness context, symptoms, and sleep outcomes. The closest direct evidence is small and older-adult/institutional, while broader adult support is mostly observational (`source_artifact:pmid-28786887`, `source_artifact:doi-10.31086-tjgeri.2020.147`, `source_artifact:pmid-19560724`, `source_artifact:pmid-41053799`, `source_artifact:pmid-39077837`, `source_artifact:pmid-41426466`, `source_artifact:pmid-34488088`).
+The default Murph protocol belongs here when the behavior is simple and repeatable: go outdoors soon after waking, receive ambient natural daylight without sun-gazing, and log timing, duration, outdoor-versus-window status, weather/brightness context, symptoms, and sleep outcomes. The closest direct evidence is small and older-adult/institutional, while broader adult support is mostly observational.
 
 ## What stays separate
 
-Keep light boxes, dawn simulators, indoor dynamic lighting, workplace/classroom/window-light protocols, SAD/depression light therapy, clinician-guided circadian treatment, travel/jet-lag countermeasures, and morning walk or exercise bundles separate unless a future page deliberately defines one of those variants. Those adjacent sources can inform mechanisms, measurement, and safety, but they should not be pooled into direct evidence for the default outdoor habit (`source_artifact:pmid-34639284`, `source_artifact:pmid-18815716`, `source_artifact:pmid-19187411`, `source_artifact:pmid-14577838`, `source_artifact:pmid-21797835`, `source_artifact:pmid-32303523`).
+Keep light boxes, dawn simulators, indoor dynamic lighting, workplace/classroom/window-light protocols, SAD/depression light therapy, clinician-guided circadian treatment, travel/jet-lag countermeasures, and morning walk or exercise bundles separate unless a future page deliberately defines one of those variants. Those adjacent sources can inform mechanisms, measurement, and safety, but they should not be pooled into direct evidence for the default outdoor habit.
 
 ## How to read the evidence
 
-The research corpus separates direct outdoor evidence, free-living observational context, dose and measurement guidance, adjacent variants, population modifiers, and safety boundaries. The practical claim is intentionally narrow: morning outdoor light is a plausible, low-burden self-experiment for subjective sleep quality, sleep timing, morning alertness, and tolerability, but it is not a proven treatment for insomnia, depression, bipolar disorder, seasonal affective disorder, or diagnosed circadian rhythm sleep-wake disorders (`source_artifact:morning-light-exposure-bibliography`, `source_artifact:pmid-30670164`, `source_artifact:pmid-35298459`, `source_artifact:pmid-28891192`, `source_artifact:pmid-29348073`).
+The research corpus separates direct outdoor evidence, free-living observational context, dose and measurement guidance, adjacent variants, population modifiers, and safety boundaries. The practical claim is intentionally narrow: morning outdoor light is a plausible, low-burden self-experiment for subjective sleep quality, sleep timing, morning alertness, and tolerability, but it is not a proven treatment for insomnia, depression, bipolar disorder, seasonal affective disorder, or diagnosed circadian rhythm sleep-wake disorders.
 
 ## Safety posture
 
-Safety is stronger than efficacy here. The family should preserve boundaries around mood activation/mania risk, eye disease or visual symptoms, migraine/photophobia, photosensitizing medications, sun allergy, UV exposure, heat, and unsafe outdoor routes (`source_artifact:pmid-28891192`, `source_artifact:pmid-29348073`, `source_artifact:who-ultraviolet-radiation-2022-06-21`, `source_artifact:cdc-protect-yourself-from-extreme-heat-2024-06-25`).
+Safety is stronger than efficacy here. The family should preserve boundaries around mood activation/mania risk, eye disease or visual symptoms, migraine/photophobia, photosensitizing medications, sun allergy, UV exposure, heat, and unsafe outdoor routes.

@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "crossover"
 modality: "oral psyllium husk / ispaghula husk safety, tolerability, label, or adjacent context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-gov-nct03370848-2026-04-26-niacin-tolerability-registry"
     sourceKey: "source_artifact:clinicaltrials-gov-nct03370848-2026-04-26"

@@ -760,6 +760,7 @@ export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS = [
   "continue_with_caution",
   "clinician_guidance_before_unsupervised_start",
   "do_not_start_unsupervised",
+  "do_not_start_unsupervised_explicit_clinician_clearance_required",
 ] as const;
 
 export type HealthCommonsExperimentOnboardingPositiveDisposition =
@@ -818,6 +819,7 @@ export const healthCommonsExperimentOnboardingSafetyQuestionSchema = z
     id: experimentOnboardingIdSchema,
     prompt: longStringSchema,
     ifPositive: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS).optional(),
+    ifNegative: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS).optional(),
     why: longStringSchema.optional(),
   })
   .strict();
@@ -893,7 +895,9 @@ export const healthCommonsExperimentOnboardingSetupSlotSchema = z
     question: longStringSchema.optional(),
     options: z.array(experimentOnboardingIdSchema).optional(),
     constraints: experimentOnboardingUnknownRecordSchema.optional(),
-    target: healthCommonsExperimentOnboardingSetupTargetSchema,
+    notes: z.array(longStringSchema).optional(),
+    target: healthCommonsExperimentOnboardingSetupTargetSchema.optional(),
+    writePath: experimentOnboardingSetupTargetFieldSchema.optional(),
   })
   .strict()
   .superRefine((slot, context) => {
@@ -902,6 +906,13 @@ export const healthCommonsExperimentOnboardingSetupSlotSchema = z
         code: z.ZodIssueCode.custom,
         message: "Enum setup slots must declare options.",
         path: ["options"],
+      });
+    }
+    if (!slot.target && !slot.writePath) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Setup slots must declare target or writePath.",
+        path: ["target"],
       });
     }
   });
@@ -919,6 +930,7 @@ export const healthCommonsExperimentOnboardingPlanDefaultsSchema = z
     targetSessions: z.number().int().nonnegative().optional(),
     minimumUsefulSessions: z.number().int().nonnegative().optional(),
     firstSessionGuidance: longStringSchema.optional(),
+    missedSessionGuidance: longStringSchema.optional(),
   })
   .strict();
 
@@ -929,7 +941,7 @@ export type HealthCommonsExperimentOnboardingPlanDefaults = z.infer<
 export const healthCommonsExperimentOnboardingLoggingSchema = z
   .object({
     sessionFields: z.array(experimentOnboardingIdSchema).min(1),
-    confounders: z.array(experimentOnboardingIdSchema).optional(),
+    confounders: z.array(longStringSchema).optional(),
     notes: z.array(longStringSchema).optional(),
   })
   .strict();
@@ -1103,8 +1115,8 @@ function addDuplicateStableIdIssues<TField extends string, TEntry extends Record
 export const healthCommonsSafetySchema = z
   .object({
     cautionLevel: z.enum(["low", "moderate", "high", "unknown"]),
-    avoidOrGetClinicianGuidance: z.array(shortStringSchema).optional(),
-    stopIf: z.array(shortStringSchema).optional(),
+    avoidOrGetClinicianGuidance: z.array(longStringSchema).optional(),
+    stopIf: z.array(longStringSchema).optional(),
     notes: z.array(longStringSchema).optional(),
   })
   .strict();
@@ -1115,11 +1127,14 @@ export const healthCommonsResearchEvidenceSchema = z
   .object({
     designKind: z.enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_DESIGN_KINDS),
     designLabel: shortStringSchema.optional(),
-    participantCount: z.number().int().positive().optional(),
+    participantCount: z.number().int().nonnegative().optional(),
     participantCountKind: z
       .enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_PARTICIPANT_COUNT_KINDS)
       .optional(),
     includedStudyCount: z.number().int().positive().optional(),
+    includedStudyCountKind: z
+      .enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_PARTICIPANT_COUNT_KINDS)
+      .optional(),
     populationLabel: shortStringSchema.optional(),
     durationLabel: shortStringSchema.optional(),
     aggregateRole: z.enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_AGGREGATE_ROLES).optional(),
@@ -1322,6 +1337,7 @@ export const healthCommonsSourceSchema = z
     journal: shortStringSchema.optional(),
     pmid: z.string().regex(/^\d+$/u).optional(),
     doi: shortStringSchema.optional(),
+    registryId: shortStringSchema.optional(),
     url: z.string().url().optional(),
     citation: longStringSchema.optional(),
   })

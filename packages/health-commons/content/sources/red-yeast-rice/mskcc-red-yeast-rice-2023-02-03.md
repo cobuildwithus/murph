@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -60,6 +61,7 @@ modality: "Red yeast rice supplement / lovastatin-like monacolin exposure"
 directness: "general_guideline"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:mskcc-ryr-statin-like-safety-boundary"
     findingKind: "safety"

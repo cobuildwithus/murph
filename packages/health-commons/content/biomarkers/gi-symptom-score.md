@@ -39,6 +39,7 @@ biomarker:
     minimumPoints: 5
     aggregation: median
   explainerCards:
+
   -
     title: What it is
     body: A daily manual score for nausea, bloating, abdominal discomfort, diarrhea, constipation, reflux, or other digestive symptoms.
@@ -82,4 +83,4 @@ relations:
 
 # GI Symptom Score
 
-GI symptoms are a practical tolerability signal for oral collagen-peptide runs. The score should be compared with baseline and interpreted alongside diet, illness, medication, product, and coingredient changes. `[source_artifact:pmid-40507417; source_artifact:pmid-30061579; source_artifact:pmid-36912494; source_artifact:pmid-40685650; source_artifact:pmid-11071580]`
+GI symptoms are a practical tolerability signal for oral collagen-peptide runs. The score should be compared with baseline and interpreted alongside diet, illness, medication, product, and coingredient changes.

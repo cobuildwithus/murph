@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Broad systematic-review source that extends beyond mindfulnes
 studyDesign: "systematic_review"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12671-022-01915-6:primary-safety-context"
     sourceKey: "source_artifact:doi-10.1007-s12671-022-01915-6"

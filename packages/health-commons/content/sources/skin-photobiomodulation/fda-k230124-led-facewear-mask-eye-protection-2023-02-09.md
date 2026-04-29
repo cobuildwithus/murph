@@ -3,26 +3,27 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:fda-k230124-led-facewear-mask-eye-protection-2023-02-09
 slug: sources/skin-photobiomodulation/fda-k230124-led-facewear-mask-eye-protection-2023-02-09
-title: 510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask
+title: '510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask'
 summary: FDA 510(k) summary for a facewear LED mask with red/NIR wrinkle mode, red/blue acne mode, default 10-minute treatment, and removable eye protection.
 status: draft
 quality: usable
+aliases:
+- FDA K230124
+- LUSTRE ClearSkin Renew Pro Facewear Mask
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
-  title: 510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask
+  title: '510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask'
   authors: U.S. Food and Drug Administration; Ambicare Health Ltd.
   year: 2023
   journal: FDA 510(k) Premarket Notification
-  citation: U.S. Food and Drug Administration. 510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask (K230124). Decision date February 9, 2023.
+  citation: 'U.S. Food and Drug Administration. 510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask (K230124). Decision date February 9, 2023.'
   url: https://www.accessdata.fda.gov/cdrh_docs/pdf23/K230124.pdf
 researchEvidence:
   designKind: other
@@ -34,10 +35,10 @@ researchEvidence:
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It provides red/NIR dose context and explicitly identifies eye protection as a device component.
 potentialMurphEndpoints:
-  - removable eye protection
-  - session duration
-  - wavelength mode
-  - dose
+- removable eye protection
+- session duration
+- wavelength mode
+- dose
 protocolTakeaway: Use as safety-only or context-only evidence; do not use for direct skin-outcome claims.
 murphTakeaway: Treat new eye symptoms during facial light use as stop-use signals.
 studyDesign: FDA 510(k) summary and nonclinical performance documentation

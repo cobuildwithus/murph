@@ -15,6 +15,7 @@ categories:
   - recovery
 familyKind: intervention
 relations:
+
   -
     type: child_family
     target: experiment_family:dry-sauna

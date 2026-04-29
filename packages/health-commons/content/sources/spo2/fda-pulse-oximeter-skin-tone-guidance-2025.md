@@ -14,6 +14,7 @@ categories:
   - skin-pigmentation
   - health-equity
 relations:
+
   -
     type: measures
     target: biomarker:blood-oxygen-spo2

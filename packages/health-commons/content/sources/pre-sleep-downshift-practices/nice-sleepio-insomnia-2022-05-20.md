@@ -12,6 +12,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -53,6 +54,7 @@ studyDesign: Health technology guidance
 modality: Digital CBT-I comparator guidance
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:nice-sleepio-insomnia-2022-05-20-digital-cbti-comparator
     sourceKey: source_artifact:nice-sleepio-insomnia-2022-05-20

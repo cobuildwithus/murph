@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Duration-manipulation experiment; useful dose boundary but no
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-1007-s12671-020-01512-5-primary"
     sourceKey: "source_artifact:doi-10.1007-s12671-020-01512-5"

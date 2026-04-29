@@ -16,6 +16,7 @@ categories:
   - "photoaging"
   - "self-assessment"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
@@ -56,6 +57,7 @@ biomarker:
     minimumPoints: 2
     aggregation: "median"
   explainerCards:
+
     -
       title: "What it is"
       body: "A safety log for heat, pain, irritation, prolonged redness, blistering, pigment change, headache, eye discomfort, afterimages, blurry vision, flashes, or spots."

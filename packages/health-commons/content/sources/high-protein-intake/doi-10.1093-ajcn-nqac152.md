@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - source_delivery_quality
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -42,6 +43,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-006; priority: medium; claimUse: context-only; directness: adjacent_variant"
 sourceFindings:
+
   -
     findingId: finding:doi-10.1093-ajcn-nqac152-beef-maintenance-no-advantage
     sourceKey: source_artifact:doi-10.1093-ajcn-nqac152

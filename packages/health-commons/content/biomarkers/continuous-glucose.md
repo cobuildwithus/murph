@@ -16,6 +16,7 @@ categories:
   - consumer-device
   - fasting
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours

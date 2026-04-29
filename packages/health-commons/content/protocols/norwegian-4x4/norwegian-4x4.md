@@ -19,12 +19,14 @@ categories:
   - vo2max
   - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-norwegian-4x4.jpeg
     mediaType: image/jpeg
     caption: Norwegian 4x4 Intervals
 relations:
+
   -
     type: parent_family
     target: experiment_family:norwegian-4x4
@@ -177,6 +179,7 @@ protocol:
     - Stop the session immediately if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.
     - End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.
 testPlans:
+
   -
     planId: wearable-cardio-fitness-49d
     durationDays: 49
@@ -196,6 +199,7 @@ testPlans:
       - Resting heart rate and heart-rate recovery may be useful secondary signals, but sleep, illness, stress, alcohol, heat, and training load can confound them.
       - HRV is exploratory. Sleep efficiency is recovery context and a confounder; neither is a promised outcome.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:estimated-vo2max
     description: "Four-minute hard intervals keep oxygen demand high for repeated stretches. Across weeks, that can improve how much oxygen the heart and muscles deliver and use."
@@ -218,6 +222,7 @@ experimentOnboarding:
     intentSummary: "Explore Norwegian 4x4 Intervals"
   contextReview:
     vaultChecks:
+
       -
         id: active_experiments
         label: Active experiments
@@ -290,6 +295,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: cardiovascular_red_flags
         prompt: known cardiovascular disease, exertional chest pain or pressure, unexplained shortness of breath, fainting or near-fainting, significant palpitations or arrhythmia, heart failure, recent heart attack or stroke, uncontrolled blood pressure, or possible myocarditis/pericarditis
@@ -305,6 +311,7 @@ experimentOnboarding:
       - A positive or uncertain screen is not a diagnosis; it means Murph should not set up this as an unsupervised high-intensity self-experiment.
       - Offer a lower-intensity or clinician-guided alternative when the self-directed 4x4 path is not a safe fit.
   setupSlots:
+
     -
       id: modality
       label: Modality
@@ -426,6 +433,7 @@ whyItWorks:
   - Across weeks, the expected adaptation is both central and peripheral: the heart may pump more blood per beat, muscles may improve capillary delivery and mitochondrial oxygen use, and lactate handling may become less limiting. Those changes are the physiology behind lab-measured VO2max improvements in the 4x4 evidence base.
   - Wearable cardio-fitness estimates, heart-rate recovery, and resting heart rate are only proxies for that physiology. HRV, sleep, and next-day recovery can move in either direction early because the same sympathetic and metabolic stress that drives adaptation can temporarily tax recovery.
 claims:
+
   -
     claimId: canonical-4x4-has-direct-human-intervention-support
     type: intervention_result
@@ -558,6 +566,7 @@ researchLandscape:
   primaryClaim: "If vigorous exercise is appropriate for you, the best-supported claim is that a well-executed 4x4 block can improve lab VO2max, and sometimes a wearable cardio-fitness proxy, over roughly six weeks."
   mainCaveat: "The direct 4x4 trials are small, while many larger papers come from supervised cardiac or cardiometabolic settings. Those studies help set boundaries, not prove that unscreened home users should self-treat disease or expect every metric to improve."
   groups:
+
     -
       id: "exact-or-close-4x4-trials"
       label: "Exact or close 4x4 trials"
@@ -737,6 +746,7 @@ expectedSignal:
       - source_artifact:pmid-26440134
       - source_artifact:pmid-30733142
   secondary:
+
     -
       biomarkerKey: biomarker:resting-heart-rate
       direction: decrease_or_no_clear_change

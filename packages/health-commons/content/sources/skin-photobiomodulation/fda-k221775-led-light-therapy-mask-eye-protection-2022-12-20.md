@@ -3,26 +3,27 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20
 slug: sources/skin-photobiomodulation/fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20
-title: 510(k) Summary: LED Light Therapy Mask, models MK-78, MK-04, MK66-H, MK66R-B, EL00003
+title: '510(k) Summary: LED Light Therapy Mask, models MK-78, MK-04, MK66-H, MK66R-B, EL00003'
 summary: FDA 510(k) summary for several LED mask models, including red/NIR wrinkle modes and removable eye protection.
 status: draft
 quality: usable
+aliases:
+- FDA K221775
+- LED Light Therapy Mask eye protection
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
-  title: 510(k) Summary: LED Light Therapy Mask, models MK-78, MK-04, MK66-H, MK66R-B, EL00003
+  title: '510(k) Summary: LED Light Therapy Mask, models MK-78, MK-04, MK66-H, MK66R-B, EL00003'
   authors: U.S. Food and Drug Administration; Shenzhen Kaiyan Medical Equipment Co., Ltd.
   year: 2022
   journal: FDA 510(k) Premarket Notification
-  citation: U.S. Food and Drug Administration. 510(k) Summary: LED Light Therapy Mask (K221775). Decision date December 20, 2022.
+  citation: 'U.S. Food and Drug Administration. 510(k) Summary: LED Light Therapy Mask (K221775). Decision date December 20, 2022.'
   url: https://www.accessdata.fda.gov/cdrh_docs/pdf22/K221775.pdf
 researchEvidence:
   designKind: other
@@ -34,10 +35,10 @@ researchEvidence:
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It documents removable eye protection in red/NIR LED face-mask designs used for wrinkle indications.
 potentialMurphEndpoints:
-  - eye protection installed
-  - dose
-  - session duration
-  - weekly frequency
+- eye protection installed
+- dose
+- session duration
+- weekly frequency
 protocolTakeaway: Use as safety-only or context-only evidence; do not use for direct skin-outcome claims.
 murphTakeaway: Treat new eye symptoms during facial light use as stop-use signals.
 studyDesign: FDA 510(k) summary and nonclinical performance documentation

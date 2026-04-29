@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: safety_boundary; claim use: safety-only; priority: high
     - Candidate row: candidate:safety:029; shard: safety. Manufacturing-error/toxicity boundary; not an incidence estimate for normal daily supplement use. Candidate rationale: Regulatory boundary source for overdose and manufacturing/compounding error risk; not protocol-supportive.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:fda-glades-vitamin-d3-recall-2015-11-25:001
     sourceKey: source_artifact:fda-glades-vitamin-d3-recall-2015-11-25

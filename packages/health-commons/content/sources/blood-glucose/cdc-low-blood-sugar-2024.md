@@ -15,6 +15,7 @@ categories:
   - hypoglycemia
   - safety
 relations:
+
   -
     type: cites
     target: biomarker:blood-glucose

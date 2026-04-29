@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -80,6 +81,7 @@ adverseEventsOrSafetyNotes: "No adverse-event extraction in the registry/protoco
 artifactCandidates:
   - "art-clinicaltrials-gov-nct04133805-2026-04-26"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-gov-nct04133805-viscous-fiber-review-protocol"
     sourceKey: "source_artifact:clinicaltrials-gov-nct04133805-2026-04-26"

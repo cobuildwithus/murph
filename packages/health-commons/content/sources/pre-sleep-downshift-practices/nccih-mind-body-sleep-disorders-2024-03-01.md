@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -48,6 +49,7 @@ studyDesign: Government evidence digest
 modality: external guideline/evidence summary
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:nccih-mind-body-sleep-disorders-2024-03-01-guideline-mindfulness-boundary
     sourceKey: source_artifact:nccih-mind-body-sleep-disorders-2024-03-01

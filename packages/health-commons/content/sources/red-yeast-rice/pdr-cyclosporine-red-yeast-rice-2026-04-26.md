@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -58,6 +59,7 @@ modality: "Cyclosporine with red yeast rice / HMG-CoA reductase inhibitor-like e
 directness: "same_mechanism"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:pdr-cyclosporine-ryr-contraindicated"
     findingKind: "safety"

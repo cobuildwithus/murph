@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "other"
 modality: "psyllium husk / soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:federalregister-psyllium-soluble-fiber-chd-proposed-rule-1997-05-22-fda-proposed-rule-context"
     sourceKey: "source_artifact:federalregister-psyllium-soluble-fiber-chd-proposed-rule-1997-05-22"

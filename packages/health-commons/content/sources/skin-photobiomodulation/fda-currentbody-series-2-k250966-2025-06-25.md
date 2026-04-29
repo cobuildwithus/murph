@@ -3,26 +3,28 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:fda-currentbody-series-2-k250966-2025-06-25
 slug: sources/skin-photobiomodulation/fda-currentbody-series-2-k250966-2025-06-25
-title: 510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H
+title: '510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H'
 summary: FDA 510(k) summary for a home-use red/NIR LED wrinkle mask documenting wavelengths, dose, schedule, auto shutoff, and eye inserts.
 status: draft
 quality: usable
+aliases:
+- FDA K250966
+- CurrentBody Skin LED Light Therapy Mask Series 2
+- MK-90H
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
-  title: 510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H
+  title: '510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H'
   authors: U.S. Food and Drug Administration; Shenzhen Kaiyan Medical Equipment Co., Ltd.
   year: 2025
   journal: FDA 510(k) Premarket Notification
-  citation: U.S. Food and Drug Administration. 510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H (K250966). Decision date June 25, 2025.
+  citation: 'U.S. Food and Drug Administration. 510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H (K250966). Decision date June 25, 2025.'
   url: https://www.accessdata.fda.gov/cdrh_docs/pdf25/K250966.pdf
 researchEvidence:
   designKind: other
@@ -34,11 +36,11 @@ researchEvidence:
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It is directly adjacent to the protocol device class and records eye inserts as part of the cleared device configuration.
 potentialMurphEndpoints:
-  - session duration
-  - weekly frequency
-  - eye insert use
-  - auto shutoff
-  - dose
+- session duration
+- weekly frequency
+- eye insert use
+- auto shutoff
+- dose
 protocolTakeaway: Use as safety-only or context-only evidence; do not use for direct skin-outcome claims.
 murphTakeaway: Treat new eye symptoms during facial light use as stop-use signals.
 studyDesign: FDA 510(k) summary and nonclinical performance documentation

@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -71,6 +72,7 @@ limitations:
   - Manualized therapist-guided MBTI differs from silent unguided meditation before bed.
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:doi-10.1037-14952-000-mbti-manual-dose-context
     sourceKey: source_artifact:doi-10.1037-14952-000

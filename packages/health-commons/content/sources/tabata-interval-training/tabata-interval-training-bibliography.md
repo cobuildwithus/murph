@@ -14,6 +14,7 @@ categories:
   - tabata-interval-training
   - bibliography
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:tabata-interval-training/tabata-20-10-interval-training

@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: direct_protocol; claim use: context-only; priority: high
     - Candidate row: candidate:population-subgroups:040; shard: population-subgroups. Candidate rationale: Trial registry explicitly designed around individualized response modifiers; useful for recall and provenance.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:clinicaltrials-nct02925195-individualized-vitamin-d-response-2026-04-25:001
     sourceKey: source_artifact:clinicaltrials-nct02925195-individualized-vitamin-d-response-2026-04-25

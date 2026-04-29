@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "guideline"
 modality: "oral psyllium husk / ispaghula husk safety, tolerability, label, or adjacent context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:ema-plantaginis-ovatae-seminis-tegumentum-2026-04-26-ema-cholesterol-supervision"
     sourceKey: "source_artifact:ema-plantaginis-ovatae-seminis-tegumentum-2026-04-26"

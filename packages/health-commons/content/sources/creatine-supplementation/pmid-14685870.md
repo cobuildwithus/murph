@@ -13,6 +13,7 @@ aliases:
 categories:
   - creatine-supplementation
 relations:
+
   -
     type: related_protocol
     target: "protocol_variant:creatine-supplementation/creatine-monohydrate"

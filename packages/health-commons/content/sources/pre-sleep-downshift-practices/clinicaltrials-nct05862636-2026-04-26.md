@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Registered study explicitly framed around for whom mindfulnes
 studyDesign: "other"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct05862636-2026-04-26:context-boundary"
     sourceKey: "source_artifact:clinicaltrials-nct05862636-2026-04-26"

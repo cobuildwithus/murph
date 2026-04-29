@@ -24,6 +24,7 @@ categories:
 familyKind: modality
 canonicalModality: tabata_20_10_intervals
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:tabata-interval-training/tabata-20-10-interval-training

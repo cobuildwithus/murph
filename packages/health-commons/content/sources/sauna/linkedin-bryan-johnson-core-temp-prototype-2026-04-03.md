@@ -14,6 +14,7 @@ categories:
   - sauna
   - linkedin
 relations:
+
   -
     type: mirror_of
     target: source_artifact:x-bryan-johnson-core-temp-update-2026-04-03
@@ -34,6 +35,7 @@ researchEvidence:
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
+
   -
     artifactId: art_linkedin_bryan_johnson_core_temp_prototype_2026_04_03_html_snapshot
     kind: html

@@ -17,6 +17,7 @@ categories:
   - "measurement-method"
   - "image-analysis"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging"
@@ -71,6 +72,7 @@ measurementMethod:
     - "biomarker:periocular-wrinkle-score"
     - "biomarker:skin-texture-roughness-score"
   outputs:
+
     -
       outputId: "wrinkle_line_length_or_area"
       label: "Wrinkle line length or area"

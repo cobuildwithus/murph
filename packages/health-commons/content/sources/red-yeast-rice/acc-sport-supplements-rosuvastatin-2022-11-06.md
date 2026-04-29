@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "web_page_about_randomized_trial"
 modality: "clinical_supervised nutraceutical comparator context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:acc-sport-supplements-rosuvastatin-2022-11-06-sport-null-comparator"
     sourceKey: "source_artifact:acc-sport-supplements-rosuvastatin-2022-11-06"

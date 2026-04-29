@@ -7,15 +7,16 @@ title: High Fluence Light Emitting Diode-Red Light (LED-RL) in Healthy Adults
 summary: ClinicalTrials.gov registration anchors the high-fluence red LED healthy-adult safety study. Included for red-light skin safety and dose-escalation boundary; claim use is safety-only.
 status: draft
 quality: usable
+aliases:
+- source_artifact:clinicaltrials-nct02630303-2026-04-24
+- High Fluence Light Emitting Diode-Red Light (LED-RL) in Healthy Adults
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: external_protocol
   title: High Fluence Light Emitting Diode-Red Light (LED-RL) in Healthy Adults
@@ -36,9 +37,9 @@ researchEvidence:
 evidenceBucket: red-light skin safety and dose-escalation boundary
 whyItMatters: Use for trial identity, arms, dates, and registry-reported outcomes, not as independent efficacy evidence.
 potentialMurphEndpoints:
-  - registered arms
-  - registry safety outcomes
-  - trial provenance
+- registered arms
+- registry safety outcomes
+- trial provenance
 protocolTakeaway: ClinicalTrials.gov registration anchors the high-fluence red LED healthy-adult safety study. Peer-reviewed results should be cited for outcome claims.
 murphTakeaway: Use for trial identity, arms, dates, and registry-reported outcomes, not as independent efficacy evidence.
 studyDesign: Clinical trial registration for phase I high-fluence LED-red light safety study

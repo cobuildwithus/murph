@@ -14,6 +14,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -100,6 +101,7 @@ endpoints:
 effectEstimatesOrDirection: No registry-posted comparative effect estimate was available in the extracted source payload.
 adverseEventsOrSafetyNotes: No registry adverse-event results were posted in the extracted payload.
 sourceFindings:
+
   -
     findingId: finding:clinicaltrials-nct04951466-2026-04-27/registry-context
     sourceKey: source_artifact:clinicaltrials-nct04951466-2026-04-27

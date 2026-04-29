@@ -23,7 +23,15 @@ categories:
   - evening-routine
   - wearable-measured
   - murph-canonical
+media:
+
+  -
+    kind: image
+    relativePath: design-assets/hero-silent-meditation-before-bed.jpeg
+    mediaType: image/jpeg
+    caption: Silent Meditation Before Bed
 relations:
+
   -
     type: parent_family
     target: experiment_family:pre-sleep-downshift-practices
@@ -128,6 +136,7 @@ protocol:
     - Stop rules override adherence targets.
     - "This is not a substitute for CBT-I, medical evaluation for sleep apnea, or mental-health care."
 testPlans:
+
   -
     planId: sol-arousal-21d
     durationDays: 21
@@ -146,6 +155,7 @@ testPlans:
       - "Treat wearable sleep-onset latency, sleep efficiency, deep sleep, HRV, and resting heart rate as repeated-night context, not one-night proof."
       - "Keep other sleep interventions and major evening routines stable; flag caffeine, alcohol, late exercise, illness, travel, stress, and medication or supplement changes."
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:sleep-onset-latency
     description: Silent meditation may lower rumination and sleep effort before bed. If the mind is less busy, falling asleep can feel easier.
@@ -154,7 +164,7 @@ expectedSignalDescriptions:
     description: If meditation reduces the restless start of the night or bedtime rumination, more time in bed may be spent asleep.
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: Deep sleep is downstream. It might improve only if the practice first improves sleep continuity or reduces early-night disruption.
+    description: Silent meditation would affect deep sleep only indirectly: first by reducing rumination, then by making early-night sleep less broken.
   -
     biomarkerKey: biomarker:hrv-rmssd
     description: Lower pre-sleep arousal may ease overnight strain. HRV could rise or stabilize if the practice helps recovery rather than adding effort.
@@ -168,6 +178,7 @@ experimentOnboarding:
     intentSummary: Explore Silent Meditation Before Bed.
   contextReview:
     vaultChecks:
+
       -
         id: active-experiments
         label: Active sleep or recovery experiments
@@ -206,6 +217,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
       -
         id: mania-psychosis-risk
         prompt: "Any history of bipolar disorder, mania or hypomania, psychosis, hallucinations, unusual beliefs, markedly reduced need for sleep, or current agitation?"
@@ -264,6 +276,7 @@ experimentOnboarding:
     notes:
       - "Positive screens do not diagnose anything; they decide whether the protocol should be skipped, shortened, or clinician-guided."
   setupSlots:
+
     -
       id: bedtime-anchor
       label: Target bedtime
@@ -362,6 +375,7 @@ experimentOnboarding:
         field: reminderPolicy
   adaptationPolicy:
     fields:
+
       -
         id: adapt-session-duration
         label: Session duration
@@ -461,10 +475,11 @@ experimentOnboarding:
     missedLogFollowupCopy: You missed last night’s silent-meditation log. Add a quick estimate only if it is easy.
     confirmationPrompt: "Create a 7-day baseline plus 14-night Silent Meditation Before Bed experiment, with stop rules active and wearable data treated as exploratory?"
 whyItWorks:
-  - "The mechanistic rationale is pre-sleep arousal downshift: structured mindfulness exposures have reduced cognitive-emotional or pre-sleep arousal in adjacent sources, but not as isolated silent bedtime meditation. Source keys: source_artifact:doi-10.1007-s12671-018-0911-6; source_artifact:doi-10.1007-s12671-019-01217-4; source_artifact:doi-10.1016-j.aimed.2024.08.005."
-  - "Sleep evidence for mindfulness is promising but heterogeneous, so the protocol tests a personal signal rather than claiming insomnia treatment. Source keys: source_artifact:pmid-27663102; source_artifact:pmid-30380915; source_artifact:pmid-32590218; source_artifact:pmid-36150798; source_artifact:healthquality-va-gov-insomnia-osa-cpg-2025-04-22."
-  - "Manual sleep-onset and pre-sleep wiredness logging is prioritized because actigraphy and consumer wearables can misclassify quiet wakefulness and vary across devices and populations. Source keys: source_artifact:pmid-12927124; source_artifact:pmid-14655927; source_artifact:pmid-17969470; source_artifact:pmid-30789439; source_artifact:pmid-31778122."
+  - "The mechanistic rationale is pre-sleep arousal downshift: structured mindfulness exposures have reduced cognitive-emotional or pre-sleep arousal in adjacent sources, but not as isolated silent bedtime meditation."
+  - "Sleep evidence for mindfulness is promising but heterogeneous, so the protocol tests a personal signal rather than claiming insomnia treatment."
+  - "Manual sleep-onset and pre-sleep wiredness logging is prioritized because actigraphy and consumer wearables can misclassify quiet wakefulness and vary across devices and populations."
 claims:
+
   -
     claimId: direct-silent-bedtime-evidence-not-established
     type: evidence_scope
@@ -758,6 +773,7 @@ researchLandscape:
   primaryClaim: "A brief silent routine is reasonable as a personal downshift test for perceived sleep-onset latency and wiredness, not as a treatment claim."
   mainCaveat: "Most evidence comes from structured mindfulness programs, app-guided or digital variants, reviews, guidelines, measurement papers, safety reports, trial registries, or special populations."
   groups:
+
     -
       id: presleep-arousal-rumination-mechanisms
       label: "Pre-sleep arousal mechanism, closest extracted records"
@@ -1139,7 +1155,7 @@ The primary read is manual perceived sleep-onset latency plus pre-bed wiredness 
 
 ## Evidence stance
 
-The corpus supports a plausible pre-sleep arousal-downshift mechanism, but it does **not** provide completed, direct evidence that silent unguided meditation immediately before bed improves sleep. Closest evidence comes from structured mindfulness programs, clinical insomnia studies, app-guided variants, registries, reviews, guidelines, measurement papers, and special populations. The claim and researchLandscape blocks preserve those distinctions with source keys.
+The corpus supports a plausible pre-sleep arousal-downshift mechanism, but it does **not** provide completed, direct evidence that silent unguided meditation immediately before bed improves sleep. Closest evidence comes from structured mindfulness programs, clinical insomnia studies, app-guided variants, registries, reviews, guidelines, measurement papers, and special populations. The evidence section preserves those distinctions rather than treating adjacent studies as direct proof.
 
 ## Safety stance
 

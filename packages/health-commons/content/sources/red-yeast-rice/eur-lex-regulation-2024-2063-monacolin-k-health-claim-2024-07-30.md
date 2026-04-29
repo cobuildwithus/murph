@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Health-claim refusal regulation"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "context"
     population: "EU health-claim application for SYLVAN BIO red yeast rice"
@@ -71,6 +73,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_eur_lex_regulation_2024_2063_monacolin_k_health_claim_2024_07_30_pdf"
     sourceKey: "source_artifact:eur-lex-regulation-2024-2063-monacolin-k-health-claim-2024-07-30"

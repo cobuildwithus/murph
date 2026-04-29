@@ -12,6 +12,7 @@ categories:
   - training-log
   - manual-log
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:creatine-supplementation/creatine-monohydrate

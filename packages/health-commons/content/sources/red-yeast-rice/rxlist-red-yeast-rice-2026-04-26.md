@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -60,6 +61,7 @@ modality: "Red yeast rice supplement exposure"
 directness: "same_mechanism"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:rxlist-ryr-statin-and-drug-interactions"
     findingKind: "safety"

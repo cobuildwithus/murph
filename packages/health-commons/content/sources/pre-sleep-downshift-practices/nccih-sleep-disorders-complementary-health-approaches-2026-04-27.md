@@ -12,6 +12,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -50,6 +51,7 @@ studyDesign: Government consumer evidence summary
 modality: external health information page
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:nccih-sleep-disorders-complementary-health-approaches-2026-04-27-consumer-boundary-and-safety
     sourceKey: source_artifact:nccih-sleep-disorders-complementary-health-approaches-2026-04-27

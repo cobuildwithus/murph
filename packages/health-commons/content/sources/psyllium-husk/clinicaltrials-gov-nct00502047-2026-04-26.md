@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -78,6 +79,7 @@ adverseEventsOrSafetyNotes: "No registry-extracted adverse-event results."
 artifactCandidates:
   - "art-clinicaltrials-gov-nct00502047-2026-04-26"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-gov-nct00502047-plantago-ovata-ldl-protocol"
     sourceKey: "source_artifact:clinicaltrials-gov-nct00502047-2026-04-26"

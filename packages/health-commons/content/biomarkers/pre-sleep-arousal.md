@@ -18,6 +18,7 @@ categories:
   - manual-measurement
   - subjective-rating
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation

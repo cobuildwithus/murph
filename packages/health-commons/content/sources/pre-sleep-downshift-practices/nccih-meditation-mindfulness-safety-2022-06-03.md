@@ -12,6 +12,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -61,6 +62,7 @@ populationMismatch: "General meditation/mindfulness page, not silent bedtime med
 directnessToProtocol: safety_boundary
 claimUse: safety-only
 sourceFindings:
+
   -
     findingId: finding:nccih-meditation-mindfulness-safety-2022-06-03:primary-safety-context
     sourceKey: source_artifact:nccih-meditation-mindfulness-safety-2022-06-03

@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -55,6 +56,7 @@ studyDesign: "Government cause-investigation summary"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "mechanistic"
     population: "Affected Beni-koji product batches and rat toxicity testing"
@@ -71,6 +73,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_mhlw_beni_koji_cause_investigation_2024_09_18_pdf"
     sourceKey: "source_artifact:mhlw-beni-koji-cause-investigation-2024-09-18"

@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Important active trial/registry boundary: slow breathing is c
 studyDesign: "interventional_trial_registry"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct06614803-2024-09-26-primary"
     sourceKey: "source_artifact:clinicaltrials-nct06614803-2024-09-26"

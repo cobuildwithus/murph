@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -57,6 +58,7 @@ studyDesign: "Government clinical digest summarizing clinical guidelines, system
 modality: "Mind-body practices for sleep disorders, including CBT-I, relaxation therapy, mindfulness meditation, yoga, and tai chi."
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:nccih-mind-body-practices-sleep-disorders-guideline-boundary
     sourceKey: source_artifact:nccih-mind-body-practices-sleep-disorders-2026-04-27

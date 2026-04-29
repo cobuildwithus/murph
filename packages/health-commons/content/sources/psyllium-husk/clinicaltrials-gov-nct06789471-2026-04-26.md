@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -85,6 +86,7 @@ adverseEventsOrSafetyNotes: "Exclusions included intestinal obstruction, choking
 artifactCandidates:
   - "art-clinicaltrials-gov-nct06789471-2026-04-26"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-gov-nct06789471-schizophrenia-psyllium-lipid-endpoints"
     sourceKey: "source_artifact:clinicaltrials-gov-nct06789471-2026-04-26"

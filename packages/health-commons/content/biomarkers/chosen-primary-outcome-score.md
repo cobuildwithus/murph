@@ -41,6 +41,7 @@ biomarker:
     minimumPoints: 2
     aggregation: median
   explainerCards:
+
   -
     title: What it is
     body: A manually configured score for the single outcome the user chose before starting the run.
@@ -84,4 +85,4 @@ relations:
 
 # Chosen Primary Outcome Score
 
-This is a configurable manual endpoint for HCP runs. It exists because collagen-peptide evidence is target-specific: skin, joint, tendon, recovery, and bone contexts should not be collapsed into one generic collagen score. `[source_artifact:pmid-39212129; source_artifact:pmid-33742704; source_artifact:pmid-30609761; source_artifact:pmid-38590831]`
+This is a configurable manual endpoint for HCP runs. It exists because collagen-peptide evidence is target-specific: skin, joint, tendon, recovery, and bone contexts should not be collapsed into one generic collagen score.

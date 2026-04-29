@@ -12,11 +12,9 @@ aliases:
 categories:
 - caffeine-timing
 relations:
--
-  type: related_protocol
+- type: related_protocol
   target: protocol_variant:caffeine-timing/caffeine-curfew-dose-reset
--
-  type: parent_family
+- type: parent_family
   target: experiment_family:caffeine-timing
 source:
   kind: web_page
@@ -30,10 +28,6 @@ sourceIdentity:
   identityKind: guideline
   canonicalIdBasis: url
   identifiers:
-
-
-
-
     titleHash: cea378cc693de78daf47a2315f5762eb9f1123e5ef0925a7a5ec47ae3cffb29b
     url: https://www.fda.gov/food/information-select-dietary-supplement-ingredients-and-other-substances/fda-warns-consumers-about-pure-and-highly-concentrated-caffeine
   canonicalUrl: https://www.fda.gov/food/information-select-dietary-supplement-ingredients-and-other-substances/fda-warns-consumers-about-pure-and-highly-concentrated-caffeine
@@ -61,26 +55,26 @@ limitations:
 populationMismatch: Product type is concentrated supplement rather than coffee/tea.
 directnessToProtocol: general_guideline
 sourceFindings:
--
-  findingId: finding:fda-pure-highly-concentrated-caffeine-2018-04-13-01
+- findingId: finding:fda-pure-highly-concentrated-caffeine-2018-04-13-01
   sourceKey: source_artifact:fda-pure-highly-concentrated-caffeine-2018-04-13
+  extractedFromArtifactId: art_fda_pure_highly_concentrated_caffeine_2018_04_13_html
   findingKind: safety
   population: Consumers
   exposure: Bulk pure or highly concentrated caffeine powders/liquids
   outcome: Avoidance recommendation
   summary: FDA warns consumers to avoid dietary supplements consisting of pure or highly concentrated caffeine in powdered or liquid bulk forms because safe amounts can be hard to measure from toxic or lethal amounts.
   evidenceUse:
-    - safety
--
-  findingId: finding:fda-pure-highly-concentrated-caffeine-2018-04-13-02
+  - safety
+- findingId: finding:fda-pure-highly-concentrated-caffeine-2018-04-13-02
   sourceKey: source_artifact:fda-pure-highly-concentrated-caffeine-2018-04-13
+  extractedFromArtifactId: art_fda_pure_highly_concentrated_caffeine_2018_04_13_html
   findingKind: adverse_event
   population: Consumers with suspected concentrated-caffeine overdose
   exposure: High-dose caffeine
   outcome: Severe toxicity symptoms and immediate-care trigger
   summary: FDA lists serious effects including rapid or erratic heartbeat, seizures, vomiting, diarrhea, stupor, disorientation, and death, and advises immediate medical care for adverse events.
   evidenceUse:
-    - safety
+  - safety
 murphV1Priority: High
 pdfRightsStatus: open_access
 ---

@@ -7,15 +7,16 @@ title: Effects of a Red/Gold/IR LED Combination Therapy Against the Signs of Agi
 summary: ClinicalTrials.gov red/gold/IR LED combination registry record; no efficacy outcomes extracted.
 status: draft
 quality: usable
+aliases:
+- Effects of a Red/Gold/IR LED Combination Therapy Against the Signs of Aging
+- NCT04525573
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: external_protocol
   title: Effects of a Red/Gold/IR LED Combination Therapy Against the Signs of Aging
@@ -31,13 +32,13 @@ researchEvidence:
   durationLabel: Not extracted from available batch notes.
   aggregateRole: context
   cohortKey: nct04525573
-evidenceBucket: wavelength sibling: red-only, amber/yellow, or broad-spectrum evidence
+evidenceBucket: 'wavelength sibling: red-only, amber/yellow, or broad-spectrum evidence'
 whyItMatters: It flags a registered red/gold/IR combination intervention but should not be used as efficacy evidence.
 potentialMurphEndpoints:
-  - registry status
-  - intervention description
-  - title mismatch
-  - results availability
+- registry status
+- intervention description
+- title mismatch
+- results availability
 protocolTakeaway: Do not use for efficacy or safety claims unless the registry is rechecked and posted results are extracted.
 murphTakeaway: Registry-only sources need explicit separation from completed outcome evidence.
 studyDesign: Clinical trial registry record; open-label design noted in extracted search context.

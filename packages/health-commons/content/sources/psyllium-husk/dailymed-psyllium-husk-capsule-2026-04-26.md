@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -74,6 +75,7 @@ endpoints:
   - "allergy risk"
   - "medicine timing"
 sourceFindings:
+
   -
     findingId: "finding:dailymed-psyllium-husk-capsule-2026-04-26-main"
     sourceKey: "source_artifact:dailymed-psyllium-husk-capsule-2026-04-26"

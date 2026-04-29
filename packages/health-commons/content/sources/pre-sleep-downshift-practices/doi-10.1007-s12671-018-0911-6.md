@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Companion arousal/daytime analysis to the chronic insomnia mi
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12671-018-0911-6-main"
     sourceKey: "source_artifact:doi-10.1007-s12671-018-0911-6"

@@ -15,6 +15,7 @@ categories:
   - device
   - monitoring
 relations:
+
   -
     type: cites
     target: biomarker:blood-glucose

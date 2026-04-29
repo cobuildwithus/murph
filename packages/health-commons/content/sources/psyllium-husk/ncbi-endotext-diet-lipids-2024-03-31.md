@@ -12,6 +12,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "narrative_review"
 modality: "psyllium husk / soluble fiber cholesterol context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:ncbi-endotext-diet-lipids-2024-03-31-soluble-fiber-lipid-review-context"
     sourceKey: "source_artifact:ncbi-endotext-diet-lipids-2024-03-31"

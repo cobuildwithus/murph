@@ -8,19 +8,17 @@ summary: NHS Specialist Pharmacy Service guidance on prescribing and using thiam
 status: draft
 quality: usable
 aliases:
-  - SPS 2025 Prescribing and using thiamine to prevent refeeding syn
-  - Prescribing and using thiamine to prevent refeeding syndrome
+- SPS 2025 Prescribing and using thiamine to prevent refeeding syn
+- Prescribing and using thiamine to prevent refeeding syndrome
 categories:
-  - prolonged-fasting
-  - refeeding-safety
-  - electrolytes-thiamine
+- prolonged-fasting
+- refeeding-safety
+- electrolytes-thiamine
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: web_page
   title: Prescribing and using thiamine to prevent refeeding syndrome
@@ -44,20 +42,20 @@ researchEvidence:
   aggregateRole: synthesis
   cohortKey: sps-thiamine-refeeding-syndrome-2025-03-11
   notes:
-    - 'Limitations: Medicines advice/guidance, not trial evidence; recommendations depend on risk category and clinical context.'
-    - 'Population mismatch: Patients at refeeding-syndrome risk are not the same as low-risk 24–72 hour fasting users.'
+  - 'Limitations: Medicines advice/guidance, not trial evidence; recommendations depend on risk category and clinical context.'
+  - 'Population mismatch: Patients at refeeding-syndrome risk are not the same as low-risk 24–72 hour fasting users.'
 evidenceBucket: refeeding, electrolytes, and thiamine safety
 directnessToProtocol: general_guideline
 whyItMatters: Practical medicines-source guidance for route selection and prevention use; pairs well with BAPEN for user-facing supplement boundaries.
 potentialMurphEndpoints:
-  - biomarker:thiamine-status
-  - biomarker:refeeding-syndrome-symptoms
+- biomarker:thiamine-status
+- biomarker:refeeding-syndrome-symptoms
 participantSummary: No participant sample; NHS medicines advice for patients at refeeding-syndrome risk.
 interventionOrExposure: Oral, enteral, or intravenous thiamine use before and during refeeding; based on NICE-style risk categories.
 comparatorOrControl: Not applicable or not extracted for this source.
 endpoints:
-  - thiamine
-  - refeeding symptoms
+- thiamine
+- refeeding symptoms
 effectEstimatesOrDirection: SPS guidance emphasizes oral/enteral thiamine where clinically appropriate and reserves intravenous thiamine for high/extremely high risk patients when oral or enteral administration is unavailable; it provides practical prescribing context for prevention.
 adverseEventsOrSafetyNotes: Thiamine prescribing, route selection, and prevention use in refeeding risk.
 limitations: Medicines advice/guidance, not trial evidence; recommendations depend on risk category and clinical context.
@@ -68,17 +66,16 @@ studyDesign: Medicines guidance
 modality: Thiamine prescribing for refeeding prevention
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:sps-thiamine-refeeding-syndrome-2025-03-11-refeeding-safety
-    sourceKey: source_artifact:sps-thiamine-refeeding-syndrome-2025-03-11
-    extractedFromArtifactId: art_sps_thiamine_refeeding_syndrome_2025_03_11
-    findingKind: safety
-    population: No participant sample; NHS medicines advice for patients at refeeding-syndrome risk.
-    exposure: Oral, enteral, or intravenous thiamine use before and during refeeding; based on NICE-style risk categories.
-    outcome: Thiamine prescribing, route selection, and prevention use in refeeding risk.
-    summary: SPS guidance emphasizes oral/enteral thiamine where clinically appropriate and reserves intravenous thiamine for high/extremely high risk patients when oral or enteral administration is unavailable; it provides practical prescribing context for prevention.
-    evidenceUse:
-      - safety
+- findingId: finding:sps-thiamine-refeeding-syndrome-2025-03-11-refeeding-safety
+  sourceKey: source_artifact:sps-thiamine-refeeding-syndrome-2025-03-11
+  extractedFromArtifactId: art_sps_thiamine_refeeding_syndrome_2025_03_11
+  findingKind: safety
+  population: No participant sample; NHS medicines advice for patients at refeeding-syndrome risk.
+  exposure: Oral, enteral, or intravenous thiamine use before and during refeeding; based on NICE-style risk categories.
+  outcome: Thiamine prescribing, route selection, and prevention use in refeeding risk.
+  summary: SPS guidance emphasizes oral/enteral thiamine where clinically appropriate and reserves intravenous thiamine for high/extremely high risk patients when oral or enteral administration is unavailable; it provides practical prescribing context for prevention.
+  evidenceUse:
+  - safety
 murphV1Priority: High
 pdfRightsStatus: unknown
 ---

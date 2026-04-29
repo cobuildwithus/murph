@@ -12,6 +12,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -41,6 +42,7 @@ researchEvidence:
     - Directness: safety_boundary; claim use: safety-only; priority: high
     - Candidate row: candidate:adjacent-variants:042; shard: adjacent-variants. Adjacent route/vehicle variant; use only to separate daily oral supplement evidence from UVB/sunlight or fortified-food evidence. Candidate rationale: Professional guideline for UV/sunlight as a vitamin D source and its safety tradeoffs.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:nice-sunlight-exposure-2016-02-09:001
     sourceKey: source_artifact:nice-sunlight-exposure-2016-02-09

@@ -43,6 +43,7 @@ biomarker:
     label: Lower spikes and safer time-in-range are usually better, but lows are dangerous.
     nuance: The right interpretation depends on diabetes status, pregnancy, medications, fasting state, meal timing, exercise timing, illness, and clinician-set targets. A lower value is not automatically better.
   privateMetricBindings:
+
     -
       source: browser_vault_metric
       domain: body_state
@@ -55,6 +56,7 @@ biomarker:
     minimumPoints: 7
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: Blood glucose is the amount of glucose in blood at a moment in time. Murph treats imported glucose values as a private trend signal, not as a diagnostic label.
@@ -92,12 +94,13 @@ biomarker:
       - meter strip storage or expiration
       - device, sensor, or calibration changes
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:norwegian-4x4/norwegian-4x4
   -
     type: related_protocol
-    target: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+    target: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
@@ -138,6 +141,7 @@ relations:
     type: cites
     target: source_artifact:pmid-31915891
 claims:
+
   -
     claimId: blood-glucose-diagnostic-lab-thresholds
     type: evidence_scope
@@ -204,6 +208,7 @@ protocolRanking:
   version: deterministic-v0
   scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
   candidates:
+
     -
       protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
       expectedDirection: down_or_stable
@@ -220,7 +225,7 @@ protocolRanking:
         burdenLabel: High
         cautionLabel: Higher
     -
-      protocolKey: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
       expectedDirection: mixed_or_contextual
       relationship: secondary_biomarker
       mechanism: Evening light reduction may improve sleep timing or circadian regularity, which can indirectly matter for glucose interpretation, but direct evidence for this consumer protocol as a glucose intervention is sparse.

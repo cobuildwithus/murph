@@ -7,15 +7,16 @@ title: Risk of thermal harm from therapeutic and cosmetic energy-emitting medica
 summary: Regulatory notice flags >45°C surface skin temperature as unsafe without objective rationale and includes LEDs among covered energy devices. Included for thermal injury and energy-device safety boundary; claim use is safety-only.
 status: draft
 quality: usable
+aliases:
+- source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21
+- Risk of thermal harm from therapeutic and cosmetic energy-emitting medical devices
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: web_page
   title: Risk of thermal harm from therapeutic and cosmetic energy-emitting medical devices
@@ -34,10 +35,10 @@ researchEvidence:
 evidenceBucket: thermal injury and energy-device safety boundary
 whyItMatters: Use for heat-related stop rules, device-temperature caution, and avoiding protocols that seek heating as a benefit.
 potentialMurphEndpoints:
-  - surface temperature limit
-  - burning/warmth stop rule
-  - worst-case device setup check
-  - Fitzpatrick coverage
+- surface temperature limit
+- burning/warmth stop rule
+- worst-case device setup check
+- Fitzpatrick coverage
 protocolTakeaway: Regulatory notice flags >45°C surface skin temperature as unsafe without objective rationale and includes LEDs among covered energy devices. Specific device risk depends on irradiance, contact, motion, spot size, skin type, and testing.
 murphTakeaway: Use for heat-related stop rules, device-temperature caution, and avoiding protocols that seek heating as a benefit.
 studyDesign: Regulatory safety notice on thermal harm from cosmetic and therapeutic energy-emitting medical devices

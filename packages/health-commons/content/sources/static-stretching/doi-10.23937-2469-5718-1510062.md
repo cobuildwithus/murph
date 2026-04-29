@@ -12,6 +12,7 @@ aliases:
 categories:
   - static-stretching
 relations:
+
   -
     type: related_protocol
     target: "protocol_variant:static-stretching/at-home-static-stretching-for-flexibility"
@@ -72,6 +73,7 @@ limitations:
   - "Blinding limitations were noted in available descriptions."
   - "Evidence was extracted from open web/abstract-level records, not a redistributed PDF."
 artifactCandidates:
+
   -
     kind: "html"
     url: "https://doi.org/10.23937/2469-5718/1510062"

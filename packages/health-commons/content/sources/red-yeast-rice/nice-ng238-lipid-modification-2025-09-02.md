@@ -13,6 +13,7 @@ categories:
   - "red-yeast-rice"
   - "lipid-measurement"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -71,6 +72,7 @@ limitations:
   - "Treatment recommendations are clinician-facing and should not be treated as supplement efficacy evidence."
 populationMismatch: "Guideline population is broad cardiovascular-prevention care; individual red yeast rice self-experimenters may not match NICE risk strata or medication pathways."
 sourceFindings:
+
   -
     findingId: "finding:nice-ng238-lipid-modification-2025-09-02-full-lipid-profile-follow-up"
     sourceKey: "source_artifact:nice-ng238-lipid-modification-2025-09-02"

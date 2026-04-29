@@ -19,6 +19,7 @@ categories:
   - behavior-change
 familyKind: exercise_training
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:aerobic-base-training/zone-2-aerobic-base-block

@@ -249,9 +249,57 @@
           "maxLength": 160
         },
         "schedule": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 4000
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "dailyLocal"
+                },
+                "localTime": {
+                  "type": "string",
+                  "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                },
+                "timeZone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "kind",
+                "localTime",
+                "timeZone"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "cron"
+                },
+                "expression": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 400
+                },
+                "timeZone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "kind",
+                "expression",
+                "timeZone"
+              ],
+              "additionalProperties": false
+            }
+          ]
         },
         "dose": {
           "type": "string",
@@ -372,7 +420,8 @@
               "enum": [
                 "continue_with_caution",
                 "clinician_guidance_before_unsupervised_start",
-                "do_not_start_unsupervised"
+                "do_not_start_unsupervised",
+                "do_not_start_unsupervised_explicit_clinician_clearance_required"
               ]
             },
             "positiveQuestionIds": {

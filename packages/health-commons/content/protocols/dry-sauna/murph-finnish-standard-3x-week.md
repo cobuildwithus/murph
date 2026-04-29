@@ -1,1266 +1,1140 @@
 ---
-schemaVersion: murph.commons.page.v1
-entityType: protocol_variant
-key: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-slug: protocols/dry-sauna/murph-finnish-standard-3x-week
-title: Finnish Dry Sauna
-summary: "Sit in a traditional dry sauna for short, repeatable sessions to see whether heat exposure helps recovery, sleep, resting heart rate, or morning blood pressure enough to be worth repeating."
-status: field-testing
-quality: usable
+schemaVersion: "murph.commons.page.v1"
+entityType: "protocol_variant"
+key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+slug: "protocols/dry-sauna/murph-finnish-standard-3x-week"
+title: "Finnish Dry Sauna"
+summary: "Test whether a traditional dry-sauna routine changes tolerability, recovery context, sleep context, resting pulse, or morning blood-pressure signals enough to be worth keeping."
+status: "field-testing"
+quality: "usable"
 aliases:
-  - dry sauna protocol
-  - Finnish sauna protocol
-  - Finnish dry sauna experiment
-  - 3x weekly dry sauna experiment
+  - "dry sauna protocol"
+  - "Finnish sauna protocol"
+  - "Finnish dry sauna experiment"
+  - "traditional Finnish sauna experiment"
+  - "3x weekly dry sauna experiment"
 categories:
-  - passive-heat
-  - recovery
-  - cardiovascular
-  - murph-canonical
+  - "passive-heat"
+  - "sauna"
+  - "recovery"
+  - "cardiovascular"
+  - "murph-canonical"
 media:
+
   -
-    kind: image
-    relativePath: design-assets/hero-finnish-sauna.jpeg
-    mediaType: image/jpeg
-    caption: Finnish Dry Sauna
+    kind: "image"
+    relativePath: "design-assets/hero-finnish-sauna.jpeg"
+    mediaType: "image/jpeg"
+    caption: "Finnish Dry Sauna"
 relations:
+
   -
-    type: parent_family
-    target: experiment_family:dry-sauna
+    type: "parent_family"
+    target: "experiment_family:dry-sauna"
   -
-    type: primary_biomarker
-    target: biomarker:resting-heart-rate
+    type: "primary_biomarker"
+    target: "biomarker:resting-heart-rate"
   -
-    type: secondary_biomarker
-    target: biomarker:morning-blood-pressure
+    type: "secondary_biomarker"
+    target: "biomarker:morning-blood-pressure"
   -
-    type: secondary_biomarker
-    target: biomarker:hrv-rmssd
+    type: "secondary_biomarker"
+    target: "biomarker:hrv-rmssd"
   -
-    type: secondary_biomarker
-    target: biomarker:sleep-efficiency
+    type: "secondary_biomarker"
+    target: "biomarker:sleep-efficiency"
   -
-    type: secondary_biomarker
-    target: biomarker:deep-sleep-minutes
-  -
-    type: cites
-    target: source_artifact:sauna-bibliography-2026-04-18
-  -
-    type: cites
-    target: source_artifact:pmid-445022
-  -
-    type: cites
-    target: source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
-  -
-    type: cites
-    target: source_artifact:pmid-3766176
-  -
-    type: cites
-    target: source_artifact:pmid-3788622
-  -
-    type: cites
-    target: source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
-  -
-    type: cites
-    target: source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
-  -
-    type: cites
-    target: source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
-  -
-    type: cites
-    target: source_artifact:pmid-3174262
-  -
-    type: cites
-    target: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
-  -
-    type: cites
-    target: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
-  -
-    type: cites
-    target: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
-  -
-    type: cites
-    target: source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
-  -
-    type: cites
-    target: source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
-  -
-    type: cites
-    target: source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
-  -
-    type: cites
-    target: source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
-  -
-    type: cites
-    target: source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
-  -
-    type: cites
-    target: source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
-  -
-    type: cites
-    target: source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
-  -
-    type: cites
-    target: source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
-  -
-    type: cites
-    target: source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
-  -
-    type: cites
-    target: source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna
-  -
-    type: cites
-    target: source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
-  -
-    type: cites
-    target: source_artifact:pmid-11165553
-  -
-    type: cites
-    target: source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
-  -
-    type: cites
-    target: source_artifact:pmid-16871826
-  -
-    type: cites
-    target: source_artifact:pmid-19154844
-  -
-    type: cites
-    target: source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
-  -
-    type: cites
-    target: source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
-  -
-    type: cites
-    target: source_artifact:pmid-25705824
-  -
-    type: cites
-    target: source_artifact:pmid-25432420
-  -
-    type: cites
-    target: source_artifact:pmid-26152773
-  -
-    type: cites
-    target: source_artifact:pmid-29229091
-  -
-    type: cites
-    target: source_artifact:pmid-28905164
-  -
-    type: cites
-    target: source_artifact:pmid-27932366
-  -
-    type: cites
-    target: source_artifact:pmid-28633297
-  -
-    type: cites
-    target: source_artifact:pmid-29351426
-  -
-    type: cites
-    target: source_artifact:pmid-29849692
-  -
-    type: cites
-    target: source_artifact:pmid-28972808
-  -
-    type: cites
-    target: source_artifact:pmid-29897261
-  -
-    type: cites
-    target: source_artifact:pmid-29269746
-  -
-    type: cites
-    target: source_artifact:mayo-2018-sauna-review
-  -
-    type: cites
-    target: source_artifact:pmid-30173212
-  -
-    type: cites
-    target: source_artifact:pmid-30486813
-  -
-    type: cites
-    target: source_artifact:pmid-31126559
-  -
-    type: cites
-    target: source_artifact:pmid-29720543
-  -
-    type: cites
-    target: source_artifact:pmid-31372865
-  -
-    type: cites
-    target: source_artifact:pmid-31102597
-  -
-    type: cites
-    target: source_artifact:pmid-31331560
-  -
-    type: cites
-    target: source_artifact:pmid-32951736
-  -
-    type: cites
-    target: source_artifact:pmid-31950931
-  -
-    type: cites
-    target: source_artifact:pmid-31490429
-  -
-    type: cites
-    target: source_artifact:pmid-31869820
-  -
-    type: cites
-    target: source_artifact:pmid-33513711
-  -
-    type: cites
-    target: source_artifact:pmid-33211153
-  -
-    type: cites
-    target: source_artifact:pmid-34297227
-  -
-    type: cites
-    target: source_artifact:pmid-34622026
-  -
-    type: cites
-    target: source_artifact:pmid-34199101
-  -
-    type: cites
-    target: source_artifact:pmid-36078656
-  -
-    type: cites
-    target: source_artifact:pmid-35710395
-  -
-    type: cites
-    target: source_artifact:pmid-35908583
-  -
-    type: cites
-    target: source_artifact:pmid-36255556
-  -
-    type: cites
-    target: source_artifact:pmid-35785965
-  -
-    type: cites
-    target: source_artifact:pmid-34727008
-  -
-    type: cites
-    target: source_artifact:pmid-38011189
-  -
-    type: cites
-    target: source_artifact:pmid-37650138
-  -
-    type: cites
-    target: source_artifact:pmid-37270272
-  -
-    type: cites
-    target: source_artifact:pmid-37029766
-  -
-    type: cites
-    target: source_artifact:pmid-36813265
-  -
-    type: cites
-    target: source_artifact:pmid-39446139
-  -
-    type: cites
-    target: source_artifact:pmid-38410962
-  -
-    type: cites
-    target: source_artifact:pmid-38577299
-  -
-    type: cites
-    target: source_artifact:doi-10.3390-app151910762
-  -
-    type: cites
-    target: source_artifact:pmid-40202605
-  -
-    type: cites
-    target: source_artifact:pmid-41426898
-  -
-    type: cites
-    target: source_artifact:doi-10-1016-j-aimed-2024-09-009
-  -
-    type: cites
-    target: source_artifact:pmid-40611569
-  -
-    type: cites
-    target: source_artifact:pmid-41340471
-  -
-    type: cites
-    target: source_artifact:doi-10-3389-fcvm-2025-1537194
-  -
-    type: cites
-    target: source_artifact:pmid-41461792
-  -
-    type: cites
-    target: source_artifact:pmid-41831305
-  -
-    type: cites
-    target: source_artifact:doi-10.1080-23328940.2026.2645467
-  -
-    type: cites
-    target: source_artifact:pmid-31293098
-  -
-    type: cites
-    target: source_artifact:pmid-32615263
-  -
-    type: cites
-    target: source_artifact:pmid-38836690
-  -
-    type: cites
-    target: source_artifact:pmid-41049507
-  -
-    type: cites
-    target: source_artifact:pmid-34363927
-  -
-    type: cites
-    target: source_artifact:pmid-24304490
-  -
-    type: cites
-    target: source_artifact:pmid-30800676
-  -
-    type: cites
-    target: source_artifact:pmid-38344040
-  -
-    type: cites
-    target: source_artifact:pmid-24899780
-  -
-    type: cites
-    target: source_artifact:pmid-3218892
-  -
-    type: cites
-    target: source_artifact:pmid-3218894
-  -
-    type: cites
-    target: source_artifact:pmid-3218897
+    type: "secondary_biomarker"
+    target: "biomarker:deep-sleep-minutes"
 lineage:
-  relationship: root
-  rationale: Default dry-sauna experiment designed to be simple enough to try and clear enough to interpret.
+  relationship: "root"
+  rationale: "Murph-owned default dry-sauna experiment kept separate from external named routines, infrared sauna, steam/wet heat, Waon therapy, cold-contrast routines, and post-exercise heat variants."
 attribution:
-  ownerType: murph
+  ownerType: "murph"
 protocol:
-  doseSignature: 3x/week · 15–20 min · 80–100 °C · 21-day stand-alone dry-sauna experiment
-  target: 80–100 °C traditional dry sauna
+  doseSignature: "3x/week · first-session tolerance check 5–10 min, then 15–20 min only if well tolerated · traditional dry sauna preferably ~80–90 °C; 100 °C is a high-end ceiling, not a goal · 21-day stand-alone dry-sauna experiment"
+  target: "traditional dry sauna, preferably around 80–90 °C; use lower heat when new and do not chase 100 °C"
   frequency:
     sessionsPerWeek: 3
   durationMinutes:
-    min: 15
+    min: 5
     max: 20
   temperatureC:
-    min: 80
-    max: 100
+    min: 70
+    max: 90
   interventionSessionsMinimum: 4
   interventionSessionsTarget: 6
   steps:
-    - Choose a traditional dry sauna and a time when you can cool down afterward without rushing.
-    - Sit for 15–20 minutes at about 80–100 °C.
-    - Hydrate normally before and after, then cool down gently before returning to normal activity.
-    - Log the session and any context that could change recovery or sleep.
+    - "Pick a traditional dry sauna and a time when you can cool down afterward without rushing; do not use a facility that feels poorly ventilated, overheated, unsafe, or hard to exit."
+    - "Start normally hydrated; do not sauna after alcohol or recreational drugs that day, and do not force large water or electrolyte doses."
+    - "For the first session, treat 5–10 minutes as a tolerance check. Later sessions can use 15–20 minutes only when well tolerated."
+    - "Sit where you can exit easily, use a lower bench when new, and do not chase extreme discomfort, a sweat target, or a core-temperature threshold."
+    - "Leave immediately for any stop condition. Early exit counts as a valid logged outcome, not a failed session."
+    - "Cool down gently before driving, exercising, hot showering, cold plunging, or going to bed; do not resume activity until you feel fully alert and steady."
+    - "Log the session dose, context, cool-down method, and any symptoms the same day."
   tips:
-    - Use a similar time of day and similar pre-sauna routine when practical.
-    - Keep cold plunges, new supplements, new training blocks, major diet changes, and intentional alcohol changes out of this test window.
-    - If a session follows exercise, log the workout because post-exercise sauna is a different context than stand-alone sauna.
+    - "Keep sessions at a similar time of day when practical."
+    - "Keep cold plunges, cold swimming, ice baths, contrast therapy, new supplements, new training blocks, major diet changes, and intentional alcohol changes out of the test window."
+    - "If a session follows a workout, label it as post-exercise and interpret it separately; postpone if you are dehydrated, overheated, unusually fatigued, or unable to cool down."
+    - "Treat the first session as a tolerance check; completing a conservative session is better than pushing through warning symptoms."
+    - "Do not make up missed sessions by stacking sessions, extending duration, or using hotter settings."
+    - "In public or shared saunas, use a towel or seating barrier, follow facility rules, and skip the session if hygiene, ventilation, timer, temperature control, or exit access seems questionable."
   keepInMind:
-    - This experiment is designed to read short-term recovery and cardiovascular proxies, not long-term disease or longevity claims.
-    - HRV and sleep-stage changes are exploratory and can be moved by illness, stress, alcohol, travel, and training load.
-    - Infrared sauna and other heat modalities are related, but they should not be treated as the same protocol.
+    - "This is a short self-experiment for practical recovery context and cardiovascular proxies, not a treatment plan or longevity proof."
+    - "HRV and sleep-stage changes are exploratory and can be moved by illness, stress, alcohol, travel, and training load."
+    - "Traditional Finnish sauna can include water on rocks and changing humidity, so log heavy löyly or unusual humidity if it changes the feel of the session."
+    - "Infrared sauna, steam rooms, Waon therapy, hot-water immersion, cold plunges, and high-heat daily routines are related but separate protocols."
   logFields:
-    - duration
-    - approximate temperature
-    - time of day
-    - stand-alone or post-exercise
-    - symptoms
-    - alcohol
-    - illness or travel
-    - unusually hard training
+    - "session_date"
+    - "session_start_time"
+    - "session_duration_minutes"
+    - "first_session_tolerance_check_minutes"
+    - "approximate_temperature_c"
+    - "bench_level_or_position"
+    - "standalone_or_postexercise"
+    - "exercise_type_and_load_if_applicable"
+    - "humidity_or_loly_if_notable"
+    - "cool_down_method"
+    - "time_until_fully_steady_and_alert"
+    - "hydration_notes"
+    - "pre_post_body_mass_if_already_tracking_hydration"
+    - "alcohol_last_24h"
+    - "caffeine_stimulant_sedative_or_recreational_substance_context"
+    - "medication_dose_or_timing_change"
+    - "illness_or_fever"
+    - "travel_or_timezone_shift"
+    - "ambient_heat_or_other_heat_exposure"
+    - "hard_training_last_24h"
+    - "cold_shower_cold_plunge_cold_swim_or_contrast_exposure"
+    - "skin_irritation_rash_hives_burning_or_infection_context"
+    - "menstrual_pregnancy_or_fertility_context_if_relevant"
+    - "public_shared_sauna_hygiene_or_facility_issue"
+    - "symptoms_during_or_after"
   stopConditions:
-    - Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, or unusual shortness of breath occurs.
-    - End the experiment and seek appropriate care if severe or repeated symptoms occur.
+    - "Stop the session immediately for chest pain or pressure, faintness, severe dizziness, loss of balance, confusion, neurologic symptoms, palpitations, unusual shortness of breath, severe headache, vomiting, weakness, feeling unwell, panic-level distress, skin burning, heat-triggered itching, hives, rash flare, or feeling unsafe."
+    - "Leave and cool down gently if heat feels stronger than expected, humidity or löyly becomes overwhelming, or you cannot stay comfortable without forcing it."
+    - "End the experiment and seek urgent care for loss of consciousness, chest pain, neurologic symptoms, severe shortness of breath, repeated vomiting, severe headache, heat-stroke-like symptoms, symptoms that do not resolve promptly after leaving, or any symptom pattern that repeats across sessions."
+    - "Do not continue during fever, acute infection, vomiting, diarrhea, significant dehydration, recent heat illness, day-of alcohol or recreational drug use, or unusually impaired recovery after hard training."
 testPlans:
+
   -
-    planId: rhr-21d
+    planId: "rhr-21d"
     durationDays: 21
     baselineDays: 7
     interventionDays: 14
-    primaryBiomarkerKey: biomarker:resting-heart-rate
+    primaryBiomarkerKey: "biomarker:resting-heart-rate"
     secondaryBiomarkerKeys:
-      - biomarker:morning-blood-pressure
-      - biomarker:hrv-rmssd
-      - biomarker:sleep-efficiency
-      - biomarker:deep-sleep-minutes
+      - "biomarker:morning-blood-pressure"
+      - "biomarker:hrv-rmssd"
+      - "biomarker:sleep-efficiency"
+      - "biomarker:deep-sleep-minutes"
     minimumAdherenceSessions: 4
     targetAdherenceSessions: 6
     notes:
-      - Compare intervention-window averages against the user’s own 7-day baseline rather than highlighting single-session spikes.
-      - Treat morning blood pressure as optional but valuable when a validated home cuff and consistent routine are available.
-      - Keep HRV and sleep-stage markers exploratory unless the personal signal is strong, repeated, and not obviously confounded.
-      - Keep stand-alone sauna and post-exercise sauna interpretations separate whenever the workout context is materially different.
+      - "Compare intervention-window averages against the user’s own 7-day baseline instead of highlighting single-session spikes."
+      - "Treat morning blood pressure as optional but valuable when a validated home cuff and consistent routine are available."
+      - "Keep HRV and sleep-stage markers exploratory unless the personal signal is strong, repeated, and not obviously confounded."
+      - "Keep stand-alone sauna and post-exercise sauna interpretations separate whenever workout context is materially different."
 expectedSignalDescriptions:
+
   -
-    biomarkerKey: biomarker:resting-heart-rate
-    description: Repeated dry sauna is a short heat stress that can train sweating, blood volume, and cooling. If the same heat load becomes easier, resting pulse may drift lower or stay steadier.
+    biomarkerKey: "biomarker:resting-heart-rate"
+    expected: "mixed_or_contextual"
+    protocolProminence: "focus"
+    description: "Resting heart rate is practical to watch, but the evidence does not support expecting a drop; compare averaged baseline and intervention windows while checking heat timing, hydration, sleep, illness, alcohol, and training load."
   -
-    biomarkerKey: biomarker:morning-blood-pressure
-    description: Sauna opens blood vessels in the skin during heat. Repeated sessions may change how blood vessels relax later. Morning blood pressure can show whether that carries into daily rest.
+    biomarkerKey: "biomarker:morning-blood-pressure"
+    expected: "mixed_or_contextual"
+    protocolProminence: "context"
+    description: "Sauna can change vascular tone acutely, but morning blood pressure should stay optional and contextual; only consistent home-cuff averages are interpretable."
   -
-    biomarkerKey: biomarker:hrv-rmssd
-    description: The cool-down after heat may help the body shift out of high-alert mode. HRV can move with that recovery shift, but the evidence is mixed.
+    biomarkerKey: "biomarker:hrv-rmssd"
+    expected: "mixed_or_contextual"
+    protocolProminence: "context"
+    description: "HRV may improve if the routine supports recovery, but it can also drop with heat stress, poor sleep, illness, alcohol, or hard training."
   -
-    biomarkerKey: biomarker:sleep-efficiency
-    description: A tolerable sauna session followed by cooling may make it easier to settle and stay asleep. If the heat feels too intense or happens too late, sleep continuity may worsen instead.
+    biomarkerKey: "biomarker:sleep-efficiency"
+    expected: "mixed_or_contextual"
+    protocolProminence: "context"
+    description: "Cooling after heat may help some people settle at night, while late, hot, or poorly tolerated sessions can disturb sleep."
   -
-    biomarkerKey: biomarker:deep-sleep-minutes
-    description: If sauna improves overnight recovery and sleep depth, deep-sleep minutes may rise. This is weaker than overall sleep continuity.
+    biomarkerKey: "biomarker:deep-sleep-minutes"
+    expected: "mixed_or_contextual"
+    protocolProminence: "context"
+    description: "Consumer sleep-stage estimates are noisy, so deep sleep belongs as context rather than the headline verdict."
 experimentOnboarding:
-  schemaVersion: murph.commons.experiment-onboarding.v1
+  schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
     displayPrompt: "Hey Murph, I want to explore doing the Finnish dry sauna protocol."
     intentSummary: "Explore Finnish Dry Sauna"
   contextReview:
     vaultChecks:
+
       -
-        id: active_experiments
-        label: Active experiments
-        reason: Avoid starting another meaningful experiment on top of an active one unless the user explicitly accepts weaker attribution.
+        id: "active_experiments"
+        label: "Active experiments"
+        reason: "Avoid starting another meaningful experiment on top of an active one unless the user explicitly accepts weaker attribution."
         readHints:
-          - experiment list --status active --format json
+          - "experiment list --status active --format json"
       -
-        id: wearable_sources
-        label: Wearable sources
-        reason: Confirm whether resting-heart-rate, recovery, sleep, or activity signals are available during the baseline and intervention windows.
+        id: "wearable_sources"
+        label: "Wearable sources"
+        reason: "Confirm whether resting-heart-rate, recovery, sleep, or activity signals are available during the baseline and intervention windows."
         freshnessDays: 14
         readHints:
-          - wearables sources list --format json
-          - wearables day <YYYY-MM-DD> --format json
+          - "wearables sources list --format json"
+          - "wearables day <YYYY-MM-DD> --format json"
       -
-        id: recent_sleep_and_recovery_signals
-        label: Recent sleep and recovery context
-        reason: Review recent sleep or recovery instability before interpreting sauna sessions as the main cause of any short-horizon signal.
+        id: "recent_sleep_and_recovery_signals"
+        label: "Recent sleep and recovery context"
+        reason: "Review recent sleep or recovery instability before interpreting sauna sessions as the main cause of any short-horizon signal."
         freshnessDays: 21
         readHints:
-          - wearables day <YYYY-MM-DD> --format json
-          - search query "sleep recovery fatigue insomnia travel alcohol illness" --format json
+          - "wearables day <YYYY-MM-DD> --format json"
+          - "search query \"sleep recovery fatigue insomnia travel alcohol illness\" --format json"
       -
-        id: recent_activity_sessions
-        label: Recent activity sessions
-        reason: Determine whether sauna sessions are likely to be stand-alone or post-exercise and whether recent training load could dominate the signal.
+        id: "recent_activity_sessions"
+        label: "Recent activity sessions"
+        reason: "Determine whether sauna sessions are likely to be stand-alone or post-exercise and whether recent training load could dominate the signal."
         freshnessDays: 21
         readHints:
-          - timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json
-          - search query "sauna workout exercise training recovery" --format json
+          - "timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json"
+          - "search query \"sauna workout exercise training recovery\" --format json"
       -
-        id: morning_blood_pressure_records
-        label: Morning blood pressure context
-        reason: Recent home blood-pressure measurements can improve interpretation when the user already has a consistent cuff routine.
+        id: "morning_blood_pressure_records"
+        label: "Morning blood pressure context"
+        reason: "Recent home blood-pressure measurements can improve interpretation when the user already has a consistent cuff routine."
         freshnessDays: 30
         readHints:
-          - search query "blood pressure hypertension home cuff" --format json
+          - "search query \"blood pressure hypertension home cuff\" --format json"
       -
-        id: conditions
-        label: Relevant conditions
-        reason: Cardiovascular, kidney, seizure, heat-intolerance, or respiratory context can change whether unsupervised sauna is a good fit.
+        id: "conditions"
+        label: "Relevant conditions"
+        reason: "Cardiovascular, kidney, seizure, heat-intolerance, pregnancy, respiratory, fainting, or dehydration context can change whether unsupervised sauna is a good fit."
         freshnessDays: 90
         readHints:
-          - search query "heart disease chest pain fainting dehydration kidney disease seizure asthma COPD heat intolerance" --format json
+          - "search query \"heart disease chest pain fainting syncope dehydration kidney disease seizure asthma COPD heat intolerance pregnancy\" --format json"
       -
-        id: medications
-        label: Relevant medications
-        reason: Diuretics, blood-pressure medications, stimulants, sedatives, and other medications that change hydration, blood pressure, alertness, or sweating affect safety and interpretation.
+        id: "medications"
+        label: "Relevant medications"
+        reason: "Diuretics, blood-pressure medications, stimulants, sedatives, opioid patches, and other medications that change hydration, blood pressure, alertness, or sweating affect safety and interpretation."
         freshnessDays: 30
         readHints:
-          - search query "diuretic beta blocker antihypertensive stimulant sedative sweating dehydration medication" --format json
+          - "search query \"diuretic beta blocker antihypertensive stimulant sedative sweating dehydration opioid patch medication\" --format json"
       -
-        id: pregnancy_or_postpartum_context
-        label: Pregnancy or postpartum context
-        reason: Pregnancy and early postpartum status can change whether heat exposure is a good fit right now.
-        freshnessDays: 30
-        readHints:
-          - memory show --format json
-          - search query "pregnancy postpartum" --format json
-      -
-        id: recent_illness_or_fever
-        label: Recent illness or fever
-        reason: Fever, infection, or recent illness can make sauna tolerance worse and distort recovery signals.
+        id: "recent_illness_or_fever"
+        label: "Recent illness or fever"
+        reason: "Fever, infection, or recent illness can make sauna tolerance worse and distort recovery signals."
         freshnessDays: 14
         readHints:
-          - search query "fever illness infection" --format json
-      -
-        id: recent_fainting_or_dehydration
-        label: Recent fainting or dehydration
-        reason: Recent fainting, near-fainting, or dehydration raises the bar for unsupervised heat exposure.
-        freshnessDays: 30
-        readHints:
-          - search query "fainting syncope dehydration heat exhaustion" --format json
+          - "search query \"fever illness infection\" --format json"
     notes:
-      - Review recent tolerance, recovery context, and hydration-sensitive factors first, but still ask the compact heat-safety screen because silence in the vault is not clearance.
+      - "Review available context first, but still ask the compact heat-safety screen because silence in the vault is not clearance."
   safetyScreen:
-    cautionLevel: moderate
-    mode: ask_compact_then_expand_if_positive
-    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    cautionLevel: "high"
+    mode: "ask_compact_then_expand_if_positive"
+    dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
+
       -
-        id: cardiovascular_or_heat_red_flags
-        prompt: known cardiovascular disease, chest pressure with heat or exertion, fainting or near-fainting, significant palpitations, uncontrolled blood pressure, recent heart attack or stroke, decompensated heart failure, or severe valve disease
+        id: "cardiovascular_or_fainting_risk"
+        prompt: "Any chest pain, fainting, significant dizziness, unstable blood pressure, known serious heart rhythm issue, heart failure, ischemic heart disease, recent cardiac event, peripheral arterial disease, or clinician advice to avoid heat?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+        why: "Heat raises cardiovascular strain and can worsen unsafe symptoms."
       -
-        id: acute_or_special_context
-        prompt: pregnancy or early postpartum if relevant, acute illness or fever, dehydration, recent fainting, kidney problems, seizure disorder, severe asthma or COPD symptoms, or a condition where heat exposure has been risky for you
+        id: "pregnancy_or_fertility_context"
+        prompt: "Are you pregnant, possibly pregnant, trying to become pregnant, early postpartum, or actively protecting fertility or sperm markers?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+        why: "Heat exposure has pregnancy and fertility-specific caution boundaries."
       -
-        id: medication_or_substance_context
-        prompt: medications or substances that can change heat tolerance, hydration, blood pressure, heart rate, alertness, or sweating, or any plan to drink alcohol before or after sauna
+        id: "opioid_patch_or_transdermal_heat_risk"
+        prompt: "Are you using a fentanyl, buprenorphine, or other transdermal opioid patch, or any medication patch with heat warnings?"
+        ifPositive: "do_not_start_unsupervised_explicit_clinician_clearance_required"
+        why: "External heat can increase transdermal drug delivery; opioid patches have sauna-specific fatal-poisoning reports."
+      -
+        id: "medication_or_substance_risk"
+        prompt: "Any diuretics, blood-pressure medicines, beta blockers, anticholinergics, psychotropics, sedatives, stimulants, antiseizure medicines, lithium, insulin or other heat-sensitive medications, recreational drugs, or alcohol use planned before or after sauna?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+        why: "Medications and substances can change hydration, electrolytes, blood pressure, alertness, sweating, thermoregulation, skin blood flow, and heat tolerance."
+      -
+        id: "clinical_heat_risk_conditions"
+        prompt: "Any diabetes, kidney disease, seizure disorder, asthma, COPD, chronic respiratory disease, heat intolerance, prior heat illness, skin condition that flares with heat or sweat, open wound, or active skin infection?"
+        ifPositive: "clinician_guidance_before_unsupervised_start"
+        why: "These groups were excluded from or mismatched with direct wellness-protocol evidence and may change heat tolerance."
+      -
+        id: "acute_illness_or_dehydration"
+        prompt: "Any fever, acute illness, recent heat exhaustion, dehydration, vomiting, diarrhea, or unusually hard training recovery right now?"
+        ifPositive: "do_not_start_unsupervised"
+        why: "These contexts raise heat-stress risk and make the experiment difficult to interpret."
     stopIf:
       inheritFromProtocolSafety: true
     notes:
-      - A positive or uncertain safety answer is not a diagnosis; it means Murph should not set this up as an unsupervised sauna run without clinician guidance, a lower-heat alternative, or postponement.
-      - Do not coach the user through concerning heat symptoms. Have them exit, cool down safely, and seek appropriate care if symptoms are severe or do not resolve.
+      - "A positive or uncertain safety answer is not a diagnosis; it means Murph should not set this up as an unsupervised run without clinician guidance, postponement, or a lower-risk alternative."
   adaptationPolicy:
     fields:
+
       -
-        id: modality
-        label: Sauna modality
+        id: "modality"
+        label: "Sauna modality"
         target:
-          object: protocol
-          field: effectiveSpec.modality
+          object: "protocol"
+          field: "effectiveSpec.modality"
         sourceSlotIds:
-          - sauna_access
-          - sauna_modality_match
+          - "sauna_access"
+          - "sauna_modality_match"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: Reuse a private protocol only when the available sauna is a traditional dry sauna rather than infrared, steam, or mixed hot-cold exposure.
+        guidance: "Reuse a private protocol only when the available sauna is a traditional dry sauna rather than infrared, steam, or mixed hot-cold exposure."
       -
-        id: frequency_sessions_per_week
-        label: Weekly frequency
+        id: "duration_minutes"
+        label: "Session duration"
         target:
-          object: protocol
-          field: effectiveSpec.frequency.sessionsPerWeek
-        sourceSlotIds:
-          - session_timing
+          object: "protocol"
+          field: "effectiveSpec.durationMinutes"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: The default is 3 sessions per week; private protocol adaptations should keep the weekly frequency explicit instead of hiding it in free-text notes.
+        guidance: "Keep the target session duration explicit, with early exits logged instead of treated as failure."
       -
-        id: duration_minutes
-        label: Session duration
+        id: "temperature_c"
+        label: "Temperature"
         target:
-          object: protocol
-          field: effectiveSpec.durationMinutes
+          object: "protocol"
+          field: "effectiveSpec.temperatureC"
+        sourceSlotIds:
+          - "sauna_modality_match"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: Keep the target session duration explicit, with the first session allowed to be conservative and early exits logged rather than treated as failure.
+        guidance: "Keep the dry-sauna temperature range explicit because lower heat, infrared, or steam changes the recipe."
       -
-        id: temperature_c
-        label: Temperature
+        id: "timing_context"
+        label: "Timing context"
         target:
-          object: protocol
-          field: effectiveSpec.temperatureC
+          object: "experimentRun"
+          field: "timingContext"
         sourceSlotIds:
-          - sauna_modality_match
+          - "session_timing"
+          - "standalone_context"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: Keep the dry-sauna temperature range explicit because lowering the heat, using infrared, or using steam changes the runnable recipe.
+        guidance: "Store planned time windows and whether sessions are stand-alone, post-exercise, or mixed."
       -
-        id: timing_context
-        label: Timing context
+        id: "measurement_plan"
+        label: "Measurement plan"
         target:
-          object: experimentRun
-          field: timingContext
+          object: "analysisPlan"
+          field: "measurementPlan"
         sourceSlotIds:
-          - session_timing
-          - standalone_context
+          - "blood_pressure_tracking"
         requiredForRunSpec: true
         protocolReusable: true
-        guidance: Store planned time windows and whether sessions are stand-alone, post-exercise, or mixed so later runs do not blur context.
-      -
-        id: adherence_targets
-        label: Adherence targets
-        target:
-          object: analysisPlan
-          field: adherenceTargets
-        sourceSlotIds:
-          - session_timing
-        requiredForRunSpec: true
-        protocolReusable: false
-        guidance: Preserve the 6-session target and 4-session minimum useful dose for the 14-day intervention window.
-      -
-        id: measurement_plan
-        label: Measurement plan
-        target:
-          object: analysisPlan
-          field: measurementPlan
-        sourceSlotIds:
-          - blood_pressure_tracking
-        requiredForRunSpec: true
-        protocolReusable: true
-        guidance: Resting heart rate remains the required primary signal; morning blood pressure and wearable recovery or sleep markers are optional context.
-      -
-        id: reusable_setup
-        label: Reusable setup
-        target:
-          object: protocol
-          field: setupSnapshot
-        sourceSlotIds:
-          - sauna_access
-          - sauna_modality_match
-          - session_timing
-          - standalone_context
-          - blood_pressure_tracking
-        requiredForRunSpec: true
-        protocolReusable: true
-        guidance: Save reusable access, modality, timing, context, and measurement choices on a private protocol, then snapshot the effective protocol when each experiment run starts.
+        guidance: "Resting heart rate remains the required primary signal; morning blood pressure and wearable recovery or sleep markers are optional context."
     measurementPlan:
-      testPlanId: rhr-21d
+      testPlanId: "rhr-21d"
       requiredSignals:
-        - biomarker:resting-heart-rate
+        - "biomarker:resting-heart-rate"
       optionalSignals:
-        - biomarker:morning-blood-pressure
-        - biomarker:hrv-rmssd
-        - biomarker:sleep-efficiency
-        - biomarker:deep-sleep-minutes
+        - "biomarker:morning-blood-pressure"
+        - "biomarker:hrv-rmssd"
+        - "biomarker:sleep-efficiency"
+        - "biomarker:deep-sleep-minutes"
       notes:
-        - Use the same baseline and intervention windows as the selected test plan.
-        - Treat blood pressure as optional unless the user already has a consistent home-cuff routine.
+        - "Use the same baseline and intervention windows as the selected test plan."
+        - "Treat blood pressure as optional unless the user already has a consistent home-cuff routine."
     reusableSetup:
       enabled: true
       target:
-        object: protocol
-        field: setupSnapshot
+        object: "protocol"
+        field: "setupSnapshot"
       sourceSlotIds:
-        - sauna_access
-        - sauna_modality_match
-        - session_timing
-        - standalone_context
-        - blood_pressure_tracking
+        - "sauna_access"
+        - "sauna_modality_match"
+        - "session_timing"
+        - "standalone_context"
+        - "blood_pressure_tracking"
       notes:
-        - Reuse the setup only when the dry-sauna modality, planned frequency, session context, and measurement plan still match the user's current situation.
+        - "Reuse the setup only when the dry-sauna modality, planned frequency, session context, and measurement plan still match the user’s current situation."
   setupSlots:
+
     -
-      id: sauna_access
-      label: Sauna access
-      purpose: logistics
-      valueType: enum
-      askPolicy: ask_if_unknown
+      id: "sauna_access"
+      label: "Sauna access"
+      purpose: "logistics"
+      valueType: "enum"
+      askPolicy: "ask_if_unknown"
       required: true
       question: "Do you have regular access to a traditional Finnish-style dry sauna for the next 2 weeks?"
       options:
-        - home_dry_sauna
-        - gym_or_spa_dry_sauna
-        - public_dry_sauna
-        - infrared_or_steam_only
-        - no_regular_access
+        - "home_dry_sauna"
+        - "gym_or_spa_dry_sauna"
+        - "public_dry_sauna"
+        - "infrared_or_steam_only"
+        - "no_regular_access"
       target:
-        object: experimentRun
-        field: saunaAccess
+        object: "experimentRun"
+        field: "saunaAccess"
     -
-      id: sauna_modality_match
-      label: Modality match
-      purpose: measurement_fidelity
-      valueType: boolean
-      askPolicy: ask_if_unknown
+      id: "sauna_modality_match"
+      label: "Modality match"
+      purpose: "measurement_fidelity"
+      valueType: "boolean"
+      askPolicy: "ask_if_unknown"
       required: true
       question: "Can you keep this to a dry sauna around 80-100 C rather than infrared, steam, cold plunge, or mixed hot-cold sessions?"
       target:
-        object: experimentRun
-        field: modalityMatch
+        object: "experimentRun"
+        field: "modalityMatch"
     -
-      id: usual_sauna_tolerance
-      label: Usual sauna tolerance
-      purpose: safety
-      valueType: enum
-      askPolicy: ask_if_unknown
+      id: "usual_sauna_tolerance"
+      label: "Usual sauna tolerance"
+      purpose: "safety"
+      valueType: "enum"
+      askPolicy: "ask_if_unknown"
       required: true
       question: "Have you used a sauna recently, and did it feel tolerable without dizziness, chest symptoms, or feeling unwell afterward?"
       options:
-        - recent_and_tolerated
-        - recent_but_not_well_tolerated
-        - not_recent
-        - unsure
+        - "recent_and_tolerated"
+        - "recent_but_not_well_tolerated"
+        - "not_recent"
+        - "unsure"
       target:
-        object: onboardingCapture
-        field: answers.usualSaunaTolerance
+        object: "onboardingCapture"
+        field: "answers.usualSaunaTolerance"
     -
-      id: session_timing
-      label: Session timing
-      purpose: logistics
-      valueType: weekly_time_windows
-      askPolicy: ask_if_unknown
+      id: "session_timing"
+      label: "Session timing"
+      purpose: "logistics"
+      valueType: "weekly_time_windows"
+      askPolicy: "ask_if_unknown"
       required: true
       question: "What 3 days or time windows could realistically work for sauna sessions?"
       constraints:
         sessionsPerWeek: 3
         avoidBackToBackWhenPossible: true
       target:
-        object: experimentRun
-        field: schedule
+        object: "experimentRun"
+        field: "schedule"
     -
-      id: standalone_context
-      label: Session context
-      purpose: context
-      valueType: enum
-      askPolicy: ask_if_unknown
+      id: "standalone_context"
+      label: "Session context"
+      purpose: "context"
+      valueType: "enum"
+      askPolicy: "ask_if_unknown"
       required: true
       question: "Should we treat these as stand-alone sauna sessions, post-exercise sessions, or a mix we need to label carefully?"
       options:
-        - mostly_standalone
-        - mostly_post_exercise
-        - mixed_contexts
+        - "mostly_standalone"
+        - "mostly_post_exercise"
+        - "mixed_contexts"
       target:
-        object: experimentRun
-        field: sessionContext
+        object: "experimentRun"
+        field: "sessionContext"
     -
-      id: blood_pressure_tracking
-      label: Morning blood pressure
-      purpose: measurement_fidelity
-      valueType: enum
-      askPolicy: ask_if_unknown_or_stale
+      id: "blood_pressure_tracking"
+      label: "Morning blood pressure"
+      purpose: "measurement_fidelity"
+      valueType: "enum"
+      askPolicy: "ask_if_unknown_or_stale"
       required: false
       question: "Do you already measure morning blood pressure with a home cuff, or should we keep blood pressure as optional context?"
       options:
-        - validated_home_cuff_available
-        - cuff_available_but_inconsistent
-        - no_home_cuff
+        - "validated_home_cuff_available"
+        - "cuff_available_but_inconsistent"
+        - "no_home_cuff"
       target:
-        object: analysisPlan
-        field: morningBloodPressureMode
+        object: "analysisPlan"
+        field: "morningBloodPressureMode"
     -
-      id: reminder_policy
-      label: Reminder policy
-      purpose: assistant_support
-      valueType: reminder_policy
-      askPolicy: ask_at_confirmation
+      id: "reminder_policy"
+      label: "Reminder policy"
+      purpose: "assistant_support"
+      valueType: "reminder_policy"
+      askPolicy: "ask_at_confirmation"
       required: true
       question: "Would you like a reminder before planned sauna sessions, and should I ask once later that day if nothing is logged?"
       options:
-        - none
-        - pre_session
-        - pre_session_plus_same_day_missing_log_check
+        - "none"
+        - "pre_session"
+        - "pre_session_plus_same_day_missing_log_check"
       target:
-        object: assistantSupport
-        field: reminderPolicy
+        object: "assistantSupport"
+        field: "reminderPolicy"
   planDefaults:
-    testPlanId: rhr-21d
+    testPlanId: "rhr-21d"
     baselineDays: 7
     interventionDays: 14
     sessionsPerWeek: 3
     targetSessions: 6
     minimumUsefulSessions: 4
-    firstSessionGuidance: Keep the first session conservative: aim for 15 minutes, exit early if heat discomfort becomes concerning, and do not add cold plunge or alcohol around the session.
+    firstSessionGuidance: "Treat the first session as a tolerance check: 5–10 minutes or less is acceptable, use lower heat or a lower bench where possible, exit at the first concerning symptom, and do not add cold plunge, alcohol, recreational drugs, or hard exercise around the session."
+    missedSessionGuidance: "Never make up a missed sauna by doubling duration, stacking sessions, or choosing hotter settings."
   logging:
     sessionFields:
-      - session_date
-      - session_start_time
-      - session_duration_minutes
-      - approximate_temperature_c
-      - standalone_or_postexercise
-      - exercise_type_and_load_if_applicable
-      - hydration_notes
-      - alcohol_last_24h
-      - illness_or_fever
-      - travel_or_timezone_shift
-      - hard_training_last_24h
-      - symptoms_during_or_after
+      - "session_date"
+      - "session_start_time"
+      - "session_duration_minutes"
+      - "first_session_tolerance_check_minutes"
+      - "approximate_temperature_c"
+      - "bench_level_or_position"
+      - "standalone_or_postexercise"
+      - "exercise_type_and_load_if_applicable"
+      - "humidity_or_loly_if_notable"
+      - "cool_down_method"
+      - "time_until_fully_steady_and_alert"
+      - "hydration_notes"
+      - "pre_post_body_mass_if_already_tracking_hydration"
+      - "alcohol_last_24h"
+      - "caffeine_stimulant_sedative_or_recreational_substance_context"
+      - "medication_dose_or_timing_change"
+      - "illness_or_fever"
+      - "travel_or_timezone_shift"
+      - "ambient_heat_or_other_heat_exposure"
+      - "hard_training_last_24h"
+      - "cold_shower_cold_plunge_cold_swim_or_contrast_exposure"
+      - "skin_irritation_rash_hives_burning_or_infection_context"
+      - "menstrual_pregnancy_or_fertility_context_if_relevant"
+      - "public_shared_sauna_hygiene_or_facility_issue"
+      - "symptoms_during_or_after"
     confounders:
-      - illness_or_fever
-      - alcohol_last_24h
-      - hard_training_last_24h
-      - travel_or_timezone_shift
-      - major_bedtime_change
-      - major_diet_change
-      - new_supplement_or_medication_change
-      - cold_plunge_or_other_new_heat_or_cold_intervention
+      - "illness_or_fever"
+      - "alcohol_last_24h"
+      - "caffeine_stimulant_sedative_or_recreational_substance_context"
+      - "hard_training_last_24h"
+      - "travel_or_timezone_shift"
+      - "ambient_heat_or_other_heat_exposure"
+      - "major_bedtime_change"
+      - "major_diet_change"
+      - "new_supplement_or_medication_change"
+      - "medication_dose_or_timing_change"
+      - "cold_shower_cold_plunge_cold_swim_or_contrast_exposure"
+      - "public_shared_sauna_hygiene_or_facility_issue"
     notes:
-      - Keep stand-alone and post-exercise sauna interpretation separate whenever workout context could explain the recovery story.
+      - "Keep stand-alone and post-exercise sauna interpretation separate whenever workout context could explain the recovery story."
+      - "Do not require pre/post body-mass logging unless the user already tracks hydration that way."
   assistantPolicy:
     maxSetupQuestionsPerTurn: 2
     askBeforeCreatingAutomations: true
-    missedLogFollowup: opt_in_only
+    missedLogFollowup: "opt_in_only"
     reminderOptions:
-      - none
-      - pre_session
-      - pre_session_plus_same_day_missing_log_check
+      - "none"
+      - "pre_session"
+      - "pre_session_plus_same_day_missing_log_check"
     weeklyDigestDefault: true
-    missedLogFollowupCopy: "Did you end up doing today's sauna session? Totally fine either way, I just want the experiment record to be accurate."
-    confirmationPrompt: "Before I start this, I'll show the exact sauna plan, schedule, logging expectations, and reminder policy so you can confirm it."
+    missedLogFollowupCopy: "Did you end up doing today’s sauna session? Totally fine either way, I just want the experiment record to be accurate."
+    confirmationPrompt: "Before I start this, I’ll show the exact sauna plan, schedule, logging expectations, stop conditions, and reminder policy so you can confirm it."
 whyItWorks:
-  - Finnish dry sauna is a controlled whole-body heat load. Hot, low-humidity air warms the skin and gradually raises core temperature, so the body opens skin blood vessels, sweats, and raises heart rate and cardiac output to keep blood pressure and cooling stable.
-  - The main theory is hormesis: a short, tolerable heat stress followed by recovery can train the thermoregulatory system. Repeated exposures may make sweating start earlier, expand plasma volume, lower cardiovascular strain at the same heat dose, and activate cellular stress-response pathways such as HSP-70.
-  - The vascular theory is that repeated heat-driven blood-flow shear helps endothelial function and arterial tone. That is why near-term resting heart rate and optional morning blood pressure are plausible signals, even though the long-term Finnish cohort outcomes are not something a 21-day test can directly prove.
-  - The sleep-and-recovery theory is about the rebound after heat: as you cool down, sympathetic drive may ease and parasympathetic activity may rise. If sauna helps a person sleep or recover, the early pattern is likely a calmer post-sauna downshift, lower resting heart rate, or steadier overnight autonomic signal rather than a guaranteed sleep-stage change.
+  - "A traditional dry sauna is a controlled whole-body heat stress. The body opens skin blood vessels, sweats, and raises heart rate to move heat out while trying to keep blood pressure and core temperature stable."
+  - "The working hypothesis is adaptation: a short, tolerable heat stress followed by recovery may improve heat tolerance for some people over repeated exposures. That does not prove a recovery benefit, and it does not mean harder or hotter is better."
+  - "The vascular hypothesis is that repeated heat-driven blood flow and cooling recovery may affect vascular tone in some contexts. That makes resting pulse and optional morning blood pressure reasonable signals to track, while disease outcomes and durable cardiometabolic effects remain outside this experiment."
+  - "The sleep-and-recovery theory is about the rebound after heat. Cooling down after a tolerable session may help some people settle; late, extreme, dehydrating, or poorly tolerated sessions can do the opposite."
 claims:
+
   -
-    claimId: research-base-is-broad-but-mixed
-    type: evidence_scope
-    text: Dry-sauna research is broad enough to support a simple self-test, but the studies vary by heat type, temperature, duration, session context, population, and outcome.
-    strength: moderate
+    claimId: "dry-sauna-evidence-broad-but-mixed"
+    type: "evidence_scope"
+    text: "Dry-sauna research is broad enough to justify a bounded self-test, but the evidence varies by modality, temperature, humidity, session context, population, and endpoint."
+    strength: "moderate"
     sourceKeys:
-      - source_artifact:sauna-bibliography-2026-04-18
-      - source_artifact:pmid-16871826
-      - source_artifact:pmid-29849692
-      - source_artifact:mayo-2018-sauna-review
-      - source_artifact:pmid-38577299
-      - source_artifact:pmid-34363927
-      - source_artifact:pmid-41049507
+      - "source_artifact:pmid-16871826"
+      - "source_artifact:pmid-29849692"
+      - "source_artifact:pmid-30077204"
+      - "source_artifact:pmid-34363927"
+      - "source_artifact:pmid-38577299"
     caveats:
-      - A large literature does not automatically mean that one exact wearable signal will move in every user.
-      - Study-design and modality caveats matter more than a single confidence score.
+      - "The exact Murph 3x/week, 21-day design is a practical protocol, not a named clinical trial."
+      - "Review-level evidence should not be converted into guaranteed personal outcomes."
   -
-    claimId: near-term-cardiovascular-markers-are-the-right-v1-target
-    type: intervention_result
-    text: Acute and short-term sauna papers support watching practical near-term cardiovascular signals over a few weeks, while keeping medical claims off the table.
-    strength: moderate
+    claimId: "near-term-cardiovascular-proxies-are-practical-targets"
+    type: "design_guardrail"
+    text: "Resting heart rate and optional morning blood pressure are practical short-horizon signals to track, not promised outcomes; HRV, sleep-stage, immune, vascular, and lab markers remain exploratory or adjacent."
+    strength: "moderate"
     sourceKeys:
-      - source_artifact:pmid-32814462
-      - source_artifact:pmid-29269746
-      - source_artifact:pmid-31126559
-      - source_artifact:pmid-31331560
-      - source_artifact:pmid-31293098
-      - source_artifact:pmid-32615263
-      - source_artifact:pmid-41049507
+      - "source_artifact:doi-10.1080-23328940.2026.2645467"
+      - "source_artifact:pmid-23859414"
+      - "source_artifact:pmid-24511348"
+      - "source_artifact:pmid-2830109"
+      - "source_artifact:pmid-29450979"
+      - "source_artifact:pmid-30827125"
+      - "source_artifact:pmid-31102877"
+      - "source_artifact:pmid-3218894"
+      - "source_artifact:pmid-3218896"
+      - "source_artifact:pmid-3218898"
+      - "source_artifact:pmid-33513711"
+      - "source_artifact:pmid-33710173"
+      - "source_artifact:pmid-33866630"
+      - "source_artifact:pmid-34269334"
+      - "source_artifact:pmid-34770018"
+      - "source_artifact:pmid-36343372"
+      - "source_artifact:pmid-39657954"
+      - "source_artifact:pmid-41049507"
+      - "source_artifact:pmid-41166412"
     caveats:
-      - Wearable resting heart rate is a proxy marker, not a clinical cardiovascular assessment.
-      - Blood-pressure interpretation requires consistent home measurement technique rather than opportunistic readings.
+      - "Acute heart-rate and blood-pressure changes do not prove lower resting heart rate or durable blood-pressure improvement."
+      - "Morning blood-pressure interpretation requires a consistent home-cuff routine."
+      - "HRV and sleep-stage markers are noisy and heavily confounded."
+      - "RCT-only passive-heating synthesis preserved mostly null cardiometabolic, resting-heart-rate, and HRV findings; warm-bath sleep evidence is adjacent, not dry-sauna sleep proof."
   -
-    claimId: repeated-exposure-matters-more-than-a-single-session
-    type: intervention_result
-    text: Repeated sauna exposure over weeks is more informative than a single session because several physiology and training-adaptation papers suggest responses can build across repeated exposures.
-    strength: moderate
+    claimId: "repeated-heat-is-plausible-but-not-guaranteed"
+    type: "mechanistic"
+    text: "Repeated tolerable heat exposure is biologically plausible as a thermoregulatory and vascular stressor, but the best personal read is still adherence, tolerability, and baseline-versus-intervention signals."
+    strength: "moderate"
     sourceKeys:
-      - source_artifact:pmid-36813265
-      - source_artifact:pmid-25432420
-      - source_artifact:pmid-41032138
-      - source_artifact:pmid-41831305
+      - "source_artifact:pmid-16871826"
+      - "source_artifact:pmid-25943654"
+      - "source_artifact:pmid-30618849"
+      - "source_artifact:pmid-41166412"
     caveats:
-      - The evidence includes both standalone sauna and post-exercise sauna designs.
-      - A repeated-exposure rationale does not determine the exact best dose for every user.
+      - "Adjacent heat-acclimation and passive-heating literature includes non-sauna modalities and athlete or clinical populations."
+      - "A plausible mechanism does not define an optimal dose for every user."
   -
-    claimId: standalone-and-postexercise-variants-should-be-separated
-    type: design_guardrail
-    text: A standalone dry-sauna session and a post-exercise sauna session should be read separately because workout context can change physiology, hydration, and recovery.
-    strength: high
+    claimId: "standalone-and-postexercise-contexts-should-be-separated"
+    type: "design_guardrail"
+    text: "Stand-alone sauna and post-exercise sauna should be logged and interpreted separately because exercise, dehydration, and recovery context can change the signal."
+    strength: "high"
     sourceKeys:
-      - source_artifact:pmid-34622026
-      - source_artifact:pmid-35785965
-      - source_artifact:pmid-41032138
-      - source_artifact:pmid-31490429
-      - source_artifact:pmid-24304490
+      - "source_artifact:pmid-28035584"
+      - "source_artifact:pmid-34727008"
+      - "source_artifact:pmid-39762944"
+      - "source_artifact:pmid-41032138"
     caveats:
-      - The same person may benefit from both patterns, but they are not the same experiment.
+      - "Post-exercise heat may be useful for some goals, but it is not the same experiment as a stand-alone dry-sauna test."
   -
-    claimId: hydration-and-session-context-matter
-    type: design_guardrail
-    text: Hydration status, recent exercise load, and session context can materially change sauna responses, so they are worth logging before interpreting the result.
-    strength: moderate
+    claimId: "long-term-observational-context-is-not-a-21-day-endpoint"
+    type: "association_not_causation"
+    text: "Long-term observational and real-world findings are background context, not outcomes a short personal experiment can prove."
+    strength: "high"
     sourceKeys:
-      - source_artifact:pmid-34727008
-      - source_artifact:pmid-31490429
-      - source_artifact:pmid-31126559
-      - source_artifact:pmid-3218897
-      - source_artifact:pmid-30800676
+      - "source_artifact:pmid-31590079"
+      - "source_artifact:pmid-37029766"
+      - "source_artifact:pmid-37270272"
     caveats:
-      - A user can still run the protocol without perfect control, but the interpretation should become more cautious.
+      - "Observational evidence cannot prove an individual causal benefit."
+      - "The available extraction set did not recover every major Finnish cohort source, so long-term disease framing should remain conservative."
   -
-    claimId: long-term-cohort-findings-are-context-not-endpoints
-    type: association_not_causation
-    text: Long-term Finnish cohort findings on mortality, hypertension, dementia, pneumonia, stroke, kidney outcomes, and other disease signals are background context, not outcomes a 21-day personal experiment can test.
-    strength: high
+    claimId: "modality-boundaries-matter"
+    type: "design_guardrail"
+    text: "Finnish dry sauna, steam or wet heat, infrared sauna, Waon therapy, hot-water immersion, cold plunges, and contrast routines should not be merged into one protocol claim."
+    strength: "high"
     sourceKeys:
-      - source_artifact:pmid-25705824
-      - source_artifact:pmid-28633297
-      - source_artifact:pmid-27932366
-      - source_artifact:pmid-29229091
-      - source_artifact:pmid-28905164
-      - source_artifact:pmid-29720543
-      - source_artifact:pmid-35908583
-      - source_artifact:pmid-36255556
-      - source_artifact:pmid-37029766
-      - source_artifact:pmid-38410962
-      - source_artifact:pmid-38836690
+      - "source_artifact:acog-sauna-hot-tub-pregnancy-2026-04-27"
+      - "source_artifact:cdc-heat-medications-2025-09-18"
+      - "source_artifact:cdc-heat-pregnancy-2025-09-18"
+      - "source_artifact:doi-10.16926-par.2023.11.07"
+      - "source_artifact:fimea-opioid-patch-sauna-warning-2024-11-26"
+      - "source_artifact:pmid-11165553"
+      - "source_artifact:pmid-15703536"
+      - "source_artifact:pmid-1640616"
+      - "source_artifact:pmid-38577299"
+      - "source_artifact:saunasociety-build-sauna-temperature-2026-04-27"
+      - "source_artifact:saunasociety-faqs-2026-04-27"
+      - "source_artifact:saunasociety-sauna-experience-2026-04-27"
     caveats:
-      - Observational cohort evidence cannot prove an individual causal benefit.
-      - These findings should not become guaranteed result language.
+      - "Adjacent modalities can inform mechanisms or safety but should stay labeled as adjacent evidence."
   -
-    claimId: null-evidence-belongs-on-the-page
-    type: mixed_evidence
-    text: Null and mixed intervention findings belong alongside positive findings, so users do not get the impression that every vascular, inflammatory, gut, or HRV marker reliably improves.
-    strength: high
+    claimId: "safety-screening-should-lead-the-experiment"
+    type: "safety"
+    text: "Unsupervised sauna setup should screen for heat intolerance, pregnancy, cardiovascular symptoms, recent fainting or dehydration, medication risks, opioid patches, fertility goals, alcohol, fever, and severe symptoms before emphasizing possible benefits."
+    strength: "high"
     sourceKeys:
-      - source_artifact:pmid-35710395
-      - source_artifact:pmid-37650138
-      - source_artifact:pmid-40611569
-      - source_artifact:pmid-41049507
-      - source_artifact:pmid-31293098
+      - "source_artifact:acog-sauna-hot-tub-pregnancy-2026-04-27"
+      - "source_artifact:alberta-health-pool-standards-sauna-2017-11-03"
+      - "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
+      - "source_artifact:cdc-heat-medications-2025-09-18"
+      - "source_artifact:cdc-heat-pregnancy-2025-09-18"
+      - "source_artifact:doi-10.16926-par.2023.11.07"
+      - "source_artifact:fimea-opioid-patch-sauna-warning-2024-11-26"
+      - "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16"
+      - "source_artifact:ncceh-sauna-safety-2026-01-16"
+      - "source_artifact:pmid-1017928"
+      - "source_artifact:pmid-11165553"
+      - "source_artifact:pmid-1267582"
+      - "source_artifact:pmid-15703536"
+      - "source_artifact:pmid-1640616"
+      - "source_artifact:pmid-16871826"
+      - "source_artifact:dry-sauna-pmid-17473783"
+      - "source_artifact:pmid-18525205"
+      - "source_artifact:dry-sauna-pmid-19602651"
+      - "source_artifact:pmid-23411620"
+      - "source_artifact:pmid-23833705"
+      - "source_artifact:pmid-25614882"
+      - "source_artifact:pmid-25943653"
+      - "source_artifact:pmid-27270841"
+      - "source_artifact:pmid-29351426"
+      - "source_artifact:pmid-29409954"
+      - "source_artifact:pmid-29496695"
+      - "source_artifact:pmid-31102597"
+      - "source_artifact:pmid-3218897"
+      - "source_artifact:pmid-3218900"
+      - "source_artifact:pmid-3218901"
+      - "source_artifact:dry-sauna-pmid-32217980"
+      - "source_artifact:pmid-32740103"
+      - "source_artifact:pmid-33586133"
+      - "source_artifact:pmid-3788622"
+      - "source_artifact:pmid-38344040"
+      - "source_artifact:pmid-39513185"
+      - "source_artifact:pmid-40134984"
+      - "source_artifact:pmid-41426898"
+      - "source_artifact:pmid-6476971"
+      - "source_artifact:pmid-6501022"
+      - "source_artifact:pmid-7260810"
+      - "source_artifact:pmid-7589027"
+      - "source_artifact:pmid-7957149"
+      - "source_artifact:pmid-9010709"
+      - "source_artifact:pmid-9100952"
+      - "source_artifact:pmid-9571303"
+      - "source_artifact:pmid-9972494"
+      - "source_artifact:who-safe-recreational-water-environments-2006-01-02"
+      - "source_artifact:x-bryan-johnson-fired-review-2026-04-06"
     caveats:
-      - A null result in one signal does not mean the protocol is useless for every user.
-      - Disease populations, athletes, and general-wellness users should not be blended into one expected result.
+      - "General tolerability language does not clear unstable cardiovascular disease, pregnancy, high-risk medications, severe heat symptoms, or extreme-heat sessions."
+      - "Fertility-related evidence is limited but important enough to disclose."
   -
-    claimId: dry-sauna-is-not-infrared
-    type: design_guardrail
-    text: Finnish dry sauna, infrared sauna, and other passive-heat approaches should stay separate because heat source, temperature profile, humidity, and evidence base can change dose and interpretation.
-    strength: high
+    claimId: "temperature_duration_not_a_target"
+    type: "safety"
+    text: "Traditional dry sauna may occur around 80–90 °C, but this protocol should frame 100 °C and 20 minutes as upper bounds, not goals; first-session early exit is valid."
+    strength: "high"
     sourceKeys:
-      - source_artifact:pmid-38577299
-      - source_artifact:doi-10.1152-ajpregu.00012.2025
-      - source_artifact:mayo-2018-sauna-review
-      - source_artifact:pmid-24899780
-      - source_artifact:pmid-3218892
+      - "source_artifact:pmid-16871826"
+      - "source_artifact:infofinland-finnish-sauna-2025-04-11"
+      - "source_artifact:pmid-1017928"
+      - "source_artifact:pmid-1267582"
+      - "source_artifact:pmid-38344040"
+      - "source_artifact:saunologia-finnish-sauna-instructions-2018-01-10"
     caveats:
-      - Related heat modalities can inform each other, but their claims should not be silently merged.
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
   -
-    claimId: hrv-is-exploratory-not-promised
-    type: mixed_evidence
-    text: HRV is best treated as exploratory here because the literature contains both promising autonomic signals and a modern randomized null result.
-    strength: moderate
+    claimId: "acute_stop_rules"
+    type: "safety"
+    text: "Chest pain, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, severe headache, vomiting, weakness, skin symptoms, panic, or feeling unsafe require immediate exit and may require care."
+    strength: "high"
     sourceKeys:
-      - source_artifact:pmid-31331560
-      - source_artifact:pmid-25432420
-      - source_artifact:pmid-40611569
+      - "source_artifact:pmid-1017928"
+      - "source_artifact:pmid-38344040"
+      - "source_artifact:ncceh-sauna-safety-2026-01-16"
+      - "source_artifact:infofinland-finnish-sauna-2025-04-11"
     caveats:
-      - HRV is noisy and highly confounded by sleep, illness, alcohol, psychological stress, and training load.
-      - A null HRV signal does not automatically mean the protocol was not personally useful.
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "opioid_patch_hard_stop"
+    type: "safety"
+    text: "Transdermal opioid patches and sauna/external heat require a hard-stop or explicit clinician-clearance boundary."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:fimea-opioid-patch-sauna-warning-2024-11-26"
+      - "source_artifact:pmid-32740103"
+      - "source_artifact:pmid-9571303"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "pregnancy_possible_pregnancy_boundary"
+    type: "safety"
+    text: "Pregnancy, possible pregnancy, trying to conceive, and early postpartum status require clinician-guided routing rather than an ordinary unsupervised wellness run."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:acog-sauna-hot-tub-pregnancy-2026-04-27"
+      - "source_artifact:cdc-heat-pregnancy-2025-09-18"
+      - "source_artifact:pmid-15703536"
+      - "source_artifact:pmid-1640616"
+      - "source_artifact:pmid-29496695"
+      - "source_artifact:dry-sauna-pmid-32217980"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "medications_heat_interaction"
+    type: "safety"
+    text: "Medication classes that affect hydration, electrolytes, blood pressure, alertness, sweating, thermoregulation, skin blood flow, or heat tolerance require clinician or pharmacist review; users should not self-adjust medications for sauna."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:cdc-heat-medications-2025-09-18"
+      - "source_artifact:pmid-39513185"
+      - "source_artifact:pmid-7589027"
+      - "source_artifact:pmid-7957149"
+      - "source_artifact:pmid-9010709"
+      - "source_artifact:pmid-9571303"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "hydration_fluid_loss_boundary"
+    type: "safety"
+    text: "Fever, vomiting, diarrhea, dehydration, recent heat illness, and heavy training recovery are postponement contexts; hydration should be logged without encouraging forced overhydration."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:pmid-3218894"
+      - "source_artifact:pmid-3218897"
+      - "source_artifact:pmid-25614882"
+      - "source_artifact:pmid-34727008"
+      - "source_artifact:saunologia-finnish-sauna-instructions-2018-01-10"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "fertility_boundary"
+    type: "safety"
+    text: "Active fertility or sperm-marker goals require a caution boundary because sauna heat has limited, mixed, and population-specific reproductive evidence."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:pmid-23411620"
+      - "source_artifact:pmid-9972494"
+      - "source_artifact:pmid-6476971"
+      - "source_artifact:pmid-29849692"
+      - "source_artifact:pmid-18076419"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "skin_shared_sauna_boundary"
+    type: "safety"
+    text: "Heat-triggered skin symptoms, open wounds, active infection, and shared-sauna hygiene concerns require screening, logging, and possible postponement."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:pmid-3218900"
+      - "source_artifact:pmid-18525205"
+      - "source_artifact:ncceh-sauna-safety-2026-01-16"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "cold_plunge_separate_exposure"
+    type: "safety"
+    text: "Cold plunge, cold swimming, ice bath, and contrast therapy should remain separate exposures and confounders, not part of this dry-sauna protocol."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:saunologia-finnish-sauna-instructions-2018-01-10"
+      - "source_artifact:sauna-fi-health-effects-2026-04-27"
+      - "source_artifact:pmid-9100952"
+      - "source_artifact:doi-10.16926-par.2023.11.07"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "clinical_variant_boundary"
+    type: "safety"
+    text: "Cardiovascular disease, PAD, heart failure, COPD/asthma/chronic respiratory disease, diabetes, kidney disease, seizure disorder, minors, frail users, and medication-managed users require separate clinician-guided variants because direct evidence is mismatched, supervised, observational, or adjacent."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:pmid-23859414"
+      - "source_artifact:pmid-16871826"
+      - "source_artifact:pmid-18522783"
+      - "source_artifact:pmid-29409954"
+      - "source_artifact:pmid-33587690"
+      - "source_artifact:pmid-39819110"
+      - "source_artifact:pmid-34808071"
+      - "source_artifact:pmid-40134984"
+      - "source_artifact:pmid-41426898"
+      - "source_artifact:pmid-37029766"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "alcohol_recreational_substance_boundary"
+    type: "safety"
+    text: "Alcohol and recreational substances should be treated as postponement or clinician-guidance contexts, not merely as interpretation confounders."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:doi-10.3390-ijerph23030347"
+      - "source_artifact:pmid-11165553"
+      - "source_artifact:ncceh-sauna-safety-2026-01-16"
+      - "source_artifact:cdc-heat-medications-2025-09-18"
+    caveats:
+      - "Safety boundaries are routing rules for an unsupervised wellness experiment, not individualized medical advice."
+  -
+    claimId: "external-named-routines-stay-external"
+    type: "design_guardrail"
+    text: "Huberman and Bryan Johnson or Blueprint routines should remain external-protocol context; their daily-dose, toxin, microplastic, fertility, vascular, core-temperature, and heat-shock-protein claims should not become Murph outcome promises."
+    strength: "high"
+    sourceKeys:
+      - "source_artifact:bryan-johnson-morning-routine-2026-04-08"
+      - "source_artifact:bryan-johnson-podcast-sauna-2025-06-26"
+      - "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
+      - "source_artifact:hubermanlab-deliberate-heat-exposure-2022-06-01"
+      - "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16"
+      - "source_artifact:protocol-bryanjohnson-sauna-2026-04-27"
+      - "source_artifact:x-bryan-johnson-fired-review-2026-04-06"
+    caveats:
+      - "External web, podcast, social, and N-of-1 sources are not controlled efficacy evidence."
+      - "Core-temperature threshold claims should not be converted into stop-rule-breaking encouragement."
 researchLandscape:
-  bottomLine: "Best read as a bounded dry-sauna self-experiment for near-term recovery and cardiovascular proxies, not as proof of long-term disease prevention or a guarantee that HRV, vascular, gut, or inflammatory markers will improve."
+  bottomLine: "Best read as a bounded dry-sauna self-experiment for tolerability, recovery context, and short-horizon cardiovascular proxies, not as proof of long-term disease prevention or a guarantee that HRV, vascular, immune, toxin, fertility, or sleep-stage markers will improve."
   confidenceLabel: "mixed"
-  primaryClaim: "The most practical support is for testing resting heart rate, optional morning blood pressure, recovery context, and session tolerance across repeated dry-sauna sessions."
-  mainCaveat: "The strongest long-term findings are observational, several modern intervention endpoints are null or mixed, and post-exercise, cold-immersion, clinical, extreme-heat, infrared, and steam-sauna contexts must stay separate."
+  primaryClaim: "The practical support is strongest for tracking resting heart rate, optional morning blood pressure, session tolerance, symptoms, and context over repeated dry-sauna sessions, not for expecting a uniform improvement."
+  mainCaveat: "The extracted evidence is heterogeneous, several adjacent intervention endpoints are mixed or null, major cohort findings are context only, and external high-heat routines should stay separate from the Murph canonical protocol."
   groups:
+
     -
       id: "evidence-backbone-and-claim-calibration"
       label: "Evidence backbone and claim calibration"
       stance: "mixed"
-      summary: "The strongest sauna page should lead with scope, not certainty: reviews and meta-analyses support a broad passive-heat rationale, but they also show heterogeneous protocols, mixed cardiometabolic effects, and many clinical caveats. Use these sources to frame what is plausible and what not to promise."
+      summary: "Reviews support a cautious dry-sauna rationale while keeping heterogeneity, study quality, and modality differences visible."
       sourceKeys:
-        - "source_artifact:doi-10-1016-j-aimed-2024-09-009"
-        - "source_artifact:doi-10-3389-fcvm-2025-1537194"
-        - "source_artifact:mayo-2018-sauna-review"
-        - "source_artifact:pmid-11165553"
-        - "source_artifact:pmid-16871826"
-        - "source_artifact:pmid-29351426"
         - "source_artifact:pmid-29849692"
-        - "source_artifact:pmid-31102597"
-        - "source_artifact:pmid-33513711"
+        - "source_artifact:pmid-30077204"
         - "source_artifact:pmid-34363927"
-        - "source_artifact:pmid-37270272"
         - "source_artifact:pmid-38577299"
-        - "source_artifact:pmid-40202605"
-        - "source_artifact:pmid-41049507"
-        - "source_artifact:pmid-41426898"
-        - "source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article"
-        - "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases"
-        - "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system"
-        - "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna"
-        - "source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna"
-        - "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio"
+        - "source_artifact:doi-10.3390-ijerph23030347"
+      defaultOpen: true
+    -
+      id: "dry_sauna_acute_thermoregulation"
+      label: "Direct Finnish-sauna thermoregulation"
+      stance: "context_only"
+      summary: "Classic thermoregulation evidence explains acute heat strain, sweating, and temperature changes that make short-term tolerance and recovery signals plausible."
+      sourceKeys:
+        - "source_artifact:pmid-3218894"
+      defaultOpen: false
     -
       id: "near-term-autonomic-vascular-and-immune-signals"
-      label: "Near-term physiology and wearable signals"
+      label: "Near-term physiology and measurable signals"
       stance: "mixed"
-      summary: "Acute Finnish-sauna papers make resting heart rate, blood pressure, HRV, and recovery context plausible short-horizon signals. The same group includes null or endpoint-specific findings, so these signals should be read as personal response markers rather than guaranteed improvements."
+      summary: "Acute physiology, autonomic, blood-pressure-measurement, immune, and clinical-adjacent evidence makes resting pulse and optional morning blood pressure reasonable signals, but HRV and immune markers stay exploratory."
       sourceKeys:
         - "source_artifact:doi-10.1080-23328940.2026.2645467"
-        - "source_artifact:pmid-24304490"
-        - "source_artifact:pmid-26152773"
-        - "source_artifact:pmid-29269746"
-        - "source_artifact:pmid-31126559"
-        - "source_artifact:pmid-31293098"
-        - "source_artifact:pmid-31331560"
-        - "source_artifact:pmid-3174262"
-        - "source_artifact:pmid-31950931"
-        - "source_artifact:pmid-3218894"
-        - "source_artifact:pmid-32615263"
-        - "source_artifact:pmid-32951736"
-        - "source_artifact:pmid-34622026"
-        - "source_artifact:pmid-36813265"
-        - "source_artifact:pmid-3766176"
-        - "source_artifact:pmid-3788622"
-        - "source_artifact:pmid-38011189"
-        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2"
-        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3"
-        - "source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a"
-    -
-      id: "long-term-finnish-cohort-and-real-world-context"
-      label: "Long-term Finnish cohort and real-world context"
-      stance: "context_only"
-      summary: "KIHD and related population papers explain why sauna is interesting for cardiovascular and healthspan framing. They are observational and often long-horizon, so they belong in rationale, screening, and baseline-context language rather than the result promise for a 21-day experiment."
-      sourceKeys:
-        - "source_artifact:pmid-25705824"
-        - "source_artifact:pmid-27932366"
-        - "source_artifact:pmid-28633297"
-        - "source_artifact:pmid-28905164"
-        - "source_artifact:pmid-28972808"
-        - "source_artifact:pmid-29229091"
-        - "source_artifact:pmid-29720543"
-        - "source_artifact:pmid-29897261"
-        - "source_artifact:pmid-30173212"
-        - "source_artifact:pmid-30486813"
-        - "source_artifact:pmid-31372865"
-        - "source_artifact:pmid-35908583"
-        - "source_artifact:pmid-36255556"
-        - "source_artifact:pmid-37029766"
-        - "source_artifact:pmid-38410962"
-        - "source_artifact:pmid-38836690"
-        - "source_artifact:pmid-39446139"
-        - "source_artifact:pmid-41340471"
-        - "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children"
+        - "source_artifact:pmid-23859414"
+        - "source_artifact:pmid-24511348"
+        - "source_artifact:pmid-2830109"
+        - "source_artifact:pmid-29450979"
+        - "source_artifact:pmid-30827125"
+        - "source_artifact:pmid-3218896"
+        - "source_artifact:pmid-3218898"
+        - "source_artifact:pmid-33513711"
+        - "source_artifact:pmid-33710173"
+        - "source_artifact:pmid-34269334"
+        - "source_artifact:pmid-34770018"
+        - "source_artifact:pmid-36343372"
+        - "source_artifact:pmid-39657954"
+        - "source_artifact:pmid-31102877"
+        - "source_artifact:pmid-33792402"
+        - "source_artifact:pmid-33866630"
+        - "source_artifact:pmid-41049507"
+        - "source_artifact:pmid-41166412"
+      defaultOpen: false
     -
       id: "intervention-design-training-and-mixed-results"
-      label: "Intervention design, training, and mixed results"
+      label: "Intervention design and mixed results"
       stance: "mixed"
-      summary: "Intervention papers show that repeated sauna, post-exercise sauna, and clinical protocols can affect selected outcomes, but they also include modern null results for HRV, vascular markers, gut markers, and other endpoints. These studies shape dose, timing, and expectation setting more than they prove one universal benefit."
+      summary: "Intervention and adjacent passive-heat studies show selected positive signals alongside null or mixed endpoints, so the protocol should be treated as a personal signal test rather than a guaranteed response."
       sourceKeys:
         - "source_artifact:doi-10.3390-app151910762"
-        - "source_artifact:pmid-19154844"
-        - "source_artifact:pmid-25432420"
-        - "source_artifact:pmid-31490429"
-        - "source_artifact:pmid-31869820"
-        - "source_artifact:pmid-33211153"
-        - "source_artifact:pmid-34199101"
-        - "source_artifact:pmid-34297227"
-        - "source_artifact:pmid-35710395"
-        - "source_artifact:pmid-35785965"
-        - "source_artifact:pmid-37650138"
-        - "source_artifact:pmid-40611569"
-        - "source_artifact:pmid-41831305"
-        - "source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds"
-        - "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients"
-        - "source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys"
-        - "source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type"
+        - "source_artifact:pmid-31177835"
+        - "source_artifact:pmid-32814462"
+        - "source_artifact:pmid-34727008"
+        - "source_artifact:pmid-18522783"
+        - "source_artifact:pmid-25943654"
+        - "source_artifact:pmid-28035584"
+        - "source_artifact:pmid-30618849"
+        - "source_artifact:pmid-32166103"
+        - "source_artifact:pmid-33587690"
+        - "source_artifact:pmid-34808071"
+        - "source_artifact:pmid-39819110"
+        - "source_artifact:pmid-41603269"
+      defaultOpen: false
+    -
+      id: "post_exercise_heat_performance"
+      label: "Post-exercise heat boundary"
+      stance: "mixed"
+      summary: "Post-exercise heat evidence belongs near the protocol as context, but workout-coupled heat should be logged and interpreted separately from stand-alone sauna."
+      sourceKeys:
+        - "source_artifact:pmid-39762944"
+        - "source_artifact:pmid-41032138"
+      defaultOpen: false
+    -
+      id: "cultural-practice-and-protocol-context"
+      label: "Finnish-sauna practice context"
+      stance: "context_only"
+      summary: "Public Finnish-sauna practice sources help define ordinary session behavior, beginner caution, and operational expectations without becoming efficacy evidence."
+      sourceKeys:
+        - "source_artifact:infofinland-finnish-sauna-2025-04-11"
+        - "source_artifact:sauna-fi-guidelines-bathing-2026-04-27"
+        - "source_artifact:saunologia-finnish-sauna-instructions-2018-01-10"
+        - "source_artifact:sauna-fi-health-effects-2026-04-27"
+      defaultOpen: false
+    -
+      id: "traditional-sauna-design-and-operation"
+      label: "Traditional-sauna design and operation"
+      stance: "safety_boundary"
+      summary: "Sauna-design and FAQ sources help define heat, humidity, water-on-rocks nuance, and operating boundaries for the dry-sauna family."
+      sourceKeys:
+        - "source_artifact:saunasociety-build-sauna-temperature-2026-04-27"
+        - "source_artifact:saunasociety-faqs-2026-04-27"
+      defaultOpen: false
+    -
+      id: "sauna-modality-definition-context"
+      label: "Dry-sauna modality definition"
+      stance: "context_only"
+      summary: "Modality guidance distinguishes traditional Finnish sauna, very-low-humidity dry sauna, and humidity control so the protocol does not silently merge steam, infrared, and contrast routines."
+      sourceKeys:
+        - "source_artifact:saunasociety-sauna-experience-2026-04-27"
+      defaultOpen: false
+    -
+      id: "long-term-finnish-cohort-and-real-world-context"
+      label: "Long-term context, not short-test endpoints"
+      stance: "context_only"
+      summary: "Extracted long-term and lifestyle-context sources belong in rationale and overclaim guardrails rather than in the expected results of a short personal experiment."
+      sourceKeys:
+        - "source_artifact:pmid-37029766"
+        - "source_artifact:pmid-37270272"
+        - "source_artifact:pmid-31590079"
+      defaultOpen: false
     -
       id: "safety-dose-modality-and-context-boundaries"
-      label: "Safety, dose, and modality boundaries"
+      label: "Safety, dose, and population boundaries"
       stance: "safety_boundary"
-      summary: "Classic and modern physiology sources show why hydration, alcohol, medications, cold immersion, extreme heat, pregnancy/children, and dry-vs-steam modality need guardrails. They keep the default protocol conservative and stop high-heat or mixed-modality variants from being silently merged into ordinary Finnish dry sauna."
+      summary: "Safety sources cover cardiovascular tolerance, extreme heat, fluid loss, pregnancy, fertility, medications, opioid patches, and adjacent modalities; safety language should remain stronger than efficacy language."
       sourceKeys:
-        - "source_artifact:pmid-19154844"
-        - "source_artifact:pmid-24899780"
-        - "source_artifact:pmid-26152773"
-        - "source_artifact:pmid-30800676"
-        - "source_artifact:pmid-3218892"
+        - "source_artifact:acog-sauna-hot-tub-pregnancy-2026-04-27"
+        - "source_artifact:cdc-heat-medications-2025-09-18"
+        - "source_artifact:cdc-heat-pregnancy-2025-09-18"
+        - "source_artifact:doi-10.16926-par.2023.11.07"
+        - "source_artifact:fimea-opioid-patch-sauna-warning-2024-11-26"
+        - "source_artifact:pmid-11165553"
+        - "source_artifact:pmid-15703536"
+        - "source_artifact:pmid-1640616"
+        - "source_artifact:dry-sauna-pmid-17473783"
+        - "source_artifact:pmid-18525205"
+        - "source_artifact:dry-sauna-pmid-19602651"
+        - "source_artifact:pmid-23411620"
+        - "source_artifact:pmid-23833705"
+        - "source_artifact:pmid-25614882"
+        - "source_artifact:pmid-27270841"
+        - "source_artifact:pmid-29351426"
+        - "source_artifact:pmid-29409954"
+        - "source_artifact:pmid-29496695"
+        - "source_artifact:pmid-31102597"
         - "source_artifact:pmid-3218897"
-        - "source_artifact:pmid-34727008"
-        - "source_artifact:pmid-36078656"
+        - "source_artifact:pmid-3218900"
+        - "source_artifact:pmid-3218901"
+        - "source_artifact:dry-sauna-pmid-32217980"
+        - "source_artifact:pmid-32740103"
+        - "source_artifact:pmid-33586133"
         - "source_artifact:pmid-3788622"
+        - "source_artifact:pmid-39513185"
+        - "source_artifact:pmid-40134984"
+        - "source_artifact:pmid-41426898"
+        - "source_artifact:pmid-6476971"
+        - "source_artifact:pmid-6501022"
+        - "source_artifact:pmid-7260810"
+        - "source_artifact:pmid-7589027"
+        - "source_artifact:pmid-7957149"
+        - "source_artifact:pmid-9010709"
+        - "source_artifact:pmid-9571303"
+        - "source_artifact:pmid-9972494"
+        - "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
+        - "source_artifact:pmid-1017928"
+        - "source_artifact:pmid-1267582"
+        - "source_artifact:pmid-16871826"
+        - "source_artifact:pmid-18076419"
+        - "source_artifact:pmid-25943653"
         - "source_artifact:pmid-38344040"
-        - "source_artifact:pmid-41461792"
-        - "source_artifact:pmid-445022"
-        - "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases"
-        - "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system"
-        - "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna"
-        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons"
-        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2"
-        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3"
-        - "source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm"
-        - "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children"
-        - "source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment"
-        - "source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities"
-        - "source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood"
-        - "source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c"
-        - "source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac"
-        - "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio"
-        - "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients"
+        - "source_artifact:pmid-9100952"
+      defaultOpen: true
+    -
+      id: "operational-public-sauna-safety"
+      label: "Public-sauna operational safety"
+      stance: "safety_boundary"
+      summary: "Facility and public-health guidance supports practical environmental controls and reinforces that public saunas require explicit safety and monitoring boundaries."
+      sourceKeys:
+        - "source_artifact:alberta-health-pool-standards-sauna-2017-11-03"
+        - "source_artifact:ncceh-sauna-safety-2026-01-16"
+        - "source_artifact:who-safe-recreational-water-environments-2006-01-02"
+      defaultOpen: false
+    -
+      id: "external-protocol-claims"
+      label: "External protocol claims"
+      stance: "context_only"
+      summary: "Named public routines from Huberman and Blueprint are separate external protocol claims, not ownership or proof of the Murph canonical protocol."
+      sourceKeys:
+        - "source_artifact:bryan-johnson-podcast-sauna-2025-06-26"
+        - "source_artifact:hubermanlab-deliberate-heat-exposure-2022-06-01"
+        - "source_artifact:protocol-bryanjohnson-sauna-2026-04-27"
+        - "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
+        - "source_artifact:x-bryan-johnson-fired-review-2026-04-06"
+      defaultOpen: false
+    -
+      id: "external-protocol-dose-context"
+      label: "External high-heat dose context"
+      stance: "context_only"
+      summary: "Public N-of-1 high-heat routines can inform what to log, but they should not redefine the Murph dose or expected outcomes."
+      sourceKeys:
+        - "source_artifact:bryan-johnson-morning-routine-2026-04-08"
+      defaultOpen: false
+    -
+      id: "core-temperature-measurement-context"
+      label: "Core-temperature measurement context"
+      stance: "mixed"
+      summary: "External core-temperature posts are useful for instrumenting heat exposure but should not turn a 39°C target or heat-shock-protein threshold into a protocol promise."
+      sourceKeys:
+        - "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16"
+        - "source_artifact:x-bryan-johnson-fired-review-2026-04-06"
+      defaultOpen: false
+    -
+      id: "heat-tolerance-safety-boundaries"
+      label: "Extreme-discomfort safety boundary"
+      stance: "safety_boundary"
+      summary: "External high-heat accounts reinforce that panic, severe discomfort, or threshold chasing should be treated as stop-rule context, not as a goal."
+      sourceKeys:
+        - "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16"
+        - "source_artifact:x-bryan-johnson-fired-review-2026-04-06"
+      defaultOpen: false
 safety:
-  cautionLevel: moderate
+  cautionLevel: "high"
   avoidOrGetClinicianGuidance:
-    - unstable_angina
-    - recent_myocardial_infarction_or_stroke
-    - uncontrolled_hypertension
-    - symptomatic_arrhythmia
-    - decompensated_heart_failure
-    - severe_aortic_stenosis
-    - pregnancy
-    - acute_illness_or_fever
-    - dehydration_or_recent_fainting
-    - heat_intolerance_or_another_condition_where_heat_exposure_is_risky
+    - "pregnancy, possible pregnancy, trying to become pregnant, early postpartum, or active fertility or sperm-marker concerns"
+    - "transdermal opioid patches, especially fentanyl or buprenorphine patches, or any medication patch with heat warnings unless explicit medical guidance clears sauna exposure"
+    - "unstable cardiovascular disease, recent cardiac event, unexplained chest pain, serious arrhythmia, heart failure, ischemic heart disease, peripheral arterial disease, uncontrolled blood pressure, or prior fainting with heat"
+    - "diabetes, kidney disease, seizure disorder, chronic respiratory disease, asthma, COPD, heat intolerance, prior heat illness, or clinician advice to avoid heat exposure"
+    - "recent heat illness, significant dehydration, fever, vomiting, diarrhea, acute infection, or unusually impaired recovery after hard training"
+    - "medications or substances that change hydration, electrolytes, blood pressure, alertness, sweating, thermoregulation, skin blood flow, or heat tolerance, including diuretics, antihypertensives, beta blockers, anticholinergics, psychotropics, stimulants, sedatives, antiseizure medicines, lithium, insulin or heat-sensitive medicines, alcohol, and recreational drugs"
+    - "heat-triggered itching, burning, hives, dermatitis, rash flares, inflamed skin, open wounds, or skin infection concerns"
+    - "children, minors, frail older adults, or anyone who cannot reliably exit, cool down, hydrate normally, or recognize and report symptoms"
   stopIf:
-    - chest_pain
-    - faintness
-    - severe_dizziness
-    - confusion
-    - palpitations
-    - unusual_shortness_of_breath
+    - "chest pain or pressure"
+    - "faintness, severe dizziness, loss of balance, or weakness"
+    - "confusion or neurologic symptoms"
+    - "palpitations or unusual shortness of breath"
+    - "severe headache, vomiting, or symptoms that do not resolve promptly after leaving the sauna"
+    - "skin burning, heat-triggered itching, hives, rash flare, or painful irritation"
+    - "panic-level distress or feeling unsafe"
   notes:
-    - Avoid alcohol before sauna sessions.
-    - This is a bounded wellness self-experiment, not a treatment plan for cardiovascular disease.
-    - People with known cardiovascular disease or major medical conditions should use clinician guidance before starting.
-    - Exiting early is normal if heat discomfort starts to feel concerning.
-    - Avoid extreme-temperature sessions; this protocol is not a 120 °C heat-stress test.
+    - "Safety takes priority over adherence; leaving early is a valid logged outcome."
+    - "Do not use this protocol to chase extreme heat, severe discomfort, a sweat target, or a specific core-temperature threshold."
+    - "Do not use this protocol after alcohol or recreational drugs that day; postpone rather than trying to compensate with hydration."
+    - "Do not change prescribed medications for sauna. Medication and fluid plans belong with a clinician or pharmacist."
+    - "Use fertility, pregnancy, medication, skin, respiratory, kidney, seizure, diabetes, and cardiovascular concerns as reasons to pause unsupervised setup rather than as topics to optimize casually."
 researchCoverage:
-  bibliographyKey: source_artifact:sauna-bibliography-2026-04-18
-  corpusStats:
-    masterRecords: 180
-    finnishDrySaunaSubsetRecords: 81
-    reviewMetaRecords: 32
-    curatedShortlistRecords: 40
-    highPriorityRecords: 24
-    mediumPriorityRecords: 65
-    lowerPriorityRecords: 91
-    finnishDrySaunaYesRecords: 36
-    finnishDrySaunaYesOrLikelyRecords: 81
-    earliestYear: 1978
-    latestYear: 2026
-    auditCutoff: 2026-04-18
-  shortlistBucketCounts:
-    long-term-finnish-cohort-evidence: 14
-    intervention-design-reality-checks: 13
-    acute-and-mechanistic: 8
-    evidence-backbone: 5
-  supplementalReview:
-    reviewedAt: 2026-04-21
-    scopeNote: Added missing Finnish dry-sauna source pages and corrected the stroke-cohort PMID while preserving the earlier corpus-count snapshot because broader sauna source work was already in flight in the current tree.
-    sourceKeys:
-      - source_artifact:pmid-29720543
-      - source_artifact:pmid-31293098
-      - source_artifact:pmid-32615263
-      - source_artifact:pmid-38836690
-      - source_artifact:pmid-41049507
-      - source_artifact:pmid-34363927
-      - source_artifact:pmid-24304490
-      - source_artifact:pmid-30800676
-      - source_artifact:pmid-38344040
-      - source_artifact:pmid-24899780
-      - source_artifact:pmid-3218892
-      - source_artifact:pmid-3218894
-      - source_artifact:pmid-3218897
-  backboneSourceKeys:
-    - source_artifact:pmid-16871826
-    - source_artifact:pmid-29849692
-    - source_artifact:mayo-2018-sauna-review
-    - source_artifact:pmid-32814462
-    - source_artifact:pmid-38577299
-    - source_artifact:pmid-41032138
-  finnishDrySaunaSourceKeys:
-    - source_artifact:pmid-445022
-    - source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
-    - source_artifact:pmid-3766176
-    - source_artifact:pmid-3788622
-    - source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
-    - source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
-    - source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
-    - source_artifact:pmid-3174262
-    - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
-    - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
-    - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
-    - source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
-    - source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
-    - source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
-    - source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
-    - source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
-    - source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
-    - source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
-    - source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
-    - source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
-    - source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna
-    - source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
-    - source_artifact:pmid-11165553
-    - source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
-    - source_artifact:pmid-16871826
-    - source_artifact:pmid-19154844
-    - source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
-    - source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
-    - source_artifact:pmid-25705824
-    - source_artifact:pmid-25432420
-    - source_artifact:pmid-26152773
-    - source_artifact:pmid-29229091
-    - source_artifact:pmid-28905164
-    - source_artifact:pmid-27932366
-    - source_artifact:pmid-28633297
-    - source_artifact:pmid-29351426
-    - source_artifact:pmid-29849692
-    - source_artifact:pmid-28972808
-    - source_artifact:pmid-29897261
-    - source_artifact:pmid-29269746
-    - source_artifact:mayo-2018-sauna-review
-    - source_artifact:pmid-30173212
-    - source_artifact:pmid-30486813
-    - source_artifact:pmid-31126559
-    - source_artifact:pmid-29720543
-    - source_artifact:pmid-31372865
-    - source_artifact:pmid-31102597
-    - source_artifact:pmid-31331560
-    - source_artifact:pmid-32951736
-    - source_artifact:pmid-31950931
-    - source_artifact:pmid-31490429
-    - source_artifact:pmid-31869820
-    - source_artifact:pmid-33513711
-    - source_artifact:pmid-33211153
-    - source_artifact:pmid-34297227
-    - source_artifact:pmid-34622026
-    - source_artifact:pmid-34199101
-    - source_artifact:pmid-36078656
-    - source_artifact:pmid-35710395
-    - source_artifact:pmid-35908583
-    - source_artifact:pmid-36255556
-    - source_artifact:pmid-35785965
-    - source_artifact:pmid-34727008
-    - source_artifact:pmid-38011189
-    - source_artifact:pmid-37650138
-    - source_artifact:pmid-37270272
-    - source_artifact:pmid-37029766
-    - source_artifact:pmid-36813265
-    - source_artifact:pmid-39446139
-    - source_artifact:pmid-38410962
-    - source_artifact:pmid-38577299
-    - source_artifact:doi-10.3390-app151910762
-    - source_artifact:pmid-40202605
-    - source_artifact:pmid-41426898
-    - source_artifact:doi-10-1016-j-aimed-2024-09-009
-    - source_artifact:pmid-40611569
-    - source_artifact:pmid-41340471
-    - source_artifact:doi-10-3389-fcvm-2025-1537194
-    - source_artifact:pmid-41461792
-    - source_artifact:pmid-41831305
-    - source_artifact:doi-10.1080-23328940.2026.2645467
-sessionLoggingFields:
-  - session_date
-  - session_start_time
-  - session_duration_minutes
-  - approximate_temperature_c
-  - standalone_or_postexercise
-  - exercise_type_and_load_if_applicable
-  - hydration_notes
-  - alcohol_last_24h
-  - illness_or_fever
-  - travel_or_timezone_shift
-  - hard_training_last_24h
-  - symptoms_during_or_after
-confoundersToTrack:
-  - illness_or_fever
-  - alcohol_last_24h
-  - hard_training_last_24h
-  - travel_or_timezone_shift
-  - major_bedtime_change
-  - major_diet_change
-  - new_supplement_or_medication_change
-  - cold_plunge_or_other_new_heat_or_cold_intervention
+  canonicalLedgerPath: "output-packages/research/finnish-dry-sauna-research-restart-20260427/downloads/11-source-ledger-reducer/canonical_source_ledger_v1.json"
+  ledgerSourceCount: 265
+  usableExtractionBatches:
+    - "batch-004"
+    - "batch-005"
+    - "batch-006"
+    - "batch-009"
+    - "batch-010"
+    - "batch-012-inline"
+  skippedOrUnavailableBatches:
+    - "batch-001 unavailable extraction JSON"
+    - "batch-002 cold-water/cold-plunge mismatch"
+    - "batch-003 unavailable extraction JSON"
+    - "batch-007 contaminated by prolonged-fasting thread"
+    - "batch-008 cold-water/cold-plunge mismatch"
+    - "batch-011 unavailable extraction JSON"
+  usableAppraisalCount: 108
+  usableSourceFindingCount: 158
+  usableSourcePageCount: 104
+  sourceExtractionRunLimitNote: "All source-extraction runs used by this package remained within the <=40-source-record cap; final landing reducer performed no new source extraction."
 ---
 
 ## Question this experiment answers
 
-After a stable baseline, does a short block of **stand-alone Finnish dry sauna** make recovery, sleep, or cardiovascular signals move enough to be worth repeating?
+After a stable baseline, does a traditional **Finnish dry-sauna** routine change tolerability, recovery context, sleep context, resting pulse, or morning blood-pressure signals enough to be worth keeping?
 
 ## Simple version
 
-Run a 21-day experiment:
-
-- **7 baseline days**
-- **14 intervention days**
-- **3 sessions per week**
-- **15–20 minutes per session**
-- roughly **80–100 °C**
-- **6 target sessions**, with **4 sessions** as the minimum for a useful first read
-
-This is intentionally practical: a repeatable dry-sauna routine, not an extreme heat-adaptation block and not a treatment plan.
-
-## Why this version
-
-Sauna research is broad, but not all sauna studies are testing the same thing. Heat source, temperature, humidity, timing, workout context, hydration, and study population can all change the story.
-
-This version starts with a clean, low-drama question: what happens when you add a few stand-alone Finnish dry-sauna sessions without adding cold plunges, new supplements, new training blocks, or major diet changes at the same time?
+Use a traditional dry sauna, keep the routine repeatable, and compare averages from the baseline window with the intervention window. The useful read is not a dramatic single-session spike; it is whether the routine was tolerable, completed often enough, and produced a signal that is not better explained by illness, travel, alcohol, training load, or another new intervention.
 
 ## What to watch
 
-The main read is whether baseline-vs-intervention averages move in a useful direction and whether the routine felt repeatable. Resting heart rate is the most practical wearable signal; morning blood pressure can help if you already measure it consistently; HRV and sleep-stage changes are context, not promises.
+Resting heart rate is the main practical wearable signal to watch, not a guaranteed improvement target. Morning blood pressure is optional context when the user already has a reliable home-cuff routine. HRV, sleep efficiency, and deep-sleep estimates remain exploratory because they are sensitive to heat stress, timing, alcohol, illness, travel, hard training, and device noise.
 
 ## What to log
 
-At minimum, log session duration, approximate temperature, time of day, whether the session followed exercise, illness, alcohol, travel, unusually hard training, and any symptoms during or after the session.
-
-If those details are missing, the experiment can still count, but the result should be read more cautiously.
+Log the session dose, first-session tolerance duration when relevant, bench or position, time of day, whether it followed exercise, cool-down method, any notable humidity or heavy löyly, hydration context, alcohol or substance context, illness, travel, ambient heat, hard training, skin or safety symptoms, and any facility issue. Missing context does not erase the experiment, but it should make the interpretation more cautious.
 
 ## What this does not test
 
-This experiment does not test mortality, dementia, stroke, kidney outcomes, pneumonia, or long-term disease incidence. Those findings are background context, not results a 21-day experiment can prove.
-
-It also does not promise HRV improvement, gut benefits, vascular improvements, or a perfect wearable score. A useful result is usually modest: the averages move, the person completed enough sessions, no obvious confounder explains everything, and the routine felt worth repeating.
+This experiment does not test mortality, dementia, stroke, kidney outcomes, cancer, pneumonia, toxin removal, microplastic reduction, fertility preservation, heat-shock-protein thresholds, or long-term disease incidence. Those topics belong in background evidence, external-protocol context, or future specialized protocols, not in the result promise for this short personal test.
 
 ## Evidence snapshot
 
-The sauna research map includes reviews, corrected long-term Finnish cohort papers, acute physiology work, post-exercise context, classic thermoregulation and fluid-balance sources, dry-vs-steam modality comparisons, and intervention-design papers. That mix is enough to make the experiment worth trying, while also keeping the claims careful.
+The evidence map includes dry-sauna reviews, acute Finnish-sauna physiology, adjacent passive-heat and heat-acclimation studies, post-exercise heat boundary sources, home blood-pressure measurement guidance, pregnancy and medication safety sources, fertility caution sources, public-sauna operational guidance, and external named protocol claims. That mix makes the experiment plausible to run with careful tracking, but it also keeps the claim conservative: personal signals first, safety first, and no guarantee that every marker improves.

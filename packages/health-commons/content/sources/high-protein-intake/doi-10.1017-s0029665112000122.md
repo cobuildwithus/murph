@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - safety_kidney_renal
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -40,6 +41,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-010; priority: backbone; claimUse: safety-only; directness: measurement_context"
 sourceFindings:
+
   -
     findingId: finding:doi-10.1017-s0029665112000122-healthy-renal-risk-context
     sourceKey: source_artifact:doi-10.1017-s0029665112000122

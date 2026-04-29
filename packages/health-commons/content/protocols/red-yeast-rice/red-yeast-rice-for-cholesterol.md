@@ -27,12 +27,14 @@ categories:
   - "high-caution"
   - "murph-canonical"
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-03.png
     mediaType: image/png
     caption: Red Yeast Rice For Cholesterol
 relations:
+
   -
     type: "parent_family"
     target: "experiment_family:red-yeast-rice"
@@ -166,6 +168,7 @@ protocol:
     - "Stop if there is a product recall, contamination notice, hidden-drug/adulteration warning, failed local-law/warning-label check, suspected adulteration, or inability to verify product identity."
     - "Do not restart after any stop signal unless a clinician evaluates and explicitly clears restarting."
 testPlans:
+
   -
     planId: "lipid-panel-98d"
     durationDays: 98
@@ -191,6 +194,7 @@ testPlans:
       - "Use the same lab and fasting pattern when practical; log LDL-C calculation method or direct LDL-C if shown."
       - "Safety labs are not LDL-C endpoints and should not be used to self-clear risk. If any risk flag is present or clinician guidance is needed, the clinician-guided variant should specify baseline and follow-up or symptom-triggered ALT, AST, creatinine/eGFR, and CK when muscle symptoms, prior statin intolerance, kidney risk, liver risk, or interacting medicines are relevant. With a fully negative screen, document whether baseline ALT/AST and creatinine/eGFR are available; stop and route to care for abnormal or worsening safety labs."
 expectedSignalDescriptions:
+
   -
     biomarkerKey: "biomarker:ldl-c"
     description: "Some red yeast rice products can contain monacolin K, a statin-like compound that may lower cholesterol production in the liver. If the product is active and tolerated, LDL-C may fall."
@@ -216,6 +220,7 @@ experimentOnboarding:
     intentSummary: "Plan a high-caution, product-specific RYR lipid-panel experiment with safety screening before any run is created."
   contextReview:
     vaultChecks:
+
       -
         id: "recent-lipid-panel"
         label: "Recent lipid panel"
@@ -257,6 +262,7 @@ experimentOnboarding:
     mode: "ask_compact_then_expand_if_positive"
     dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start"
     mustAsk:
+
       -
         id: "pregnancy-lactation-pediatric"
         prompt: "Are you pregnant, trying to become pregnant, breastfeeding, or planning this for a child or teenager?"
@@ -306,6 +312,7 @@ experimentOnboarding:
       - "Any positive or uncertain answer should route to clinician guidance rather than a frictionless self-experiment start."
       - "A negative screen is not a guarantee of safety; it only supports using the routine protocol rather than a clinician-guided variant."
   setupSlots:
+
     -
       id: "product-identity"
       label: "Product identity"
@@ -427,6 +434,7 @@ whyItWorks:
   - "The evidence signal is product-specific: direct RYR trials and syntheses show LDL-C and total-cholesterol lowering for some preparations over short windows, while commercial products can differ in monacolin content and contaminants."
   - "A lipid-panel test is necessary because the expected signal is a lab biomarker change, not a same-day symptom change; LDL-C, non-HDL-C, total cholesterol, HDL-C, triglycerides, and optional ApoB should be interpreted with fasting status, lab method, adherence, and confounders visible."
 claims:
+
   -
     claimId: "direct-short-term-ldl-total-cholesterol"
     type: "intervention_result"
@@ -661,6 +669,7 @@ researchLandscape:
   primaryClaim: "Some documented RYR preparations can lower LDL-C over an 8–12 week lab-measured window."
   mainCaveat: "Do not treat a capsule label, proprietary Xuezhikang evidence, combination-stack evidence, or a historical RCT product as proof that a current commercial product will lower LDL-C safely."
   groups:
+
     -
       id: "direct-ryr-lipid-trials"
       label: "Direct RYR lipid trials"

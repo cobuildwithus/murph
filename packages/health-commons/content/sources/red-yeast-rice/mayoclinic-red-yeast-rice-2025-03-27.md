@@ -16,6 +16,7 @@ categories:
   - "contamination"
   - "dose-uncertainty"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "Clinical consumer monograph"
 modality: "Red yeast rice supplement quality/safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:mayoclinic-red-yeast-rice-2025-03-27:batch-003-primary"
     sourceKey: "source_artifact:mayoclinic-red-yeast-rice-2025-03-27"

@@ -25,12 +25,14 @@ categories:
   - wearable-measured
   - murph-research-umbrella
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-resonance-breathing-before-bed.jpeg
     mediaType: image/jpeg
     caption: Resonance Breathing Before Bed
 relations:
+
   -
     type: parent_family
     target: experiment_family:pre-sleep-downshift-practices
@@ -141,6 +143,7 @@ protocol:
     - End the experiment if the routine increases anxiety, performance pressure, rumination, orthosomnia-like fixation, clock-watching, or bedtime dread.
     - Pause the experiment and seek appropriate care if insomnia is chronic, impairing, associated with severe mood symptoms, tied to pregnancy/postpartum/lactation, or tied to medication changes.
 testPlans:
+
   -
     planId: chooser-sol-proxy-21d
     durationDays: 21
@@ -163,6 +166,7 @@ testPlans:
       - Treat HRV, resting heart rate, total sleep time, and sleep stages as exploratory context unless repeated changes align with logs and are not obviously confounded.
       - Combined breathing-plus-meditation runs should be analyzed separately from the breathing-only or meditation-only child practice.
 expectedSignalDescriptions:
+
   -
     biomarkerKey: biomarker:sleep-onset-latency
     description: A gentle breathing or meditation routine may lower pre-sleep arousal and make falling asleep feel less effortful.
@@ -183,6 +187,7 @@ whyItWorks:
   - "Mindfulness and meditation interventions can reduce cognitive or emotional arousal in some insomnia-adjacent contexts, but the extracted evidence is mostly guided, structured, clinical, or bundled rather than silent unguided bedtime meditation."
   - "The common practical mechanism is downshifting pre-sleep arousal and building a stable bedtime cue, not forcing sleep or optimizing sleep stages; measurement should keep arousal context visible."
 claims:
+
   -
     claimId: combined-slug-should-remain-research-umbrella
     type: evidence_scope
@@ -326,6 +331,7 @@ researchLandscape:
   primaryClaim: "Use the page to route users toward a single child practice and a conservative 21-night self-test, while preserving the evidence gap for the exact combined stack."
   mainCaveat: "No extracted completed trial directly tested resonance breathing before bed followed by silent meditation before bed. Several useful sources are adjacent, bundled, guided, clinical, protocol-only, or measurement/safety context."
   groups:
+
     -
       id: exact-combined-stack-gap
       label: Exact combined stack evidence gap

@@ -14,6 +14,7 @@ categories:
   - "red-yeast-rice"
   - "adjacent-combination-evidence"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -57,6 +58,7 @@ studyDesign: "professional drug-interaction reference"
 modality: "drug-interaction reference"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:drugs-com-gemfibrozil-red-yeast-rice-2026-04-26-safety"
     sourceKey: "source_artifact:drugs-com-gemfibrozil-red-yeast-rice-2026-04-26"

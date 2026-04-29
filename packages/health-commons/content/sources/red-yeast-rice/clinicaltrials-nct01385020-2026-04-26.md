@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -70,6 +71,7 @@ adverseEventsOrSafetyNotes: "Related extraction notes indicate concern that gemf
 limitations: "Healthy-volunteer PK study; registry result details were not fully extracted; not a lipid-lowering efficacy study."
 populationMismatch: "Healthy volunteers and drug-interaction exposure, not hypercholesterolemic protocol users."
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct01385020-2026-04-26-interaction-registry"
     sourceKey: "source_artifact:clinicaltrials-nct01385020-2026-04-26"

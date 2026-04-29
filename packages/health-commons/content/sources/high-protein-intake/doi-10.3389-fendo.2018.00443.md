@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - systematic_review_anchor
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -42,6 +43,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-002; priority: medium; claimUse: context-only; directness: measurement_context"
 sourceFindings:
+
   -
     findingId: finding:doi-10.3389-fendo.2018.00443-energy-balance-ffm
     sourceKey: source_artifact:doi-10.3389-fendo.2018.00443

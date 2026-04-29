@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Ongoing or current trial registry appears to isolate bedtime 
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct06972303-three-arm-bedtime-app-rct-protocol"
     sourceKey: "source_artifact:clinicaltrials-nct06972303-2026-02-23"

@@ -189,6 +189,20 @@ function parseScalarValue(
   }
 }
 
+function parseInlineObjectEntry(remainder: string): [string, string] | null {
+  const separatorIndex = remainder.indexOf(":");
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  const key = remainder.slice(0, separatorIndex).trim();
+  if (!/^[A-Za-z0-9_-]+$/u.test(key)) {
+    return null;
+  }
+
+  return [key, remainder.slice(separatorIndex + 1).trim()];
+}
+
 function nextMeaningfulLine(
   lines: string[],
   startIndex: number,
@@ -250,6 +264,26 @@ function parseArray(
     const remainder = trimmed.slice(1).trimStart();
 
     if (remainder) {
+      const inlineObjectEntry = parseInlineObjectEntry(remainder);
+      const nested = nextMeaningfulLine(lines, index + 1, isIgnorableLine);
+
+      if (inlineObjectEntry && nested && nested.indent > indent) {
+        const childIndent = indent + 2;
+        const [key, inlineValue] = inlineObjectEntry;
+        const syntheticLine = `${" ".repeat(childIndent)}${key}:${inlineValue ? ` ${inlineValue}` : ""}`;
+        const result = parseObject(
+          [syntheticLine, ...lines.slice(index + 1)],
+          0,
+          childIndent,
+          isIgnorableLine,
+          parseScalar,
+          allowSameIndentArrayItems,
+        );
+        value.push(result.value);
+        index += result.index;
+        continue;
+      }
+
       value.push(parseScalarValue(remainder, line, index, parseScalar));
       index += 1;
       continue;
@@ -448,14 +482,42 @@ export function parseFrontmatterDocument<TError extends Error = Error>(
   }
 
   const frontmatterLines = lines.slice(1, closingIndex);
+  const rawFrontmatter = frontmatterLines.join("\n");
   const body = normalizeBody(lines.slice(closingIndex + 1).join("\n"), bodyNormalization);
 
   if (frontmatterLines.length === 0 || frontmatterLines.every((line) => shouldSkipLine(line, isIgnorableLine))) {
     return {
       attributes: {},
       body,
-      rawFrontmatter: frontmatterLines.join("\n"),
+      rawFrontmatter,
     };
+  }
+
+  const trimmedRawFrontmatter = rawFrontmatter.trim();
+  if (trimmedRawFrontmatter.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmedRawFrontmatter) as unknown;
+
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return {
+          attributes: parsed as FrontmatterObject,
+          body,
+          rawFrontmatter,
+        };
+      }
+    } catch {
+      if (mode === "tolerant") {
+        return tolerantFallback();
+      }
+
+      throw createThrownError(createProblem("invalid_scalar", frontmatterLines[0], 0));
+    }
+
+    if (mode === "tolerant") {
+      return tolerantFallback();
+    }
+
+    throw createThrownError(createProblem("expected_key_value", frontmatterLines[0], 0));
   }
 
   try {
@@ -476,7 +538,7 @@ export function parseFrontmatterDocument<TError extends Error = Error>(
     return {
       attributes: parsed.value,
       body,
-      rawFrontmatter: frontmatterLines.join("\n"),
+      rawFrontmatter,
     };
   } catch (error) {
     if (error instanceof FrontmatterParseFailure) {

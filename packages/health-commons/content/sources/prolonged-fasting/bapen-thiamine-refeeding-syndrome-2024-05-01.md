@@ -8,19 +8,17 @@ summary: Professional thiamine-replacement guidance for patients at risk of refe
 status: draft
 quality: usable
 aliases:
-  - BAPEN/PENG/BPNG/NPPG 2024 Guidance on thiamine replacement in patients at risk of
-  - Guidance on thiamine replacement in patients at risk of Refeeding Syndrome
+- BAPEN/PENG/BPNG/NPPG 2024 Guidance on thiamine replacement in patients at risk of
+- Guidance on thiamine replacement in patients at risk of Refeeding Syndrome
 categories:
-  - prolonged-fasting
-  - refeeding-safety
-  - electrolytes-thiamine
+- prolonged-fasting
+- refeeding-safety
+- electrolytes-thiamine
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: guideline
   title: Guidance on thiamine replacement in patients at risk of Refeeding Syndrome
@@ -44,22 +42,22 @@ researchEvidence:
   aggregateRole: synthesis
   cohortKey: bapen-thiamine-refeeding-syndrome-2024-05-01
   notes:
-    - 'Limitations: Guideline/position guidance; dosing and route recommendations are clinical consensus and supply-context dependent rather than fasting trial evidence.'
-    - 'Population mismatch: Targets patients at high or extremely high refeeding risk, not generally healthy adults completing a 24–72 hour fast.'
+  - 'Limitations: Guideline/position guidance; dosing and route recommendations are clinical consensus and supply-context dependent rather than fasting trial evidence.'
+  - 'Population mismatch: Targets patients at high or extremely high refeeding risk, not generally healthy adults completing a 24–72 hour fast.'
 evidenceBucket: refeeding, electrolytes, and thiamine safety
 directnessToProtocol: general_guideline
 whyItMatters: Focused modern thiamine guidance; useful for distinguishing oral/enteral versus intravenous thiamine boundaries and avoiding overbroad supplement claims.
 potentialMurphEndpoints:
-  - biomarker:thiamine-status
-  - biomarker:heart-rhythm
-  - biomarker:refeeding-syndrome-symptoms
+- biomarker:thiamine-status
+- biomarker:heart-rhythm
+- biomarker:refeeding-syndrome-symptoms
 participantSummary: No participant sample; professional guidance document.
 interventionOrExposure: Thiamine replacement route and timing in the context of refeeding syndrome risk and Pabrinex shortage.
 comparatorOrControl: Not applicable or not extracted for this source.
 endpoints:
-  - thiamine
-  - refeeding symptoms
-  - cardiac symptoms
+- thiamine
+- refeeding symptoms
+- cardiac symptoms
 effectEstimatesOrDirection: For patients at high or extremely high risk of refeeding syndrome, the guidance emphasizes starting thiamine before nutrition support; it distinguishes oral/enteral use from intravenous use, with IV reserved for situations such as intestinal failure or unavailable oral/enteral administration.
 adverseEventsOrSafetyNotes: Thiamine replacement and refeeding-syndrome prevention route boundary.
 limitations: Guideline/position guidance; dosing and route recommendations are clinical consensus and supply-context dependent rather than fasting trial evidence.
@@ -70,17 +68,16 @@ studyDesign: Professional guidance / consensus position statement
 modality: Refeeding thiamine safety
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:bapen-thiamine-refeeding-syndrome-2024-05-01-refeeding-safety
-    sourceKey: source_artifact:bapen-thiamine-refeeding-syndrome-2024-05-01
-    extractedFromArtifactId: art_bapen_thiamine_refeeding_syndrome_2024_05_01
-    findingKind: safety
-    population: No participant sample; professional guidance document.
-    exposure: Thiamine replacement route and timing in the context of refeeding syndrome risk and Pabrinex shortage.
-    outcome: Thiamine replacement and refeeding-syndrome prevention route boundary.
-    summary: For patients at high or extremely high risk of refeeding syndrome, the guidance emphasizes starting thiamine before nutrition support; it distinguishes oral/enteral use from intravenous use, with IV reserved for situations such as intestinal failure or unavailable oral/enteral administration.
-    evidenceUse:
-      - safety
+- findingId: finding:bapen-thiamine-refeeding-syndrome-2024-05-01-refeeding-safety
+  sourceKey: source_artifact:bapen-thiamine-refeeding-syndrome-2024-05-01
+  extractedFromArtifactId: art_bapen_thiamine_refeeding_syndrome_2024_05_01
+  findingKind: safety
+  population: No participant sample; professional guidance document.
+  exposure: Thiamine replacement route and timing in the context of refeeding syndrome risk and Pabrinex shortage.
+  outcome: Thiamine replacement and refeeding-syndrome prevention route boundary.
+  summary: For patients at high or extremely high risk of refeeding syndrome, the guidance emphasizes starting thiamine before nutrition support; it distinguishes oral/enteral use from intravenous use, with IV reserved for situations such as intestinal failure or unavailable oral/enteral administration.
+  evidenceUse:
+  - safety
 murphV1Priority: High
 pdfRightsStatus: permission_required
 ---

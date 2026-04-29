@@ -12,6 +12,7 @@ categories:
   - hiit
   - exercise
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:norwegian-4x4/norwegian-4x4

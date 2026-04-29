@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - training_strength_body_composition
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -40,6 +41,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-004; priority: high; claimUse: context-only; directness: adjacent_variant"
 sourceFindings:
+
   -
     findingId: finding:doi-10-1519-ssc-0000000000000888-fat-free-mass-meta-regression
     sourceKey: source_artifact:doi-10.1519-ssc.0000000000000888

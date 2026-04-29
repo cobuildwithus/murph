@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Protocol-method source for HRVB training structure and dose; 
 studyDesign: "guideline"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.5298-1081-5937-41.3.08-primary"
     sourceKey: "source_artifact:doi-10.5298-1081-5937-41.3.08"

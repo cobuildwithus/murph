@@ -14,6 +14,7 @@ categories:
   - "regulatory"
   - "safety"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "Food safety recall"
 modality: "Red yeast rice regulatory, product-quality, or safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingKind: "safety"
     population: "Consumers of Ricepure Red Yeast Rice food supplement"
@@ -71,6 +73,7 @@ sourceFindings:
 murphV1Priority: "High"
 pdfRightsStatus: "open_access"
 artifacts:
+
   -
     artifactId: "art_fsai_ricepure_red_yeast_rice_recall_2025_06_18_html"
     sourceKey: "source_artifact:fsai-ricepure-red-yeast-rice-recall-2025-06-18"

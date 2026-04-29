@@ -20,6 +20,7 @@ categories:
   - "lab-marker"
   - "lipids"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation"
@@ -73,6 +74,7 @@ protocolRanking:
   version: "omega-3-supplementation-v1"
   scoreFormula: "Higher evidenceWeight and biomarkerRelevance favor lab endpoints that directly reflect oral EPA/DHA exposure or lipid context; safety caution and measurement burden lower suitability for unsupervised runs."
   candidates:
+
     -
       protocolKey: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation"
       expectedDirection: "up"
@@ -92,6 +94,7 @@ communityOutcomeSummary:
   state: "coming_soon"
   placeholder: "Community outcome summaries will require enough completed Murph experiments using the same lab context."
 claims:
+
   -
     claimId: "omega3-index-exposure-endpoint"
     type: "intervention_result"

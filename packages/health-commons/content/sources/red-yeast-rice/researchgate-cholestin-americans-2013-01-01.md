@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -63,6 +64,7 @@ adverseEventsOrSafetyNotes: "No adverse-event information extracted from metadat
 limitations: "ResearchGate metadata-only source with no DOI/PMID/PMCID extracted; full manuscript access and rights unclear."
 populationMismatch: "Moderate hypercholesterolemia and proprietary Cholestin product; context-only until full source is verified."
 sourceFindings:
+
   -
     findingId: "finding:researchgate-cholestin-americans-2013-01-01-metadata-lead"
     sourceKey: "source_artifact:researchgate-cholestin-americans-2013-01-01"

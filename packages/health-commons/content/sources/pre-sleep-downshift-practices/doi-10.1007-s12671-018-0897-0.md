@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "RCT-focused safety review; useful for identifying underreport
 studyDesign: "systematic_review"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12671-018-0897-0:primary-safety-context"
     sourceKey: "source_artifact:doi-10.1007-s12671-018-0897-0"

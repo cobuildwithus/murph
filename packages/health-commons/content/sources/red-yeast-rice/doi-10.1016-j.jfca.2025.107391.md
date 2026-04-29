@@ -17,6 +17,7 @@ categories:
   - "contamination"
   - "dose-uncertainty"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -59,6 +60,7 @@ studyDesign: "LC-MS/MS puberulic acid method validation"
 modality: "Red yeast rice supplement quality/safety context"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-1016-j-jfca-2025-107391:batch-003-primary"
     sourceKey: "source_artifact:doi-10.1016-j.jfca.2025.107391"

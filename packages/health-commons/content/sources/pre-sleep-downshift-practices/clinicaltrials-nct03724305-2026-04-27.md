@@ -14,6 +14,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -80,6 +81,7 @@ endpoints:
 effectEstimatesOrDirection: "Single-arm posted registry means: ISI 16.42 (SD 3.95) pre-treatment, 8.37 (SD 4.19) post-treatment, 11.72 (SD 4.95) at 6-month follow-up; no comparator."
 adverseEventsOrSafetyNotes: "Registry adverse-event table reports 0 deaths, 0 serious adverse events, and 0 other adverse events among 21 at risk, based on self-report during treatment, post-treatment, and 6-month follow-up."
 sourceFindings:
+
   -
     findingId: finding:clinicaltrials-nct03724305-2026-04-27/single-arm-registry-results
     sourceKey: source_artifact:clinicaltrials-nct03724305-2026-04-27

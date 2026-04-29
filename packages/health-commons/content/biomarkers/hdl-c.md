@@ -38,6 +38,7 @@ biomarker:
     minimumPoints: 1
     aggregation: "mean"
   explainerCards:
+
     -
       title: "What it is"
       body: "High-density lipoprotein cholesterol from a lipid panel; a watch metric for cholesterol protocols rather than a promised response."
@@ -58,6 +59,7 @@ biomarker:
       - "illness"
       - "laboratory method changes"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"

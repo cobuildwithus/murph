@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Protocol explicitly tests dose-response and tracks adverse ex
 studyDesign: "other"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.2196-72786-mindfulness-dose-protocol"
     sourceKey: "source_artifact:doi-10.2196-72786"

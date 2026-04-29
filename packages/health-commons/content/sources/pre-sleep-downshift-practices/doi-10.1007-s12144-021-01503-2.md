@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Useful bridge review across study designs, including case rep
 studyDesign: "narrative_review"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1007-s12144-021-01503-2:primary-safety-context"
     sourceKey: "source_artifact:doi-10.1007-s12144-021-01503-2"

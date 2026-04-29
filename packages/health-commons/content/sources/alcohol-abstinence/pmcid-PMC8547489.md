@@ -15,6 +15,7 @@ aliases:
 categories:
   - 'alcohol-abstinence'
 relations:
+
   -
     type: 'related_protocol'
     target: 'protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence'
@@ -61,6 +62,7 @@ studyDesign: 'Prospective cohort / observational study'
 modality: 'HCV alcohol-use and emotion change context'
 claimUse: 'safety-only'
 sourceFindings:
+
   -
     findingId: 'finding:alcohol-abstinence/pmcid-PMC8547489'
     sourceKey: 'source_artifact:pmcid-PMC8547489'

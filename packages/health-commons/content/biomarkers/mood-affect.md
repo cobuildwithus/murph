@@ -17,6 +17,7 @@ categories:
   - self-report
   - manual-checkin
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:cold-water-immersion/cold-plunge
@@ -62,6 +63,7 @@ biomarker:
       - weather
       - expectancy_or_novelty
 claims:
+
   -
     claimId: cold-plunge-mood-is-timing-sensitive
     type: mixed_evidence

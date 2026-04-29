@@ -20,6 +20,7 @@ categories:
 - manual-measurement
 - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-at-home-static-stretching-latest.jpeg
@@ -664,6 +665,7 @@ experimentOnboarding:
     intentSummary: Explore At Home Static Stretching
   contextReview:
     vaultChecks:
+
     -
       id: active_experiments
       label: Active experiments
@@ -694,6 +696,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
     -
       id: pain_neurologic_symptoms
       prompt: Do you have sharp pain, radiating pain, numbness, tingling, new weakness, reflex changes, gait or hand clumsiness, or symptoms that feel neurologic rather than ordinary tightness?
@@ -758,6 +761,7 @@ experimentOnboarding:
     - Fall or floor-limitation positives may continue only after switching to seated or fully supported positions and avoiding balance-challenging stretches.
     - Item-level do_not_start_unsupervised dispositions override the general compact-screen routing.
   setupSlots:
+
   -
     id: target_area
     label: Primary target area
@@ -1409,6 +1413,7 @@ researchLandscape:
   primaryClaim: A 4–6 week home-translatable static-stretching routine with gentle self-applied 30-second holds and logged target-area exposure can plausibly improve a matched ROM measure, but individual response is target-specific and not guaranteed.
   mainCaveat: Do not generalize a flexibility gain into proof of pain relief, injury prevention, posture correction, gait improvement, athletic performance, recovery, or permanent tissue lengthening after stopping.
   groups:
+
   -
     id: direct-rom-flexibility-evidence
     label: Direct ROM and flexibility evidence

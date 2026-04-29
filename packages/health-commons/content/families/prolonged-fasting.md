@@ -8,32 +8,30 @@ summary: Fasting protocols that intentionally extend beyond ordinary overnight f
 status: draft
 quality: usable
 aliases:
-  - prolonged fasting
-  - water fasting
-  - short-term fasting
-  - extended fasting
+- prolonged fasting
+- water fasting
+- short-term fasting
+- 24-hour fast
+- 48-hour fast
+- 72-hour fast
+- extended fasting
 categories:
-  - fasting
-  - nutrition
-  - metabolic-health
-  - safety-screened
+- fasting
+- nutrition
+- metabolic-health
+- safety-screened
 familyKind: modality
 canonicalModality: prolonged_fasting
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: cites
-    target: source_artifact:pmid-39059384
-  -
-    type: cites
-    target: source_artifact:pmid-32700827
-  -
-    type: cites
-    target: source_artifact:pmid-25857868
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: cites
+  target: source_artifact:pmid-39059384
+- type: cites
+  target: source_artifact:pmid-32700827
+- type: cites
+  target: source_artifact:pmid-25857868
 researchCoverage:
-  bibliographyKey: source_artifact:prolonged-fasting-research-ledger-2026-04-28
   corpusStats:
     canonicalLedgerRecords: 334
     extractedAndAppraisedRecords: 331
@@ -42,8 +40,8 @@ researchCoverage:
     adjacentVariantRecords: 126
     generalGuidelineRecords: 89
     auditCutoff: '2026-04-28'
+  artifactManifestKey: source_artifact:prolonged-fasting/research-artifacts
 ---
-
 Prolonged Fasting is the family for experiments that deliberately extend fasting beyond an ordinary overnight fast.
 
 ## What belongs in this family

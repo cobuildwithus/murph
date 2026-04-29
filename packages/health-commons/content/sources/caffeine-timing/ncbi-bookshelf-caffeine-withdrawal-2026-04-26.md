@@ -13,11 +13,9 @@ aliases:
 categories:
 - caffeine-timing
 relations:
--
-  type: related_protocol
+- type: related_protocol
   target: protocol_variant:caffeine-timing/caffeine-curfew-dose-reset
--
-  type: parent_family
+- type: parent_family
   target: experiment_family:caffeine-timing
 source:
   kind: book
@@ -26,13 +24,13 @@ source:
   year: 2026
   journal: StatPearls [Internet]. NCBI Bookshelf
   citation: 'Rocha Cabrero F, Hamilton RJ. Caffeine Withdrawal. [Updated 2025 Dec 13]. In: StatPearls [Internet]. Treasure Island (FL): StatPearls Publishing; 2026 Jan-. Bookshelf ID: NBK430790. PMID:28613541.'
-  pmid: "28613541"
+  pmid: '28613541'
   url: https://www.ncbi.nlm.nih.gov/books/NBK430790/
 sourceIdentity:
   identityKind: book
   canonicalIdBasis: url
   identifiers:
-    pmid: "28613541"
+    pmid: '28613541'
     titleHash: e63059f1cc8b8242cd070a6df77625f03cde7fed2018a485fa485378cb639e65
     url: https://www.ncbi.nlm.nih.gov/books/NBK430790/
   canonicalUrl: https://www.ncbi.nlm.nih.gov/books/NBK430790/
@@ -60,28 +58,28 @@ modality: caffeine withdrawal / dose reset safety
 claimUse: context-only
 directness: same_mechanism
 sourceFindings:
--
-  findingId: finding:ncbi-bookshelf-caffeine-withdrawal-2026-04-26-withdrawal-symptom-timeline
+- findingId: finding:ncbi-bookshelf-caffeine-withdrawal-2026-04-26-withdrawal-symptom-timeline
   sourceKey: source_artifact:ncbi-bookshelf-caffeine-withdrawal-2026-04-26
+  extractedFromArtifactId: art_ncbi_bookshelf_caffeine_withdrawal_html
   findingKind: safety
   population: Habitual caffeine users who abruptly stop or reduce caffeine
   exposure: Caffeine cessation or reduction
   outcome: Withdrawal symptoms and timing
   summary: Caffeine withdrawal can begin 12–24 hours after cessation or reduction, peak around 20–51 hours, and last several days; symptoms include headache, fatigue, irritability, impaired concentration, mood disturbance, somnolence, nausea, and myalgia.
   evidenceUse:
-    - safety
-    - context
--
-  findingId: finding:ncbi-bookshelf-caffeine-withdrawal-2026-04-26-withdrawal-management-taper
+  - safety
+  - context
+- findingId: finding:ncbi-bookshelf-caffeine-withdrawal-2026-04-26-withdrawal-management-taper
   sourceKey: source_artifact:ncbi-bookshelf-caffeine-withdrawal-2026-04-26
+  extractedFromArtifactId: art_ncbi_bookshelf_caffeine_withdrawal_html
   findingKind: safety
   population: Habitual caffeine users planning caffeine reduction
   exposure: Gradual tapering and supportive care
   outcome: Withdrawal mitigation and adherence
   summary: The clinical reference recommends supportive management such as gradual tapering, hydration, rest, analgesics when appropriate, and small caffeine doses for severe symptoms; tapering by 25–50% every few days is described as a practical approach.
   evidenceUse:
-    - safety
-    - context
+  - safety
+  - context
 murphV1Priority: High
 pdfRightsStatus: open_access
 ---

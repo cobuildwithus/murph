@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -75,6 +76,7 @@ limitations:
   - "Weight effect was not directionally favorable in the reported pooled estimate and should not be converted into a weight-loss claim."
 safetyNotes: "Adverse-event extraction was not the central source role for this batch item; use dedicated safety records for tolerability claims."
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1016-j.jff.2023.105878-ldl-total-cholesterol-dose-response"
     sourceKey: "source_artifact:doi-10.1016-j.jff.2023.105878"

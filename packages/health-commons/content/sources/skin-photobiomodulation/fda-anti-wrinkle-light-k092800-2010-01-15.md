@@ -3,26 +3,28 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:fda-anti-wrinkle-light-k092800-2010-01-15
 slug: sources/skin-photobiomodulation/fda-anti-wrinkle-light-k092800-2010-01-15
-title: 510(k) Summary: Anti-Wrinkle Light, Model AAL
+title: '510(k) Summary: Anti-Wrinkle Light, Model AAL'
 summary: FDA 510(k) context for an older handheld periocular anti-wrinkle LED device; useful for historical consumer-device and periocular boundaries only.
 status: draft
 quality: usable
+aliases:
+- Anti-Wrinkle Light Model AAL
+- K092800
+- LED Intellectual Properties Anti-Wrinkle Light
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: other
-  title: 510(k) Summary: Anti-Wrinkle Light, Model AAL
+  title: '510(k) Summary: Anti-Wrinkle Light, Model AAL'
   authors: U.S. Food and Drug Administration; LED Intellectual Properties LLC
   year: 2010
   journal: FDA 510(k) Premarket Notification
-  citation: U.S. Food and Drug Administration; LED Intellectual Properties LLC. 510(k) Summary: Anti-Wrinkle Light, Model AAL. FDA 510(k) Premarket Notification; 2010. K092800.
+  citation: 'U.S. Food and Drug Administration; LED Intellectual Properties LLC. 510(k) Summary: Anti-Wrinkle Light, Model AAL. FDA 510(k) Premarket Notification; 2010. K092800.'
   url: https://www.accessdata.fda.gov/cdrh_docs/pdf9/K092800.pdf
 researchEvidence:
   designKind: other
@@ -34,10 +36,10 @@ researchEvidence:
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Frames early handheld anti-wrinkle LED device designs and reinforces the need for periocular-use caution.
 potentialMurphEndpoints:
-  - periocular-boundary
-  - session-length
-  - wavelength-band
-  - eye-protection
+- periocular-boundary
+- session-length
+- wavelength-band
+- eye-protection
 protocolTakeaway: Use as historical device context for periocular use and wavelength mix; do not use as a clinical outcome source.
 murphTakeaway: Useful for device taxonomy and periocular caution language, lower priority than recent mask records.
 studyDesign: Regulatory 510(k) summary for a handheld light-based OTC wrinkle-reduction device.

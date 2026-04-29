@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Objective sleep architecture secondary analysis; useful for s
 studyDesign: "other"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10-1016-j-sleh-2022-02-003-primary"
     sourceKey: "source_artifact:doi-10.1016-j.sleh.2022.02.003"

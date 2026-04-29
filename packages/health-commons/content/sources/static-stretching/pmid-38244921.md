@@ -13,6 +13,7 @@ aliases:
 categories:
   - "static-stretching"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:static-stretching/at-home-static-stretching-for-flexibility"

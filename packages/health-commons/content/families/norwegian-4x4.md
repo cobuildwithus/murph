@@ -20,6 +20,7 @@ categories:
 familyKind: modality
 canonicalModality: aerobic_4x4_intervals
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:norwegian-4x4/norwegian-4x4

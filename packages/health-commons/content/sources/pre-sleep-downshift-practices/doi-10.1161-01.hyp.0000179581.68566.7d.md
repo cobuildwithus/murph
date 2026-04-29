@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Clinical baroreflex/BP mechanism source for slow breathing; d
 studyDesign: "mechanistic"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1161-01.hyp.0000179581.68566.7d-primary"
     sourceKey: "source_artifact:doi-10.1161-01.hyp.0000179581.68566.7d"

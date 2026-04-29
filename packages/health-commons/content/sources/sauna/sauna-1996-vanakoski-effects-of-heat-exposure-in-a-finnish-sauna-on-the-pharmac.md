@@ -12,6 +12,7 @@ categories:
   - study
   - safety-physiology
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week

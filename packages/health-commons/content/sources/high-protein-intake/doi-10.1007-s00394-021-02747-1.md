@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - energy_balance_satiety_weight
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -42,6 +43,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-003; priority: medium; claimUse: context-only; directness: same_mechanism"
 sourceFindings:
+
   -
     findingId: finding:doi-10.1007-s00394-021-02747-1-hormones-not-appetite
     sourceKey: source_artifact:doi-10.1007-s00394-021-02747-1

@@ -13,6 +13,7 @@ categories:
   - "hyperbaric-oxygen-therapy"
   - "identity-boundary-supervision-and-variant-separation"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"

@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Clinical guideline context for panic disorder; useful for not
 studyDesign: "guideline"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:nice-panic-disorder-management-2011-01-26-panic-care-guideline-boundary"
     sourceKey: "source_artifact:nice-panic-disorder-management-2011-01-26"

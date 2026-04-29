@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Reference source for defining hypocarbia/hypocapnia and exces
 studyDesign: "narrative_review"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:statpearls-hypocarbia-2023-08-14-hypocarbia-definition"
     sourceKey: "source_artifact:statpearls-hypocarbia-2023-08-14"

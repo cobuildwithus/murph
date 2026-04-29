@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - safety_gout_stone_uric_acid
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -37,6 +38,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-011; priority: backbone; claimUse: safety-only; directness: clinical_supervised"
 sourceFindings:
+
   -
     findingId: finding:eau-urolithiasis-guidelines-2026-04-26-animal-protein-limit
     findingKind: safety

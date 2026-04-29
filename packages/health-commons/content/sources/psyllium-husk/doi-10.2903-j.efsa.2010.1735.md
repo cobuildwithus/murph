@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -56,6 +57,7 @@ studyDesign: "EFSA scientific opinion / regulatory claim assessment"
 modality: "Regulatory health-claim assessment"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.2903-j.efsa.2010.1735-identity-boundary"
     sourceKey: "source_artifact:doi-10.2903-j.efsa.2010.1735"

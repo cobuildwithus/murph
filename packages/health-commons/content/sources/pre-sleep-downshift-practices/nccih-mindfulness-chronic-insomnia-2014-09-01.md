@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -60,6 +61,7 @@ studyDesign: Government research-results digest of randomized trial
 modality: MBSR and mindfulness-based therapy for insomnia
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:nccih-mindfulness-chronic-insomnia-2014-09-01/government-digest-ong-2014
     sourceKey: source_artifact:nccih-mindfulness-chronic-insomnia-2014-09-01

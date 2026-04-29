@@ -8,17 +8,15 @@ summary: Cleveland Clinic health-library page describing refeeding syndrome, ele
 status: draft
 quality: usable
 aliases:
-  - Cleveland Clinic refeeding syndrome
-  - Refeeding syndrome risk factors
+- Cleveland Clinic refeeding syndrome
+- Refeeding syndrome risk factors
 categories:
-  - prolonged-fasting
+- prolonged-fasting
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: guideline
   title: 'Refeeding Syndrome: Symptoms, Treatment & Risk Factors'
@@ -44,48 +42,46 @@ researchEvidence:
 evidenceBucket: implementation, hydration, and refeed context
 whyItMatters: Refeeding is a key safety boundary for longer fasts and higher-risk participants, especially when electrolyte stores may be depleted.
 potentialMurphEndpoints:
-  - phosphate
-  - magnesium
-  - potassium
-  - thiamine status
-  - blood glucose
-  - vital signs
-  - fluid retention symptoms
+- phosphate
+- magnesium
+- potassium
+- thiamine status
+- blood glucose
+- vital signs
+- fluid retention symptoms
 protocolTakeaway: 'Use as safety-only context: a 24–72 hour protocol should include explicit refeeding caution, risk-screening, and medical-supervision boundaries for vulnerable users.'
 murphTakeaway: Participants should not treat the end of a fast as risk-free; refeeding symptoms and electrolyte context may matter as much as fasting-day signals.
 studyDesign: Clinical safety guidance / health-library review.
 modality: Refeeding risk after food deprivation or malnutrition.
 claimUse: safety-only
 sourceFindings:
-  -
-    findingId: finding:clevelandclinic-refeeding-syndrome-2022-06-06-electrolyte-shift-risk
-    findingKind: safety
-    population: People beginning to eat after malnutrition or nutrient deprivation.
-    exposure: Rapid refeeding after nutrient deprivation.
-    outcome: Electrolyte and fluid/glucose complications.
-    summary: The page describes refeeding syndrome as severe shifts related to electrolyte deficiencies when food is reintroduced too quickly, especially involving phosphorus, potassium, and magnesium, with potential effects on muscles, lungs, heart, and brain.
-    evidenceUse:
-      - safety
-    sourceKey: source_artifact:clevelandclinic-refeeding-syndrome-2022-06-06
-    extractedFromArtifactId: art_clevelandclinic_refeeding_syndrome_2022_06_06_source_record
-  -
-    findingId: finding:clevelandclinic-refeeding-syndrome-2022-06-06-monitoring-and-slow-refeed
-    findingKind: safety
-    population: People at risk of refeeding syndrome.
-    exposure: Medical refeeding process.
-    outcome: Monitoring and treatment approach.
-    summary: The page recommends pre-refeeding blood tests, electrolyte replacement before carbohydrate metabolism is stressed, continued daily electrolyte monitoring, and slowing refeeding or reducing carbohydrate delivery if symptoms occur.
-    evidenceUse:
-      - safety
-      - context
-    sourceKey: source_artifact:clevelandclinic-refeeding-syndrome-2022-06-06
-    extractedFromArtifactId: art_clevelandclinic_refeeding_syndrome_2022_06_06_source_record
+- findingId: finding:clevelandclinic-refeeding-syndrome-2022-06-06-electrolyte-shift-risk
+  findingKind: safety
+  population: People beginning to eat after malnutrition or nutrient deprivation.
+  exposure: Rapid refeeding after nutrient deprivation.
+  outcome: Electrolyte and fluid/glucose complications.
+  summary: The page describes refeeding syndrome as severe shifts related to electrolyte deficiencies when food is reintroduced too quickly, especially involving phosphorus, potassium, and magnesium, with potential effects on muscles, lungs, heart, and brain.
+  evidenceUse:
+  - safety
+  sourceKey: source_artifact:clevelandclinic-refeeding-syndrome-2022-06-06
+  extractedFromArtifactId: art_clevelandclinic_refeeding_syndrome_2022_06_06_source_record
+- findingId: finding:clevelandclinic-refeeding-syndrome-2022-06-06-monitoring-and-slow-refeed
+  findingKind: safety
+  population: People at risk of refeeding syndrome.
+  exposure: Medical refeeding process.
+  outcome: Monitoring and treatment approach.
+  summary: The page recommends pre-refeeding blood tests, electrolyte replacement before carbohydrate metabolism is stressed, continued daily electrolyte monitoring, and slowing refeeding or reducing carbohydrate delivery if symptoms occur.
+  evidenceUse:
+  - safety
+  - context
+  sourceKey: source_artifact:clevelandclinic-refeeding-syndrome-2022-06-06
+  extractedFromArtifactId: art_clevelandclinic_refeeding_syndrome_2022_06_06_source_record
 murphV1Priority: High
 pdfRightsStatus: unknown
 directnessToProtocol: general_guideline
 populationMismatch: High-risk malnutrition and prolonged deprivation populations may not match lower-risk healthy adults completing a short fast, but the mechanism is directly relevant to refeeding risk.
 limitations:
-  - Patient-facing guidance, not a fasting-specific controlled trial and not limited to 24–72 hour fasts.
+- Patient-facing guidance, not a fasting-specific controlled trial and not limited to 24–72 hour fasts.
 claimUseBoundary: safety-only
 ---
 

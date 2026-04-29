@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - population_strata_requirement
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -40,6 +41,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-008; priority: medium; claimUse: context-only; directness: adjacent_variant"
 sourceFindings:
+
   -
     findingId: finding:doi-10.1016-j.foodqual.2015.01.016-population-requirement-context
     sourceKey: source_artifact:doi-10.1016-j.foodqual.2015.01.016

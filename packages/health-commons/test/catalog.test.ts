@@ -55,7 +55,7 @@ describe("health commons catalog", () => {
     });
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:81b1501a47e2bd38b0207b9ad8c88fe99f43c180f8553b49ee8f97f5daa19de9",
+      "sha256:740bb2afa069d0c8ff886f52bfc05da1d7b5402ac79e747d33ff0fa605218cec",
     );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
@@ -73,20 +73,20 @@ describe("health commons catalog", () => {
     const redLightProtocol = catalog.entities.find(
       (entity) =>
         entity.key ===
-        "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+        "protocol_variant:evening-light-reduction/red-light-glasses-before-bed",
     );
     expect(redLightProtocol).toMatchObject({
       experimentOnboarding: {
         planDefaults: {
-          testPlanId: "sol-proxy-21d",
+          testPlanId: "sol-wiredness-21d",
         },
         startIntent: {
-          intentSummary: "Explore Red-Light Glasses Before Bed",
+          intentSummary: "Explore Red Light Glasses Before Bed",
         },
       },
       revision: {
         runSpecRevisionId:
-          "sha256:902fe245b3dd316be97381ac0bf6b95adff85edebae8908a4323db1887638fb4",
+          "sha256:dd6fa6e801290483298ef7232664108eeef7172c8c361d9e049428c08e1cd485",
       },
     });
 

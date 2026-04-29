@@ -25,6 +25,7 @@ categories:
 - wearable-measured
 - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-digital-sunset.jpeg
@@ -503,6 +504,7 @@ experimentOnboarding:
     intentSummary: Explore Digital Sunset
   contextReview:
     vaultChecks:
+
     -
       id: active_experiments
       label: Active experiments
@@ -543,6 +545,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
     -
       id: acute_mental_health_or_self_harm
       prompt: current suicidal thoughts, self-harm urges, psychosis, crisis-level distress, or rapidly worsening severe depression or anxiety
@@ -611,6 +614,7 @@ experimentOnboarding:
     - A positive screen does not always block the experiment, but high-risk sleep, mood, circadian, self-harm, or clinical-treatment positives require clinician guidance before an unsupervised start. Low-risk positives such as necessary availability or mild phone-separation discomfort may continue only after a documented exception or step-down plan.
     - A positive or uncertain screen is not a diagnosis. It tells Murph whether to soften, postpone, or route the unsupervised experiment.
   setupSlots:
+
   -
     id: bedtime_anchor
     label: Bedtime anchor
@@ -1030,6 +1034,7 @@ researchLandscape:
   primaryClaim: "A 30-minute minimum personal-screen curfew, with a larger 60-minute window when realistic, may help some users feel less wired or fall asleep more easily when baseline bedtime screen use is a real problem; the evidence does not establish one optimal cutoff duration."
   mainCaveat: "Do not promise universal sleep improvement, sleep-stage gains, HRV/RHR change, insomnia treatment, blue-light-filter equivalence, mental-health detox effects, or clean generalization from pediatric, athlete, registry-only, or bundled interventions."
   groups:
+
     -
       id: "direct-protocol-trials-and-registries"
       label: "Direct screen-curfew trials and registries"

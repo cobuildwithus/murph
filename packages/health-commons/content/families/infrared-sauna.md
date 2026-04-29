@@ -15,6 +15,7 @@ categories:
 familyKind: modality
 parentFamilyKey: experiment_family:sauna
 relations:
+
   -
     type: parent_family
     target: experiment_family:sauna

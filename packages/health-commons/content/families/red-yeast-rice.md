@@ -26,6 +26,7 @@ categories:
 familyKind: "intervention"
 canonicalMechanism: "monacolin_k_lovastatin_like_hmg_coa_reductase_inhibition_when_present"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -71,6 +72,7 @@ researchCoverage:
     measurement_context: 40
     general_guideline: 49
   bucketCounts:
+
     -
       label: "Adjacent combinations and special-population evidence"
       count: 55

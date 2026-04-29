@@ -17,6 +17,7 @@ categories:
   - symptom-log
   - manual-measurement
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
@@ -42,6 +43,7 @@ biomarker:
     minimumPoints: 1
     aggregation: median
   explainerCards:
+
     -
       title: What it is
       body: A structured log of hunger, headache, dizziness, faintness, palpitations, chest symptoms, confusion, mood, sleep disruption, hydration context, and refeed symptoms.

@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "External protocol safety warning for fainting/water risk; use
 studyDesign: "other"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:wimhofmethod-breathing-water-fainting-2026-04-26-wim-hof-water-fainting-warning"
     sourceKey: "source_artifact:wimhofmethod-breathing-water-fainting-2026-04-26"

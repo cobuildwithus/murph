@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - external_guideline_context
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -40,6 +41,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-016; priority: medium; claimUse: context-only; directness: general_guideline"
 sourceFindings:
+
   -
     findingId: finding:doi-10.17226-10490-adult-rda-context
     findingKind: context

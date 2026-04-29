@@ -14,6 +14,7 @@ categories:
   - "red-yeast-rice"
   - "adjacent-combination-evidence"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -59,6 +60,7 @@ studyDesign: "everyday-practice subgroup study"
 modality: "pragmatic RYR-based nutraceutical context"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.3233-s12349-010-0028-5-adjacent"
     sourceKey: "source_artifact:doi-10.3233-s12349-010-0028-5"

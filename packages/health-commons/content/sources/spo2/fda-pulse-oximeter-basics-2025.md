@@ -13,6 +13,7 @@ categories:
   - device-accuracy
   - home-monitoring
 relations:
+
   -
     type: measures
     target: biomarker:blood-oxygen-spo2

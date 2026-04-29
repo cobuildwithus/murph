@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Potentially useful HRV-biofeedback insomnia record missed by 
 studyDesign: "pilot_randomized_controlled_study"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.29052-ijehsr.v11.i3.2023.154-162-primary"
     sourceKey: "source_artifact:doi-10.29052-ijehsr.v11.i3.2023.154-162"

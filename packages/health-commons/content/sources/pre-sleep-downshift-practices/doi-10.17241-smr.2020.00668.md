@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -31,6 +32,7 @@ protocolTakeaway: "Directly bedtime-timed breathing study, but the 'deep/forced'
 studyDesign: "rct"
 claimUse: "supports-protocol"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.17241-smr.2020.00668-nfdbc-sleep-improvement"
     sourceKey: "source_artifact:doi-10.17241-smr.2020.00668"

@@ -77,6 +77,68 @@ describe("parseFrontmatterDocument", () => {
     });
   });
 
+  it("parses inline object entries in arrays when child fields follow", () => {
+    expect(
+      parseFrontmatterDocument(
+        [
+          "---",
+          "relations:",
+          "  - type: cites",
+          "    target: source_artifact:example",
+          "setupSlots:",
+          "  - id: water_temperature_c",
+          "    required: true",
+          "sourceKeys:",
+          "  - source_artifact:pmid-123",
+          "---",
+        ].join("\n"),
+      ).attributes,
+    ).toEqual({
+      relations: [
+        {
+          type: "cites",
+          target: "source_artifact:example",
+        },
+      ],
+      setupSlots: [
+        {
+          id: "water_temperature_c",
+          required: true,
+        },
+      ],
+      sourceKeys: ["source_artifact:pmid-123"],
+    });
+  });
+
+  it("parses JSON frontmatter blocks", () => {
+    expect(
+      parseFrontmatterDocument(
+        [
+          "---",
+          "{",
+          "  \"title\": \"JSON Source\",",
+          "  \"relations\": [{ \"type\": \"cites\", \"target\": \"source_artifact:example\" }]",
+          "}",
+          "---",
+          "Body",
+        ].join("\n"),
+        { bodyNormalization: "trim" },
+      ),
+    ).toEqual({
+      attributes: {
+        title: "JSON Source",
+        relations: [{ type: "cites", target: "source_artifact:example" }],
+      },
+      body: "Body",
+      rawFrontmatter: [
+        "{",
+        "  \"title\": \"JSON Source\",",
+        "  \"relations\": [{ \"type\": \"cites\", \"target\": \"source_artifact:example\" }]",
+        "}",
+      ].join("\n"),
+    });
+  });
+
   it("uses body normalization for both plain documents and tolerant fallbacks", () => {
     expect(
       parseFrontmatterDocument("  plain body  \n", {

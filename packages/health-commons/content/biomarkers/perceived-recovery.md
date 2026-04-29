@@ -12,6 +12,7 @@ categories:
   - self-report
   - manual-checkin
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:creatine-supplementation/creatine-monohydrate

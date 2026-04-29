@@ -13,6 +13,7 @@ aliases:
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
@@ -57,6 +58,7 @@ studyDesign: Consumer health education page with references to secondary evidenc
 modality: "Meditation for sleep, mindfulness, guided meditation, deep breathing, and sleep-habit pairing."
 claimUse: context-only
 sourceFindings:
+
   -
     findingId: finding:sleepfoundation-meditation-sleep-consumer-mechanism-and-practice
     sourceKey: source_artifact:sleepfoundation-meditation-sleep-2024-02-26

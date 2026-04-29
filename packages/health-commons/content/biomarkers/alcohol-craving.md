@@ -38,6 +38,7 @@ biomarker:
     label: Lower, less frequent, or more manageable urges are useful, but stable craving with successful safety and adherence can still be informative.
     nuance: Craving is subjective and context-sensitive. High or escalating urges are a support-planning signal, especially when paired with distress or unsafe substitution.
   privateMetricBindings:
+
   -
     source: browser_vault_metric
     domain: body_state

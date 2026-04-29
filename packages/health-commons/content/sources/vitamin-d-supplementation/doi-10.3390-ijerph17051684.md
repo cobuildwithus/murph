@@ -14,6 +14,7 @@ aliases:
 categories:
   - vitamin-d-supplementation
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation
@@ -46,6 +47,7 @@ researchEvidence:
     - Directness: adjacent_variant; claim use: context-only; priority: medium
     - Candidate row: candidate:adjacent-variants:041; shard: adjacent-variants. Adjacent route/vehicle variant; use only to separate daily oral supplement evidence from UVB/sunlight or fortified-food evidence. Candidate rationale: Frail-population RCT comparing UVB with oral supplementation; useful but population mismatch for general daily D3 protocol.
 sourceFindings:
+
   -
     findingId: finding:daily-vitamin-d3-supplementation:doi-10.3390-ijerph17051684:001
     sourceKey: source_artifact:doi-10.3390-ijerph17051684

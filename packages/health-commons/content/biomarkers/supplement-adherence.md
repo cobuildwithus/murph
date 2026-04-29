@@ -39,6 +39,7 @@ biomarker:
     minimumPoints: 5
     aggregation: mean
   explainerCards:
+
   -
     title: What it is
     body: The percentage of planned daily supplement doses taken during the run.
@@ -75,4 +76,4 @@ relations:
 
 # Supplement Adherence
 
-Supplement adherence is a process metric, not an efficacy outcome. It shows whether the planned exposure happened often enough for the selected HCP target to be interpretable. `[source_artifact:pmid-37717022; source_artifact:pmid-40826844; source_artifact:pmid-30609761]`
+Supplement adherence is a process metric, not an efficacy outcome. It shows whether the planned exposure happened often enough for the selected HCP target to be interpretable.

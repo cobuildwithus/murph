@@ -7,15 +7,17 @@ title: Comparison of the Effects of Photobiomodulation With LED Mask on Facial R
 summary: ClinicalTrials.gov registry record for NCT04911140, useful for trial arms, planned outcomes, and dose cross-checking for the Bragato/Motta facial LED mask publications.
 status: draft
 quality: usable
+aliases:
+- NCT04911140
+- ClinicalTrials.gov NCT04911140
+- Facial rejuvenation LED mask registry
 categories:
-  - skin-photobiomodulation
+- skin-photobiomodulation
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-  -
-    type: parent_family
-    target: experiment_family:skin-photobiomodulation
+- type: related_protocol
+  target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+- type: parent_family
+  target: experiment_family:skin-photobiomodulation
 source:
   kind: external_protocol
   title: Comparison of the Effects of Photobiomodulation With LED Mask on Facial Rejuvenation
@@ -34,12 +36,12 @@ researchEvidence:
 evidenceBucket: direct facial LED trial registry and dose cross-check
 whyItMatters: The registry anchors the Bragato/Motta facial rejuvenation trial, allowing dose, arm, and outcome verification against publications.
 potentialMurphEndpoints:
-  - Registered dose and schedule
-  - Registered outcome names
-  - Publication-registry agreement
-  - Completion/reporting status
+- Registered dose and schedule
+- Registered outcome names
+- Publication-registry agreement
+- Completion/reporting status
 protocolTakeaway: Use as context-only registry evidence for the 660 nm facial LED mask frequency trial; do not treat it as separate clinical efficacy evidence.
-murphTakeaway: Registry-style precommitment is a useful model for Murph experiments: define photos, scales, satisfaction, and safety logging before sessions start.
+murphTakeaway: 'Registry-style precommitment is a useful model for Murph experiments: define photos, scales, satisfaction, and safety logging before sessions start.'
 studyDesign: Trial registry record for a randomized facial PBM mask trial.
 modality: Registered photobiomodulation with LED facial mask; extracted sources indicate 660 nm red light, but registry dose details should be checked directly before dose claims.
 claimUse: context-only

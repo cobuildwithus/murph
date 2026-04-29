@@ -13,6 +13,7 @@ categories:
   - respiratory
   - clinical-context
 relations:
+
   -
     type: measures
     target: biomarker:blood-oxygen-spo2

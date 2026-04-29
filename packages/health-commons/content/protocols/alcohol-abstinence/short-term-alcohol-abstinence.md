@@ -26,6 +26,7 @@ categories:
 - safety-screened
 - murph-canonical
 media:
+
   -
     kind: image
     relativePath: design-assets/hero-short-term-alcohol-abstinence.jpeg
@@ -1035,6 +1036,7 @@ experimentOnboarding:
     intentSummary: Explore Short-Term Alcohol Abstinence
   contextReview:
     vaultChecks:
+
     -
       id: active_experiments
       label: Active experiments
@@ -1122,6 +1124,7 @@ experimentOnboarding:
     mode: ask_compact_then_expand_if_positive
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
+
     -
       id: alcohol_abstinence_safety_route
       prompt: 'Before choosing a duration, do any of these apply: under 18; current or past withdrawal symptoms when cutting down, such as shakes/tremor, sweats, nausea/vomiting, severe anxiety, palpitations/racing or irregular heartbeat, or insomnia; needing alcohol to prevent symptoms; prior withdrawal seizure, delirium tremens, hallucinations, or confusion; high or uncertain daily intake; possible dependence or loss of control; pregnancy, trying to conceive, or breastfeeding questions; known/suspected liver disease or abnormal liver tests; seizure disorder or major cardiovascular/medical instability; active AUD treatment, recent detox, or AUD medication questions; benzodiazepine, opioid, CNS depressant, sedative, or sleep-medicine use/taper; complex medication list; unstable depression, mania, psychosis, suicidal/self-harm thoughts, or co-occurring substance use?'
@@ -1133,6 +1136,7 @@ experimentOnboarding:
     - Safety routing comes before duration choice. Positive or uncertain answers should route to clinician-guided care, not a self-guided alcohol-free challenge.
     - AUDIT/AUDIT-C-style drinking-risk questions can support context but are not consumer withdrawal-risk clearance.
   setupSlots:
+
   -
     id: safety_route_disposition
     label: Safety route
@@ -1453,6 +1457,7 @@ researchLandscape:
   primaryClaim: Appropriately screened adults can test whether a short alcohol-free interval changes adherence, sleep/recovery trends, cravings, mood, social friction, blood pressure, or optional labs enough to inform their next drinking pattern.
   mainCaveat: This is not detox, AUD treatment, medication advice, pregnancy counseling, liver-disease treatment, or proof that abstinence automatically improves biomarkers or resets drinking behavior.
   groups:
+
   -
     id: direct_30_day_abstinence_challenge_feasibility
     label: Direct 30-day challenge feasibility

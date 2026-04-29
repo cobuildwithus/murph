@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Ongoing/recent registry record explicitly tests 6 breaths/min
 studyDesign: "rct"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:clinicaltrials-nct06914167-registered-lavender-slow-breathing"
     sourceKey: "source_artifact:clinicaltrials-nct06914167-2026-04-26"

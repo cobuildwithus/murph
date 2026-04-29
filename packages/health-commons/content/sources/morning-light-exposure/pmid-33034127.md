@@ -13,6 +13,7 @@ aliases:
 categories:
   - "morning-light-exposure"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"

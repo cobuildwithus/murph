@@ -10,6 +10,7 @@ quality: usable
 categories:
   - pre-sleep-downshift-practices
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
@@ -30,6 +31,7 @@ protocolTakeaway: "Professional clinical reference for dyspnea/tachypnea and exc
 studyDesign: "guideline"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:msdmanuals-hyperventilation-syndrome-2026-04-26-clinical-exclusion-boundary"
     sourceKey: "source_artifact:msdmanuals-hyperventilation-syndrome-2026-04-26"

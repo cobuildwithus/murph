@@ -12,6 +12,7 @@ categories:
   - protein-floor
   - safety_digestive_liver_pregnancy_tolerance
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
@@ -37,6 +38,7 @@ researchEvidence:
   notes:
     - "Canonical ledger batch: batch-012; priority: backbone; claimUse: safety-only; directness: clinical_supervised"
 sourceFindings:
+
   -
     findingId: finding:who-high-protein-pregnancy-2023-08-09-not-recommended-undernourished-pregnancy
     sourceKey: source_artifact:who-high-protein-pregnancy-2023-08-09

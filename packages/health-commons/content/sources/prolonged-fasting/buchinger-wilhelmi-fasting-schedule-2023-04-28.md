@@ -8,17 +8,15 @@ summary: Buchinger Wilhelmi clinic page describing a medically supervised therap
 status: draft
 quality: usable
 aliases:
-  - Buchinger Wilhelmi fasting schedule
-  - Fasting schedule at Buchinger Wilhelmi clinics
+- Buchinger Wilhelmi fasting schedule
+- Fasting schedule at Buchinger Wilhelmi clinics
 categories:
-  - prolonged-fasting
+- prolonged-fasting
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
-  -
-    type: parent_family
-    target: experiment_family:prolonged-fasting
+- type: related_protocol
+  target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
+- type: parent_family
+  target: experiment_family:prolonged-fasting
 source:
   kind: external_protocol
   title: Our fasting schedule
@@ -44,49 +42,47 @@ researchEvidence:
 evidenceBucket: implementation, hydration, and refeed context
 whyItMatters: 'This is not efficacy evidence, but it gives a concrete implementation boundary: the clinic program surrounds fasting days with preparation, monitoring, and refeeding rather than treating fasting as an isolated calorie-abstinence block.'
 potentialMurphEndpoints:
-  - morning blood pressure
-  - pulse
-  - body weight
-  - blood glucose
-  - symptoms during fast
-  - refeeding tolerance
+- morning blood pressure
+- pulse
+- body weight
+- blood glucose
+- symptoms during fast
+- refeeding tolerance
 protocolTakeaway: 'Use as clinical-supervised implementation context only: do not generalize Buchinger clinic structure into a claim that unsupervised 24–72 hour fasting is safe or effective.'
 murphTakeaway: A conservative Murph experiment should separate fasting exposure from preparation, daily monitoring, and refeeding signals.
 studyDesign: External clinic protocol / implementation guidance.
 modality: Buchinger-style modified therapeutic fasting with clinic supervision.
 claimUse: context-only
 sourceFindings:
-  -
-    findingId: finding:buchinger-wilhelmi-fasting-schedule-2023-04-28-clinic-schedule-monitoring-refeed
-    findingKind: context
-    population: Buchinger Wilhelmi fasting-clinic guests.
-    exposure: Shortest described clinic fasting program with digestive rest, fasting days, fast-breaking, and gradual food reintroduction.
-    outcome: Implementation sequence and monitoring requirements.
-    summary: The clinic describes a shortest ten-day program consisting of a digestive rest day, about six fasting days including fast-breaking, and three days of gradual reintroduction, with typical daily checks of blood pressure, pulse, weight, blood glucose, and symptoms.
-    evidenceUse:
-      - context
-      - safety
-      - adjacent_variant
-    sourceKey: source_artifact:buchinger-wilhelmi-fasting-schedule-2023-04-28
-    extractedFromArtifactId: art_buchinger_wilhelmi_fasting_schedule_2023_04_28_source_record
-  -
-    findingId: finding:buchinger-wilhelmi-fasting-schedule-2023-04-28-water-fasting-supervision-boundary
-    findingKind: safety
-    population: People considering at-home long fasting or water fasting.
-    exposure: At-home fasting longer than five days or water-only/zero-diet fasting.
-    outcome: Supervision boundary.
-    summary: The page advises against fasting longer than five days at home and states that a zero diet or water fasting should not be done without medical supervision.
-    evidenceUse:
-      - safety
-      - context
-    sourceKey: source_artifact:buchinger-wilhelmi-fasting-schedule-2023-04-28
-    extractedFromArtifactId: art_buchinger_wilhelmi_fasting_schedule_2023_04_28_source_record
+- findingId: finding:buchinger-wilhelmi-fasting-schedule-2023-04-28-clinic-schedule-monitoring-refeed
+  findingKind: context
+  population: Buchinger Wilhelmi fasting-clinic guests.
+  exposure: Shortest described clinic fasting program with digestive rest, fasting days, fast-breaking, and gradual food reintroduction.
+  outcome: Implementation sequence and monitoring requirements.
+  summary: The clinic describes a shortest ten-day program consisting of a digestive rest day, about six fasting days including fast-breaking, and three days of gradual reintroduction, with typical daily checks of blood pressure, pulse, weight, blood glucose, and symptoms.
+  evidenceUse:
+  - context
+  - safety
+  - adjacent_variant
+  sourceKey: source_artifact:buchinger-wilhelmi-fasting-schedule-2023-04-28
+  extractedFromArtifactId: art_buchinger_wilhelmi_fasting_schedule_2023_04_28_source_record
+- findingId: finding:buchinger-wilhelmi-fasting-schedule-2023-04-28-water-fasting-supervision-boundary
+  findingKind: safety
+  population: People considering at-home long fasting or water fasting.
+  exposure: At-home fasting longer than five days or water-only/zero-diet fasting.
+  outcome: Supervision boundary.
+  summary: The page advises against fasting longer than five days at home and states that a zero diet or water fasting should not be done without medical supervision.
+  evidenceUse:
+  - safety
+  - context
+  sourceKey: source_artifact:buchinger-wilhelmi-fasting-schedule-2023-04-28
+  extractedFromArtifactId: art_buchinger_wilhelmi_fasting_schedule_2023_04_28_source_record
 murphV1Priority: High
 pdfRightsStatus: unknown
 directnessToProtocol: clinical_supervised
 populationMismatch: Clinic guests and people considering at-home fasting do not necessarily match healthy self-experimenters attempting a 24–72 hour protocol.
 limitations:
-  - Clinic webpage; no randomized comparator, no extractable participant count, and claims reflect a commercial clinic protocol.
+- Clinic webpage; no randomized comparator, no extractable participant count, and claims reflect a commercial clinic protocol.
 claimUseBoundary: context-only
 ---
 

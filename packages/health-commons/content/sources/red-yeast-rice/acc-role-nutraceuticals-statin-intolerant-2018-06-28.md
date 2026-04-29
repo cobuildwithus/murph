@@ -13,6 +13,7 @@ aliases:
 categories:
   - "red-yeast-rice"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol"
@@ -56,6 +57,7 @@ modality: "Red yeast rice as a nutraceutical option in statin-intolerant care"
 directness: "same_mechanism"
 claimUse: "safety-only"
 sourceFindings:
+
   -
     findingId: "finding:acc-nutraceuticals-statin-intolerant-ryr-context"
     findingKind: "context"

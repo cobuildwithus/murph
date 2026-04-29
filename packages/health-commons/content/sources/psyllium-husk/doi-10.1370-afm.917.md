@@ -13,6 +13,7 @@ aliases:
 categories:
   - "psyllium-husk"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
@@ -58,6 +59,7 @@ modality: "barley-derived beta-glucan / soluble fiber"
 directness: "adjacent_variant"
 claimUse: "context-only"
 sourceFindings:
+
   -
     findingId: "finding:doi-10.1370-afm.917-barley-beta-glucan-lipid-lowering"
     sourceKey: "source_artifact:doi-10.1370-afm.917"

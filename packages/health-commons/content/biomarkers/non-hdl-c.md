@@ -35,6 +35,7 @@ biomarker:
     minimumPoints: 1
     aggregation: "mean"
   explainerCards:
+
     -
       title: "What it is"
       body: "Total cholesterol minus HDL-C; a secondary lab endpoint that captures cholesterol carried by atherogenic lipoproteins."
@@ -55,6 +56,7 @@ biomarker:
       - "illness"
       - "laboratory method changes"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"

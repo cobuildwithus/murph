@@ -17,6 +17,7 @@ categories:
   - "sleep-regularity"
   - "self-experiment-metric"
 relations:
+
   -
     type: "related_protocol"
     target: "protocol_variant:consistent-wake-time/consistent-wake-time"
@@ -71,6 +72,7 @@ biomarker:
       - "caffeine"
       - "light exposure"
   privateMetricBindings:
+
     -
       source: "browser_vault_metric"
       domain: "sleep"
