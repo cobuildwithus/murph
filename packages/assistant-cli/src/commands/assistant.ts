@@ -71,6 +71,10 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
+import {
+  assertLocalAssistantLinqIMessageChannelSupported,
+  normalizeAssistantLocalChannel,
+} from '../assistant/local-channel-guard.js'
 
 const assistantIdentityRoutingDescription =
   'Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.'
@@ -110,8 +114,6 @@ const assistantLocalChannelOptionSchema = z
     'Supported local assistant channels: telegram, email.',
   )
 
-const LOCAL_ASSISTANT_LINQ_ERROR =
-  'Local assistant iMessage routes are no longer supported. Hosted/shared assistant-engine iMessage support remains available.'
 const VAULT_METADATA_FILE = 'vault.json'
 
 function normalizeAssistantChannelOption(
@@ -121,25 +123,14 @@ function normalizeAssistantChannelOption(
     return undefined
   }
 
-  const normalized = value.trim().toLowerCase()
-  const alias = normalizeAssistantChannelAlias(normalized)
-  if (alias) {
-    return alias
+  const normalized = normalizeAssistantLocalChannel(value)
+  if (!normalized) {
+    return undefined
   }
 
   const parsed = assistantChannelNameSchema.safeParse(normalized)
 
   return parsed.success ? parsed.data : normalized
-}
-
-function normalizeAssistantChannelAlias(value: string): string | null {
-  switch (value) {
-    case 'imessage':
-    case 'i-message':
-      return 'linq'
-    default:
-      return null
-  }
 }
 
 function optionalNonEmptyStringOption(description: string) {
@@ -224,7 +215,7 @@ function assertAssistantSelfDeliveryTargetInput(input: {
   participant?: string
   thread?: string
 }) {
-  assertLocalAssistantChannelSupported(input.channel)
+  assertLocalAssistantLinqIMessageChannelSupported(input.channel)
 
   if (!input.deliveryTarget && !input.participant && !input.thread) {
     throw new VaultCliError(
@@ -243,22 +234,11 @@ function assertAssistantSelfDeliveryTargetInput(input: {
   assertAssistantDeliveryTargetForChannel(input)
 }
 
-function assertLocalAssistantChannelSupported(channel?: string | null): void {
-  if (normalizeAssistantChannelOption(channel ?? undefined) !== 'linq') {
-    return
-  }
-
-  throw new VaultCliError(
-    'invalid_option',
-    LOCAL_ASSISTANT_LINQ_ERROR,
-  )
-}
-
 function assertAssistantDeliveryTargetForChannel(input: {
   channel?: string
   deliveryTarget?: string
 }): void {
-  assertLocalAssistantChannelSupported(input.channel)
+  assertLocalAssistantLinqIMessageChannelSupported(input.channel)
   assertAssistantDeliveryTargetLooksIntentional(input.deliveryTarget)
 
   if (
