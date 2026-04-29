@@ -206,6 +206,38 @@ works locally without a second terminal.
   stdout pipe, stderr pipe, and output-tail buffers, so operator logs never
   contain the live `whsec_...`.
 
+#### Full local test-mode checkout
+
+The local hosted signup flow uses real Stripe Checkout against Stripe's test
+environment; it does not use an in-process fake checkout service. To complete
+the flow without moving real money:
+
+1. Configure test-mode Stripe values in Vercel Development env, shell env, or
+   repo-local env:
+   - `STRIPE_SECRET_KEY=sk_test_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL=price_...`
+2. Install and log in to the Stripe CLI once with `stripe login`.
+3. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
+   orchestrator starts `stripe listen` and injects the captured
+   `STRIPE_WEBHOOK_SECRET` into the web process.
+4. Use a real hosted onboarding invite and continue to checkout. The dev-only
+   `/join/<inviteCode>?preview=checkout` URL is only a UI preview; pressing its
+   checkout button still calls the real checkout API.
+5. On the Stripe-hosted Checkout page, use Stripe's interactive test card
+   `4242 4242 4242 4242` with any future expiration date and any three-digit
+   CVC. Stripe test cards are valid only in test environments.
+
+Stripe's docs for this contract are:
+
+- Test environments do not make actual charges or move real money:
+  https://docs.stripe.com/testing-use-cases
+- Interactive test cards require test API keys:
+  https://docs.stripe.com/testing
+- `stripe listen --forward-to ...` forwards sandbox events locally and prints
+  the signing secret used for webhook signature verification:
+  https://docs.stripe.com/stripe-cli/use-cli
+
 ## Hosted public origin and Cloudflare callback auth
 
 This section is the operator-facing contract for hosted public origin and the
