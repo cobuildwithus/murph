@@ -91,6 +91,11 @@ export async function runHostedWorkspaceAssistantPhase(
     userEnv: input.runtime.userEnv,
     wake,
   });
+  const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
+  const issueDeviceConnectLink = resolveHostedWorkspaceIssueDeviceConnectLink({
+    deviceConnectProviders,
+    runtime: input.runtime,
+  });
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget({
     hosted: {
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
@@ -99,7 +104,8 @@ export async function runHostedWorkspaceAssistantPhase(
         signal: typingAbortController.signal,
         userEnv: input.runtime.userEnv,
       }),
-      deviceConnectProviders: resolveHostedWorkspaceDeviceConnectProviders(input.runtime),
+      deviceConnectProviders,
+      ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
       memberId: input.request.userId,
       ...(stripeCustomerId ? { stripeCustomerId } : {}),
       userEnvKeys: Object.keys(input.runtime.userEnv),
@@ -674,6 +680,18 @@ function resolveHostedWorkspaceDeviceConnectProviders(
     label: formatDeviceSyncProviderLabel(provider),
     provider,
   }));
+}
+
+function resolveHostedWorkspaceIssueDeviceConnectLink(input: {
+  deviceConnectProviders: readonly { label: string; provider: string }[];
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+}): NonNullable<AssistantExecutionContext["hosted"]>["issueDeviceConnectLink"] | undefined {
+  const deviceSyncPort = input.runtime.platform.deviceSyncPort ?? null;
+  if (!deviceSyncPort || input.deviceConnectProviders.length === 0) {
+    return undefined;
+  }
+
+  return ({ provider }) => deviceSyncPort.createConnectLink({ provider });
 }
 
 function assistantMetricsProgressed(
