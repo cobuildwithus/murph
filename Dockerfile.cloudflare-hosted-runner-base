@@ -71,6 +71,11 @@ RUN apt-get update \
   && chown -R runner:runner /home/runner \
   && rm -rf /var/lib/apt/lists/*
 
+RUN printf '%s\n' \
+    'export PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
+    > /etc/profile.d/murph-runner-path.sh \
+  && chmod 0644 /etc/profile.d/murph-runner-path.sh
+
 # The hosted assistant harness is Codex app-server itself; repo-local helpers
 # only coordinate the mailbox/runtime around this pinned CLI.
 RUN npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}" \

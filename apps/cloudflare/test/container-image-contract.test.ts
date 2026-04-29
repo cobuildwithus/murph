@@ -378,6 +378,10 @@ describe("hosted runner container image contract", () => {
     );
     expect(baseDockerfile).toContain("npm cache clean --force");
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    expect(baseDockerfile).toContain("/etc/profile.d/murph-runner-path.sh");
+    expect(baseDockerfile).toContain(
+      "'export PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'",
+    );
     expect(baseDockerfile).toContain("WHISPER_COMMAND=/usr/local/bin/whisper-cli");
     expect(baseDockerfile).toContain(
       "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
@@ -441,6 +445,10 @@ describe("hosted runner container image contract", () => {
       new URL("../scripts/runner-docker-smoke.ts", import.meta.url),
       "utf8",
     );
+    const hostedRunnerSmokeChild = await readFile(
+      new URL("../src/hosted-runner-smoke-child.ts", import.meta.url),
+      "utf8",
+    );
     const rendered = buildHostedWranglerDeployConfig(createDeployEnvironment());
     const [container] = rendered.containers as Array<Record<string, unknown>>;
 
@@ -479,6 +487,11 @@ describe("hosted runner container image contract", () => {
       "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-smoke -t murph-cloudflare-runner .",
     );
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
+    expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
+    expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphHelpBytes=");
+    expect(hostedRunnerSmokeChild).toContain(
+      '"/bin/sh",\n          "-lc",',
+    );
     expect(packageJson.scripts?.["test:e2e:local"]).toBe(
       "pnpm test:e2e:hosted-local && pnpm test:e2e:workers:local",
     );
