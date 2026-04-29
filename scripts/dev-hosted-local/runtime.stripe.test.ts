@@ -121,7 +121,7 @@ describe("spawnStripeListenerWithSecretCapture", () => {
     const stderrTarget = new CapturingWritable();
 
     const result = await runtime.spawnStripeListenerWithSecretCapture({
-      args: ["listen", "--forward-to", "http://127.0.0.1:3000/api/hosted-onboarding/stripe/webhook"],
+      args: ["listen", "--forward-to", "http://localhost:3000/api/hosted-onboarding/stripe/webhook"],
       command: "stripe",
       env: { PATH: process.env.PATH ?? "" },
       pipeOutput: true,
@@ -192,7 +192,7 @@ describe("spawnStripeListenerWithSecretCapture", () => {
 
   it("times out cleanly when no whsec ever appears", async () => {
     const { runtime } = await loadRuntimeWithStripeChild({
-      stdoutFirstLine: "> Listening for events on http://127.0.0.1:3000 (no secret yet)\n",
+      stdoutFirstLine: "> Listening for events on http://localhost:3000 (no secret yet)\n",
     });
 
     await expect(
@@ -272,4 +272,3 @@ describe("spawnStripeListenerWithSecretCapture", () => {
     expect(buffered).toContain("[redacted whsec]");
   });
 });
-

@@ -34,7 +34,7 @@ const defaultConfig: HostedLocalDevConfig = {
   skipWeb: false,
   skipVercelPull: false,
   useVercelDatabaseUrl: false,
-  webHost: "127.0.0.1",
+  webHost: "localhost",
   webPort: 3000,
   workerHost: "127.0.0.1",
   workerPersistDir: ".wrangler/state/dev-root",
@@ -135,11 +135,11 @@ vi.mock("./environment.ts", () => ({
     return `sha256-${hex.padEnd(24, "0").slice(0, 24)}`;
   }),
   buildHostedLocalDevOverrides: vi.fn(() => ({
-    HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+    HOSTED_WEB_BASE_URL: "http://localhost:3000",
   })),
-  buildWranglerEnvFileText: vi.fn(() => 'HOSTED_WEB_BASE_URL="http://127.0.0.1:3000"'),
+  buildWranglerEnvFileText: vi.fn(() => 'HOSTED_WEB_BASE_URL="http://localhost:3000"'),
   buildWranglerLocalDevConfig: vi.fn(() => ({ name: "murph-hosted" })),
-  buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000"]),
+  buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://localhost:3000"]),
   normalizeLocalDatabaseUrl: vi.fn((value: string | undefined) => value ?? "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"),
   resolveHostedLocalDatabaseUrl: vi.fn((input: {
     databaseUrlOverride?: string | null;
@@ -260,7 +260,7 @@ describe("hosted local dev stack", () => {
         "--env-file",
         "/tmp/murph-dev-env-test/cloudflare-worker.env",
         "--var",
-        "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000",
+        "HOSTED_WEB_BASE_URL:http://localhost:3000",
       ],
       expect.objectContaining({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
@@ -318,7 +318,7 @@ describe("hosted local dev stack", () => {
       protocol: "http",
     });
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(2, {
-      host: "127.0.0.1",
+      host: "localhost",
       label: "web",
       path: "/api/internal/health",
       port: 3000,
@@ -842,7 +842,7 @@ describe("hosted local dev stack", () => {
             args: [
               "listen",
               "--forward-to",
-              "http://127.0.0.1:3000/api/hosted-onboarding/stripe/webhook",
+              "http://localhost:3000/api/hosted-onboarding/stripe/webhook",
             ],
             command: "stripe",
             timeoutMs: 15_000,

@@ -75,7 +75,7 @@ export function printHelp(): void {
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",
       `  MURPH_DEV_STRIPE_ENV_FILE=${DEFAULT_STRIPE_ENV_FILE}  Load local Stripe test checkout env after Vercel env pull`,
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",
-      "  MURPH_DEV_WEB_HOST=127.0.0.1        Hosted web listen host",
+      "  MURPH_DEV_WEB_HOST=localhost        Hosted web listen host",
       "  MURPH_DEV_WEB_PORT=3000             Hosted web listen port",
       "  MURPH_DEV_WORKER_HOST=127.0.0.1     Cloudflare worker listen host",
       "  MURPH_DEV_WORKER_PORT=8787          Cloudflare worker listen port",

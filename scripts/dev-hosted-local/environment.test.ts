@@ -28,7 +28,7 @@ const localConfig: HostedLocalDevConfig = {
   skipStripeListen: false,
   skipVercelPull: false,
   useVercelDatabaseUrl: false,
-  webHost: "127.0.0.1",
+  webHost: "localhost",
   webPort: 3000,
   workerHost: "127.0.0.1",
   workerPersistDir: ".wrangler/state/dev-root",
@@ -165,7 +165,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBe("http://127.0.0.1:8787");
     expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("192.168.65.2");
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
-    expect(merged.HOSTED_WEB_BASE_URL).toBe("http://127.0.0.1:3000");
+    expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
   });
 
   it("lets current env overrides replace stale existing optional worker vars", () => {
@@ -225,13 +225,13 @@ describe("buildHostedLocalDevOverrides", () => {
 
     expect(overrides).toMatchObject({
       HOSTED_EXECUTION_DISPATCH_URL: "http://127.0.0.1:8787",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://127.0.0.1:3000",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
       HOSTED_WAKE_ENCRYPTION_KEY: "worker-wake-key",
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-worker-wake-key\"}",
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "worker:v2",
-      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+      HOSTED_WEB_BASE_URL: "http://localhost:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
-      VERCEL_PROJECT_PRODUCTION_URL: "127.0.0.1:3000",
+      VERCEL_PROJECT_PRODUCTION_URL: "localhost:3000",
     });
     expect(JSON.parse(overrides.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK ?? "")).toEqual({
       crv: "P-256",
@@ -386,7 +386,7 @@ describe("buildWranglerVarArgs", () => {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         ALLOW_LOCAL_INTERNAL_PROXY: "true",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
-        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
         LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
@@ -396,7 +396,7 @@ describe("buildWranglerVarArgs", () => {
       }),
     ).toEqual([
       "--var",
-      "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000",
+      "HOSTED_WEB_BASE_URL:http://localhost:3000",
       "--var",
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
       "--var",
@@ -423,7 +423,7 @@ describe("buildWranglerEnvFileText", () => {
       buildWranglerEnvFileText({
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
-        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
     ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,hosted-email,linq,mapbox,telegram"');
@@ -431,7 +431,7 @@ describe("buildWranglerEnvFileText", () => {
       buildWranglerEnvFileText({
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
-        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
     ).toContain('HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS="60000"');
@@ -439,7 +439,7 @@ describe("buildWranglerEnvFileText", () => {
       buildWranglerEnvFileText({
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
-        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
     ).toContain('LINQ_API_TOKEN="linq-secret"');
