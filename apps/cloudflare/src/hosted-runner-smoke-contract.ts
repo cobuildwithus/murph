@@ -12,6 +12,8 @@ export interface HostedRunnerSmokeResult {
   codexAppServerHelpBytes: number;
   codexCommandDiscovered: boolean;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
+  codexHostedShellMurphHelpBytes: number;
+  codexHostedShellVaultCliLlmsBytes: number;
   codexVersion: string;
   healthCommonsCatalogHash: string;
   healthCommonsCliProtocolListBytes: number;
@@ -79,6 +81,14 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     codexHostedConfigShellEnvironmentPolicyAllowlisted: readBoolean(
       record.codexHostedConfigShellEnvironmentPolicyAllowlisted,
       "Hosted runner smoke result.codexHostedConfigShellEnvironmentPolicyAllowlisted",
+    ),
+    codexHostedShellMurphHelpBytes: readPositiveFiniteNumber(
+      record.codexHostedShellMurphHelpBytes,
+      "Hosted runner smoke result.codexHostedShellMurphHelpBytes",
+    ),
+    codexHostedShellVaultCliLlmsBytes: readPositiveFiniteNumber(
+      record.codexHostedShellVaultCliLlmsBytes,
+      "Hosted runner smoke result.codexHostedShellVaultCliLlmsBytes",
     ),
     codexVersion: readNonEmptyString(
       record.codexVersion,
@@ -174,6 +184,15 @@ function readFiniteNumber(value: unknown, label: string): number {
   }
 
   return value;
+}
+
+function readPositiveFiniteNumber(value: unknown, label: string): number {
+  const parsed = readFiniteNumber(value, label);
+  if (parsed <= 0) {
+    throw new TypeError(`${label} must be a positive finite number.`);
+  }
+
+  return parsed;
 }
 
 function readBoolean(value: unknown, label: string): boolean {

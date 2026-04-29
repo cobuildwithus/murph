@@ -11,6 +11,8 @@ const validHostedRunnerSmokeResult = {
   codexAppServerHelpBytes: 2048,
   codexCommandDiscovered: true,
   codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
+  codexHostedShellMurphHelpBytes: 1536,
+  codexHostedShellVaultCliLlmsBytes: 4096,
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
   healthCommonsCliProtocolListBytes: 768,
@@ -69,6 +71,8 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexAppServerHelpBytes: 2048,
       codexCommandDiscovered: true,
       codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
+      codexHostedShellMurphHelpBytes: 1536,
+      codexHostedShellVaultCliLlmsBytes: 4096,
       codexVersion: "codex-cli 0.125.0",
       murphCommandDiscovered: true,
       normalizedTranscriptSha256: "normalized-hash",
@@ -131,6 +135,20 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexAppServerHelpBytes: Number.NaN,
     })).toThrow(
       "Hosted runner smoke result.codexAppServerHelpBytes must be a finite number.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexHostedShellVaultCliLlmsBytes: Number.NaN,
+    })).toThrow(
+      "Hosted runner smoke result.codexHostedShellVaultCliLlmsBytes must be a finite number.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexHostedShellMurphHelpBytes: 0,
+    })).toThrow(
+      "Hosted runner smoke result.codexHostedShellMurphHelpBytes must be a positive finite number.",
     );
   });
 
