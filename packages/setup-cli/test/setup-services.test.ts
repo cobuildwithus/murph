@@ -326,12 +326,12 @@ test('setup wizard initial channels prefer persisted state and only default when
     await writeFile(
       automationStatePath,
       JSON.stringify({
-        version: 1,
-        inboxScanCursor: null,
-        autoReply: [
-          { channel: 'telegram', cursor: null },
-          { channel: 'email', cursor: null },
-          { channel: 'unknown', cursor: null },
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [
+          { channel: 'telegram', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
+          { channel: 'email', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
+          { channel: 'unknown', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
         ],
         updatedAt: '2026-04-08T00:00:00.000Z',
       }),

@@ -823,12 +823,10 @@ test.sequential('source add --enableAutoReply updates assistant automation state
     assert.equal(added.autoReplyEnabled, true)
 
     const automationState = await readAssistantAutomationState(fixture.vaultRoot)
-    assert.deepEqual(automationState.autoReply, [
-      {
-        channel: 'telegram',
-        cursor: null,
-      },
-    ])
+    assert.equal(automationState.autoReply.length, 1)
+    assert.equal(automationState.autoReply[0]?.channel, 'telegram')
+    assert.equal(automationState.autoReply[0]?.eligibleAfter, null)
+    assert.match(automationState.autoReply[0]?.enabledAt ?? '', /^\d{4}-\d{2}-\d{2}T/u)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

@@ -17,6 +17,10 @@ import {
   type PersistedCapture,
   openInboxRuntime,
 } from "@murphai/inboxd";
+import {
+  createConfiguredParserRegistry,
+  createInboxParserService,
+} from "@murphai/parsers";
 
 import {
   buildHostedTelegramChannelEnv,
@@ -63,10 +67,15 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       vaultRoot: input.vaultRoot,
     });
     const persistedCapture = await pipeline.processCapture(capture);
+    const parserProcessed = await drainHostedConversationParsers({
+      captureId: persistedCapture.captureId,
+      runtime,
+      vaultRoot: input.vaultRoot,
+    });
 
     const metrics: HostedConversationWakeMetrics = {
       nextWakeAt: null,
-      parserProcessed: 0,
+      parserProcessed,
     };
     return {
       capture: persistedCapture,
@@ -78,6 +87,30 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     } else {
       runtime.close();
     }
+  }
+}
+
+async function drainHostedConversationParsers(input: {
+  captureId: string;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+  vaultRoot: string;
+}): Promise<number> {
+  try {
+    const parserConfig = await createConfiguredParserRegistry({
+      vaultRoot: input.vaultRoot,
+    });
+    const parserService = createInboxParserService({
+      ffmpeg: parserConfig.ffmpeg,
+      registry: parserConfig.registry,
+      runtime: input.runtime,
+      vaultRoot: input.vaultRoot,
+    });
+    const results = await parserService.drain({
+      captureId: input.captureId,
+    });
+    return results.length;
+  } catch {
+    return 0;
   }
 }
 

@@ -542,11 +542,13 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
     autoReply: [
       {
         channel: 'linq',
-        cursor: null,
+        enabledAt: '2026-04-23T00:00:00.000Z',
+        eligibleAfter: null,
       },
       {
         channel: 'telegram',
-        cursor: null,
+        enabledAt: '2026-04-23T00:00:00.000Z',
+        eligibleAfter: null,
       },
     ],
     inboxScanCursor: null,
@@ -601,7 +603,8 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
     autoReply: [
       {
         channel: 'telegram',
-        cursor: null,
+        enabledAt: '2026-04-23T00:00:00.000Z',
+        eligibleAfter: null,
       },
     ],
     inboxScanCursor: null,

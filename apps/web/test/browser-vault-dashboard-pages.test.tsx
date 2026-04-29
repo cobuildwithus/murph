@@ -137,7 +137,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault is una
 
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Hyperbaric Oxygen Therapy/);
-  assert.match(markup, /Red-Light Glasses Before Bed/);
+  assert.match(markup, /Red Light Glasses Before Bed/);
   const featuredMarkup = markup.split("Browse all").at(0) ?? markup;
   assert.match(featuredMarkup, /Finnish Dry Sauna/);
   assert.match(featuredMarkup, /Norwegian 4x4/);
@@ -161,7 +161,7 @@ test("ExperimentsPage merges protocol-shaped private runs into the matching publ
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
   assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /Started Apr 18, 2026 · 14 days · 93 studies/);
+  assert.match(markup, /Started Apr 18, 2026 · 14 days · 150 studies/);
   assert.doesNotMatch(markup, /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/);
   assert.doesNotMatch(markup, /Morning walk/);
 });
@@ -200,7 +200,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
   assert.match(markup, /The latest refresh failed\./);
   assert.match(markup, /The public experiment library is still available below\./);
   assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /Red-Light Glasses Before Bed/);
+  assert.match(markup, /Red Light Glasses Before Bed/);
 });
 
 test("OverviewPage preserves stale data when a refresh fails", () => {

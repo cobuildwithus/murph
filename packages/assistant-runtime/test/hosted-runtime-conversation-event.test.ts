@@ -291,7 +291,7 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(pipelineClose).toHaveBeenCalledTimes(3);
     expect(linqMetrics).toEqual({
       nextWakeAt: null,
-      parserProcessed: 0,
+      parserProcessed: 2,
     });
   });
 
@@ -388,7 +388,7 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(order).toEqual(["processCapture"]);
     expect(importResult.metrics).toEqual({
       nextWakeAt: null,
-      parserProcessed: 0,
+      parserProcessed: 1,
     });
     expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
@@ -412,6 +412,7 @@ describe("ingestHostedConversationMessageWake", () => {
     mocks.markLinqChatRead.mockImplementationOnce(async () => {
       order.push("markRead");
     });
+    mocks.createConfiguredParserRegistry.mockRejectedValueOnce(new Error("parser setup failed"));
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
       source: "linq",
     });
@@ -445,7 +446,7 @@ describe("ingestHostedConversationMessageWake", () => {
       parserProcessed: 0,
     });
     expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(1);
-    expect(mocks.createConfiguredParserRegistry).not.toHaveBeenCalled();
+    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
     expect(mocks.createInboxParserService).not.toHaveBeenCalled();
   });
 

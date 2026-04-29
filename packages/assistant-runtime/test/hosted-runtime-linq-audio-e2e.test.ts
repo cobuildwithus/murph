@@ -160,7 +160,7 @@ describe("hosted Linq audio conversation ingestion", () => {
       });
       assert.deepEqual(importResult.metrics, {
         nextWakeAt: null,
-        parserProcessed: 0,
+        parserProcessed: 1,
       });
       expect(downloadDriver.downloadUrl).toHaveBeenCalledTimes(1);
       expect(downloadDriver.downloadPart).not.toHaveBeenCalled();

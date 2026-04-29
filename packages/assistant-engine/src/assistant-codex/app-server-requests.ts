@@ -146,7 +146,7 @@ export function buildCodexAppServerInputItems(input: {
 }
 
 export function mapCodexAppServerApprovalPolicy(
-  approvalPolicy: AssistantApprovalPolicy | null | undefined,
+  approvalPolicy: string | null | undefined,
 ): 'never' {
   return resolveSupportedCodexAppServerApprovalPolicy(approvalPolicy)
 }
@@ -167,7 +167,7 @@ export function mapCodexAppServerSandboxMode(
 }
 
 export function resolveSupportedCodexAppServerApprovalPolicy(
-  approvalPolicy: AssistantApprovalPolicy | null | undefined,
+  approvalPolicy: string | null | undefined,
 ): 'never' {
   if (!approvalPolicy || approvalPolicy === 'never') {
     return 'never'
