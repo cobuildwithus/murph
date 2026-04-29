@@ -19,15 +19,17 @@ Updated: 2026-04-29
 - Planned schedule cells can be rendered from `runPlan.schedule: ScheduleIntent` using the first emitted schedule subset: `dailyLocal` and five-field cron with weekday lists, plus actual intervention events. The old free-text schedule string is not a data source.
 - Completed, missed, skipped, and partial session cells are based on run-linked `intervention_session` events from the current replica.
 - Every protocol/test-plan biomarker remains represented in selector output, including unsupported or no-data biomarkers. Unsupported biomarkers do not get fake chart/card values.
-- A single high-level browser query selector is exported through `@murphai/query/browser`: `selectBrowserVaultExperimentResults(client, lookup, { asOf })`. Client code does not import server-only query or vault-reader paths.
-- The schedule hard cut updates every writer and artifact in the same PR: contract examples, generated contract schemas, onboarding apply/usecase writers, CLI options, CLI/generated metadata if applicable, and tests. No repo writer should continue producing legacy string `runPlan.schedule`.
+- A single high-level browser query selector is exported through `@murphai/query/browser`: `selectBrowserVaultExperimentResults(client, lookup, { asOf }): BrowserVaultExperimentResultsView | null`. Client code does not import server-only query or vault-reader paths.
+- No matching private run returns `null`, not a diagnostics object. Diagnostics exist only after a matching run is found.
+- Raw event rows stay internal to the selector. The exported result returns higher-level biomarker, schedule, progress, outcome, and diagnostics data only.
+- The schedule hard cut updates every writer and artifact in the same PR: contract examples, generated contract schemas, onboarding apply/usecase writers, Health Commons onboarding targets/defaults, CLI options, CLI/generated metadata if applicable, and tests. No repo writer should continue producing legacy string `runPlan.schedule`.
 - Tests prove active baseline, active intervention, finished with enough data, finished with sparse data, no expected range, no schedule, and structured cron/dailyLocal schedule cases.
 
 ## Scope
 
 - In scope:
   - Browser-vault experiment selectors under `packages/query/src/browser-replica/**`.
-  - Browser replica safe projections needed for experiment metric windows, structured event detail, run-linked events, and planned schedule rows.
+  - Browser replica safe projections needed for experiment metric windows, family-specific structured event detail, internal run-linked events, and planned schedule rows.
   - `apps/web/src/lib/browser-vault/experiment-run.ts` projection shaping.
   - `apps/web/src/types/experiments.ts` type adjustments if real data makes existing fields optional.
   - Results tab mock removal in `apps/web/app/(dashboard)/experiments/[experimentId]/results/results-tab-client.tsx`.
@@ -46,7 +48,8 @@ Updated: 2026-04-29
   - Compute from the current browser-vault replica by default. Use `client.replica.generatedAt` as the default `asOf`, not wall-clock `new Date()`.
   - Do not use `selectBrowserVaultTrackedExperiments` as the detail lookup source; that path is capped for overview. Detail selectors should search replica entities directly by experiment id, slug, protocol ref, commons key, and aliases.
   - Browser-safe selectors should use projected `metricRows` / `metricDayRows` as metric truth. The root experiment helpers rely on raw attributes that the browser replica intentionally strips.
-  - Browser projection may include structured session/context fields that are useful for Results analysis: `sessionStatus`, `durationMinutes`, `timing`, `temperatureC`, `afterExercise`, `symptoms`, `confounders`, `contextType`, and `severity`.
+  - Browser event projection may include family-specific structured session/context fields that are useful for Results analysis: `sessionStatus`, `durationMinutes`, `timing`, `temperatureC`, `afterExercise`, `symptoms`, `confounders`, `contextType`, and `severity`.
+  - Keep raw events internal to query. Export higher-level result objects plus diagnostics, not the raw event list.
   - Do not widen browser replica entity attributes wholesale to raw notes, raw provider provenance, raw external refs/ids, or full markdown bodies just to make analysis easier.
   - Keep package dependencies acyclic and one-way. Do not import assistant-engine cron helpers into query/browser code.
 - Product/process constraints:
@@ -93,6 +96,9 @@ Updated: 2026-04-29
 12. Schedule writers and generated artifacts must move with the schema.
     Current examples, CLI onboarding options, usecase onboarding writers, and generated contract schemas still encode `runPlan.schedule` as text. A schema-only hard cut would leave repo tools producing invalid experiment records.
 
+13. Health Commons onboarding targets are part of the schedule-writing surface.
+    The hard cut needs to update protocol/onboarding targets and defaults alongside contracts, generated schemas, CLI, and vault-usecase writers so Health Commons does not keep emitting legacy text schedules.
+
 ## Target Architecture
 
 ```text
@@ -101,7 +107,7 @@ current BrowserVaultReplica
        - run lookup
        - metric windows
        - progress/outcome snapshot
-       - run-linked intervention events
+       - internal run-linked intervention events
        - planned schedule from runPlan.schedule
        - source-backed expected effects/ranges
   -> apps/web browser-vault projection mapper
@@ -112,21 +118,26 @@ current BrowserVaultReplica
 
 The Results tab remains a rendering surface. The projection mapper is the only app layer that knows how query-domain output maps to cards, trend charts, schedule cells, running summaries, and conclusions.
 
+Raw event rows are an implementation detail inside the selector. The app-facing query result exposes the derived biomarker, schedule, progress, outcome, and diagnostics surfaces that the web projection mapper needs.
+
 ## Decisions
 
-1. Compute from the current replica first.
+1. Return nullable for no matching private run.
+   `selectBrowserVaultExperimentResults(...)` should return `BrowserVaultExperimentResultsView | null`. A missing run is not an analysis diagnostic; diagnostics are meaningful only after a private run has been found. Raw events stay internal.
+
+2. Compute from the current replica first.
    Active and finished Results should recompute from browser-vault replica rows for freshness. Persisted `outcomeRef` can be a later optimization only when its artifact is safely projected and can be checked against the current run/test-plan revision.
 
-2. Add source-gated expected ranges.
+3. Add source-gated expected ranges.
    Expected ranges should live in Health Commons test-plan or analysis-model metadata, not in BrowserVault or app UI. The metadata should include biomarker key, unit, value scale, low/high range, day/window, direction, confidence, source keys, and caveats.
 
-3. Use structured schedules, not free text.
+4. Use structured schedules, not free text.
    Store intended cadence on the experiment run as `runPlan.schedule: ScheduleIntent`, such as cron plus timezone. Delete/stop using the old free-text schedule as data. Scheduled logs can become an execution/reminder layer later, but they should not block the Results migration.
 
-4. Omit unknowns.
+5. Omit unknowns.
    If a run has no structured schedule, omit `schedule`. If a trend has no numeric expected range, omit `expectedRange`. If a biomarker lacks resolver support, keep it in selector output as `unsupported_source`, `unavailable`, or `no_data`, do not render fake values, and mention limitations in summary/conclusion copy where useful.
 
-5. Keep browser privacy boundaries.
+6. Keep browser privacy boundaries.
    Add minimal safe replica fields/selectors plus structured session/context fields where useful. Continue excluding raw notes, raw provider refs, external ids, and full markdown bodies unless a specific feature needs them and a privacy review approves it.
 
 ## MVP Shape
@@ -134,7 +145,11 @@ The Results tab remains a rendering surface. The projection mapper is the only a
 Start with one app-facing query contract:
 
 ```ts
-selectBrowserVaultExperimentResults(client, lookup, { asOf })
+selectBrowserVaultExperimentResults(
+  client,
+  lookup,
+  { asOf },
+): BrowserVaultExperimentResultsView | null
 ```
 
 `apps/web` should call this one selector from `resolveBrowserVaultExperimentRun` and then map its result to `ExperimentRunProjection`. Lower-level helpers for run lookup, events, metric windows, biomarkers, progress, outcome, schedule expansion, and expected effects should stay internal until another caller genuinely needs them.
@@ -158,7 +173,6 @@ interface BrowserVaultExperimentResultsView {
   asOf: string;
   experiment: BrowserVaultExperimentResultRun;
   biomarkers: BrowserVaultExperimentBiomarkerResult[];
-  events: BrowserVaultExperimentEventResult[];
   schedule: BrowserVaultExperimentScheduleResult | null;
   progress: BrowserVaultExperimentProgressResult | null;
   outcome: BrowserVaultExperimentOutcomeResult | null;
@@ -166,7 +180,9 @@ interface BrowserVaultExperimentResultsView {
 }
 ```
 
-The selector should default `asOf` from `client.replica.generatedAt`, not wall-clock time. `lookup` should not depend on `apps/web` protocol types; the app can pass protocol lookup keys built from Health Commons route id/key/aliases.
+The selector should default `asOf` from `client.replica.generatedAt`, not wall-clock time. `lookup` should not depend on `apps/web` protocol types; the app can pass protocol lookup keys built from Health Commons route id/key/aliases. No matching private run returns `null`. Once a run is found, diagnostics can describe unsupported biomarkers, unsupported schedules, sparse data, or inconsistent event/run-plan facts.
+
+Raw events should not be part of the exported result. The selector can use event rows internally to build schedule cells, progress, and outcome.
 
 For MVP, biomarker statuses stay in this query result. Do not add `ExperimentRunProjection.biomarkers` unless the UI needs a visible missing-biomarkers section now. Unsupported or unavailable biomarkers can affect summary/detail/conclusion copy without expanding the Results UI contract.
 
@@ -194,6 +210,7 @@ Implementation notes:
 
 - Search `client.replica.entities` directly for the matching experiment. Do not depend on the capped overview list.
 - Use `metricRows` / `metricDayRows` for baseline and intervention windows.
+- Use a family-specific BrowserVault event projection for `intervention_session` and relevant context events. Keep the projection narrow and structured; do not export the raw event list from the selector result.
 - Preserve every protocol/test-plan biomarker in selector output. Use explicit states like `available`, `no_data`, `unsupported_source`, and `unavailable` rather than dropping unresolved biomarkers.
 - Return per-day points for trends as well as means/deltas, since `ExperimentMetricResult` currently summarizes windows without chart-ready points.
 - Keep browser result types narrow and app-agnostic. `apps/web` should still own formatting labels and card copy.
@@ -212,6 +229,7 @@ Required changes:
 - Add required `timeZone: string` to schedule-intent variants where local expansion needs it, especially `cron` and `dailyLocal`.
 - Update `packages/contracts/src/examples.ts` and regenerated contract schema artifacts in the same PR so generated output no longer advertises a string schedule.
 - Update onboarding writers in `packages/vault-usecases/src/usecases/experiment-journal-vault.ts` and `packages/cli/src/commands/experiment.ts` in the same PR so they parse/emit `ScheduleIntent`, not text.
+- Update Health Commons onboarding targets/defaults in the same PR so generated or authored protocol setup data emits structured `ScheduleIntent`, not text.
 - Update CLI/generated metadata and directly coupled CLI tests so `experiment apply-onboarding` cannot silently write legacy string `runPlan.schedule`.
 - Add a residue test or `rg`-based verification target that fails on new experiment-run writer paths assigning a string to `runPlan.schedule`.
 
@@ -250,6 +268,7 @@ Cell rules:
 
 - baseline window days become `baseline`
 - future planned occurrence: `scheduled`
+- exact session status from a matching event wins over inferred state
 - completed/partial event on the same local day/window: `completed`
 - skipped/missed event on the same local day/window: `missed`, or `skipped` if the UI type is extended
 - past planned occurrence with no event: `missed` only after an explicit grace period; MVP default is 24 hours after the planned occurrence time in the schedule timezone
@@ -350,7 +369,7 @@ After real projection tests pass:
 ## Tasks
 
 1. Add the browser-native experiment results selector and tests in `packages/query`.
-2. Extract shared schedule-intent contracts, then hard-cut `runPlan.schedule` to `ScheduleIntent`, including examples/generated schemas/onboarding writers/CLI writers in the same PR.
+2. Extract shared schedule-intent contracts, then hard-cut `runPlan.schedule` to `ScheduleIntent`, including examples/generated schemas, onboarding writers, Health Commons onboarding targets/defaults, CLI writers, CLI/generated metadata, and tests in the same PR.
 3. Add run-plan schedule expansion helper with narrow cron/dailyLocal support and missed-session grace semantics.
 4. Add source-backed expected-effect/range metadata to Health Commons contracts/content flow, with nullable/empty ranges and no sauna numeric bands until the source exists.
 5. Populate `ExperimentRunProjection` from `selectBrowserVaultExperimentResults` in `apps/web`.
@@ -371,6 +390,7 @@ Implementation verification when this plan is executed:
 - contracts generated-schema freshness check for experiment frontmatter/run plan
 - `pnpm --dir packages/query test -- experiment`
 - focused CLI/usecase tests proving onboarding writes structured `runPlan.schedule`
+- Health Commons generation/check proving onboarding targets/defaults no longer emit string `runPlan.schedule`
 - residue scan proving experiment run writers no longer emit string `runPlan.schedule`
 - focused browser-entry/boundary tests for `@murphai/query/browser`
 - focused `apps/web` tests for BrowserVault private-run Results projection and Results tab rendering
@@ -393,6 +413,7 @@ Implementation verification when this plan is executed:
 - directly coupled CLI generated metadata/tests
 - `packages/vault-usecases/src/usecases/experiment-journal-vault.ts`
 - `packages/health-commons/content/protocols/**`
+- `packages/health-commons/src/**`
 - `apps/web/src/lib/browser-vault/experiment-run.ts`
 - `apps/web/src/lib/experiments/experiment-detail.ts`
 - `apps/web/src/types/experiments.ts`
