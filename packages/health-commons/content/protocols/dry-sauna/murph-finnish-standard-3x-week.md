@@ -146,7 +146,7 @@ expectedSignalDescriptions:
       window: "2-6 weeks"
       confidence: "low"
       basis: "Direct sauna physiology plus mixed repeated/passive-heat evidence; RCT-only passive-heating evidence did not consistently show lower resting heart rate."
-    description: "Sauna raises heart rate during the session because more blood is sent to the skin for cooling. With repeated tolerable sessions, the body may handle that heat load with less resting strain, so resting pulse could settle or trend lower. If the heat dose stays too stressful, it may not move or may rise instead."
+    description: "Sauna widens skin blood vessels, so the heart beats faster to move heat out and keep pressure up. Repeated heat exposure trains that cooling response, which can leave the heart doing less work at rest."
   -
     biomarkerKey: "biomarker:morning-blood-pressure"
     expected: "Could trend lower"
@@ -159,7 +159,7 @@ expectedSignalDescriptions:
       window: "2-6 weeks"
       confidence: "low"
       basis: "Same-mechanism heat-therapy meta-analyses suggest small BP reductions, but evidence is heterogeneous and not the exact 3x/week Finnish-sauna protocol."
-    description: "Heat opens blood vessels and shifts blood toward the skin, which can lower pressure during and after a session. With repeated tolerable exposure, vascular tone may relax slightly, so blood pressure could drift lower. If the body treats the sessions as too much strain, the signal may stay flat."
+    description: "Heat widens blood vessels and shifts blood toward the skin, reducing resistance against each heartbeat. Repeated exposure can keep vessel tone slightly more relaxed after the session."
   -
     biomarkerKey: "biomarker:hrv-rmssd"
     expected: "Worth watching"
@@ -169,7 +169,7 @@ expectedSignalDescriptions:
       window: "2-6 weeks"
       confidence: "low"
       basis: "Autonomic sauna evidence is plausible but indirect for consumer RMSSD; the closest 3x/week trial used frequency-domain HRV in allergic-rhinitis patients."
-    description: "A sauna session first pushes the body toward heat stress, then into a cooling and relaxation phase. If that rebound is easy to recover from, RMSSD could rise or stabilize. If the heat stress dominates, RMSSD can drop instead."
+    description: "Sauna first triggers heat stress, then a cooling rebound as the vagus nerve retakes beat-to-beat control of the heart."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
     expected: "Worth watching"
