@@ -3,6 +3,7 @@ const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const RED_LIGHT_GLASSES_ROUTE_ID = "red-light-glasses-before-bed";
 const BRYAN_JOHNSON_SAUNA_ROUTE_ID = "bryan-johnson-blueprint";
 const INTERMITTENT_FASTING_ROUTE_ID = "time-restricted-eating-18-6";
+const PNEUMATIC_COMPRESSION_PANTS_ROUTE_ID = "pneumatic-compression-pants";
 
 export const DEFAULT_PROTOCOL_IMAGE = "/design-assets/hero-04.png";
 
@@ -12,6 +13,7 @@ const PROTOCOL_ROUTE_IMAGES: Record<string, string> = {
   [FINNISH_SAUNA_ROUTE_ID]: "/design-assets/hero-finnish-sauna.jpeg",
   [INTERMITTENT_FASTING_ROUTE_ID]: "/design-assets/hero-intermittent-fasting.jpg",
   [NORWEGIAN_4X4_ROUTE_ID]: "/design-assets/hero-norwegian-4x4.jpeg",
+  [PNEUMATIC_COMPRESSION_PANTS_ROUTE_ID]: "/design-assets/hero-pneumatic-compression-pants.jpg",
   [RED_LIGHT_GLASSES_ROUTE_ID]: "/design-assets/hero-red-light-glasses-before-bed.jpeg",
 };
 

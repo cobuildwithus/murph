@@ -183,6 +183,13 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-prolonged-fasting.jpeg");
   });
 
+  it("uses the dedicated pneumatic compression pants artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("pneumatic-compression-pants");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-pneumatic-compression-pants.jpg");
+  });
+
   it("omits protocols hidden by Health Commons frontmatter from the public experiments library", () => {
     const catalog = createFixtureCatalog();
 
