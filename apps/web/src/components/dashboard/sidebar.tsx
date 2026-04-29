@@ -73,7 +73,7 @@ function BrandMark() {
         width={197}
         height={44}
         className="h-6 w-auto"
-        priority
+        preload
       />
     </Link>
   );

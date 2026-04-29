@@ -135,7 +135,7 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           {featuredCards.map((card) => (
-            <ExperimentHeroCard key={`featured:${card.id}`} {...card} priority />
+            <ExperimentHeroCard key={`featured:${card.id}`} {...card} preload />
           ))}
         </div>
       </section>

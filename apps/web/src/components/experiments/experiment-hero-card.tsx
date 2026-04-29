@@ -21,7 +21,7 @@ interface ExperimentHeroCardProps {
   statusVariant?: ExperimentCardStatusVariant;
   description?: string;
   className?: string;
-  priority?: boolean;
+  preload?: boolean;
 }
 
 const HERO_CARD_IMAGE_SIZES = "(min-width: 768px) 50vw, 100vw";
@@ -41,7 +41,7 @@ export function ExperimentHeroCard({
   statusVariant = "secondary",
   description,
   className,
-  priority = false,
+  preload = false,
 }: ExperimentHeroCardProps) {
   const resolvedHref = href === undefined ? `/experiments/${id}` : href;
   const isInteractive = resolvedHref !== null;
@@ -53,7 +53,7 @@ export function ExperimentHeroCard({
           alt=""
           fill
           sizes={HERO_CARD_IMAGE_SIZES}
-          priority={priority}
+          preload={preload}
           className={cn(
             "object-cover",
             isInteractive ? "transition-transform duration-300 group-hover:scale-[1.03]" : "",
