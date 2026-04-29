@@ -284,6 +284,7 @@ describe("buildHostedDataExport", () => {
           {
             action: "accepted",
             idPresent: true,
+            metadataPresent: true,
             scope: "launch.required",
             source: "settings",
           },
@@ -359,6 +360,8 @@ describe("buildHostedDataExport", () => {
         ],
       },
     });
+    const consent = requireRecord(exported.consent);
+    expect(requireArray(consent.events)[0]).not.toHaveProperty("metadataJson");
     expect(exported.messaging).toMatchObject({
       invites: [
         {
@@ -435,6 +438,7 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("consent-event-1");
     expect(serialized).not.toContain("vault-sync-1");
     expect(serialized).not.toContain("trace-1");
+    expect(serialized).not.toContain("secret-consent-metadata");
   });
 
   it("bounds large stores and reports truncation metadata", async () => {
@@ -775,7 +779,7 @@ function createHostedAccountDataExportPrisma(input: {
           id: "consent-event-1",
           memberId,
           metadataJson: {
-            surface: "settings",
+            surface: "secret-consent-metadata",
           },
           scope: "launch.required",
           source: "settings",

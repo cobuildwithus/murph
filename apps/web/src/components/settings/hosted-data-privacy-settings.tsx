@@ -83,7 +83,8 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const exportPhraseMatches = exportConfirmationText === HOSTED_DATA_EXPORT_CONFIRMATION_TEXT;
   const exportReady = acknowledgedSensitiveDownload && exportPhraseMatches && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
-  const deleteReady = phraseMatches
+  const deleteReady = dialogStep === "confirm"
+    && phraseMatches
     && acknowledgedIrreversibleDeletion
     && acknowledgedProviderAndBackupLimits
     && !deletePending;
@@ -154,7 +155,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
           acknowledgedIrreversibleDeletion: true,
           acknowledgedProviderAndBackupLimits: true,
           confirmationPhrase,
-          secondConfirmationAccepted: true,
+          secondConfirmationAccepted: dialogStep === "confirm",
         },
         url: "/api/settings/privacy/delete",
       });
