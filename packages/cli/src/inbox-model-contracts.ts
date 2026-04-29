@@ -16,6 +16,22 @@ export const inboxModelRoutingImageSchema = z.object({
   extension: z.string().min(1).nullable(),
 })
 
+export const inboxModelRoutingPdfSchema = z.object({
+  byteSize: z.number().int().nonnegative().nullable(),
+  eligible: z.boolean(),
+  maxBytes: z.number().int().positive(),
+  path: pathSchema.nullable(),
+  reason: z.enum([
+    'declared-too-large',
+    'eligible',
+    'missing-stored-path',
+    'not-pdf',
+    'stored-file-too-large',
+    'stored-file-unavailable',
+    'stored-path-outside-capture',
+  ]),
+})
+
 export const inboxModelTextFragmentSchema = z.object({
   kind: z.enum([
     'capture_text',
@@ -40,9 +56,11 @@ export const inboxModelAttachmentBundleSchema = z.object({
   kind: z.enum(['image', 'audio', 'video', 'document', 'other']),
   mime: z.string().min(1).nullable(),
   fileName: z.string().min(1).nullable(),
+  byteSize: z.number().int().nonnegative().nullable().optional(),
   storedPath: pathSchema.nullable(),
   parseState: z.enum(['pending', 'running', 'succeeded', 'failed']).nullable(),
   routingImage: inboxModelRoutingImageSchema,
+  routingPdf: inboxModelRoutingPdfSchema.optional(),
   fragments: z.array(inboxModelTextFragmentSchema),
   combinedText: z.string(),
 })

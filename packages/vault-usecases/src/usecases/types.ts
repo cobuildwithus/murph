@@ -2,6 +2,7 @@ import type {
   EventSource,
   ExperimentFrontmatter,
   ExperimentStatus,
+  HealthCommonsExperimentOnboardingPositiveDisposition,
   MealNutrition,
 } from "@murphai/contracts"
 import type {
@@ -736,10 +737,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       onboardingCompletedAt?: string
       setupAnswer?: readonly string[]
       safetyCautionLevel?: "low" | "moderate" | "high" | "unknown"
-      safetyDisposition?:
-        | "continue_with_caution"
-        | "clinician_guidance_before_unsupervised_start"
-        | "do_not_start_unsupervised"
+      safetyDisposition?: HealthCommonsExperimentOnboardingPositiveDisposition
       positiveQuestionId?: readonly string[]
       safetyNote?: readonly string[]
       contextNote?: readonly string[]
