@@ -9,7 +9,7 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantTurnInputPort } from '../turn-input.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
-import { assistantChatReplyArtifactExists } from './artifacts.js'
+import { readAssistantAutoReplyTerminalEvidence } from './evidence.js'
 import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
 import {
   type AssistantAutoReplyGroupItem,
@@ -151,6 +151,9 @@ export async function recoverAssistantAutoReplies(
       vault: input.vault,
     })
     summary.failed += result.failed
+    if (result.checkpointRequired) {
+      summary.checkpointRequired = true
+    }
     summary.nextWakeAt = earliestAssistantAutomationWakeAt(
       summary.nextWakeAt,
       result.nextWakeAt,
@@ -228,7 +231,7 @@ async function listReceiptRecoveryCandidates(input: {
     if (hasUnsafeDeliveryEvidence(receipt)) {
       continue
     }
-    if (await hasHandledReplyArtifacts(input.vault, metadata.captureIds)) {
+    if (await hasTerminalHandlingEvidence(input.vault, metadata.captureIds)) {
       continue
     }
 
@@ -387,16 +390,16 @@ function hasUnsafeDeliveryEvidence(receipt: AssistantTurnReceipt): boolean {
   )
 }
 
-async function hasHandledReplyArtifacts(
+async function hasTerminalHandlingEvidence(
   vault: string,
   captureIds: readonly string[],
 ): Promise<boolean> {
-  const existingArtifacts = await Promise.all(
+  const existingEvidence = await Promise.all(
     captureIds.map((captureId) =>
-      assistantChatReplyArtifactExists(vault, captureId),
+      readAssistantAutoReplyTerminalEvidence(vault, captureId),
     ),
   )
-  return existingArtifacts.some(Boolean)
+  return existingEvidence.every((evidence) => evidence !== null)
 }
 
 function isInboxCaptureNotFoundError(error: unknown): boolean {

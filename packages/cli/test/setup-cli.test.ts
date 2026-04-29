@@ -3928,7 +3928,8 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
     autoReply: [
       {
         channel: 'email',
-        cursor: null,
+        enabledAt: '2026-03-24T23:00:00.000Z',
+        eligibleAfter: null,
       },
     ],
     updatedAt: '2026-03-24T23:00:00.000Z',

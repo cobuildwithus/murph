@@ -46,6 +46,7 @@ export interface AssistantInboxScanResult {
 }
 
 export interface AssistantAutoReplyScanResult {
+  checkpointRequired?: true
   considered: number
   failed: number
   nextWakeAt: string | null

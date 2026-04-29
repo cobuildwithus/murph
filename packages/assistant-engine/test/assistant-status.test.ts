@@ -579,7 +579,8 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
       autoReply: [
         {
           channel: 'telegram',
-          cursor: null,
+          enabledAt: '2026-04-08T06:00:00.000Z',
+          eligibleAfter: null,
         },
       ],
       updatedAt: '2026-04-08T06:00:00.000Z',

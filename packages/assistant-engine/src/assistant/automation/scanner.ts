@@ -6,7 +6,10 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantTurnInputPort } from '../turn-input.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
-import { assistantAutoReplyTerminalEvidenceExists } from './evidence.js'
+import {
+  readAssistantAutoReplyTerminalEvidence,
+  type AssistantAutoReplyTerminalEvidence,
+} from './evidence.js'
 import {
   applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext,
@@ -231,6 +234,32 @@ async function listAssistantReplyCandidates(input: {
     return []
   }
 
+  const terminalEvidenceCache = new Map<
+    string,
+    Promise<AssistantAutoReplyTerminalEvidence | null>
+  >()
+  const readTerminalEvidence = (captureId: string) => {
+    let cached = terminalEvidenceCache.get(captureId)
+    if (!cached) {
+      cached = readAssistantAutoReplyTerminalEvidence(input.vault, captureId)
+      terminalEvidenceCache.set(captureId, cached)
+    }
+    return cached
+  }
+  const terminalEvidenceGroupComplete = async (
+    evidence: AssistantAutoReplyTerminalEvidence,
+  ) => {
+    const groupCaptureIds = [...new Set(evidence.groupCaptureIds)]
+    if (groupCaptureIds.length === 0) {
+      return true
+    }
+
+    const groupEvidence = await Promise.all(
+      groupCaptureIds.map((captureId) => readTerminalEvidence(captureId)),
+    )
+    return groupEvidence.every((item) => item !== null)
+  }
+
   const candidates = await Promise.all(
     input.autoReply.map(async (channelState) => {
       const channelCandidates: AssistantInboxCaptureSummary[] = []
@@ -256,7 +285,8 @@ async function listAssistantReplyCandidates(input: {
           if (capture.source !== channelState.channel) {
             continue
           }
-          if (await assistantAutoReplyTerminalEvidenceExists(input.vault, capture.captureId)) {
+          const evidence = await readTerminalEvidence(capture.captureId)
+          if (evidence && await terminalEvidenceGroupComplete(evidence)) {
             continue
           }
           channelCandidates.push(capture)
