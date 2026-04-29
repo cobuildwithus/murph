@@ -62,6 +62,29 @@ test("keeps past planned local dates scheduled until the grace period expires", 
   );
 });
 
+test("treats date-only asOf values as schedule-local dates", () => {
+  const schedule = {
+    kind: "dailyLocal",
+    localTime: "08:00",
+    timeZone: "America/Los_Angeles",
+  } satisfies ExperimentRunScheduleIntent;
+
+  const cells = expandBrowserVaultRunSchedule({
+    asOf: "2026-04-29",
+    gracePeriodHours: 0,
+    schedule,
+    window: {
+      startLocalDate: "2026-04-28",
+      endLocalDate: "2026-04-29",
+    },
+  });
+
+  assert.deepEqual(compactCells(cells), [
+    ["2026-04-28", "08:00", "missed", "planned", true],
+    ["2026-04-29", "08:00", "scheduled", "planned", true],
+  ]);
+});
+
 test("expands supported five-field weekday-list cron schedules by local date", () => {
   const schedule = {
     kind: "cron",

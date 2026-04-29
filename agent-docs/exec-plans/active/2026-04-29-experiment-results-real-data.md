@@ -25,6 +25,14 @@ Updated: 2026-04-29
 - The schedule hard cut updates every writer and artifact in the same PR: contract examples, generated contract schemas, onboarding apply/usecase writers, Health Commons onboarding targets/defaults, CLI options, CLI/generated metadata if applicable, and tests. No repo writer should continue producing legacy string `runPlan.schedule`.
 - Tests prove active baseline, active intervention, finished with enough data, finished with sparse data, no expected range, no schedule, and structured cron/dailyLocal schedule cases.
 
+## Current repair focus
+
+- Fix session-event inclusion around local-date boundaries by resolving timestamped session events in the run schedule time zone before `asOf` filtering.
+- Treat date-only `asOf` values as local dates for run-schedule expansion instead of UTC-midnight instants.
+- Rank every supported active run status ahead of newer completed/stopped matching runs.
+- Compute adherence `expectedSessionsByNow` from structured schedule cells when a run has a schedule, falling back to proportional target math only when no structured schedule exists.
+- Let numeric expected-effect ranges inherit parent source keys when the range itself omits them, and format converted percent/delta ranges with the measured biomarker unit rather than the range's relative unit.
+
 ## Scope
 
 - In scope:

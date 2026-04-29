@@ -136,6 +136,55 @@ describe("experiment detail private-run composition", () => {
     expect(privateRun).toBeNull();
   });
 
+  it("uses the run time zone for active timeline reference dates near UTC boundaries", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-30T03:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_local_boundary",
+            runPlan: {
+              baselineEnd: "2026-04-29",
+              baselineStart: "2026-04-29",
+              interventionEnd: "2026-05-05",
+              interventionStart: "2026-04-30",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "08:00",
+                timeZone: "America/Los_Angeles",
+              },
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-29",
+            status: "active",
+            title: "Private sauna boundary run",
+          }),
+          id: "exp_sauna_local_boundary",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-29",
+          status: "active",
+          summary: "Local-date boundary run.",
+          tags: ["sauna"],
+          title: "Private sauna boundary run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun?.day).toBe(1);
+    expect(privateRun?.timeline.find((event) => event.label === "Day 1")).toEqual(
+      expect.objectContaining({ date: "Apr 29" }),
+    );
+  });
+
   it("matches browser-vault tracked experiments by canonical commonsProtocolRef key", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -451,6 +500,68 @@ describe("experiment detail private-run composition", () => {
     expect(trendMarkup).not.toContain("Expected");
   });
 
+  it("formats converted percent expected ranges with measured biomarker units", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-10T12:00:00.000Z",
+        metricRows: restingHeartRateRows([
+          ["2026-04-01", 62],
+          ["2026-04-02", 62],
+          ["2026-04-03", 62],
+          ["2026-04-08", 60],
+        ]),
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            expectedSignalDescriptions: [{
+              biomarkerKey: "biomarker:resting-heart-rate",
+              sourceKeys: ["source_artifact:range"],
+              range: {
+                startDay: 8,
+                endDay: 8,
+                low: -10,
+                high: -5,
+                scale: "percent",
+                unit: "%",
+              },
+            }],
+            id: "exp_sauna_expected_range",
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-14",
+              interventionStart: "2026-04-08",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna expected-range run",
+          }),
+          id: "exp_sauna_expected_range",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Expected range has source-backed percent metadata.",
+          tags: ["sauna"],
+          title: "Private sauna expected-range run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun?.signals[0]?.expected).toBe("55.8 to 58.9 bpm");
+    expect(privateRun?.trends[0]?.expectedRange).toEqual([
+      { day: 8, low: 55.8, high: 58.9 },
+    ]);
+  });
+
   it("renders partial and skipped schedule cells from real browser-vault sessions", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -702,6 +813,7 @@ function createExperimentFrontmatter(input: {
   status: string;
   title: string;
   commonsProtocolRef?: Record<string, unknown>;
+  expectedSignalDescriptions?: unknown[];
   runPlan?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
@@ -724,6 +836,7 @@ function createExperimentFrontmatter(input: {
           minimumUsefulSessions: 4,
         }
       : undefined,
+    expectedSignalDescriptions: input.expectedSignalDescriptions,
     experimentId: input.id,
     hypothesis: "Test the canonical private-run metadata path.",
     runPlan: input.runPlan,

@@ -88,7 +88,7 @@ function mapExperimentResultsProjection(
   const { experiment } = results;
   const status = normalizePrivateRunStatus(results);
   const startedOn = experiment.windows.baselineStart ?? experiment.startedOn;
-  const referenceDate = extractIsoDate(results.asOf) ?? extractIsoDate(client.replica.generatedAt) ?? todayIsoDate();
+  const referenceDate = resolveResultsReferenceDate(results, client);
   const analysisAvailableOn = experiment.windows.interventionEnd ?? experiment.completedAt ?? undefined;
   const fallbackDurationDays = normalizeDayCount(protocol.durationDays, 1);
   const durationDays =
@@ -945,7 +945,8 @@ function formatExpectedSignalText(
 ): string | undefined {
   const range = biomarker.expectedEffect.expectedRange;
   if (range && range.sourceKeys.length > 0) {
-    return formatExpectedRange(range, biomarker.baseline.mean);
+    const measuredUnit = biomarker.unit ?? biomarker.intervention.unit ?? biomarker.baseline.unit;
+    return formatExpectedRange(range, biomarker.baseline.mean, measuredUnit);
   }
 
   return biomarker.expectedEffect.description ?? undefined;
@@ -954,6 +955,7 @@ function formatExpectedSignalText(
 function formatExpectedRange(
   range: BrowserVaultExperimentExpectedRange,
   baselineMean: number | null,
+  measuredUnit: string | null,
 ): string {
   const low = convertExpectedRangeValue(range.low, range, baselineMean);
   const high = convertExpectedRangeValue(range.high, range, baselineMean);
@@ -962,7 +964,11 @@ function formatExpectedRange(
     return `${formatSignedNumber(range.low)} to ${formatSignedNumber(range.high)} ${range.unit ?? ""}`.trim();
   }
 
-  return `${formatMetricValue(Math.min(low, high))} to ${formatMetricValue(Math.max(low, high))} ${range.unit ?? ""}`.trim();
+  const unit = range.scale === "absolute" ? range.unit : measuredUnit;
+  return [
+    `${formatMetricValue(Math.min(low, high))} to ${formatMetricValue(Math.max(low, high))}`,
+    unit ?? "",
+  ].join(" ").trim();
 }
 
 function resolveSignalDirection(
@@ -1086,6 +1092,19 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function resolveResultsReferenceDate(
+  results: BrowserVaultExperimentResultsView,
+  client: BrowserVaultQueryClient,
+): string {
+  const timeZone = results.schedule?.timeZone ?? results.experiment.runPlan.schedule?.timeZone ?? null;
+
+  if (timeZone) {
+    return formatIsoDateInTimeZone(results.asOf, timeZone);
+  }
+
+  return extractIsoDate(results.asOf) ?? extractIsoDate(client.replica.generatedAt) ?? todayIsoDate();
+}
+
 function daysBetweenInclusive(startDate: string, endDate: string): number {
   const start = parseIsoDateAsUtcNoon(startDate);
   const end = parseIsoDateAsUtcNoon(endDate);
@@ -1167,7 +1186,15 @@ function formatWeekday(value: string): string {
 }
 
 function formatIsoDateInTimeZone(value: string, timeZone: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return value;
+  }
+
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return extractIsoDate(value) ?? todayIsoDate();
+  }
+
   const parts = new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
     month: "2-digit",
