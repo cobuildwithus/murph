@@ -580,7 +580,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       params: {
         command: [
           "/bin/sh",
-          "-c",
+          "-lc",
           [
             "vault_cli_path=$(command -v vault-cli || true)",
             "murph_path=$(command -v murph || true)",
