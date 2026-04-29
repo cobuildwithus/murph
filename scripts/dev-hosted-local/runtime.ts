@@ -45,6 +45,11 @@ interface BoundedCommandResult {
 }
 
 const HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-RunnerContainer-";
+const HOSTED_WORKER_REUSE_HEALTH_MAX_BYTES = 16 * 1024;
+const HOSTED_WORKER_REUSE_HEALTH_TIMEOUT_MS = 2_000;
+const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
+
+export type HostedLocalWorkerPortMode = "start" | "reuse-existing";
 
 export async function assertHostedWebDevServerAvailable(env: NodeJS.ProcessEnv): Promise<void> {
   const lockPaths = resolveHostedWebDevLockPaths(env);
@@ -82,7 +87,40 @@ export async function assertHostedWebDevServerAvailable(env: NodeJS.ProcessEnv):
 }
 
 export async function assertPortAvailable(host: string, port: number, message: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+  const available = await isPortAvailable(host, port);
+  if (!available) {
+    throw new Error(message);
+  }
+}
+
+export async function resolveHostedLocalWorkerPortMode(input: {
+  host: string;
+  message: string;
+  port: number;
+  protocol: "http" | "https";
+}): Promise<HostedLocalWorkerPortMode> {
+  const available = await isPortAvailable(input.host, input.port);
+  if (available) {
+    return "start";
+  }
+
+  const health = await requestJson({
+    host: input.host,
+    path: "/health",
+    port: input.port,
+    protocol: input.protocol,
+    timeoutMs: HOSTED_WORKER_REUSE_HEALTH_TIMEOUT_MS,
+  }).catch(() => null);
+
+  if (isHostedWorkerServiceBanner(health)) {
+    return "reuse-existing";
+  }
+
+  throw new Error(input.message);
+}
+
+async function isPortAvailable(host: string, port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve, reject) => {
     const server = net.createServer();
 
     server.once("error", (error) => {
@@ -92,7 +130,7 @@ export async function assertPortAvailable(host: string, port: number, message: s
         && "code" in error
         && error.code === "EADDRINUSE"
       ) {
-        reject(new Error(message));
+        resolve(false);
         return;
       }
 
@@ -105,7 +143,7 @@ export async function assertPortAvailable(host: string, port: number, message: s
           return;
         }
 
-        resolve();
+        resolve(true);
       });
     });
     server.listen(port, host);
@@ -1014,6 +1052,67 @@ async function requestStatus(input: {
     req.on("error", reject);
     req.end();
   });
+}
+
+async function requestJson(input: {
+  host: string;
+  path: string;
+  port: number;
+  protocol: "http" | "https";
+  timeoutMs: number;
+}): Promise<unknown> {
+  const requestImpl = input.protocol === "https" ? https.request : http.request;
+
+  return await new Promise((resolve, reject) => {
+    const req = requestImpl(
+      {
+        host: input.host,
+        method: "GET",
+        path: input.path,
+        port: input.port,
+        rejectUnauthorized: false,
+      },
+      (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string | Buffer) => {
+          body += chunk.toString();
+          if (body.length > HOSTED_WORKER_REUSE_HEALTH_MAX_BYTES) {
+            req.destroy(new Error("response too large"));
+          }
+        });
+        response.on("end", () => {
+          if (response.statusCode !== 200) {
+            resolve(null);
+            return;
+          }
+
+          try {
+            resolve(JSON.parse(body));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      },
+    );
+
+    req.setTimeout(input.timeoutMs, () => {
+      req.destroy(new Error("request timed out"));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function isHostedWorkerServiceBanner(value: unknown): boolean {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "ok" in value
+    && value.ok === true
+    && "service" in value
+    && value.service === HOSTED_WORKER_SERVICE_NAME,
+  );
 }
 
 function pipeWithPrefix(

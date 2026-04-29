@@ -33,6 +33,7 @@ import {
   assertPortAvailable,
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
+  resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
   spawnStripeListenerWithSecretCapture,
@@ -63,7 +64,7 @@ export interface HostedLocalDevStack {
   oidcIdentity: HostedExecutionOidcIdentity;
   oidcToken: string;
   processes: {
-    cloudflare: BufferedNamedChildProcess;
+    cloudflare: BufferedNamedChildProcess | null;
     stripe: BufferedNamedChildProcess | null;
     web: BufferedNamedChildProcess | null;
   };
@@ -93,6 +94,7 @@ export async function startHostedLocalDevStack(input: {
     initialEnv[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim() || randomUUID(),
   );
   const tsxTsconfigPath = path.join(repoRoot, "tsconfig.base.json");
+  const workerBaseUrl = `${config.workerProtocol}://${config.workerHost}:${config.workerPort}`;
 
   if (!config.skipVercelPull && !providedVercelOidcToken) {
     await ensureVercelLinkExists();
@@ -104,10 +106,15 @@ export async function startHostedLocalDevStack(input: {
       "Stop the existing listener or set MURPH_DEV_WEB_PORT to a free port before running `pnpm dev`.",
     ].join(" "));
   }
-  await assertPortAvailable(config.workerHost, config.workerPort, [
-    `Local Cloudflare worker port ${config.workerPort} is already in use on ${config.workerHost}.`,
-    "Stop the existing listener or set MURPH_DEV_WORKER_PORT to a free port before running `pnpm dev`.",
-  ].join(" "));
+  const workerPortMode = await resolveHostedLocalWorkerPortMode({
+    host: config.workerHost,
+    message: [
+      `Local Cloudflare worker port ${config.workerPort} is already in use on ${config.workerHost}.`,
+      "Stop the existing listener or set MURPH_DEV_WORKER_PORT to a free port before running `pnpm dev`.",
+    ].join(" "),
+    port: config.workerPort,
+    protocol: config.workerProtocol,
+  });
 
   const tempDir = tempDirOverride
     ? resolveHostedLocalTempDir(repoRoot, tempDirOverride)
@@ -132,6 +139,7 @@ export async function startHostedLocalDevStack(input: {
   const children: BufferedNamedChildProcess[] = [];
   let stripeListener: BufferedNamedChildProcess | null = null;
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
+  let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
   try {
     if (!config.skipVercelPull && !providedVercelOidcToken) {
@@ -187,40 +195,44 @@ export async function startHostedLocalDevStack(input: {
       TSX_TSCONFIG_PATH: tsxTsconfigPath,
       VERCEL_OIDC_TOKEN: oidcToken,
     };
-    workerRuntimeEnv = {
-      ...runtimeEnv,
-      ...cloudflareDevVars,
-      [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: hostedRunnerLocalBuildId,
-    };
-    const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
-    await writeFile(workerEnvPath, workerEnvText, "utf8");
-    await writeFile(workerDevVarsPath, workerEnvText, "utf8");
-    await writeFile(
-      workerConfigPath,
-      `${JSON.stringify(
-        buildWranglerLocalDevConfig(workerRuntimeEnv, {
-          configDir: path.dirname(workerConfigPath),
-        }),
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-    try {
-      await rename(cloudflareDevVarsPath, workerDevVarsBackupPath);
-      hadExistingCloudflareDevVars = true;
-    } catch (error) {
-      if (
-        typeof error !== "object"
-        || error === null
-        || !("code" in error)
-        || error.code !== "ENOENT"
-      ) {
-        throw error;
+    workerRuntimeEnv = workerPortMode === "start"
+      ? {
+        ...runtimeEnv,
+        ...cloudflareDevVars,
+        [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: hostedRunnerLocalBuildId,
       }
+      : null;
+    if (workerRuntimeEnv !== null) {
+      const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
+      await writeFile(workerEnvPath, workerEnvText, "utf8");
+      await writeFile(workerDevVarsPath, workerEnvText, "utf8");
+      await writeFile(
+        workerConfigPath,
+        `${JSON.stringify(
+          buildWranglerLocalDevConfig(workerRuntimeEnv, {
+            configDir: path.dirname(workerConfigPath),
+          }),
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      try {
+        await rename(cloudflareDevVarsPath, workerDevVarsBackupPath);
+        hadExistingCloudflareDevVars = true;
+      } catch (error) {
+        if (
+          typeof error !== "object"
+          || error === null
+          || !("code" in error)
+          || error.code !== "ENOENT"
+        ) {
+          throw error;
+        }
+      }
+      restoreCloudflareDevVars = true;
+      await symlink(workerDevVarsPath, cloudflareDevVarsPath);
     }
-    restoreCloudflareDevVars = true;
-    await symlink(workerDevVarsPath, cloudflareDevVarsPath);
 
     requireEnvValue(
       "DATABASE_URL",
@@ -272,46 +284,59 @@ export async function startHostedLocalDevStack(input: {
       }
     }
 
-    const shouldPrepareRunnerBundle = initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1";
-    if (shouldPrepareRunnerBundle) {
-      await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle"], {
+    if (workerRuntimeEnv !== null) {
+      if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
+        await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle"], {
+          cwd: repoRoot,
+          env: workerRuntimeEnv,
+          name: "setup",
+        });
+        workerRuntimeEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
+      }
+
+      await cleanupHostedRunnerContainers({
         cwd: repoRoot,
         env: workerRuntimeEnv,
-        name: "setup",
       });
-      workerRuntimeEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
     }
 
-    await cleanupHostedRunnerContainers({
-      cwd: repoRoot,
-      env: workerRuntimeEnv,
-    });
-
-    const cloudflareProcess = spawnChildProcess("cloudflare", "pnpm", [
-      "--dir",
-      "apps/cloudflare",
-      "worker:dev:prepared",
-      "--",
-      "--ip",
-      config.workerHost,
-      "--port",
-      String(config.workerPort),
-      "--config",
-      workerConfigPath,
-      "--local-protocol",
-      config.workerProtocol,
-      "--persist-to",
-      config.workerPersistDir,
-      "--env-file",
-      workerEnvPath,
-      ...resolveWranglerDebugArgs(initialEnv),
-      ...buildWranglerVarArgs(workerRuntimeEnv),
-    ], workerRuntimeEnv, {
-      pipeOutput: input.pipeOutput,
-      stderrTarget: input.stderrTarget,
-      stdoutTarget: input.stdoutTarget,
-    });
-    children.push(cloudflareProcess);
+    const cloudflareProcess = workerRuntimeEnv === null
+      ? null
+      : spawnChildProcess("cloudflare", "pnpm", [
+        "--dir",
+        "apps/cloudflare",
+        "worker:dev:prepared",
+        "--",
+        "--ip",
+        config.workerHost,
+        "--port",
+        String(config.workerPort),
+        "--config",
+        workerConfigPath,
+        "--local-protocol",
+        config.workerProtocol,
+        "--persist-to",
+        config.workerPersistDir,
+        "--env-file",
+        workerEnvPath,
+        ...resolveWranglerDebugArgs(initialEnv),
+        ...buildWranglerVarArgs(workerRuntimeEnv),
+      ], workerRuntimeEnv, {
+        pipeOutput: input.pipeOutput,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+      });
+    if (cloudflareProcess) {
+      children.push(cloudflareProcess);
+    } else {
+      const stderrTarget = input.stderrTarget ?? process.stderr;
+      stderrTarget.write(
+        `[cloudflare] Reusing existing local Cloudflare worker at ${workerBaseUrl}; stop that process to force a fresh worker.\n`,
+      );
+      if (config.skipWeb) {
+        keepAliveTimer = setInterval(() => {}, 2_147_483_647);
+      }
+    }
 
     stripeListener = await maybeStartStripeWebhookListener({
       config,
@@ -362,8 +387,6 @@ export async function startHostedLocalDevStack(input: {
     }
 
     const webBaseUrl = config.skipWeb ? null : `http://${config.webHost}:${config.webPort}`;
-    const workerBaseUrl = `${config.workerProtocol}://${config.workerHost}:${config.workerPort}`;
-
     const cleanupTemporaryInputs = async (): Promise<void> => {
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true });
@@ -394,7 +417,11 @@ export async function startHostedLocalDevStack(input: {
         if (stripeListener !== null) {
           await terminateChildProcessAndWait(stripeListener.child, { signal });
         }
-        if (workerRuntimeEnv) {
+        if (keepAliveTimer !== null) {
+          clearInterval(keepAliveTimer);
+          keepAliveTimer = null;
+        }
+        if (workerRuntimeEnv && workerPortMode === "start") {
           await cleanupHostedRunnerContainers({
             cwd: repoRoot,
             env: workerRuntimeEnv,
@@ -438,18 +465,20 @@ export async function startHostedLocalDevStack(input: {
           }),
         ]);
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
-        await maybeRunRunnerContainerSmoke({
-          config,
-          env: workerRuntimeEnv,
-          workerBaseUrl,
-        });
+        if (workerRuntimeEnv !== null) {
+          await maybeRunRunnerContainerSmoke({
+            config,
+            env: workerRuntimeEnv,
+            workerBaseUrl,
+          });
+        }
       } catch (error) {
         if (!stopped) {
           await stop("SIGTERM");
         }
         throw appendStartupDiagnostics(error, await collectDockerDevDiagnostics({
           cwd: repoRoot,
-          env: workerRuntimeEnv,
+          env: workerRuntimeEnv ?? undefined,
         }), children);
       }
     })();
@@ -492,7 +521,7 @@ export async function startHostedLocalDevStack(input: {
     if (stripeListener !== null) {
       await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
     }
-    if (workerRuntimeEnv) {
+    if (workerRuntimeEnv && workerPortMode === "start") {
       await cleanupHostedRunnerContainers({
         cwd: repoRoot,
         env: workerRuntimeEnv,

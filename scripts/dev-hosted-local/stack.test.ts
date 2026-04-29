@@ -1,3 +1,4 @@
+import { rename, symlink, writeFile } from "node:fs/promises";
 import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,7 @@ import type {
   HostedLocalChildProcess,
   HostedLocalDevConfig,
 } from "./types.ts";
+import type { HostedLocalWorkerPortMode } from "./runtime.ts";
 
 class CapturingWritable extends Writable {
   readonly chunks: string[] = [];
@@ -90,6 +92,14 @@ const spawnStripeListenerWithSecretCapture = vi.fn<
 >();
 const terminateChildProcessAndWait = vi.fn(async () => {});
 const waitForHealthyHttpEndpoint = vi.fn(async () => {});
+const resolveHostedLocalWorkerPortMode = vi.fn<
+  (input: {
+    host: string;
+    message: string;
+    port: number;
+    protocol: "http" | "https";
+  }) => Promise<HostedLocalWorkerPortMode>
+>(async () => "start");
 const waitForFirstChildExit = vi.fn<(
   children: readonly BufferedNamedChildProcess[],
 ) => Promise<BufferedNamedChildProcess>>(() => new Promise(() => {}));
@@ -176,6 +186,7 @@ vi.mock("./runtime.ts", () => ({
   assertPortAvailable: vi.fn(async () => {}),
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
+  resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
   spawnStripeListenerWithSecretCapture,
@@ -560,6 +571,53 @@ describe("hosted local dev stack", () => {
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(1);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
     expect(stack.webBaseUrl).toBeNull();
+  });
+
+  it("reuses an already-running local worker when its health banner matches Murph", async () => {
+    resolveHostedLocalWorkerPortMode.mockResolvedValueOnce("reuse-existing");
+    const stderrTarget = new CapturingWritable();
+    spawnChildProcess.mockReturnValueOnce(
+      createBufferedChild({ exitCode: null, name: "web", pid: 460 }),
+    );
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+      pipeOutput: false,
+      stderrTarget,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(stack.processes.cloudflare).toBeNull();
+    expect(stderrTarget.text()).toContain(
+      "Reusing existing local Cloudflare worker at http://127.0.0.1:8787",
+    );
+    expect(spawnChildProcess).toHaveBeenCalledTimes(1);
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "web",
+      expect.any(String),
+      expect.any(Array),
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "runner:bundle"],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "deploy:smoke"],
+      expect.any(Object),
+    );
+    expect(cleanupHostedRunnerContainers).not.toHaveBeenCalled();
+    expect(vi.mocked(writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(rename)).not.toHaveBeenCalled();
+    expect(vi.mocked(symlink)).not.toHaveBeenCalled();
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
+    expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
   });
 
   it("fails fast and cleans up when a dev child exits before readiness", async () => {
