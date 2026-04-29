@@ -31,5 +31,8 @@ Research rules:
 - Never write source-key spillover as visible copy. This includes labels or inline text such as `Source keys:`, `Source key:`, `Citation key:`, `Citation keys:`, `Source artifact:`, backticked `source_artifact:*` references, or prose that says a claim is backed by raw internal source IDs.
 - Use source keys only in structured machine-readable fields: frontmatter relations, `claims.sourceKeys`, `researchLandscape.groups.sourceKeys`, source ledgers, source findings, evidence appraisals, artifact manifests, JSON, and JSONL.
 - When prose needs attribution, use readable source-card references, study names, author/year, PMID/DOI text, or source titles instead of raw internal keys.
+- Choose protocol signal markers that are not just the exposure or adherence metric. For example, daily step count is assumed to be logged for Daily Step Floor, and daily protein intake is assumed to be logged for Protein Floor.
+- Prefer primary UI markers that are objective and easy to measure from ordinary Murph data when a credible downstream signal exists; subjective or process-adjacent markers like sedentary time, walking-bout minutes, or musculoskeletal pain usually belong lower as `also worth watching`.
+- For protocol pages, write the frontmatter `summary:` field directly below `title:` using `agent-docs/product-specs/protocol-summary-copy.md` as the source of truth. Prefer this shape: `[Concrete protocol in plain language], [simple mechanism or reason it might matter].`
 - Copyrighted PDFs do not go in Git. Add metadata or manifest candidates only unless rights are clearly open and redistributable.
 - Every claim proposed for a protocol page must carry source keys in structured fields unless explicitly labeled community outcome.

@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
 slug: protocols/evening-light-reduction/red-light-glasses-before-bed
 title: Red Light Glasses Before Bed
-summary: Wear high-filtering amber, red, or orange glasses during the last 90–120 minutes before bed to test whether lowering evening melanopic light makes winding down or sleep onset easier.
+summary: Bedtime light-filtering glasses, where less blue-green light reaches the retina so the brain gets a weaker signal to stay alert and delay melatonin.
 status: draft
 quality: usable
 aliases:

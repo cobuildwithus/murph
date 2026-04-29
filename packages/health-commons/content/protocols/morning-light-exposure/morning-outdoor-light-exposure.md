@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:morning-light-exposure/morning-outdoor-light-exposure
 slug: protocols/morning-light-exposure/morning-outdoor-light-exposure
 title: Morning Outdoor Light Exposure
-summary: Go outside after waking for repeatable ambient daylight exposure to test whether subjective sleep quality and alertness improve without light, mood, UV, or heat side effects.
+summary: Outdoor daylight soon after waking, where bright morning light resets the body clock early in the day so sleep pressure and melatonin timing line up better by evening.
 status: field-testing
 quality: usable
 aliases:

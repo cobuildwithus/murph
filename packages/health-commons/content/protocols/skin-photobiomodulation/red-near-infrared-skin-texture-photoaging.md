@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
 slug: protocols/skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-title: Red And Near Infrared Light For Skin Texture And Photoaging
-summary: Use a specified adult facial or periocular red-plus-near-infrared LED/IRED mask on a conservative fixed schedule, with eye protection, standardized photos, and tolerability logs, to test whether skin texture or photoaging scores change over weeks.
+title: Red Light For Skin
+summary: Red/NIR LED mask on facial skin, where red and near-infrared light is absorbed by skin cells and may nudge cell-energy and repair signals.
 status: draft
 quality: usable
 aliases:

@@ -735,7 +735,6 @@ const TIMELINE_LEGEND: ReadonlyArray<{
   term: string;
   description: string;
 }> = [
-  { kind: "baseline", term: "Baseline", description: "measurement only, no sessions" },
   { kind: "session", term: "Session", description: "a sauna session that day" },
   { kind: "rest", term: "Rest", description: "no session, still track signals" },
 ];
@@ -795,7 +794,7 @@ function ProtocolPhaseTimeline({
           );
         })}
       </div>
-      <dl className="flex flex-col gap-2 text-[12px]/4 text-muted-foreground">
+      <dl className="flex flex-row gap-2 text-[12px]/4 text-muted-foreground">
         {TIMELINE_LEGEND.map((entry) => (
           <div key={entry.kind} className="flex items-center gap-2.5">
             <span
@@ -805,7 +804,6 @@ function ProtocolPhaseTimeline({
             <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
               {entry.term}
             </dt>
-            <dd>{entry.description}</dd>
           </div>
         ))}
       </dl>

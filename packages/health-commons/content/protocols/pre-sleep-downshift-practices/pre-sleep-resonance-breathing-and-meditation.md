@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
 slug: protocols/pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
 title: Resonance Breathing Before Bed
-summary: "Use this as a conservative pre-sleep downshift chooser: test either gentle resonance-like breathing or silent meditation before bed, and treat a combined breathing-plus-meditation run as exploratory rather than a proven stacked protocol."
+summary: "Slow steady breathing before bed, where each breath lines up more predictably with heart-rate rhythms and gives the nervous system a calmer pre-sleep cue."
 status: draft
 quality: usable
 aliases:

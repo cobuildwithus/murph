@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants
 slug: protocols/intermittent-pneumatic-compression/pneumatic-compression-pants
 title: Pneumatic Compression Pants
-summary: Use consumer lower-limb pneumatic compression pants or boots after exercise or for leg-comfort self-testing, prioritizing soreness and comfort tracking with conservative safety screening over broad performance or medical claims.
+summary: Pneumatic compression pants that rhythmically squeeze the legs, helping move blood and fluids to potentially ease soreness and improve comfort after exercise.
 status: field-testing
 quality: usable
 aliases:

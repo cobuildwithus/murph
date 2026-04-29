@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
 slug: protocols/alcohol-abstinence/short-term-alcohol-abstinence
 title: Short-Term Alcohol Abstinence
-summary: Run a voluntary alcohol-free interval with safety screening, adherence and symptom logs, wearable or optional lab review, and a non-moral off-ramp plan.
+summary: A short alcohol-free window, where removing alcohol avoids its early-night sedation and later sleep disruption, eases overnight recovery load, and makes drinking cues easier to see.
 status: draft
 quality: usable
 aliases:
