@@ -8,16 +8,18 @@ import type {
   HealthCommonsTestPlan,
   StoredMedia,
 } from "@murphai/contracts";
+import {
+  createHealthCommonsRouteBundleReader,
+  getGeneratedHealthCommonsWebExperimentIndex,
+  loadGeneratedHealthCommonsWebRouteBundle,
+  type HealthCommonsCatalogReader,
+  type HealthCommonsEntity,
+} from "@murphai/health-commons/runtime";
 
 import {
   CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
 } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
-import {
-  healthCommonsCatalog,
-  type HealthCommonsCatalogReader,
-  type HealthCommonsEntity,
-} from "./catalog";
 import {
   listProtocolBiomarkers,
   toExpectedSignal,
@@ -72,10 +74,25 @@ const PROTOCOL_LIBRARY_ORDER = [
   RED_LIGHT_GLASSES_ROUTE_ID,
   BRYAN_JOHNSON_SAUNA_ROUTE_ID,
 ] as const;
+const PROTOCOL_ROUTE_IMAGES: Record<string, string> = {
+  [BRYAN_JOHNSON_SAUNA_ROUTE_ID]: "/design-assets/hero-bryan-johnson-sauna.jpg",
+  "cold-plunge": "/design-assets/cold-plunge-tub.jpeg",
+  [FINNISH_SAUNA_ROUTE_ID]: "/design-assets/hero-finnish-sauna.jpeg",
+  [NORWEGIAN_4X4_ROUTE_ID]: "/design-assets/hero-norwegian-4x4.jpeg",
+  [RED_LIGHT_GLASSES_ROUTE_ID]: "/design-assets/hero-red-light-glasses-before-bed.jpeg",
+};
 
 export function listHealthCommonsExperimentProtocols(
-  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+  catalog?: HealthCommonsCatalogReader,
 ): ExperimentProtocol[] {
+  if (!catalog) {
+    return getGeneratedHealthCommonsWebExperimentIndex()
+      .experiments
+      .filter(isPublicExperimentIndexEntry)
+      .map(toExperimentProtocolIndexEntry)
+      .sort(compareExperimentProtocolOrder);
+  }
+
   return catalog
     .listByEntityType("protocol_variant")
     .filter((protocol) => protocol.entityType === "protocol_variant")
@@ -87,18 +104,118 @@ export function listHealthCommonsExperimentProtocols(
 
 export function resolveHealthCommonsExperimentProtocol(
   experimentId: string,
-  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+  catalog?: HealthCommonsCatalogReader,
 ): ExperimentProtocol | null {
+  if (!catalog) {
+    const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+      entityType: "protocol_variant",
+      routeId: normalizeExperimentRouteId(experimentId),
+    });
+    if (!bundle) {
+      return null;
+    }
+    const reader = createHealthCommonsRouteBundleReader(bundle);
+    const protocol = reader.findByKey(bundle.primaryKey);
+
+    return isPublicExperimentProtocol(protocol)
+      ? toExperimentDetail(protocol, reader)
+      : null;
+  }
+
   const protocol = catalog.findByRouteId({
     entityType: "protocol_variant",
     routeId: normalizeExperimentRouteId(experimentId),
   });
 
-  if (!protocol || protocol.entityType !== "protocol_variant") {
+  if (!isPublicExperimentProtocol(protocol)) {
     return null;
   }
 
   return toExperimentDetail(protocol, catalog);
+}
+
+export function listHealthCommonsExperimentRouteParams(): { experimentId: string }[] {
+  return getGeneratedHealthCommonsWebExperimentIndex()
+    .experiments
+    .filter(isPublicExperimentIndexEntry)
+    .map((entry) => ({ experimentId: entry.routeId }))
+    .sort((left, right) => left.experimentId.localeCompare(right.experimentId));
+}
+
+function isPublicExperimentIndexEntry(
+  entry: ReturnType<typeof getGeneratedHealthCommonsWebExperimentIndex>["experiments"][number],
+): boolean {
+  return entry.status !== "deprecated" && entry.hidden !== true;
+}
+
+function isPublicExperimentProtocol(
+  entity: HealthCommonsEntity | null,
+): entity is HealthCommonsEntity & { entityType: "protocol_variant" } {
+  return entity?.entityType === "protocol_variant"
+    && entity.status !== "deprecated"
+    && entity.hidden !== true;
+}
+
+function toExperimentProtocolIndexEntry(
+  entry: ReturnType<typeof getGeneratedHealthCommonsWebExperimentIndex>["experiments"][number],
+): ExperimentProtocol {
+  const image = PROTOCOL_ROUTE_IMAGES[entry.routeId] ?? entry.image ?? DEFAULT_PROTOCOL_IMAGE;
+
+  return {
+    protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
+    id: entry.routeId,
+    title: entry.title,
+    category: entry.category,
+    image,
+    durationDays: entry.durationDays,
+    baselineDays: entry.baselineDays,
+    studyCount: entry.studyCount,
+    researchSummaryLabel: formatIndexResearchSummaryLabel(entry.studyCount),
+    evidenceLevel: entry.evidenceLevel,
+    evidenceLabel: entry.evidenceLabel,
+    description: entry.description,
+    expectedSignals: [],
+    measurementPaths: [],
+    protocolFacts: [],
+    protocol: [],
+    protocolTips: [],
+    protocolKeepInMind: [],
+    protocolLogFields: [],
+    whyItWorks: entry.description,
+    experts: [],
+    researchStats: [],
+    studies: [],
+    safety: {
+      cautionLevel: 1,
+      precautions: [],
+      whoShouldAvoid: [],
+    },
+    commons: {
+      aliases: uniqueStrings([
+        entry.routeId,
+        entry.key,
+        entry.key.replace(/^protocol_variant:/u, ""),
+        entry.slug,
+        entry.slug.split("/").at(-1) ?? null,
+        ...entry.aliases,
+      ]),
+      catalogHash: getGeneratedHealthCommonsWebExperimentIndex().catalogHash,
+      key: entry.key,
+      pageRevisionId: entry.revision.pageRevisionId,
+      recipeHash: entry.revision.recipeHash ?? null,
+      routeId: entry.routeId,
+      runSpecRevisionId: entry.revision.runSpecRevisionId ?? null,
+      slug: entry.slug,
+    },
+  };
+}
+
+function formatIndexResearchSummaryLabel(studyCount: number): string {
+  if (studyCount === 0) {
+    return "Research mapped";
+  }
+
+  return studyCount === 1 ? "1 study" : `${studyCount} studies`;
 }
 
 function normalizeExperimentRouteId(value: string): string {
@@ -140,16 +257,31 @@ function toExperimentDetail(
   const protocolSpec = protocol.protocol;
   const measurementPaths = toMeasurementPaths(protocol, catalog);
   const safety = protocol.safety;
-  const citedSources = catalog.listRelated({
+  const evidenceAppraisals = catalog.listEvidenceAppraisals({
+    targetKey: protocol.key,
+  });
+  const directlyCitedSources = catalog.listRelated({
     entity: protocol,
     entityTypes: ["source_artifact"],
     relationTypes: ["cites"],
   });
+  const appraisalSources = evidenceAppraisals.flatMap((appraisal) => {
+    const source = catalog.findByKey(appraisal.sourceKey);
+    return source?.entityType === "source_artifact" ? [source] : [];
+  });
+  const landscapeSources = (protocol.researchLandscape?.groups ?? []).flatMap((group) =>
+    group.sourceKeys.flatMap((sourceKey) => {
+      const source = catalog.findByKey(sourceKey);
+      return source?.entityType === "source_artifact" ? [source] : [];
+    })
+  );
+  const citedSources = uniqueEntities([
+    ...directlyCitedSources,
+    ...appraisalSources,
+    ...landscapeSources,
+  ]);
   const citedDisplaySources = citedSources.filter(isDisplaySource);
   const countedResearchSources = citedDisplaySources.filter(isCountedResearchSource);
-  const evidenceAppraisals = catalog.listEvidenceAppraisals({
-    targetKey: protocol.key,
-  });
   const studies = sortStudySourcesForDisplay(citedDisplaySources)
     .map((source) => toStudy(
       source,
@@ -180,7 +312,7 @@ function toExperimentDetail(
     id: routeId,
     title: protocol.title,
     category: formatProtocolCategory(protocol),
-    image: resolveProtocolPageImage(protocol) ?? DEFAULT_PROTOCOL_IMAGE,
+    image: resolveProtocolPageImage(protocol) ?? PROTOCOL_ROUTE_IMAGES[routeId] ?? DEFAULT_PROTOCOL_IMAGE,
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
     studyCount: hasMixedResearchAndProvenanceSources({
@@ -313,6 +445,22 @@ function readProtocolMedia(protocol: HealthCommonsCatalogEntity): StoredMedia[] 
   }
 
   return media.filter(isStoredMediaEntry);
+}
+
+function uniqueEntities(entities: readonly HealthCommonsEntity[]): HealthCommonsEntity[] {
+  const seen = new Set<string>();
+  const result: HealthCommonsEntity[] = [];
+
+  for (const entity of entities) {
+    if (seen.has(entity.key)) {
+      continue;
+    }
+
+    seen.add(entity.key);
+    result.push(entity);
+  }
+
+  return result;
 }
 
 function isStoredMediaEntry(value: unknown): value is StoredMedia {

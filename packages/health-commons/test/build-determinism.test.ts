@@ -36,6 +36,9 @@ vi.mock("../src/catalog.ts", () => ({
 }));
 
 import { writeHealthCommonsGeneratedArtifacts } from "../src/build.ts";
+import { buildHealthCommonsWebGeneratedArtifacts } from "../src/web-artifacts.ts";
+
+const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
 
 function createCatalog(catalogHash: string) {
   return {
@@ -45,7 +48,49 @@ function createCatalog(catalogHash: string) {
     entities: [],
     evidenceAppraisals: [],
     redirects: [],
-    schemaVersion: "murph.commons.catalog.v1",
+    schemaVersion: "murph.commons.catalog.v1" as const,
+  };
+}
+
+function createProtocolEntity(input: {
+  key: string;
+  slug: string;
+  title: string;
+  relations?: { target: string; type: string }[];
+}) {
+  return {
+    schemaVersion: "murph.commons.page.v1" as const,
+    entityType: "protocol_variant" as const,
+    key: input.key,
+    slug: input.slug,
+    title: input.title,
+    summary: `${input.title} summary.`,
+    categories: ["recovery"],
+    lineage: { relationship: "root" as const },
+    attribution: { ownerType: "murph" as const },
+    protocol: {
+      doseSignature: `${input.title} dose`,
+      steps: [`Do ${input.title}.`],
+    },
+    relations: input.relations,
+    safety: {
+      cautionLevel: "moderate" as const,
+      stopIf: ["Stop condition"],
+    },
+    testPlans: [
+      {
+        planId: "test-plan",
+        durationDays: 14,
+        baselineDays: 7,
+        interventionDays: 7,
+        primaryBiomarkerKey: "biomarker:test-signal",
+      },
+    ],
+    body: `${input.title} body.`,
+    relativePath: `${input.slug}.md`,
+    revision: {
+      pageRevisionId: TEST_PAGE_REVISION_ID,
+    },
   };
 }
 
@@ -68,7 +113,7 @@ describe("@murphai/health-commons build determinism", () => {
         generatedRoot: "health-commons-generated",
       }),
     ).rejects.toThrow(
-      "Health Commons generated artifacts are nondeterministic: catalog.json, catalog.hash, source-index.json, source-artifact-index.json.",
+      "Health Commons generated artifacts are nondeterministic: catalog.json, catalog.hash, source-index.json, source-artifact-index.json, web/routes/index.json, web/browse/experiments.json, web/browse/biomarkers.json.",
     );
 
     expect(buildHealthCommonsCatalogMock).toHaveBeenCalledTimes(2);
@@ -93,8 +138,47 @@ describe("@murphai/health-commons build determinism", () => {
     await expect(readFile(path.join(generatedRoot, "source-artifact-index.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.source-artifact-index.v1"',
     );
+    await expect(readFile(path.join(generatedRoot, "web/routes/index.json"), "utf8")).resolves.toContain(
+      '"schemaVersion": "murph.commons.web.route-index.v1"',
+    );
+    await expect(readFile(path.join(generatedRoot, "web/browse/experiments.json"), "utf8")).resolves.toContain(
+      '"schemaVersion": "murph.commons.web.experiment-index.v1"',
+    );
+    await expect(readFile(path.join(generatedRoot, "web/browse/biomarkers.json"), "utf8")).resolves.toContain(
+      '"schemaVersion": "murph.commons.web.biomarker-index.v1"',
+    );
     expect(buildHealthCommonsSourceIndexMock).toHaveBeenCalledTimes(1);
     expect(buildHealthCommonsSourceArtifactIndexMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects duplicate generated web route ids before writing route indexes", () => {
+    expect(() =>
+      buildHealthCommonsWebGeneratedArtifacts({
+        ...createCatalog("sha256:first"),
+        entities: [
+          createProtocolEntity({
+            key: "protocol_variant:family/a",
+            slug: "protocols/family/a",
+            title: "Protocol A",
+          }),
+          createProtocolEntity({
+            key: "protocol_variant:family/b",
+            slug: "protocols/other/b",
+            title: "Protocol B",
+          }),
+        ],
+        redirects: [
+          {
+            from: "protocol_variant:legacy/shared",
+            to: "protocol_variant:family/a",
+          },
+          {
+            from: "protocol_variant:other/shared",
+            to: "protocol_variant:family/b",
+          },
+        ],
+      }),
+    ).toThrow("Duplicate Health Commons web route id generated for protocol_variant:shared");
   });
 });
 

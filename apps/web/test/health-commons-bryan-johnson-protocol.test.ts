@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 import {
   healthCommonsCatalogSchema,
@@ -9,6 +11,7 @@ import {
   createHealthCommonsCatalogReader,
 } from "@/src/lib/health-commons/catalog";
 import {
+  listHealthCommonsExperimentRouteParams,
   listHealthCommonsExperimentProtocols,
   resolveHealthCommonsExperimentProtocol,
 } from "@/src/lib/health-commons/experiment-detail";
@@ -41,6 +44,44 @@ const SUPPLEMENT_PROTOCOL_FIXTURES = [
 ] as const;
 
 describe("Health Commons experiment protocol metadata", () => {
+  it("keeps public experiment resolution on generated route bundles, not the monolithic catalog import", () => {
+    const source = readFileSync(
+      new URL("../src/lib/health-commons/experiment-detail.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).not.toContain("generated/catalog.json");
+    expect(source).not.toContain("./catalog");
+
+    const routeParams = listHealthCommonsExperimentRouteParams();
+    expect(routeParams).toContainEqual({ experimentId: "finnish-sauna" });
+
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    expect(protocol?.commons?.routeId).toBe("finnish-sauna");
+    expect(protocol?.studies.length).toBeGreaterThan(0);
+  });
+
+  it("uses the generated browse index directly for the public experiment library list", () => {
+    const source = readFileSync(
+      new URL("../src/lib/health-commons/experiment-detail.ts", import.meta.url),
+      "utf8",
+    );
+    const listStart = source.indexOf("export function listHealthCommonsExperimentProtocols(");
+    const resolveStart = source.indexOf("export function resolveHealthCommonsExperimentProtocol(");
+    const listBlock = source.slice(listStart, resolveStart);
+
+    expect(listBlock).toContain("getGeneratedHealthCommonsWebExperimentIndex()");
+    expect(listBlock).not.toContain("loadGeneratedHealthCommonsWebRouteBundle");
+
+    const protocols = listHealthCommonsExperimentProtocols();
+    const protocolIds = protocols.map((protocol) => protocol.id);
+
+    expect(protocolIds).toContain("finnish-sauna");
+    expect(protocolIds).toContain("bryan-johnson-blueprint");
+    expect(protocolIds).not.toContain("creatine-monohydrate");
+    expect(protocolIds).not.toContain("daily-vitamin-d3-supplementation");
+  });
+
   it("uses the simplified protocol title", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
 
@@ -109,8 +150,12 @@ describe("Health Commons experiment protocol metadata", () => {
       resolveHealthCommonsExperimentProtocol(
         "hydrolyzed-collagen-peptides",
         createHealthCommonsCatalogReader(catalog),
-      )?.title,
-    ).toBe("Hydrolyzed Collagen Peptides");
+      ),
+    ).toBeNull();
+  });
+
+  it("does not resolve hidden generated protocols by direct route id", () => {
+    expect(resolveHealthCommonsExperimentProtocol("hydrolyzed-collagen-peptides")).toBeNull();
   });
 
   it("prefers page-owned cold plunge artwork when the protocol declares media", () => {
@@ -125,19 +170,19 @@ describe("Health Commons experiment protocol metadata", () => {
 
     expect(protocol).not.toBeNull();
     expect(
-      protocol?.expectedSignals.find((signal) => signal.label === "Perceived Stress")?.description,
+      protocol?.expectedSignals.find((signal) => signal.label === "Self-Reported Mood")?.description,
     ).toBe(
-      "Cold water first puts the body on high alert: breathing, pulse, and blood pressure rise. The possible benefit comes later, when that stress response settles and you feel calmer.",
+      "Use the same 0–10 or 1–5 scale before the session and again 30–180 minutes after. Acute mood is the most defensible first-run target, but it remains short-horizon and source-limited. Source basis: source_artifact:doi-10.1002-lim2.53, source_artifact:doi-10.1002-lim2.70044, source_artifact:doi-10.1002-lim2.70048, source_artifact:pmid-37866096.",
     );
     expect(
-      protocol?.expectedSignals.find((signal) => signal.label === "Mood / Affect")?.description,
+      protocol?.expectedSignals.find((signal) => signal.label === "HRV / RMSSD")?.description,
     ).toBe(
-      "Cold water first gives the body a stress jolt. The mood effect, if it happens, is likely the rebound afterward: less tension and a steadier mood later that day.",
+      "Track HRV as recovery/autonomic context only; acute cold and post-exercise CWI can shift autonomic signals, but HRV is not a direct wellness benefit verdict. Source basis: source_artifact:pmid-39918163, source_artifact:pmid-25437181.",
     );
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Resting Heart Rate")?.description,
     ).toBe(
-      "Repeated cold exposure can blunt the stress response to the plunge. A lower baseline stress response can reduce resting pulse, but only if the body is less taxed between sessions.",
+      "Track resting heart rate for recovery strain and context. Direct repeated-CWI cardiovascular findings are small and unclear, so avoid calling a change a benefit without the full context. Source basis: source_artifact:pmid-37711459, source_artifact:pmid-8891513.",
     );
   });
 

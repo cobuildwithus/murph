@@ -12,12 +12,14 @@ import type {
   HealthCommonsInterpretationFrame,
   HealthCommonsSource,
 } from "@murphai/contracts";
-
 import {
-  healthCommonsCatalog,
+  createHealthCommonsRouteBundleReader,
+  getGeneratedHealthCommonsWebBiomarkerIndex,
+  loadGeneratedHealthCommonsWebRouteBundle,
   type HealthCommonsCatalogReader,
   type HealthCommonsEntity,
-} from "./catalog";
+  type HealthCommonsRouteBundleReader,
+} from "@murphai/health-commons/runtime";
 
 const FINNISH_SAUNA_PROTOCOL_KEY = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
@@ -139,8 +141,16 @@ export interface BiomarkerPageModel {
 }
 
 export function listHealthCommonsBiomarkerRoutes(
-  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+  catalog?: HealthCommonsCatalogReader,
 ): string[] {
+  if (!catalog) {
+    return getGeneratedHealthCommonsWebBiomarkerIndex()
+      .biomarkers
+      .filter((entry) => entry.published)
+      .map((entry) => entry.routeId)
+      .sort();
+  }
+
   return catalog
     .listByEntityType("biomarker")
     .filter(isPublishedBiomarker)
@@ -150,8 +160,26 @@ export function listHealthCommonsBiomarkerRoutes(
 
 export function resolveHealthCommonsBiomarkerDetail(
   biomarkerId: string,
-  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+  catalog?: HealthCommonsCatalogReader,
 ): BiomarkerPageModel | null {
+  if (!catalog) {
+    const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+      entityType: "biomarker",
+      routeId: normalizeRouteId(biomarkerId),
+    });
+    if (!bundle) {
+      return null;
+    }
+    const reader = createHealthCommonsRouteBundleReader(bundle);
+    const biomarker = reader.findByKey(bundle.primaryKey);
+
+    if (!isPublishedBiomarker(biomarker)) {
+      return null;
+    }
+
+    return toBiomarkerPageModel(biomarker, reader);
+  }
+
   const biomarker = catalog.findByRouteId({
     entityType: "biomarker",
     routeId: normalizeRouteId(biomarkerId),
@@ -234,8 +262,10 @@ function toBiomarkerPageModel(
   };
 }
 
-function isPublishedBiomarker(entity: HealthCommonsEntity): boolean {
-  return entity.entityType === "biomarker"
+function isPublishedBiomarker(
+  entity: HealthCommonsEntity | null,
+): entity is HealthCommonsEntity & { entityType: "biomarker" } {
+  return entity?.entityType === "biomarker"
     && entity.status !== "deprecated"
     && (entity.biomarker?.explainerCards?.length ?? 0) > 0
     && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
@@ -417,12 +447,28 @@ function resolveProtocolCandidates(input: {
     entityTypes: ["protocol_variant"],
     relationTypes: ["related_protocol"],
   });
-  const inverse = input.catalog
-    .listByEntityType("protocol_variant")
-    .filter((protocol) => protocol.status !== "deprecated")
-    .filter((protocol) => hasProtocolBiomarkerRelation(protocol, input.biomarker.key));
+  const inverse = isRouteBundleReader(input.catalog)
+    ? input.catalog
+        .listReverseEdges({
+          relationTypes: ["primary_biomarker", "secondary_biomarker"],
+          targetKey: input.biomarker.key,
+        })
+        .flatMap((edge) => {
+          const protocol = input.catalog.findByKey(edge.sourceKey);
+          return protocol?.entityType === "protocol_variant" ? [protocol] : [];
+        })
+    : input.catalog
+        .listByEntityType("protocol_variant")
+        .filter((protocol) => protocol.status !== "deprecated")
+        .filter((protocol) => hasProtocolBiomarkerRelation(protocol, input.biomarker.key));
 
   return uniqueEntities([...explicit, ...direct, ...inverse]);
+}
+
+function isRouteBundleReader(
+  catalog: HealthCommonsCatalogReader,
+): catalog is HealthCommonsRouteBundleReader {
+  return "listReverseEdges" in catalog && typeof catalog.listReverseEdges === "function";
 }
 
 function toProtocolRanking(input: {

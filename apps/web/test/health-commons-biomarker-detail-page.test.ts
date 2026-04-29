@@ -75,6 +75,15 @@ describe("BiomarkerPage", () => {
   });
 
   it("publishes the production-ready biomarker routes", () => {
+    const source = readFileSync(
+      new URL("../src/lib/health-commons/biomarker-detail.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).not.toContain("generated/catalog.json");
+    expect(source).not.toContain("healthCommonsCatalog");
+    expect(source).not.toContain("./catalog");
+
     expect(generateStaticParams()).toEqual([
       { biomarkerId: "blood-glucose" },
       { biomarkerId: "blood-oxygen-spo2" },
@@ -218,7 +227,7 @@ describe("BiomarkerPage", () => {
     ).toEqual([
       {
         href: "/experiments/red-light-glasses-before-bed",
-        title: "Red-Light Glasses Before Bed",
+        title: "Red Light Glasses Before Bed",
       },
       {
         href: "/experiments/finnish-sauna",
@@ -295,7 +304,7 @@ describe("BiomarkerPage", () => {
     expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
       expect.objectContaining({
         href: "/experiments/red-light-glasses-before-bed",
-        title: "Red-Light Glasses Before Bed",
+        title: "Red Light Glasses Before Bed",
       }),
       expect.objectContaining({
         href: "/experiments/finnish-sauna",
@@ -368,7 +377,7 @@ describe("BiomarkerPage", () => {
     expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
       expect.objectContaining({
         href: "/experiments/red-light-glasses-before-bed",
-        title: "Red-Light Glasses Before Bed",
+        title: "Red Light Glasses Before Bed",
       }),
       expect.objectContaining({
         href: "/experiments/finnish-sauna",
@@ -500,7 +509,7 @@ describe("BiomarkerPage", () => {
       },
       {
         href: "/experiments/red-light-glasses-before-bed",
-        title: "Red-Light Glasses Before Bed",
+        title: "Red Light Glasses Before Bed",
       },
     ]);
     expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
@@ -581,7 +590,7 @@ describe("BiomarkerPage", () => {
     const detail = resolveHealthCommonsBiomarkerDetail("resting-heart-rate", reader);
 
     expect(detail?.protocolRankings.slice(0, 3).map((protocol) => protocol.title)).toEqual([
-      "Red-Light Glasses Before Bed",
+      "Red Light Glasses Before Bed",
       "Norwegian 4x4 Intervals",
       "Finnish Dry Sauna",
     ]);

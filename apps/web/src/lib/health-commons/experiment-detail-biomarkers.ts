@@ -1,7 +1,10 @@
 import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
+import type {
+  HealthCommonsCatalogReader,
+  HealthCommonsEntity,
+} from "@murphai/health-commons/runtime";
 
 import type { ExperimentProtocol } from "@/src/types/experiments";
-import type { HealthCommonsCatalogReader, HealthCommonsEntity } from "./catalog";
 
 type BiomarkerSignalDirection =
   ExperimentProtocol["expectedSignals"][number]["direction"];

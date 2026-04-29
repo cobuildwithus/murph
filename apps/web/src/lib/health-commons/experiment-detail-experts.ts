@@ -1,5 +1,5 @@
 import type { Expert } from "@/src/types/experiments";
-import type { HealthCommonsEntity } from "./catalog";
+import type { HealthCommonsEntity } from "@murphai/health-commons/runtime";
 
 const SOURCE_PERSON_EXPERT_QUOTES: Partial<Record<string, string>> = {
   "source_person:bryan-johnson":
