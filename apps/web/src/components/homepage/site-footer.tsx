@@ -37,19 +37,19 @@ export function SiteFooter({ authenticated }: { authenticated: boolean }) {
           </p>
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="Legal and project links">
             <a
-              href="/legal/consumer-health-data-privacy-policy"
+              href="/consumer-health-data-privacy-policy"
               className="font-semibold text-[#f5f0e8]/70 underline underline-offset-4 transition-colors hover:text-[#f5f0e8]"
             >
               Consumer Health Data Privacy Policy
             </a>
             <a
-              href="/legal/privacy.pdf"
+              href="/legal/privacy"
               className="text-[#f5f0e8]/55 transition-colors hover:text-[#f5f0e8]/70"
             >
               Privacy Policy
             </a>
             <a
-              href="/legal/terms.pdf"
+              href="/legal/terms"
               className="text-[#f5f0e8]/55 transition-colors hover:text-[#f5f0e8]/70"
             >
               Terms
