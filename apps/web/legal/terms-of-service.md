@@ -1,6 +1,6 @@
 # Murph Terms of Service
 
-**Effective Date:** April 9, 2026  
+**Effective Date:** April 29, 2026
 **Company:** Just Cobuild, Co. ("**Murph**," "**we**," "**us**," or "**our**")
 
 These Terms of Service ("**Terms**") govern your access to and use of Murph's hosted websites, hosted applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features, hosted integrations, and related managed services that link to these Terms (collectively, the "**Hosted Service**").
@@ -162,7 +162,7 @@ You grant us a non-exclusive, worldwide, limited license to host, store, reprodu
 - create de-identified or aggregated analytics or service-improvement materials as described in our Privacy Policy; and
 - otherwise process User Content with your consent or at your direction.
 
-**Model training.** Unless we clearly disclose otherwise and obtain any consent required by law, we do not use your identifiable private health logs, messages, chats, attachments, wearable data, imported records, or similar User Content to train foundation models or third-party AI models. We also contractually require third-party AI model providers that process your identifiable User Content for the Hosted Service not to use that content to train their models, except where you separately authorize that use or where the provider acts under your own account, API key, or settings.
+**Model training.** Unless we clearly disclose otherwise and obtain any consent required by law, we do not use your identifiable private health logs, messages, chats, attachments, wearable data, imported records, or similar User Content to train foundation models or third-party AI models. We also contractually require third-party AI model providers that process your identifiable User Content for the Hosted Service not to use that content to train their models, except where you separately authorize that use after clear disclosure.
 
 This license ends when your User Content is deleted from our active systems, except to the extent retention is reasonably necessary for backups, security, audit logs, legal compliance, dispute resolution, or legitimate internal operational purposes.
 

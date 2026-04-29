@@ -6,10 +6,10 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
 endobj
 3 0 obj
-<< /Length 4844 >>
+<< /Length 4845 >>
 stream
 BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Terms of Service) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 9, 2026 Company: Just Cobuild, Co. \("Murph," "we," "us," or "our"\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 29, 2026 Company: Just Cobuild, Co. \("Murph," "we," "us," or "our"\)) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (These Terms of Service \("Terms"\) govern your access to and use of Murph's hosted websites, hosted) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features,) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (hosted integrations, and related managed services that link to these Terms \(collectively, the "Hosted) Tj ET
@@ -275,7 +275,7 @@ BT /F1 10 Tf 1 0 0 1 54.00 88.00 Tm (device accuracy, medical-device status, or 
 endstream
 endobj
 8 0 obj
-<< /Length 5580 >>
+<< /Length 5531 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (References to third-party names, services, devices, integrations, or logos are for identification only and) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (do not imply sponsorship, endorsement, or affiliation unless we expressly say so. We may disable, modify,) Tj ET
@@ -316,7 +316,7 @@ BT /F1 10 Tf 1 0 0 1 54.00 304.00 Tm (use your identifiable private health logs,
 BT /F1 10 Tf 1 0 0 1 54.00 290.00 Tm (records, or similar User Content to train foundation models or third-party AI models. We also) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 276.00 Tm (contractually require third-party AI model providers that process your identifiable User Content for) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 262.00 Tm (the Hosted Service not to use that content to train their models, except where you separately) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 248.00 Tm (authorize that use or where the provider acts under your own account, API key, or settings.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 248.00 Tm (authorize that use after clear disclosure.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 230.00 Tm (This license ends when your User Content is deleted from our active systems, except to the extent) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 216.00 Tm (retention is reasonably necessary for backups, security, audit logs, legal compliance, dispute resolution,) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 202.00 Tm (or legitimate internal operational purposes.) Tj ET
@@ -895,42 +895,42 @@ xref
 0000000009 00000 n 
 0000000079 00000 n 
 0000000154 00000 n 
-0000005050 00000 n 
-0000010805 00000 n 
-0000016621 00000 n 
-0000022071 00000 n 
-0000027541 00000 n 
-0000033173 00000 n 
-0000038504 00000 n 
-0000043867 00000 n 
-0000049195 00000 n 
-0000055302 00000 n 
-0000060210 00000 n 
-0000065352 00000 n 
-0000070728 00000 n 
-0000075531 00000 n 
-0000080502 00000 n 
-0000081951 00000 n 
-0000082089 00000 n 
-0000082227 00000 n 
-0000082365 00000 n 
-0000082503 00000 n 
-0000082641 00000 n 
-0000082779 00000 n 
-0000082917 00000 n 
-0000083056 00000 n 
-0000083195 00000 n 
-0000083334 00000 n 
-0000083473 00000 n 
-0000083612 00000 n 
-0000083751 00000 n 
-0000083890 00000 n 
-0000084029 00000 n 
-0000084168 00000 n 
-0000084333 00000 n 
-0000084476 00000 n 
+0000005051 00000 n 
+0000010806 00000 n 
+0000016622 00000 n 
+0000022072 00000 n 
+0000027542 00000 n 
+0000033125 00000 n 
+0000038456 00000 n 
+0000043819 00000 n 
+0000049147 00000 n 
+0000055254 00000 n 
+0000060162 00000 n 
+0000065304 00000 n 
+0000070680 00000 n 
+0000075483 00000 n 
+0000080454 00000 n 
+0000081903 00000 n 
+0000082041 00000 n 
+0000082179 00000 n 
+0000082317 00000 n 
+0000082455 00000 n 
+0000082593 00000 n 
+0000082731 00000 n 
+0000082869 00000 n 
+0000083008 00000 n 
+0000083147 00000 n 
+0000083286 00000 n 
+0000083425 00000 n 
+0000083564 00000 n 
+0000083703 00000 n 
+0000083842 00000 n 
+0000083981 00000 n 
+0000084120 00000 n 
+0000084285 00000 n 
+0000084428 00000 n 
 trailer
 << /Size 38 /Root 37 0 R /Info 36 0 R >>
 startxref
-84527
+84479
 %%EOF
