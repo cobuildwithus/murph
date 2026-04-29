@@ -89,15 +89,12 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   expect(window.document.body.textContent).toContain("Log in or sign up");
 });
 
-test.each([
-  ["nav", "Log in or sign up"],
-  ["hero", "See what works for your body"],
-] as const)("LandingAuthActions keeps the %s CTA as one auth button", async (context, authLabel) => {
+test("LandingAuthActions keeps the hero CTA as one auth button", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
-      context,
-      authLabel,
+      context: "hero",
+      authLabel: "See what works for your body",
     }),
   );
   cleanupRender = cleanup;
@@ -106,7 +103,26 @@ test.each([
     container.querySelectorAll("button"),
   ) as HTMLButtonElement[];
   expect(buttons).toHaveLength(1);
-  expect(buttons[0]?.textContent).toContain(authLabel);
+  expect(buttons[0]?.textContent).toContain("See what works for your body");
+});
+
+test("LandingAuthActions splits the nav CTA when requested", async () => {
+  const { cleanup, container } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "nav",
+      authLabel: "Log in or sign up",
+      splitUnauthenticated: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const buttons = Array.from(
+    container.querySelectorAll("button"),
+  ) as HTMLButtonElement[];
+  expect(buttons).toHaveLength(2);
+  expect(buttons[0]?.textContent).toBe("Log in");
+  expect(buttons[1]?.textContent).toBe("Signup");
 });
 
 test("LandingAuthActions splits the lower homepage CTA into login and signup actions", async () => {

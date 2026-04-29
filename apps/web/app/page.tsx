@@ -69,7 +69,11 @@ export default async function HomePage() {
     <HostedPhoneCountryCodeBoundary>
       <style>{`#global-footer { display: none; }`}</style>
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
-        <StickyNav authenticated={authenticated} githubStarCount={githubStarCount} />
+        <StickyNav
+          authenticated={authenticated}
+          githubStarCount={githubStarCount}
+          splitUnauthenticatedAuth
+        />
         <HeroSection authenticated={authenticated} />
         <HowItWorksSection />
         <AssistantSection />
