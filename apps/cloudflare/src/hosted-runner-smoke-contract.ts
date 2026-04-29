@@ -11,6 +11,7 @@ export interface HostedRunnerSmokeResult {
   childCwdIsIsolated: boolean;
   codexAppServerHelpBytes: number;
   codexCommandDiscovered: boolean;
+  codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
   codexVersion: string;
   healthCommonsCatalogHash: string;
   healthCommonsCliProtocolListBytes: number;
@@ -74,6 +75,10 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     codexCommandDiscovered: readBoolean(
       record.codexCommandDiscovered,
       "Hosted runner smoke result.codexCommandDiscovered",
+    ),
+    codexHostedConfigShellEnvironmentPolicyAllowlisted: readBoolean(
+      record.codexHostedConfigShellEnvironmentPolicyAllowlisted,
+      "Hosted runner smoke result.codexHostedConfigShellEnvironmentPolicyAllowlisted",
     ),
     codexVersion: readNonEmptyString(
       record.codexVersion,

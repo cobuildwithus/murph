@@ -10,6 +10,7 @@ const validHostedRunnerSmokeResult = {
   childCwdIsIsolated: true,
   codexAppServerHelpBytes: 2048,
   codexCommandDiscovered: true,
+  codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
   healthCommonsCliProtocolListBytes: 768,
@@ -67,6 +68,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       childCwdIsIsolated: true,
       codexAppServerHelpBytes: 2048,
       codexCommandDiscovered: true,
+      codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
       codexVersion: "codex-cli 0.125.0",
       murphCommandDiscovered: true,
       normalizedTranscriptSha256: "normalized-hash",
@@ -108,6 +110,13 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexCommandDiscovered: "true",
     })).toThrow(
       "Hosted runner smoke result.codexCommandDiscovered must be a boolean.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexHostedConfigShellEnvironmentPolicyAllowlisted: "true",
+    })).toThrow(
+      "Hosted runner smoke result.codexHostedConfigShellEnvironmentPolicyAllowlisted must be a boolean.",
     );
 
     expect(() => parseHostedRunnerSmokeResult({
