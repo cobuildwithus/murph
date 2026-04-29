@@ -817,9 +817,15 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: Which days or time windows are easiest for stretching?
+    constraints:
+      defaultRunPlanSchedule:
+        kind: cron
+        expression: "0 20 * * 1,2,3,4,5"
+        timeZone: UTC
+      runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
     target:
-      object: experimentRun
-      field: schedule
+      object: onboardingCapture
+      field: answers.weeklySchedule
   -
     id: reminder_policy
     label: Reminder preference

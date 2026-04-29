@@ -69,6 +69,13 @@ import {
   healthCommonsKeySchema,
   healthCommonsStableIdSchema,
 } from "./health-commons.ts";
+import { experimentRunScheduleIntentSchema } from "./schedule-intent.ts";
+
+export {
+  experimentRunScheduleIntentSchema,
+  type ExperimentRunScheduleIntent,
+  type ExperimentRunScheduleIntentKind,
+} from "./schedule-intent.ts";
 
 export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -1150,7 +1157,7 @@ export const experimentRunPlanSchema = z
     interventionStart: isoDateString().optional(),
     interventionEnd: isoDateString().optional(),
     modality: boundedString(1, 160).optional(),
-    schedule: boundedString(1, 4000).optional(),
+    schedule: experimentRunScheduleIntentSchema.optional(),
     dose: boundedString(1, 160).optional(),
     sessionsPerWeek: numberSchema(0).optional(),
     targetSessions: integerSchema(0).optional(),

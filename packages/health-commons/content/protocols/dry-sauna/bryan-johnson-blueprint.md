@@ -370,9 +370,14 @@ experimentOnboarding:
         sourceRoutineSessionsPerWeek: 7
         minimumUsefulSessions: 7
         targetSessions: 14
+        defaultRunPlanSchedule:
+          kind: dailyLocal
+          localTime: "07:30"
+          timeZone: UTC
+        runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
       target:
-        object: experimentRun
-        field: schedule
+        object: onboardingCapture
+        field: answers.weeklySchedule
     -
       id: hydration_plan
       label: Hydration plan

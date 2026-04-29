@@ -768,9 +768,15 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: What time do you plan to take it most days?
+    constraints:
+      defaultRunPlanSchedule:
+        kind: dailyLocal
+        localTime: "08:00"
+        timeZone: UTC
+      runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
     target:
-      object: experimentRun
-      field: schedule.dosingTime
+      object: onboardingCapture
+      field: answers.dosingTime
   -
     id: background_seafood
     label: Background seafood intake

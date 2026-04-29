@@ -645,9 +645,15 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: Which two weekly time windows should Murph suggest, with at least 48 hours between sessions?
+      constraints:
+        defaultRunPlanSchedule:
+          kind: cron
+          expression: "0 8 * * 2,5"
+          timeZone: UTC
+        runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
       target:
-        object: experimentRun
-        field: schedule.weeklyWindows
+        object: onboardingCapture
+        field: answers.weeklySchedule
     -
       id: reminder_policy
       label: Reminders

@@ -44,6 +44,30 @@ export {
   selectBrowserVaultSignals,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/views.ts";
+export { selectBrowserVaultExperimentResults } from "./browser-replica/experiments.ts";
+export type {
+  BrowserVaultExperimentBiomarkerResult,
+  BrowserVaultExperimentBiomarkerStatus,
+  BrowserVaultExperimentCoverageStatus,
+  BrowserVaultExperimentExpectedDirection,
+  BrowserVaultExperimentExpectedEffect,
+  BrowserVaultExperimentExpectedRange,
+  BrowserVaultExperimentMetricPoint,
+  BrowserVaultExperimentMetricSource,
+  BrowserVaultExperimentMetricWindowSummary,
+  BrowserVaultExperimentOutcomeResult,
+  BrowserVaultExperimentOutcomeStatus,
+  BrowserVaultExperimentProgressPhase,
+  BrowserVaultExperimentProgressResult,
+  BrowserVaultExperimentResultDiagnostic,
+  BrowserVaultExperimentResultDiagnosticCode,
+  BrowserVaultExperimentResultRun,
+  BrowserVaultExperimentResultsLookup,
+  BrowserVaultExperimentResultsOptions,
+  BrowserVaultExperimentResultsView,
+  BrowserVaultExperimentRunWindows,
+  BrowserVaultExperimentScheduleResult,
+} from "./browser-replica/experiments.ts";
 export {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
   isActiveOverviewExperimentStatus,

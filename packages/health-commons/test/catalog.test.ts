@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { experimentRunScheduleIntentSchema } from "@murphai/contracts";
 import { buildHealthCommonsCatalog } from "@murphai/health-commons";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,9 +54,45 @@ describe("health commons catalog", () => {
         field: "saunaAccess",
       },
     });
+    expect(
+      saunaProtocol?.experimentOnboarding?.setupSlots?.find((slot) => slot.id === "session_timing"),
+    ).toMatchObject({
+      constraints: {
+        defaultRunPlanSchedule: {
+          kind: "cron",
+          expression: "0 18 * * 2,4,6",
+          timeZone: "UTC",
+        },
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone",
+      },
+      target: {
+        object: "onboardingCapture",
+        field: "answers.sessionTiming",
+      },
+    });
+    for (const protocol of catalog.entities.filter((entity) => entity.experimentOnboarding)) {
+      for (const slot of protocol.experimentOnboarding?.setupSlots ?? []) {
+        expect(
+          slot.target?.object === "experimentRun" &&
+            (slot.target.field === "schedule" || slot.target.field.startsWith("schedule.")),
+          `${protocol.key} setup slot ${slot.id} must not target legacy experimentRun.schedule fields`,
+        ).toBe(false);
+        const constraints = readRecord(slot.constraints);
+        if (constraints?.defaultRunPlanSchedule !== undefined) {
+          expect(
+            experimentRunScheduleIntentSchema.safeParse(constraints.defaultRunPlanSchedule).success,
+            `${protocol.key} setup slot ${slot.id} defaultRunPlanSchedule must be structured`,
+          ).toBe(true);
+          expect(
+            constraints.runPlanScheduleTimeZonePolicy,
+            `${protocol.key} setup slot ${slot.id} must declare the run-plan schedule timezone policy`,
+          ).toBe("replace_with_user_vault_timezone");
+        }
+      }
+    }
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:740bb2afa069d0c8ff886f52bfc05da1d7b5402ac79e747d33ff0fa605218cec",
+      "sha256:7a9b8dbf60aa788f05a092a47f33b68b779b820b17434c3076fda65438ce8208",
     );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
@@ -121,3 +158,9 @@ describe("health commons catalog", () => {
     });
   });
 });
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : null;
+}

@@ -1,0 +1,206 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { afterEach, test, vi } from "vitest";
+
+import { importWithMocks } from "./mock-import.ts";
+
+const repoRoot = path.resolve(
+  fileURLToPath(new URL("../../../", import.meta.url)),
+);
+
+afterEach(() => {
+  vi.doUnmock("../src/query-runtime.js");
+  vi.doUnmock("../src/runtime-import.js");
+  vi.restoreAllMocks();
+});
+
+test("applyExperimentOnboardingRecord writes structured run-plan schedules", async () => {
+  const experimentEntity = {
+    entityId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+    family: "experiment",
+    kind: "experiment",
+    title: "Sauna Daily",
+    status: "planned",
+    occurredAt: null,
+    date: null,
+    path: "bank/experiments/sauna-daily.md",
+    body: "---\n",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+      slug: "sauna-daily",
+      status: "planned",
+      title: "Sauna Daily",
+      startedOn: "2026-04-29",
+    },
+    links: [],
+    relatedIds: [],
+    stream: null,
+    experimentSlug: "sauna-daily",
+    tags: [],
+    frontmatter: null,
+  };
+  const queryRuntime = {
+    readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
+    lookupEntityById: vi.fn(() => experimentEntity),
+  };
+  const updateExperiment = vi.fn(
+    async (_input: { runPlan?: { schedule?: unknown } }) => ({
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+      slug: "sauna-daily",
+      relativePath: "bank/experiments/sauna-daily.md",
+      status: "planned",
+      updated: true as const,
+    }),
+  );
+
+  const module = await importWithMocks<
+    typeof import("../src/usecases/experiment-journal-vault.ts")
+  >("../src/usecases/experiment-journal-vault.ts", {
+    "../src/query-runtime.js": () => ({
+      loadQueryRuntime: vi.fn(async () => queryRuntime),
+    }),
+    "../src/runtime-import.js": () => ({
+      loadRuntimeModule: vi.fn(async (specifier: string) => {
+        assert.equal(specifier, "@murphai/core");
+        return { updateExperiment };
+      }),
+    }),
+  });
+
+  await module.applyExperimentOnboardingRecord({
+    vault: "test-vault",
+    lookup: "sauna-daily",
+    scheduleKind: "dailyLocal",
+    scheduleLocalTime: "19:30",
+    scheduleTimeZone: "America/Los_Angeles",
+  });
+
+  const updateInput = updateExperiment.mock.calls[0]?.[0];
+  assert.ok(updateInput);
+  assert.deepEqual(updateInput.runPlan?.schedule, {
+    kind: "dailyLocal",
+    localTime: "19:30",
+    timeZone: "America/Los_Angeles",
+  });
+});
+
+test("applyExperimentOnboardingRecord rejects legacy string schedule payloads", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-onboarding-schedule-"));
+  const schedulePayloadPath = path.join(vaultRoot, "schedule.json");
+  const experimentEntity = {
+    entityId: "exp_01JNV44P4R5SWC90K2AHXQJQYZ",
+    family: "experiment",
+    kind: "experiment",
+    title: "Sauna Legacy",
+    status: "planned",
+    occurredAt: null,
+    date: null,
+    path: "bank/experiments/sauna-legacy.md",
+    body: "---\n",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQYZ",
+      slug: "sauna-legacy",
+      status: "planned",
+      title: "Sauna Legacy",
+      startedOn: "2026-04-29",
+    },
+    links: [],
+    relatedIds: [],
+    stream: null,
+    experimentSlug: "sauna-legacy",
+    tags: [],
+    frontmatter: null,
+  };
+  const queryRuntime = {
+    readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
+    lookupEntityById: vi.fn(() => experimentEntity),
+  };
+  const updateExperiment = vi.fn();
+
+  try {
+    await writeFile(
+      schedulePayloadPath,
+      `${JSON.stringify("Three evening sauna sessions per week.")}\n`,
+      "utf8",
+    );
+
+    const module = await importWithMocks<
+      typeof import("../src/usecases/experiment-journal-vault.ts")
+    >("../src/usecases/experiment-journal-vault.ts", {
+      "../src/query-runtime.js": () => ({
+        loadQueryRuntime: vi.fn(async () => queryRuntime),
+      }),
+      "../src/runtime-import.js": () => ({
+        loadRuntimeModule: vi.fn(async (specifier: string) => {
+          assert.equal(specifier, "@murphai/core");
+          return { updateExperiment };
+        }),
+      }),
+    });
+
+    await assert.rejects(
+      () =>
+        module.applyExperimentOnboardingRecord({
+          vault: "test-vault",
+          lookup: "sauna-legacy",
+          scheduleInputFile: schedulePayloadPath,
+        }),
+      /ExperimentRunScheduleIntent/u,
+    );
+    assert.equal(updateExperiment.mock.calls.length, 0);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("experiment onboarding writers do not preserve legacy string run-plan schedules", async () => {
+  const sourceFiles = [
+    "packages/vault-usecases/src/usecases/experiment-journal-vault.ts",
+    "packages/vault-usecases/src/usecases/types.ts",
+    "packages/cli/src/commands/experiment.ts",
+  ];
+  const sourcePatterns = [
+    /schedule\?: string/u,
+    /Plain-language schedule string/u,
+    /schedule:\s*options\.schedule/u,
+    /patch\.schedule\s*=\s*normalizeRequiredTextOption/u,
+    /runPlan\s*:\s*\{[\s\S]*?schedule\s*:\s*["'`]/u,
+  ];
+  const generatedFiles = [
+    "packages/cli/src/incur.generated.ts",
+    "packages/cli/config.schema.json",
+  ];
+  const generatedPatterns = [
+    /experiment apply-onboarding[^\n]*schedule\?: string/u,
+    /Plain-language schedule string for the run plan/u,
+  ];
+  const violations: string[] = [];
+
+  for (const relativePath of sourceFiles) {
+    const source = await readFile(path.join(repoRoot, relativePath), "utf8");
+    for (const pattern of sourcePatterns) {
+      if (pattern.test(source)) {
+        violations.push(`${relativePath} matched ${pattern}`);
+      }
+    }
+  }
+
+  for (const relativePath of generatedFiles) {
+    const source = await readFile(path.join(repoRoot, relativePath), "utf8");
+    for (const pattern of generatedPatterns) {
+      if (pattern.test(source)) {
+        violations.push(`${relativePath} matched ${pattern}`);
+      }
+    }
+  }
+
+  assert.deepEqual(violations, []);
+});

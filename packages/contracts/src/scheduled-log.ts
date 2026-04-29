@@ -2,6 +2,7 @@ import * as z from "zod";
 
 import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES, ID_PREFIXES } from "./constants.ts";
 import { idPattern } from "./ids.ts";
+import { scheduleIntentSchema } from "./schedule-intent.ts";
 import { withContractMetadata } from "./schema-metadata.ts";
 import {
   mealNutritionSchema,
@@ -12,6 +13,18 @@ import {
   type WorkoutSession,
 } from "./zod.ts";
 
+export {
+  formatScheduleIntentIssues,
+  scheduleIntentAtSchema,
+  scheduleIntentCronSchema,
+  scheduleIntentDailyLocalSchema,
+  scheduleIntentEverySchema,
+  scheduleIntentKindValues,
+  scheduleIntentSchema,
+  type ScheduleIntent,
+  type ScheduleIntentKind,
+} from "./schedule-intent.ts";
+
 export const SCHEDULED_LOG_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.scheduledLogFrontmatter;
 export const SCHEDULED_LOG_DOC_TYPE = FRONTMATTER_DOC_TYPES.scheduledLog;
 
@@ -19,71 +32,11 @@ export const scheduledLogStatusValues = Object.freeze(["active", "paused", "arch
 export const scheduledLogStatusSchema = z.enum(scheduledLogStatusValues);
 export type ScheduledLogStatus = z.infer<typeof scheduledLogStatusSchema>;
 
-export const scheduleIntentKindValues = Object.freeze(["at", "every", "cron", "dailyLocal"] as const);
-
 const slugSchema = z.string().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
 const titleSchema = z.string().min(1).max(160);
 const noteSchema = z.string().min(1).max(4_000);
 const tagListSchema = z.array(slugSchema).max(32);
-const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const scheduledLogIdSchema = z.string().regex(new RegExp(idPattern(ID_PREFIXES.scheduledLog), "u"));
-
-export const scheduleIntentAtSchema = z.object({
-  kind: z.literal("at"),
-  at: z.string().min(1).max(64),
-}).strict();
-
-export const scheduleIntentEverySchema = z.object({
-  kind: z.literal("every"),
-  everyMs: z.number().int().positive(),
-}).strict();
-
-export const scheduleIntentCronSchema = z.object({
-  kind: z.literal("cron"),
-  expression: z.string().min(1).max(400),
-}).strict();
-
-export const scheduleIntentDailyLocalSchema = z.object({
-  kind: z.literal("dailyLocal"),
-  localTime: z.string().regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time."),
-}).strict();
-
-export const scheduleIntentSchema = z.discriminatedUnion("kind", [
-  scheduleIntentAtSchema,
-  scheduleIntentEverySchema,
-  scheduleIntentCronSchema,
-  scheduleIntentDailyLocalSchema,
-]);
-
-function formatScheduleIntentIssue(issue: z.ZodIssue): string {
-  if (issue.path.length === 0 && issue.code === "invalid_type") {
-    return "schedule must be an object.";
-  }
-
-  const field = typeof issue.path[0] === "string" ? issue.path[0] : null;
-
-  switch (field) {
-    case "kind":
-      return "schedule.kind must match a supported scheduled-log schedule.";
-    case "at":
-      return "schedule.at is required.";
-    case "everyMs":
-      return "schedule.everyMs must be a positive integer.";
-    case "expression":
-      return "schedule.expression is required.";
-    case "localTime":
-      return "schedule.localTime must use HH:MM format.";
-    default:
-      return issue.message;
-  }
-}
-
-export function formatScheduleIntentIssues(error: z.ZodError): string {
-  return error.issues.map((issue) => formatScheduleIntentIssue(issue)).join("; ");
-}
-
-export type ScheduleIntentKind = (typeof scheduleIntentKindValues)[number];
-export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
 
 const scheduledActionBaseSchema = z.object({
   tags: tagListSchema.optional(),

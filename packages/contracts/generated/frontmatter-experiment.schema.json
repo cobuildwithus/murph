@@ -284,7 +284,8 @@
                 "expression": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 400
+                  "maxLength": 400,
+                  "pattern": "^\\S+(?:\\s+\\S+){4}$"
                 },
                 "timeZone": {
                   "type": "string",
