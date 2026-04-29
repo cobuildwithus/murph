@@ -18,6 +18,7 @@ import {
 } from "./constants.ts";
 import type {
   BufferedNamedChildProcess,
+  HostedLocalChildProcessName,
   HostedLocalChildProcess,
   HostedWebDevServerLockMetadata,
   NamedChildProcess,
@@ -151,7 +152,7 @@ async function isPortAvailable(host: string, port: number): Promise<boolean> {
 }
 
 export function spawnChildProcess(
-  name: "cloudflare" | "stripe" | "web",
+  name: HostedLocalChildProcessName,
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv,

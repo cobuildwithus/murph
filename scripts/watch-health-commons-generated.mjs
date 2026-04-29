@@ -11,6 +11,7 @@ const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const contentRoot = path.join(repoRoot, "packages", "health-commons", "content");
 const generatorScript = path.join(repoRoot, "scripts", "ensure-health-commons-generated.mjs");
 const debounceMs = readPositiveIntegerEnv(process.env.MURPH_HEALTH_COMMONS_WATCH_DEBOUNCE_MS, 300);
+const skipInitialGenerate = process.env.MURPH_HEALTH_COMMONS_WATCH_SKIP_INITIAL === "1";
 
 let debounceTimer = null;
 let running = false;
@@ -35,7 +36,11 @@ try {
 }
 
 console.error("[health-commons:watch] watching packages/health-commons/content/**/*.md");
-void runGenerate("initial");
+if (skipInitialGenerate) {
+  console.error("[health-commons:watch] initial generate skipped");
+} else {
+  void runGenerate("initial");
+}
 
 function scheduleGenerate(reason) {
   rerunRequested = true;

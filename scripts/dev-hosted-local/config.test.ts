@@ -12,6 +12,7 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(resolveHostedLocalDevConfig({})).toEqual({
       databaseUrlOverride: null,
       forceResetLocalDatabase: false,
+      skipHealthCommonsWatch: false,
       skipPrismaMigrate: false,
       skipRunnerSmoke: false,
       skipStripeListen: false,
@@ -32,6 +33,7 @@ describe("resolveHostedLocalDevConfig", () => {
       resolveHostedLocalDevConfig({
         MURPH_DEV_FORCE_RESET_LOCAL_DB: "1",
         MURPH_DEV_DATABASE_URL: "postgresql://127.0.0.1:5432/custom",
+        MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
         MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
         MURPH_DEV_SKIP_RUNNER_SMOKE: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -48,6 +50,7 @@ describe("resolveHostedLocalDevConfig", () => {
     ).toEqual({
       databaseUrlOverride: "postgresql://127.0.0.1:5432/custom",
       forceResetLocalDatabase: true,
+      skipHealthCommonsWatch: true,
       skipPrismaMigrate: true,
       skipRunnerSmoke: true,
       skipStripeListen: true,
@@ -82,6 +85,7 @@ describe("printHelp", () => {
     const output = writes.join("");
     expect(output).toContain("MURPH_DEV_DATABASE_URL=...");
     expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
+    expect(output).toContain("MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1");
     expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
     expect(output).toContain("MURPH_DEV_STRIPE_ENV_FILE=.tmp/.env.hosted-local-stripe");

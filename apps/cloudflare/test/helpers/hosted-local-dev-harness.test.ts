@@ -5,6 +5,7 @@ import type { HostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/
 const hostedLocalDevConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  skipHealthCommonsWatch: false,
   skipPrismaMigrate: true,
   skipRunnerSmoke: false,
   skipStripeListen: true,
@@ -30,6 +31,8 @@ const startHostedLocalDevStack = vi.fn(async () => ({
   oidcToken: "oidc-token",
   processes: {
     cloudflare: null,
+    healthCommons: null,
+    stripe: null,
     web: null,
   },
   ready: Promise.resolve(),

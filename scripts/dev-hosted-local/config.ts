@@ -15,6 +15,7 @@ export function resolveHostedLocalDevConfig(
   return {
     databaseUrlOverride: env.MURPH_DEV_DATABASE_URL?.trim() || null,
     forceResetLocalDatabase: env.MURPH_DEV_FORCE_RESET_LOCAL_DB === "1",
+    skipHealthCommonsWatch: env.MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH === "1",
     skipPrismaMigrate: env.MURPH_DEV_SKIP_PRISMA_MIGRATE === "1",
     skipRunnerSmoke: env.MURPH_DEV_SKIP_RUNNER_SMOKE === "1",
     skipStripeListen: env.MURPH_DEV_SKIP_STRIPE_LISTEN === "1",
@@ -72,6 +73,7 @@ export function printHelp(): void {
       "  MURPH_DEV_SKIP_VERCEL_PULL=1        Reuse the current shell env instead of pulling Vercel development env",
       "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
       "  MURPH_DEV_SKIP_RUNNER_SMOKE=1       Skip the runner container deploy-smoke readiness proof",
+      "  MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1  Skip the Health Commons markdown watcher after startup generation",
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",
       `  MURPH_DEV_STRIPE_ENV_FILE=${DEFAULT_STRIPE_ENV_FILE}  Load local Stripe test checkout env after Vercel env pull`,
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",

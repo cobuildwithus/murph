@@ -22,10 +22,11 @@ import type {
 const localConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
-  skipWeb: false,
+  skipHealthCommonsWatch: false,
   skipPrismaMigrate: false,
   skipRunnerSmoke: false,
   skipStripeListen: false,
+  skipWeb: false,
   skipVercelPull: false,
   useVercelDatabaseUrl: false,
   webHost: "localhost",
