@@ -485,7 +485,7 @@ test('assistant ask rejects saved Linq delivery routes for the local assistant s
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
-      assert.match(error.message, /iMessage routes are no longer supported/u)
+      assert.match(error.message, /Linq\/iMessage routes are no longer supported/u)
       return true
     },
   )
@@ -993,7 +993,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
-      assert.match(error.message, /iMessage routes are no longer supported/u)
+      assert.match(error.message, /Linq\/iMessage routes are no longer supported/u)
       return true
     },
   )

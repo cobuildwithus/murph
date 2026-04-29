@@ -5,7 +5,6 @@ import {
   maybeUpdateAssistantSessionOptionsViaDaemon,
 } from '../assistant-daemon-client.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   openAssistantConversationLocal,
   sendAssistantMessageLocal,
@@ -16,6 +15,10 @@ import {
 import {
   getAssistantSessionLocal,
 } from '@murphai/assistant-engine/assistant-store'
+import {
+  normalizeAssistantLocalChannel,
+  throwLocalAssistantLinqIMessageUnsupported,
+} from './local-channel-guard.js'
 
 export * from '@murphai/assistant-engine/assistant-service'
 
@@ -24,17 +27,6 @@ type AssistantSessionOptionsPatch = Pick<
   'provider'
 > &
   Partial<Omit<AssistantSession['providerOptions'], 'provider'>>
-
-const LOCAL_ASSISTANT_LINQ_ERROR =
-  'Local assistant Linq routes are no longer supported. Hosted/shared assistant-engine Linq support remains available.'
-
-function normalizeAssistantChannel(channel?: string | null): string | null {
-  if (typeof channel !== 'string') {
-    return null
-  }
-  const normalized = channel.trim().toLowerCase()
-  return normalized.length > 0 ? normalized : null
-}
 
 function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
@@ -45,10 +37,6 @@ function isAssistantSessionNotFoundError(error: unknown): boolean {
   )
 }
 
-function throwLocalAssistantLinqUnsupported(): never {
-  throw new VaultCliError('invalid_option', LOCAL_ASSISTANT_LINQ_ERROR)
-}
-
 async function assertLocalAssistantLinqRouteAllowed(input: {
   channel?: string | null
   conversation?: { channel?: string | null } | null
@@ -56,10 +44,10 @@ async function assertLocalAssistantLinqRouteAllowed(input: {
   vault: string
 }): Promise<void> {
   if (
-    normalizeAssistantChannel(input.channel) === 'linq' ||
-    normalizeAssistantChannel(input.conversation?.channel) === 'linq'
+    normalizeAssistantLocalChannel(input.channel) === 'linq' ||
+    normalizeAssistantLocalChannel(input.conversation?.channel) === 'linq'
   ) {
-    throwLocalAssistantLinqUnsupported()
+    throwLocalAssistantLinqIMessageUnsupported()
   }
 
   if (!input.sessionId) {
@@ -68,8 +56,8 @@ async function assertLocalAssistantLinqRouteAllowed(input: {
 
   try {
     const session = await getAssistantSessionLocal(input.vault, input.sessionId)
-    if (normalizeAssistantChannel(session.binding.channel) === 'linq') {
-      throwLocalAssistantLinqUnsupported()
+    if (normalizeAssistantLocalChannel(session.binding.channel) === 'linq') {
+      throwLocalAssistantLinqIMessageUnsupported()
     }
   } catch (error) {
     if (!isAssistantSessionNotFoundError(error)) {

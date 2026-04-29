@@ -248,7 +248,7 @@ test('service wrappers prefer daemon responses and fall back to local implementa
 test('service wrappers reject local Linq routes before daemon or local delivery work starts', async () => {
   storeLocalMocks.getAssistantSessionLocal.mockResolvedValueOnce({
     binding: {
-      channel: 'linq',
+      channel: 'iMessage',
     },
   })
 
@@ -258,7 +258,7 @@ test('service wrappers reject local Linq routes before daemon or local delivery 
         channel: 'linq',
         vault: TEST_VAULT,
       }),
-    /Linq routes are no longer supported/u,
+    /Linq\/iMessage routes are no longer supported/u,
   )
   await assert.rejects(
     () =>
@@ -267,7 +267,18 @@ test('service wrappers reject local Linq routes before daemon or local delivery 
         sessionId: 'session_linq',
         vault: TEST_VAULT,
       }),
-    /Linq routes are no longer supported/u,
+    /Linq\/iMessage routes are no longer supported/u,
+  )
+  await assert.rejects(
+    () =>
+      sendAssistantMessage({
+        conversation: {
+          channel: 'i-message',
+        },
+        prompt: 'hello',
+        vault: TEST_VAULT,
+      }),
+    /Linq\/iMessage routes are no longer supported/u,
   )
 
   assert.equal(daemonMocks.maybeOpenAssistantConversationViaDaemon.mock.calls.length, 0)
