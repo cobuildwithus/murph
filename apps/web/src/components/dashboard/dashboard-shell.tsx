@@ -34,7 +34,7 @@ export function DashboardShell({
                 width={197}
                 height={44}
                 className="h-5 w-auto"
-                priority
+                preload
               />
             </div>
             <div className="size-7" aria-hidden="true" />

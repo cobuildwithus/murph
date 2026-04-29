@@ -1,13 +1,16 @@
 import { LandingAuthActions } from "@/app/auth-controls";
 import { formatHostedLandingPricingShortSummary } from "@/src/lib/hosted-onboarding/billing-plans";
+import Image from "next/image";
 
 export function HeroSection({ authenticated }: { authenticated: boolean }) {
   const launchPricingSummary = formatHostedLandingPricingShortSummary();
 
   return (
     <section className="relative min-h-[85svh] overflow-hidden bg-[#3a3028] sm:min-h-svh">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <Image
+        preload
+        fill
+        sizes="100vw"
         src="/hero.jpg"
         alt=""
         className="absolute inset-0 h-full w-full object-cover object-[80%_center] sm:object-center"
