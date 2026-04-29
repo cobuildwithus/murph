@@ -769,7 +769,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/delete", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/account-data/delete", {
         body: "{}",
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -806,7 +806,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await worker.fetch(
       await signControlRequest(
-        new Request("https://runner.example.test/internal/users/member_123/delete", {
+        new Request("https://runner.example.test/internal/users/member_123/account-data/delete", {
           method: "POST",
         }),
         { boundUserId: "member_other" },
@@ -817,6 +817,29 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the route user.",
+    });
+    expect(stub.deleteHostedUserData).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized user-data deletion request bodies before touching the Durable Object", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await signControlRequest(
+        new Request("https://runner.example.test/internal/users/member_123/account-data/delete", {
+          body: JSON.stringify({ padding: "x".repeat(5_000) }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        }),
+      ),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request.",
     });
     expect(stub.deleteHostedUserData).not.toHaveBeenCalled();
   });

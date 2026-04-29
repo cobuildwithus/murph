@@ -249,6 +249,7 @@ export class HostedUserRunner {
         this.runnerStores = null;
       }
 
+      await this.stateStore.assertStateForUser(userId);
       const r2 = await this.deleteHostedUserR2DataBestEffort(userId);
       const stateDeletion = await this.stateStore.deleteStateForUser(userId);
       const deleteAlarm = this.state.storage.deleteAlarm;
@@ -611,7 +612,7 @@ export class HostedUserRunner {
       deletedObjectCount,
       deletedRootKeyEnvelope,
       skippedUserScopedPrefixes: userCrypto === null || !supportsPrefixDeletion,
-      supported: supportsObjectDeletion && (userCrypto === null || supportsPrefixDeletion),
+      supported: supportsObjectDeletion && supportsPrefixDeletion,
       userScopedSkipReason: userCrypto === null || !supportsPrefixDeletion ? userScopedSkipReason : null,
     };
   }

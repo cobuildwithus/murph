@@ -105,6 +105,16 @@ export class RunnerStateStore {
     return { deleted: true };
   }
 
+  async assertStateForUser(userId: string): Promise<void> {
+    const meta = this.selectMetaRowSync();
+
+    if (meta && meta.user_id !== userId) {
+      throw new Error(
+        `Hosted runner Durable Object is bound to ${meta.user_id}, not ${userId}.`,
+      );
+    }
+  }
+
   async clearNextWakeIfDue(nowMs: number): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     const parsedMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;

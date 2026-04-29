@@ -113,4 +113,30 @@ describe("settings data export route", () => {
       schema: "murph.hosted-data-export.v1",
     });
   });
+
+  it("rejects oversized export confirmation bodies before parsing or building the export", async () => {
+    const response = await settingsDataExportRoute.POST(
+      new Request("https://join.example.test/api/settings/data-export", {
+        body: JSON.stringify({
+          acknowledgedSensitiveDownload: true,
+          confirmationText: "EXPORT MY DATA",
+          padding: "x".repeat(5_000),
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "INVALID_REQUEST",
+      },
+    });
+    expect(mocks.parseHostedDataExportRequest).not.toHaveBeenCalled();
+    expect(mocks.buildHostedDataExport).not.toHaveBeenCalled();
+  });
 });

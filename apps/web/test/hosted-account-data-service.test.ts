@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const serviceMocks = vi.hoisted(() => ({
+  deleteHostedRunnerUserDataBestEffort: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  deleteHostedRunnerUserDataBestEffort: serviceMocks.deleteHostedRunnerUserDataBestEffort,
+}));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -12,8 +20,8 @@ import {
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { encryptHostedMailboxNullableString } from "@/src/lib/hosted-mailbox/encryption";
 import {
-  buildHostedAccountDataExport,
   buildHostedDataExport,
+  deleteHostedAccountData,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
   parseHostedDataExportRequest,
@@ -67,6 +75,11 @@ const VALID_EXPORT_MODES = new Set([
   "metadata-and-counts",
   "not-exported-secret",
 ]);
+
+beforeEach(() => {
+  serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
+  serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
+});
 
 describe("parseHostedAccountDeletionRequest", () => {
   it("requires the exact destructive action phrase and every acknowledgement", () => {
@@ -188,7 +201,8 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
   it("marks ciphertext/token stores and external systems with the safest export/deletion modes", () => {
     const bySlug = new Map(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((entry) => [entry.slug, entry]));
 
-    expect(bySlug.get("prisma.hosted_mailbox_payload")?.export).toBe("decoded-redacted-data");
+    expect(bySlug.get("prisma.hosted_mailbox_item")?.export).toBe("metadata-and-counts");
+    expect(bySlug.get("prisma.hosted_mailbox_payload")?.export).toBe("not-exported-secret");
     expect(bySlug.get("prisma.hosted_vault_sync_payload")?.export).toBe("not-exported-secret");
     expect(bySlug.get("cloudflare.runner_durable_object")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("cloudflare.r2_user_artifacts")?.deletion).toBe("best-effort-delete");
@@ -202,125 +216,6 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
     expect(deviceSyncSignal?.note).toContain("pre-existing");
     expect(deviceSyncSignal?.note).toContain("does not enqueue new disconnect or wake work");
-  });
-});
-
-describe("buildHostedAccountDataExport", () => {
-  it("returns metadata and counts without resurfacing lookup secrets or ciphertext", async () => {
-    const exported = await buildHostedAccountDataExport({
-      memberId: "member_123",
-      prisma: createHostedAccountDataExportPrismaForTest(),
-    });
-
-    expect(exported.schema).toBe("murph.hosted-account-data-export.v1");
-    expect(exported.counts["prisma.hosted_mailbox_payload"]).toBe(1);
-    expect(exported.counts["prisma.hosted_vault_sync_payload"]).toBe(1);
-    expect(exported.identity).toEqual({
-      maskedPhoneNumberHint: "+1 **** 1234",
-      phoneNumberVerifiedAt: "2026-04-27T00:02:00.000Z",
-      privyUserLinked: true,
-      walletAddressLinked: true,
-      walletChainType: "ethereum",
-      walletCreatedAt: "2026-04-27T00:03:00.000Z",
-      walletProvider: "privy",
-    });
-    expect(Object.keys(exported.identity ?? {}).sort()).toEqual([
-      "maskedPhoneNumberHint",
-      "phoneNumberVerifiedAt",
-      "privyUserLinked",
-      "walletAddressLinked",
-      "walletChainType",
-      "walletCreatedAt",
-      "walletProvider",
-    ]);
-    expect(exported.routing).toEqual({
-      linqHomeThreadLinked: true,
-      linqRecipientLinked: true,
-      pendingLinqThreadLinked: true,
-      replyAliasLinked: true,
-      telegramLinked: true,
-    });
-    expect(exported.workspace).toEqual({
-      browserVaultReplicaRefPresent: true,
-      checkpointedAt: "2026-04-27T00:04:00.000Z",
-      nextWakeAt: "2026-04-27T00:05:00.000Z",
-      nextWakeReason: "nudge",
-      redactedStatusPresent: true,
-      snapshotRefPresent: true,
-      updatedAt: "2026-04-27T00:06:00.000Z",
-      version: "9",
-    });
-    expect(exported.deviceConnections).toEqual([
-      {
-        connectedAt: "2026-04-27T00:07:00.000Z",
-        createdAt: "2026-04-27T00:07:00.000Z",
-        displayName: "WHOOP",
-        id: "device-1",
-        lastSyncCompletedAt: "2026-04-27T00:08:00.000Z",
-        provider: "whoop",
-        status: "active",
-        updatedAt: "2026-04-27T00:09:00.000Z",
-      },
-    ]);
-    expect(Object.keys(exported.deviceConnections[0] ?? {}).sort()).toEqual([
-      "connectedAt",
-      "createdAt",
-      "displayName",
-      "id",
-      "lastSyncCompletedAt",
-      "provider",
-      "status",
-      "updatedAt",
-    ]);
-    expect(exported.vaultSyncSessions).toEqual([
-      {
-        createdAt: "2026-04-27T00:10:00.000Z",
-        direction: "import",
-        expiresAt: "2026-04-27T01:10:00.000Z",
-        id: "vault-sync-1",
-        payloadPresent: true,
-        sourceSchemaVersion: "3",
-        sourceVaultIdPresent: true,
-        sourceVaultTitle: "Source Vault",
-        status: "ready",
-        updatedAt: "2026-04-27T00:11:00.000Z",
-      },
-    ]);
-    expect(Object.keys(exported.vaultSyncSessions[0] ?? {}).sort()).toEqual([
-      "createdAt",
-      "direction",
-      "expiresAt",
-      "id",
-      "payloadPresent",
-      "sourceSchemaVersion",
-      "sourceVaultIdPresent",
-      "sourceVaultTitle",
-      "status",
-      "updatedAt",
-    ]);
-    expect(exported.retentionNotes).toEqual([
-      "Live Prisma, hosted mailbox, vault sync, device, runtime, and workspace rows are deleted immediately by this workflow.",
-      "Cloudflare Durable Object/R2 cleanup is best effort and reported in the deletion result when hosted execution control is configured.",
-      "Provider-side data deletion is limited to revocation hooks and external provider retention controls.",
-      "Stripe, Privy, carrier/email/Telegram/Linq provider records, and infrastructure backups follow their documented retention/legal processes.",
-    ]);
-    expect(Object.keys(exported).sort()).toEqual([
-      "coverage",
-      "counts",
-      "deviceConnections",
-      "emailAuthorization",
-      "generatedAt",
-      "identity",
-      "member",
-      "retentionNotes",
-      "routing",
-      "schema",
-      "vaultSyncSessions",
-      "workspace",
-    ].sort());
-    expect(exported).not.toHaveProperty("mailboxPayloads");
-    expect(exported).not.toHaveProperty("providerTokens");
-    expect(exported).not.toHaveProperty("ciphertext");
   });
 });
 
@@ -349,11 +244,38 @@ describe("buildHostedDataExport", () => {
           telegramUserId: "telegram-user-123",
         },
       },
+      counts: {
+        "prisma.hosted_mailbox_payload": 1,
+        "prisma.hosted_vault_sync_payload": 1,
+      },
+      limits: {
+        maxRowsPerStore: 250,
+        stores: {
+          aiUsage: {
+            exportedRows: 1,
+            maxRows: 250,
+            truncated: false,
+          },
+          mailboxItems: {
+            exportedRows: 3,
+            maxRows: 250,
+            truncated: false,
+          },
+        },
+      },
       schema: "murph.hosted-data-export.v1",
       usage: {
         aiUsage: [
           {
             apiKeyEnvConfigured: true,
+            baseUrlConfigured: true,
+            gatewayTagsOmitted: true,
+            idPresent: true,
+            routeIdPresent: true,
+            sessionIdPresent: true,
+            stripeMeterErrorPresent: true,
+            stripeMeterIdentifierPresent: true,
+            turnIdPresent: true,
           },
         ],
       },
@@ -361,6 +283,7 @@ describe("buildHostedDataExport", () => {
         events: [
           {
             action: "accepted",
+            idPresent: true,
             scope: "launch.required",
             source: "settings",
           },
@@ -370,6 +293,7 @@ describe("buildHostedDataExport", () => {
             scope: "launch.required",
             source: "settings",
             status: "granted",
+            lastEventIdPresent: true,
           },
         ],
       },
@@ -380,71 +304,88 @@ describe("buildHostedDataExport", () => {
         },
         vaultSyncSessions: [
           {
+            idPresent: true,
+            localManifestHashPresent: true,
             payload: {
               payloadOmitted: true,
               payloadSchema: "murph.hosted-vault-sync-payload.v1",
             },
+            sourceVaultIdPresent: true,
+          },
+        ],
+      },
+      wearables: {
+        deviceConnections: [
+          {
+            idPresent: true,
+            keyVersionPresent: true,
+            lastErrorMessagePresent: false,
+            metadataPresent: true,
+            providerAccountLinked: true,
+            scopesPresent: true,
+            tokenVersionPresent: true,
+          },
+        ],
+        deviceSyncSignals: [
+          {
+            connectionIdPresent: true,
+            idPresent: true,
+            revokeWarningMessagePresent: false,
+            traceIdPresent: true,
+          },
+        ],
+        deviceTokenAudits: [
+          {
+            connectionIdPresent: true,
+            expectedTokenVersionPresent: true,
+            idPresent: true,
+            keyVersionPresent: true,
+            sessionIdPresent: true,
+            tokenVersionPresent: true,
+          },
+        ],
+      },
+      diagnostics: {
+        runtimeLogs: [
+          {
+            attemptIdPresent: true,
+            checkpointVersionPresent: true,
+            idPresent: true,
+            leaseGenerationPresent: true,
+            mailboxSeqEndPresent: true,
+            mailboxSeqStartPresent: true,
+            workspaceVersionPresent: true,
           },
         ],
       },
     });
     expect(exported.messaging).toMatchObject({
+      invites: [
+        {
+          idPresent: true,
+          inviteCodeOmitted: true,
+        },
+      ],
       mailboxItems: expect.arrayContaining([
         expect.objectContaining({
           dedupeKeyPresent: true,
+          idPresent: true,
           payload: {
-            status: "decoded",
-            value: expect.objectContaining({
-              message: expect.objectContaining({
-                channel: "linq",
-                linqMessage: expect.objectContaining({
-                  parts: [
-                    {
-                      type: "text",
-                      value: "hello from mailbox",
-                    },
-                    {
-                      type: "media",
-                      downloadUrlOmitted: true,
-                      storageObjectKeyOmitted: true,
-                      urlOmitted: true,
-                    },
-                  ],
-                }),
-                phoneLookupKeyOmitted: true,
-              }),
-              authPayload: expect.objectContaining({
-                accessTokenEncryptedOmitted: true,
-                apiKeyEnvOmitted: true,
-                credentialIdOmitted: true,
-              }),
-            }),
+            decodedPayloadOmitted: true,
+            status: "present-omitted",
           },
           payloadRefPresent: false,
         }),
         expect.objectContaining({
           payload: {
-            status: "decoded",
-            value: expect.objectContaining({
-              message: expect.objectContaining({
-                channel: "email",
-                rawMessageKeyOmitted: true,
-              }),
-            }),
+            decodedPayloadOmitted: true,
+            status: "present-omitted",
           },
         }),
         expect.objectContaining({
           payload: {
-            status: "decoded",
-            value: expect.objectContaining({
-              notification: expect.objectContaining({
-                deliveryDedupeTokenOmitted: true,
-                deliveryIdempotencyKeyOmitted: true,
-                route: expect.objectContaining({
-                  identityIdOmitted: true,
-                }),
-              }),
-            }),
+            decodedPayloadOmitted: true,
+            status: "present-omitted",
           },
         }),
       ]),
@@ -473,10 +414,146 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("secret-access-token-encrypted");
     expect(serialized).not.toContain("SECRET_MAILBOX_API_KEY_ENV");
     expect(serialized).not.toContain("secret-credential-id");
+    expect(serialized).not.toContain("hello from mailbox");
+    expect(serialized).not.toContain("https://gateway.example");
+    expect(serialized).not.toContain("gatewayTagsJson");
+    expect(serialized).not.toContain("secret-stripe-meter-error");
+    expect(serialized).not.toContain("secret-stripe-meter-id");
+    expect(serialized).not.toContain("manifest-hash");
+    expect(serialized).not.toContain("vault-secret");
+    expect(serialized).not.toContain("shallow");
+    expect(serialized).not.toContain("secret-runtime-diagnostic");
+    expect(serialized).not.toContain("secret-outbox-intent-ref");
+    expect(serialized).not.toContain("device-1");
+    expect(serialized).not.toContain("agent-session-1");
+    expect(serialized).not.toContain("usage-1");
+    expect(serialized).not.toContain("route-a");
+    expect(serialized).not.toContain("runtime-log-1");
+    expect(serialized).not.toContain("attempt-1");
+    expect(serialized).not.toContain("mailbox-1");
+    expect(serialized).not.toContain("invite-1");
+    expect(serialized).not.toContain("consent-event-1");
+    expect(serialized).not.toContain("vault-sync-1");
+    expect(serialized).not.toContain("trace-1");
+  });
+
+  it("bounds large stores and reports truncation metadata", async () => {
+    const memberId = "member_123";
+    const exported = await buildHostedDataExport({
+      memberId,
+      prisma: createHostedAccountDataExportPrismaForTest({
+        aiUsageRows: Array.from({ length: 251 }, (_unused, index) =>
+          makeHostedAiUsageRowForTest({
+            id: `usage-${index}`,
+            memberId,
+          })),
+      }),
+    });
+
+    expect(exported).toMatchObject({
+      limits: {
+        stores: {
+          aiUsage: {
+            exportedRows: 250,
+            maxRows: 250,
+            truncated: true,
+          },
+        },
+      },
+    });
+    const usage = requireRecord(exported.usage);
+    expect(requireArray(usage.aiUsage)).toHaveLength(250);
   });
 });
 
-function createHostedAccountDataExportPrisma() {
+describe("deleteHostedAccountData", () => {
+  it("runs Cloudflare cleanup only after the Prisma transaction commits", async () => {
+    const order: string[] = [];
+    serviceMocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
+      order.push("cloudflare");
+      return makeCloudflareDeletionResult();
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => order.push("prisma"),
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(order).toEqual(["prisma", "cloudflare"]);
+    expect(result.cloudflare.deleted).toBe(true);
+    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
+      context: "settings.account-data.delete",
+      userId: "member_123",
+    });
+  });
+
+  it("does not call Cloudflare cleanup when the Prisma transaction fails", async () => {
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => {
+        throw new Error("transaction failed");
+      },
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toThrow("transaction failed");
+
+    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+  });
+});
+
+function makeHostedAiUsageRowForTest(input: {
+  id?: string;
+  memberId: string;
+}) {
+  return {
+    apiKeyEnv: "SECRET_API_KEY_ENV",
+    attemptCount: 1,
+    baseUrl: "https://gateway.example",
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    createdAt: new Date("2026-04-27T00:24:00.000Z"),
+    credentialSource: "member",
+    featureKey: "assistant",
+    gatewayTagsJson: { surface: "settings" },
+    id: input.id ?? "usage-1",
+    inputTokens: 10,
+    memberId: input.memberId,
+    occurredAt: new Date("2026-04-27T00:23:00.000Z"),
+    outputTokens: 20,
+    provider: "openai",
+    providerName: "OpenAI",
+    reasoningTokens: null,
+    reportingUserId: input.memberId,
+    requestedModel: "model-a",
+    routeId: "route-a",
+    servedModel: "model-b",
+    sessionId: "session-1",
+    stripeMeterAttemptCount: 0,
+    stripeMeteredAt: null,
+    stripeMeterError: "secret-stripe-meter-error",
+    stripeMeterIdentifier: "secret-stripe-meter-id",
+    stripeMeterLastAttemptedAt: null,
+    stripeMeterNextAttemptAt: null,
+    stripeMeterSource: "murph",
+    stripeMeterStatus: "pending",
+    surface: "assistant",
+    totalTokens: 30,
+    triggerKind: "manual",
+    turnId: "turn-1",
+    updatedAt: new Date("2026-04-27T00:24:00.000Z"),
+  };
+}
+
+function createHostedAccountDataExportPrisma(input: {
+  aiUsageRows?: ReturnType<typeof makeHostedAiUsageRowForTest>[];
+} = {}) {
   const count = async () => 1;
   const memberId = "member_123";
   const linqMailboxPayload = encryptHostedMailboxNullableString({
@@ -683,45 +760,7 @@ function createHostedAccountDataExportPrisma() {
     },
     hostedAiUsage: {
       count,
-      findMany: async () => [
-        {
-          apiKeyEnv: "SECRET_API_KEY_ENV",
-          attemptCount: 1,
-          baseUrl: "https://gateway.example",
-          cacheWriteTokens: null,
-          cachedInputTokens: null,
-          createdAt: new Date("2026-04-27T00:24:00.000Z"),
-          credentialSource: "member",
-          featureKey: "assistant",
-          gatewayTagsJson: { surface: "settings" },
-          id: "usage-1",
-          inputTokens: 10,
-          memberId,
-          occurredAt: new Date("2026-04-27T00:23:00.000Z"),
-          outputTokens: 20,
-          provider: "openai",
-          providerName: "OpenAI",
-          reasoningTokens: null,
-          reportingUserId: memberId,
-          requestedModel: "model-a",
-          routeId: "route-a",
-          servedModel: "model-b",
-          sessionId: "session-1",
-          stripeMeterAttemptCount: 0,
-          stripeMeteredAt: null,
-          stripeMeterError: null,
-          stripeMeterIdentifier: null,
-          stripeMeterLastAttemptedAt: null,
-          stripeMeterNextAttemptAt: null,
-          stripeMeterSource: "murph",
-          stripeMeterStatus: "pending",
-          surface: "assistant",
-          totalTokens: 30,
-          triggerKind: "manual",
-          turnId: "turn-1",
-          updatedAt: new Date("2026-04-27T00:24:00.000Z"),
-        },
-      ],
+      findMany: async () => input.aiUsageRows ?? [makeHostedAiUsageRowForTest({ memberId })],
     },
     hostedConsentEvent: {
       count,
@@ -949,9 +988,9 @@ function createHostedAccountDataExportPrisma() {
           mailboxLane: "conversation",
           mailboxSeqEnd: 1n,
           mailboxSeqStart: 1n,
-          outboxIntentRef: null,
+          outboxIntentRef: "secret-outbox-intent-ref",
           phase: "assistant",
-          redactedJson: { message: "redacted" },
+          redactedJson: { message: "secret-runtime-diagnostic" },
           userId: memberId,
           workspaceVersion: 9n,
         },
@@ -1011,8 +1050,61 @@ function createHostedAccountDataExportPrisma() {
   };
 }
 
-function createHostedAccountDataExportPrismaForTest(): HostedAccountDataPrismaForTest {
+function createHostedAccountDataExportPrismaForTest(
+  input?: Parameters<typeof createHostedAccountDataExportPrisma>[0],
+): HostedAccountDataPrismaForTest {
   // This fake implements the Prisma delegates exercised by this focused unit test.
-  const fakePrisma: unknown = createHostedAccountDataExportPrisma();
+  const fakePrisma: unknown = createHostedAccountDataExportPrisma(input);
   return fakePrisma as HostedAccountDataPrismaForTest;
+}
+
+function createHostedAccountDeletionPrismaForTest(input: {
+  onTransaction: () => void;
+}): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
+  const fakePrisma: unknown = {
+    deviceConnection: {
+      findMany: async () => [],
+    },
+    hostedMember: {
+      findUnique: async () => ({ id: "member_123" }),
+    },
+    $transaction: async () => {
+      input.onTransaction();
+      return {
+        "prisma.hosted_member": 1,
+      };
+    },
+  };
+  return fakePrisma as Parameters<typeof deleteHostedAccountData>[0]["prisma"];
+}
+
+function makeCloudflareDeletionResult() {
+  return {
+    alarmCleared: true,
+    configured: true,
+    deleted: true,
+    deletedRootKeyEnvelope: true,
+    errorCode: null,
+    r2DeletedObjectCount: 0,
+    r2SkippedUserScopedPrefixes: false,
+    r2Supported: true,
+    r2UserScopedSkipReason: null,
+    runnerStateDeleted: true,
+  };
+}
+
+function requireRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Expected a record.");
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireArray(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError("Expected an array.");
+  }
+
+  return value;
 }

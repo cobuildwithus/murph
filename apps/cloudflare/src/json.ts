@@ -23,18 +23,86 @@ export function unauthorized(): Response {
   return jsonError("Unauthorized", 401);
 }
 
-export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  return requireJsonObject(await request.json());
+export interface JsonBodyReadOptions {
+  limitBytes?: number;
 }
 
-export async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
-  const payload = await request.text();
+export async function readJsonObject(
+  request: Request,
+  options: JsonBodyReadOptions = {},
+): Promise<Record<string, unknown>> {
+  return requireJsonObject(JSON.parse(await readRequestBodyText(request, options)));
+}
+
+export async function readOptionalJsonObject(
+  request: Request,
+  options: JsonBodyReadOptions = {},
+): Promise<Record<string, unknown>> {
+  const payload = await readRequestBodyText(request, options);
 
   if (!payload.trim()) {
     return {};
   }
 
   return requireJsonObject(JSON.parse(payload));
+}
+
+async function readRequestBodyText(
+  request: Request,
+  options: JsonBodyReadOptions,
+): Promise<string> {
+  if (options.limitBytes === undefined) {
+    return request.text();
+  }
+
+  const declaredContentLength = request.headers.get("content-length");
+  if (declaredContentLength) {
+    const parsedContentLength = Number.parseInt(declaredContentLength, 10);
+    if (Number.isFinite(parsedContentLength) && parsedContentLength > options.limitBytes) {
+      throw new RangeError(`Request body exceeded ${options.limitBytes} bytes.`);
+    }
+  }
+
+  if (!request.body) {
+    return "";
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      if (!value || value.byteLength === 0) {
+        continue;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > options.limitBytes) {
+        await reader.cancel();
+        throw new RangeError(`Request body exceeded ${options.limitBytes} bytes.`);
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return new TextDecoder().decode(body);
 }
 
 export function requireJsonObject(parsed: unknown): Record<string, unknown> {

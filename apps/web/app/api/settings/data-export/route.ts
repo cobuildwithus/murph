@@ -9,6 +9,7 @@ import {
   parseHostedDataExportRequest,
 } from "@/src/lib/hosted-privacy/account-data-service";
 import {
+  HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES,
   buildHostedDataExportFilename,
   HOSTED_DATA_EXPORT_MIME_TYPE,
 } from "@/src/lib/hosted-privacy/account-data-shared";
@@ -39,7 +40,9 @@ export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
   const auth = await requirePrivyMemberAuth(request, prisma);
-  parseHostedDataExportRequest(await readJsonObject(request));
+  parseHostedDataExportRequest(await readJsonObject(request, {
+    limitBytes: HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES,
+  }));
 
   const exportBundle = await buildHostedDataExport({
     memberId: auth.member.id,

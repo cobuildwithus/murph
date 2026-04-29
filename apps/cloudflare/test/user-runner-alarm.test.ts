@@ -198,7 +198,7 @@ describe("HostedUserRunner alarm routing", () => {
         deletedObjectCount: 0,
         deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
-        supported: true,
+        supported: false,
       },
       userId: "member_123",
     });
@@ -207,6 +207,24 @@ describe("HostedUserRunner alarm routing", () => {
     expect(destroyInstance).toHaveBeenCalledTimes(1);
     expect(r2Deletes).toEqual([]);
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
+  it("preflights Durable Object ownership before deleting R2 objects", async () => {
+    const destroyInstance = vi.fn(async () => {});
+    const { r2Deletes, runner, sql } = createRunnerHarness({
+      runnerContainerNamespace: createRunnerContainerNamespace(destroyInstance),
+    });
+    await runner.bindUser("member_other");
+
+    await expect(runner.deleteHostedUserData("member_123")).rejects.toThrow(
+      "Hosted runner Durable Object is bound to member_other, not member_123.",
+    );
+
+    expect(r2Deletes).toEqual([]);
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([
+      { user_id: "member_other" },
+    ]);
   });
 
   it("continues Durable Object cleanup when best-effort R2 deletion fails", async () => {

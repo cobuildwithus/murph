@@ -104,6 +104,8 @@ interface DeclarativeRoute<Context> {
   wrongMethodResponse?: WrongMethodResponse;
 }
 
+const INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES = 4 * 1024;
+
 const workerPublicRoutes: readonly DeclarativeRoute<{
   env: WorkerEnvironmentSource;
   request: Request;
@@ -510,7 +512,9 @@ async function handleRunnerNudgeRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   try {
-    await readOptionalJsonObject(context.request);
+    await readOptionalJsonObject(context.request, {
+      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+    });
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -551,7 +555,9 @@ async function handleUserDataDeleteRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   try {
-    await readOptionalJsonObject(context.request);
+    await readOptionalJsonObject(context.request, {
+      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+    });
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",

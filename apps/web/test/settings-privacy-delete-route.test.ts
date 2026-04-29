@@ -1,5 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { HOSTED_ACCOUNT_DATA_DELETION_SCHEMA } from "@/src/lib/hosted-privacy/account-data-shared";
+
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   deleteHostedAccountData: vi.fn(),
@@ -58,7 +61,7 @@ describe("settings privacy delete route", () => {
         "prisma.hosted_member": 1,
       },
       memberId: "member_123",
-      schema: "murph.hosted-account-data-deletion.v1",
+      schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
     });
   });
 
@@ -97,8 +100,70 @@ describe("settings privacy delete route", () => {
       ok: true,
       result: {
         memberId: "member_123",
-        schema: "murph.hosted-account-data-deletion.v1",
+        schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
       },
     });
+  });
+
+  it("rejects a wrong typed phrase before deleting account data", async () => {
+    mocks.parseHostedAccountDeletionRequest.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_CONFIRMATION_PHRASE_REQUIRED",
+        httpStatus: 400,
+        message: "Type DELETE MY MURPH DATA exactly to delete your Murph data.",
+      });
+    });
+
+    const request = new Request("https://join.example.test/api/settings/privacy/delete", {
+      body: JSON.stringify({
+        acknowledgedIrreversibleDeletion: true,
+        acknowledgedProviderAndBackupLimits: true,
+        confirmationPhrase: "delete my data",
+        secondConfirmationAccepted: true,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await settingsPrivacyDeleteRoute.POST(request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "ACCOUNT_DELETION_CONFIRMATION_PHRASE_REQUIRED",
+      },
+    });
+    expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized request bodies before parsing or deleting account data", async () => {
+    const request = new Request("https://join.example.test/api/settings/privacy/delete", {
+      body: JSON.stringify({
+        acknowledgedIrreversibleDeletion: true,
+        acknowledgedProviderAndBackupLimits: true,
+        confirmationPhrase: "DELETE MY MURPH DATA",
+        padding: "x".repeat(5_000),
+        secondConfirmationAccepted: true,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await settingsPrivacyDeleteRoute.POST(request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "INVALID_REQUEST",
+      },
+    });
+    expect(mocks.parseHostedAccountDeletionRequest).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
   });
 });

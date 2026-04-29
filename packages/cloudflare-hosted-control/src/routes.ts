@@ -14,7 +14,7 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   },
   userDataDelete: {
     method: "POST",
-    suffix: "delete",
+    suffix: "account-data/delete",
   },
   status: {
     method: "GET",
