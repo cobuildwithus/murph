@@ -1,7 +1,7 @@
 # Murph Privacy Policy
 
 **Effective Date:** April 9, 2026  
-**Last Updated:** April 9, 2026
+**Last Updated:** April 29, 2026
 
 Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
@@ -26,14 +26,20 @@ This Privacy Policy applies to Murph-controlled processing. If you self-host Mur
 
 ## 2. Our privacy commitments
 
-Murph is designed around a few core privacy commitments:
+Murph is designed for sensitive personal and health-related information. We make the following commitments:
 
-- **No sale or rental of personal information.** Murph does not sell or rent personal information.
-- **No health-data advertising profile.** Murph does not use health data you provide through Murph for cross-context behavioral advertising or health-data ad-targeting profiles.
-- **Need-to-know access.** Murph limits access to personal information to authorized personnel and service providers who need it to operate, support, secure, or improve Murph.
-- **Privacy-protective design where feasible.** Murph seeks to use measures such as encryption, data minimization, privacy-preserving lookup values, pseudonymization, and short-lived operational storage where appropriate.
-- **Sensitive-data care.** Some information Murph handles may qualify as health data, sensitive personal information, special category data, or consumer health data under applicable law. Where required by law, Murph processes such data only with your consent or another valid legal basis.
-- **Transparent hosted processing.** Unless we expressly state otherwise for a specific feature, Hosted Murph is not offered as a zero-knowledge, operator-blind, or end-to-end-encrypted service.
+- **No sale or rental.** We do not sell or rent personal information.
+- **No sale, sharing, licensing, or data-broker disclosure of health data.** We do not sell, rent, license, disclose, or make available health data, consumer health data, HealthKit data, wearable data, journal content, health files, health memories, prompts involving health data, or derived health insights to data brokers, advertising networks, third-party advertising platforms, information resellers, or similar parties.
+- **No targeted advertising from health data.** We do not use health data for cross-context behavioral advertising, targeted advertising, retargeting, lookalike audiences, ad attribution, ad measurement, or health-data advertising profiles.
+- **No health data for insurance, employment, credit, or eligibility decisions.** We do not disclose health data to employers, insurers, lenders, benefits administrators, or credit agencies for eligibility, underwriting, pricing, employment, benefits, credit, or risk-scoring decisions, unless you expressly direct us to do so for a specific feature and applicable law permits it.
+- **No AI training on health data.** We do not use health data, consumer health data, HealthKit data, wearable data, journal content, health files, health memories, health prompts, assistant outputs based on health data, or derived health insights to train, fine-tune, or improve Murph's or any third party's general-purpose AI models.
+- **Limited provider use.** When we use service providers, subprocessors, model providers, search providers, wearable connectors, health-record connectors, or infrastructure providers, we authorize them to process information only as needed to provide, secure, support, or troubleshoot Murph, subject to contractual and legal safeguards where applicable.
+- **Feature-specific consent for optional health integrations.** We collect health data from optional integrations only when you enable the integration or otherwise provide affirmative, feature-specific consent. You can withdraw consent by disconnecting the integration or contacting us.
+- **Need-to-know access.** We limit access to personal information and hosted health data to authorized personnel and service providers who need it to operate, secure, support, troubleshoot, or improve Murph.
+- **No hidden ad-tech on health surfaces.** We do not intentionally place third-party advertising pixels, retargeting tags, behavioral advertising SDKs, or similar technologies on pages, screens, APIs, or workflows where users enter, view, upload, connect, or receive health data.
+- **Transparent hosted processing.** Unless we expressly state otherwise for a specific feature, Hosted Murph is not zero-knowledge, operator-blind, or end-to-end encrypted. Hosted Murph may require Murph and its providers to process readable content to provide requested features, support users, debug problems, secure the service, or comply with law.
+- **HIPAA boundary.** Unless we enter into a written Business Associate Agreement that expressly covers the relevant service, Murph is not acting as a HIPAA business associate and Hosted Murph is not offered under a BAA.
+- **Local control.** If you run Murph locally or self-host Murph, Murph does not receive your local health content unless you connect hosted Murph services, enable telemetry, use a hosted integration, request support, or otherwise transmit information to us.
 
 ## 3. Information we collect
 
@@ -189,17 +195,21 @@ We may use information to:
 - establish, exercise, or defend legal claims; and
 - protect the rights, safety, privacy, or property of Murph, our users, or others.
 
-## 6. AI, search, and automated features
+## 6. Health data, AI, and model providers
 
-Murph may offer assistant, search, parsing, extraction, summarization, automation, or other intelligent features. To provide those features, Murph may process or transmit relevant prompts, conversation history, user-provided content, connected data, or attachment content to Murph-controlled systems and, where applicable, third-party providers that help power those features.
+Murph may use AI, search, parsing, transcription, embedding, summarization, extraction, retrieval, and automation features to provide the functionality you request. These features may process prompts, messages, health records, journal entries, wearable data, files, attachments, transcripts, health memories, and related context.
 
 Murph tries to limit the data shared with those systems or providers to what is reasonably necessary for the requested feature. Where feasible, Murph may minimize, pseudonymize, redact, hash, or otherwise reduce the data used.
 
-Some outputs may be generated automatically and may not be reviewed by a human before they are returned to you or used in a workflow you enable.
+**No model training on health data.** Murph does not use health data, consumer health data, HealthKit data, wearable data, journal content, health files, health memories, prompts involving health data, assistant outputs based on health data, or derived health insights to train, fine-tune, or improve Murph's or any third party's general-purpose AI models. This commitment applies even if you provide feedback, unless we present a separate, specific research or model-improvement consent that clearly identifies the data involved and applicable law permits the use.
 
-Unless Murph clearly tells you otherwise and obtains any consent required by law, Murph will **not** use health data you submit through Murph to train Murph’s or a third party’s general-purpose models.
+**Third-party model providers.** Murph does not route health data to third-party model, search, parsing, transcription, embedding, or inference providers unless the relevant contract, service setting, or deployment control prohibits model training on Murph health data. We also require those providers to limit retention of Murph health data to what is necessary to provide, secure, and troubleshoot the requested service.
 
-Automated outputs may be inferential and may not always be accurate, complete, or appropriate for every use case. You are responsible for reviewing important outputs before relying on them.
+**Health memories and derived context.** If Murph creates persistent health memories, summaries, embeddings, trends, user preferences, or other derived context from your health data, we treat those derived items as health data. Health memories are used only to provide, personalize, secure, support, or troubleshoot Murph features you use. You may request access, correction, deletion, or disabling of health memories where required by law and supported by the feature.
+
+**Human review.** Murph personnel do not review the contents of your hosted health data except where needed to provide support you request, investigate security or abuse issues, debug service problems, comply with law, enforce our Terms, or protect the rights, safety, privacy, or property of Murph, users, or others.
+
+**Important outputs disclaimer.** AI-generated outputs may be incomplete, inaccurate, or inappropriate for your situation. Murph is designed for personal wellness, journaling, organization, education, and self-reflection. Murph is not a medical device, does not provide medical diagnosis or treatment, and is not a substitute for professional medical advice or emergency care.
 
 ## 7. Legal bases for processing
 
@@ -219,7 +229,7 @@ We may disclose information in the following circumstances.
 
 ### A. Service providers and processors
 
-We may share information with vendors and service providers that help us operate Murph, such as providers for:
+We may share information with vendors, service providers, and subprocessors that help us operate Murph, such as providers for:
 
 - identity and authentication;
 - cloud hosting, storage, and infrastructure;
@@ -231,9 +241,13 @@ We may share information with vendors and service providers that help us operate
 
 These parties are authorized to process information on Murph’s behalf only as needed to provide services to us or to you, subject to contractual and legal safeguards where applicable.
 
+**Subprocessors and model providers.** We maintain a list of subprocessors and third-party providers that may process personal information or health data for Murph at [withmurph.ai/subprocessors](https://withmurph.ai/subprocessors). The list identifies the provider or provider category, service purpose, categories of data involved, country or region, and whether the provider is permitted to use Murph data for training. Material changes to Murph-managed providers that process health data will be reflected on that page and, where required by law or contract, notified to users.
+
 ### B. Connected services and integrations you enable
 
 If you connect Murph to devices, wearable providers, messaging channels, identity providers, or other third-party services, Murph may exchange information with those services as needed to provide the feature you requested.
+
+**Feature-specific consent.** We collect, use, or disclose health data from optional integrations only after you enable the integration or otherwise provide affirmative, feature-specific consent. Consent screens will describe the data source, categories of data requested, purpose of use, whether data will be stored or queried on demand, and the third parties involved where required by law and supported by the feature. You can withdraw consent by disconnecting the integration or contacting us. Withdrawal stops future collection from that integration, but may not affect data already processed as permitted by law, data retained for security or legal reasons, or data already extracted by an independent third party you directed us to share with.
 
 When you direct Murph to share information with a third-party provider, that provider may act as an independent controller of the information it receives under its own privacy policy and terms. Please review those policies carefully before enabling a connection.
 
@@ -242,6 +256,8 @@ When you direct Murph to share information with a third-party provider, that pro
 If you create, send, or accept a Murph invite or similar user-directed flow, Murph may disclose the information reasonably necessary to complete that flow to the intended recipient or the service providers involved in carrying it out. Depending on the feature, this may include preview information, invite status, or imported records.
 
 Information you intentionally make available to other users or recipients may become visible to them under the settings or permissions you choose.
+
+**Recipient responsibility.** If you direct Murph to share health data with another person, organization, workspace, coach, clinician, researcher, or third-party app, that recipient may become an independent controller or separately responsible party for the data it receives. Their privacy policy, security practices, retention periods, and deletion practices may apply. Murph is not responsible for data that a recipient independently extracts, stores, or further discloses outside Murph, except where applicable law says otherwise.
 
 ### D. Legal, compliance, and protection purposes
 
@@ -252,19 +268,27 @@ We may disclose information if we believe doing so is reasonably necessary to:
 - detect, prevent, or address fraud, security, or technical issues; or
 - protect the rights, privacy, safety, or property of Murph, our users, or others.
 
+**Government and law-enforcement requests.** Murph does not voluntarily disclose health data to law enforcement, government agencies, or civil litigants except with your direction, as required by valid legal process, or where we reasonably believe disclosure is necessary to prevent serious harm, protect rights or safety, or comply with law. Where legally permitted and reasonably practicable, we will attempt to notify you before disclosing your information in response to legal process. We may challenge requests that we believe are overbroad, unlawful, or inconsistent with user privacy.
+
 ### E. Corporate transactions
 
-We may disclose information in connection with an actual or proposed merger, acquisition, financing, reorganization, bankruptcy, sale of assets, or similar transaction, subject to customary confidentiality and legal protections.
+If Murph is involved in a merger, acquisition, financing, reorganization, bankruptcy, sale of assets, or similar transaction, personal information may be disclosed or transferred subject to appropriate confidentiality, security, and legal protections. Consumer health data will not be transferred for materially different uses unless the recipient is bound to protections materially consistent with this Privacy Policy, we provide notice required by law, and we obtain any consent or authorization required by law. We will not sell health data as a standalone asset.
 
-## 9. No sale of personal information; no health-data ad targeting
+## 9. No sale, ad-tech sharing, or restricted-use disclosure of health data
 
 Murph does **not** sell or rent personal information.
 
-Murph also does **not** use health data you provide through Murph for cross-context behavioral advertising or for health-data ad-targeting profiles.
+Murph does not sell, rent, license, or otherwise disclose consumer health data, HealthKit data, wearable data, journal data, prompt content, health files, health memories, or derived health insights to data brokers, advertising networks, third-party advertising platforms, or information resellers.
+
+Murph does not "share" health data for cross-context behavioral advertising, targeted advertising, retargeting, lookalike audience creation, attribution, ad measurement, or similar advertising or marketing purposes. Murph does not use health data to create or enrich advertising profiles.
+
+Murph does not disclose health data to employers, insurers, benefits administrators, lenders, credit agencies, or similar parties for eligibility, underwriting, pricing, employment, benefits, credit, or risk-scoring decisions, unless you expressly direct us to do so for a specific feature and applicable law permits it.
+
+**No health-facility geofencing for advertising or profiling.** Murph does not use geofences around healthcare facilities, reproductive-health facilities, gender-affirming-care facilities, mental-health facilities, addiction-treatment facilities, or similar locations to identify users, infer health status, send advertising, build profiles, or sell/share consumer health data.
 
 If Murph’s practices change in the future, we will update this Privacy Policy and provide any notices or choices required by law before the change becomes effective.
 
-## 10. Cookies, local storage, and similar technologies
+## 10. Tracking, analytics, and health surfaces
 
 Murph and our service providers may use cookies, local storage, session tokens, and similar technologies to:
 
@@ -274,25 +298,59 @@ Murph and our service providers may use cookies, local storage, session tokens, 
 - secure sessions and prevent abuse; and
 - operate core website and hosted-service functionality.
 
-Murph may also use analytics or similar tools to understand service performance and usage. If Murph uses non-essential analytics, advertising, or personalization technologies in the future, Murph will provide any disclosures and consent mechanisms required by applicable law.
+Murph may also use analytics or similar tools to understand service performance and usage.
 
-## 11. Data retention
+**No advertising trackers on health surfaces.** We do not intentionally place third-party advertising pixels, retargeting tags, behavioral advertising SDKs, or similar tracking technologies on pages, screens, APIs, or workflows where users enter, view, upload, connect, or receive health data.
 
-Murph retains personal information for as long as reasonably necessary for the purposes described in this Privacy Policy, including to provide Murph, satisfy legal obligations, resolve disputes, enforce agreements, and maintain security.
+**No health content in analytics.** We do not intentionally send journal content, health prompts, wearable metrics, health-file contents, health-file names, symptoms, diagnoses, lab values, health memories, integration tokens, or health-related URL query strings to analytics or advertising tools.
 
-Retention can vary by category, including:
+**Analytics limits.** Where we use analytics or diagnostics, we configure them to collect minimized operational information such as performance, uptime, feature usage, crash reports, and security events, and to avoid collecting health content where feasible.
 
-- **local or self-hosted records**: generally according to your own systems, files, settings, and deletion choices;
-- **hosted account and profile information**: generally while your account is active and for a reasonable period thereafter;
-- **health and user-submitted content**: according to your account status, deployment choices, product settings, deletion requests, and backup or recovery needs;
-- **integration and routing data**: for as long as needed to operate the connection and for a reasonable period for troubleshooting, fraud prevention, reconciliation, and security;
-- **messages, assistant history, or support data**: for as long as needed to provide the feature, preserve continuity, handle support, maintain security, or satisfy legal obligations;
-- **transaction and billing records**: as long as needed for accounting, tax, audit, legal, and compliance purposes; and
-- **logs, webhook receipts, and operational artifacts**: typically for shorter periods, although some may be retained longer when needed for security, replay protection, debugging, abuse prevention, or legal preservation.
+If Murph uses non-essential analytics, advertising, or personalization technologies in the future, Murph will provide any disclosures and consent mechanisms required by applicable law.
 
-Murph may also keep aggregated, de-identified, or otherwise non-identifying information that does not reasonably identify you.
+## 11. Apple Health, HealthKit, Health Connect, and wearable APIs
 
-## 12. Security and hosted processing transparency
+If you connect Apple Health, HealthKit, Google Health Connect, wearable providers, device providers, or wellness apps, Murph will collect only the categories of data you authorize and only for the features you enable.
+
+**Apple Health / HealthKit.** Murph uses HealthKit data only to provide health, fitness, wellness, journaling, personalization, import, export, or other features you request. Murph does not use HealthKit data for advertising, data mining, third-party advertising, cross-context behavioral advertising, data-broker disclosure, insurance/employment/credit decisions, or general-purpose AI model training. Murph does not disclose HealthKit data to third parties except as necessary to provide the feature you request, with your permission, for security/legal purposes, or as otherwise permitted by Apple's rules and applicable law.
+
+**Health Connect and wearable APIs.** Murph uses data from Google Health Connect, wearable providers, device providers, and wellness apps only to provide the feature you enable; personalize, import, export, sync, summarize, secure, or troubleshoot that feature; or comply with law. Murph does not use that data for advertising, data-broker disclosure, insurance/employment/credit decisions, or general-purpose AI model training.
+
+**Permissions and revocation.** You can manage some health-data permissions through your device, browser, app, or connected-provider settings. Disconnecting a provider or revoking permissions stops future collection from that provider, but may not automatically delete data already stored by Murph or by independent third parties, unless deletion is required by law or requested through available privacy controls.
+
+## 12. Research and product improvement
+
+Murph may improve the service using aggregated, de-identified, pseudonymized, or otherwise minimized information where feasible.
+
+**No identifiable health research without separate consent.** Murph will not use identifiable health data for human-subjects research, clinical research, publication, or sponsored research unless you separately opt in, the use is otherwise permitted by law, or the data has been de-identified as permitted by applicable law.
+
+**Research notices.** If Murph offers a research feature, the applicable consent or study notice will describe the research sponsor, data categories, purpose, retention period, withdrawal process, whether results may be published, and who controls the research data.
+
+**De-identified data.** If Murph maintains de-identified data, Murph will maintain and use it in de-identified form and will not attempt to reidentify it except as permitted by law. We will use reasonable technical and organizational measures to prevent reidentification and require recipients of de-identified data to make similar commitments where required by law.
+
+## 13. Data retention
+
+Murph retains personal information only for as long as reasonably necessary for the purposes described in this Privacy Policy, including to provide Murph, comply with law, resolve disputes, enforce agreements, maintain security, prevent fraud or abuse, and honor your choices. The table below describes Murph's current retention targets for hosted Murph systems. Actual deletion timing may vary where deletion depends on a user-controlled provider, deployment-specific database backup cycle, legal hold, security investigation, billing/tax obligation, unresolved dispute, or technically constrained backup restoration process.
+
+| Category | Typical retention target |
+| --- | --- |
+| Account/profile information | While your account is active and up to 90 days after deletion, unless longer retention is required for legal, security, fraud-prevention, or dispute purposes |
+| Health and user-submitted content | Until you delete it or your account is deleted; targeted for removal from active hosted systems within 30 days and from backups within 90 days, unless legally preserved |
+| Wearable/device raw sync data | While the integration is active, or queried on demand where technically supported; targeted for deletion within 30-90 days after disconnect/account deletion unless needed for security, legal, or user-requested features |
+| Health memories, summaries, embeddings, and derived insights | Until you delete/disable them or your account is deleted; targeted for removal from active systems within 30 days and backups within 90 days unless legally preserved |
+| Integration tokens and credentials | Until disconnect/account deletion, then targeted for revocation or deletion promptly, normally within 7-30 days |
+| Webhook receipts, routing metadata, and sync logs | Typically 30-90 days unless needed for security, debugging, replay protection, fraud prevention, reconciliation, or legal preservation |
+| Prompt/tool logs containing health data | Minimized by default; retained only as needed for the feature, support, security, or user history settings |
+| Support communications | Typically up to 3 years, with health content redacted or deleted sooner where feasible |
+| Billing/tax records | As required for accounting, tax, audit, and legal obligations |
+| Security logs | Typically 90-365 days, with health content excluded where feasible |
+| Backups | Deleted or overwritten on a rolling basis, typically within 90 days for hosted systems Murph controls |
+
+We do not retain health data "just in case." We retain it only for the purposes described in this Privacy Policy, for the periods described above, or as required to comply with legal, security, fraud-prevention, accounting, dispute-resolution, or user-request obligations.
+
+Murph may retain aggregated, de-identified, or otherwise non-identifying information that does not reasonably identify you, provided we maintain and use it in de-identified form as required by law.
+
+## 14. Security and hosted processing transparency
 
 Murph uses administrative, technical, and physical safeguards designed to protect personal information. These may include, as appropriate:
 
@@ -304,21 +362,29 @@ Murph uses administrative, technical, and physical safeguards designed to protec
 - secure key handling and signed internal requests for certain hosted operations; and
 - staff training and vendor management processes.
 
+For hosted health data, Murph applies controls appropriate to the feature and hosting environment, which may include encryption in transit and at rest, role-based access controls, least-privilege access, production-access logging, access reviews, token vaulting or equivalent secure credential handling, secrets management, vendor review, incident-response procedures, and workforce confidentiality obligations. Access to hosted health data is limited to personnel and providers with a need to operate, secure, support, or troubleshoot Murph, and sensitive access may be logged and reviewed.
+
 Hosted Murph may require Murph and its service providers to process readable content when necessary to provide requested features, secure the service, investigate incidents, debug problems, or provide support. Although Murph uses encryption and access controls, Hosted Murph is **not** a zero-knowledge, operator-blind, or end-to-end-encrypted service unless we expressly say otherwise for a specific feature.
 
-Unless Murph expressly agrees otherwise in a separate signed writing, Murph is **not** acting as your HIPAA business associate for Hosted Murph, and Hosted Murph is **not** offered under a Business Associate Agreement.
+**Support access.** Murph personnel do not access the contents of your hosted health data for support unless needed to respond to your request, troubleshoot the service, investigate abuse/security issues, comply with law, or protect rights and safety.
+
+**HIPAA and Business Associate Agreements.** Unless Murph expressly enters into a written Business Associate Agreement with you that identifies covered services, Murph is not acting as your HIPAA business associate, and Hosted Murph is not offered for creating, receiving, maintaining, or transmitting protected health information on behalf of a HIPAA covered entity or business associate. If you are a covered entity or business associate, do not submit PHI to Murph unless we have signed a BAA covering the applicable service and you have configured the service according to any HIPAA-ready implementation requirements we provide. Consumer, beta, experimental, local, self-hosted, non-enterprise, or third-party-integrated features may be excluded from BAA coverage unless the BAA expressly says otherwise.
+
+**Security incidents and health-data breach notices.** If we identify a security incident involving personal information or health data, we will investigate, take steps to mitigate harm, and provide notices required by applicable law. Depending on the nature of the incident and the laws that apply, notices may be provided to affected users, regulators, consumer-reporting agencies, the media, or other parties. Service providers that process health data for Murph must notify us of security incidents as required by contract and applicable law.
 
 If you self-host or run Murph locally, you are responsible for the security of the systems, credentials, backups, and network environments you control.
 
+**Local and self-hosted telemetry.** If you run Murph locally or self-host Murph, Murph does not receive your local health content unless you connect hosted Murph services, enable telemetry, use a hosted integration, request support, or otherwise transmit information to us. Any optional telemetry should be off by default for health content and should not include journal entries, prompts, files, health metrics, health memories, wearable data, or integration tokens.
+
 No method of transmission or storage is completely secure, and Murph cannot guarantee absolute security.
 
-## 13. International transfers
+## 15. International transfers
 
 Murph and our service providers may process information in the United States and other countries where we or our providers operate. Those countries may have data-protection laws different from those in your jurisdiction.
 
 Where required by law, Murph will use appropriate safeguards for cross-border transfers, such as contractual protections or other approved transfer mechanisms.
 
-## 14. Your choices and rights
+## 16. Your choices and rights
 
 Depending on where you live and subject to applicable law, you may have rights to:
 
@@ -346,9 +412,9 @@ If we deny a request that is appealable under applicable law, you may appeal by 
 
 Murph will not discriminate against you for exercising privacy rights provided by law.
 
-## 15. U.S. Consumer Health Data Supplemental Notice
+## 17. U.S. Consumer Health Data Supplemental Notice
 
-This section applies only to the extent Murph processes **consumer health data** subject to applicable U.S. state consumer health privacy laws, including laws such as the Washington My Health My Data Act and similar laws. It supplements the rest of this Privacy Policy. If there is a conflict between this section and the rest of this Privacy Policy, this section controls only for consumer health data and only to the extent required by applicable law.
+This section applies only to the extent Murph processes **consumer health data** subject to applicable U.S. state consumer health privacy laws, including laws such as the Washington My Health My Data Act and similar laws. It supplements the rest of this Privacy Policy. Murph may later maintain a separate Consumer Health Data Privacy Policy for additional disclosures required by U.S. consumer health privacy laws; where applicable, that separate notice will control for consumer health data to the extent required by law.
 
 For purposes of this section, **consumer health data** generally means personal information linked or reasonably linkable to you that identifies your past, present, or future physical or mental health status. Consumer health data does not include information that has been de-identified as permitted by law. If Murph maintains de-identified information, Murph will maintain and use it in de-identified form and will not attempt to reidentify it except as permitted by law.
 
@@ -393,7 +459,7 @@ Murph may disclose consumer health data to:
 - parties involved in legal compliance, protection, or corporate transactions as described in this Privacy Policy; and
 - other third parties with your consent or at your direction.
 
-Murph does **not** sell consumer health data. Murph does **not** use consumer health data for targeted advertising.
+Murph does **not** sell consumer health data. Murph does **not** use consumer health data for targeted advertising, cross-context behavioral advertising, data-broker disclosure, general-purpose AI model training, or insurance/employment/credit eligibility decisions.
 
 ### E. Your consumer health data rights
 
@@ -411,7 +477,7 @@ To exercise these rights, contact Murph at **legal@justco.build**. Murph may tak
 
 Murph will not discriminate against you for exercising rights provided by applicable consumer health privacy laws.
 
-## 16. Region-specific disclosures
+## 18. Region-specific disclosures
 
 ### A. EEA / UK / Switzerland
 
@@ -423,21 +489,21 @@ If applicable U.S. state law grants you rights relating to access, deletion, cor
 
 If Murph later offers a dedicated online privacy-rights portal or self-serve workflow, this Privacy Policy may be updated to identify that process.
 
-## 17. Age restrictions and children’s privacy
+## 19. Age restrictions and children’s privacy
 
 Murph is not directed to anyone under **18 years old**, and we do not knowingly collect personal information from anyone under 18 in a manner not permitted by law. If we learn that we collected personal information from someone under 18 in a manner not permitted by law, we will take steps to delete it.
 
 If a different age threshold, parental consent rule, or other age-related standard applies under applicable law, that law controls.
 
-## 18. Third-party services and links
+## 20. Third-party services and links
 
 Murph may link to or interoperate with third-party services. This Privacy Policy does not govern third-party websites, applications, hardware, wearable providers, identity providers, payment processors, messaging channels, model providers, search providers, or integration providers except as described here for Murph-controlled processing. Please review their privacy policies before using those services.
 
-## 19. Changes to this Privacy Policy
+## 21. Changes to this Privacy Policy
 
 We may update this Privacy Policy from time to time. When we do, we will revise the “Last Updated” date above and provide any additional notice required by law. Your continued use of Murph after an updated Privacy Policy becomes effective is subject to that updated policy.
 
-## 20. Contact us
+## 22. Contact us
 
 For questions, requests, or complaints regarding this Privacy Policy or Murph’s privacy practices, contact:
 

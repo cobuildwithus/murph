@@ -35,14 +35,34 @@ export function SiteFooter({ authenticated }: { authenticated: boolean }) {
             Early product, improving fast &middot; Open source &middot; Apache
             2.0
           </p>
-          <a
-            href="https://github.com/cobuildwithus/murph"
-            target="_blank"
-            rel="noreferrer"
-            className="text-[#f5f0e8]/55 transition-colors hover:text-[#f5f0e8]/70"
-          >
-            GitHub &middot; Help us build
-          </a>
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="Legal and project links">
+            <a
+              href="/legal/privacy.pdf"
+              className="text-[#f5f0e8]/55 transition-colors hover:text-[#f5f0e8]/70"
+            >
+              Privacy Policy
+            </a>
+            <a
+              href="/legal/terms.pdf"
+              className="text-[#f5f0e8]/55 transition-colors hover:text-[#f5f0e8]/70"
+            >
+              Terms
+            </a>
+            <a
+              href="/subprocessors"
+              className="text-[#f5f0e8]/55 transition-colors hover:text-[#f5f0e8]/70"
+            >
+              Subprocessors
+            </a>
+            <a
+              href="https://github.com/cobuildwithus/murph"
+              target="_blank"
+              rel="noreferrer"
+              className="text-[#f5f0e8]/55 transition-colors hover:text-[#f5f0e8]/70"
+            >
+              GitHub &middot; Help us build
+            </a>
+          </nav>
         </div>
       </div>
     </footer>

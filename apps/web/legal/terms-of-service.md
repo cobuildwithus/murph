@@ -1,20 +1,22 @@
 # Murph Terms of Service
 
 **Effective Date:** April 9, 2026  
-**Company:** Just Cobuild, Co. (“**Murph**,” “**we**,” “**us**,” or “**our**”)
+**Company:** Just Cobuild, Co. ("**Murph**," "**we**," "**us**," or "**our**")
 
-These Terms of Service (“**Terms**”) govern your access to and use of Murph’s hosted websites, hosted applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features, hosted integrations, and related managed services that link to these Terms (collectively, the “**Hosted Service**”).
+These Terms of Service ("**Terms**") govern your access to and use of Murph's hosted websites, hosted applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features, hosted integrations, and related managed services that link to these Terms (collectively, the "**Hosted Service**").
 
-Murph may also offer local, self-hosted, and open-source software (“**Local Software**”). These Terms do **not** replace the open-source license terms that apply to Local Software. If you download, run, modify, or distribute Local Software made available under an open-source license, that Local Software is governed by the applicable open-source license. These Terms apply only to your use of the **Hosted Service**.
+Murph may also offer local, self-hosted, and open-source software ("**Local Software**"). These Terms do **not** replace the open-source license terms that apply to Local Software. If you download, run, modify, or distribute Local Software made available under an open-source license, that Local Software is governed by the applicable open-source license. These Terms apply only to your use of the **Hosted Service**.
 
 By accessing or using the Hosted Service, you agree to these Terms. If you do not agree, do not use the Hosted Service.
 
 ## Important Notices
 
 - **Auto-renewal.** Paid subscriptions renew automatically until canceled, unless applicable law requires otherwise or the checkout flow states otherwise.
-- **Health disclaimer.** Murph is not a doctor, medical device, hospital, pharmacy, or emergency service. Murph does not provide medical care.
-- **AI and wearable limitations.** Murph may use AI-generated responses and third-party wearable or imported data, each of which may be incomplete, delayed, or wrong.
-- **Disputes.** These Terms include important rules about dispute handling, governing law, and venue.
+- **General wellness only.** Murph is a personal wellness and self-experimentation tool. Murph is not a doctor, clinician, medical device, hospital, pharmacy, therapist, dietitian, trainer, emergency service, or remote patient monitoring service.
+- **No medical care.** Murph does not provide diagnosis, treatment, prescriptions, medication or supplement dosing, clinical monitoring, emergency triage, or medical, nutritional, therapeutic, or other licensed professional advice.
+- **AI and data limitations.** Murph may use AI-generated responses, automations, third-party model providers, third-party wearable data, imported records, lab data, and user-submitted information. These may be incomplete, delayed, biased, misleading, unsafe, or wrong.
+- **Health-data sensitivity.** Your use of Murph may involve sensitive consumer health data. Our Privacy Policy and any applicable Consumer Health Data Privacy Policy explain our data practices and your choices.
+- **Disputes.** These Terms include important rules about dispute handling, governing law, venue, arbitration, and class-action waiver provisions.
 
 ## 1. Eligibility and Authority
 
@@ -39,38 +41,65 @@ Murph is a personal health assistant and self-experimentation tool that may incl
 - invite links and other import/export flows; and
 - local-first and hosted workflows that may interact with one another.
 
+Murph is intended to help adults organize personal wellness information, run bounded self-experiments, understand general wellness patterns, and prepare better questions for qualified healthcare professionals. Murph is not intended to replace professional judgment, clinical evaluation, clinical testing, medical treatment, diagnosis, prescription, remote patient monitoring, emergency response, or regulated clinical decision support.
+
 Some features may be available only in Local Software, while others may be available only in the Hosted Service. We may add, remove, or change features, providers, and integrations over time.
 
-Subject to these Terms, Murph grants you a limited, non-exclusive, non-transferable, non-sublicensable, revocable right to access and use the Hosted Service only for your personal, direct-to-consumer use.
+Subject to these Terms, Murph grants you a limited, non-exclusive, non-transferable, non-sublicensable, revocable right to access and use the Hosted Service only for your personal, direct-to-consumer, non-clinical, non-commercial wellness use, unless we expressly agree otherwise in a separate signed written agreement.
 
-## 3. Health, Safety, Emergency, and Medication Disclaimer
+You may not use the Hosted Service to provide healthcare, therapy, coaching, nutrition counseling, training, insurance, employment, benefits, legal, financial, or other professional services to another person unless Murph has expressly authorized that use in a separate signed written agreement. If you are a healthcare provider, covered entity, business associate, employer, insurer, benefits administrator, school, researcher, or other organization, these consumer Terms do not authorize you to use the Hosted Service for professional, organizational, regulated, or institutional purposes.
 
-**Murph is not medical advice and is not a substitute for a qualified healthcare professional.** Except where we expressly and specifically say otherwise in a product-specific notice, Murph and the Hosted Service are not a medical device and are not intended to diagnose, treat, cure, prevent, monitor, or alleviate any disease, injury, or medical condition.
+## 3. Health, Safety, Emergency, Medication, and Protocol Disclaimer
 
-Murph’s content, outputs, summaries, suggestions, reminders, and analytics are provided for informational, educational, organizational, and general wellness purposes only. They may not be appropriate for your specific circumstances.
+**Murph is not medical advice and is not a substitute for a qualified healthcare professional.** Except where we expressly and specifically say otherwise in a product-specific notice and under a separate written agreement, Murph and the Hosted Service are not a medical device and are not intended to diagnose, treat, cure, prevent, monitor, or alleviate any disease, injury, disability, or medical condition.
 
-You should always use your own judgment and consult a licensed clinician before making decisions about medications, supplements, treatment, medical testing, training, diet, sleep, or exercise. **Do not use Murph to determine medication or supplement dosing, treatment timing, or whether to start, stop, or change any medication, supplement, or therapy.**
+Murph's content, outputs, summaries, protocols, experiments, suggested actions, reminders, analytics, labels, citations, and comparisons are provided for informational, educational, organizational, and general wellness purposes only. They may not be appropriate for your specific circumstances and may be misleading if your physiology, health status, medications, sleep, nutrition, training, pregnancy status, age, medical history, device fit, data quality, or other circumstances differ from population averages or from the assumptions in the underlying research.
 
-**Emergency use is prohibited.** Do not use Murph for emergencies, urgent care, crisis response, or time-sensitive clinical decisions. If you think you may have a medical emergency, contact emergency services or seek immediate in-person medical care.
+You should use your own judgment and consult a licensed clinician before making decisions about medications, supplements, treatment, medical testing, laboratory testing, diet, sleep, sauna, cold exposure, breathwork, exercise, alcohol use, recovery, or other health-related activities.
 
-Use of the Hosted Service does not create a doctor-patient, therapist-patient, coach-patient, fiduciary, or similar professional relationship between you and Murph.
+**Do not use Murph to determine whether to start, stop, change, time, increase, decrease, combine, or dose any medication, supplement, therapy, treatment, diagnostic test, medical device, or clinical care plan.** Murph may not detect dangerous interactions, contraindications, allergies, adverse effects, abnormal results, or other safety issues.
 
-## 4. AI Outputs and Automation
+**Emergency use is prohibited.** Do not use Murph for emergencies, urgent care, crisis response, acute symptoms, medication emergencies, overdose, poisoning, chest pain, difficulty breathing, fainting, severe allergic reactions, suicidal thoughts, self-harm, disordered-eating crises, or other time-sensitive clinical decisions. If you think you may have a medical or mental-health emergency, contact emergency services or seek immediate in-person care.
 
-Murph may use artificial intelligence, machine learning systems, third-party model providers, rules engines, and automations to generate messages, summaries, suggested actions, reminders, or other output (collectively, “**Output**”).
+**Higher-risk users.** If you are or may be pregnant, nursing, trying to conceive, under medical care, taking medication, have a history of an eating disorder, have a heart, metabolic, neurological, psychiatric, respiratory, immune, kidney, liver, endocrine, sleep, or other medical condition, or experience pain, dizziness, faintness, shortness of breath, abnormal heart rhythm, swelling, persistent fatigue, or other concerning symptoms, consult a qualified clinician before using Murph or following any protocol.
 
-Some Output may be generated automatically and may not be reviewed by a human before it is returned to you or used in a workflow you enable.
+Use of the Hosted Service does not create a doctor-patient, therapist-patient, dietitian-client, trainer-client, coach-client, fiduciary, or similar professional relationship between you and Murph.
+
+## 4. Experiments, Protocols, Supplements, Nutrition, Exercise, Sauna, and Cold Exposure
+
+Murph may help you select, track, and review wellness experiments or protocols. These experiments are not clinical trials, medical research studies, or controlled scientific studies. Murph's analysis may identify correlations or changes in your data, but correlation does not prove causation, and the results may be affected by confounding factors, missing data, device limitations, self-reporting errors, illness, travel, alcohol, stress, medication, menstrual cycle, sleep disruption, training load, nutrition, lab variability, or other factors.
+
+Research citations, study summaries, and protocol rationales may be incomplete, outdated, misinterpreted, non-representative, based on small studies, based on population averages, or not applicable to you. Murph does not guarantee that a cited study is high quality, clinically applicable, reproducible, or sufficient to support a protocol for your circumstances.
+
+Supplements, nutrition, exercise, sauna, cold exposure, breathwork, fasting, alcohol changes, sleep changes, and recovery protocols can create health risks. You are responsible for reading product labels, following manufacturer instructions, avoiding known allergens or contraindications, and consulting a qualified professional where appropriate. Stop any activity and seek medical care if you experience concerning symptoms.
+
+Murph does not sell, prescribe, dispense, recommend the clinical use of, or guarantee the safety, effectiveness, purity, dosage, legality, or suitability of any supplement, food, device, exercise, sauna, cold-exposure practice, breathwork practice, or other intervention.
+
+## 5. AI Outputs, Actions, Automations, and Human Judgment
+
+Murph may use artificial intelligence, machine learning systems, third-party model providers, rules engines, retrieval systems, search tools, analytics, and automations to generate messages, summaries, suggested actions, reminders, experiment protocols, comparisons, labels, citations, and other content (collectively, "**Output**"). Murph may also take or suggest actions based on your settings, inputs, permissions, integrations, and instructions, including sending messages, reminders, follow-ups, exports, sync requests, or other workflow steps (collectively, "**Actions**").
+
+Some Output and Actions may be generated automatically and may not be reviewed by a human before being returned to you, sent to a channel, used in a workflow, or reflected in the Hosted Service.
 
 You understand and agree that:
 
-1. Output may be inaccurate, incomplete, biased, out of date, poorly phrased, or unsuitable for your situation;
-2. Output may reflect limitations in source data, wearable data quality, third-party APIs, or provider availability;
-3. Murph may trigger automated messages or workflows based on the rules, channels, and permissions you enable; and
-4. you are responsible for using independent judgment before relying on Output or any automated result.
+1. Output may be inaccurate, incomplete, biased, out of date, misleading, unsafe, poorly phrased, inconsistent, or unsuitable for your situation, even when it appears detailed, confident, personalized, or well-cited;
+2. Output may reflect limitations, errors, or omissions in your inputs, wearable data, imported records, lab data, third-party APIs, model providers, search results, retrieval systems, or available research;
+3. Actions may fail, be delayed, be sent to the wrong place if your settings are incorrect, execute differently than intended, or not execute at all;
+4. messages, reminders, notifications, syncs, imports, exports, and links may not be delivered, may be delayed, may be filtered, may be unavailable, or may be affected by third-party channels and providers;
+5. Murph does not provide continuous monitoring, safety monitoring, medication monitoring, symptom monitoring, emergency monitoring, rescue, escalation, or alerting services;
+6. Murph may decline, limit, redirect, block, modify, or refuse to generate Output or take Actions for safety, legal, policy, product, or operational reasons; and
+7. you are responsible for using independent judgment and, where appropriate, consulting qualified professionals before relying on Output or Actions.
 
-Output is for informational purposes only and is **not** professional medical, legal, tax, financial, or other professional advice.
+Output and Actions are for informational and organizational purposes only and are not professional medical, legal, tax, financial, nutritional, therapeutic, training, or other licensed professional advice.
 
-## 5. Accounts, Identity, and Security
+## 6. Topics Murph May Decline or Redirect
+
+Murph may decline, limit, redirect, or require professional involvement for requests involving diagnosis, treatment, medical decision-making, medication or supplement dosing, medication timing, drug interactions, clinical interpretation of abnormal results, acute symptoms, pregnancy or fertility complications, mental-health crisis, self-harm, disordered eating, personalized nutrition therapy, emergency advice, or other high-risk topics.
+
+Murph may provide general educational information about health and wellness topics, but you should not rely on Murph for decisions that require a licensed professional. When Murph suggests that you contact a clinician, emergency service, crisis line, or other professional resource, you are responsible for doing so.
+
+## 7. Accounts, Identity, and Security
 
 To use some hosted features, you may need to create or activate an account using a phone number, email address, linked wallet, third-party identity service, invite link, passkey, or similar credential.
 
@@ -86,7 +115,7 @@ You are responsible for activity that occurs through your account, sessions, dev
 
 We may require additional verification, decline onboarding, revoke sessions, reset credentials, or disable access if we suspect fraud, impersonation, security risk, unauthorized use, or legal exposure.
 
-## 6. Transactional Messages and Communications
+## 8. Transactional Messages and Communications
 
 If you use phone-based sign-in, invite flows, verification codes, email sync, messaging integrations, or similar hosted features, you agree that we and our providers may send you transactional communications, including one-time passcodes, sign-in links, service notices, billing notices, security notices, and account-related messages.
 
@@ -97,38 +126,51 @@ You understand that:
 - consent to receive **marketing** communications, if any, is separate; and
 - opting out of promotional messages will not stop service-related or security-related communications where allowed by law.
 
-## 7. Connected Services, Wearables, and Third-Party Dependencies
+## 9. Connected Services, Wearables, Imported Data, and Third-Party Dependencies
 
-Murph may let you connect or interact with third-party services, devices, or accounts, including identity providers, messaging providers, wearable providers, payment processors, AI model providers, cloud providers, search providers, and email providers (collectively, “**Connected Services**”).
+Murph may let you connect or interact with third-party services, devices, accounts, APIs, applications, or data sources, including identity providers, messaging providers, wearable providers, payment processors, AI model providers, cloud providers, search providers, email providers, app stores, Apple Health, HealthKit, Google Health Connect, Oura, WHOOP, Garmin, Strava, Terra, labs, medical-record services, and similar providers (collectively, "**Connected Services**").
 
 If you enable a Connected Service:
 
 - you authorize us to exchange relevant information with that Connected Service to provide the feature you enabled;
-- your use of the Connected Service remains subject to that provider’s own terms and policies;
-- you are responsible for maintaining valid credentials, permissions, and legal authorization for the connection; and
-- you understand that data from Connected Services may be delayed, inaccurate, unavailable, incomplete, reformatted, revoked, or changed without notice.
+- your use of the Connected Service remains subject to that provider's own terms, privacy notices, platform rules, rate limits, permissions, and account settings;
+- you are responsible for maintaining valid credentials, permissions, subscriptions, devices, connectivity, and legal authorization for the connection;
+- you understand that data from Connected Services may be delayed, inaccurate, unavailable, incomplete, misclassified, reformatted, revoked, corrupted, duplicated, or changed without notice;
+- you understand that device metrics may be affected by sensor limitations, device fit, firmware, algorithm changes, user behavior, environmental conditions, illness, pregnancy, medications, supplements, alcohol, caffeine, stress, travel, time-zone changes, and other factors; and
+- you understand that Murph's analysis may be wrong if source data is wrong, missing, delayed, stale, or inconsistent.
 
-Murph does not own or control Connected Services and is not responsible for their products, subscriptions, warranties, uptime, safety, security, pricing, API changes, or data practices.
+Murph does not own or control Connected Services and is not responsible for their products, subscriptions, warranties, uptime, safety, security, pricing, API changes, data practices, data quality, device accuracy, medical-device status, or availability.
 
-## 8. User Content and Data Rights
+References to third-party names, services, devices, integrations, or logos are for identification only and do not imply sponsorship, endorsement, or affiliation unless we expressly say so. We may disable, modify, or remove any integration at any time if required by law, provider terms, platform rules, security needs, product changes, or operational reasons.
 
-“**User Content**” means information you submit to Murph or authorize Murph to access, including messages, notes, logs, attachments, chats, health-related text, wearable data, imported data, exported data, account metadata, and content disclosed through invite, import, export, or other user-directed features.
+If you connect data from Apple Health, HealthKit, Google Health Connect, or similar platform health-data services, Murph will use that data only as described in our Privacy Policy and applicable consent flows, and not for advertising, data brokerage, employment, insurance, credit, housing, or other eligibility decisions.
+
+## 10. User Content and Data Rights
+
+"**User Content**" means information you submit to Murph or authorize Murph to access, including messages, notes, logs, attachments, chats, health-related text, wearable data, imported data, exported data, account metadata, and content disclosed through invite, import, export, or other user-directed features.
 
 As between you and Murph, you retain ownership of your User Content.
 
-You grant us a non-exclusive, worldwide, limited license to host, store, reproduce, process, transmit, display, analyze, modify, and otherwise use User Content only as reasonably necessary to:
+You grant us a non-exclusive, worldwide, limited license to host, store, reproduce, process, transmit, display, analyze, modify, format, transform, and otherwise use User Content only as reasonably necessary to:
 
-- provide, secure, support, and improve the Hosted Service;
+- provide, secure, support, maintain, troubleshoot, and improve the Hosted Service;
 - authenticate users and maintain account state;
 - sync the Connected Services and features you enable;
-- generate Output and service functionality you request;
-- process payments, billing, fraud prevention, and customer support;
-- investigate abuse, enforce these Terms, and comply with law; and
-- create de-identified or aggregated analytics or service-improvement materials as described in our Privacy Policy.
+- generate Output and perform Actions you request or enable;
+- process payments, billing, fraud prevention, security, abuse prevention, and customer support;
+- investigate abuse, enforce these Terms, and comply with law;
+- create de-identified or aggregated analytics or service-improvement materials as described in our Privacy Policy; and
+- otherwise process User Content with your consent or at your direction.
+
+**Model training.** Unless we clearly disclose otherwise and obtain any consent required by law, we do not use your identifiable private health logs, messages, chats, attachments, wearable data, imported records, or similar User Content to train foundation models or third-party AI models. We also contractually require third-party AI model providers that process your identifiable User Content for the Hosted Service not to use that content to train their models, except where you separately authorize that use or where the provider acts under your own account, API key, or settings.
 
 This license ends when your User Content is deleted from our active systems, except to the extent retention is reasonably necessary for backups, security, audit logs, legal compliance, dispute resolution, or legitimate internal operational purposes.
 
 **No public marketing use without separate permission.** We will not use your identifiable private health logs, messages, attachments, or similar User Content in public marketing materials without your separate consent.
+
+**Information about other people.** You may not submit, sync, upload, share, or invite another person's personal, health, biometric, genetic, precise-location, medical, minor, or sensitive information unless you have all rights, authority, and consent required by law. You may not use Murph to surveil, monitor, profile, or make decisions about another person without authorization.
+
+Because AI systems may generate similar or identical Output for different users, Output may not be unique to you, and other users may receive similar Output. Murph does not grant you ownership of underlying models, systems, prompts, methods, or non-user-specific content.
 
 You represent and warrant that:
 
@@ -137,7 +179,7 @@ You represent and warrant that:
 3. if you upload, sync, or share information about another person, you have any consent required by law; and
 4. you will not submit content that is unlawful, infringing, defamatory, fraudulent, or intentionally misleading in a way that could foreseeably cause harm.
 
-## 9. Invites, Imports, and Shared Content
+## 11. Invites, Imports, and Shared Content
 
 Murph may allow you to create invite links or similar features that allow another person to join, view, claim, or import content.
 
@@ -146,29 +188,45 @@ If you use these features:
 - you are solely responsible for deciding what to share;
 - you must have the right and any necessary consent to share that content;
 - you understand that shared content may be copied into another account, vault, or environment and may not be revocable after claim or import;
-- you must not disclose another person’s private, health, or sensitive information without authorization; and
+- you must not disclose another person's private, health, or sensitive information without authorization; and
 - you must not access, redeem, intercept, or use a link that was not intended for you.
 
 Invite and import links may be single-use, time-limited, automatically expiring, or disabled after claim. For privacy and security reasons, some links may expire on a short schedule shown in the product.
 
 We may refuse, revoke, expire, or invalidate invite links or import flows at any time for security, abuse, legal, policy, or operational reasons.
 
-## 10. Privacy, Sensitive Information, and HIPAA
+## 12. Privacy, Sensitive Information, Consumer Health Data, and HIPAA
 
-Our Privacy Policy, available at https://withmurph.ai/legal/privacy.pdf, explains how we collect, use, disclose, and process personal information through the Hosted Service and is incorporated into these Terms by reference.
+Our Privacy Policy, available at https://withmurph.ai/legal/privacy.pdf, explains how we collect, use, disclose, and process personal information through the Hosted Service and is incorporated into these Terms by reference. Where required or appropriate, we may also provide a Consumer Health Data Privacy Policy, platform-specific notices, app-store notices, or consent flows that supplement our Privacy Policy.
 
-Because Murph is health-oriented, some information you provide may be sensitive. You understand and agree that:
+Because Murph is health-oriented, information you provide or authorize us to access may be sensitive and may include consumer health data, biometric data, health measurements, health conditions, symptoms, medications, supplements, lab data, wearable data, nutrition data, exercise data, sleep data, precise-location-related health information, or information that could be used to infer health status.
 
-- the Hosted Service may involve cloud processing, encrypted storage, and third-party subprocessors;
-- Local Software and self-hosted Murph may have different privacy, locality, and security characteristics than the Hosted Service;
-- when we say data is encrypted, that does **not** mean the Hosted Service is zero-knowledge, operator-blind, or inaccessible to us where decryption or readable processing is necessary to operate hosted features; and
-- unless we expressly agree otherwise in a separate signed writing, Murph is **not** acting as your HIPAA business associate and the Hosted Service is **not** offered under a Business Associate Agreement.
+You understand and agree that:
 
-Hosted Murph is for personal, direct-to-consumer use and is not intended for covered entities or business associates to create, receive, maintain, transmit, or otherwise process protected health information (PHI) unless Murph has signed a separate Business Associate Agreement governing that use.
+- the Hosted Service may involve cloud processing, encrypted storage, third-party subprocessors, Connected Services, and AI model providers;
+- Local Software and self-hosted Murph may have different privacy, locality, security, and operator-access characteristics than the Hosted Service;
+- Hosted Murph encrypts sensitive data at rest, but it is not zero-knowledge. The Hosted Service can decrypt data when it needs to run requested tasks, operate hosted features, troubleshoot user-reported issues, investigate abuse, or comply with law;
+- you should not rely on general marketing language unless it matches the specific controls, limits, and exceptions described in these Terms, the Privacy Policy, and applicable product documentation;
+- you may be able to disconnect integrations, withdraw certain permissions, request deletion, or exercise other privacy rights as described in our Privacy Policy and applicable law; and
+- unless we expressly agree otherwise in a separate signed writing, Murph is not acting as your HIPAA business associate and the Hosted Service is not offered under a Business Associate Agreement.
 
-Do not submit regulated protected health information to the Hosted Service on behalf of a covered entity unless and until Murph expressly offers that service under a signed BAA.
+Hosted Murph is for personal, direct-to-consumer wellness use and is not intended for covered entities or business associates to create, receive, maintain, transmit, or otherwise process protected health information (PHI) unless Murph has signed a separate Business Associate Agreement governing that use.
 
-## 11. Subscriptions, Billing, and Automatic Renewal
+Do not submit regulated PHI to the Hosted Service on behalf of a covered entity or business associate unless and until Murph expressly offers that service under a signed BAA. If you are using Murph as an individual consumer and you direct a provider, lab, app, or other third party to send your information to Murph, that does not by itself make Murph a HIPAA business associate.
+
+We do not sell your identifiable private health logs, messages, chats, wearable data, or imported health records to data brokers. If we ever ask to use consumer health data for advertising, sale, model training, research, or other secondary purposes that require separate consent, we will seek consent in the manner required by applicable law.
+
+## 13. No Monitoring or Clinical Review
+
+Murph does not continuously review your messages, symptoms, wearable data, lab data, protocols, trends, or account activity for safety issues. Murph does not guarantee that it will detect or alert you to abnormal metrics, dangerous symptoms, medication issues, emergencies, mental-health concerns, eating-disorder risks, or other health or safety concerns. Unless we expressly agree otherwise in a separate signed writing, no licensed clinician reviews your data, Output, Actions, or protocols before they are shown or sent to you.
+
+## 14. Platform Health Data
+
+Some features may depend on platform health-data services such as Apple Health, HealthKit, Google Health Connect, or similar services. Your use of those services is subject to the platform provider's rules and your device permissions. You can change many platform health-data permissions through your device or platform settings.
+
+We use platform health data only to provide and improve the health and wellness features you request or enable, as described in our Privacy Policy and consent flows. We do not use platform health data for advertising, data brokerage, employment, insurance, credit, housing, or other eligibility decisions, and we do not sell platform health data.
+
+## 15. Subscriptions, Billing, and Automatic Renewal
 
 Some hosted features require a paid subscription or other fees.
 
@@ -192,9 +250,9 @@ We may offer free trials, discounts, credits, or promotional terms. Unless other
 
 ### Price Changes
 
-We may change fees prospectively. If you are on a recurring plan and we change the recurring price for a future renewal term, we will provide at least **30 days’ advance notice** unless a different period is required by law.
+We may change fees prospectively. If you are on a recurring plan and we change the recurring price for a future renewal term, we will provide at least **30 days' advance notice** unless a different period is required by law.
 
-## 12. Cancellation, Refunds, Chargebacks, and Payment Reversals
+## 16. Cancellation, Refunds, Chargebacks, and Payment Reversals
 
 You may cancel a recurring subscription at any time through your account settings, the payment channel you used, or by contacting legal@justco.build, unless a different method is specified at checkout.
 
@@ -212,9 +270,9 @@ If applicable law gives you a cooling-off, withdrawal, or similar consumer right
 
 We may suspend, downgrade, or terminate access if a payment fails, is reversed, becomes delinquent, is disputed, or is subject to a chargeback, refund, fraud review, or similar payment reversal. Reactivation may require updated payment information, settlement of past-due amounts, or manual review.
 
-If you purchased through an app store, marketplace, or reseller, that third party’s billing, renewal, refund, and cancellation terms may also apply.
+If you purchased through an app store, marketplace, or reseller, that third party's billing, renewal, refund, and cancellation terms may also apply.
 
-## 13. Availability, Support, Changes, and Beta Features
+## 17. Availability, Support, Changes, and Beta Features
 
 We may modify, update, suspend, or discontinue all or part of the Hosted Service at any time.
 
@@ -226,45 +284,60 @@ The Hosted Service may include experimental, beta, preview, or early-access feat
 
 We do not guarantee uninterrupted or error-free operation. The Hosted Service may be unavailable or degraded due to maintenance, incidents, provider outages, infrastructure failures, integration changes, abuse prevention, legal requirements, or reasons outside our reasonable control.
 
-## 14. Acceptable Use
+## 18. Acceptable Use
 
 You may not use the Hosted Service to, or help others to:
 
 1. violate any law, regulation, court order, or third-party right;
 2. upload, import, or share data you do not have the right to use;
-3. impersonate another person or use another person’s phone number, email, messaging account, wallet, or device connection without authorization;
-4. copy, scrape, harvest, probe, reverse engineer, test vulnerabilities, or attempt unauthorized access to the Hosted Service or related systems, except to the extent a restriction is prohibited by applicable law;
-5. introduce malware, malicious code, denial-of-service traffic, phishing content, or abusive automation;
-6. bypass rate limits, access controls, invite limits, payment controls, or security restrictions;
-7. send spam, scams, or unsolicited commercial communications through Murph channels or integrations;
-8. use Murph for emergency triage, clinical decision support, medication-dosing decisions, or other high-risk uses where inaccurate or delayed output could reasonably cause death, bodily injury, or significant property damage;
-9. use Murph to make decisions about another person’s employment, housing, insurance, credit, education, benefits, or legal status;
-10. misuse invite links or imported content to exfiltrate or expose another person’s information; or
-11. use the Hosted Service in a way that damages, disables, overburdens, or impairs Murph or other users.
+3. impersonate another person or use another person's phone number, email, messaging account, wallet, or device connection without authorization;
+4. copy, scrape, harvest, reverse engineer, or attempt unauthorized access to the Hosted Service or related systems, except to the extent a restriction is prohibited by applicable law;
+5. probe, test, or scan hosted systems except through an authorized security program or with our prior written permission;
+6. introduce malware, malicious code, denial-of-service traffic, phishing content, or abusive automation;
+7. bypass rate limits, access controls, invite limits, payment controls, or security restrictions;
+8. send spam, scams, or unsolicited commercial communications through Murph channels or integrations;
+9. provide or automate diagnosis, treatment, medical decision-making, medication or supplement dosing, clinical triage, emergency response, remote patient monitoring, or other regulated healthcare services without a separate written agreement with Murph and any required professional oversight;
+10. use Murph outputs as the sole basis for decisions affecting a person's health, safety, legal rights, financial rights, insurance, employment, housing, education, benefits, credit, or access to essential services;
+11. submit or process PHI on behalf of a covered entity or business associate without a signed BAA with Murph;
+12. submit data about minors or other people without required authorization;
+13. use Murph to encourage self-harm, disordered eating, unsafe exercise, unsafe supplement use, substance misuse, or other harmful health behavior;
+14. use Murph to infer sensitive traits about another person, including health status, pregnancy status, disability, biometric identity, race, religion, sexual orientation, or political views, except where you have lawful authorization and the use is permitted by these Terms;
+15. use outputs, prompts, system behavior, or service interactions to train, distill, copy, or build competing AI models or services without our prior written permission;
+16. remove, obscure, or misrepresent AI disclosures, health disclaimers, research limitations, citations, warnings, or source information;
+17. misuse invite links or imported content to exfiltrate or expose another person's information; or
+18. use the Hosted Service in a way that damages, disables, overburdens, or impairs Murph or other users.
 
 We may investigate suspected violations and take any action we reasonably believe is appropriate, including suspending accounts, revoking sessions, blocking integrations, removing content where permitted, and cooperating with law enforcement or affected third parties.
 
-## 15. Local Software and Open-Source Licenses
+## 19. Local Software and Open-Source Licenses
 
 Local Software may be made available under one or more open-source licenses. Nothing in these Terms limits the rights you receive under an applicable open-source license for Local Software.
 
-Conversely, no open-source license grants you rights to the Hosted Service, Murph trademarks, paid hosted features, hosted infrastructure, or proprietary operational systems except as expressly stated.
+If you use Local Software or self-host Murph, you are responsible for installation, configuration, security, updates, backups, model-provider selection, API keys, logs, network access, credentials, and compliance with laws and third-party terms. We do not control your self-hosted environment and are not responsible for data loss, unauthorized access, misconfiguration, third-party model behavior, or legal compliance issues arising from your use of Local Software, except to the extent required by applicable law or the applicable open-source license.
+
+If Local Software connects to the Hosted Service, hosted APIs, paid hosted features, or Murph-managed infrastructure, these Terms apply to that hosted use. Open-source licenses do not grant rights to hosted infrastructure, trademarks, paid hosted features, or proprietary operational systems except as expressly stated.
 
 Murph does not currently sell or warranty first-party wearable hardware under these Terms. If Murph later offers first-party hardware, peripherals, or physical goods, separate terms of sale, delivery, or warranty terms may apply.
 
-## 16. Intellectual Property and Brand
+## 20. Copyright Complaints and Repeat Infringers
+
+We respect intellectual property rights. If you believe content available through the Hosted Service infringes your copyright, you may send a notice to our designated copyright agent at legal@justco.build with the information required by 17 U.S.C. Section 512(c)(3), including identification of the copyrighted work, identification of the allegedly infringing material, your contact information, a statement of good-faith belief, a statement under penalty of perjury that the information is accurate and that you are authorized to act, and your physical or electronic signature.
+
+We may remove or disable access to allegedly infringing material and may terminate accounts of repeat infringers or serious infringers where appropriate.
+
+## 21. Intellectual Property and Brand
 
 The Hosted Service, including our site design, hosted application logic, visual interfaces, branding, trademarks, logos, and non-open-source content, is owned by Murph or its licensors and is protected by intellectual property laws.
 
 Except for the limited rights expressly granted in these Terms, we reserve all rights in and to the Hosted Service.
 
-You may not use Murph’s name, trademarks, logos, or branding without our prior written consent, except as permitted by law or the applicable open-source license.
+You may not use Murph's name, trademarks, logos, or branding without our prior written consent, except as permitted by law or the applicable open-source license.
 
-## 17. Feedback
+## 22. Feedback
 
 If you provide suggestions, ideas, comments, or feedback about Murph, you grant us a worldwide, perpetual, irrevocable, sublicensable, transferable, royalty-free license to use that feedback for any purpose without restriction or compensation to you.
 
-## 18. Suspension and Termination
+## 23. Suspension and Termination
 
 You may stop using the Hosted Service at any time.
 
@@ -284,9 +357,9 @@ After termination:
 - Local Software you lawfully obtained may remain available under its own license; and
 - we may retain certain data as permitted or required by law, for backups, fraud prevention, audit logs, security, dispute resolution, or as described in our Privacy Policy.
 
-The following sections survive termination to the extent applicable: Sections 8 through 10, 12, 18 through 27, and any other provisions that by their nature should survive.
+The following sections survive termination to the extent applicable: Sections 10 through 14, 16, and 20 through 33, and any other provisions that by their nature should survive.
 
-## 19. Data Retention, Deletion, and Export
+## 24. Data Retention, Deletion, and Export
 
 You are responsible for maintaining your own copies of content you care about.
 
@@ -294,23 +367,23 @@ Where the Hosted Service offers export, import, or deletion features, you may us
 
 We may retain residual copies of data for a limited period in backups, logs, encrypted storage, or operational systems, and may retain information longer where necessary for security, fraud prevention, legal compliance, tax, accounting, or dispute resolution.
 
-## 20. Disclaimers
+## 25. Disclaimers
 
-TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE HOSTED SERVICE IS PROVIDED **“AS IS”** AND **“AS AVAILABLE.”** MURPH AND ITS AFFILIATES, LICENSORS, CONTRACTORS, AND SERVICE PROVIDERS DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, QUIET ENJOYMENT, ACCURACY, OR THAT THE HOSTED SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR FREE OF HARMFUL COMPONENTS.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE HOSTED SERVICE IS PROVIDED **"AS IS"** AND **"AS AVAILABLE."** MURPH AND ITS AFFILIATES, LICENSORS, CONTRACTORS, AND SERVICE PROVIDERS DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, QUIET ENJOYMENT, ACCURACY, OR THAT THE HOSTED SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR FREE OF HARMFUL COMPONENTS.
 
 Without limiting the above, we do not warrant that:
 
-- Murph’s outputs are accurate, complete, current, safe, or clinically appropriate;
+- Murph's outputs are accurate, complete, current, safe, or clinically appropriate;
 - AI-generated output will be reliable or suitable for your needs;
-- wearable, imported, or third-party data is accurate, complete, or timely;
-- any message, sync event, notification, or import will be delivered or completed;
+- wearable, imported, lab, or third-party data is accurate, complete, or timely;
+- any message, sync event, notification, Action, or import will be delivered or completed;
 - any integration will remain available or compatible;
 - hosted or local data will never be lost, corrupted, delayed, or inaccessible; or
 - the Hosted Service will meet your expectations or achieve any health, wellness, business, or personal outcome.
 
 Some jurisdictions do not allow certain disclaimers, so some of the above may not apply to you.
 
-## 21. Limitation of Liability
+## 26. Limitation of Liability
 
 TO THE MAXIMUM EXTENT PERMITTED BY LAW:
 
@@ -319,43 +392,78 @@ TO THE MAXIMUM EXTENT PERMITTED BY LAW:
 
 These limitations apply regardless of the legal theory and even if a remedy fails of its essential purpose.
 
+The limitations above apply to claims arising from or relating to health, wellness, fitness, nutrition, supplement, sauna, cold-exposure, breathwork, experiment, wearable, lab, AI Output, Action, message-delivery, integration, data-loss, privacy, or third-party-provider issues, except to the extent liability cannot be limited under applicable law.
+
 Nothing in these Terms excludes or limits liability that cannot be excluded under applicable law, including liability for fraud, willful misconduct, gross negligence, or, where required by law, death or personal injury.
 
-## 22. Indemnity
+## 27. Indemnity
 
-To the maximum extent permitted by law, you will defend, indemnify, and hold harmless Murph and its affiliates, officers, directors, employees, contractors, licensors, and service providers from and against third-party claims, liabilities, damages, judgments, awards, losses, costs, and expenses (including reasonable attorneys’ fees) arising out of or related to:
+To the maximum extent permitted by law, you will defend, indemnify, and hold harmless Murph and its affiliates, officers, directors, employees, contractors, licensors, and service providers from and against third-party claims, liabilities, damages, judgments, awards, losses, costs, and expenses (including reasonable attorneys' fees) arising out of or related to:
 
 - your User Content;
 - your misuse of the Hosted Service;
 - your violation of these Terms;
-- your violation of applicable law or third-party rights; or
-- your sharing, syncing, or disclosure of another person’s information without required authorization,
+- your violation of applicable law or third-party rights;
+- your sharing, syncing, or disclosure of another person's information without required authorization;
+- your use of Output or Actions to provide services, advice, decisions, or recommendations to another person;
+- your unauthorized submission, syncing, sharing, or processing of another person's data;
+- your violation of Connected Service terms, app-store rules, platform health-data rules, or third-party API terms;
+- your self-hosting, Local Software configuration, API keys, model-provider choices, or third-party services outside Murph's control; or
+- your use of the Hosted Service for professional, clinical, institutional, employer, insurer, benefits, research, or regulated purposes without our separate written authorization,
 
-except to the extent the claim arises from Murph’s breach of these Terms or Murph’s gross negligence or willful misconduct.
+except to the extent the claim arises from Murph's breach of these Terms or Murph's gross negligence or willful misconduct.
 
-## 23. Export Controls and Sanctions
+## 28. Export Controls and Sanctions
 
 You may not use the Hosted Service if you are located in, ordinarily resident in, or organized under the laws of a jurisdiction subject to comprehensive sanctions, or if you are on a government restricted-party list, except as authorized by applicable law.
 
 You agree not to use, export, re-export, or make available the Hosted Service in violation of export control, sanctions, or trade laws.
 
-## 24. Informal Dispute Resolution, Governing Law, and Venue
+## 29. Informal Dispute Resolution, Arbitration, Class-Action Waiver, Governing Law, and Venue
 
-Before filing a claim, each party agrees to try to resolve the dispute informally by sending written notice to the other party describing the dispute and the requested relief. Murph notices must be sent to **legal@justco.build**. If the dispute is not resolved within **30 days** after notice is received, either party may bring a claim as permitted by this Section.
+Before filing a claim, each party agrees to try to resolve the dispute informally by sending written notice to the other party describing the dispute, the requested relief, and enough information to evaluate the claim. Murph notices must be sent to legal@justco.build. If the dispute is not resolved within 30 days after notice is received, either party may bring a claim as permitted by this Section.
 
-These Terms are governed by the laws of the State of Delaware, excluding its conflict-of-laws rules.
+### Binding Arbitration
 
-Any dispute arising out of or relating to these Terms or the Hosted Service that is not resolved informally will be brought exclusively in the state or federal courts located in the State of Delaware, and each party consents to those courts’ personal jurisdiction and venue, except where applicable law requires a different forum or gives you a non-waivable right to bring a claim elsewhere.
+Except for the exceptions below, you and Murph agree that any dispute, claim, or controversy arising out of or relating to these Terms, the Hosted Service, your account, payments, privacy, data, communications, Output, Actions, or our relationship will be resolved by final and binding arbitration administered by the American Arbitration Association under its applicable consumer arbitration rules.
 
-Nothing in this section limits either party’s right to seek temporary or preliminary injunctive relief to protect its intellectual property, confidential information, or security interests.
+The arbitrator has authority to resolve disputes about the interpretation, applicability, enforceability, formation, or validity of this arbitration agreement, except that a court will decide disputes about the class-action waiver.
 
-## 25. Changes to These Terms
+### Exceptions
+
+Either party may bring claims in small claims court if the claims qualify. Either party may seek temporary or preliminary injunctive relief in court to protect intellectual property, confidential information, security interests, privacy, or to stop unauthorized use or abuse of the Hosted Service. Nothing in this Section prevents you from filing a complaint with a government agency.
+
+### Class-Action and Representative-Action Waiver
+
+You and Murph agree to resolve disputes only on an individual basis. You and Murph waive any right to bring or participate in any class, collective, consolidated, private attorney general, or representative action or arbitration, except to the extent this waiver is prohibited by applicable law.
+
+### Jury-Trial Waiver
+
+To the extent any dispute proceeds in court rather than arbitration, you and Murph knowingly and voluntarily waive any right to a jury trial to the maximum extent permitted by law.
+
+### Mass Arbitration
+
+If 25 or more similar arbitration demands are filed against Murph by or with the assistance of the same law firm, organization, or group of organizations, the parties agree that the arbitration administrator may apply reasonable batching, bellwether, fee-allocation, or staged-case procedures designed to promote efficient, fair, and lower-cost resolution, consistent with applicable law and the administrator's rules.
+
+### Opt Out
+
+You may opt out of this arbitration agreement by emailing legal@justco.build within 30 days after you first become subject to it. Your opt-out notice must include your name, account email or phone number, and a clear statement that you want to opt out of arbitration. Opting out of arbitration does not affect any other part of these Terms.
+
+### Governing Law and Venue
+
+These Terms are governed by the laws of the State of Delaware, excluding its conflict-of-laws rules. For disputes not subject to arbitration, the parties consent to the exclusive jurisdiction and venue of the state and federal courts located in Delaware, except where applicable law requires a different forum or gives you a non-waivable right to bring a claim elsewhere.
+
+## 30. Notice for California Users
+
+Under California Civil Code Section 1789.3, California users may contact the Complaint Assistance Unit of the Division of Consumer Services of the California Department of Consumer Affairs at 1625 North Market Blvd., Suite N 112, Sacramento, CA 95834, or by telephone at 1-800-952-5210.
+
+## 31. Changes to These Terms
 
 We may update these Terms from time to time. If we make material changes, we will provide notice by updating the Effective Date, posting the revised Terms, emailing you, notifying you through the Hosted Service, or using another reasonable method.
 
 Changes apply prospectively unless otherwise required by law. If you continue using the Hosted Service after the revised Terms become effective, you agree to the updated Terms. If you do not agree, you must stop using the Hosted Service.
 
-## 26. General Terms
+## 32. General Terms
 
 - These Terms, together with any incorporated policies, order forms, checkout terms, and any separate written agreements we sign with you, form the entire agreement between you and Murph regarding the Hosted Service.
 - If any provision is held unenforceable, the remaining provisions remain in effect.
@@ -364,15 +472,13 @@ Changes apply prospectively unless otherwise required by law. If you continue us
 - We are not liable for delay or failure to perform caused by events beyond our reasonable control, including internet or utility failures, provider outages, labor disputes, acts of God, war, terrorism, civil unrest, epidemic or pandemic events, or governmental actions.
 - Section headings are for convenience only.
 - Nothing in these Terms creates a partnership, joint venture, agency, employment, fiduciary, or franchise relationship between you and Murph.
-- These Terms do not limit any non-waivable rights you may have under applicable consumer protection law.
+- If you reside outside the United States, or if mandatory consumer protection laws apply to you, some provisions of these Terms may not apply to you or may apply only to the maximum extent permitted by law. Nothing in these Terms limits non-waivable rights you have under applicable consumer, privacy, health-data, data-protection, or product-safety laws.
 - In the event of a conflict between these Terms and an applicable open-source license, the open-source license controls only with respect to the Local Software governed by that license.
 
-## 27. Contact Information
+## 33. Contact Information
 
 Murph  
 Just Cobuild, Co.  
 2261 Market Street, STE 85230  
 San Francisco, CA 94114 USA  
-legal@justco.build  
-legal@justco.build  
 legal@justco.build
