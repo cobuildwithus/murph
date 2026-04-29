@@ -965,10 +965,8 @@ function createAssistantAutoReplyActiveTurnInputHook(input: {
 
   return async (admissionInput) => {
     const refreshResult = await input.port.refresh({
-      phase:
-        admissionInput.phase === 'commit_barrier'
-          ? 'commit_barrier'
-          : 'after_provider',
+      phase: admissionInput.phase,
+      signal: admissionInput.signal,
     })
     if (refreshResult.reason === 'source_unavailable') {
       throw new AssistantActiveTurnInputUnavailableError(

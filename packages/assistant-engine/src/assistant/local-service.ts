@@ -747,8 +747,7 @@ async function resolveAssistantActiveTurnInputAdmission(input: {
 }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
   return input.activeTurnInputController?.admit({
     phase: input.phase,
-    providerRequestOrdinal: input.providerRequestOrdinal,
-    response: input.providerResult.response,
+    signal: input.currentInput.abortSignal,
     sessionId: input.providerResult.session.sessionId,
     turnId: input.userTurn.turnId,
     vault: input.currentInput.vault,
