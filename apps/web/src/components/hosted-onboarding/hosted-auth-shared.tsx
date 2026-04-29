@@ -45,7 +45,7 @@ export function HostedAuthLegalNotice({
       <a href={HOSTED_PRIVACY_URL} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">
         Privacy Policy
       </a>
-      . Hosted Murph is for personal, direct-to-consumer use and is not for covered entities or business associates to process PHI without a signed BAA.
+      .
     </p>
   );
 }

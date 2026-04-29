@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { BrowserVaultStatus } from "@/src/lib/browser-vault/context";
 import { formatIsoDate } from "@/src/lib/browser-vault/display";
 import type { Experiment } from "@/src/types/experiments";
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -53,8 +54,16 @@ export function ResultsTab({
 
       {!hasPrivateRun && (privateRunStatus === "ready" || privateRunStatus === "empty") && (
         <ResultsEmptyState
-          title="No private run yet"
-          body="This page is showing Health Commons protocol data. Once you start this experiment, your browser-vault run state can attach here without copying the public protocol data."
+          title="Run this on yourself"
+          body="You're previewing the public protocol. Start the experiment to track your own baseline, sessions, and outcomes — kept private in your browser vault."
+          action={
+            <AuthButton
+              size="lg"
+              className="rounded-[10px] bg-primary px-8 py-4 text-base font-semibold text-background hover:bg-primary/90"
+            >
+              Start experiment →
+            </AuthButton>
+          }
         />
       )}
 
