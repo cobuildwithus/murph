@@ -9,6 +9,10 @@ import { type HostedMemberCoreState } from "./hosted-member-store";
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import { type HostedMemberPrivyIdentityLookup } from "./member-identity-service";
 import { resolvePrivyMemberAuthFromSession } from "./request-auth";
+import {
+  anonymousHostedSidebarAuthSnapshot,
+  type HostedSidebarAuthSnapshot,
+} from "./sidebar-auth";
 
 export interface HostedPageAuthSnapshot {
   authenticated: boolean;
@@ -64,6 +68,43 @@ export async function getHostedPageAuthSnapshot(): Promise<HostedPageAuthSnapsho
   return resolveHostedPageAuthSnapshot();
 }
 
+const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAuthSnapshot> => {
+  let session: HostedPrivySession | null;
+
+  try {
+    session = await getHostedPrivySession();
+  } catch (error) {
+    if (isHostedSidebarAuthSessionError(error)) {
+      return anonymousHostedSidebarAuthSnapshot;
+    }
+
+    throw error;
+  }
+
+  if (!session) {
+    return anonymousHostedSidebarAuthSnapshot;
+  }
+
+  return {
+    authenticated: true,
+    label: resolveHostedSidebarAuthLabel(session),
+  };
+});
+
+export async function getHostedSidebarAuthSnapshot(): Promise<HostedSidebarAuthSnapshot> {
+  return resolveHostedSidebarAuthSnapshot();
+}
+
 function isHostedPageAuthSessionError(error: unknown): boolean {
   return isHostedOnboardingError(error) && error.code === "PRIVY_AUTH_FAILED";
+}
+
+function isHostedSidebarAuthSessionError(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.code !== "PRIVY_CONFIG_REQUIRED"
+    && error.code.startsWith("PRIVY_");
+}
+
+function resolveHostedSidebarAuthLabel(session: HostedPrivySession): string | null {
+  return session.identity.email?.address ?? session.identity.phone?.number ?? null;
 }

@@ -35,6 +35,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/src/components/ui/sidebar";
+import {
+  anonymousHostedSidebarAuthSnapshot,
+  type HostedSidebarAuthSnapshot,
+} from "@/src/lib/hosted-onboarding/sidebar-auth";
 import type {
   SidebarAccountStatus,
   SidebarAccountStatusTone,
@@ -118,15 +122,22 @@ function SidebarAuthActions() {
   );
 }
 
-function AccountMenu() {
+function AccountMenu({
+  initialAuth,
+}: {
+  initialAuth: HostedSidebarAuthSnapshot;
+}) {
   const { user } = useUser();
-  const { logout } = usePrivy();
+  const { authenticated, logout, ready } = usePrivy();
   const [deviceSyncStatusState, setDeviceSyncStatusState] =
     useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
-  const userKey = user?.id ?? null;
+  const hasAccount = ready
+    ? authenticated
+    : Boolean(user) || initialAuth.authenticated;
+  const userKey = hasAccount ? user?.id ?? null : null;
 
   const primaryLabel =
-    user?.email?.address ?? user?.phone?.number ?? "Account";
+    user?.email?.address ?? user?.phone?.number ?? initialAuth.label ?? "Account";
   const initials =
     primaryLabel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
   const deviceSyncStatus =
@@ -167,7 +178,7 @@ function AccountMenu() {
     };
   }, [userKey]);
 
-  if (!user) {
+  if (!hasAccount) {
     return <SidebarAuthActions />;
   }
 
@@ -237,7 +248,11 @@ function accountStatusDotClass(tone: SidebarAccountStatusTone): string {
   return "bg-white/30";
 }
 
-export function Sidebar() {
+export function Sidebar({
+  initialAuth = anonymousHostedSidebarAuthSnapshot,
+}: {
+  initialAuth?: HostedSidebarAuthSnapshot;
+}) {
   const pathname = usePathname();
 
   return (
@@ -278,7 +293,7 @@ export function Sidebar() {
       </SidebarContent>
 
       <SidebarFooter className="pb-4">
-        <AccountMenu />
+        <AccountMenu initialAuth={initialAuth} />
       </SidebarFooter>
     </ShadcnSidebar>
   );

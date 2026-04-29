@@ -52,11 +52,19 @@ export async function resolvePrivyMemberAuthFromSession(input: {
   member: HostedMemberCoreState | null;
   memberLookup: HostedMemberPrivyIdentityLookup | null;
 }> {
-  const memberLookup = await lookupHostedMemberForPrivyIdentity({
-    identity: input.identity,
-    parallelizeReads: true,
-    prisma: input.prisma,
-  });
+  const [memberLookup, sessionMember] = await Promise.all([
+    lookupHostedMemberForPrivyIdentity({
+      identity: input.identity,
+      parallelizeReads: true,
+      prisma: input.prisma,
+    }),
+    input.memberId
+      ? readHostedMemberCoreState({
+          memberId: input.memberId,
+          prisma: input.prisma,
+        })
+      : Promise.resolve(null),
+  ]);
 
   if (!input.memberId) {
     return {
@@ -64,11 +72,6 @@ export async function resolvePrivyMemberAuthFromSession(input: {
       memberLookup,
     };
   }
-
-  const sessionMember = await readHostedMemberCoreState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
 
   if (!memberLookup) {
     return {
