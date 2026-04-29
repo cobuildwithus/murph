@@ -2,18 +2,21 @@ import type { ReactNode } from "react";
 
 import type { BrowserVaultStatus } from "@/src/lib/browser-vault/context";
 import { formatIsoDate } from "@/src/lib/browser-vault/display";
+import type { ExperimentStartContactChannels } from "@/src/lib/experiments/start-experiment-contact";
 import type { Experiment } from "@/src/types/experiments";
-import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { ConclusionCard } from "@/src/components/conclusion-card";
 import { ExperimentSchedule } from "./experiment-schedule";
 import { ExperimentSummaryTiles } from "./experiment-summary-tiles";
+import { StartExperimentButton } from "./start-experiment-button";
 import { TrendChart } from "./trend-chart";
 import { ExperimentTimeline } from "./experiment-timeline";
 
 interface ResultsTabProps {
   experiment: Experiment;
+  initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
+  murphPhoneNumber?: string | null;
   onPrivateRunRetry?: () => Promise<void>;
   privateRunError: string | null;
   privateRunStatus: BrowserVaultStatus;
@@ -21,6 +24,8 @@ interface ResultsTabProps {
 
 export function ResultsTab({
   experiment,
+  initialContactChannels,
+  murphPhoneNumber,
   onPrivateRunRetry,
   privateRunError,
   privateRunStatus,
@@ -57,12 +62,12 @@ export function ResultsTab({
           title="Run this on yourself"
           body="You're previewing the public protocol. Start the experiment to track your own baseline, sessions, and outcomes — kept private in your browser vault."
           action={
-            <AuthButton
-              size="lg"
-              className="rounded-[10px] bg-primary px-8 py-4 text-base font-semibold text-background hover:bg-primary/90"
-            >
-              Start experiment →
-            </AuthButton>
+            <StartExperimentButton
+              initialContactChannels={initialContactChannels}
+              murphPhoneNumber={murphPhoneNumber}
+              protocolDays={formatProtocolDays(experiment.durationDays, experiment.baselineDays)}
+              protocolTitle={experiment.title}
+            />
           }
         />
       )}
@@ -191,6 +196,10 @@ export function ResultsTab({
   );
 }
 
+function formatProtocolDays(durationDays: number, baselineDays: number): number {
+  return Math.max(1, durationDays - baselineDays);
+}
+
 function ResultsEmptyState({
   action,
   title,
@@ -216,4 +225,3 @@ function ResultsEmptyState({
     </div>
   );
 }
-

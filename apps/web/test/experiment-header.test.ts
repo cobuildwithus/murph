@@ -10,17 +10,20 @@ vi.mock("next/link", () => ({
   },
 }));
 
-vi.mock("@/src/components/ui/auth-button", () => ({
-  AuthButton(props: { children?: ReactNode; className?: string; size?: string }) {
+vi.mock("@/src/components/experiments/experiment-detail/start-experiment-button", () => ({
+  StartExperimentButton(props: { protocolDays: number }) {
     return createElement(
-      "button",
-      {
-        className: props.className,
-        "data-size": props.size,
-        "data-slot": "auth-button",
-        type: "button",
-      },
-      props.children,
+      "div",
+      null,
+      createElement(
+        "button",
+        {
+          "data-slot": "auth-button",
+          type: "button",
+        },
+        "Start Experiment",
+      ),
+      createElement("span", null, `${props.protocolDays}-day protocol`),
     );
   },
 }));

@@ -305,7 +305,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(emptyMarkup).toContain("No private run yet");
+    expect(emptyMarkup).toContain("Run this on yourself");
 
     const finishedRun = resolveBrowserVaultExperimentRun({
       client: await createClient({

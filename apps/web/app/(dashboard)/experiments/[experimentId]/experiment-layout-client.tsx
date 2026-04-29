@@ -8,36 +8,60 @@ import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { ExperimentHero } from "@/src/components/experiments/experiment-detail/experiment-hero";
 import { ExperimentHeader } from "@/src/components/experiments/experiment-detail/experiment-header";
+import { ExperimentStartContactProvider } from "@/src/components/experiments/experiment-detail/start-experiment-contact-context";
 import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import {
   composeExperimentDetail,
   hasCurrentExperimentProtocolContract,
 } from "@/src/lib/experiments/experiment-detail";
+import {
+  DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS,
+  type ExperimentStartContactChannels,
+} from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentProtocol } from "@/src/types/experiments";
 
 type ExperimentDetailTab = "protocol" | "research" | "results";
 
 export function ExperimentLayoutClient({
-  protocol,
   children,
+  initialContactChannels = DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS,
+  murphPhoneNumber = null,
+  protocol,
 }: {
+  children?: ReactNode;
+  initialContactChannels?: ExperimentStartContactChannels;
+  murphPhoneNumber?: string | null;
   protocol: ExperimentProtocol;
-  children: ReactNode;
 }) {
   return (
     <BrowserVaultProvider>
-      <ExperimentLayoutInner protocol={protocol}>{children}</ExperimentLayoutInner>
+      <ExperimentStartContactProvider
+        initialContactChannels={initialContactChannels}
+        murphPhoneNumber={murphPhoneNumber}
+      >
+        <ExperimentLayoutInner
+          initialContactChannels={initialContactChannels}
+          murphPhoneNumber={murphPhoneNumber}
+          protocol={protocol}
+        >
+          {children}
+        </ExperimentLayoutInner>
+      </ExperimentStartContactProvider>
     </BrowserVaultProvider>
   );
 }
 
 function ExperimentLayoutInner({
-  protocol,
   children,
+  initialContactChannels,
+  murphPhoneNumber,
+  protocol,
 }: {
+  children?: ReactNode;
+  initialContactChannels: ExperimentStartContactChannels;
+  murphPhoneNumber: string | null;
   protocol: ExperimentProtocol;
-  children: ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -113,6 +137,8 @@ function ExperimentLayoutInner({
         baselineDays={experiment.baselineDays}
         completionPercent={experiment.completionPercent}
         description={experiment.description}
+        initialContactChannels={initialContactChannels}
+        murphPhoneNumber={murphPhoneNumber}
       />
 
       <Tabs value={currentTab} className="w-full">
