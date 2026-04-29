@@ -9,9 +9,9 @@ import {
   CalendarIcon,
   CheckCircleIcon,
   CheckIcon,
+  Code2Icon,
   LoaderCircleIcon,
   LockIcon,
-  RefreshCwIcon,
   ShieldCheckIcon,
 } from "lucide-react";
 
@@ -312,7 +312,7 @@ export function JoinInviteCheckoutPanel({
           <ul className="flex w-full flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <CheckoutTrustItem icon={LockIcon} label="Private by default" />
             <CheckoutTrustItem icon={ShieldCheckIcon} label="No data sold, ever" />
-            <CheckoutTrustItem icon={RefreshCwIcon} label="Fully open source" />
+            <CheckoutTrustItem icon={Code2Icon} label="Fully open source" />
           </ul>
         </CardFooter>
       </Card>
