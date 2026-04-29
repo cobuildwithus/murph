@@ -94,6 +94,24 @@ describe('assistant GPT-5 execution prompt overlay', () => {
 })
 
 describe('assistant local PDF evidence guidance', () => {
+  it('describes hosted device-connect as available without stale unavailable guidance', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      onboardingGuidance: true,
+    }))
+
+    expect(prompt).toContain(
+      'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
+    )
+    expect(prompt).toContain(
+      'Supported connect-link requests are handled by the hosted runtime before the model turn',
+    )
+    expect(prompt).toContain(
+      'offer to send a connection link',
+    )
+    expect(prompt).not.toContain('hosted connect helper is not exposed')
+    expect(prompt).not.toContain('connection links are temporarily unavailable')
+  })
+
   it('teaches Codex to inspect local PDF artifacts with Poppler tools', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 

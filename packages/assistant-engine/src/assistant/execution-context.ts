@@ -22,6 +22,7 @@ export interface AssistantHostedDeviceConnectProvider {
 }
 
 export interface AssistantHostedDeviceConnectRequest {
+  messagingReturnTarget?: 'imessage' | 'telegram' | null
   provider: string
 }
 
