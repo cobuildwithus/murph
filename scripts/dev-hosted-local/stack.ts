@@ -19,7 +19,7 @@ import {
   buildWranglerEnvFileText,
   buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
-  normalizeLocalDatabaseUrl,
+  resolveHostedLocalDatabaseUrl,
   readOptionalSimpleEnvFile,
   readSimpleEnvFile,
   requireEnvValue,
@@ -146,10 +146,14 @@ export async function startHostedLocalDevStack(input: {
       ...initialEnv,
     };
 
-    vercelEnv.DATABASE_URL = normalizeLocalDatabaseUrl(
-      vercelEnv.DATABASE_URL,
-      DEFAULT_DATABASE_URL,
-    );
+    vercelEnv.DATABASE_URL = resolveHostedLocalDatabaseUrl({
+      databaseUrlOverride: config.databaseUrlOverride,
+      fallbackUrl: DEFAULT_DATABASE_URL,
+      pulledDatabaseUrl: pulledEnv.DATABASE_URL,
+      repoDatabaseUrl: repoEnv.DATABASE_URL,
+      shellDatabaseUrl: initialEnv.DATABASE_URL,
+      useVercelDatabaseUrl: config.useVercelDatabaseUrl,
+    });
     const localInternalProxyBaseUrl = resolveContainerReachableWorkerOrigin(config, vercelEnv);
 
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
@@ -259,6 +263,16 @@ export async function startHostedLocalDevStack(input: {
           name: "setup",
         });
       }
+    }
+
+    const shouldPrepareRunnerBundle = initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1";
+    if (shouldPrepareRunnerBundle) {
+      await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle"], {
+        cwd: repoRoot,
+        env: workerRuntimeEnv,
+        name: "setup",
+      });
+      workerRuntimeEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
     }
 
     await cleanupHostedRunnerContainers({
@@ -417,6 +431,11 @@ export async function startHostedLocalDevStack(input: {
           }),
         ]);
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
+        await maybeRunRunnerContainerSmoke({
+          config,
+          env: workerRuntimeEnv,
+          workerBaseUrl,
+        });
       } catch (error) {
         if (!stopped) {
           await stop("SIGTERM");
@@ -487,6 +506,30 @@ export async function startHostedLocalDevStack(input: {
     }
     throw error;
   }
+}
+
+async function maybeRunRunnerContainerSmoke(input: {
+  config: HostedLocalDevConfig;
+  env: NodeJS.ProcessEnv | null;
+  workerBaseUrl: string;
+}): Promise<void> {
+  if (input.config.skipRunnerSmoke || input.env === null) {
+    return;
+  }
+
+  await runCommand("pnpm", ["--dir", "apps/cloudflare", "deploy:smoke"], {
+    cwd: repoRoot,
+    env: {
+      ...input.env,
+      HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: input.workerBaseUrl,
+      HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+      HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS:
+        input.env.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS?.trim() || "30",
+      HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS:
+        input.env.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS?.trim() || "1000",
+    },
+    name: "setup",
+  });
 }
 
 async function maybeStartStripeWebhookListener(input: {

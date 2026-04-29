@@ -92,4 +92,50 @@ describe("terminateChildProcessAndWait", () => {
     expect(killCalls).toEqual(["SIGTERM", "SIGKILL"]);
     platformSpy.mockRestore();
   });
+
+  it("terminates the detached process group after the direct child has exited", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const child = new EventEmitter() as EventEmitter & {
+      exitCode: number | null;
+      kill: (signal?: NodeJS.Signals | number) => boolean;
+      once: EventEmitter["once"];
+      pid: number;
+    };
+    const groupSignals: Array<NodeJS.Signals | number | undefined> = [];
+    let gracefulSignalSent = false;
+    child.exitCode = 0;
+    child.pid = 5252;
+    child.kill = vi.fn(() => true);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((
+      ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (pid !== -child.pid) {
+          return true;
+        }
+
+        groupSignals.push(signal);
+        if (signal === 0 && gracefulSignalSent) {
+          const error = new Error("process group exited") as NodeJS.ErrnoException;
+          error.code = "ESRCH";
+          throw error;
+        }
+        if (signal === "SIGTERM") {
+          gracefulSignalSent = true;
+        }
+        return true;
+      }) as typeof process.kill
+    ));
+
+    try {
+      await terminateChildProcessAndWait(child, {
+        graceMs: 1,
+        signal: "SIGTERM",
+      });
+    } finally {
+      killSpy.mockRestore();
+      platformSpy.mockRestore();
+    }
+
+    expect(groupSignals).toContain("SIGTERM");
+    expect(child.kill).not.toHaveBeenCalled();
+  });
 });

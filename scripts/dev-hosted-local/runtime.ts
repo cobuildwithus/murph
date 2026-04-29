@@ -603,13 +603,13 @@ export function terminateChildProcess(
   child: HostedLocalChildProcess,
   signal: NodeJS.Signals,
 ): void {
-  if (child.exitCode !== null || child.pid === undefined) {
+  if (child.pid === undefined) {
     return;
   }
 
-  const descendantPids = process.platform === "win32"
-    ? []
-    : listDescendantProcessIds(child.pid);
+  const descendantPids = child.exitCode === null && process.platform !== "win32"
+    ? listDescendantProcessIds(child.pid)
+    : [];
 
   try {
     if (process.platform !== "win32") {
@@ -627,10 +627,12 @@ export function terminateChildProcess(
     }
   }
 
-  try {
-    child.kill(signal);
-  } catch {
-    // Ignore already-dead children.
+  if (child.exitCode === null) {
+    try {
+      child.kill(signal);
+    } catch {
+      // Ignore already-dead children.
+    }
   }
 }
 
@@ -660,14 +662,17 @@ export async function terminateChildProcessAndWait(
   const graceMs = input.graceMs ?? 15_000;
   const processGroupId = process.platform === "win32" ? null : (child.pid ?? null);
 
-  if (child.exitCode !== null || child.pid === undefined) {
+  if (child.pid === undefined) {
     return;
   }
 
-  const exited = await waitForChildExit(child, graceMs, () => {
-    terminateChildProcess(child, signal);
-  });
-  if (exited) {
+  if (child.exitCode === null) {
+    await waitForChildExit(child, graceMs, () => {
+      terminateChildProcess(child, signal);
+    });
+  }
+
+  if (child.exitCode !== null) {
     if (processGroupId === null) {
       return;
     }

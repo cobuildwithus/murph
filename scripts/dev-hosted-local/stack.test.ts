@@ -26,11 +26,14 @@ class CapturingWritable extends Writable {
 }
 
 const defaultConfig: HostedLocalDevConfig = {
+  databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  skipRunnerSmoke: false,
   skipPrismaMigrate: false,
   skipStripeListen: true,
   skipWeb: false,
   skipVercelPull: false,
+  useVercelDatabaseUrl: false,
   webHost: "127.0.0.1",
   webPort: 3000,
   workerHost: "127.0.0.1",
@@ -138,6 +141,20 @@ vi.mock("./environment.ts", () => ({
   buildWranglerLocalDevConfig: vi.fn(() => ({ name: "murph-hosted" })),
   buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000"]),
   normalizeLocalDatabaseUrl: vi.fn((value: string | undefined) => value ?? "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"),
+  resolveHostedLocalDatabaseUrl: vi.fn((input: {
+    databaseUrlOverride?: string | null;
+    fallbackUrl?: string;
+    pulledDatabaseUrl?: string;
+    repoDatabaseUrl?: string;
+    shellDatabaseUrl?: string;
+    useVercelDatabaseUrl?: boolean;
+  }) =>
+    input.databaseUrlOverride
+      ?? input.shellDatabaseUrl
+      ?? (input.useVercelDatabaseUrl ? input.pulledDatabaseUrl ?? input.repoDatabaseUrl : undefined)
+      ?? input.fallbackUrl
+      ?? "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"
+  ),
   shouldSyncLocalDatabaseSchema: vi.fn(() => true),
   readOptionalSimpleEnvFile: vi.fn(async () => ({
     HOSTED_ASSISTANT_PROVIDER: "venice",
@@ -248,6 +265,7 @@ describe("hosted local dev stack", () => {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_ASSISTANT_PROVIDER: "venice",
+        MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
@@ -262,6 +280,31 @@ describe("hosted local dev stack", () => {
       "pnpm",
       ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"],
       expect.any(Object),
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "runner:bundle"],
+      expect.objectContaining({
+        cwd: expect.stringContaining("murph"),
+        env: expect.objectContaining({
+          MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: expect.stringMatching(/^sha256-[a-f0-9]{24}$/u),
+        }),
+        name: "setup",
+      }),
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "deploy:smoke"],
+      expect.objectContaining({
+        cwd: expect.stringContaining("murph"),
+        env: expect.objectContaining({
+          HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "30",
+          HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "1000",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "http://127.0.0.1:8787",
+        }),
+        name: "setup",
+      }),
     );
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(2);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
@@ -280,6 +323,31 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("can skip the runner container smoke proof for focused debugging", async () => {
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipRunnerSmoke: true,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 131 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 132 }));
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "deploy:smoke"],
+      expect.any(Object),
+    );
   });
 
   it("uses prisma migrate deploy for non-local databases instead of forcing db push", async () => {
