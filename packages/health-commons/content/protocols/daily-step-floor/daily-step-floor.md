@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:daily-step-floor/daily-step-floor
 slug: protocols/daily-step-floor/daily-step-floor
 title: Daily Step Floor
-summary: Choose a daily minimum step-count floor from your own baseline, then test whether a consistent phone, wearable, or pedometer signal can raise steps without worsening pain, safety, recovery, or life friction.
+summary: A daily minimum step count, where a visible floor ensures enough steady low-grade cardiovascular and weight-bearing load for the body to adapt to rather than lose.
 status: field-testing
 quality: usable
 aliases:
@@ -33,13 +33,11 @@ relations:
 - type: parent_family
   target: experiment_family:daily-step-floor
 - type: primary_biomarker
-  target: biomarker:daily-step-count
+  target: biomarker:resting-heart-rate
 - type: secondary_biomarker
-  target: biomarker:step-floor-days
+  target: biomarker:estimated-vo2max
 - type: secondary_biomarker
-  target: biomarker:sedentary-time
-- type: secondary_biomarker
-  target: biomarker:walking-bout-minutes
+  target: biomarker:sleep-efficiency
 - type: secondary_biomarker
   target: biomarker:walking-cadence
 - type: secondary_biomarker
@@ -49,13 +47,11 @@ relations:
 - type: secondary_biomarker
   target: biomarker:walking-safety-events
 - type: secondary_biomarker
-  target: biomarker:resting-heart-rate
-- type: secondary_biomarker
   target: biomarker:morning-blood-pressure
 - type: secondary_biomarker
-  target: biomarker:estimated-vo2max
+  target: biomarker:sedentary-time
 - type: secondary_biomarker
-  target: biomarker:sleep-efficiency
+  target: biomarker:walking-bout-minutes
 - type: cites
   target: source_artifact:daily-step-floor-bibliography
 lineage:
@@ -129,17 +125,15 @@ testPlans:
   durationDays: 42
   baselineDays: 14
   interventionDays: 28
-  primaryBiomarkerKey: biomarker:daily-step-count
+  primaryBiomarkerKey: biomarker:resting-heart-rate
   secondaryBiomarkerKeys:
-  - biomarker:step-floor-days
-  - biomarker:sedentary-time
-  - biomarker:walking-bout-minutes
-  - biomarker:walking-cadence
-  - biomarker:moderate-to-vigorous-activity-minutes
-  - biomarker:resting-heart-rate
-  - biomarker:morning-blood-pressure
   - biomarker:estimated-vo2max
   - biomarker:sleep-efficiency
+  - biomarker:walking-cadence
+  - biomarker:moderate-to-vigorous-activity-minutes
+  - biomarker:morning-blood-pressure
+  - biomarker:sedentary-time
+  - biomarker:walking-bout-minutes
   - biomarker:musculoskeletal-pain
   safetyOutcomeKeys:
   - biomarker:walking-safety-events
@@ -148,18 +142,18 @@ testPlans:
   targetAdherenceSessions: 28
   notes:
   - Use the same device and carry/wear rule during baseline and intervention.
-  - Primary readout is change in daily step count plus floor-hit days; secondary outcomes are exploratory and confounded.
+  - Daily step count and floor-hit days are exposure and adherence context, not the outcome win.
   - Flag device gaps, illness, travel, weather/heat, pain, route risk, and concurrent exercise or rehab.
   - Do not count a high step total as success if safety symptoms, pain, recovery debt, or life friction worsened.
 expectedSignalDescriptions:
-- biomarkerKey: biomarker:daily-step-count
-  expected: up_or_stable
+- biomarkerKey: biomarker:resting-heart-rate
+  expected: down_or_stable
   protocolProminence: focus
-  description: 'The main expected signal is a higher daily step-count trend compared with baseline when the floor is achievable and measured consistently. Source keys: source_artifact:pmid-18029834; source_artifact:pmid-19791652; source_artifact:pmid-33036635.'
-- biomarkerKey: biomarker:step-floor-days
-  expected: up_or_stable
-  protocolProminence: focus
-  description: 'Floor-hit days show adherence to the chosen target, but high adherence with pain or safety events is not a good result. Source keys: source_artifact:pmid-22429600; source_artifact:pmid-26150019; source_artifact:10000steps-setting-step-goal-2026-04-26.'
+  description: 'Resting heart rate is an objective wearable signal that may stay stable or ease if the added walking fits recovery, sleep, and overall load.'
+- biomarkerKey: biomarker:musculoskeletal-pain
+  expected: down_or_stable
+  protocolProminence: context
+  description: 'Pain should stay stable or improve as the floor rises; worsening pain overrides step-count success.'
 - biomarkerKey: biomarker:walking-safety-events
   expected: down_or_stable
   protocolProminence: focus

@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:static-stretching/at-home-static-stretching-for-flexibility
 slug: protocols/static-stretching/at-home-static-stretching-for-flexibility
 title: At Home Static Stretching
-summary: A low-burden home routine that uses gentle self-applied static holds to test whether one target range-of-motion measure improves.
+summary: Gentle held stretches on one target area, where repeated time under mild tension gradually increases how far the joint moves — partly by raising stretch tolerance and partly by nudging tissue to give more.
 status: draft
 quality: usable
 aliases:

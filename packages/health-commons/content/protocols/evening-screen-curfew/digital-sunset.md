@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: "protocol_variant:evening-screen-curfew/digital-sunset"
 slug: "protocols/evening-screen-curfew/digital-sunset"
 title: "Digital Sunset: No Screens Before Bed"
-summary: Stop personal screen use before bed, then test whether evenings feel less wired and sleep onset becomes easier without sacrificing safety, access, or sleep opportunity.
+summary: No personal screens for the last 30–60 minutes before bed, where removing late light, stimulating content, and notification loops lets arousal drop so the brain can shift toward sleep.
 status: draft
 quality: usable
 aliases:

@@ -2020,6 +2020,10 @@ function isGeneratedWebExperimentSignal(value: unknown): boolean {
     typeof value["delta"] === "string" &&
     (value["description"] === undefined || typeof value["description"] === "string") &&
     isGeneratedWebSignalDirection(value["direction"]) &&
+    (
+      value["estimatedChange"] === undefined ||
+      isGeneratedWebExperimentSignalEstimate(value["estimatedChange"])
+    ) &&
     typeof value["expected"] === "string" &&
     typeof value["label"] === "string" &&
     (
@@ -2029,6 +2033,40 @@ function isGeneratedWebExperimentSignal(value: unknown): boolean {
     ) &&
     (value["unit"] === undefined || typeof value["unit"] === "string") &&
     typeof value["value"] === "string"
+  );
+}
+
+function isGeneratedWebExperimentSignalEstimate(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (value["kind"] === "mixed_or_contextual") {
+    return (
+      (value["basis"] === undefined || typeof value["basis"] === "string") &&
+      isGeneratedWebExperimentSignalEstimateConfidence(value["confidence"]) &&
+      (value["window"] === undefined || typeof value["window"] === "string")
+    );
+  }
+
+  return (
+    (value["kind"] === "absolute" || value["kind"] === "relative_percent") &&
+    (value["basis"] === undefined || typeof value["basis"] === "string") &&
+    isGeneratedWebExperimentSignalEstimateConfidence(value["confidence"]) &&
+    typeof value["high"] === "number" &&
+    typeof value["low"] === "number" &&
+    typeof value["unit"] === "string" &&
+    (value["window"] === undefined || typeof value["window"] === "string")
+  );
+}
+
+function isGeneratedWebExperimentSignalEstimateConfidence(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === "low" ||
+    value === "moderate" ||
+    value === "high" ||
+    value === "mixed"
   );
 }
 

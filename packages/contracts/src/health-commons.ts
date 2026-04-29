@@ -388,11 +388,56 @@ export const healthCommonsTestPlanSchema = z
 
 export type HealthCommonsTestPlan = z.infer<typeof healthCommonsTestPlanSchema>;
 
+export const HEALTH_COMMONS_EXPECTED_SIGNAL_ESTIMATE_CONFIDENCE = [
+  "low",
+  "moderate",
+  "high",
+  "mixed",
+] as const;
+
+const healthCommonsNumericExpectedSignalEstimateSchema = z
+  .object({
+    kind: z.enum(["absolute", "relative_percent"]),
+    low: z.number(),
+    high: z.number(),
+    unit: shortStringSchema,
+    window: shortStringSchema.optional(),
+    confidence: z
+      .enum(HEALTH_COMMONS_EXPECTED_SIGNAL_ESTIMATE_CONFIDENCE)
+      .optional(),
+    basis: longStringSchema.optional(),
+  })
+  .strict();
+
+const healthCommonsContextualExpectedSignalEstimateSchema = z
+  .object({
+    kind: z.literal("mixed_or_contextual"),
+    window: shortStringSchema.optional(),
+    confidence: z
+      .enum(HEALTH_COMMONS_EXPECTED_SIGNAL_ESTIMATE_CONFIDENCE)
+      .optional(),
+    basis: longStringSchema.optional(),
+  })
+  .strict();
+
+export const healthCommonsExpectedSignalEstimateSchema = z.discriminatedUnion(
+  "kind",
+  [
+    healthCommonsNumericExpectedSignalEstimateSchema,
+    healthCommonsContextualExpectedSignalEstimateSchema,
+  ],
+);
+
+export type HealthCommonsExpectedSignalEstimate = z.infer<
+  typeof healthCommonsExpectedSignalEstimateSchema
+>;
+
 export const healthCommonsExpectedSignalDescriptionSchema = z
   .object({
     biomarkerKey: healthCommonsKeySchema,
     description: longStringSchema,
     expected: shortStringSchema.optional(),
+    estimatedChange: healthCommonsExpectedSignalEstimateSchema.optional(),
     protocolProminence: z.enum(["focus", "context"]).optional(),
   })
   .strict();

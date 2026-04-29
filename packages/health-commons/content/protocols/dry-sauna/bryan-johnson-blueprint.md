@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:dry-sauna/bryan-johnson-blueprint
 slug: protocols/dry-sauna/bryan-johnson-blueprint
 title: Bryan Johnson Sauna
-summary: Source-attributed Blueprint dry-sauna routine with hydration and source-specific cooling tactics; read the research as heat-load and safety context, not proof of Bryan Johnson's personal outcomes.
+summary: High-heat dry sauna daily after a workout with groin ice, where stacking intense heat on exercise doubles the demand on heart and blood vessels to move heat out.
 status: field-testing
 quality: usable
 aliases:
@@ -144,8 +144,9 @@ protocol:
   interventionSessionsMinimum: 7
   interventionSessionsTarget: 14
   steps:
-    - Use a low-humidity dry sauna at about 93 °C / 200 °F.
     - Do the sauna in the morning after your workout.
+    - Use a low-humidity dry sauna at about 93 °C / 200 °F.
+    - Put ice on the groin during the session.
     - Set a 20-minute timer and leave early if heat distress or safety symptoms show up.
     - Rehydrate after the session with water or electrolytes.
     - Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable.

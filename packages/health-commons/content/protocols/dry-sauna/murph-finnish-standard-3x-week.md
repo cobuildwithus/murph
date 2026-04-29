@@ -4,7 +4,7 @@ entityType: "protocol_variant"
 key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
 slug: "protocols/dry-sauna/murph-finnish-standard-3x-week"
 title: "Finnish Dry Sauna"
-summary: "A dry sauna session at a steady, tolerable heat, to see whether your resting pulse, recovery, or sleep trends improve."
+summary: "Traditional dry sauna at steady, tolerable heat, where the body opens blood vessels near the skin and the heart pumps harder to move heat out while defending core temperature."
 status: "field-testing"
 quality: "usable"
 aliases:
@@ -36,13 +36,13 @@ relations:
     target: "biomarker:resting-heart-rate"
   -
     type: "secondary_biomarker"
+    target: "biomarker:morning-blood-pressure"
+  -
+    type: "secondary_biomarker"
     target: "biomarker:hrv-rmssd"
   -
     type: "secondary_biomarker"
     target: "biomarker:sleep-efficiency"
-  -
-    type: "secondary_biomarker"
-    target: "biomarker:morning-blood-pressure"
   -
     type: "secondary_biomarker"
     target: "biomarker:deep-sleep-minutes"
@@ -124,9 +124,9 @@ testPlans:
     interventionDays: 14
     primaryBiomarkerKey: "biomarker:resting-heart-rate"
     secondaryBiomarkerKeys:
+      - "biomarker:morning-blood-pressure"
       - "biomarker:hrv-rmssd"
       - "biomarker:sleep-efficiency"
-      - "biomarker:morning-blood-pressure"
       - "biomarker:deep-sleep-minutes"
     minimumAdherenceSessions: 4
     targetAdherenceSessions: 6
@@ -139,29 +139,57 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: "biomarker:resting-heart-rate"
-    expected: "mixed_or_contextual"
+    expected: "Possible change"
     protocolProminence: "focus"
-    description: "Resting heart rate is practical to watch, but the evidence does not support expecting a drop; compare averaged baseline and intervention windows while checking heat timing, hydration, sleep, illness, alcohol, and training load."
-  -
-    biomarkerKey: "biomarker:hrv-rmssd"
-    expected: "mixed_or_contextual"
-    protocolProminence: "focus"
-    description: "HRV may improve if the routine supports recovery, but it can also drop with heat stress, poor sleep, illness, alcohol, or hard training."
-  -
-    biomarkerKey: "biomarker:sleep-efficiency"
-    expected: "mixed_or_contextual"
-    protocolProminence: "focus"
-    description: "Cooling after heat may help some people settle at night, while late, hot, or poorly tolerated sessions can disturb sleep."
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "2-6 weeks"
+      confidence: "low"
+      basis: "Direct sauna physiology plus mixed repeated/passive-heat evidence; RCT-only passive-heating evidence did not consistently show lower resting heart rate."
+    description: "Sauna raises heart rate during the session because more blood is sent to the skin for cooling. With repeated tolerable sessions, the body may handle that heat load with less resting strain, so resting pulse could settle or trend lower. If the heat dose stays too stressful, it may not move or may rise instead."
   -
     biomarkerKey: "biomarker:morning-blood-pressure"
-    expected: "mixed_or_contextual"
+    expected: "Could trend lower"
+    protocolProminence: "focus"
+    estimatedChange:
+      kind: "absolute"
+      low: -4
+      high: 0
+      unit: "mmHg"
+      window: "2-6 weeks"
+      confidence: "low"
+      basis: "Same-mechanism heat-therapy meta-analyses suggest small BP reductions, but evidence is heterogeneous and not the exact 3x/week Finnish-sauna protocol."
+    description: "Heat opens blood vessels and shifts blood toward the skin, which can lower pressure during and after a session. With repeated tolerable exposure, vascular tone may relax slightly, so blood pressure could drift lower. If the body treats the sessions as too much strain, the signal may stay flat."
+  -
+    biomarkerKey: "biomarker:hrv-rmssd"
+    expected: "Worth watching"
+    protocolProminence: "focus"
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "2-6 weeks"
+      confidence: "low"
+      basis: "Autonomic sauna evidence is plausible but indirect for consumer RMSSD; the closest 3x/week trial used frequency-domain HRV in allergic-rhinitis patients."
+    description: "A sauna session first pushes the body toward heat stress, then into a cooling and relaxation phase. If that rebound is easy to recover from, RMSSD could rise or stabilize. If the heat stress dominates, RMSSD can drop instead."
+  -
+    biomarkerKey: "biomarker:sleep-efficiency"
+    expected: "Worth watching"
     protocolProminence: "context"
-    description: "Sauna can change vascular tone acutely, but morning blood pressure should stay optional and contextual; only consistent home-cuff averages are interpretable."
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "2-3 weeks"
+      confidence: "low"
+      basis: "Sleep-supportive evidence comes from adjacent warm bath/shower passive heating, not direct Finnish dry-sauna trials."
+    description: "Some people sleep better after a warm-to-cool transition because cooling can make the body feel ready for sleep. Finnish sauna is a stronger heat exposure than the warm-bath evidence, so sleep efficiency could improve if the session feels calming, or worsen if the heat leaves the body too activated."
   -
     biomarkerKey: "biomarker:deep-sleep-minutes"
-    expected: "mixed_or_contextual"
+    expected: "Can be noisy"
     protocolProminence: "context"
-    description: "Consumer sleep-stage estimates are noisy, so deep sleep belongs as context rather than the headline verdict."
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "2-3 weeks"
+      confidence: "low"
+      basis: "No extracted direct Finnish-sauna finding supports deep-sleep improvement; keep deep sleep as background context rather than a promoted outcome."
+    description: "Deep-sleep minutes are not a strong sauna target. A calming warm-to-cool transition could make sleep feel more settled, but the extracted sauna evidence does not show that Finnish dry sauna reliably creates more deep sleep, so this should stay background-only."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

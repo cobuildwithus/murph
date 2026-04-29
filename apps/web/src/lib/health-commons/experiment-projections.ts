@@ -166,9 +166,16 @@ function toExperimentResultsPublicProjection(
 function cleanExperimentSignal(
   signal: HealthCommonsWebExperimentProtocolTab["expectedSignals"][number],
 ): HealthCommonsWebExperimentProtocolTab["expectedSignals"][number] {
-  const { baseline, description, unit, ...requiredSignal } = signal;
+  const {
+    baseline,
+    description,
+    estimatedChange,
+    unit,
+    ...requiredSignal
+  } = signal;
   const cleanBaseline = cleanOptionalHealthCommonsUserFacingCopy(baseline);
   const cleanDescription = cleanOptionalHealthCommonsUserFacingCopy(description);
+  const cleanEstimatedChange = cleanExperimentSignalEstimate(estimatedChange);
   const cleanUnit = cleanOptionalHealthCommonsUserFacingCopy(unit);
 
   return {
@@ -179,7 +186,42 @@ function cleanExperimentSignal(
     value: cleanHealthCommonsUserFacingCopy(requiredSignal.value),
     ...(cleanBaseline ? { baseline: cleanBaseline } : {}),
     ...(cleanDescription ? { description: cleanDescription } : {}),
+    ...(cleanEstimatedChange ? { estimatedChange: cleanEstimatedChange } : {}),
     ...(cleanUnit ? { unit: cleanUnit } : {}),
+  };
+}
+
+function cleanExperimentSignalEstimate(
+  estimate:
+    | HealthCommonsWebExperimentProtocolTab["expectedSignals"][number]["estimatedChange"]
+    | undefined,
+):
+  | HealthCommonsWebExperimentProtocolTab["expectedSignals"][number]["estimatedChange"]
+  | undefined {
+  if (!estimate) {
+    return undefined;
+  }
+
+  const cleanBasis = cleanOptionalHealthCommonsUserFacingCopy(estimate.basis);
+  const cleanWindow = cleanOptionalHealthCommonsUserFacingCopy(estimate.window);
+
+  if (estimate.kind === "mixed_or_contextual") {
+    return {
+      kind: estimate.kind,
+      ...(estimate.confidence ? { confidence: estimate.confidence } : {}),
+      ...(cleanWindow ? { window: cleanWindow } : {}),
+      ...(cleanBasis ? { basis: cleanBasis } : {}),
+    };
+  }
+
+  return {
+    high: estimate.high,
+    kind: estimate.kind,
+    low: estimate.low,
+    unit: cleanHealthCommonsUserFacingCopy(estimate.unit),
+    ...(estimate.confidence ? { confidence: estimate.confidence } : {}),
+    ...(cleanWindow ? { window: cleanWindow } : {}),
+    ...(cleanBasis ? { basis: cleanBasis } : {}),
   };
 }
 

@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
 slug: protocols/high-protein-intake/protein-floor-high-protein-intake
 title: High Protein Intake
-summary: Raise dietary protein toward a declared target while logging achieved intake, energy balance, source quality, tolerability, and safety context.
+summary: A daily protein floor from real food, where enough amino acids at each meal keeps muscle repair supplied and digestion slow enough to stay full longer.
 status: field-testing
 quality: usable
 aliases:
@@ -33,15 +33,6 @@ relations:
   target: experiment_family:high-protein-intake
 -
   type: primary_biomarker
-  target: biomarker:daily-protein-g-per-kg
--
-  type: secondary_biomarker
-  target: biomarker:daily-protein-grams
--
-  type: secondary_biomarker
-  target: biomarker:daily-energy-intake-kcal
--
-  type: secondary_biomarker
   target: biomarker:subjective-satiety
 -
   type: secondary_biomarker
@@ -132,11 +123,8 @@ testPlans:
   durationDays: 70
   baselineDays: 14
   interventionDays: 56
-  primaryBiomarkerKey: biomarker:daily-protein-g-per-kg
+  primaryBiomarkerKey: biomarker:subjective-satiety
   secondaryBiomarkerKeys:
-  - biomarker:daily-protein-grams
-  - biomarker:daily-energy-intake-kcal
-  - biomarker:subjective-satiety
   - biomarker:body-weight
   - biomarker:body-fat-percent
   - biomarker:lean-mass
@@ -158,19 +146,10 @@ testPlans:
   minimumAdherenceSessions: 42
   targetAdherenceSessions: 56
   notes:
-  - Use the primary biomarker as achieved exposure, not as an outcome win.
+  - Daily protein g/kg, total protein grams, and daily energy intake are exposure or interpretation context, not outcome wins.
   - Body-composition, appetite, and weight outcomes must be interpreted by energy balance and training context.
   - Safety labs are optional for low-risk users but important when kidney, gout, stone, metabolic, lipid, age, diabetes-related renal-risk, or clinician context makes them relevant.
 expectedSignalDescriptions:
--
-  biomarkerKey: biomarker:daily-protein-g-per-kg
-  description: A protein floor only changes exposure if meals actually reach the chosen g/kg target.
--
-  biomarkerKey: biomarker:daily-protein-grams
-  description: Daily grams need to rise before any higher-protein mechanism can happen.
--
-  biomarkerKey: biomarker:daily-energy-intake-kcal
-  description: Higher protein reshapes meals and fullness. Calories can fall when it replaces less filling foods, or rise when it is simply added.
 -
   biomarkerKey: biomarker:subjective-satiety
   description: Protein tends to digest slowly and can trigger fullness. Satiety may rise when meals hit the planned dose.
@@ -1353,15 +1332,14 @@ confoundersToTrack:
 - bariatric_frailty_malnutrition_or_post_hospital_context
 expectedSignal:
   primary:
-    biomarkerKey: biomarker:daily-protein-g-per-kg
-    direction: increase_to_declared_target_or_no_adherence
-    latency: days
-    confidence: high_for_exposure_if_logged
+    biomarkerKey: biomarker:subjective-satiety
+    direction: improve_or_mixed
+    latency: hours_to_2_weeks
+    confidence: low
     sourceKeys:
-    - source_artifact:pmid-22691622
-    - source_artifact:pmid-19246357
-    - source_artifact:pmid-28340516
-    - source_artifact:pmid-34141717
+    - source_artifact:pmid-26947338
+    - source_artifact:pmid-32768415
+    - source_artifact:pmid-16434457
   secondary:
 
   -
@@ -1384,15 +1362,6 @@ expectedSignal:
     - source_artifact:pmid-22691622
     - source_artifact:pmid-23739654
     - source_artifact:pmid-33975325
-  -
-    biomarkerKey: biomarker:subjective-satiety
-    direction: improve_or_mixed
-    latency: hours_to_2_weeks
-    confidence: low
-    sourceKeys:
-    - source_artifact:pmid-26947338
-    - source_artifact:pmid-32768415
-    - source_artifact:pmid-16434457
   -
     biomarkerKey: biomarker:digestive-comfort
     direction: mixed

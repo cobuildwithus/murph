@@ -73,27 +73,29 @@ const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
   "protocol_variant:dry-sauna/murph-finnish-standard-3x-week": {
     "biomarker:deep-sleep-minutes": {
       description:
-        "Heat exposure may deepen perceived recovery on some nights, but wearable sleep-stage estimates are noisy enough to keep this as background.",
+        "A calming warm-to-cool transition may make sleep feel more settled, but Finnish dry sauna has not shown reliable deep-sleep gains, so keep this as background.",
       protocolProminence: "context",
     },
     "biomarker:hrv-rmssd": {
       description:
-        "Sauna is a recovery stressor: the cooldown may support relaxation, but dehydration or too much heat can push HRV the other way.",
+        "Sauna first adds heat stress, then a cooling and relaxation phase; if the rebound is easy to recover from, HRV may rise or stabilize, but too much heat can push it lower.",
       protocolProminence: "focus",
     },
     "biomarker:morning-blood-pressure": {
       description:
-        "Heat widens blood vessels during the session; repeated exposure may ease vascular tone, making consistent morning cuff readings worth watching.",
+        "Heat widens blood vessels during the session; repeated tolerable exposure may ease vascular tone slightly, so blood pressure could drift lower.",
       protocolProminence: "focus",
     },
     "biomarker:resting-heart-rate": {
       description:
-        "Repeated heat sessions make the heart work harder while you cool down; over weeks, adaptation may show as a lower resting pulse.",
+        "Repeated heat sessions make the heart work harder during cooling; over time, adaptation may show as a steadier or lower resting pulse.",
+      direction: "neutral",
       protocolProminence: "focus",
     },
     "biomarker:sleep-efficiency": {
       description:
-        "A warm-to-cool evening pattern can feel sedating for some people, but timing and room temperature decide whether sleep actually consolidates.",
+        "A warm-to-cool transition can feel sedating for some people, but a strong heat dose can also leave the body too activated for smooth sleep.",
+      direction: "neutral",
       protocolProminence: "context",
     },
   },
@@ -197,17 +199,39 @@ export function toExpectedSignal(
       ?? biomarker.summary
       ?? summarizeBody(biomarker.body),
   );
+  const expected = cleanHealthCommonsUserFacingCopy(
+    normalizeExpectedSignalLabel(protocolSignal?.expected ?? hint.expected),
+  );
+
   return {
     label: cleanHealthCommonsUserFacingCopy(biomarker.title),
     value: "",
     delta: "",
     direction: hint.direction,
-    expected: cleanHealthCommonsUserFacingCopy(protocolSignal?.expected ?? hint.expected),
+    ...(protocolSignal?.estimatedChange
+      ? { estimatedChange: protocolSignal.estimatedChange }
+      : {}),
+    expected,
     ...(description ? { description } : {}),
     ...(protocolProminence
       ? { protocolProminence }
       : {}),
   };
+}
+
+function normalizeExpectedSignalLabel(expected: string): string {
+  switch (expected) {
+    case "mixed_or_contextual":
+      return "Possible change";
+    case "down_or_stable":
+      return "Could trend lower";
+    case "up_or_stable":
+      return "Could improve";
+    case "stable":
+      return "Should stay stable";
+    default:
+      return expected;
+  }
 }
 
 function resolveProtocolExpectedSignalDescription(
