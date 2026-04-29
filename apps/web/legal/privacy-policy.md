@@ -414,7 +414,9 @@ Murph will not discriminate against you for exercising privacy rights provided b
 
 ## 17. U.S. Consumer Health Data Supplemental Notice
 
-This section applies only to the extent Murph processes **consumer health data** subject to applicable U.S. state consumer health privacy laws, including laws such as the Washington My Health My Data Act and similar laws. It supplements the rest of this Privacy Policy. Murph may later maintain a separate Consumer Health Data Privacy Policy for additional disclosures required by U.S. consumer health privacy laws; where applicable, that separate notice will control for consumer health data to the extent required by law.
+Murph also maintains a separate [Consumer Health Data Privacy Policy](/legal/consumer-health-data-privacy-policy), which provides additional consumer health data disclosures and rights information.
+
+This section applies only to the extent Murph processes **consumer health data** subject to applicable U.S. state consumer health privacy laws, including laws such as the Washington My Health My Data Act and similar laws. It supplements the rest of this Privacy Policy. If there is a conflict between this section and the rest of this Privacy Policy or the separate Consumer Health Data Privacy Policy for consumer health data, the separate Consumer Health Data Privacy Policy controls only for consumer health data and only to the extent required by applicable law.
 
 For purposes of this section, **consumer health data** generally means personal information linked or reasonably linkable to you that identifies your past, present, or future physical or mental health status. Consumer health data does not include information that has been de-identified as permitted by law. If Murph maintains de-identified information, Murph will maintain and use it in de-identified form and will not attempt to reidentify it except as permitted by law.
 

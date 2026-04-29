@@ -65,6 +65,11 @@ const DOCUMENTS = [
     output: "apps/web/public/legal/terms.pdf",
     title: "Murph Terms of Service",
   },
+  {
+    input: "apps/web/legal/consumer-health-data-privacy-policy.md",
+    output: "apps/web/public/legal/consumer-health-data-privacy.pdf",
+    title: "Murph Consumer Health Data Privacy Policy",
+  },
 ] satisfies DocumentSpec[];
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
