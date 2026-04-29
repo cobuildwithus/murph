@@ -4,13 +4,13 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceLine,
   XAxis,
   YAxis,
 } from "recharts";
 import {
   ChartContainer,
   ChartTooltip,
-  ChartTooltipContent,
   type ChartConfig,
 } from "@/src/components/ui/chart";
 import type { TrendData } from "@/src/types/experiments";
@@ -30,33 +30,55 @@ const chartConfig = {
     label: "Active",
     color: "#7A8C6E",
   },
+  expectedRange: {
+    label: "Expected",
+    color: "#7A8C6E",
+  },
 } satisfies ChartConfig;
+
+type SeriesKey = "baseline" | "active" | "expectedRange";
+
+const SERIES: Record<SeriesKey, { label: string; swatch: string }> = {
+  baseline: { label: "Baseline", swatch: "border-t border-dashed border-secondary" },
+  active: { label: "Active", swatch: "h-px bg-ring" },
+  expectedRange: { label: "Expected", swatch: "h-2 rounded-sm bg-ring/20" },
+};
+
+interface ChartPoint {
+  day: number;
+  baseline?: number;
+  active?: number;
+  expectedRange?: [number, number];
+}
 
 export function TrendChart({ data, className }: TrendChartProps) {
   const chartId = data.label.replace(/\s+/g, "-").toLowerCase();
-  const allPoints = [...data.baseline, ...data.active];
-  const baselineEnd = data.baseline[data.baseline.length - 1]?.day ?? 0;
-
-  const chartData = allPoints.map((p) => ({
-    day: p.day,
-    baseline: p.day <= baselineEnd ? p.value : undefined,
-    active: p.day >= baselineEnd ? p.value : undefined,
-  }));
-
-  // Dedupe by day (baseline end overlaps with active start)
-  const deduped = chartData.reduce(
-    (acc, item) => {
-      const existing = acc.find((a) => a.day === item.day);
-      if (existing) {
-        if (item.baseline !== undefined) existing.baseline = item.baseline;
-        if (item.active !== undefined) existing.active = item.active;
-      } else {
-        acc.push({ ...item });
-      }
-      return acc;
-    },
-    [] as typeof chartData
+  const lastBaselinePoint = data.baseline[data.baseline.length - 1];
+  const baselineEnd = lastBaselinePoint?.day ?? 0;
+  const lastBaselineValue = lastBaselinePoint?.value;
+  const expectedRange = data.expectedRange ?? [];
+  const allDays = new Set<number>([
+    ...data.baseline.map((p) => p.day),
+    ...data.active.map((p) => p.day),
+    ...expectedRange.map((p) => p.day),
+  ]);
+  const baselineByDay = new Map(data.baseline.map((p) => [p.day, p.value]));
+  const activeByDay = new Map(data.active.map((p) => [p.day, p.value]));
+  const expectedByDay = new Map(
+    expectedRange.map((p) => [p.day, [p.low, p.high] as [number, number]]),
   );
+  const deduped: ChartPoint[] = [...allDays]
+    .sort((a, b) => a - b)
+    .map((day) => ({
+      day,
+      baseline: day <= baselineEnd ? baselineByDay.get(day) : undefined,
+      active: day > baselineEnd
+        ? activeByDay.get(day)
+        : day === baselineEnd
+          ? activeByDay.get(day) ?? lastBaselineValue
+          : undefined,
+      expectedRange: expectedByDay.get(day),
+    }));
 
   return (
     <div
@@ -76,14 +98,9 @@ export function TrendChart({ data, className }: TrendChartProps) {
             </span>
           )}
           <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-px w-3 border-t border-dashed border-secondary" />
-              Baseline
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-px w-3 bg-ring" />
-              Active
-            </span>
+            <LegendSwatch seriesKey="baseline" />
+            <LegendSwatch seriesKey="active" />
+            {expectedRange.length > 0 && <LegendSwatch seriesKey="expectedRange" />}
           </div>
         </div>
       </div>
@@ -103,12 +120,58 @@ export function TrendChart({ data, className }: TrendChartProps) {
           <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.5} />
           <XAxis dataKey="day" hide />
           <YAxis hide domain={["auto", "auto"]} />
+          {baselineEnd > 0 && (
+            <ReferenceLine
+              x={baselineEnd}
+              stroke="var(--color-foreground)"
+              strokeOpacity={0.25}
+              strokeDasharray="2 3"
+            />
+          )}
           <ChartTooltip
-            content={
-              <ChartTooltipContent
-                labelFormatter={(v) => `Day ${v}`}
-              />
-            }
+            cursor={{ stroke: "var(--color-border)", strokeDasharray: "3 3" }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const day = payload[0]?.payload?.day;
+              const rows = payload
+                .map((entry) => formatTooltipRow(entry, data.unit))
+                .filter((row): row is { key: SeriesKey; label: string; value: string } => row !== null);
+
+              if (rows.length === 0) return null;
+
+              return (
+                <div className="rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+                  <div className="font-medium text-foreground">Day {day}</div>
+                  <div className="mt-1 grid gap-1">
+                    {rows.map((row) => (
+                      <div key={row.key} className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-1.5 text-muted-foreground">
+                          <span
+                            aria-hidden="true"
+                            className={cn("inline-block w-3", SERIES[row.key].swatch)}
+                          />
+                          {row.label}
+                        </span>
+                        <span className="font-mono tabular-nums text-foreground">{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }}
+          />
+          <Area
+            dataKey="expectedRange"
+            type="monotone"
+            stroke="#7A8C6E"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            strokeOpacity={0.5}
+            fill="#7A8C6E"
+            fillOpacity={0.12}
+            connectNulls={false}
+            dot={false}
+            activeDot={false}
           />
           <Area
             dataKey="baseline"
@@ -143,4 +206,38 @@ export function TrendChart({ data, className }: TrendChartProps) {
       </div>
     </div>
   );
+}
+
+function LegendSwatch({ seriesKey }: { seriesKey: SeriesKey }) {
+  const series = SERIES[seriesKey];
+  return (
+    <span className="flex items-center gap-1.5">
+      <span aria-hidden="true" className={cn("inline-block w-3", series.swatch)} />
+      {series.label}
+    </span>
+  );
+}
+
+interface TooltipRow {
+  key: SeriesKey;
+  label: string;
+  value: string;
+}
+
+function formatTooltipRow(
+  entry: { dataKey?: string | number | ((obj: unknown) => unknown); value?: unknown },
+  unit: string,
+): TooltipRow | null {
+  const key = String(entry.dataKey ?? "");
+  if (!(key in SERIES)) return null;
+  const seriesKey = key as SeriesKey;
+  const label = SERIES[seriesKey].label;
+
+  if (seriesKey === "expectedRange") {
+    if (!Array.isArray(entry.value) || entry.value[0] == null) return null;
+    return { key: seriesKey, label, value: `${entry.value[0]}–${entry.value[1]} ${unit}` };
+  }
+
+  if (entry.value == null) return null;
+  return { key: seriesKey, label, value: `${entry.value} ${unit}` };
 }
