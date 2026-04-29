@@ -78,6 +78,7 @@ export interface TrendData {
   unit: string;
   baseline: { day: number; value: number }[];
   active: { day: number; value: number }[];
+  expectedRange?: { day: number; low: number; high: number }[];
   baselineAvg: number;
   currentValue: number;
   delta: string;
@@ -224,6 +225,35 @@ export interface ExperimentProtocol {
   commons?: ExperimentCommonsReference;
 }
 
+export type ScheduleCellKind =
+  | "baseline"
+  | "completed"
+  | "missed"
+  | "scheduled"
+  | "rest"
+  | "upcoming";
+
+export interface ScheduleCell {
+  dayLabel: string;
+  date?: string;
+  kind: ScheduleCellKind;
+  detail?: string;
+  isToday?: boolean;
+}
+
+export interface ScheduleWeek {
+  label: string;
+  dateRange: string;
+  summary?: string;
+  cells: ScheduleCell[];
+}
+
+export interface ExperimentSchedule {
+  cadence: string;
+  dose?: string;
+  weeks: ScheduleWeek[];
+}
+
 export interface ExperimentRunProjection {
   id: string;
   source: "browser-vault";
@@ -241,6 +271,7 @@ export interface ExperimentRunProjection {
   signals: ExperimentSignal[];
   trends: TrendData[];
   timeline: TimelineEvent[];
+  schedule?: ExperimentSchedule;
   nextStep?: ExperimentNextStep;
   summary?: string;
   summaryDetail?: string;
@@ -256,6 +287,7 @@ export interface Experiment extends ExperimentProtocol {
   signals: ExperimentSignal[];
   trends: TrendData[];
   timeline: TimelineEvent[];
+  schedule?: ExperimentSchedule;
   privateRun?: ExperimentRunProjection;
   nextStep?: ExperimentNextStep;
   summary?: string;

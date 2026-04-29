@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 
 import type { BrowserVaultStatus } from "@/src/lib/browser-vault/context";
+import { formatIsoDate } from "@/src/lib/browser-vault/display";
 import type { Experiment } from "@/src/types/experiments";
 import { Button } from "@/src/components/ui/button";
 import { MetricCard } from "@/src/components/ui/metric-card";
-import { NextStepCard } from "@/src/components/next-step-card";
 import { ConclusionCard } from "@/src/components/conclusion-card";
-import { ExperimentProgress } from "./experiment-progress";
+import { ExperimentSchedule } from "./experiment-schedule";
+import { ExperimentSummaryTiles } from "./experiment-summary-tiles";
 import { TrendChart } from "./trend-chart";
 import { ExperimentTimeline } from "./experiment-timeline";
 
@@ -30,28 +31,6 @@ export function ResultsTab({
   const isRunnable = isActive || isPaused;
   const hasPrivateRun = Boolean(experiment.privateRun);
   const hasPersonalOutcomeData = experiment.signals.length > 0 || experiment.trends.length > 0;
-  const currentDay = experiment.day ?? 0;
-  const activeTotalDays = Math.max(1, experiment.durationDays - experiment.baselineDays);
-  const inBaseline = experiment.baselineDays > 0
-    && currentDay > 0
-    && currentDay <= experiment.baselineDays;
-  const activeDay = !inBaseline && currentDay > 0
-    ? Math.max(1, currentDay - experiment.baselineDays)
-    : null;
-  const baselineLabel = experiment.baselineDays > 0
-    ? inBaseline
-      ? `Baseline · Day ${currentDay} of ${experiment.baselineDays}`
-      : `Baseline · ${experiment.baselineDays}d ${currentDay > experiment.baselineDays ? "✓" : ""}`
-    : "Baseline · 0d ✓";
-  const protocolLabel = inBaseline
-    ? "Protocol · Not started"
-    : isPaused
-      ? activeDay
-        ? `Paused · Day ${activeDay} of ${activeTotalDays}`
-        : "Paused"
-      : activeDay
-        ? `Active · Day ${activeDay} of ${activeTotalDays}`
-        : "Active";
 
   return (
     <div className="flex flex-col gap-10">
@@ -108,23 +87,7 @@ export function ResultsTab({
         />
       )}
 
-      {isRunnable && (
-        <ExperimentProgress
-          baselineLabel={baselineLabel}
-          protocolLabel={protocolLabel}
-          overallPercent={experiment.completionPercent ?? 0}
-        />
-      )}
-
-      {isRunnable && experiment.nextStep && (
-        <NextStepCard
-          title={experiment.nextStep.title}
-          when={experiment.nextStep.when}
-          instructions={experiment.nextStep.instructions}
-          context={experiment.nextStep.context}
-          nextSession={experiment.nextStep.nextSession}
-        />
-      )}
+      {isRunnable && <ExperimentSummaryTiles experiment={experiment} />}
 
       {isFinished && experiment.summary && (
         <div className="rounded-xl border border-border bg-card p-6">
@@ -165,15 +128,37 @@ export function ResultsTab({
         </div>
       )}
 
+      {experiment.schedule && <ExperimentSchedule schedule={experiment.schedule} />}
+
       {isRunnable && (
         <div className="flex flex-col gap-2">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Conclusions
+            Running summary
           </span>
-          <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-            {experiment.analysisAvailableOn
-              ? `Available after ${formatResultsDate(experiment.analysisAvailableOn)}`
-              : "Available after the protocol window closes."}
+          <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-5">
+            {experiment.summary ? (
+              <>
+                <p className="font-serif text-base/6 text-foreground">
+                  {experiment.summary}
+                </p>
+                {experiment.summaryDetail && (
+                  <p className="text-sm/5 text-muted-foreground">
+                    {experiment.summaryDetail}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Early days — keep logging sessions and trend signals will start showing here.
+              </p>
+            )}
+            <p className="text-[11px] text-muted-foreground/80">
+              Full conclusions{" "}
+              {experiment.analysisAvailableOn
+                ? `after ${formatIsoDate(experiment.analysisAvailableOn, { day: "numeric", month: "short", year: "numeric" })}`
+                : "after the protocol window closes"}
+              .
+            </p>
           </div>
         </div>
       )}
@@ -223,15 +208,3 @@ function ResultsEmptyState({
   );
 }
 
-function formatResultsDate(value: string): string {
-  const parsed = new Date(`${value}T12:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(parsed);
-}
