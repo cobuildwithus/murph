@@ -20,6 +20,7 @@ Updated: 2026-04-29
 - Completed, missed, skipped, and partial session cells are based on run-linked `intervention_session` events from the current replica.
 - Every protocol/test-plan biomarker remains represented in selector output, including unsupported or no-data biomarkers. Unsupported biomarkers do not get fake chart/card values.
 - A single high-level browser query selector is exported through `@murphai/query/browser`: `selectBrowserVaultExperimentResults(client, lookup, { asOf })`. Client code does not import server-only query or vault-reader paths.
+- The schedule hard cut updates every writer and artifact in the same PR: contract examples, generated contract schemas, onboarding apply/usecase writers, CLI options, CLI/generated metadata if applicable, and tests. No repo writer should continue producing legacy string `runPlan.schedule`.
 - Tests prove active baseline, active intervention, finished with enough data, finished with sparse data, no expected range, no schedule, and structured cron/dailyLocal schedule cases.
 
 ## Scope
@@ -88,6 +89,9 @@ Updated: 2026-04-29
 
 11. `ScheduleIntent` needs lower-level contract ownership before `runPlan.schedule` can use it.
     The current schedule-intent schema lives in `packages/contracts/src/scheduled-log.ts`, while `scheduled-log.ts` imports schemas from `packages/contracts/src/zod.ts`. Since `experimentRunPlanSchema` also lives in `zod.ts`, a hard cut to `runPlan.schedule: ScheduleIntent` should first move the schedule-intent schemas/types to a lower-level contracts module that both `zod.ts` and `scheduled-log.ts` can import.
+
+12. Schedule writers and generated artifacts must move with the schema.
+    Current examples, CLI onboarding options, usecase onboarding writers, and generated contract schemas still encode `runPlan.schedule` as text. A schema-only hard cut would leave repo tools producing invalid experiment records.
 
 ## Target Architecture
 
@@ -206,6 +210,10 @@ Required changes:
 - Update scheduled-log contracts to import the shared schedule-intent schema.
 - Change `experimentRunPlanSchema` to require structured `schedule: ScheduleIntent` when schedule is present. Do not keep the free-text string as a data-compatible variant.
 - Add required `timeZone: string` to schedule-intent variants where local expansion needs it, especially `cron` and `dailyLocal`.
+- Update `packages/contracts/src/examples.ts` and regenerated contract schema artifacts in the same PR so generated output no longer advertises a string schedule.
+- Update onboarding writers in `packages/vault-usecases/src/usecases/experiment-journal-vault.ts` and `packages/cli/src/commands/experiment.ts` in the same PR so they parse/emit `ScheduleIntent`, not text.
+- Update CLI/generated metadata and directly coupled CLI tests so `experiment apply-onboarding` cannot silently write legacy string `runPlan.schedule`.
+- Add a residue test or `rg`-based verification target that fails on new experiment-run writer paths assigning a string to `runPlan.schedule`.
 
 ```ts
 type ScheduleIntent =
@@ -324,22 +332,25 @@ After real projection tests pass:
 2. Risk: Free-text schedule parsing invents planned weekdays.
    Mitigation: hard-cut `runPlan.schedule` to `ScheduleIntent`; delete/stop using free-text schedule as run-plan data and never parse legacy strings into planned cells.
 
-3. Risk: Browser selectors import server-only query paths.
+3. Risk: The schema hard cut lands before repo writers and generated artifacts move.
+   Mitigation: require the schedule schema PR to update contract examples, generated schemas, onboarding usecase writers, CLI options/generated metadata, and directly coupled tests together; add a residue check for string schedule writers.
+
+4. Risk: Browser selectors import server-only query paths.
    Mitigation: keep new selectors under `@murphai/query/browser`, update browser boundary tests, and add a client-bundle or import-graph check.
 
-4. Risk: Schedule cells mark missed sessions too aggressively.
+5. Risk: Schedule cells mark missed sessions too aggressively.
    Mitigation: require explicit missed-session semantics before coding; MVP marks an unlogged planned occurrence missed only after a 24-hour grace period after the planned occurrence time in the schedule timezone.
 
-5. Risk: Existing BrowserVault privacy projection widens too far.
+6. Risk: Existing BrowserVault privacy projection widens too far.
    Mitigation: add narrow derived rows and safe attributes, with tests asserting raw notes/external refs/bodies are not projected.
 
-6. Risk: Finished Results become stale if persisted artifacts are preferred.
+7. Risk: Finished Results become stale if persisted artifacts are preferred.
    Mitigation: recompute from current replica for this plan; only use persisted outcome artifacts later when the artifact is safely projected and version-matched.
 
 ## Tasks
 
 1. Add the browser-native experiment results selector and tests in `packages/query`.
-2. Extract shared schedule-intent contracts, then hard-cut `runPlan.schedule` to `ScheduleIntent`.
+2. Extract shared schedule-intent contracts, then hard-cut `runPlan.schedule` to `ScheduleIntent`, including examples/generated schemas/onboarding writers/CLI writers in the same PR.
 3. Add run-plan schedule expansion helper with narrow cron/dailyLocal support and missed-session grace semantics.
 4. Add source-backed expected-effect/range metadata to Health Commons contracts/content flow, with nullable/empty ranges and no sauna numeric bands until the source exists.
 5. Populate `ExperimentRunProjection` from `selectBrowserVaultExperimentResults` in `apps/web`.
@@ -357,7 +368,10 @@ Planning-only verification for this document:
 Implementation verification when this plan is executed:
 
 - `pnpm --dir packages/contracts test -- scheduled-log`
+- contracts generated-schema freshness check for experiment frontmatter/run plan
 - `pnpm --dir packages/query test -- experiment`
+- focused CLI/usecase tests proving onboarding writes structured `runPlan.schedule`
+- residue scan proving experiment run writers no longer emit string `runPlan.schedule`
 - focused browser-entry/boundary tests for `@murphai/query/browser`
 - focused `apps/web` tests for BrowserVault private-run Results projection and Results tab rendering
 - `bash scripts/workspace-verify.sh test:diff <changed paths>` or the package-specific stronger equivalent required by the verification docs
@@ -371,8 +385,12 @@ Implementation verification when this plan is executed:
 - `packages/query/test/**`
 - `packages/contracts/src/scheduled-log.ts`
 - `packages/contracts/src/schedule-intent.ts`
+- `packages/contracts/src/examples.ts`
+- `packages/contracts/generated/**`
 - `packages/contracts/src/health-commons.ts`
 - `packages/contracts/src/zod.ts`
+- `packages/cli/src/commands/experiment.ts`
+- directly coupled CLI generated metadata/tests
 - `packages/vault-usecases/src/usecases/experiment-journal-vault.ts`
 - `packages/health-commons/content/protocols/**`
 - `apps/web/src/lib/browser-vault/experiment-run.ts`
