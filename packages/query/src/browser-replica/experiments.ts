@@ -247,6 +247,14 @@ interface MetricWindowContext {
   windows: BrowserVaultExperimentRunWindows;
 }
 
+const ACTIVE_EXPERIMENT_RUN_STATUSES = new Set([
+  "active",
+  "in_progress",
+  "ongoing",
+  "open",
+  "running",
+]);
+
 export function selectBrowserVaultExperimentResults(
   client: BrowserVaultQueryClient,
   lookup: BrowserVaultExperimentResultsLookup,
@@ -321,14 +329,23 @@ function matchesRunLookup(
 }
 
 function compareExperimentRunCandidates(left: BrowserVaultEntity, right: BrowserVaultEntity): number {
-  const leftActive = left.status === "active" ? 1 : 0;
-  const rightActive = right.status === "active" ? 1 : 0;
+  const leftActive = isActiveExperimentRunStatus(
+    readString(left.attributes.status) ?? left.status,
+  ) ? 1 : 0;
+  const rightActive = isActiveExperimentRunStatus(
+    readString(right.attributes.status) ?? right.status,
+  ) ? 1 : 0;
 
   if (leftActive !== rightActive) {
     return rightActive - leftActive;
   }
 
   return compareStringsDesc(left.occurredAt ?? left.date, right.occurredAt ?? right.date);
+}
+
+function isActiveExperimentRunStatus(status: string | null | undefined): boolean {
+  return typeof status === "string" &&
+    ACTIVE_EXPERIMENT_RUN_STATUSES.has(status.trim().toLowerCase());
 }
 
 function buildRunContext(
@@ -364,7 +381,7 @@ function buildRunContext(
     title: entity.title ?? readString(attributes.title) ?? entity.id,
     windows,
   } satisfies BrowserVaultExperimentResultRun;
-  const events = selectExperimentEvents(client, entity, run, asOfDate);
+  const events = selectExperimentEvents(client, entity, run, asOfDate, schedule?.timeZone ?? null);
   const expectedEffects = readExpectedEffectInputs(attributes);
 
   return {
@@ -417,6 +434,7 @@ function selectExperimentEvents(
   experiment: BrowserVaultEntity,
   run: BrowserVaultExperimentResultRun,
   asOfDate: string,
+  eventTimeZone: string | null,
 ): BrowserVaultEntity[] {
   const from = run.windows.baselineStart ?? run.startedOn;
 
@@ -425,7 +443,7 @@ function selectExperimentEvents(
       return false;
     }
 
-    const eventDate = entity.date ?? extractDate(entity.occurredAt);
+    const eventDate = readEventLocalDate(entity, eventTimeZone);
     if (from && eventDate && eventDate < from) {
       return false;
     }
@@ -448,6 +466,18 @@ function selectExperimentEvents(
 
     return entity.links.some((link) => link.targetId === experiment.id || link.targetId === run.id);
   });
+}
+
+function readEventLocalDate(entity: BrowserVaultEntity, timeZone: string | null): string | null {
+  if (timeZone && entity.occurredAt) {
+    try {
+      return toZonedIsoDate(entity.occurredAt, timeZone);
+    } catch {
+      return entity.date ?? extractDate(entity.occurredAt);
+    }
+  }
+
+  return entity.date ?? extractDate(entity.occurredAt);
 }
 
 function buildMetricWindowContext(
@@ -815,7 +845,12 @@ function buildProgressResult(
   const missedSessions = schedule?.missedSessions ?? countSessionEvents(context.events, "missed");
   const skippedSessions = schedule?.skippedSessions ?? countSessionEvents(context.events, "skipped");
   const loggedSessions = completedSessions + partialSessions;
-  const expectedSessionsByNow = computeExpectedSessionsByNow(context.run, context.asOfDate, targetSessions);
+  const expectedSessionsByNow = computeExpectedSessionsByNow(
+    context.run,
+    context.asOfDate,
+    targetSessions,
+    schedule,
+  );
   const primary = biomarkers[0] ?? null;
   const primaryBaselineDays = primary?.baseline.daysWithData ?? 0;
   const primaryInterventionDays = primary?.intervention.daysWithData ?? 0;
@@ -990,18 +1025,23 @@ function readExpectedEffectInput(value: unknown): BrowserVaultExperimentExpected
     return null;
   }
 
+  const sourceKeys = readStringArray(record.sourceKeys);
+
   return {
     biomarkerKey,
     caveats: readStringArray(record.caveats),
     confidence: readExpectedEffectConfidence(record.confidence),
     description: readString(record.description),
     direction: readExpectedDirection(record.direction) ?? readExpectedDirection(record.expected),
-    range: readExpectedRange(record.range),
-    sourceKeys: readStringArray(record.sourceKeys),
+    range: readExpectedRange(record.range, sourceKeys),
+    sourceKeys,
   };
 }
 
-function readExpectedRange(value: unknown): BrowserVaultExperimentExpectedRange | null {
+function readExpectedRange(
+  value: unknown,
+  inheritedSourceKeys: readonly string[],
+): BrowserVaultExperimentExpectedRange | null {
   const record = readRecord(value);
   if (!record) {
     return null;
@@ -1023,12 +1063,14 @@ function readExpectedRange(value: unknown): BrowserVaultExperimentExpectedRange 
     return null;
   }
 
+  const sourceKeys = readStringArray(record.sourceKeys);
+
   return {
     endDay,
     high,
     low,
     scale,
-    sourceKeys: readStringArray(record.sourceKeys),
+    sourceKeys: sourceKeys.length > 0 ? sourceKeys : inheritedSourceKeys.slice(),
     startDay,
     unit: readString(record.unit),
   };
@@ -1249,16 +1291,24 @@ function computeExpectedSessionsByNow(
   run: BrowserVaultExperimentResultRun,
   asOfDate: string,
   targetSessions: number | null,
+  schedule: BrowserVaultExperimentScheduleResult | null,
 ): number | null {
   const interventionStart = run.windows.interventionStart;
   const interventionEnd = run.windows.interventionEnd;
 
   if (
-    targetSessions === null ||
     !interventionStart ||
     !interventionEnd ||
     asOfDate < interventionStart
   ) {
+    return null;
+  }
+
+  if (schedule) {
+    return schedule.cells.filter((cell) => cell.planned && cell.kind !== "scheduled").length;
+  }
+
+  if (targetSessions === null) {
     return null;
   }
 

@@ -77,7 +77,7 @@ export function expandBrowserVaultRunSchedule(
     throw new RangeError("window.startLocalDate must be on or before window.endLocalDate.");
   }
 
-  const asOf = requireDate(input.asOf, "asOf");
+  const asOf = resolveAsOf(input.asOf, timeZone);
   const asOfMs = asOf.getTime();
   const asOfLocalDate = formatZonedLocalDate(asOf, timeZone);
   const gracePeriodHours =
@@ -340,6 +340,14 @@ function resolveScheduleEvent(
     localTime: parts.localTime,
     rank,
   };
+}
+
+function resolveAsOf(value: Date | string, timeZone: string): Date {
+  if (typeof value === "string" && ISO_LOCAL_DATE_PATTERN.test(value)) {
+    return new Date(zonedLocalDateTimeToEpochMs(value, "00:00", timeZone));
+  }
+
+  return requireDate(value, "asOf");
 }
 
 function requireDate(value: Date | string, label: string): Date {
