@@ -132,6 +132,11 @@ repo/
   Objects keep only runner-local lease, alarm, and bundle/addressing
   coordination state; web-owned mailbox/workspace checkpoints are the durable
   progress truth.
+- Mailbox import progress is not assistant handling progress. If a deploy,
+  Durable Object reset, or runner restart lands after mailbox import has
+  checkpointed, the next hosted invocation must still replay assistant handling
+  from raw capture evidence until per-capture terminal auto-reply evidence
+  exists.
 - Cloudflare is not the canonical owner of device-sync control-plane state,
   hosted legal consent, hosted usage ledgers, gateway product truth, or any
   second mailbox/recovery queue.
