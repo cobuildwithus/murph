@@ -27,7 +27,8 @@ Research rules:
   - DOI without PMID: source_artifact:doi-{normalized-doi}
   - PMCID without PMID or DOI: source_artifact:pmcid-{PMCID}
   - Web or external protocol: source_artifact:{domain-or-author}-{topic}-{YYYY-MM-DD}
-- Keep `source_artifact:*` keys, `sourceKeys`, and `Source keys:` labels out of all user-facing Health Commons Markdown prose, including protocol, family, and biomarker body copy, steps, tips, safety text, summaries, and explanatory paragraphs.
+- Keep `source_artifact:*` keys, `sourceKeys`, and source-key labels out of all user-facing Health Commons Markdown prose, including protocol, family, and biomarker body copy, steps, tips, safety text, summaries, and explanatory paragraphs.
+- Never write source-key spillover as visible copy. This includes labels or inline text such as `Source keys:`, `Source key:`, `Citation key:`, `Citation keys:`, `Source artifact:`, backticked `source_artifact:*` references, or prose that says a claim is backed by raw internal source IDs.
 - Use source keys only in structured machine-readable fields: frontmatter relations, `claims.sourceKeys`, `researchLandscape.groups.sourceKeys`, source ledgers, source findings, evidence appraisals, artifact manifests, JSON, and JSONL.
 - When prose needs attribution, use readable source-card references, study names, author/year, PMID/DOI text, or source titles instead of raw internal keys.
 - Copyrighted PDFs do not go in Git. Add metadata or manifest candidates only unless rights are clearly open and redistributable.
