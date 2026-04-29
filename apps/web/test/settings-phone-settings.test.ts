@@ -35,7 +35,7 @@ describe("HostedPhoneSettings", () => {
     }
   });
 
-  it("renders the member's routed Murph SMS number when available", async () => {
+  it("renders the member's routed Murph SMS link when available", async () => {
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
       user: null,
@@ -58,7 +58,8 @@ describe("HostedPhoneSettings", () => {
     );
 
     expect(markup).toContain("•••• 7706");
-    expect(markup).toContain("Message +1 555 010 0001");
+    expect(markup).toContain("message murph");
+    expect(markup).not.toContain("Message +1 555 010 0001");
     expect(markup).toContain('href="sms:+15550100001"');
   });
 
