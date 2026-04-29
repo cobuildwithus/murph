@@ -160,6 +160,13 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.title).toBe("Intermittent Fasting");
   });
 
+  it("uses the dedicated intermittent fasting artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("time-restricted-eating-18-6");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-intermittent-fasting.jpg");
+  });
+
   it("uses the dedicated red and near infrared skin artwork", () => {
     const protocol = resolveHealthCommonsExperimentProtocol(
       "red-near-infrared-skin-texture-photoaging",
