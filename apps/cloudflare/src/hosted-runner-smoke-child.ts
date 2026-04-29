@@ -431,6 +431,8 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     'model = "gpt-5.5"',
     'model_provider = "vercel-ai-gateway"',
     'model_reasoning_effort = "medium"',
+    'approval_policy = "never"',
+    'sandbox_mode = "danger-full-access"',
     "",
     '[model_providers."vercel-ai-gateway"]',
     'name = "Vercel AI Gateway"',

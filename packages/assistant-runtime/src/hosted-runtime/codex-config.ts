@@ -512,6 +512,8 @@ export function buildHostedCodexConfigToml(input: {
     `model = ${tomlString(input.model)}`,
     `model_provider = ${tomlString(input.provider.id)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
+    `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
+    `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "",
     `[model_providers.${tomlQuotedKey(input.provider.id)}]`,
     `name = ${tomlString(input.provider.name)}`,
