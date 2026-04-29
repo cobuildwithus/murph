@@ -68,6 +68,13 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 
+type RuntimeDeviceSyncPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]
+>;
+type RuntimeDeviceSyncConnectLinkRequest = Parameters<
+  RuntimeDeviceSyncPort["createConnectLink"]
+>[0];
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
@@ -166,6 +173,71 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       }),
     );
+  });
+
+  it("exposes hosted device connect providers and link helper from the platform port", async () => {
+    const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
+    const deviceSyncPort = {
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink(request) {
+        connectLinkRequests.push(request);
+        return {
+          authorizationUrl: `https://connect.example.test/${request.provider}`,
+          expiresAt: "2026-04-29T00:05:00.000Z",
+          provider: request.provider,
+          providerLabel: "WHOOP",
+        };
+      },
+      async fetchSnapshot() {
+        return {
+          connections: [],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    expect(hydratedContext).toEqual({
+      hosted: expect.objectContaining({
+        deviceConnectProviders: [
+          { label: "WHOOP", provider: "whoop" },
+        ],
+        issueDeviceConnectLink: expect.any(Function),
+        memberId: "member_synthetic_phase",
+      }),
+    });
+    await expect(
+      hydratedContext?.hosted?.issueDeviceConnectLink?.({ provider: "whoop" }),
+    ).resolves.toEqual({
+      authorizationUrl: "https://connect.example.test/whoop",
+      expiresAt: "2026-04-29T00:05:00.000Z",
+      provider: "whoop",
+      providerLabel: "WHOOP",
+    });
+    expect(connectLinkRequests).toEqual([
+      { provider: "whoop" },
+    ]);
   });
 
   it("writes a durable assistant pass summary without requiring local log storage", async () => {
@@ -655,6 +727,8 @@ describe("hosted runtime log helpers", () => {
 function createPhaseInput(input: {
   billingStripeCustomerId?: string | null;
   logRequests?: HostedRuntimeLogRequest[];
+  resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
+  runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
   runtimeUserEnv?: Record<string, string>;
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
@@ -748,6 +822,7 @@ function createPhaseInput(input: {
           sendEmail: vi.fn(async () => undefined),
         },
         ...(billingPort ? { billingPort } : {}),
+        ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
       },
       platformEnv: {},
       resolvedConfig: {
@@ -755,7 +830,7 @@ function createPhaseInput(input: {
           emailSendReady: false,
           telegramBotConfigured: false,
         },
-        deviceSync: null,
+        deviceSync: input.resolvedDeviceSync ?? null,
       },
       userEnv: input.runtimeUserEnv ?? {},
     },

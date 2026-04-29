@@ -494,12 +494,15 @@ export async function resolveAssistantActiveExperimentContextBlock(
 export function resolveAssistantPromptCapabilityAvailability(input: {
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
 }): AssistantPromptCapabilityAvailability {
-  const assistantHostedDeviceConnectAvailable = false
+  const assistantHostedDeviceConnectProviders =
+    input.executionContext?.hosted?.deviceConnectProviders ?? []
+  const assistantHostedDeviceConnectAvailable =
+    assistantHostedDeviceConnectProviders.length > 0
 
   return {
     assistantHostedDeviceConnectAvailable,
     assistantHostedDeviceConnectProviders: assistantHostedDeviceConnectAvailable
-      ? input.executionContext?.hosted?.deviceConnectProviders ?? []
+      ? assistantHostedDeviceConnectProviders
       : [],
     assistantKnowledgeToolsAvailable: false,
   }
