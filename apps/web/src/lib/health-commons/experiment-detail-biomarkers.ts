@@ -197,9 +197,8 @@ export function toExpectedSignal(
       ?? biomarker.summary
       ?? summarizeBody(biomarker.body),
   );
-
   return {
-    label: biomarker.title,
+    label: cleanHealthCommonsUserFacingCopy(biomarker.title),
     value: "",
     delta: "",
     direction: hint.direction,
