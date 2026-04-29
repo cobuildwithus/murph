@@ -1143,7 +1143,7 @@ test('resolveAssistantSession rebuilds indexes from durable sessions without tru
         sessionId: 'asst_existing',
         target: {
           adapter: 'codex-cli',
-          approvalPolicy: 'on-request',
+          approvalPolicy: 'never',
           codexCommand: null,
           model: null,
           oss: false,

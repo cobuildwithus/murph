@@ -347,7 +347,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
       version: 1,
       inboxScanCursor: null,
       autoReply: [
-        { channel: 'email', cursor: null },
+        { channel: 'email', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
       ],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
@@ -479,14 +479,18 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     ) as {
       autoReply: Array<{
         channel: string
-        cursor: { captureId: string; createdAt: string | null; occurredAt: string } | null
+        enabledAt: string
+        eligibleAfter: { captureId: string; createdAt: string | null; occurredAt: string } | null
       }>
     }
 
+    assert.equal(savedAutomationState.autoReply.length, 1)
+    assert.match(savedAutomationState.autoReply[0]?.enabledAt ?? '', /^\d{4}-\d{2}-\d{2}T/u)
     assert.deepEqual(savedAutomationState.autoReply, [
       {
         channel: 'telegram',
-        cursor: {
+        enabledAt: savedAutomationState.autoReply[0]?.enabledAt,
+        eligibleAfter: {
           captureId: 'capture-latest',
           createdAt: null,
           occurredAt: '2026-04-08T00:05:00.000Z',
@@ -541,7 +545,7 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
     JSON.stringify({
       version: 1,
       inboxScanCursor: null,
-      autoReply: [{ channel: 'custom', cursor: null }],
+      autoReply: [{ channel: 'custom', enabledAt: TEST_TIMESTAMP, eligibleAfter: null }],
       updatedAt: TEST_TIMESTAMP,
     }),
     'utf8',
@@ -628,15 +632,17 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
     ) as {
       autoReply: Array<{
         channel: string
-        cursor: { captureId: string; createdAt: string | null; occurredAt: string } | null
+        enabledAt: string
+        eligibleAfter: { captureId: string; createdAt: string | null; occurredAt: string } | null
       }>
     }
 
     assert.deepEqual(savedAutomationState.autoReply, [
-      { channel: 'custom', cursor: null },
+      { channel: 'custom', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
       {
         channel: 'telegram',
-        cursor: {
+        enabledAt: savedAutomationState.autoReply[1]?.enabledAt,
+        eligibleAfter: {
           captureId: 'capture-latest',
           createdAt: null,
           occurredAt: '2026-04-08T00:05:00.000Z',
@@ -755,7 +761,8 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
     autoReply: [
       {
         channel: 'email',
-        cursor: {
+        enabledAt: TEST_TIMESTAMP,
+        eligibleAfter: {
           captureId: 'capture-email',
           occurredAt: '2026-04-08T00:00:00.000Z',
         },
@@ -841,13 +848,17 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
     ) as {
       autoReply: Array<{
         channel: string
-        cursor: { captureId: string; occurredAt: string } | null
+        enabledAt: string
+        eligibleAfter: { captureId: string; occurredAt: string } | null
       }>
     }
+    assert.equal(savedEmailState.autoReply.length, 1)
+    assert.match(savedEmailState.autoReply[0]?.enabledAt ?? '', /^\d{4}-\d{2}-\d{2}T/u)
     assert.deepEqual(savedEmailState.autoReply, [
       {
         channel: 'email',
-        cursor: {
+        enabledAt: savedEmailState.autoReply[0]?.enabledAt,
+        eligibleAfter: {
           captureId: 'capture-email',
           occurredAt: '2026-04-08T00:00:00.000Z',
         },

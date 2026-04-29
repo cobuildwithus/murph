@@ -6,10 +6,7 @@ import path from 'node:path'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
-import type {
-  AssistantApprovalPolicy,
-  AssistantSandbox,
-} from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantSandbox } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   CodexNormalizedEvent,
   CodexProgressEvent,
@@ -89,7 +86,7 @@ const CODEX_APP_SERVER_COMMAND = 'app-server'
 
 export interface CodexAppServerTurnInput {
   abortSignal?: AbortSignal
-  approvalPolicy?: AssistantApprovalPolicy
+  approvalPolicy?: string
   configOverrides?: readonly string[]
   codexCommand?: string
   codexHome?: string | null

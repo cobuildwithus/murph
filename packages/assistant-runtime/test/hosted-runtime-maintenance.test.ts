@@ -239,9 +239,10 @@ describe("runHostedAssistantAutomation", () => {
         autoReply: [
           {
             channel: "telegram",
-            cursor: {
+            enabledAt: "2026-04-08T00:00:00.000Z",
+            eligibleAfter: {
               captureId: "capture_122",
-              importedAt: "2026-04-08T00:05:00.000Z",
+              occurredAt: "2026-04-08T00:05:00.000Z",
             },
           },
         ],
@@ -256,9 +257,10 @@ describe("runHostedAssistantAutomation", () => {
         autoReply: [
           {
             channel: "telegram",
-            cursor: {
+            enabledAt: "2026-04-08T00:00:00.000Z",
+            eligibleAfter: {
               captureId: "capture_123",
-              importedAt: "2026-04-08T00:10:00.000Z",
+              occurredAt: "2026-04-08T00:10:00.000Z",
             },
           },
         ],
@@ -332,7 +334,7 @@ describe("runHostedAssistantAutomation", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           autoReplyChannels: "telegram",
-          autoReplyEligibleAfterSummary: "telegram:null",
+          autoReplyEligibleAfterSummary: "telegram:capture_122",
           inboxScanCursor: "capture_122",
         }),
         message: "Hosted assistant automation pass starting.",

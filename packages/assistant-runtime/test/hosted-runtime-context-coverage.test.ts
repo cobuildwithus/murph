@@ -156,7 +156,8 @@ async function readAutomationState(vaultRoot: string) {
   ) as {
     autoReply: Array<{
       channel: string;
-      cursor: { captureId: string; occurredAt: string } | null;
+      enabledAt: string;
+      eligibleAfter: { captureId: string; occurredAt: string } | null;
     }>;
     inboxScanCursor: { captureId: string; occurredAt: string } | null;
     updatedAt: string;
@@ -169,7 +170,8 @@ async function writeAutomationState(
   state: {
     autoReply: Array<{
       channel: string;
-      cursor: { captureId: string; occurredAt: string } | null;
+      enabledAt: string;
+      eligibleAfter: { captureId: string; occurredAt: string } | null;
     }>;
     inboxScanCursor: { captureId: string; occurredAt: string } | null;
     updatedAt: string;
@@ -181,6 +183,18 @@ async function writeAutomationState(
     recursive: true,
   });
   await writeFile(automationStatePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function summarizeAutoReply(
+  state: Awaited<ReturnType<typeof readAutomationState>>,
+): Array<{
+  channel: string;
+  eligibleAfter: { captureId: string; occurredAt: string } | null;
+}> {
+  return state.autoReply.map((entry) => ({
+    channel: entry.channel,
+    eligibleAfter: entry.eligibleAfter,
+  }));
 }
 
 describe("hosted runtime context coverage", () => {
@@ -389,18 +403,21 @@ describe("hosted runtime context coverage", () => {
         autoReply: [
           {
             channel: "email",
-            cursor: {
+            enabledAt: "2026-04-08T00:05:00.000Z",
+            eligibleAfter: {
               captureId: "cap_email",
               occurredAt: "2026-04-08T00:00:00.000Z",
             },
           },
           {
             channel: "linq",
-            cursor: null,
+            enabledAt: "2026-04-08T00:05:00.000Z",
+            eligibleAfter: null,
           },
           {
             channel: "telegram",
-            cursor: {
+            enabledAt: "2026-04-08T00:05:00.000Z",
+            eligibleAfter: {
               captureId: "cap_telegram",
               occurredAt: "2026-04-08T00:01:00.000Z",
             },
@@ -425,24 +442,28 @@ describe("hosted runtime context coverage", () => {
         telegramAutoReplyEnabled: true,
       });
 
-      await expect(readAutomationState(vaultRoot)).resolves.toEqual({
+      const state = await readAutomationState(vaultRoot);
+      assert.deepEqual(state, {
         version: 1,
         inboxScanCursor: null,
         autoReply: [
           {
             channel: "email",
-            cursor: {
+            enabledAt: "2026-04-08T00:05:00.000Z",
+            eligibleAfter: {
               captureId: "cap_email",
               occurredAt: "2026-04-08T00:00:00.000Z",
             },
           },
           {
             channel: "linq",
-            cursor: null,
+            enabledAt: "2026-04-08T00:05:00.000Z",
+            eligibleAfter: null,
           },
           {
             channel: "telegram",
-            cursor: {
+            enabledAt: "2026-04-08T00:05:00.000Z",
+            eligibleAfter: {
               captureId: "cap_telegram",
               occurredAt: "2026-04-08T00:01:00.000Z",
             },
@@ -469,7 +490,8 @@ describe("hosted runtime context coverage", () => {
         autoReply: [
           {
             channel: "linq",
-            cursor: {
+            enabledAt: "2026-04-08T00:05:00.000Z",
+            eligibleAfter: {
               captureId: "cap_linq",
               occurredAt: "2026-04-08T00:00:00.000Z",
             },
@@ -506,29 +528,29 @@ describe("hosted runtime context coverage", () => {
         telegramAutoReplyEnabled: false,
       });
 
-      await expect(readAutomationState(vaultRoot)).resolves.toMatchObject({
-        inboxScanCursor: {
-          captureId: "cap_route",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
-        autoReply: [
-          {
-            channel: "email",
-            cursor: {
-              captureId: "cap_latest",
-              occurredAt: "2026-04-08T00:09:00.000Z",
-            },
-          },
-          {
-            channel: "linq",
-            cursor: {
-              captureId: "cap_linq",
-              occurredAt: "2026-04-08T00:00:00.000Z",
-            },
-          },
-        ],
-        version: 1,
+      const state = await readAutomationState(vaultRoot);
+      assert.deepEqual(state.inboxScanCursor, {
+        captureId: "cap_route",
+        occurredAt: "2026-04-08T00:00:00.000Z",
       });
+      assert.deepEqual(summarizeAutoReply(state), [
+        {
+          channel: "email",
+          eligibleAfter: {
+            captureId: "cap_latest",
+            createdAt: null,
+            occurredAt: "2026-04-08T00:09:00.000Z",
+          },
+        },
+        {
+          channel: "linq",
+          eligibleAfter: {
+            captureId: "cap_linq",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+      ]);
+      assert.equal(state.version, 1);
       expect(mocks.inboxList).toHaveBeenCalledTimes(1);
     } finally {
       await cleanup();

@@ -126,7 +126,8 @@ async function readAutomationState(vaultRoot: string) {
   ) as {
     autoReply: Array<{
       channel: string;
-      cursor: { captureId: string; occurredAt: string } | null;
+      enabledAt: string;
+      eligibleAfter: { captureId: string; occurredAt: string } | null;
     }>;
   };
 }
@@ -136,7 +137,8 @@ async function writeAutomationState(
   state: {
     autoReply: Array<{
       channel: string;
-      cursor: { captureId: string; occurredAt: string } | null;
+      enabledAt: string;
+      eligibleAfter: { captureId: string; occurredAt: string } | null;
     }>;
     inboxScanCursor: { captureId: string; occurredAt: string } | null;
     updatedAt: string;
@@ -146,6 +148,18 @@ async function writeAutomationState(
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath;
   await mkdir(path.dirname(automationStatePath), { recursive: true });
   await writeFile(automationStatePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function summarizeAutoReply(
+  state: Awaited<ReturnType<typeof readAutomationState>>,
+): Array<{
+  channel: string;
+  eligibleAfter: { captureId: string; occurredAt: string } | null;
+}> {
+  return state.autoReply.map((entry) => ({
+    channel: entry.channel,
+    eligibleAfter: entry.eligibleAfter,
+  }));
 }
 
 function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
@@ -207,18 +221,18 @@ test("hosted channel state reconciliation enables linked hosted auto-reply chann
       linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
-    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+    assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
       {
         channel: "email",
-        cursor: null,
+        eligibleAfter: null,
       },
       {
         channel: "linq",
-        cursor: null,
+        eligibleAfter: null,
       },
       {
         channel: "telegram",
-        cursor: null,
+        eligibleAfter: null,
       },
     ]);
 
@@ -250,21 +264,24 @@ test("hosted channel state reconciliation preserves unmanaged entries while prun
       autoReply: [
         {
           channel: "email",
-          cursor: {
+          enabledAt: "2026-03-28T09:03:00.000Z",
+          eligibleAfter: {
             captureId: "cap_email",
             occurredAt: "2026-03-28T09:00:00.000Z",
           },
         },
         {
           channel: "linq",
-          cursor: {
+          enabledAt: "2026-03-28T09:03:00.000Z",
+          eligibleAfter: {
             captureId: "cap_linq",
             occurredAt: "2026-03-28T09:01:00.000Z",
           },
         },
         {
           channel: "telegram",
-          cursor: {
+          enabledAt: "2026-03-28T09:03:00.000Z",
+          eligibleAfter: {
             captureId: "cap_telegram",
             occurredAt: "2026-03-28T09:02:00.000Z",
           },
@@ -292,17 +309,17 @@ test("hosted channel state reconciliation preserves unmanaged entries while prun
       linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
-    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+    assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
       {
         channel: "linq",
-        cursor: {
+        eligibleAfter: {
           captureId: "cap_linq",
           occurredAt: "2026-03-28T09:01:00.000Z",
         },
       },
       {
         channel: "telegram",
-        cursor: {
+        eligibleAfter: {
           captureId: "cap_telegram",
           occurredAt: "2026-03-28T09:02:00.000Z",
         },
@@ -423,18 +440,18 @@ test("hosted member activation enables managed Linq auto-reply when first contac
         vaultCreated: true,
       });
     });
-    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+    assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
       {
         channel: "email",
-        cursor: null,
+        eligibleAfter: null,
       },
       {
         channel: "linq",
-        cursor: null,
+        eligibleAfter: null,
       },
       {
         channel: "telegram",
-        cursor: null,
+        eligibleAfter: null,
       },
     ]);
   } finally {
@@ -572,18 +589,18 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
       );
     });
 
-    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+    assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
       {
         channel: "email",
-        cursor: null,
+        eligibleAfter: null,
       },
       {
         channel: "linq",
-        cursor: null,
+        eligibleAfter: null,
       },
       {
         channel: "telegram",
-        cursor: null,
+        eligibleAfter: null,
       },
     ]);
   } finally {
@@ -644,10 +661,10 @@ test("hosted Linq inbound wake self-heals managed Linq auto-reply when the hoste
       assert.equal(result, null);
     });
 
-    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+    assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
       {
         channel: "linq",
-        cursor: null,
+        eligibleAfter: null,
       },
     ]);
   } finally {
@@ -706,14 +723,14 @@ test("hosted Linq inbound wake self-heal preserves existing managed channels", a
       assert.equal(result, null);
     });
 
-    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+    assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
       {
         channel: "email",
-        cursor: null,
+        eligibleAfter: null,
       },
       {
         channel: "linq",
-        cursor: null,
+        eligibleAfter: null,
       },
     ]);
   } finally {

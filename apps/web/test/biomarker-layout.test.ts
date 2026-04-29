@@ -4,6 +4,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedSidebarAuthSnapshot: async () => ({
+    authenticated: false,
+    label: null,
+  }),
+}));
+
 vi.mock("@/src/components/dashboard/sidebar", () => ({
   Sidebar() {
     return createElement("div", {
@@ -14,13 +23,15 @@ vi.mock("@/src/components/dashboard/sidebar", () => ({
 
 import BiomarkersLayout from "../app/biomarkers/layout";
 
-test("BiomarkersLayout renders biomarker pages inside the shared dashboard shell", () => {
+test("BiomarkersLayout renders biomarker pages inside the shared dashboard shell", async () => {
   const markup = renderToStaticMarkup(
-    createElement(
-      BiomarkersLayout,
-      null,
-      createElement("div", { "data-biomarker-page": "true" }, "biomarker"),
-    ),
+    await BiomarkersLayout({
+      children: createElement(
+        "div",
+        { "data-biomarker-page": "true" },
+        "biomarker",
+      ),
+    }),
   );
 
   assert.match(markup, /#global-footer \{ display: none; \}/);

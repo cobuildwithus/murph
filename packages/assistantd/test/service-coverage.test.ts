@@ -24,7 +24,8 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(async () => ({
     autoReply: [] as Array<{
       channel: string
-      cursor: null
+      enabledAt: string
+      eligibleAfter: null
     }>,
     inboxScanCursor: null,
     updatedAt: '2026-04-23T00:00:00.000Z',
@@ -359,11 +360,13 @@ test('createAssistantLocalService rejects local Linq routes and drops legacy Lin
     autoReply: [
       {
         channel: 'linq',
-        cursor: null,
+        enabledAt: '2026-04-23T00:00:00.000Z',
+        eligibleAfter: null,
       },
       {
         channel: 'telegram',
-        cursor: null,
+        enabledAt: '2026-04-23T00:00:00.000Z',
+        eligibleAfter: null,
       },
     ],
     inboxScanCursor: null,
@@ -412,7 +415,8 @@ test('createAssistantLocalService rejects local Linq routes and drops legacy Lin
     autoReply: [
       {
         channel: 'telegram',
-        cursor: null,
+        enabledAt: '2026-04-23T00:00:00.000Z',
+        eligibleAfter: null,
       },
     ],
     inboxScanCursor: null,
