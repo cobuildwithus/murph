@@ -5,9 +5,6 @@ import {
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 
-import {
-  DEFAULT_DATABASE_URL,
-} from "../../../scripts/dev-hosted-local/constants.ts";
 import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -29,7 +26,7 @@ const telegramBotToken = "telegram-local-test-token";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
-const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
+const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 let telegramStub: HostedLocalTelegramStub | null = null;
