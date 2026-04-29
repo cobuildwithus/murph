@@ -10,7 +10,7 @@ import {
 } from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
 import {
-  resolveAssistantProviderTargetExecutionCapabilities,
+  resolveAssistantProviderTargetCapabilities,
 } from '../../assistant-provider.js'
 import { buildAssistantActiveExperimentContextBlock } from '../active-experiment-context.js'
 import { resolveAssistantCliSurfaceBootstrapContext } from '../cli-surface-bootstrap.js'
@@ -19,8 +19,8 @@ import {
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
 import {
-  type ResolvedAssistantFailoverRoute,
-} from '../failover.js'
+  type ResolvedAssistantProviderRoute,
+} from '../provider-route.js'
 import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
@@ -31,9 +31,6 @@ import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
 } from '../provider-binding.js'
-import type {
-  AssistantMurphCommandAccessMode,
-} from '../providers/types.js'
 import {
   prioritizeAssistantRoutesForRichUserMessageContent,
 } from '../rich-content-routing.js'
@@ -51,7 +48,6 @@ import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   type AssistantPromptCacheMetadata,
-  type AssistantHealthCommonsAccessMode,
 } from '../system-prompt.js'
 import { buildAssistantVaultOverviewBlock } from '../vault-overview.js'
 import {
@@ -62,13 +58,9 @@ import {
 import type {
   AssistantProviderContinuation,
 } from '../active-turn-input-journal.js'
-import {
-  resolveAssistantOnboardingCompletionFallbackReason,
-} from './onboarding-fallback.js'
 import { normalizeNullableString } from '../shared.js'
 
 export interface AssistantRouteTurnPlan {
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   conversationMessages?: ReadonlyArray<{
@@ -91,8 +83,6 @@ export interface AssistantRouteTurnPlan {
 }
 
 export interface AssistantPromptCapabilityAvailability {
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode
-  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode
   assistantHostedDeviceConnectAvailable: boolean
   assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[]
   assistantKnowledgeToolsAvailable: boolean
@@ -148,16 +138,16 @@ export interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
   profile: AssistantProviderTurnResolvedExecutionProfile
-  primaryRoute: ResolvedAssistantFailoverRoute | null
+  primaryRoute: ResolvedAssistantProviderRoute | null
   promptTimeContext: AssistantPromptTimeContext
-  routes: readonly ResolvedAssistantFailoverRoute[]
+  routes: readonly ResolvedAssistantProviderRoute[]
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }
 
 export interface AssistantProviderAttemptPlan {
   attemptCount: number
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
 }
@@ -229,7 +219,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
   resolvedSession: AssistantSession
-  routes: readonly ResolvedAssistantFailoverRoute[]
+  routes: readonly ResolvedAssistantProviderRoute[]
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantProviderTurnExecutionPlan> {
@@ -305,7 +295,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   input: AssistantMessageInput
   profile: AssistantProviderTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
 }): Promise<AssistantRouteTurnPlan> {
@@ -314,7 +304,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     route: input.route,
     sessionResumeState: input.session.resumeState,
   })
-  const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
+  const routeProviderCapabilities = resolveAssistantProviderTargetCapabilities({
     ...input.route.providerOptions,
   })
   const activeTurnHistory = input.activeTurnHistory ?? null
@@ -343,8 +333,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldInjectBootstrapContext = continuityPlan.shouldInjectBootstrapContext
   const shouldPrepareBootstrapContext =
     shouldInjectBootstrapContext ||
-    (resumeProviderSessionId !== null &&
-      providerUsesFlatPrompt(routeProviderCapabilities))
+    resumeProviderSessionId !== null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
@@ -352,7 +341,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const shouldInjectOnboardingGuidance =
     continuityPlan.onboardingGuidanceInjected
-  const providerCapabilities = routeProviderCapabilities
   const assistantToolNameAliases = null
   const transcriptReplayLimit = shouldPrepareBootstrapContext && !activeTurnHistoryPresent
     ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
@@ -373,10 +361,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : undefined
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
-    providerCapabilities,
   })
-  const assistantCommandAccessMode =
-    promptCapabilityAvailability.assistantCommandAccessMode
   const assistantCliContract =
     shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
       ? await resolveAssistantCliSurfaceBootstrapContext({
@@ -403,8 +388,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
             activeExperimentContext,
             allowSensitiveHealthContext:
               input.sharedPlan.allowSensitiveHealthContext,
-            assistantHealthCommonsAccessMode:
-              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
@@ -422,10 +405,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantCliContract,
             allowSensitiveHealthContext:
               input.sharedPlan.allowSensitiveHealthContext,
-            assistantCommandAccessMode:
-              promptCapabilityAvailability.assistantCommandAccessMode,
-            assistantHealthCommonsAccessMode:
-              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
@@ -447,22 +426,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const systemPrompt = systemPromptResult.prompt
 
   return {
-    assistantCommandAccessMode,
     assistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
     continuityContext: null,
     diagnosticsPolicy,
-    onboardingCompletionFallbackReason:
-      resolveAssistantOnboardingCompletionFallbackReason({
-        assistantCommandAccessMode,
-        onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
-        prompt: input.input.prompt,
-      }),
+    onboardingCompletionFallbackReason: null,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
     providerContinuation: resolveAssistantProviderContinuation({
-      capabilities: routeProviderCapabilities,
       resumeProviderSessionId,
     }),
     resumeProviderSessionId,
@@ -521,39 +493,16 @@ export async function resolveAssistantActiveExperimentContextBlock(
 
 export function resolveAssistantPromptCapabilityAvailability(input: {
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
 }): AssistantPromptCapabilityAvailability {
   const assistantHostedDeviceConnectAvailable = false
 
   return {
-    assistantCommandAccessMode: resolveAssistantCommandAccessMode({
-      providerCapabilities: input.providerCapabilities,
-    }),
-    assistantHealthCommonsAccessMode: resolveAssistantHealthCommonsAccessMode({
-      providerCapabilities: input.providerCapabilities,
-    }),
     assistantHostedDeviceConnectAvailable,
     assistantHostedDeviceConnectProviders: assistantHostedDeviceConnectAvailable
       ? input.executionContext?.hosted?.deviceConnectProviders ?? []
       : [],
     assistantKnowledgeToolsAvailable: false,
   }
-}
-
-function resolveAssistantHealthCommonsAccessMode(input: {
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-}): AssistantHealthCommonsAccessMode {
-  return input.providerCapabilities.murphCommandSurface === 'direct-cli'
-    ? 'direct-cli'
-    : 'none'
-}
-
-function resolveAssistantCommandAccessMode(input: {
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-}): AssistantMurphCommandAccessMode {
-  return input.providerCapabilities.murphCommandSurface === 'direct-cli'
-    ? 'direct-cli'
-    : 'none'
 }
 
 function removeTrailingCurrentUserPrompt(
@@ -577,14 +526,7 @@ function removeTrailingCurrentUserPrompt(
   return messages
 }
 
-function providerUsesFlatPrompt(
-  capabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>,
-): boolean {
-  return capabilities.requestFormat === 'flat-prompt'
-}
-
 function resolveAssistantProviderContinuation(input: {
-  capabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
   resumeProviderSessionId: string | null
 }): AssistantProviderContinuation {
   if (input.resumeProviderSessionId) {
@@ -593,20 +535,14 @@ function resolveAssistantProviderContinuation(input: {
     }
   }
 
-  if (providerUsesFlatPrompt(input.capabilities)) {
-    return {
-      kind: 'flat-prompt-replay',
-    }
-  }
-
   return {
-    kind: 'explicit-structured-history',
+    kind: 'flat-prompt-replay',
   }
 }
 
 function resolveAssistantEffectiveProviderResumeSessionId(input: {
   resumeProviderSessionId: string | null
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
 }): string | null {
   void input.route
   return normalizeNullableString(input.resumeProviderSessionId)

@@ -9,7 +9,6 @@ import {
   assistantDiagnosticEventSchema,
   assistantDiagnosticsSnapshotSchema,
   assistantDoctorResultSchema,
-  assistantFailoverStateSchema,
   assistantOutboxIntentSchema,
   assistantRuntimeBudgetSnapshotSchema,
   assistantRuntimeEventSchema,
@@ -74,7 +73,6 @@ async function runAssistantDoctorAtPaths(
     diagnosticEventScan,
     runtimeEventScan,
     diagnosticsScan,
-    failoverScan,
     statusScan,
     runtimeBudgetScan,
     secrecyAudit,
@@ -88,7 +86,6 @@ async function runAssistantDoctorAtPaths(
     scanJsonLinesFile(paths.diagnosticEventsPath, assistantDiagnosticEventSchema),
     scanJsonLinesFile(paths.runtimeEventsPath, assistantRuntimeEventSchema),
     scanJsonFile(paths.diagnosticSnapshotPath, assistantDiagnosticsSnapshotSchema),
-    scanJsonFile(paths.failoverStatePath, assistantFailoverStateSchema),
     scanJsonFile(paths.statusPath, assistantStatusResultSchema, {
       label: 'Assistant status snapshot',
       schema: ASSISTANT_STATUS_SNAPSHOT_SCHEMA,
@@ -284,20 +281,6 @@ async function runAssistantDoctorAtPaths(
             : 'assistant diagnostics snapshot parsed cleanly.',
       name: 'diagnostics-snapshot',
       status: diagnosticsScan.parseError ? 'fail' : 'pass',
-    }),
-    createDoctorCheck({
-      details: {
-        present: failoverScan.present,
-        parseError: failoverScan.parseError,
-      },
-      message:
-        !failoverScan.present
-          ? 'assistant failover state has not been written yet.'
-          : failoverScan.parseError
-            ? 'assistant failover state could not be parsed.'
-            : 'assistant failover state parsed cleanly.',
-      name: 'failover-state',
-      status: failoverScan.parseError ? 'fail' : 'pass',
     }),
     createDoctorCheck({
       details: {

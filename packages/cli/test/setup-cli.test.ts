@@ -566,9 +566,6 @@ test('setup assistant account resolver merges codex auth plan with rpc quota met
       enabled: true,
       provider: 'codex-cli',
       model: 'gpt-5.4',
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: null,
       profile: null,
       reasoningEffort: null,
@@ -638,9 +635,6 @@ test('setup assistant account resolver scopes auth and rpc probes to the selecte
       enabled: true,
       provider: 'codex-cli',
       model: 'gpt-5.4',
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: null,
       codexHome: '/tmp/codex-1',
       profile: null,
@@ -1648,7 +1642,6 @@ test('interactive onboarding prompts for missing channel and wearable credential
 test('interactive onboarding carries the Codex wizard preset into assistant setup', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-assistant-codex-'))
   const promptedInputs: Array<{
-    assistantApiKeyEnv: string | null | undefined
     channels: string[]
     env: NodeJS.ProcessEnv
     wearables: string[]
@@ -1672,9 +1665,7 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
 
         return {
           account: null,
-          apiKeyEnv: null,
           approvalPolicy: 'never',
-          baseUrl: null,
           codexCommand: null,
           detail: 'configured',
           enabled: true,
@@ -1684,7 +1675,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
           preset: input.preset,
           profile: null,
           provider: 'codex-cli',
-          providerName: null,
           reasoningEffort: null,
           sandbox: 'danger-full-access',
         }
@@ -1697,7 +1687,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
       },
       async promptForMissing(input) {
         promptedInputs.push({
-          assistantApiKeyEnv: input.assistantApiKeyEnv,
           channels: [...input.channels],
           env: { ...input.env },
           wearables: [...input.wearables],
@@ -1737,7 +1726,6 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
 
     assert.deepEqual(promptedInputs, [
       {
-        assistantApiKeyEnv: null,
         channels: [],
         env: {},
         wearables: [],
@@ -1759,17 +1747,12 @@ test('interactive onboarding carries the Codex wizard preset into assistant setu
 test('interactive onboarding keeps Codex selections clear of endpoint defaults', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-assistant-clear-'))
   const promptedInputs: Array<{
-    assistantApiKeyEnv: string | null | undefined
     channels: string[]
     env: NodeJS.ProcessEnv
     wearables: string[]
   }> = []
   const assistantCalls: Array<{
-    options: {
-      assistantApiKeyEnv: string | null | undefined
-      assistantBaseUrl: string | null | undefined
-      assistantProviderName: string | null | undefined
-    }
+    options: Record<string, never>
     preset: string
   }> = []
 
@@ -1777,19 +1760,13 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
     assistantSetup: {
       async resolve(input: any) {
         assistantCalls.push({
-          options: {
-            assistantApiKeyEnv: input.options.assistantApiKeyEnv,
-            assistantBaseUrl: input.options.assistantBaseUrl,
-            assistantProviderName: input.options.assistantProviderName,
-          },
+          options: {},
           preset: input.preset,
         })
 
         return {
           account: null,
-          apiKeyEnv: null,
           approvalPolicy: null,
-          baseUrl: null,
           codexCommand: null,
           detail: 'configured',
           enabled: true,
@@ -1798,7 +1775,6 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
           preset: input.preset,
           profile: null,
           provider: 'codex-cli',
-          providerName: null,
           reasoningEffort: null,
           sandbox: null,
         }
@@ -1811,7 +1787,6 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
       },
       async promptForMissing(input) {
         promptedInputs.push({
-          assistantApiKeyEnv: input.assistantApiKeyEnv,
           channels: [...input.channels],
           env: { ...input.env },
           wearables: [...input.wearables],
@@ -1833,10 +1808,7 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
     wizard: {
       async run() {
         return {
-          assistantApiKeyEnv: null,
-          assistantBaseUrl: null,
           assistantPreset: 'codex',
-          assistantProviderName: null,
           channels: [],
           scheduledUpdates: [],
           wearables: [],
@@ -1857,7 +1829,6 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
 
     assert.deepEqual(promptedInputs, [
       {
-        assistantApiKeyEnv: null,
         channels: [],
         env: {},
         wearables: [],
@@ -1865,11 +1836,7 @@ test('interactive onboarding keeps Codex selections clear of endpoint defaults',
     ])
     assert.deepEqual(assistantCalls, [
       {
-        options: {
-          assistantApiKeyEnv: undefined,
-          assistantBaseUrl: undefined,
-          assistantProviderName: undefined,
-        },
+        options: {},
         preset: 'codex',
       },
     ])
@@ -1971,9 +1938,6 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
           provider: 'codex-cli',
           model: input.options.assistantModel ?? 'gpt-5.4',
           modelProvider: input.options.assistantModelProvider ?? null,
-          baseUrl: null,
-          apiKeyEnv: null,
-          providerName: null,
           codexCommand: null,
           profile: null,
           reasoningEffort: null,
@@ -2027,9 +1991,6 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       provider: 'codex-cli',
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: null,
       profile: null,
       reasoningEffort: null,
@@ -2039,29 +2000,6 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
       detail: 'Use Codex with the selected model provider.',
     },
   ])
-})
-
-test('onboard rejects removed OpenAI-compatible assistant options when the wizard is skipped', async () => {
-  const result = await runSetupCli<unknown>(
-    [
-      'onboard',
-      '--assistantBaseUrl',
-      'http://127.0.0.1:11434/v1',
-      '--assistantApiKeyEnv',
-      'OLLAMA_API_KEY',
-    ],
-    {
-      async setupMacos() {
-        throw new Error('setup services should not run for removed assistant options')
-      },
-    },
-  )
-
-  assert.equal(result.ok, false)
-  assert.match(
-    result.error?.message ?? '',
-    /OpenAI-compatible assistant setup options have been removed|assistantBaseUrl|assistantApiKeyEnv/u,
-  )
 })
 
 test('setup handoff launches assistant automation instead of chat when auto-reply channels are enabled', () => {
@@ -2616,9 +2554,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
         enabled: true,
         provider: 'codex-cli',
         model: 'gpt-5.4',
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
         codexCommand: null,
         profile: null,
         reasoningEffort: null,
@@ -2839,9 +2774,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
         enabled: true,
         provider: 'codex-cli',
         model: 'gpt-5.4',
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
         codexCommand: '/opt/bin/codex-new',
         profile: null,
         reasoningEffort: null,
@@ -2870,9 +2802,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
         enabled: true,
         provider: 'codex-cli',
         model: 'gpt-5.4',
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
         codexCommand: null,
         profile: null,
         reasoningEffort: null,
@@ -2898,8 +2827,8 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   }
 })
 
-test.sequential('setup persistence can replace legacy OpenAI-compatible assistant defaults', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-replace-legacy-openai-'))
+test.sequential('setup persistence can replace unsupported assistant defaults', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-replace-unsupported-assistant-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(homeRoot, 'vault')
 
@@ -3346,9 +3275,6 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
         provider: 'codex-cli',
         model: 'gpt-5.4',
         modelProvider: null,
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
         codexCommand: path.join(homeRoot, '.codex', 'bin', 'codex'),
         codexHome: path.join(homeRoot, '.codex'),
         profile: null,
@@ -4269,18 +4195,17 @@ async function writeLegacySetupAssistantOperatorConfig(homeRoot: string): Promis
       defaultVault: null,
       assistant: {
         backend: {
-          adapter: 'openai-compatible',
-          apiKeyEnv: 'OPENAI_API_KEY',
-          endpoint: 'https://api.openai.example/v1',
+          adapter: 'unsupported-provider',
+          apiKeyEnv: 'LEGACY_API_KEY',
+          endpoint: 'https://api.legacy.example/v1',
           headers: null,
           model: 'gpt-4.1-mini',
-          presetId: 'openai',
-          providerName: 'openai',
+          presetId: 'legacy',
+          providerName: 'legacy-provider',
           reasoningEffort: null,
           webSearch: null,
         },
         account: null,
-        failoverRoutes: null,
         identityId: null,
         selfDeliveryTargets: null,
       },

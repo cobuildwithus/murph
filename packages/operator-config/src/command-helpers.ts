@@ -3,8 +3,6 @@ import {
   baseCommandOptionsSchema,
   type BaseCommandOptions,
 } from './vault-cli-contracts.js'
-import { isSensitiveAssistantHeader } from './assistant/redaction.js'
-import { VaultCliError } from './vault-cli-errors.js'
 
 export const emptyArgsSchema = z.object({})
 export const ROOT_OPTIONS_WITH_VALUES = new Set([
@@ -37,9 +35,6 @@ export function requestIdFromOptions(
 ): string | null {
   return typeof options.requestId === 'string' ? options.requestId : null
 }
-
-const httpHeaderNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u
-const httpHeaderValueControlPattern = /[\u0000-\u0008\u000A-\u001F\u007F]/u
 
 const httpUrlInvalidMessage =
   'Expected an http or https URL without embedded credentials.'
@@ -98,86 +93,6 @@ export const httpBaseUrlSchema = z
   .refine((value) => value === value.trim() && normalizeHttpBaseUrlOption(value) !== null, {
     message: httpBaseUrlInvalidMessage,
   })
-
-export const apiKeyEnvNameSchema = z
-  .string()
-  .min(1)
-  .refine(
-    (value) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(value),
-    'Expected an environment variable name like OPENAI_API_KEY.',
-  )
-
-export function parseHeadersJsonOption(value?: string) {
-  if (!value) {
-    return undefined
-  }
-
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(value)
-  } catch (error) {
-    throw new VaultCliError(
-      'invalid_payload',
-      'headersJson must be a valid JSON object.',
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new VaultCliError(
-      'invalid_payload',
-      'headersJson must be a JSON object with string values.',
-    )
-  }
-
-  const headers: Record<string, string> = {}
-  const normalizedNames = new Set<string>()
-  for (const [key, candidate] of Object.entries(parsed)) {
-    if (typeof candidate !== 'string') {
-      throw new VaultCliError(
-        'invalid_payload',
-        'headersJson must be a JSON object with string values.',
-      )
-    }
-
-    if (key.length === 0 || key !== key.trim() || !httpHeaderNamePattern.test(key)) {
-      throw new VaultCliError(
-        'invalid_payload',
-        'headersJson contains an invalid HTTP header name.',
-      )
-    }
-
-    if (isSensitiveAssistantHeader(key, candidate)) {
-      throw new VaultCliError(
-        'invalid_payload',
-        'headersJson may not include credential headers. Use apiKey or apiKeyEnv for model credentials.',
-      )
-    }
-
-    const normalizedName = key.toLowerCase()
-    if (normalizedNames.has(normalizedName)) {
-      throw new VaultCliError(
-        'invalid_payload',
-        `headersJson contains duplicate header name "${key}".`,
-      )
-    }
-
-    if (httpHeaderValueControlPattern.test(candidate)) {
-      throw new VaultCliError(
-        'invalid_payload',
-        `headersJson contains an invalid value for "${key}".`,
-      )
-    }
-
-    normalizedNames.add(normalizedName)
-    headers[key] = candidate
-  }
-
-  return headers
-}
 
 export function resolveEffectiveTopLevelToken(
   args: readonly string[],

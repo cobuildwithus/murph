@@ -65,8 +65,6 @@ export function assistantModelTargetToProviderConfigInput(
   target: AssistantModelTarget,
 ): AssistantProviderConfigInput {
   switch (target.adapter) {
-    case 'openai-compatible':
-      throw createUnsupportedAssistantRuntimeTargetError()
     case 'codex-cli':
     default:
       return {
@@ -111,17 +109,7 @@ export const assistantBackendTargetsEqual = assistantModelTargetsEqual
 export function sanitizeAssistantModelTargetForPersistence(
   target: AssistantModelTarget | null | undefined,
 ): AssistantModelTarget | null {
-  const normalized = normalizeAssistantModelTarget(target)
-
-  if (!normalized) {
-    return normalized
-  }
-
-  if (normalized.adapter !== 'codex-cli') {
-    throw createUnsupportedAssistantRuntimeTargetError()
-  }
-
-  return normalized
+  return normalizeAssistantModelTarget(target)
 }
 
 export const sanitizeAssistantBackendTargetForPersistence =
@@ -131,9 +119,6 @@ function convertAssistantProviderConfigToModelTarget(
   config: AssistantProviderConfig,
 ): AssistantModelTarget {
   switch (config.target.kind) {
-    case 'responses':
-    case 'openai-compatible':
-      throw createUnsupportedAssistantRuntimeTargetError()
     case 'codex-cli':
     default:
       return {
@@ -157,6 +142,15 @@ function convertAssistantProviderConfigToModelTarget(
 function coerceAssistantModelTargetToProviderConfigInput(
   target: unknown,
 ): AssistantProviderConfigInput | null {
+  if (
+    target &&
+    typeof target === 'object' &&
+    'adapter' in target &&
+    (target as { adapter?: unknown }).adapter !== 'codex-cli'
+  ) {
+    throw createUnsupportedAssistantRuntimeTargetError()
+  }
+
   const current = assistantModelTargetSchema.safeParse(target)
   return current.success
     ? assistantModelTargetToProviderConfigInput(current.data)
@@ -165,8 +159,6 @@ function coerceAssistantModelTargetToProviderConfigInput(
 
 function hasAssistantModelTargetValues(target: AssistantModelTarget): boolean {
   switch (target.adapter) {
-    case 'openai-compatible':
-      throw createUnsupportedAssistantRuntimeTargetError()
     case 'codex-cli':
     default:
       return Boolean(

@@ -4,7 +4,7 @@ import type {
   AssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../../src/assistant/content-types.ts'
-import type { ResolvedAssistantFailoverRoute } from '../../src/assistant/failover.js'
+import type { ResolvedAssistantProviderRoute } from '../../src/assistant/provider-route.js'
 import {
   assistantRouteSupportsRichUserMessageContent,
   hasAssistantRichUserMessageContent,
@@ -115,7 +115,7 @@ describe('rich-content-routing', () => {
   })
 })
 
-function createRoute(provider: AssistantChatProvider): ResolvedAssistantFailoverRoute {
+function createRoute(provider: AssistantChatProvider): ResolvedAssistantProviderRoute {
   return {
     codexCommand: null,
     label: provider,

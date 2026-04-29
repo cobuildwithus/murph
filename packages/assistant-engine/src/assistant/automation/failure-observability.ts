@@ -21,7 +21,6 @@ export interface AssistantAutoReplyFailureSnapshot {
 
 const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'assistantProviderAdapter',
-  'assistantProviderBaseUrlConfigured',
   'assistantProviderErrorBodyCode',
   'assistantProviderErrorBodyMessage',
   'assistantProviderErrorBodyPresent',
@@ -33,15 +32,7 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'assistantProviderErrorStatusText',
   'assistantProviderErrorType',
   'assistantProviderExecutionDriver',
-  'assistantProviderGatewayOnlyProviderCount',
-  'assistantProviderGatewayOnlyProviders',
-  'assistantProviderGatewayTarget',
   'assistantProviderModel',
-  'assistantProviderName',
-  'assistantProviderPresetId',
-  'assistantProviderRequestUrlOrigin',
-  'assistantProviderRequestUrlPath',
-  'assistantProviderZeroDataRetention',
   'connectionLost',
   'errorCode',
   'interrupted',

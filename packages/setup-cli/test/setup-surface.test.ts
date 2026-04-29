@@ -315,7 +315,6 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
           },
           async promptForMissing(input) {
             promptCalls.push({
-              assistantApiKeyEnv: input.assistantApiKeyEnv,
               channels: [...input.channels],
               env: { ...input.env },
               wearables: [...input.wearables],
@@ -395,7 +394,6 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
     })
     assert.deepEqual(promptCalls, [
       {
-        assistantApiKeyEnv: null,
         channels: [],
         env: {
           DEVICE_SYNC_BASE_URL: ' http://127.0.0.1:9000 ',
@@ -409,9 +407,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
         allowChannelPrompts: true,
         assistant: {
           account: null,
-          apiKeyEnv: null,
           approvalPolicy: null,
-          baseUrl: null,
           codexCommand: null,
           codexHome: null,
           detail:
@@ -421,10 +417,8 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
           modelProvider: null,
           oss: null,
           preset: 'skip',
-          presetId: null,
           profile: null,
           provider: null,
-          providerName: null,
           reasoningEffort: null,
           sandbox: null,
         },
@@ -528,9 +522,7 @@ test('interactive onboard carries Codex wizard choices into runtime prompts and 
 
           return {
             account: null,
-            apiKeyEnv: null,
             approvalPolicy: 'never',
-            baseUrl: null,
             codexCommand: null,
             codexHome: null,
             detail: 'configured',
@@ -541,7 +533,6 @@ test('interactive onboard carries Codex wizard choices into runtime prompts and 
             preset: input.preset,
             profile: null,
             provider: 'codex-cli',
-            providerName: null,
             reasoningEffort: 'medium',
             sandbox: 'danger-full-access',
           }
@@ -554,7 +545,6 @@ test('interactive onboard carries Codex wizard choices into runtime prompts and 
         },
         async promptForMissing(input) {
           promptCalls.push({
-            assistantApiKeyEnv: input.assistantApiKeyEnv,
             channels: [...input.channels],
             env: { ...input.env },
             wearables: [...input.wearables],
@@ -594,7 +584,6 @@ test('interactive onboard carries Codex wizard choices into runtime prompts and 
 
   assert.deepEqual(promptCalls, [
     {
-      assistantApiKeyEnv: null,
       channels: [],
       env: {},
       wearables: [],
@@ -629,9 +618,7 @@ test('interactive onboard lets the wizard switch a local Codex flag back to clou
 
           return {
             account: null,
-            apiKeyEnv: null,
             approvalPolicy: 'never',
-            baseUrl: null,
             codexCommand: null,
             codexHome: null,
             detail: 'configured',
@@ -642,7 +629,6 @@ test('interactive onboard lets the wizard switch a local Codex flag back to clou
             preset: input.preset,
             profile: null,
             provider: 'codex-cli',
-            providerName: null,
             reasoningEffort: 'medium',
             sandbox: 'danger-full-access',
           }
@@ -655,7 +641,6 @@ test('interactive onboard lets the wizard switch a local Codex flag back to clou
         },
         async promptForMissing(input) {
           promptCalls.push({
-            assistantApiKeyEnv: input.assistantApiKeyEnv,
             channels: [...input.channels],
             env: { ...input.env },
             wearables: [...input.wearables],
@@ -695,7 +680,6 @@ test('interactive onboard lets the wizard switch a local Codex flag back to clou
 
   assert.deepEqual(promptCalls, [
     {
-      assistantApiKeyEnv: null,
       channels: [],
       env: {},
       wearables: [],

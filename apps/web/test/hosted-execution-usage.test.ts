@@ -11,9 +11,9 @@ import {
 } from "@/src/lib/hosted-execution/usage";
 
 const BASE_USAGE_RECORD = {
-  apiKeyEnv: "OPENAI_API_KEY",
+  apiKeyEnv: "VERCEL_AI_API_KEY",
   attemptCount: 1,
-  baseUrl: "https://api.example.test/v1",
+  baseUrl: "https://ai-gateway.vercel.sh/v1",
   cacheWriteTokens: 3,
   cachedInputTokens: 12,
   credentialSource: "platform",
@@ -21,14 +21,14 @@ const BASE_USAGE_RECORD = {
   memberId: "member_123",
   occurredAt: "2026-03-29T12:00:00.000Z",
   outputTokens: 45,
-  provider: "openai-compatible",
+  provider: "codex-cli",
   providerMetadataJson: {
     nested: {
       ignored: undefined,
     },
-    provider: "example",
+    provider: "vercel-ai-gateway",
   },
-  providerName: "example",
+  providerName: "vercel-ai-gateway",
   providerRequestId: "req_123",
   providerSessionId: "session_123",
   rawUsageJson: {
@@ -369,7 +369,7 @@ describe("importHostedAiUsageRecords", () => {
             credentialSource: "platform",
             memberId: "member_other",
             occurredAt: "2026-03-29T12:00:00.000Z",
-            provider: "openai-compatible",
+            provider: "codex-cli",
             routeId: "primary",
             schema: "murph.assistant-usage.v1",
             sessionId: "asst_123",
@@ -531,6 +531,7 @@ describe("importHostedAiUsageRecords", () => {
         {
           ...BASE_USAGE_RECORD,
           baseUrl: "https://api.example.test/v1",
+          provider: "unsupported-provider",
           providerName: "example",
           stripeMeterSource: "vercel-ai-gateway",
         },
@@ -665,7 +666,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       memberId: "member_123",
       occurredAt: new Date("2026-03-29T12:00:00.000Z"),
       outputTokens: 5,
-      provider: "openai-compatible",
+      provider: "codex-cli",
       requestedModel: "gpt-5.4-mini",
       servedModel: null,
       stripeMeterAttemptCount: 2,
@@ -770,7 +771,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       memberId: "member_123",
       occurredAt: new Date("2026-03-29T12:00:00.000Z"),
       outputTokens: 5,
-      provider: "openai-compatible",
+      provider: "codex-cli",
       requestedModel: "gpt-5.4-mini",
       servedModel: null,
       stripeCustomerId: "cus_123",
@@ -808,7 +809,7 @@ describe("claimHostedAiUsageStripeMetering", () => {
           memberId: "member_123",
           occurredAt: new Date("2026-03-29T12:00:00.000Z"),
           outputTokens: 5,
-          provider: "openai-compatible",
+          provider: "codex-cli",
           requestedModel: "gpt-5.4-mini",
           servedModel: null,
           stripeCustomerId: "cus_123",

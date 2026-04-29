@@ -1,5 +1,5 @@
 import type { AssistantUserMessageContentPart } from './content-types.js'
-import type { ResolvedAssistantFailoverRoute } from './failover.js'
+import type { ResolvedAssistantProviderRoute } from './provider-route.js'
 import { resolveAssistantProviderTargetCapabilities } from './provider-registry.js'
 import type { AssistantUserMessageContentType } from './providers/types.js'
 
@@ -10,17 +10,17 @@ export function hasAssistantRichUserMessageContent(
 }
 
 export function prioritizeAssistantRoutesForRichUserMessageContent(input: {
-  routes: readonly ResolvedAssistantFailoverRoute[]
+  routes: readonly ResolvedAssistantProviderRoute[]
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined
-}): ResolvedAssistantFailoverRoute[] {
+}): ResolvedAssistantProviderRoute[] {
   const normalized = normalizeAssistantUserMessageContent(input.userMessageContent)
   const routes = [...input.routes]
   if (!hasAssistantRichUserMessageContent(normalized)) {
     return routes
   }
 
-  const richRoutes: ResolvedAssistantFailoverRoute[] = []
-  const textOnlyRoutes: ResolvedAssistantFailoverRoute[] = []
+  const richRoutes: ResolvedAssistantProviderRoute[] = []
+  const textOnlyRoutes: ResolvedAssistantProviderRoute[] = []
 
   for (const route of routes) {
     if (
@@ -45,7 +45,7 @@ export function prioritizeAssistantRoutesForRichUserMessageContent(input: {
 }
 
 export function resolveAssistantRouteUserMessageContent(input: {
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined
 }): AssistantUserMessageContentPart[] | null {
   const normalized = normalizeAssistantUserMessageContent(input.userMessageContent)
@@ -66,7 +66,7 @@ export function resolveAssistantRouteUserMessageContent(input: {
 }
 
 export function assistantRouteSupportsRichUserMessageContent(
-  route: ResolvedAssistantFailoverRoute,
+  route: ResolvedAssistantProviderRoute,
 ): boolean {
   return resolveAssistantProviderTargetCapabilities(
     route.providerOptions,
@@ -74,7 +74,7 @@ export function assistantRouteSupportsRichUserMessageContent(
 }
 
 export function resolveAssistantRouteSupportedUserMessageContentTypes(
-  route: ResolvedAssistantFailoverRoute,
+  route: ResolvedAssistantProviderRoute,
 ): readonly AssistantUserMessageContentType[] {
   return resolveAssistantProviderTargetCapabilities(
     route.providerOptions,
@@ -92,7 +92,7 @@ function normalizeAssistantUserMessageContent(
 }
 
 function routeSupportsAssistantUserMessageContent(input: {
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   userMessageContent: readonly AssistantUserMessageContentPart[]
 }): boolean {
   return hasAssistantRichUserMessageContent(
@@ -101,7 +101,7 @@ function routeSupportsAssistantUserMessageContent(input: {
 }
 
 function filterAssistantRouteUserMessageContent(input: {
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   userMessageContent: readonly AssistantUserMessageContentPart[]
 }): AssistantUserMessageContentPart[] {
   const supportedTypes = new Set(

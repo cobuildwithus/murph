@@ -822,29 +822,8 @@ async function readHostedAiUsageMemberStripeCustomerId(input: {
 function isHostedAiUsageVercelAiGatewayRecord(record: AssistantUsageRecord): boolean {
   const normalizedProviderName = normalizeOptionalString(record.providerName, "providerName");
 
-  if (record.provider === "codex-cli") {
-    return normalizedProviderName?.toLowerCase() === "vercel-ai-gateway";
-  }
-
-  if (record.provider !== "openai-compatible") {
-    return false;
-  }
-
-  if (normalizedProviderName?.toLowerCase() === "vercel-ai-gateway") {
-    return true;
-  }
-
-  const normalizedBaseUrl = normalizeOptionalString(record.baseUrl, "baseUrl");
-  if (!normalizedBaseUrl) {
-    return false;
-  }
-
-  try {
-    const url = new URL(normalizedBaseUrl);
-    return url.protocol === "https:" && url.hostname.toLowerCase() === "ai-gateway.vercel.sh";
-  } catch {
-    return false;
-  }
+  return record.provider === "codex-cli"
+    && normalizedProviderName?.toLowerCase() === "vercel-ai-gateway";
 }
 
 function compareHostedAiUsageField(

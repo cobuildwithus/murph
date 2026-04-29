@@ -27,9 +27,9 @@ afterEach(async () => {
 })
 
 describe('assistant shared helpers', () => {
-  it('normalizes environment strings, OpenAI base URLs, and provider option keys', async () => {
+  it('normalizes environment strings, Vercel Gateway base URLs, and provider option keys', async () => {
     const {
-      isAssistantOpenAIBaseUrl,
+      isAssistantVercelAIGatewayBaseUrl,
       normalizeAssistantProviderOptionKey,
       readAssistantEnvString,
     } = await loadSharedModule()
@@ -45,11 +45,10 @@ describe('assistant shared helpers', () => {
     expect(readAssistantEnvString({ OPENAI_API_KEY: 'secret-token' }, '   ')).toBeNull()
     expect(readAssistantEnvString({}, 'MISSING_KEY')).toBeNull()
 
-    expect(isAssistantOpenAIBaseUrl(' https://api.openai.com/v1 ')).toBe(true)
-    expect(isAssistantOpenAIBaseUrl('https://API.OPENAI.COM/v1/chat/completions')).toBe(true)
-    expect(isAssistantOpenAIBaseUrl('http://api.openai.com/v1')).toBe(false)
-    expect(isAssistantOpenAIBaseUrl('https://example.com/v1')).toBe(false)
-    expect(isAssistantOpenAIBaseUrl('not-a-url')).toBe(false)
+    expect(isAssistantVercelAIGatewayBaseUrl(' https://ai-gateway.vercel.sh/v1 ')).toBe(true)
+    expect(isAssistantVercelAIGatewayBaseUrl('http://ai-gateway.vercel.sh/v1')).toBe(false)
+    expect(isAssistantVercelAIGatewayBaseUrl('https://example.com/v1')).toBe(false)
+    expect(isAssistantVercelAIGatewayBaseUrl('not-a-url')).toBe(false)
 
     expect(normalizeAssistantProviderOptionKey(' Codex app server endpoint ')).toBe(
       'codexAppServerEndpoint',

@@ -9,7 +9,7 @@ import type {
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { serializeAssistantProviderSessionOptions } from "@murphai/operator-config/assistant/provider-config";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
-import type { ResolvedAssistantFailoverRoute } from "../src/assistant/failover.ts";
+import type { ResolvedAssistantProviderRoute } from "../src/assistant/provider-route.ts";
 import type { AssistantProviderUsage } from "../src/assistant/providers/types.ts";
 import type {
   AssistantTurnSharedPlan,
@@ -126,7 +126,6 @@ import {
 import {
   resolveAssistantTurnRoutes,
   resolveAssistantTurnRoutesForMessage,
-  selectAssistantTurnRouteOverride,
 } from "../src/assistant/service-turn-routes.ts";
 import { persistPendingAssistantUsageEvent } from "../src/assistant/service-usage.ts";
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
@@ -425,93 +424,6 @@ describe("assistant service turn routes", () => {
     ).rejects.toThrow("session store exploded");
   });
 
-  it("returns route overrides only for non-primary selections", () => {
-    const primary = createRoute({ routeId: "route-primary" });
-    const backup = createRoute({
-      provider: "codex-cli",
-      providerOptions: createProviderOptions({
-        approvalPolicy: "never",
-        model: "gpt-5-codex",
-        modelProvider: "vercel-ai-gateway",
-        profile: "ops",
-        sandbox: "danger-full-access",
-      }),
-      routeId: "route-backup",
-    });
-
-    expect(
-      selectAssistantTurnRouteOverride(
-        [primary, backup],
-        (route) => route.routeId === "missing"
-      )
-    ).toEqual({
-      providerOverride: null,
-      route: null,
-    });
-
-    expect(
-      selectAssistantTurnRouteOverride(
-        [primary, backup],
-        (route) => route.routeId === primary.routeId
-      )
-    ).toEqual({
-      providerOverride: null,
-      route: primary,
-    });
-
-    expect(
-      selectAssistantTurnRouteOverride(
-        [primary, backup],
-        (route) => route.routeId === backup.routeId
-      )
-    ).toEqual({
-      providerOverride: {
-        approvalPolicy: backup.providerOptions.approvalPolicy ?? null,
-        codexCommand: undefined,
-        codexHome: backup.providerOptions.codexHome ?? null,
-        model: backup.providerOptions.model ?? null,
-        modelProvider: backup.providerOptions.modelProvider ?? null,
-        oss: false,
-        profile: backup.providerOptions.profile ?? null,
-        provider: "codex-cli",
-        reasoningEffort: backup.providerOptions.reasoningEffort ?? null,
-        sandbox: backup.providerOptions.sandbox ?? null,
-      },
-      route: backup,
-    });
-
-    const nullableBackup = createRoute({
-      providerOptions: {
-        approvalPolicy: null,
-        model: null,
-        modelProvider: null,
-        reasoningEffort: null,
-        sandbox: null,
-      },
-      routeId: "route-nullable",
-    });
-
-    expect(
-      selectAssistantTurnRouteOverride(
-        [primary, nullableBackup],
-        (route) => route.routeId === nullableBackup.routeId
-      )
-    ).toEqual({
-      providerOverride: {
-        approvalPolicy: null,
-        codexCommand: undefined,
-        codexHome: null,
-        model: null,
-        modelProvider: null,
-        oss: false,
-        profile: null,
-        provider: "codex-cli",
-        reasoningEffort: "medium",
-        sandbox: null,
-      },
-      route: nullableBackup,
-    });
-  });
 });
 
 describe("assistant pending usage seam", () => {
@@ -1117,7 +1029,7 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
-  it("finalizes receipts, settles no-command onboarding completion, and marks first contact only for injected sent turns", async () => {
+  it("finalizes receipts, settles fallback onboarding completion, and marks first contact only for injected sent turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
 
@@ -1314,22 +1226,6 @@ describe("assistant execution context normalization", () => {
             reasoningEffort: "medium",
             sandbox: "danger-full-access",
           },
-          failoverRoutes: [
-            {
-              approvalPolicy: null,
-              codexCommand: null,
-              codexHome: null,
-              cooldownMs: null,
-              model: "gpt-5.5-backup",
-              modelProvider: "vercel-ai-gateway",
-              name: null,
-              oss: false,
-              profile: null,
-              provider: "codex-cli",
-              reasoningEffort: null,
-              sandbox: null,
-            },
-          ],
           identityId: "identity-123",
           selfDeliveryTargets: null,
         },
@@ -1343,22 +1239,6 @@ describe("assistant execution context normalization", () => {
       }),
     ).toEqual({
       backend: hostedDefaultTarget,
-      failoverRoutes: [
-        {
-          approvalPolicy: null,
-          codexCommand: null,
-          codexHome: null,
-          cooldownMs: null,
-          model: "gpt-5.5-backup",
-          modelProvider: "vercel-ai-gateway",
-          name: null,
-          oss: false,
-          profile: null,
-          provider: "codex-cli",
-          reasoningEffort: null,
-          sandbox: null,
-        },
-      ],
       identityId: "identity-123",
       selfDeliveryTargets: null,
     });
@@ -1787,13 +1667,12 @@ function createProviderOptions(
 }
 
 function createRoute(input?: {
-  provider?: ResolvedAssistantFailoverRoute["provider"];
+  provider?: ResolvedAssistantProviderRoute["provider"];
   providerOptions?: Partial<AssistantProviderSessionOptions>;
   routeId?: string;
-}): ResolvedAssistantFailoverRoute {
+}): ResolvedAssistantProviderRoute {
   return {
     codexCommand: null,
-    cooldownMs: 60_000,
     label: "Primary",
     provider: input?.provider ?? "codex-cli",
     providerOptions: createProviderOptions(input?.providerOptions),
@@ -1921,7 +1800,7 @@ function createProviderResult(input?: {
   providerSessionId?: string | null;
   rawEvents?: unknown[];
   response?: string;
-  route?: ResolvedAssistantFailoverRoute;
+  route?: ResolvedAssistantProviderRoute;
   session?: AssistantSession;
   usage?: AssistantProviderUsage | null;
 }): ExecutedAssistantProviderTurnResult {

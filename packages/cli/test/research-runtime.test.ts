@@ -199,7 +199,6 @@ test('runDeepthinkPrompt targets GPT Pro defaults, derives a title from the prom
         },
         identityId: null,
         selfDeliveryTargets: null,
-        failoverRoutes: null,
         account: {
           source: 'codex-auth-json',
           kind: 'account',
@@ -283,7 +282,6 @@ test('runDeepthinkPrompt skips warnings when the saved assistant account is Pro'
         },
         identityId: null,
         selfDeliveryTargets: null,
-        failoverRoutes: null,
         account: {
           source: 'codex-auth-json',
           kind: 'account',
@@ -328,7 +326,6 @@ test('runResearchPrompt warns on saved Free-tier accounts', async () => {
         },
         identityId: null,
         selfDeliveryTargets: null,
-        failoverRoutes: null,
         account: {
           source: 'codex-auth-json',
           kind: 'account',

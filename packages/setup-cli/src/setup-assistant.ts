@@ -16,7 +16,6 @@ import {
   type SetupCommandOptions,
   type SetupConfiguredAssistant,
 } from '@murphai/operator-config/setup-cli-contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.5'
@@ -24,14 +23,6 @@ export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_CODEX_REASONING_EFFORT = 'medium'
 const DEFAULT_SETUP_SANDBOX = 'danger-full-access' as const
 const DEFAULT_SETUP_APPROVAL_POLICY = 'never' as const
-
-type LegacyOpenAICompatibleSetupOptions = {
-  assistantApiKeyEnv?: unknown
-  assistantBaseUrl?: unknown
-  assistantProviderName?: unknown
-  assistantProviderPreset?: unknown
-  assistantZeroDataRetention?: unknown
-}
 
 type SetupAssistantOptionSubset = Pick<
   SetupCommandOptions,
@@ -43,7 +34,7 @@ type SetupAssistantOptionSubset = Pick<
   | 'assistantPreset'
   | 'assistantProfile'
   | 'assistantReasoningEffort'
-> & LegacyOpenAICompatibleSetupOptions
+>
 
 export interface ResolveSetupAssistantInput {
   allowPrompt: boolean
@@ -84,16 +75,13 @@ export function hasExplicitSetupAssistantOptions(
       options.assistantCodexHome ||
       options.assistantProfile ||
       options.assistantReasoningEffort ||
-      options.assistantOss !== undefined ||
-      hasLegacyOpenAICompatibleSetupOptions(options),
+      options.assistantOss !== undefined,
   )
 }
 
 export function inferSetupAssistantPresetFromOptions(
   options: Partial<SetupAssistantOptionSubset>,
 ): SetupAssistantPreset | null {
-  assertNoLegacyOpenAICompatibleSetupOptions(options)
-
   if (options.assistantPreset) {
     return options.assistantPreset
   }
@@ -125,8 +113,6 @@ export function createSetupAssistantResolver(
 
   return {
     async resolve(resolutionInput) {
-      assertNoLegacyOpenAICompatibleSetupOptions(resolutionInput.options)
-
       let resolvedAssistant: SetupConfiguredAssistant
       switch (resolutionInput.preset) {
         case 'skip':
@@ -136,10 +122,6 @@ export function createSetupAssistantResolver(
             provider: null,
             model: null,
             modelProvider: null,
-            baseUrl: null,
-            apiKeyEnv: null,
-            presetId: null,
-            providerName: null,
             codexCommand: null,
             codexHome: null,
             profile: null,
@@ -191,10 +173,6 @@ export function createSetupAssistantResolver(
             provider: 'codex-cli',
             model,
             modelProvider,
-            baseUrl: null,
-            apiKeyEnv: null,
-            presetId: null,
-            providerName: null,
             codexCommand:
               normalizeNullableString(
                 resolutionInput.options.assistantCodexCommand,
@@ -311,34 +289,4 @@ function appendDetectedAssistantAccountDetail(
   }
 
   return `${detail} Detected ${label} from local Codex credentials.`
-}
-
-function hasLegacyOpenAICompatibleSetupOptions(
-  options: unknown,
-): boolean {
-  const candidate =
-    typeof options === 'object' && options !== null
-      ? (options as Partial<LegacyOpenAICompatibleSetupOptions>)
-      : {}
-
-  return (
-    candidate.assistantProviderPreset !== undefined ||
-    candidate.assistantBaseUrl !== undefined ||
-    candidate.assistantApiKeyEnv !== undefined ||
-    candidate.assistantProviderName !== undefined ||
-    candidate.assistantZeroDataRetention !== undefined
-  )
-}
-
-function assertNoLegacyOpenAICompatibleSetupOptions(
-  options: unknown,
-): void {
-  if (!hasLegacyOpenAICompatibleSetupOptions(options)) {
-    return
-  }
-
-  throw new VaultCliError(
-    'invalid_option',
-    'OpenAI-compatible assistant setup options have been removed. Use Codex setup options such as --assistantModel, --assistantModelProvider, --assistantCodexCommand, --assistantProfile, --assistantReasoningEffort, or --assistantOss.',
-  )
 }

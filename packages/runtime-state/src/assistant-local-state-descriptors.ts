@@ -87,10 +87,6 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     "Assistant runtime automation execution state that must move with hosted continuity.",
   ),
   definePortableAssistantFile(
-    ".runtime/operations/assistant/failover.json",
-    "Assistant provider failover cooldown state that must survive hosted resume.",
-  ),
-  definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-provider-cleanup.json",
     "Hosted provider-visible cleanup retry state that must move with hosted post-commit finalization.",
   ),
@@ -177,10 +173,6 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/issues/pending",
     "Assistant anonymized pending runtime issue records that must move with hosted issue export continuity.",
-  ),
-  defineMachineLocalAssistantSubtree(
-    ".runtime/operations/assistant/provider-route-recovery",
-    "Assistant provider-route recovery state is machine-local operational residue.",
   ),
   defineMachineLocalAssistantSubtree(
     ".runtime/operations/assistant/quarantine",

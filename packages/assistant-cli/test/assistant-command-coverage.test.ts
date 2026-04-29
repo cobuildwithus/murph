@@ -283,6 +283,8 @@ beforeEach(() => {
 test('assistant command registration exposes the owned subcommands and root aliases', () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
+  const ask = readCommand(assistant.commands, 'ask')
+  const chat = readCommand(assistant.commands, 'chat')
   const selfTarget = readCommandGroup(assistant.commands, 'self-target')
   const session = readCommandGroup(assistant.commands, 'session')
   const run = readCommand(commands, 'run')
@@ -302,6 +304,10 @@ test('assistant command registration exposes the owned subcommands and root alia
   assert.deepEqual([...selfTarget.commands.keys()], ['list', 'show', 'set', 'clear'])
   assert.deepEqual([...session.commands.keys()], ['list', 'show'])
   assert.equal(Object.hasOwn(run.options?.shape ?? {}, 'skipDaemon'), false)
+  assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'provider'), false)
+  assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'oss'), false)
+  assert.equal(Object.hasOwn(chat.options?.shape ?? {}, 'provider'), false)
+  assert.equal(Object.hasOwn(chat.options?.shape ?? {}, 'oss'), false)
   assert.equal(readCommand(assistant.commands, 'chat').outputPolicy, 'agent-only')
   assert.equal(readCommand(commands, 'chat').description?.includes('assistant chat'), true)
   assert.equal(readCommand(commands, 'run').description?.includes('assistant run'), true)
@@ -400,10 +406,8 @@ test('assistant ask resolves saved delivery defaults and forwards Codex override
       deliveryTarget: 'chat_original',
       identity: 'identity_cli',
       model: 'gpt-5.4',
-      oss: true,
       participant: 'participant_cli',
       profile: 'ops',
-      provider: 'codex-cli',
       sandbox: 'workspace-write',
       session: undefined,
       thread: 'thread_cli',
@@ -443,11 +447,9 @@ test('assistant ask resolves saved delivery defaults and forwards Codex override
     identityId: 'identity_saved',
     model: 'gpt-5.4',
     modelProvider: undefined,
-    oss: true,
     participantId: 'participant_saved',
     profile: 'ops',
     prompt: 'hello from command coverage',
-    provider: 'codex-cli',
     reasoningEffort: undefined,
     sandbox: 'workspace-write',
     sessionId: undefined,

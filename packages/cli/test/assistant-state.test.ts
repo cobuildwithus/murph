@@ -1442,20 +1442,13 @@ test('assistant status includes runtime-budget quarantine details on the same re
   )
 })
 
-test('legacy OpenAI-compatible assistant targets fail closed before session secret sidecars are written', async () => {
+test('unsupported assistant targets fail closed before session secret sidecars are written', async () => {
   assert.throws(
     () =>
       createAssistantBackendTarget({
-        provider: 'openai-compatible',
+        provider: 'unsupported-provider',
         model: 'gpt-4.1-mini',
         reasoningEffort: null,
-        baseUrl: 'https://api.example.test/v1',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        providerName: 'example',
-        headers: {
-          Authorization: 'Bearer session-secret-token',
-          'X-Visible': 'public-header',
-        },
       }),
     (error) => {
       assert.equal((error as { code?: unknown }).code, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')

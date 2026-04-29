@@ -150,9 +150,6 @@ Murph setup flags are forwarded automatically, including:
   --whisperModel <model>
   --assistantPreset <preset>
   --assistantModel <model>
-  --assistantBaseUrl <url>
-  --assistantApiKeyEnv <env_var>
-  --assistantProviderName <label>
   --assistantCodexCommand <path>
   --assistantProfile <name>
   --assistantReasoningEffort <level>

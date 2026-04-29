@@ -166,8 +166,8 @@ test("hosted runtime delegated billing skips lookup when the request is not usin
       billingPort,
       forwardedEnv: {
         ...HOSTED_STRIPE_METER_BILLING_ENV,
-        HOSTED_ASSISTANT_BASE_URL: "https://api.openai.com/v1",
-        HOSTED_ASSISTANT_PROVIDER: "openai-compatible",
+        HOSTED_ASSISTANT_BASE_URL: "https://api.example.test/v1",
+        HOSTED_ASSISTANT_PROVIDER: "unsupported-provider",
       },
       userEnv: {},
       wake: createHostedRuntimeTestWake(),

@@ -10,7 +10,6 @@ import {
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
-  HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
   VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
@@ -62,7 +61,6 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
-  HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
 ] as const;
 
 export interface HostedCodexRuntimeEnvironmentInput {
@@ -82,11 +80,10 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const provider = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER);
 
   if (provider !== VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id) {
-    return {
-      codexConfigPath: null,
-      codexHome: null,
-      runtimeEnv: { ...input.runtimeEnv },
-    };
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id}.`,
+    );
   }
 
   const providerConfig = VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
@@ -286,19 +283,6 @@ function readTextInput(params) {
     .join("\\n\\n");
 }
 
-function readResponsesInputItems(params) {
-  const text = readTextInput(params);
-  return text
-    ? [{
-        role: "user",
-        content: [{
-          type: "input_text",
-          text,
-        }],
-      }]
-    : [];
-}
-
 function extractResponseText(payload) {
   const outputs = payload && Array.isArray(payload.output) ? payload.output : [];
   for (const output of outputs) {
@@ -313,10 +297,10 @@ function extractResponseText(payload) {
   throw new Error("assistant provider stub response did not contain output text");
 }
 
-async function fetchAssistantResponse(input) {
+async function fetchAssistantResponse(prompt) {
   const response = await fetch(new URL("responses", assistantProviderBaseUrl.replace(/\\/+$/u, "") + "/"), {
     body: JSON.stringify({
-      input,
+      input: prompt,
       model: "hosted-local-codex-shim",
     }),
     headers: {
@@ -340,7 +324,8 @@ async function completeTurn(turn) {
   turn.completed = true;
 
   try {
-    const text = await fetchAssistantResponse(turn.inputItems);
+    const prompt = turn.prompts.filter(Boolean).join("\\n\\n");
+    const text = await fetchAssistantResponse(prompt);
     writeRpc({
       type: "item.completed",
       item: {
@@ -425,7 +410,7 @@ async function handleRpc(message) {
     const turnId = "turn_hosted_local_" + (++turnCounter);
     const turn = {
       completed: false,
-      inputItems: readResponsesInputItems(params),
+      prompts: [readTextInput(params)],
       threadId,
       turnId,
     };
@@ -455,7 +440,7 @@ async function handleRpc(message) {
       writeRpcError(id, "hosted local Codex shim does not have an active turn");
       return;
     }
-    activeTurn.inputItems.push(...readResponsesInputItems(params));
+    activeTurn.prompts.push(readTextInput(params));
     writeRpc({
       id,
       result: {

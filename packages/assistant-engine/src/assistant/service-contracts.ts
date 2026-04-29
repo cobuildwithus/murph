@@ -6,7 +6,6 @@ import type {
   AssistantDeliveryError,
   AssistantOnboardingCompletionReason,
   AssistantDeliverySource,
-  AssistantProviderFailoverRoute,
   AssistantProviderSessionOptions,
   AssistantSandbox,
   AssistantSession,
@@ -38,8 +37,8 @@ import type {
   AssistantProviderContinuation,
 } from './active-turn-input-journal.js'
 import type {
-  ResolvedAssistantFailoverRoute,
-} from './failover.js'
+  ResolvedAssistantProviderRoute,
+} from './provider-route.js'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
 
@@ -48,28 +47,20 @@ export interface AssistantSessionResolutionFields {
   alias?: string | null
   allowBindingRebind?: boolean
   approvalPolicy?: AssistantApprovalPolicy | null
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
   channel?: string | null
   codexHome?: string | null
   deliveryKind?: AssistantBindingDeliveryKind | null
   conversation?: ConversationRef | null
-  gatewayOnlyProviders?: readonly string[] | null
-  headers?: Record<string, string> | null
   identityId?: string | null
   maxSessionAgeMs?: number | null
   model?: string | null
   modelProvider?: string | null
   oss?: boolean
   participantId?: string | null
-  presetId?: string | null
   profile?: string | null
   provider?: AssistantChatProvider
-  providerName?: string | null
   reasoningEffort?: string | null
-  webSearch?: string | null
   sandbox?: AssistantSandbox | null
-  zeroDataRetention?: boolean | null
   sessionId?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
@@ -93,7 +84,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliveryTarget?: string | null
   executionContext?: AssistantExecutionContext | null
   expectedActiveTurnId?: string | null
-  failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
   includeEarlySessionOnboarding?: boolean
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -154,7 +144,7 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   onboardingGuidanceInjected?: boolean
   providerContinuation: AssistantProviderContinuation
   providerOptions: AssistantProviderSessionOptions
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   session: AssistantSession
   usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
@@ -163,15 +153,15 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
 export interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
-  primaryRoute: ResolvedAssistantFailoverRoute | null
-  routes: readonly ResolvedAssistantFailoverRoute[]
+  primaryRoute: ResolvedAssistantProviderRoute | null
+  routes: readonly ResolvedAssistantProviderRoute[]
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }
 
 export interface AssistantProviderAttemptPlan {
   attemptCount: number
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
 }
@@ -193,7 +183,7 @@ export type AssistantProviderTurnRecoveryOutcome =
       kind: 'failed_terminal'
       error: unknown
       providerContinuation: AssistantProviderContinuation
-      route?: ResolvedAssistantFailoverRoute | null
+      route?: ResolvedAssistantProviderRoute | null
       session: AssistantSession
     }
   | {

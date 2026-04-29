@@ -13,7 +13,7 @@ import {
   executeProviderTurnWithRecovery,
   type AssistantProviderTurnContinuityProfile,
 } from './provider-turn-runner.js'
-import type { ResolvedAssistantFailoverRoute } from './failover.js'
+import type { ResolvedAssistantProviderRoute } from './provider-route.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
@@ -99,7 +99,6 @@ export interface AssistantNotificationInput
       | 'deliverySubject'
       | 'deliveryTarget'
       | 'executionContext'
-      | 'failoverRoutes'
       | 'onProviderEvent'
       | 'onTraceEvent'
       | 'operatorAuthority'
@@ -361,7 +360,7 @@ function isAssistantNotificationDetailsRecord(
 
 function buildAssistantNotificationObservabilityDetails(input: {
   input: AssistantMessageInput
-  route: ResolvedAssistantFailoverRoute | null
+  route: ResolvedAssistantProviderRoute | null
   session: AssistantSession
   stage: 'delivery' | 'provider'
 }): Record<string, unknown> {
@@ -369,9 +368,14 @@ function buildAssistantNotificationObservabilityDetails(input: {
   const providerOptions = input.route?.providerOptions ?? input.session.providerOptions
   const bindingDelivery = input.session.binding.delivery
   const linqBaseUrl = readAssistantNotificationUrlDetails(process.env.LINQ_API_BASE_URL)
-  const providerBaseUrl = readAssistantNotificationUrlDetails(providerOptions.baseUrl)
+  const providerBaseUrl = readAssistantNotificationUrlDetails(
+    readAssistantNotificationStringProperty(providerOptions, 'baseUrl'),
+  )
   const gatewayOnlyProviders = summarizeAssistantNotificationGatewayOnlyProviders(
-    providerOptions.gatewayOnlyProviders,
+    readAssistantNotificationStringListProperty(
+      providerOptions,
+      'gatewayOnlyProviders',
+    ),
   )
 
   return {
@@ -441,40 +445,74 @@ function readAssistantNotificationUrlDetails(value: string | null | undefined): 
   }
 }
 
+function readAssistantNotificationStringProperty(
+  value: object,
+  key: string,
+): string | null {
+  const candidate: unknown = Reflect.get(value, key)
+  return typeof candidate === 'string'
+    ? normalizeNullableString(candidate)
+    : null
+}
+
+function readAssistantNotificationStringListProperty(
+  value: object,
+  key: string,
+): readonly string[] | null {
+  const candidate: unknown = Reflect.get(value, key)
+  if (!Array.isArray(candidate)) {
+    return null
+  }
+
+  return candidate.filter((entry): entry is string => typeof entry === 'string')
+}
+
 function buildAssistantNotificationMessageInput(
   input: AssistantNotificationInput,
 ): AssistantMessageInput {
-  const {
-    deliveryDedupeToken: _deliveryDedupeToken,
-    firstContactPolicy: _firstContactPolicy,
-    instructions: _instructions,
-    responsePolicy: _responsePolicy,
-    ...sessionInput
-  } = input
-
   return {
-    ...sessionInput,
     abortSignal: input.abortSignal,
+    actorId: input.actorId,
+    alias: input.alias,
+    allowBindingRebind: input.allowBindingRebind,
+    approvalPolicy: input.approvalPolicy,
+    channel: input.channel,
     codexCommand: input.codexCommand,
+    codexHome: input.codexHome,
+    conversation: input.conversation,
     deliverResponse: true,
     deliveryDispatchMode: input.deliveryDispatchMode,
+    deliveryKind: input.deliveryKind,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId ?? null,
     deliverySource: input.deliverySource ?? null,
     deliverySubject: input.deliverySubject ?? null,
     deliveryTarget: input.deliveryTarget ?? null,
     executionContext: input.executionContext,
-    failoverRoutes: input.failoverRoutes,
+    identityId: input.identityId,
     includeEarlySessionOnboarding: false,
+    maxSessionAgeMs: input.maxSessionAgeMs,
+    model: input.model,
+    modelProvider: input.modelProvider,
+    oss: input.oss,
     onProviderEvent: input.onProviderEvent ?? null,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
+    participantId: input.participantId,
     persistUserPromptOnFailure: false,
+    profile: input.profile,
     prompt: normalizeRequiredText(input.instructions, 'instructions'),
+    provider: input.provider,
     receiptMetadata: null,
+    reasoningEffort: input.reasoningEffort,
+    sandbox: input.sandbox,
+    sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
+    threadId: input.threadId,
+    threadIsDirect: input.threadIsDirect,
     turnTrigger: input.turnTrigger ?? 'automation-cron',
     userMessageContent: null,
+    vault: input.vault,
     workingDirectory: input.workingDirectory ?? input.vault,
   }
 }

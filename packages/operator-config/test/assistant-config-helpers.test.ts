@@ -26,9 +26,7 @@ import {
   resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
-  shouldUseAssistantOpenAIResponsesApi,
   supportsAssistantReasoningEffort,
-  supportsAssistantZeroDataRetention,
 } from '../src/assistant/provider-config.ts'
 import {
   isSensitiveAssistantHeader,
@@ -105,15 +103,12 @@ test('assistant provider config helpers infer, merge, compact, and serialize Cod
     compactAssistantProviderConfigInput({
       provider: 'codex-cli',
       modelProvider: 'vercel-ai-gateway',
-      baseUrl: null,
-      apiKeyEnv: undefined,
     }),
     {
       provider: 'codex-cli',
       modelProvider: 'vercel-ai-gateway',
     },
   )
-
   const mergedCodex = mergeAssistantProviderConfigsForProvider(
     'codex-cli',
     {
@@ -137,8 +132,6 @@ test('assistant provider config helpers infer, merge, compact, and serialize Cod
       approvalPolicy: 'never',
       reasoningEffort: 'low',
       sandbox: 'danger-full-access',
-      webSearch: null,
-      zeroDataRetention: null,
     },
     target: {
       kind: 'codex-cli',
@@ -188,35 +181,24 @@ test('assistant provider config helpers infer, merge, compact, and serialize Cod
   })
   assert.deepEqual(serializeAssistantProviderOperatorDefaults(mergedCodex), {
     approvalPolicy: 'never',
-    apiKeyEnv: null,
-    baseUrl: null,
     codexCommand: 'codex',
     codexHome: '/tmp/home',
-    headers: null,
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
     modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: true,
-    presetId: null,
     profile: 'default',
-    providerName: null,
     reasoningEffort: 'low',
     sandbox: 'danger-full-access',
-    webSearch: null,
-    zeroDataRetention: null,
   })
-  assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedCodex), false)
   assert.equal(supportsAssistantReasoningEffort(mergedCodex), true)
-  assert.equal(supportsAssistantZeroDataRetention(mergedCodex), false)
 
   assert.throws(
     () =>
       normalizeAssistantProviderConfig({
-        provider: 'openai-compatible',
-        baseUrl: 'https://api.openai.com/v1',
-        presetId: 'openai',
+        provider: 'unsupported-provider',
       }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
+    /Assistant runtime targets must use Codex App Server/u,
   )
 })
 

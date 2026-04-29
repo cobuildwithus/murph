@@ -225,7 +225,6 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         }),
       })
       envOverrides = await runtimeEnv.promptForMissing({
-        assistantApiKeyEnv: null,
         channels: selectedChannels,
         env: currentEnv,
         helpText: publicUrlHelpText,

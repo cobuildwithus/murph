@@ -975,7 +975,6 @@ describe('assistant product small seams', () => {
       outboxDrains: 0,
       outboxRetries: 0,
       providerAttempts: 0,
-      providerFailovers: 0,
       providerFailures: 0,
       turnsCompleted: 0,
       turnsDeferred: 0,

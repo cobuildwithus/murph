@@ -154,10 +154,10 @@ describe('assistant session secret sidecars', () => {
     expect(merged).toBe(session)
   })
 
-  it('fails closed before legacy OpenAI-compatible sessions can be secret-merged', () => {
+  it('fails closed before unsupported sessions can be secret-merged', () => {
     expect(() =>
       parseAssistantSessionRecord(createLegacyOpenAiSessionRecord()),
-    ).toThrowError(/OpenAI-compatible assistant runtimes are no longer supported/u)
+    ).toThrowError()
   })
 
   it('does not apply mismatched legacy sidecars to Codex sessions', () => {
@@ -468,7 +468,7 @@ function createLegacyOpenAiSessionRecord() {
     schema: 'murph.assistant-session.v1',
     sessionId: 'session-alpha',
     target: {
-      adapter: 'openai-compatible',
+      adapter: 'unsupported-provider',
       apiKeyEnv: 'OPENAI_API_KEY',
       endpoint: 'https://api.example.com/v1',
       headers: {
@@ -477,7 +477,7 @@ function createLegacyOpenAiSessionRecord() {
         'X-Trace': 'trace-123',
       },
       model: 'gpt-5.4',
-      providerName: 'murph-openai',
+      providerName: 'murph-provider',
       reasoningEffort: 'medium',
     },
     resumeState: null,

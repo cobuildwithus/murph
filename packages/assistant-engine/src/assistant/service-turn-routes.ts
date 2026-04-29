@@ -2,7 +2,7 @@ import {
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import type { ResolvedAssistantFailoverRoute } from './failover.js'
+import type { ResolvedAssistantProviderRoute } from './provider-route.js'
 import {
   compactAssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -19,25 +19,11 @@ import {
 } from './store.js'
 import { resolveAssistantExecutionPlan } from './execution-plan.js'
 
-export type AssistantTurnRouteOverride = Pick<
-  AssistantMessageInput,
-  | 'approvalPolicy'
-  | 'codexCommand'
-  | 'codexHome'
-  | 'model'
-  | 'modelProvider'
-  | 'oss'
-  | 'profile'
-  | 'provider'
-  | 'reasoningEffort'
-  | 'sandbox'
->
-
 export function resolveAssistantTurnRoutes(
   input: AssistantMessageInput,
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
-): ResolvedAssistantFailoverRoute[] {
+): ResolvedAssistantProviderRoute[] {
   return resolveAssistantExecutionPlan({
     defaults,
     override: compactAssistantProviderConfigInput(input),
@@ -50,7 +36,7 @@ export async function resolveAssistantTurnRoutesForMessage(
   input: AssistantMessageInput,
   defaults: AssistantOperatorDefaults | null,
   boundaryDefaultTarget: AssistantModelTarget | null = null,
-): Promise<ResolvedAssistantFailoverRoute[]> {
+): Promise<ResolvedAssistantProviderRoute[]> {
   const sessionInput = buildResolveAssistantSessionInput(
     input,
     defaults,
@@ -73,45 +59,5 @@ export async function resolveAssistantTurnRoutesForMessage(
       defaults,
       override: compactAssistantProviderConfigInput(input),
     }).routes
-  }
-}
-
-export function selectAssistantTurnRouteOverride(
-  routes: readonly ResolvedAssistantFailoverRoute[],
-  predicate: (route: ResolvedAssistantFailoverRoute) => boolean,
-): {
-  providerOverride: AssistantTurnRouteOverride | null
-  route: ResolvedAssistantFailoverRoute | null
-} {
-  const selectedRoute = routes.find(predicate) ?? null
-  if (!selectedRoute) {
-    return {
-      providerOverride: null,
-      route: null,
-    }
-  }
-
-  const primaryRoute = routes[0] ?? null
-  if (primaryRoute === selectedRoute) {
-    return {
-      providerOverride: null,
-      route: selectedRoute,
-    }
-  }
-
-  return {
-    providerOverride: {
-      approvalPolicy: selectedRoute.providerOptions.approvalPolicy ?? null,
-      codexCommand: selectedRoute.codexCommand ?? undefined,
-      codexHome: selectedRoute.providerOptions.codexHome ?? null,
-      model: selectedRoute.providerOptions.model ?? null,
-      modelProvider: selectedRoute.providerOptions.modelProvider ?? null,
-      oss: selectedRoute.providerOptions.oss,
-      profile: selectedRoute.providerOptions.profile ?? null,
-      provider: selectedRoute.provider,
-      reasoningEffort: selectedRoute.providerOptions.reasoningEffort ?? null,
-      sandbox: selectedRoute.providerOptions.sandbox ?? null,
-    },
-    route: selectedRoute,
   }
 }

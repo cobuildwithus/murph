@@ -324,12 +324,12 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
   assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 0)
 })
 
-test('hosted assistant bootstrap rejects removed OpenAI-compatible hosted provider aliases', async () => {
+test('hosted assistant bootstrap rejects unsupported hosted provider aliases', async () => {
   const moduleWithProfile = await loadHostedAssistantModule({
     readOperatorConfigResult: null,
   })
 
-  for (const provider of ['openai', 'openrouter', 'custom', 'codex-cli', 'not-a-provider']) {
+  for (const provider of ['codex-cli', 'not-a-provider']) {
     await assert.rejects(
       () =>
         moduleWithProfile.ensureHostedAssistantOperatorDefaults({

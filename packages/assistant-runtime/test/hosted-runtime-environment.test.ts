@@ -392,7 +392,6 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         CODEX_HOME: "/tmp/forwarded-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
-        HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
         NODE_OPTIONS: "--require /tmp/injected.js",
         PATH: "/tmp/custom-bin",
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
@@ -418,7 +417,6 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         CODEX_HOME: "/tmp/user-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://user-legacy-provider.example.test/v1",
-        HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
         NODE_OPTIONS: "--require /tmp/user-injected.js",
         PATH: "/tmp/user-bin",
@@ -619,7 +617,6 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
       "CUSTOM_HOSTED_ENV",
       "HOSTED_ASSISTANT_BASE_URL",
       "HOSTED_ASSISTANT_PROVIDER_NAME",
-      "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
       "HOSTED_EXECUTION_CONTROL_TOKEN",
       "MURPH_HOSTED_RUNTIME_PROCESS",
       "MUTATED_DURING_HOSTED_ENV",
@@ -633,7 +630,6 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
   process.env.AMBIENT_CHANNEL_SECRET = "ambient-secret";
   process.env.HOSTED_ASSISTANT_BASE_URL = "https://legacy-provider.example.test/v1";
   process.env.HOSTED_ASSISTANT_PROVIDER_NAME = "legacy-provider";
-  process.env.HOSTED_ASSISTANT_ZERO_DATA_RETENTION = "true";
   process.env.HOSTED_EXECUTION_CONTROL_TOKEN = "control-secret";
   process.env.PATH = "/usr/bin";
   process.env.HOME = "/tmp/original-home";
@@ -657,7 +653,6 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
         assert.equal(process.env.AMBIENT_CHANNEL_SECRET, undefined);
         assert.equal(process.env.HOSTED_ASSISTANT_BASE_URL, undefined);
         assert.equal(process.env.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
-        assert.equal(process.env.HOSTED_ASSISTANT_ZERO_DATA_RETENTION, undefined);
         assert.equal(process.env.HOSTED_EXECUTION_CONTROL_TOKEN, undefined);
         assert.equal(process.env.CUSTOM_HOSTED_ENV, "runtime-value");
         assert.equal(process.env.HOME, "/tmp/hosted-home");
@@ -675,7 +670,6 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
       "https://legacy-provider.example.test/v1",
     );
     assert.equal(process.env.HOSTED_ASSISTANT_PROVIDER_NAME, "legacy-provider");
-    assert.equal(process.env.HOSTED_ASSISTANT_ZERO_DATA_RETENTION, "true");
     assert.equal(process.env.HOSTED_EXECUTION_CONTROL_TOKEN, "control-secret");
     assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);
     assert.equal(process.env.HOME, "/tmp/original-home");

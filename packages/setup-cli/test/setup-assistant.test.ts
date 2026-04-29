@@ -81,16 +81,9 @@ test('setup assistant option normalization infers Codex presets and rejects lega
     'skip',
   )
   assert.equal(inferSetupAssistantPresetFromOptions({}), null)
-  assert.throws(
-    () =>
-      inferSetupAssistantPresetFromOptions({
-        assistantBaseUrl: 'https://example.test/v1',
-      }),
-    /OpenAI-compatible assistant setup options have been removed/u,
-  )
 })
 
-test('setup assistant defaults round-trip Codex defaults and quarantine legacy saved backends', () => {
+test('setup assistant defaults round-trip Codex defaults', () => {
   const codexDefaults: AssistantOperatorDefaults = {
     backend: {
       adapter: 'codex-cli',
@@ -105,7 +98,6 @@ test('setup assistant defaults round-trip Codex defaults and quarantine legacy s
       sandbox: 'danger-full-access',
     },
     identityId: null,
-    failoverRoutes: null,
     account: {
       source: 'codex-auth-json',
       kind: 'account',
@@ -115,30 +107,6 @@ test('setup assistant defaults round-trip Codex defaults and quarantine legacy s
     },
     selfDeliveryTargets: null,
   }
-  const legacyDefaults: AssistantOperatorDefaults = {
-    backend: {
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENROUTER_API_KEY',
-      endpoint: 'https://openrouter.ai/api/v1',
-      headers: null,
-      model: 'openrouter/auto',
-      presetId: 'openrouter',
-      providerName: 'openrouter',
-      reasoningEffort: 'high',
-      webSearch: null,
-    },
-    identityId: null,
-    failoverRoutes: null,
-    account: {
-      source: 'codex-auth-json',
-      kind: 'api-key',
-      planCode: null,
-      planName: null,
-      quota: null,
-    },
-    selfDeliveryTargets: null,
-  }
-
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(codexDefaults), {
     assistantPreset: 'codex',
     assistantModel: 'gpt-5.5',
@@ -149,17 +117,9 @@ test('setup assistant defaults round-trip Codex defaults and quarantine legacy s
     assistantReasoningEffort: 'medium',
     assistantOss: true,
   })
-  assert.throws(
-    () => buildSetupAssistantOptionsFromDefaults(legacyDefaults),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
-  )
   assert.equal(
     formatSavedAssistantDefaultsSummary(codexDefaults),
     'gpt-5.5 via Codex OSS app-server (Team account)',
-  )
-  assert.throws(
-    () => formatSavedAssistantDefaultsSummary(legacyDefaults),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
   assert.equal(formatSavedAssistantDefaultsSummary(null), null)
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(null), {})
@@ -172,9 +132,6 @@ test('setup assistant summary helpers label Codex accounts consistently', () => 
     provider: 'codex-cli',
     model: 'gpt-5.5',
     modelProvider: null,
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
     codexCommand: null,
     codexHome: undefined,
     profile: null,
@@ -357,9 +314,6 @@ test('setup assistant account resolver merges Codex auth and RPC snapshots', asy
       provider: 'codex-cli',
       model: 'gpt-5.5',
       modelProvider: null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: 'codex',
       codexHome: '/tmp/custom-codex',
       profile: 'default',
@@ -393,9 +347,6 @@ test('setup assistant selection normalizes Codex values into operator defaults p
     provider: 'codex-cli',
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
     codexCommand: 'codex',
     codexHome: '/tmp/codex-home',
     profile: 'team',
@@ -440,7 +391,6 @@ test('setup assistant selection normalizes Codex values into operator defaults p
       {
         backend: patch.backend ?? null,
         identityId: null,
-        failoverRoutes: null,
         account: patch.account ?? null,
         selfDeliveryTargets: null,
       },
@@ -458,9 +408,6 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
       provider: null,
       model: null,
       modelProvider: null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: null,
       codexHome: undefined,
       profile: null,
@@ -485,7 +432,6 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
         sandbox: 'workspace-write',
       },
       identityId: null,
-      failoverRoutes: null,
       account: null,
       selfDeliveryTargets: null,
     },
@@ -566,10 +512,6 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     provider: 'codex-cli',
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    baseUrl: null,
-    apiKeyEnv: null,
-    presetId: null,
-    providerName: null,
     codexCommand: 'codex-beta',
     codexHome: '/tmp/codex-home',
     profile: 'team',

@@ -36,7 +36,7 @@ import {
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionProviderSessionId,
 } from '../src/assistant/provider-state.ts'
-import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.ts'
+import type { ResolvedAssistantProviderRoute } from '../src/assistant/provider-route.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
@@ -392,10 +392,9 @@ describe('assistant provider seam helpers', () => {
 function createRoute(input?: {
   providerOptions?: Partial<AssistantProviderSessionOptions>
   routeId?: string
-}): ResolvedAssistantFailoverRoute {
+}): ResolvedAssistantProviderRoute {
   return {
     codexCommand: null,
-    cooldownMs: 60_000,
     label: 'primary',
     provider: 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),

@@ -4,24 +4,20 @@ import {
   resolveAssistantChatProviderFromConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigLike,
-  type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   createCatalogModel,
-  discoverAssistantProviderModels as discoverAssistantProviderModelsWithRegistry,
   resolveAssistantProviderTargetCapabilities as resolveAssistantProviderRegistryTargetCapabilities,
   resolveAssistantProviderCapabilities as resolveAssistantProviderRegistryCapabilities,
   resolveAssistantProviderLabel,
   resolveAssistantProviderStaticModels,
   type AssistantCatalogModel,
-  type AssistantModelDiscoveryResult,
   type AssistantProviderCapabilities,
 } from '../assistant-provider.js'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export type {
   AssistantCatalogModel,
-  AssistantModelDiscoveryResult,
 } from '../assistant-provider.js'
 
 export interface AssistantModelOption {
@@ -41,7 +37,6 @@ export type AssistantProviderProfile = AssistantProviderConfig & {
 
 export interface AssistantModelCatalog {
   capabilities: AssistantProviderCapabilities
-  discovery: AssistantModelDiscoveryResult | null
   modelOptions: readonly AssistantModelOption[]
   models: readonly AssistantCatalogModel[]
   provider: AssistantChatProvider
@@ -109,8 +104,6 @@ export function resolveAssistantModelCatalog(input: {
   baseUrl?: string | null
   currentModel?: string | null
   currentReasoningEffort?: string | null
-  discoveredModels?: readonly string[] | null
-  discovery?: AssistantModelDiscoveryResult | null
   headers?: Record<string, string> | null
   oss?: boolean | null
   presetId?: string | null
@@ -120,32 +113,8 @@ export function resolveAssistantModelCatalog(input: {
   const profile = resolveAssistantProviderProfile(input)
   const capabilities = resolveAssistantTargetCapabilities(profile)
   const staticModels = resolveAssistantProviderStaticModels(profile)
-  const discovery = normalizeAssistantModelDiscoveryResult({
-    capabilities,
-    discovery:
-      input.discovery ??
-      (input.discoveredModels
-        ? {
-            models: input.discoveredModels.map((model) =>
-              createCatalogModel({
-                id: model,
-                description: `Discovered from ${profile.providerLabel}.`,
-                source: 'discovered',
-                capabilities: resolveAssistantCatalogModelCapabilities(
-                  profile,
-                  capabilities,
-                ),
-              }),
-            ),
-            status: 'ok' as const,
-            message: null,
-          }
-        : null),
-    profile,
-  })
   const models = buildAssistantCatalogModels({
     currentModel: input.currentModel,
-    discovery,
     profile,
     staticModels,
     targetCapabilities: capabilities,
@@ -157,7 +126,6 @@ export function resolveAssistantModelCatalog(input: {
 
   return {
     capabilities,
-    discovery,
     modelOptions: models.map((model) => ({
       value: model.id,
       description: model.description,
@@ -168,17 +136,6 @@ export function resolveAssistantModelCatalog(input: {
     reasoningOptions: resolveAssistantCatalogReasoningOptions(selectedModel),
     selectedModel,
   }
-}
-
-export async function discoverAssistantProviderModels(input: {
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  env?: NodeJS.ProcessEnv
-  headers?: Record<string, string> | null
-  provider: AssistantChatProvider
-  providerName?: string | null
-}): Promise<AssistantModelDiscoveryResult> {
-  return await discoverAssistantProviderModelsWithRegistry(input)
 }
 
 export function resolveAssistantCatalogReasoningOptions(
@@ -217,7 +174,6 @@ export function findAssistantCatalogReasoningOptionIndex(
 
 function buildAssistantCatalogModels(input: {
   currentModel?: string | null
-  discovery?: AssistantModelDiscoveryResult | null
   profile: AssistantProviderProfile
   staticModels: readonly AssistantCatalogModel[]
   targetCapabilities: AssistantProviderCapabilities
@@ -253,12 +209,7 @@ function buildAssistantCatalogModels(input: {
         capabilities:
           input.staticModels.find((model) => model.id === normalizedCurrentModel)
             ?.capabilities ??
-          input.discovery?.models.find((model) => model.id === normalizedCurrentModel)
-            ?.capabilities ??
-          resolveAssistantCatalogModelCapabilities(
-            input.profile,
-            input.targetCapabilities,
-          ),
+          resolveAssistantCatalogModelCapabilities(input.targetCapabilities),
       }),
     )
   }
@@ -267,36 +218,14 @@ function buildAssistantCatalogModels(input: {
     pushModel(model)
   }
 
-  for (const model of input.discovery?.models ?? []) {
-    pushModel(model)
-  }
-
   return models
 }
 
 function buildCurrentModelDescription(profile: AssistantProviderProfile): string {
-  switch (profile.target.kind) {
-    case 'codex-cli':
-      return profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
-    default:
-      return 'Current model.'
-  }
-}
-
-function normalizeAssistantModelDiscoveryResult(input: {
-  capabilities: AssistantProviderCapabilities
-  discovery: AssistantModelDiscoveryResult | null
-  profile: AssistantProviderProfile
-}): AssistantModelDiscoveryResult | null {
-  if (!input.discovery) {
-    return null
-  }
-
-  return input.discovery
+  return profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
 }
 
 function resolveAssistantCatalogModelCapabilities(
-  profile: AssistantProviderProfile,
   capabilities: AssistantProviderCapabilities,
 ): AssistantCatalogModel['capabilities'] {
   const supportedContentTypes = new Set(capabilities.supportedUserMessageContentTypes)

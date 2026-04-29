@@ -5,8 +5,6 @@ import {
   resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
-  shouldUseAssistantOpenAIResponsesApi,
-  supportsAssistantZeroDataRetention,
 } from '../src/assistant/provider-config.ts'
 import {
   VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
@@ -33,8 +31,6 @@ describe('assistant provider config runtime resolution', () => {
         approvalPolicy: 'never',
         reasoningEffort: 'medium',
         sandbox: 'danger-full-access',
-        webSearch: null,
-        zeroDataRetention: null,
       },
       target: {
         kind: 'codex-cli',
@@ -53,10 +49,8 @@ describe('assistant provider config runtime resolution', () => {
       executionDriver: 'codex-app-server',
       modelProvider: 'vercel-ai-gateway',
       modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-      presetId: null,
       resumeKind: 'codex-thread',
       supportsNativeResume: true,
-      supportsZeroDataRetention: false,
       target: { kind: 'codex-cli' },
     })
 
@@ -72,38 +66,26 @@ describe('assistant provider config runtime resolution', () => {
       sandbox: 'danger-full-access',
     })
     expect(serializeAssistantProviderOperatorDefaults(input)).toMatchObject({
-      apiKeyEnv: null,
-      baseUrl: null,
-      headers: null,
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
       modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-      presetId: null,
-      providerName: null,
-      zeroDataRetention: null,
     })
   })
 
-  it('fails closed for removed OpenAI-compatible provider config inputs', () => {
+  it('fails closed for unsupported provider config inputs', () => {
     const legacyInput = {
-      provider: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'https://api.example.test/v1',
+      provider: 'unsupported-provider',
       model: 'gpt-5.1',
-      presetId: 'openai',
-      zeroDataRetention: true,
     } as const
 
     expect(() => normalizeAssistantProviderConfig(legacyInput)).toThrow(
-      /OpenAI-compatible assistant runtimes are no longer supported/u,
+      /Assistant runtime targets must use Codex App Server/u,
     )
     expect(() => resolveAssistantProviderRuntimeTarget(legacyInput)).toThrow(
-      /Reconfigure the assistant for Codex App Server/u,
+      /Assistant runtime targets must use Codex App Server/u,
     )
     expect(() => serializeAssistantProviderSessionOptions(legacyInput)).toThrow(
-      /Reconfigure the assistant for Codex App Server/u,
+      /Assistant runtime targets must use Codex App Server/u,
     )
-    expect(shouldUseAssistantOpenAIResponsesApi(legacyInput)).toBe(false)
-    expect(supportsAssistantZeroDataRetention({ provider: 'codex-cli' })).toBe(false)
   })
 })

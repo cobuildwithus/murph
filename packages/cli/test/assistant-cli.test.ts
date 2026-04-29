@@ -648,7 +648,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant run rejects legacy OpenAI-compatible base URL options',
+  'assistant run rejects removed base URL options',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-run-model-guard-'))
     const vaultRoot = path.join(parent, 'vault')
@@ -925,8 +925,8 @@ test('model --show summarizes a saved Codex OSS backend', async () => {
   assert.equal(result.envelope.data?.summary, 'qwen3-coder via Codex OSS app-server')
 })
 
-test('model --show fails closed for a legacy OpenAI-compatible backend', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-legacy-openai-'))
+test('model --show fails closed for an unsupported persisted backend', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-unsupported-backend-'))
   cleanupPaths.push(homeRoot)
 
   await writeLegacyAssistantOperatorConfig(homeRoot)
@@ -951,8 +951,8 @@ test('model --show fails closed for a legacy OpenAI-compatible backend', async (
   )
 })
 
-test('model --preset codex replaces a legacy OpenAI-compatible backend', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-replace-legacy-openai-'))
+test('model --preset codex replaces an unsupported persisted backend', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-replace-unsupported-backend-'))
   cleanupPaths.push(homeRoot)
   await writeLegacyAssistantOperatorConfig(homeRoot, '~/vault')
 
@@ -963,10 +963,6 @@ test('model --preset codex replaces a legacy OpenAI-compatible backend', async (
       provider: 'codex-cli',
       model: options.assistantModel ?? null,
       modelProvider: options.assistantModelProvider ?? null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      presetId: null,
-      providerName: null,
       codexCommand: options.assistantCodexCommand ?? null,
       codexHome: options.assistantCodexHome ?? null,
       profile: options.assistantProfile ?? null,
@@ -1024,7 +1020,7 @@ test('model --preset codex replaces a legacy OpenAI-compatible backend', async (
   )
 })
 
-test('model rejects the legacy OpenAI-compatible preset', async () => {
+test('model rejects unsupported legacy presets', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-legacy-preset-'))
   cleanupPaths.push(homeRoot)
 
@@ -1040,7 +1036,7 @@ test('model rejects the legacy OpenAI-compatible preset', async () => {
   const result = await runRegisteredCliJson(cli, [
     'model',
     '--preset',
-    'openai-compatible',
+    'unsupported-provider',
     '--model',
     'gpt-4.1-mini',
   ])
@@ -1049,7 +1045,7 @@ test('model rejects the legacy OpenAI-compatible preset', async () => {
   assert.equal(result.envelope.ok, false)
   assert.match(
     result.envelope.error?.message ?? '',
-    /Invalid input|openai-compatible/u,
+    /Invalid input|unsupported-provider/u,
   )
 })
 
@@ -1114,9 +1110,6 @@ test('interactive bare model uses the Codex wizard selection before resolving de
       provider: 'codex-cli',
       model: 'gpt-5.5',
       modelProvider: options.assistantModelProvider ?? null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: null,
       codexHome: options.assistantCodexHome ?? null,
       profile: null,
@@ -1200,9 +1193,6 @@ test('model reuses existing Codex defaults when only the model changes', async (
       provider: 'codex-cli',
       model: options.assistantModel ?? null,
       modelProvider: options.assistantModelProvider ?? null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: options.assistantCodexCommand ?? null,
       codexHome: options.assistantCodexHome ?? null,
       profile: options.assistantProfile ?? null,
@@ -1301,9 +1291,6 @@ test('model forwards an explicit Codex model provider to setup resolution', asyn
       provider: 'codex-cli',
       model: options.assistantModel ?? null,
       modelProvider: options.assistantModelProvider ?? null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       codexCommand: null,
       profile: null,
       reasoningEffort: options.assistantReasoningEffort ?? null,
@@ -1365,9 +1352,7 @@ test('model treats an explicit false OSS flag as a codex option when inferring t
       enabled: true,
       provider: 'codex-cli',
       model: options.assistantModel ?? null,
-      baseUrl: options.assistantBaseUrl ?? null,
-      apiKeyEnv: options.assistantApiKeyEnv ?? null,
-      providerName: options.assistantProviderName ?? null,
+      modelProvider: options.assistantModelProvider ?? null,
       codexCommand: options.assistantCodexCommand ?? null,
       profile: options.assistantProfile ?? null,
       reasoningEffort: options.assistantReasoningEffort ?? null,
@@ -1585,18 +1570,17 @@ async function writeLegacyAssistantOperatorConfig(
       defaultVault,
       assistant: {
         backend: {
-          adapter: 'openai-compatible',
-          apiKeyEnv: 'OPENAI_API_KEY',
-          endpoint: 'https://api.openai.example/v1',
+          adapter: 'unsupported-provider',
+          apiKeyEnv: 'LEGACY_API_KEY',
+          endpoint: 'https://api.legacy.example/v1',
           headers: null,
           model: 'gpt-4.1-mini',
-          presetId: 'openai',
-          providerName: 'openai',
+          presetId: 'legacy',
+          providerName: 'legacy-provider',
           reasoningEffort: null,
           webSearch: null,
         },
         account: null,
-        failoverRoutes: null,
         identityId: null,
         selfDeliveryTargets: null,
       },

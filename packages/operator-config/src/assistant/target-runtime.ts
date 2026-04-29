@@ -1,4 +1,3 @@
-import type { SetupAssistantProviderPreset } from './openai-compatible-provider-presets.js'
 import { normalizeNullableString } from './shared.js'
 
 export const assistantExecutionDriverValues = [
@@ -9,18 +8,9 @@ export const assistantResumeKindValues = [
   'codex-thread',
 ] as const
 
-export const assistantWebSearchModeValues = [
-  'auto',
-  'provider',
-  'gateway',
-  'murph',
-  'off',
-] as const
-
 export type AssistantExecutionDriver =
   (typeof assistantExecutionDriverValues)[number]
 export type AssistantResumeKind = (typeof assistantResumeKindValues)[number]
-export type AssistantWebSearchMode = (typeof assistantWebSearchModeValues)[number]
 
 export const assistantCodexModelProviderWireApiValues = ['responses'] as const
 
@@ -69,19 +59,13 @@ export function createUnsupportedAssistantRuntimeTargetError(): UnsupportedAssis
 }
 
 export interface AssistantRuntimeResolutionInput {
-  apiKeyEnv?: string | null
   approvalPolicy?: string | null
-  baseUrl?: string | null
   codexHome?: string | null
-  gatewayOnlyProviders?: readonly string[] | null
-  headers?: Record<string, string> | null
   model?: string | null
   modelProvider?: string | null
   oss?: boolean | null
-  presetId?: string | null
   profile?: string | null
-  provider?: 'codex-cli' | 'openai-compatible' | null
-  providerName?: string | null
+  provider?: string | null
   reasoningEffort?: string | null
   sandbox?: string | null
   target?:
@@ -92,22 +76,11 @@ export interface AssistantRuntimeResolutionInput {
         codexHome?: string | null
         oss?: boolean
         profile?: string | null
-        baseUrl?: never
-        apiKeyEnv?: never
-        gatewayOnlyProviders?: never
-        providerName?: never
-        presetId?: never
-        headers?: never
       }
     | {
-        kind?: 'responses' | 'openai-compatible'
+        kind?: string | null
         model?: string | null
-        baseUrl?: string | null
-        apiKeyEnv?: string | null
-        gatewayOnlyProviders?: readonly string[] | null
-        providerName?: string | null
-        presetId?: string | null
-        headers?: Record<string, string> | null
+        modelProvider?: string | null
         codexHome?: never
         oss?: never
         profile?: never
@@ -116,14 +89,8 @@ export interface AssistantRuntimeResolutionInput {
     approvalPolicy?: string | null
     reasoningEffort?: string | null
     sandbox?: string | null
-    webSearch?: string | null
-    zeroDataRetention?: boolean | null
   }
-  webSearch?: string | null
-  zeroDataRetention?: boolean | null
 }
-
-export type AssistantTargetVia = 'openai' | 'vercel-ai-gateway'
 
 export type AssistantResolvedTargetKind = { kind: 'codex-cli' }
 
@@ -132,15 +99,10 @@ export interface AssistantResolvedRuntimeTarget {
   executionDriver: AssistantExecutionDriver
   modelProvider: string | null
   modelProviderConfig: AssistantCodexModelProviderConfig | null
-  presetId: SetupAssistantProviderPreset | null
   resumeKind: AssistantResumeKind | null
-  supportsGatewayWebSearch: boolean
   supportsNativeResume: boolean
-  supportsProviderWebSearch: boolean
   supportsReasoningEffort: boolean
-  supportsZeroDataRetention: boolean
   target: AssistantResolvedTargetKind
-  webSearch: AssistantWebSearchMode | null
 }
 
 export function normalizeAssistantExecutionDriver(
@@ -161,26 +123,6 @@ export function normalizeAssistantResumeKind(
     assistantResumeKindValues.includes(normalized as AssistantResumeKind)
     ? (normalized as AssistantResumeKind)
     : null
-}
-
-export function normalizeAssistantWebSearchMode(
-  value: string | null | undefined,
-): AssistantWebSearchMode | null {
-  const normalized = normalizeNullableString(value)
-  return normalized !== null &&
-    assistantWebSearchModeValues.includes(normalized as AssistantWebSearchMode)
-    ? (normalized as AssistantWebSearchMode)
-    : null
-}
-
-export function resolveAssistantTargetPresetId(
-  input: Pick<
-    AssistantRuntimeResolutionInput,
-    'apiKeyEnv' | 'baseUrl' | 'presetId' | 'providerName'
-  >,
-): SetupAssistantProviderPreset | null {
-  void input
-  return null
 }
 
 export function resolveAssistantRuntimeTarget(
@@ -208,7 +150,6 @@ export function resolveAssistantRuntimeTarget(
       provider: 'codex-cli',
       reasoningEffort: input?.policy?.reasoningEffort ?? input?.reasoningEffort,
       sandbox: input?.policy?.sandbox ?? input?.sandbox,
-      webSearch: null,
     })
 
     return {
@@ -216,40 +157,14 @@ export function resolveAssistantRuntimeTarget(
       executionDriver: 'codex-app-server',
       modelProvider,
       modelProviderConfig: resolveAssistantCodexModelProviderConfig(modelProvider),
-      presetId: null,
       resumeKind: 'codex-thread',
-      supportsGatewayWebSearch: false,
       supportsNativeResume: true,
-      supportsProviderWebSearch: false,
       supportsReasoningEffort: true,
-      supportsZeroDataRetention: false,
       target: { kind: 'codex-cli' },
-      webSearch: null,
     }
   }
 
   throw createUnsupportedAssistantRuntimeTargetError()
-}
-
-export function shouldAssistantTargetUseProviderWebSearch(
-  input: AssistantRuntimeResolutionInput | null | undefined,
-): boolean {
-  void input
-  return false
-}
-
-export function shouldAssistantTargetUseGatewayWebSearch(
-  input: AssistantRuntimeResolutionInput | null | undefined,
-): boolean {
-  void input
-  return false
-}
-
-export function shouldAssistantTargetUseMurphWebSearch(
-  input: AssistantRuntimeResolutionInput | null | undefined,
-): boolean {
-  void input
-  return false
 }
 
 export function normalizeAssistantCodexModelProvider(
@@ -291,21 +206,18 @@ function buildAssistantContinuityFingerprint(
 
 function resolveAssistantRuntimeResolutionProvider(
   input: AssistantRuntimeResolutionInput | null | undefined,
-): 'codex-cli' | 'openai-compatible' {
-  if (input?.target?.kind === 'codex-cli') {
-    return 'codex-cli'
+): 'codex-cli' {
+  if (input?.target?.kind && input.target.kind !== 'codex-cli') {
+    throw createUnsupportedAssistantRuntimeTargetError()
   }
 
-  if (input?.target) {
-    return 'openai-compatible'
+  if (input?.provider && input.provider !== 'codex-cli') {
+    throw createUnsupportedAssistantRuntimeTargetError()
   }
 
-  return input?.provider ?? 'codex-cli'
+  return 'codex-cli'
 }
 
 function unsupportedAssistantRuntimeTargetMessage(): string {
-  return [
-    'OpenAI-compatible assistant runtimes are no longer supported.',
-    'Reconfigure the assistant for Codex App Server.',
-  ].join(' ')
+  return 'Assistant runtime targets must use Codex App Server. Reconfigure the assistant for Codex App Server.'
 }

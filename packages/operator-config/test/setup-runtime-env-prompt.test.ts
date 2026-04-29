@@ -27,7 +27,6 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
     ' telegram-token ',
     ' garmin-id ',
     ' garmin-secret ',
-    ' openai-key ',
   ]
 
   vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array) => {
@@ -47,7 +46,6 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
   const resolver = createSetupRuntimeEnvResolver()
 
   const overrides = await resolver.promptForMissing({
-    assistantApiKeyEnv: ' OPENAI_API_KEY ',
     channels: ['telegram', 'telegram'],
     env: {},
     wearables: ['garmin', 'garmin'],
@@ -57,12 +55,10 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
     'Enter TELEGRAM_BOT_TOKEN for this setup run (leave blank to skip): ',
     'Enter GARMIN_CLIENT_ID for this setup run (leave blank to skip): ',
     'Enter GARMIN_CLIENT_SECRET for this setup run (leave blank to skip): ',
-    'Enter OPENAI_API_KEY for this setup run (leave blank to skip): ',
   ])
   assert.deepEqual(overrides, {
     GARMIN_CLIENT_ID: 'garmin-id',
     GARMIN_CLIENT_SECRET: 'garmin-secret',
-    OPENAI_API_KEY: 'openai-key',
     TELEGRAM_BOT_TOKEN: 'telegram-token',
   })
   assert.match(stderrWrites.join(''), /saved to local `\.env\.local`/u)

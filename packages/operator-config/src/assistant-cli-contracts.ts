@@ -22,14 +22,9 @@ import {
   pathSchema,
 } from './vault-cli-contracts.js'
 import {
-  setupAssistantProviderPresetValues,
-} from './assistant/openai-compatible-provider-presets.js'
-import {
   assistantCodexModelProviderWireApiValues,
   assistantExecutionDriverValues,
   assistantResumeKindValues,
-  assistantWebSearchModeValues,
-  createUnsupportedAssistantRuntimeTargetError,
   resolveAssistantRuntimeTarget,
 } from './assistant/target-runtime.js'
 
@@ -110,8 +105,6 @@ export const assistantTurnTimelineEventKindValues = [
   'provider.attempt.started',
   'provider.attempt.succeeded',
   'provider.attempt.failed',
-  'provider.failover.applied',
-  'provider.cooldown.started',
   'delivery.queued',
   'delivery.attempt.started',
   'delivery.sent',
@@ -162,7 +155,6 @@ export const assistantQuarantineArtifactKindValues = [
   'automation',
   'status',
   'diagnostics-snapshot',
-  'failover',
   'turn-receipt',
   'outbox-intent',
   'runtime-budget',
@@ -184,8 +176,6 @@ export const assistantRuntimeEventKindValues = [
   'diagnostics.event.recorded',
   'diagnostics.snapshot.recovered',
   'diagnostics.snapshot.quarantined',
-  'failover.state.upserted',
-  'failover.state.quarantined',
   'status.snapshot.refreshed',
   'status.snapshot.quarantined',
   'runtime-budget.recovered',
@@ -199,10 +189,6 @@ export const assistantHeadersSchema = z.record(
   z.string().min(1),
   z.string(),
 )
-
-export const assistantGatewayOnlyProvidersValueSchema = z
-  .array(z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9._-]*$/u))
-  .nullable()
 
 export const assistantCodexModelProviderConfigSchema = z
   .object({
@@ -229,26 +215,7 @@ export const assistantCodexModelTargetSchema = z
   })
   .strict()
 
-export const assistantOpenAiCompatibleModelTargetSchema = z
-  .object({
-    adapter: z.literal('openai-compatible'),
-    apiKeyEnv: z.string().min(1).nullable().default(null),
-    endpoint: z.string().min(1).nullable().default(null),
-    gatewayOnlyProviders: assistantGatewayOnlyProvidersValueSchema.optional(),
-    headers: assistantHeadersSchema.nullable().default(null),
-    model: z.string().min(1).nullable().default(null),
-    presetId: z.enum(setupAssistantProviderPresetValues).nullable().default(null),
-    providerName: z.string().min(1).nullable().default(null),
-    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
-    webSearch: z.enum(assistantWebSearchModeValues).nullable().default(null),
-    zeroDataRetention: z.boolean().optional(),
-  })
-  .strict()
-
-export const assistantModelTargetSchema = z.discriminatedUnion('adapter', [
-  assistantCodexModelTargetSchema,
-  assistantOpenAiCompatibleModelTargetSchema,
-])
+export const assistantModelTargetSchema = assistantCodexModelTargetSchema
 
 export const assistantSessionResumeStateSchema = z
   .object({
@@ -282,16 +249,9 @@ export const assistantProviderSessionOptionsSchema = z.object({
   codexHome: z.string().min(1).nullable().optional(),
   modelProvider: z.string().min(1).nullable().optional(),
   modelProviderConfig: assistantCodexModelProviderConfigSchema.nullable().optional(),
-  baseUrl: z.string().min(1).nullable().optional(),
-  apiKeyEnv: z.string().min(1).nullable().optional(),
   executionDriver: z.enum(assistantExecutionDriverValues),
-  providerName: z.string().min(1).nullable().optional(),
-  presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
-  gatewayOnlyProviders: assistantGatewayOnlyProvidersValueSchema.optional(),
   resumeKind: z.enum(assistantResumeKindValues).nullable(),
   headers: assistantHeadersSchema.nullable().optional(),
-  webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
-  zeroDataRetention: z.boolean().optional(),
 })
 
 export const assistantSessionSecretsSchema = z
@@ -300,23 +260,6 @@ export const assistantSessionSecretsSchema = z
     sessionId: assistantSessionIdSchema,
     updatedAt: isoTimestampSchema,
     providerHeaders: assistantHeadersSchema.nullable().default(null),
-  })
-  .strict()
-
-export const assistantProviderFailoverRouteSchema = z
-  .object({
-    name: z.string().min(1).nullable().default(null),
-    provider: z.enum(assistantChatProviderValues),
-    codexCommand: z.string().min(1).nullable().default(null),
-    codexHome: z.string().min(1).nullable().optional(),
-    model: z.string().min(1).nullable().default(null),
-    modelProvider: z.string().min(1).nullable().optional(),
-    reasoningEffort: z.string().min(1).nullable().default(null),
-    sandbox: z.enum(assistantSandboxValues).nullable().default(null),
-    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().default(null),
-    profile: z.string().min(1).nullable().default(null),
-    oss: z.boolean().default(false),
-    cooldownMs: z.number().int().positive().nullable().default(null),
   })
   .strict()
 
@@ -394,10 +337,6 @@ function normalizeAssistantSessionRecord(
 function buildAssistantRuntimeSession(
   value: AssistantPersistedSessionRecord,
 ): AssistantSession {
-  if (value.target.adapter !== 'codex-cli') {
-    throw createUnsupportedAssistantRuntimeTargetError()
-  }
-
   const provider = value.target.adapter
   const resolvedRuntimeTarget = resolveAssistantRuntimeTarget({
     provider,
@@ -613,7 +552,6 @@ export const assistantDiagnosticsCountersSchema = z
     turnsFailed: z.number().int().nonnegative(),
     providerAttempts: z.number().int().nonnegative(),
     providerFailures: z.number().int().nonnegative(),
-    providerFailovers: z.number().int().nonnegative(),
     deliveriesQueued: z.number().int().nonnegative(),
     deliveriesSent: z.number().int().nonnegative(),
     deliveriesFailed: z.number().int().nonnegative(),
@@ -702,30 +640,6 @@ export const assistantRuntimeEventSchema = z
   })
   .strict()
 
-export const assistantProviderRouteStateSchema = z
-  .object({
-    routeId: z.string().min(1),
-    label: z.string().min(1),
-    provider: z.enum(assistantChatProviderValues),
-    model: z.string().min(1).nullable(),
-    failureCount: z.number().int().nonnegative(),
-    successCount: z.number().int().nonnegative(),
-    consecutiveFailures: z.number().int().nonnegative(),
-    lastFailureAt: isoTimestampSchema.nullable(),
-    lastErrorCode: z.string().min(1).nullable(),
-    lastErrorMessage: z.string().min(1).nullable(),
-    cooldownUntil: isoTimestampSchema.nullable(),
-  })
-  .strict()
-
-export const assistantFailoverStateSchema = z
-  .object({
-    schema: z.literal('murph.assistant-failover-state.v1'),
-    updatedAt: isoTimestampSchema,
-    routes: z.array(assistantProviderRouteStateSchema),
-  })
-  .strict()
-
 export const assistantStatusRunLockSchema = z
   .object({
     state: z.enum(assistantStatusRunLockStateValues),
@@ -773,14 +687,12 @@ export const assistantStatusResultSchema = z
     statusPath: pathSchema,
     outboxRoot: pathSchema,
     diagnosticsPath: pathSchema,
-    failoverStatePath: pathSchema,
     turnsRoot: pathSchema,
     generatedAt: isoTimestampSchema,
     runLock: assistantStatusRunLockSchema,
     automation: assistantStatusAutomationSchema,
     outbox: assistantStatusOutboxSummarySchema,
     diagnostics: assistantDiagnosticsSnapshotSchema,
-    failover: assistantFailoverStateSchema,
     quarantine: assistantQuarantineSummarySchema,
     runtimeBudget: assistantRuntimeBudgetSnapshotSchema,
     recentTurns: z.array(assistantTurnReceiptSchema),
@@ -1235,15 +1147,6 @@ export type AssistantDiagnosticsCounters = z.infer<
 export type AssistantDiagnosticsSnapshot = z.infer<
   typeof assistantDiagnosticsSnapshotSchema
 >
-export type AssistantProviderFailoverRoute = z.infer<
-  typeof assistantProviderFailoverRouteSchema
->
-export type AssistantProviderRouteState = z.infer<
-  typeof assistantProviderRouteStateSchema
->
-export type AssistantFailoverState = z.infer<
-  typeof assistantFailoverStateSchema
->
 type AssistantAskResultRecord = z.infer<typeof assistantAskResultSchema>
 export type AssistantAskResult = AssistantAskResultRecord
 type AssistantChatResultRecord = z.infer<typeof assistantChatResultSchema>
@@ -1364,8 +1267,6 @@ export type AssistantReasoningEffort =
 export type AssistantExecutionDriver =
   (typeof assistantExecutionDriverValues)[number]
 export type AssistantResumeKind = (typeof assistantResumeKindValues)[number]
-export type AssistantWebSearchMode =
-  (typeof assistantWebSearchModeValues)[number]
 export type AssistantChatProvider =
   (typeof assistantChatProviderValues)[number]
 export type AssistantChannelDeliveryTargetKind = GatewayDeliveryTargetKind

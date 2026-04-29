@@ -42,7 +42,6 @@ import {
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
   HOSTED_ASSISTANT_REASONING_EFFORT_ENV,
   HOSTED_ASSISTANT_SANDBOX_ENV,
-  HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
 } from './hosted-assistant-config-constants.js'
 
 export {
@@ -60,7 +59,6 @@ export {
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
   HOSTED_ASSISTANT_REASONING_EFFORT_ENV,
   HOSTED_ASSISTANT_SANDBOX_ENV,
-  HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
 }
 const HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV =
   'HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL'
@@ -124,7 +122,6 @@ interface HostedAssistantRawEnvConfig {
   providerToken: string | null
   reasoningEffort: AssistantReasoningEffort | null
   sandbox: AssistantSandbox | null
-  zeroDataRetention: boolean | null
 }
 
 export {
@@ -428,7 +425,6 @@ function resolveHostedAssistantSeedPlan(
       [HOSTED_ASSISTANT_PROFILE_ENV, raw.profile],
       [HOSTED_ASSISTANT_PROVIDER_NAME_ENV, raw.providerName],
       [HOSTED_ASSISTANT_OSS_ENV, raw.oss],
-      [HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV, raw.zeroDataRetention],
     ],
   )
 
@@ -451,9 +447,6 @@ function readHostedAssistantRawEnvConfig(
 ): HostedAssistantRawEnvConfig {
   const source = env ?? process.env
   const rawOss = normalizeHostedAssistantString(source[HOSTED_ASSISTANT_OSS_ENV])
-  const rawZeroDataRetention = normalizeHostedAssistantString(
-    source[HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV],
-  )
   const values = {
     apiKeyEnv: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_API_KEY_ENV]),
     approvalPolicy: parseHostedAssistantEnum(
@@ -484,10 +477,6 @@ function readHostedAssistantRawEnvConfig(
       HOSTED_ASSISTANT_SANDBOX_ENV,
       assistantSandboxValues,
     ),
-    zeroDataRetention: parseHostedAssistantBoolean(
-      rawZeroDataRetention,
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
-    ),
   }
 
   return {
@@ -505,7 +494,6 @@ function readHostedAssistantRawEnvConfig(
       values.profile,
       values.reasoningEffort,
       rawOss,
-      rawZeroDataRetention,
     ].some((value) => value !== null),
   }
 }

@@ -40,7 +40,6 @@ export interface SetupWizardRuntimeStatus {
 export interface SetupRuntimeEnvResolver {
   getCurrentEnv(): NodeJS.ProcessEnv
   promptForMissing(input: {
-    assistantApiKeyEnv?: string | null
     channels: readonly SetupChannel[]
     env: NodeJS.ProcessEnv
     helpText?: readonly string[]
@@ -267,7 +266,6 @@ export function describeSelectedSetupWearables(input: {
 }
 
 function collectSetupPromptKeys(input: {
-  assistantApiKeyEnv?: string | null
   channels: readonly SetupChannel[]
   env: NodeJS.ProcessEnv
   wearables: readonly SetupWearable[]
@@ -290,14 +288,6 @@ function collectSetupPromptKeys(input: {
         seen.add(key)
         keys.push(key)
       }
-    }
-  }
-
-  const assistantApiKeyEnv = normalizeEnvValue(input.assistantApiKeyEnv)
-  if (assistantApiKeyEnv && normalizeEnvValue(input.env[assistantApiKeyEnv]) === null) {
-    if (!seen.has(assistantApiKeyEnv)) {
-      seen.add(assistantApiKeyEnv)
-      keys.push(assistantApiKeyEnv)
     }
   }
 

@@ -5,7 +5,6 @@ import { createVersionedJsonStateEnvelope } from '@murphai/runtime-state/node'
 import {
   assistantAskResultSchema,
   assistantDiagnosticsSnapshotSchema,
-  assistantFailoverStateSchema,
   assistantQuarantineSummarySchema,
   assistantRuntimeBudgetSnapshotSchema,
   assistantStatusAutomationSchema,
@@ -40,7 +39,6 @@ const statusMocks = vi.hoisted(() => ({
   listRecentAssistantTurnReceiptsForSession: vi.fn(),
   quarantineAssistantStateFile: vi.fn(),
   readAssistantDiagnosticsSnapshot: vi.fn(),
-  readAssistantFailoverState: vi.fn(),
   readAssistantRuntimeBudgetStatus: vi.fn(),
   readAutomationState: vi.fn(),
   summarizeAssistantQuarantines: vi.fn(),
@@ -54,10 +52,6 @@ vi.mock('../src/assistant/outbox.ts', () => ({
 
 vi.mock('../src/assistant/diagnostics.ts', () => ({
   readAssistantDiagnosticsSnapshot: statusMocks.readAssistantDiagnosticsSnapshot,
-}))
-
-vi.mock('../src/assistant/failover.ts', () => ({
-  readAssistantFailoverState: statusMocks.readAssistantFailoverState,
 }))
 
 vi.mock('../src/assistant/automation/runtime-lock.ts', () => ({
@@ -148,7 +142,6 @@ beforeEach(() => {
         turnsFailed: 0,
         providerAttempts: 0,
         providerFailures: 0,
-        providerFailovers: 0,
         deliveriesQueued: 0,
         deliveriesSent: 0,
         deliveriesFailed: 0,
@@ -158,13 +151,6 @@ beforeEach(() => {
         automationScans: 0,
       },
       recentWarnings: [],
-    }),
-  )
-  statusMocks.readAssistantFailoverState.mockReset().mockResolvedValue(
-    assistantFailoverStateSchema.parse({
-      schema: 'murph.assistant-failover-state.v1',
-      updatedAt: '2026-04-08T00:00:00.000Z',
-      routes: [],
     }),
   )
   statusMocks.readAssistantRuntimeBudgetStatus.mockReset().mockResolvedValue(
@@ -270,7 +256,6 @@ describe('assistant status', () => {
           turnsFailed: 1,
           providerAttempts: 2,
           providerFailures: 1,
-          providerFailovers: 1,
           deliveriesQueued: 1,
           deliveriesSent: 0,
           deliveriesFailed: 1,
@@ -280,40 +265,6 @@ describe('assistant status', () => {
           automationScans: 3,
         },
         recentWarnings: diagnosticsWarnings,
-      }),
-    )
-    statusMocks.readAssistantFailoverState.mockResolvedValue(
-      assistantFailoverStateSchema.parse({
-        schema: 'murph.assistant-failover-state.v1',
-        updatedAt: '2026-04-08T09:00:00.000Z',
-        routes: [
-          {
-            routeId: 'route-openai',
-            label: 'Codex',
-            provider: 'codex-cli',
-            model: 'gpt-5.4',
-            failureCount: 1,
-            successCount: 0,
-            consecutiveFailures: 1,
-            lastFailureAt: '2026-04-08T09:01:00.000Z',
-            lastErrorCode: 'RATE_LIMIT',
-            lastErrorMessage: 'rate limited',
-            cooldownUntil: '2026-04-08T09:30:00.000Z',
-          },
-          {
-            routeId: 'route-codex',
-            label: 'Codex',
-            provider: 'codex-cli',
-            model: 'gpt-5.4',
-            failureCount: 0,
-            successCount: 1,
-            consecutiveFailures: 0,
-            lastFailureAt: null,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            cooldownUntil: null,
-          },
-        ],
       }),
     )
     statusMocks.summarizeAssistantQuarantines.mockResolvedValue(
@@ -359,7 +310,6 @@ describe('assistant status', () => {
       '1 assistant outbox intent(s) failed permanently',
       '2 assistant outbox intent(s) are waiting for retry',
       '3 assistant runtime artifact(s) were quarantined for repair',
-      '1 provider failover route(s) are cooling down',
     ].slice(-12)
 
     expect(status.vault).toBe(paths.absoluteVaultRoot)
@@ -432,7 +382,6 @@ describe('assistant status', () => {
           turnsFailed: 0,
           providerAttempts: 2,
           providerFailures: 0,
-          providerFailovers: 0,
           deliveriesQueued: 1,
           deliveriesSent: 1,
           deliveriesFailed: 0,
@@ -615,7 +564,6 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
     statusPath: paths.statusPath,
     outboxRoot: paths.outboxDirectory,
     diagnosticsPath: paths.diagnosticSnapshotPath,
-    failoverStatePath: paths.failoverStatePath,
     turnsRoot: paths.turnsDirectory,
     generatedAt: '2026-04-08T06:07:08.000Z',
     runLock: assistantStatusRunLockSchema.parse({
@@ -659,7 +607,6 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
         turnsFailed: 0,
         providerAttempts: 1,
         providerFailures: 0,
-        providerFailovers: 0,
         deliveriesQueued: 1,
         deliveriesSent: 0,
         deliveriesFailed: 0,
@@ -669,11 +616,6 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
         automationScans: 1,
       },
       recentWarnings: ['stored warning'],
-    }),
-    failover: assistantFailoverStateSchema.parse({
-      schema: 'murph.assistant-failover-state.v1',
-      updatedAt: '2026-04-08T06:00:00.000Z',
-      routes: [],
     }),
     quarantine: assistantQuarantineSummarySchema.parse({
       total: 0,

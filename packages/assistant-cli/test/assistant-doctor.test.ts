@@ -315,7 +315,6 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
       turnsFailed: 0,
       providerAttempts: 1,
       providerFailures: 0,
-      providerFailovers: 0,
       deliveriesQueued: 0,
       deliveriesSent: 0,
       deliveriesFailed: 0,
@@ -325,11 +324,6 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
       automationScans: 1,
     },
     recentWarnings: [],
-  })
-  await writeJson(paths.failoverStatePath, {
-    schema: 'murph.assistant-failover-state.v1',
-    updatedAt: testNow,
-    routes: [],
   })
   await writeJson(paths.resourceBudgetPath, {
     schema: 'murph.assistant-runtime-budget.v1',
@@ -351,7 +345,6 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
       statusPath: paths.statusPath,
       outboxRoot: paths.outboxDirectory,
       diagnosticsPath: paths.diagnosticSnapshotPath,
-      failoverStatePath: paths.failoverStatePath,
       turnsRoot: paths.turnsDirectory,
       generatedAt: testNow,
       runLock: {
@@ -390,7 +383,6 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
           turnsFailed: 0,
           providerAttempts: 1,
           providerFailures: 0,
-          providerFailovers: 0,
           deliveriesQueued: 0,
           deliveriesSent: 0,
           deliveriesFailed: 0,
@@ -400,11 +392,6 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
           automationScans: 1,
         },
         recentWarnings: [],
-      },
-      failover: {
-        schema: 'murph.assistant-failover-state.v1',
-        updatedAt: testNow,
-        routes: [],
       },
       quarantine: {
         total: 0,
@@ -524,7 +511,6 @@ test('runAssistantDoctor uses the write lock in repair mode and surfaces warning
   assertCheckStatus(result, 'diagnostic-events', 'pass')
   assertCheckStatus(result, 'runtime-events', 'pass')
   assertCheckStatus(result, 'diagnostics-snapshot', 'pass')
-  assertCheckStatus(result, 'failover-state', 'pass')
   assertCheckStatus(result, 'status-snapshot', 'pass')
   assertCheckStatus(result, 'runtime-budget', 'pass')
   assertCheckStatus(result, 'quarantine-artifacts', 'warn')
@@ -721,7 +707,6 @@ test('runAssistantDoctor fails when assistant artifacts or secrecy metadata are 
     'utf8',
   )
   await writeFile(paths.diagnosticSnapshotPath, '{bad', 'utf8')
-  await writeFile(paths.failoverStatePath, '{bad', 'utf8')
   await writeFile(paths.statusPath, '{}', 'utf8')
   await writeFile(paths.resourceBudgetPath, '{bad', 'utf8')
 
@@ -738,7 +723,6 @@ test('runAssistantDoctor fails when assistant artifacts or secrecy metadata are 
   assertCheckStatus(result, 'diagnostic-events', 'fail')
   assertCheckStatus(result, 'runtime-events', 'fail')
   assertCheckStatus(result, 'diagnostics-snapshot', 'fail')
-  assertCheckStatus(result, 'failover-state', 'fail')
   assertCheckStatus(result, 'status-snapshot', 'fail')
   assertCheckStatus(result, 'runtime-budget', 'fail')
 })

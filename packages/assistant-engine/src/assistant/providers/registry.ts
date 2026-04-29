@@ -5,7 +5,6 @@ import {
   resolveAssistantChatProviderFromConfig,
   supportsAssistantNativeResume,
   supportsAssistantReasoningEffort,
-  supportsAssistantZeroDataRetention,
   type AssistantProviderConfig,
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -15,16 +14,11 @@ import {
 } from '../provider-progress.js'
 import { codexCliProviderDefinition } from './codex-cli.js'
 import { createCatalogModel } from './catalog.js'
-import { supportsAnyAssistantRichUserMessageContent } from './types.js'
 import type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
-  AssistantModelDiscoveryResult,
-  AssistantMurphCommandAccessMode,
-  AssistantMurphCommandSurface,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
-  AssistantProviderExecutionCapabilities,
   AssistantProviderDefinition,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
@@ -71,54 +65,28 @@ function resolveAssistantProviderDefinition(
 export function resolveAssistantProviderCapabilities(
   provider: AssistantChatProvider,
 ): AssistantProviderCapabilities {
-  return stripAssistantProviderExecutionCapabilities(
+  return cloneAssistantProviderCapabilities(
     resolveAssistantProviderDefinition(provider).capabilities,
   )
-}
-
-export function resolveAssistantProviderExecutionCapabilities(
-  provider: AssistantChatProvider,
-): AssistantProviderExecutionCapabilities {
-  return {
-    ...resolveAssistantProviderDefinition(provider).capabilities,
-  }
 }
 
 export function resolveAssistantProviderTargetCapabilities(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
-  return stripAssistantProviderExecutionCapabilities({
+  return cloneAssistantProviderCapabilities({
     ...resolveAssistantProviderDefinition(
       resolveAssistantChatProviderFromConfig(normalized),
     ).capabilities,
     supportsNativeResume: shouldAssistantProviderUseNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
-    supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
   })
-}
-
-export function resolveAssistantProviderTargetExecutionCapabilities(
-  input: AssistantProviderConfigLike | null | undefined,
-): AssistantProviderExecutionCapabilities {
-  const normalized = normalizeAssistantProviderConfig(input)
-  return {
-    ...resolveAssistantProviderDefinition(
-      resolveAssistantChatProviderFromConfig(normalized),
-    ).capabilities,
-    supportsNativeResume: shouldAssistantProviderUseNativeResume(normalized),
-    supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
-    supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
-  }
 }
 
 function shouldAssistantProviderUseNativeResume(
   config: AssistantProviderConfig,
 ): boolean {
-  return (
-    supportsAssistantNativeResume(config) &&
-    config.policy.zeroDataRetention !== true
-  )
+  return supportsAssistantNativeResume(config)
 }
 
 export function resolveAssistantProviderLabel(
@@ -129,23 +97,6 @@ export function resolveAssistantProviderLabel(
     resolveAssistantChatProviderFromConfig(normalized),
   )
   return definition.resolveLabel(normalized)
-}
-
-export async function discoverAssistantProviderModels(input: {
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  env?: NodeJS.ProcessEnv
-  headers?: Record<string, string> | null
-  provider: AssistantChatProvider
-  providerName?: string | null
-}): Promise<AssistantModelDiscoveryResult> {
-  const normalized = normalizeAssistantProviderConfig(input)
-  return resolveAssistantProviderDefinition(
-    resolveAssistantChatProviderFromConfig(normalized),
-  ).discoverModels({
-    config: normalized,
-    env: input.env,
-  })
 }
 
 export function resolveAssistantProviderStaticModels(
@@ -260,9 +211,6 @@ export { ASSISTANT_PROVIDER_DEFINITIONS }
 export type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
-  AssistantModelDiscoveryResult,
-  AssistantMurphCommandAccessMode,
-  AssistantMurphCommandSurface,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
@@ -307,17 +255,13 @@ function finalizeAssistantProviderAttemptMetadata(
   }
 }
 
-function stripAssistantProviderExecutionCapabilities(
-  capabilities: AssistantProviderExecutionCapabilities,
+function cloneAssistantProviderCapabilities(
+  capabilities: AssistantProviderCapabilities,
 ): AssistantProviderCapabilities {
   return {
     supportedUserMessageContentTypes: [...capabilities.supportedUserMessageContentTypes],
-    supportsModelDiscovery: capabilities.supportsModelDiscovery,
     supportsNativeResume: capabilities.supportsNativeResume,
     supportsReasoningEffort: capabilities.supportsReasoningEffort,
-    supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent(
-      capabilities.supportedUserMessageContentTypes,
-    ),
-    supportsZeroDataRetention: capabilities.supportsZeroDataRetention,
+    supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
   }
 }

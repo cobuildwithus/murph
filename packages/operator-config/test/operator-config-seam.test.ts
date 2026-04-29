@@ -88,22 +88,6 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
         quota: null,
         source: 'billing',
       },
-      failoverRoutes: [
-        {
-          approvalPolicy: null,
-          codexCommand: null,
-          codexHome: null,
-          cooldownMs: null,
-          model: null,
-          modelProvider: null,
-          name: 'fallback',
-          oss: false,
-          profile: null,
-          provider: 'codex-cli',
-          reasoningEffort: null,
-          sandbox: null,
-        },
-      ],
       identityId: ' user-123 ',
     },
     homeDirectory,
@@ -114,11 +98,8 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
     resolveAssistantProviderDefaults(savedDefaultsConfig.assistant, 'codex-cli'),
     {
       approvalPolicy: 'never',
-      apiKeyEnv: null,
-      baseUrl: null,
       codexCommand: null,
       codexHome: '/tmp/codex-home',
-      headers: null,
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
       modelProviderConfig: {
@@ -129,13 +110,9 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
         wireApi: 'responses',
       },
       oss: false,
-      presetId: null,
       profile: null,
-      providerName: null,
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',
-      webSearch: null,
-      zeroDataRetention: null,
     },
   )
 
@@ -504,71 +481,6 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
     /channel/u,
   )
 
-  await mkdir(path.dirname(resolveOperatorConfigPath(homeDirectory)), {
-    recursive: true,
-  })
-  await writeFile(
-    resolveOperatorConfigPath(homeDirectory),
-    JSON.stringify({
-      assistant: {
-        account: {
-          kind: 'account',
-          planCode: 'pro',
-          planName: 'Pro',
-          quota: null,
-          source: 'billing',
-        },
-        backend: {
-          adapter: 'openai-compatible',
-          apiKeyEnv: 'OPENAI_API_KEY',
-          endpoint: 'https://api.example.test/v1',
-          headers: {
-            'X-Trace-Id': 'trace-1',
-          },
-          model: 'gpt-5.4',
-          providerName: 'Example Gateway',
-          reasoningEffort: 'high',
-        },
-        failoverRoutes: [
-          {
-            approvalPolicy: null,
-            baseUrl: null,
-            codexCommand: null,
-            cooldownMs: null,
-            headers: null,
-            model: 'gpt-5.4-mini',
-            name: 'fallback',
-            oss: false,
-            profile: null,
-            provider: 'openai-compatible',
-            providerName: null,
-            reasoningEffort: 'medium',
-            sandbox: null,
-          },
-        ],
-        identityId: ' operator-123 ',
-        selfDeliveryTargets: {
-          Telegram: {
-            channel: 'telegram',
-            deliveryTarget: 'chat-123',
-            identityId: 'identity-3',
-            participantId: null,
-          threadId: null,
-        },
-      },
-      },
-      defaultVault: null,
-      hostedAssistant: null,
-      schema: 'murph.operator-config.v1',
-      updatedAt: '2026-04-08T12:00:00.000Z',
-    }),
-    'utf8',
-  )
-
-  await assert.rejects(
-    () => readOperatorConfig(homeDirectory),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
-  )
 })
 
 test('assistant self delivery targets treat iMessage as the linq route alias', async () => {

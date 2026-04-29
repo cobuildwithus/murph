@@ -58,10 +58,8 @@ test('setup runtime resolver clones process env and surfaces ready channel and w
   assert.notEqual(process.env.MURPH_OPERATOR_CONFIG_TEST_KEY, 'mutated')
   assert.deepEqual(
     await resolver.promptForMissing({
-      assistantApiKeyEnv: 'OPENAI_API_KEY',
       channels: ['telegram'],
       env: {
-        OPENAI_API_KEY: 'already-set',
         OURA_CLIENT_ID: 'already-set',
         OURA_CLIENT_SECRET: 'already-set',
         TELEGRAM_BOT_TOKEN: 'already-set',
