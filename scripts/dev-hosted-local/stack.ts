@@ -21,6 +21,7 @@ import {
   buildWranglerVarArgs,
   resolveHostedLocalDatabaseUrl,
   readOptionalSimpleEnvFile,
+  readHostedLocalStripeEnvFile,
   readSimpleEnvFile,
   requireEnvValue,
   resolveCloudflareLocalEnv,
@@ -40,6 +41,9 @@ import {
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
 } from "./runtime.ts";
+import {
+  writeHostedLocalStripeCheckoutDiagnostics,
+} from "./stripe.ts";
 import type {
   BufferedNamedChildProcess,
   HostedExecutionOidcIdentity,
@@ -119,6 +123,8 @@ export async function startHostedLocalDevStack(input: {
   const workerDevVarsBackupPath = path.join(tempDir, "cloudflare-worker.dev.vars.backup");
   const workerConfigPath = path.join(tempDir, "cloudflare-worker.local-dev.generated.json");
   const repoEnvPath = path.join(repoRoot, ".env");
+  const webEnvPath = path.join(webDir, ".env");
+  const webLocalEnvPath = path.join(webDir, ".env.local");
   let restoreCloudflareDevVars = false;
   let hadExistingCloudflareDevVars = false;
   let stopped = false;
@@ -136,13 +142,21 @@ export async function startHostedLocalDevStack(input: {
       });
     }
 
-    const repoEnv = await readOptionalSimpleEnvFile(repoEnvPath);
+    const [repoEnv, webEnv, webLocalEnv, localStripeEnv] = await Promise.all([
+      readOptionalSimpleEnvFile(repoEnvPath),
+      readOptionalSimpleEnvFile(webEnvPath),
+      readOptionalSimpleEnvFile(webLocalEnvPath),
+      readHostedLocalStripeEnvFile(initialEnv),
+    ]);
     const pulledEnv = (config.skipVercelPull || providedVercelOidcToken)
       ? {}
       : await readSimpleEnvFile(pulledEnvPath);
     const vercelEnv: NodeJS.ProcessEnv = {
       ...repoEnv,
       ...pulledEnv,
+      ...webEnv,
+      ...webLocalEnv,
+      ...localStripeEnv,
       ...initialEnv,
     };
 
@@ -221,19 +235,12 @@ export async function startHostedLocalDevStack(input: {
 
     warnForMissingEnv("NEXT_PUBLIC_PRIVY_APP_ID", runtimeEnv.NEXT_PUBLIC_PRIVY_APP_ID);
     warnForMissingEnv("PRIVY_VERIFICATION_KEY", runtimeEnv.PRIVY_VERIFICATION_KEY);
-    warnForMissingEnv(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-      runtimeEnv.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY,
-    );
-    warnForMissingEnv(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
-      runtimeEnv.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL,
-    );
-    warnForMissingEnv("STRIPE_SECRET_KEY", runtimeEnv.STRIPE_SECRET_KEY);
     const stripeListenerWillCaptureSecret = !config.skipStripeListen && !config.skipWeb;
-    if (!stripeListenerWillCaptureSecret) {
-      warnForMissingEnv("STRIPE_WEBHOOK_SECRET", runtimeEnv.STRIPE_WEBHOOK_SECRET);
-    }
+    writeHostedLocalStripeCheckoutDiagnostics({
+      env: runtimeEnv,
+      stderrTarget: input.stderrTarget,
+      stripeListenerWillCaptureSecret,
+    });
 
     await runCommand("pnpm", ["--dir", "apps/web", "prisma:generate"], {
       cwd: repoRoot,
