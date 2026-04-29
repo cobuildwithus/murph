@@ -788,7 +788,11 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
       interventionStart: "2026-03-19",
       interventionEnd: "2026-04-01",
       modality: "magnesium",
-      schedule: "Take the evening dose 60 minutes before bed.",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "22:00",
+        timeZone: "America/New_York",
+      },
       dose: "200 mg nightly",
       targetSessions: 14,
       minimumUsefulSessions: 10,
@@ -1258,7 +1262,10 @@ runPlan:
   interventionStart: 2026-03-19
   interventionEnd: 2026-04-01
   modality: magnesium
-  schedule: Take the evening dose 60 minutes before bed.
+  schedule:
+    kind: dailyLocal
+    localTime: "22:00"
+    timeZone: America/New_York
   dose: 200 mg nightly
   targetSessions: 14
   minimumUsefulSessions: 10

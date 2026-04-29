@@ -6,6 +6,8 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
   experimentOutcomeSchema,
   experimentProgressSnapshotSchema,
+  experimentRunScheduleIntentSchema,
+  type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
 import { Cli, z } from 'incur'
 import {
@@ -39,6 +41,7 @@ const experimentNotificationStyleSchema = z.enum([
   'skip_by_default',
   'send_scheduled_summary',
 ])
+const experimentRunScheduleKindSchema = z.enum(['dailyLocal', 'cron'])
 const experimentSafetyCautionLevelSchema = z.enum(
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
 )
@@ -95,6 +98,103 @@ const experimentContextSeveritySchema = z.enum([
 
 const repeatableTextOptionSchema = (description: string) =>
   z.array(z.string().min(1)).optional().describe(description)
+
+function hasRunScheduleFlag(options: {
+  scheduleKind?: z.infer<typeof experimentRunScheduleKindSchema>
+  scheduleCron?: string
+  scheduleLocalTime?: string
+  scheduleTimeZone?: string
+}) {
+  return (
+    options.scheduleKind !== undefined ||
+    options.scheduleCron !== undefined ||
+    options.scheduleLocalTime !== undefined ||
+    options.scheduleTimeZone !== undefined
+  )
+}
+
+function requireRunScheduleOption(value: string | undefined, optionName: string) {
+  if (value === undefined || value.trim().length === 0) {
+    throw new VaultCliError(
+      'invalid_option',
+      `--${optionName} is required for this schedule kind.`,
+    )
+  }
+
+  return value.trim()
+}
+
+function parseRunScheduleOption(value: unknown): ExperimentRunScheduleIntent {
+  const parsed = experimentRunScheduleIntentSchema.safeParse(value)
+
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || 'schedule'}: ${issue.message}`)
+      .join('; ')
+    throw new VaultCliError(
+      'invalid_option',
+      `Run-plan schedule must match ExperimentRunScheduleIntent: ${issues}`,
+    )
+  }
+
+  return parsed.data
+}
+
+function buildRunScheduleFromOptions(options: {
+  scheduleKind?: z.infer<typeof experimentRunScheduleKindSchema>
+  scheduleCron?: string
+  scheduleLocalTime?: string
+  scheduleTimeZone?: string
+  scheduleJson?: string
+}): ExperimentRunScheduleIntent | undefined {
+  if (options.scheduleJson !== undefined && hasRunScheduleFlag(options)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Use either --schedule-json or --schedule-kind flags, not both.',
+    )
+  }
+
+  if (!hasRunScheduleFlag(options)) {
+    return undefined
+  }
+
+  if (options.scheduleKind === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--schedule-kind is required when passing run-plan schedule fields.',
+    )
+  }
+
+  const timeZone = requireRunScheduleOption(options.scheduleTimeZone, 'schedule-time-zone')
+
+  if (options.scheduleKind === 'dailyLocal') {
+    if (options.scheduleCron !== undefined) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--schedule-cron is only valid with --schedule-kind cron.',
+      )
+    }
+
+    return parseRunScheduleOption({
+      kind: 'dailyLocal',
+      localTime: requireRunScheduleOption(options.scheduleLocalTime, 'schedule-local-time'),
+      timeZone,
+    })
+  }
+
+  if (options.scheduleLocalTime !== undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--schedule-local-time is only valid with --schedule-kind dailyLocal.',
+    )
+  }
+
+  return parseRunScheduleOption({
+    kind: 'cron',
+    expression: requireRunScheduleOption(options.scheduleCron, 'schedule-cron'),
+    timeZone,
+  })
+}
 
 type ExperimentSessionConfounderValue = string | number | boolean | null
 type ExperimentSessionConfounderMap = Record<
@@ -534,11 +634,29 @@ export function registerExperimentCommands(
           'Intervention length in days; requires intervention-start, intervention-end, or a baseline window.',
         ),
       modality: z.string().min(1).optional().describe('Intervention modality label.'),
-      schedule: z
+      scheduleKind: experimentRunScheduleKindSchema
+        .optional()
+        .describe('Run-plan schedule discriminator for structured schedule flags.'),
+      scheduleCron: z
         .string()
         .min(1)
         .optional()
-        .describe('Plain-language schedule string for the run plan.'),
+        .describe('Five-field cron expression when --schedule-kind=cron.'),
+      scheduleLocalTime: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('HH:MM local time when --schedule-kind=dailyLocal.'),
+      scheduleTimeZone: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('IANA time zone for the run-plan schedule.'),
+      scheduleJson: inputFileOptionSchema
+        .optional()
+        .describe(
+          'ExperimentRunScheduleIntent JSON object in @file.json form or - for stdin.',
+        ),
       dose: z
         .string()
         .min(1)
@@ -651,7 +769,11 @@ export function registerExperimentCommands(
         interventionEnd: options.interventionEnd,
         interventionDays: options.interventionDays,
         modality: options.modality,
-        schedule: options.schedule,
+        schedule: buildRunScheduleFromOptions(options),
+        scheduleInputFile:
+          options.scheduleJson === undefined
+            ? undefined
+            : normalizeInputFileOption(options.scheduleJson),
         dose: options.dose,
         sessionsPerWeek: options.sessionsPerWeek,
         targetSessions: options.targetSessions,

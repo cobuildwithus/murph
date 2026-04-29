@@ -1,6 +1,7 @@
 import type {
   EventSource,
   ExperimentFrontmatter,
+  ExperimentRunScheduleIntent,
   ExperimentStatus,
   HealthCommonsExperimentOnboardingPositiveDisposition,
   MealNutrition,
@@ -722,7 +723,12 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       interventionEnd?: string
       interventionDays?: number
       modality?: string
-      schedule?: string
+      schedule?: ExperimentRunScheduleIntent
+      scheduleInputFile?: string
+      scheduleKind?: ExperimentRunScheduleIntent["kind"]
+      scheduleCron?: string
+      scheduleLocalTime?: string
+      scheduleTimeZone?: string
       dose?: string
       sessionsPerWeek?: number
       targetSessions?: number

@@ -11,6 +11,7 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
     "createBrowserVaultQueryClient",
     "createBrowserVaultReplica",
     "parseBrowserVaultReplica",
+    "selectBrowserVaultExperimentResults",
     "selectBrowserVaultOverview",
     "selectBrowserVaultSignals",
   ]) {

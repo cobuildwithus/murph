@@ -144,6 +144,166 @@ test("browser vault replicas validate schema", () => {
   );
 });
 
+test("browser vault replica projects experiment event fields only for relevant event kinds", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "d".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("event", "evt_session", {
+          attributes: {
+            afterExercise: true,
+            confounders: {
+              travel: true,
+              trainingLoad: "heavy",
+            },
+            durationMinutes: 18,
+            effectiveProtocolSnapshot: {
+              doseSignature: "Sensitive generic snapshot should not be projected.",
+            },
+            experimentId: "exp_sauna",
+            experimentSlug: "sauna-rhr",
+            externalId: "provider-session-1",
+            externalRef: {
+              resourceId: "provider-session-1",
+              system: "provider",
+            },
+            interventionType: "dry-sauna",
+            markdownBody: "# Raw note",
+            note: "Felt lightheaded near the end.",
+            protocolId: "prot_sauna",
+            provenance: {
+              importedFrom: "provider",
+            },
+            rawProvenance: {
+              payloadId: "raw-1",
+            },
+            regimenId: "reg_sauna",
+            runPlan: {
+              interventionStart: "2026-04-20",
+            },
+            sessionStatus: "partial",
+            summary: "Generic event summary should not be projected.",
+            symptoms: ["lightheaded"],
+            temperatureC: 88,
+            timing: "evening",
+          },
+          body: "# Session note\n\nFelt lightheaded near the end.",
+          experimentSlug: "sauna-rhr",
+          kind: "intervention_session",
+          title: "Sauna session",
+        }),
+        createEntity("event", "evt_context", {
+          attributes: {
+            contextType: "travel",
+            experimentId: "exp_sauna",
+            experimentSlug: "sauna-rhr",
+            externalId: "provider-context-1",
+            note: "Travel day.",
+            providerRef: "provider-context-1",
+            rawProvenance: {
+              payloadId: "raw-2",
+            },
+            severity: "potential_confounder",
+            summary: "Context summary should not be projected.",
+          },
+          body: "# Context note\n\nTravel day.",
+          experimentSlug: "sauna-rhr",
+          kind: "experiment_context",
+          title: "Travel day",
+        }),
+        createEntity("event", "evt_activity", {
+          attributes: {
+            afterExercise: true,
+            contextType: "training",
+            durationMinutes: 45,
+            experimentId: "exp_sauna",
+            experimentSlug: "sauna-rhr",
+            externalId: "activity-1",
+            interventionType: "running",
+            severity: "info",
+            symptoms: ["sore"],
+          },
+          body: "# Activity note\n\nUnrelated activity details.",
+          kind: "activity_session",
+          title: "Morning run",
+        }),
+        createEntity("journal", "journal_structured_keys", {
+          attributes: {
+            contextType: "travel",
+            durationMinutes: 10,
+            experimentId: "exp_sauna",
+            experimentSlug: "sauna-rhr",
+            interventionType: "dry-sauna",
+            sessionStatus: "completed",
+          },
+          title: "Journal note with structured-looking keys",
+        }),
+      ],
+      metadata: {
+        title: "Browser vault event projection fixture",
+      },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const session = client.entities.get("evt_session");
+  const context = client.entities.get("evt_context");
+  const activity = client.entities.get("evt_activity");
+  const journal = client.entities.get("journal_structured_keys");
+
+  assert.ok(session);
+  assert.deepEqual(session.attributes, {
+    afterExercise: true,
+    confounders: {
+      travel: true,
+      trainingLoad: "heavy",
+    },
+    durationMinutes: 18,
+    experimentId: "exp_sauna",
+    experimentSlug: "sauna-rhr",
+    interventionType: "dry-sauna",
+    protocolId: "prot_sauna",
+    regimenId: "reg_sauna",
+    sessionStatus: "partial",
+    symptoms: ["lightheaded"],
+    temperatureC: 88,
+    timing: "evening",
+  });
+  assert.equal(Object.hasOwn(session.attributes, "note"), false);
+  assert.equal(Object.hasOwn(session.attributes, "markdownBody"), false);
+  assert.equal(Object.hasOwn(session.attributes, "externalId"), false);
+  assert.equal(Object.hasOwn(session.attributes, "externalRef"), false);
+  assert.equal(Object.hasOwn(session.attributes, "provenance"), false);
+  assert.equal(Object.hasOwn(session.attributes, "rawProvenance"), false);
+  assert.equal(Object.hasOwn(session.attributes, "effectiveProtocolSnapshot"), false);
+  assert.equal(Object.hasOwn(session.attributes, "runPlan"), false);
+  assert.equal(Object.hasOwn(session.attributes, "summary"), false);
+  assert.equal(session.bodyPreview, null);
+
+  assert.ok(context);
+  assert.deepEqual(context.attributes, {
+    contextType: "travel",
+    experimentId: "exp_sauna",
+    experimentSlug: "sauna-rhr",
+    severity: "potential_confounder",
+  });
+  assert.equal(Object.hasOwn(context.attributes, "note"), false);
+  assert.equal(Object.hasOwn(context.attributes, "externalId"), false);
+  assert.equal(Object.hasOwn(context.attributes, "providerRef"), false);
+  assert.equal(Object.hasOwn(context.attributes, "rawProvenance"), false);
+  assert.equal(Object.hasOwn(context.attributes, "summary"), false);
+  assert.equal(context.bodyPreview, null);
+
+  assert.ok(activity);
+  assert.deepEqual(activity.attributes, {});
+  assert.equal(activity.bodyPreview, null);
+
+  assert.ok(journal);
+  assert.deepEqual(journal.attributes, {});
+});
+
 function createEntity(
   family: BrowserVaultEntity["family"],
   entityId: string,
@@ -179,6 +339,8 @@ function createEntity(
 
 function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {
   switch (family) {
+    case "event":
+      return "ledger";
     case "experiment":
       return "bank";
     case "journal":

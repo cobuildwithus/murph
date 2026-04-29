@@ -15,11 +15,13 @@ import {
   commonsProtocolRefSchema,
   experimentRunLoggingSchema,
   experimentRunPlanSchema,
+  experimentRunScheduleIntentSchema,
   healthCommonsKeySchema,
   healthCommonsStableIdSchema,
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
+  type ExperimentRunScheduleIntent,
   type JsonValue,
 } from '@murphai/contracts'
 import { stringifyFrontmatterDocument } from '@murphai/core'
@@ -278,7 +280,12 @@ export interface ApplyExperimentOnboardingRecordInput {
   interventionEnd?: string
   interventionDays?: number
   modality?: string
-  schedule?: string
+  schedule?: ExperimentRunScheduleIntent
+  scheduleInputFile?: string
+  scheduleKind?: ExperimentRunScheduleIntent['kind']
+  scheduleCron?: string
+  scheduleLocalTime?: string
+  scheduleTimeZone?: string
   dose?: string
   sessionsPerWeek?: number
   targetSessions?: number
@@ -718,7 +725,7 @@ export async function applyExperimentOnboardingRecord(
     input,
     frontmatter.commonsProtocolRef,
   )
-  const runPlan = buildRunPlanForOnboardingApply(input, frontmatter.runPlan)
+  const runPlan = await buildRunPlanForOnboardingApply(input, frontmatter.runPlan)
   const analysisPlan = buildAnalysisPlanForOnboardingApply(
     input,
     frontmatter.analysisPlan,
@@ -1928,19 +1935,20 @@ function buildCommonsProtocolRefForOnboardingApply(
   )
 }
 
-function buildRunPlanForOnboardingApply(
+async function buildRunPlanForOnboardingApply(
   input: ApplyExperimentOnboardingRecordInput,
   existing: ExperimentFrontmatterValue['runPlan'],
-): ExperimentRunPlanValue | undefined {
+): Promise<ExperimentRunPlanValue | undefined> {
   const datePatch = buildRunPlanDatePatch(input)
   const logging = buildRunLoggingForOnboardingApply(input, existing?.logging)
+  const schedule = await buildRunScheduleForOnboardingApply(input)
   const patch: Partial<ExperimentRunPlanValue> = { ...datePatch }
 
   if (input.modality !== undefined) {
     patch.modality = normalizeRequiredTextOption(input.modality, 'modality')
   }
-  if (input.schedule !== undefined) {
-    patch.schedule = normalizeRequiredTextOption(input.schedule, 'schedule')
+  if (schedule !== undefined) {
+    patch.schedule = schedule
   }
   if (input.dose !== undefined) {
     patch.dose = normalizeRequiredTextOption(input.dose, 'dose')
@@ -1973,6 +1981,115 @@ function buildRunPlanForOnboardingApply(
       ...patch,
     }),
   )
+}
+
+async function buildRunScheduleForOnboardingApply(
+  input: ApplyExperimentOnboardingRecordInput,
+): Promise<ExperimentRunScheduleIntent | undefined> {
+  const hasScheduleFlags =
+    input.scheduleKind !== undefined ||
+    input.scheduleCron !== undefined ||
+    input.scheduleLocalTime !== undefined ||
+    input.scheduleTimeZone !== undefined
+  const sourceCount =
+    (input.schedule === undefined ? 0 : 1) +
+    (input.scheduleInputFile === undefined ? 0 : 1) +
+    (hasScheduleFlags ? 1 : 0)
+
+  if (sourceCount === 0) {
+    return undefined
+  }
+
+  if (sourceCount > 1) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Provide only one schedule source: a structured schedule object, --schedule-json, or --schedule-kind flags.',
+    )
+  }
+
+  if (input.schedule !== undefined) {
+    return parseExperimentRunScheduleIntent(input.schedule, 'schedule')
+  }
+
+  if (input.scheduleInputFile !== undefined) {
+    return parseExperimentRunScheduleIntent(
+      await readJsonPayload(input.scheduleInputFile, 'ExperimentRunScheduleIntent payload'),
+      'schedule-json',
+    )
+  }
+
+  if (input.scheduleKind === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--schedule-kind is required when passing run-plan schedule fields.',
+    )
+  }
+
+  const timeZone = requireScheduleTextOption(input.scheduleTimeZone, 'schedule-time-zone')
+
+  if (input.scheduleKind === 'dailyLocal') {
+    if (input.scheduleCron !== undefined) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--schedule-cron is only valid with --schedule-kind cron.',
+      )
+    }
+
+    return parseExperimentRunScheduleIntent(
+      {
+        kind: 'dailyLocal',
+        localTime: requireScheduleTextOption(
+          input.scheduleLocalTime,
+          'schedule-local-time',
+        ),
+        timeZone,
+      },
+      'schedule',
+    )
+  }
+
+  if (input.scheduleLocalTime !== undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--schedule-local-time is only valid with --schedule-kind dailyLocal.',
+    )
+  }
+
+  return parseExperimentRunScheduleIntent(
+    {
+      kind: 'cron',
+      expression: requireScheduleTextOption(input.scheduleCron, 'schedule-cron'),
+      timeZone,
+    },
+    'schedule',
+  )
+}
+
+function requireScheduleTextOption(
+  value: string | undefined,
+  optionName: string,
+): string {
+  if (value === undefined) {
+    throw new VaultCliError('invalid_option', `--${optionName} is required for this schedule kind.`)
+  }
+
+  return normalizeRequiredTextOption(value, optionName)
+}
+
+function parseExperimentRunScheduleIntent(
+  value: unknown,
+  label: string,
+): ExperimentRunScheduleIntent {
+  const parsed = safeParseContract(experimentRunScheduleIntentSchema, value)
+
+  if (!parsed.success) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `${label} must be an ExperimentRunScheduleIntent: ${parsed.errors.join('; ')}`,
+    )
+  }
+
+  return parsed.data
 }
 
 function buildRunLoggingForOnboardingApply(
@@ -2354,7 +2471,7 @@ function parseSetupAnswerValue(value: string): JsonValue {
   }
 
   try {
-    const parsed = JSON.parse(value) as unknown
+    const parsed: unknown = JSON.parse(value)
     if (isJsonValue(parsed)) {
       return parsed
     }

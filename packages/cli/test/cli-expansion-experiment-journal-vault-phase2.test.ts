@@ -160,7 +160,12 @@ test('experiment apply-onboarding schema exposes typed onboarding flags', async 
   assert.equal('runSpecRevisionId' in schema.options.properties, true)
   assert.equal('baselineDays' in schema.options.properties, true)
   assert.equal('interventionDays' in schema.options.properties, true)
-  assert.equal('schedule' in schema.options.properties, true)
+  assert.equal('schedule' in schema.options.properties, false)
+  assert.equal('scheduleKind' in schema.options.properties, true)
+  assert.equal('scheduleCron' in schema.options.properties, true)
+  assert.equal('scheduleLocalTime' in schema.options.properties, true)
+  assert.equal('scheduleTimeZone' in schema.options.properties, true)
+  assert.equal('scheduleJson' in schema.options.properties, true)
   assert.equal('dose' in schema.options.properties, true)
   assert.equal('sessionField' in schema.options.properties, true)
   assert.equal('setupAnswer' in schema.options.properties, true)
@@ -473,7 +478,9 @@ test('experiment onboarding llms discovery exposes apply flags and hides update 
   assert.match(applyDiscovery, /experiment apply-onboarding/u)
   assert.match(applyDiscovery, /protocolKey/u)
   assert.match(applyDiscovery, /pageRevisionId/u)
-  assert.match(applyDiscovery, /schedule/u)
+  assert.match(applyDiscovery, /scheduleKind/u)
+  assert.match(applyDiscovery, /scheduleTimeZone/u)
+  assert.doesNotMatch(applyDiscovery, /Plain-language schedule string/u)
   assert.match(applyDiscovery, /dose/u)
   assert.match(applyDiscovery, /setupAnswer/u)
   assert.match(applyDiscovery, /missedLogFollowup/u)
@@ -639,8 +646,12 @@ test.sequential(
         '14',
         '--modality',
         'dry_sauna',
-        '--schedule',
-        'Three evening sauna sessions per week.',
+        '--schedule-kind',
+        'cron',
+        '--schedule-cron',
+        '0 18 * * 2,4,6',
+        '--schedule-time-zone',
+        'America/Los_Angeles',
         '--dose',
         '20 minutes per session at a comfortable heat.',
         '--sessions-per-week',
@@ -758,7 +769,11 @@ test.sequential(
       assert.equal(runPlan.interventionStart, '2026-05-08')
       assert.equal(runPlan.interventionEnd, '2026-05-21')
       assert.equal(runPlan.modality, 'dry_sauna')
-      assert.equal(runPlan.schedule, 'Three evening sauna sessions per week.')
+      assert.deepEqual(runPlan.schedule, {
+        kind: 'cron',
+        expression: '0 18 * * 2,4,6',
+        timeZone: 'America/Los_Angeles',
+      })
       assert.equal(runPlan.dose, '20 minutes per session at a comfortable heat.')
       assert.equal(runPlan.sessionsPerWeek, 3)
       assert.equal(runPlan.targetSessions, 6)
@@ -847,12 +862,77 @@ test.sequential(
 
       assert.equal(partialApply.ok, true)
       assert.deepEqual(partialCommonsProtocolRef, commonsProtocolRef)
-      assert.equal(partialRunPlan.schedule, 'Three evening sauna sessions per week.')
+      assert.deepEqual(partialRunPlan.schedule, {
+        kind: 'cron',
+        expression: '0 18 * * 2,4,6',
+        timeZone: 'America/Los_Angeles',
+      })
       assert.deepEqual(partialRunPlan.stopConditions, ['Stop for dizziness or chest pain.'])
       assert.equal(partialSetupAnswers.session_timing, 'Evening after training')
       assert.equal(partialSetupAnswers.heat_source, 'infrared sauna')
       assert.equal(partialAssistantSupport.reminderOptionId, 'evening_reminder')
       assert.equal(partialAssistantSupport.missedLogFollowup, 'opt_in_only')
+
+      const schedulePayloadPath = path.join(vaultRoot, 'schedule.json')
+      await writeFile(
+        schedulePayloadPath,
+        `${JSON.stringify({
+          kind: 'dailyLocal',
+          localTime: '19:30',
+          timeZone: 'America/Los_Angeles',
+        })}\n`,
+        'utf8',
+      )
+      const scheduleJsonApply = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--schedule-json',
+        `@${schedulePayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const shownAfterScheduleJson = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'experiment',
+        'show',
+        'sauna-daily',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(scheduleJsonApply.ok, true)
+      assert.deepEqual(
+        requireRecord(requireData(shownAfterScheduleJson).entity.data.runPlan, 'runPlan').schedule,
+        {
+          kind: 'dailyLocal',
+          localTime: '19:30',
+          timeZone: 'America/Los_Angeles',
+        },
+      )
+
+      const legacySchedulePayloadPath = path.join(vaultRoot, 'legacy-schedule.json')
+      await writeFile(
+        legacySchedulePayloadPath,
+        `${JSON.stringify('Three evening sauna sessions per week.')}\n`,
+        'utf8',
+      )
+      const legacyScheduleApply = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--schedule-json',
+        `@${legacySchedulePayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(legacyScheduleApply.ok, false)
+      assert.match(
+        legacyScheduleApply.error.message ?? '',
+        /ExperimentRunScheduleIntent/u,
+      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -956,7 +1036,11 @@ test.sequential(
             interventionStart: '2026-05-01',
             interventionEnd: '2026-05-14',
             modality: 'traditional_dry_sauna',
-            schedule: 'Tue/Thu evening when possible',
+            schedule: {
+              kind: 'cron',
+              expression: '0 18 * * 2,4',
+              timeZone: 'America/Los_Angeles',
+            },
             sessionsPerWeek: 2,
             targetSessions: 4,
             minimumUsefulSessions: 3,

@@ -30,6 +30,22 @@ describe("Bryan Johnson sauna onboarding", () => {
         "reminder_policy",
       ]),
     );
+    expect(
+      protocol?.experimentOnboarding?.setupSlots?.find((slot) => slot.id === "weekly_schedule"),
+    ).toMatchObject({
+      constraints: {
+        defaultRunPlanSchedule: {
+          kind: "dailyLocal",
+          localTime: "07:30",
+          timeZone: "UTC",
+        },
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone",
+      },
+      target: {
+        object: "onboardingCapture",
+        field: "answers.weeklySchedule",
+      },
+    });
     expect(protocol?.revision.runSpecRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
   });
 });

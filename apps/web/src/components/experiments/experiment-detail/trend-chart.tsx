@@ -57,6 +57,7 @@ export function TrendChart({ data, className }: TrendChartProps) {
   const baselineEnd = lastBaselinePoint?.day ?? 0;
   const lastBaselineValue = lastBaselinePoint?.value;
   const expectedRange = data.expectedRange ?? [];
+  const hasExpectedRange = expectedRange.length > 0;
   const allDays = new Set<number>([
     ...data.baseline.map((p) => p.day),
     ...data.active.map((p) => p.day),
@@ -87,20 +88,20 @@ export function TrendChart({ data, className }: TrendChartProps) {
         className
       )}
     >
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <span className="min-w-0 break-words font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           {data.label}
         </span>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
           {data.delta && (
             <span className="text-xs font-semibold text-primary">
               {data.delta}
             </span>
           )}
-          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
             <LegendSwatch seriesKey="baseline" />
             <LegendSwatch seriesKey="active" />
-            {expectedRange.length > 0 && <LegendSwatch seriesKey="expectedRange" />}
+            {hasExpectedRange && <LegendSwatch seriesKey="expectedRange" />}
           </div>
         </div>
       </div>
@@ -160,19 +161,21 @@ export function TrendChart({ data, className }: TrendChartProps) {
               );
             }}
           />
-          <Area
-            dataKey="expectedRange"
-            type="monotone"
-            stroke="#7A8C6E"
-            strokeWidth={1}
-            strokeDasharray="3 3"
-            strokeOpacity={0.5}
-            fill="#7A8C6E"
-            fillOpacity={0.12}
-            connectNulls={false}
-            dot={false}
-            activeDot={false}
-          />
+          {hasExpectedRange && (
+            <Area
+              dataKey="expectedRange"
+              type="monotone"
+              stroke="#7A8C6E"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              strokeOpacity={0.5}
+              fill="#7A8C6E"
+              fillOpacity={0.12}
+              connectNulls={false}
+              dot={false}
+              activeDot={false}
+            />
+          )}
           <Area
             dataKey="baseline"
             type="monotone"

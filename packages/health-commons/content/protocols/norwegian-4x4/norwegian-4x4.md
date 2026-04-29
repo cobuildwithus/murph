@@ -367,9 +367,14 @@ experimentOnboarding:
       constraints:
         sessionsPerWeek: 2
         minimumHoursBetweenSessions: 48
+        defaultRunPlanSchedule:
+          kind: cron
+          expression: "0 8 * * 2,5"
+          timeZone: UTC
+        runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
       target:
-        object: experimentRun
-        field: schedule
+        object: onboardingCapture
+        field: answers.weeklySchedule
     -
       id: reminder_policy
       label: Reminder policy

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Check, X } from "lucide-react";
+import { Check, CircleSlash, Minus, X } from "lucide-react";
 
 import type {
   ExperimentSchedule,
@@ -15,7 +15,9 @@ interface ExperimentScheduleProps {
 const CELL_VARIANT: Record<ScheduleCellKind, string> = {
   baseline: "border border-secondary/30 bg-secondary/30 text-foreground/60",
   completed: "border border-ring/40 bg-ring/15 text-foreground",
+  partial: "border border-secondary/60 bg-secondary/20 text-foreground",
   missed: "border border-destructive/50 bg-destructive/15 text-destructive",
+  skipped: "border border-muted-foreground/30 bg-muted/40 text-muted-foreground",
   scheduled: "border border-ring/50 bg-transparent text-ring",
   rest: "border border-border/40 bg-transparent text-muted-foreground/60",
   upcoming: "border border-border/30 bg-transparent text-muted-foreground/60",
@@ -24,7 +26,9 @@ const CELL_VARIANT: Record<ScheduleCellKind, string> = {
 const LEGEND_ENTRIES: { kind: ScheduleCellKind; label: string }[] = [
   { kind: "baseline", label: "Baseline" },
   { kind: "completed", label: "Completed" },
+  { kind: "partial", label: "Partial" },
   { kind: "missed", label: "Missed" },
+  { kind: "skipped", label: "Skipped" },
   { kind: "scheduled", label: "Scheduled" },
   { kind: "rest", label: "Rest" },
 ];
@@ -128,8 +132,16 @@ function renderCellBody(cell: ScheduleCell): ReactNode {
           {cell.detail ?? <Check className="size-3.5" strokeWidth={2.5} />}
         </span>
       );
+    case "partial":
+      return (
+        <span className="text-[11px] font-semibold">
+          {cell.detail ?? <Minus aria-label="Partial" className="size-3.5" strokeWidth={2.5} />}
+        </span>
+      );
     case "missed":
-      return <X className="size-3.5" strokeWidth={2} />;
+      return <X aria-label="Missed" className="size-3.5" strokeWidth={2} />;
+    case "skipped":
+      return <CircleSlash aria-label="Skipped" className="size-3.5" strokeWidth={2} />;
     case "scheduled":
       return cell.detail ? (
         <span className="text-[11px] font-medium">{cell.detail}</span>
@@ -140,4 +152,3 @@ function renderCellBody(cell: ScheduleCell): ReactNode {
       return null;
   }
 }
-

@@ -410,9 +410,14 @@ experimentOnboarding:
       constraints:
         sessionsPerWeek: 3
         avoidBackToBackWhenPossible: true
+        defaultRunPlanSchedule:
+          kind: "cron"
+          expression: "0 18 * * 2,4,6"
+          timeZone: "UTC"
+        runPlanScheduleTimeZonePolicy: "replace_with_user_vault_timezone"
       target:
-        object: "experimentRun"
-        field: "schedule"
+        object: "onboardingCapture"
+        field: "answers.sessionTiming"
     -
       id: "standalone_context"
       label: "Session context"

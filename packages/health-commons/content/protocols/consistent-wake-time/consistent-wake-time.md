@@ -460,9 +460,14 @@ experimentOnboarding:
       question: "What 60-minute wake/rise window can you realistically keep on most days while still getting enough sleep?"
       constraints:
         maxWindowMinutes: 60
+        defaultRunPlanSchedule:
+          kind: dailyLocal
+          localTime: "07:00"
+          timeZone: UTC
+        runPlanScheduleTimeZonePolicy: replace_with_user_vault_timezone
       target:
-        object: experimentRun
-        field: schedule.targetWakeWindow
+        object: onboardingCapture
+        field: answers.targetWakeWindow
     -
       id: "sleep_opportunity_plan"
       label: "Sleep-opportunity plan"

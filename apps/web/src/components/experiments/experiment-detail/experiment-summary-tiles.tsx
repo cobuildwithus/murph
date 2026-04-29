@@ -114,14 +114,33 @@ function renderExperimentValue({
 
 function renderSessionsDetail(tallies: ScheduleTallies | null): ReactNode {
   if (!tallies) return "No schedule";
-  if (tallies.missed === 0 && tallies.scheduled === 0) return "On track";
+  if (
+    tallies.partial === 0
+    && tallies.missed === 0
+    && tallies.skipped === 0
+    && tallies.scheduled === 0
+  ) {
+    return "On track";
+  }
 
   return (
     <span className="flex flex-wrap gap-x-3 gap-y-1">
+      {tallies.partial > 0 && (
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block size-1.5 rounded-full bg-amber-500" />
+          {tallies.partial} partial
+        </span>
+      )}
       {tallies.missed > 0 && (
         <span className="flex items-center gap-1.5">
           <span className="inline-block size-1.5 rounded-full bg-destructive" />
           {tallies.missed} missed
+        </span>
+      )}
+      {tallies.skipped > 0 && (
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block size-1.5 rounded-full bg-muted-foreground" />
+          {tallies.skipped} skipped
         </span>
       )}
       {tallies.scheduled > 0 && (
@@ -136,7 +155,9 @@ function renderSessionsDetail(tallies: ScheduleTallies | null): ReactNode {
 
 interface ScheduleTallies {
   completed: number;
+  partial: number;
   missed: number;
+  skipped: number;
   scheduled: number;
   total: number;
 }
@@ -149,12 +170,17 @@ function tallySchedule(schedule: Experiment["schedule"]): ScheduleTallies | null
     .reduce(
       (acc, cell) => {
         if (cell.kind === "completed") acc.completed += 1;
+        if (cell.kind === "partial") acc.partial += 1;
         if (cell.kind === "missed") acc.missed += 1;
+        if (cell.kind === "skipped") acc.skipped += 1;
         if (cell.kind === "scheduled") acc.scheduled += 1;
         return acc;
       },
-      { completed: 0, missed: 0, scheduled: 0 },
+      { completed: 0, partial: 0, missed: 0, skipped: 0, scheduled: 0 },
     );
 
-  return { ...counts, total: counts.completed + counts.missed + counts.scheduled };
+  return {
+    ...counts,
+    total: counts.completed + counts.partial + counts.missed + counts.skipped + counts.scheduled,
+  };
 }

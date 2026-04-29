@@ -137,8 +137,8 @@ function isBrowserVaultIncludedFamily(family: string): boolean {
 
 function projectEntity(entity: CanonicalEntity): BrowserVaultEntity {
   return {
-    attributes: projectSafeAttributes(entity),
-    bodyPreview: previewText(entity.body, BODY_PREVIEW_CHARS),
+    attributes: projectEntityAttributes(entity),
+    bodyPreview: projectEntityBodyPreview(entity),
     date: entity.date,
     experimentSlug: entity.experimentSlug,
     family: entity.family,
@@ -153,6 +153,22 @@ function projectEntity(entity: CanonicalEntity): BrowserVaultEntity {
     tags: entity.tags.slice(),
     title: entity.title,
   };
+}
+
+function projectEntityBodyPreview(entity: CanonicalEntity): string | null {
+  if (entity.family === "event") {
+    return null;
+  }
+
+  return previewText(entity.body, BODY_PREVIEW_CHARS);
+}
+
+function projectEntityAttributes(entity: CanonicalEntity): Record<string, unknown> {
+  if (entity.family === "event") {
+    return projectSafeEventAttributes(entity);
+  }
+
+  return projectSafeAttributes(entity);
 }
 
 function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown> {
@@ -172,6 +188,8 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
     "onboarding",
     "outcome",
     "outcomeRef",
+    "expectedEffects",
+    "expectedSignalDescriptions",
     "commonsProtocolRef",
     "effectiveProtocolSnapshot",
     "protocolRef",
@@ -182,6 +200,55 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
     "unit",
     "value",
   ]) {
+    if (source[key] !== undefined && isBrowserSafeJson(source[key])) {
+      allowed[key] = cloneJson(source[key]);
+    }
+  }
+
+  return allowed;
+}
+
+function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unknown> {
+  if (entity.family !== "event") {
+    return {};
+  }
+
+  switch (entity.kind) {
+    case "intervention_session":
+      return projectSafeAttributeKeys(entity, [
+        "experimentId",
+        "experimentSlug",
+        "interventionType",
+        "protocolId",
+        "regimenId",
+        "sessionStatus",
+        "durationMinutes",
+        "timing",
+        "temperatureC",
+        "afterExercise",
+        "symptoms",
+        "confounders",
+      ]);
+    case "experiment_context":
+      return projectSafeAttributeKeys(entity, [
+        "experimentId",
+        "experimentSlug",
+        "contextType",
+        "severity",
+      ]);
+    default:
+      return {};
+  }
+}
+
+function projectSafeAttributeKeys(
+  entity: CanonicalEntity,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const source = entity.frontmatter ?? entity.attributes;
+  const allowed: Record<string, unknown> = {};
+
+  for (const key of keys) {
     if (source[key] !== undefined && isBrowserSafeJson(source[key])) {
       allowed[key] = cloneJson(source[key]);
     }
