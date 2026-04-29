@@ -7,6 +7,22 @@ export async function main(): Promise<void> {
     env: process.env,
   });
   let terminationSignal: NodeJS.Signals | null = null;
+  let stopPromise: Promise<void> | null = null;
+  let resolveTerminationCleanup: (() => void) | null = null;
+  const terminationCleanupComplete = new Promise<void>((resolve) => {
+    resolveTerminationCleanup = resolve;
+  });
+  let terminationCleanupError: unknown = null;
+  const stopStack = (signal: NodeJS.Signals): Promise<void> => {
+    stopPromise ??= stack.stop(signal);
+    return stopPromise;
+  };
+  const awaitTerminationCleanup = async (): Promise<void> => {
+    await terminationCleanupComplete;
+    if (terminationCleanupError !== null) {
+      throw terminationCleanupError;
+    }
+  };
 
   const handleTerminationSignal = async (signal: NodeJS.Signals) => {
     if (terminationSignal) {
@@ -15,49 +31,79 @@ export async function main(): Promise<void> {
 
     terminationSignal = signal;
     process.stderr.write(`\nStopping local hosted dev (${signal}).\n`);
-    await stack.stop(signal);
+    try {
+      await stopStack(signal);
+    } catch (error) {
+      terminationCleanupError = error;
+    } finally {
+      resolveTerminationCleanup?.();
+    }
   };
 
-  process.once("SIGINT", () => {
+  const onSigint = (): void => {
     void handleTerminationSignal("SIGINT");
-  });
-  process.once("SIGTERM", () => {
+  };
+  const onSigterm = (): void => {
     void handleTerminationSignal("SIGTERM");
-  });
+  };
+
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
 
   try {
-    await stack.ready;
-  } catch (error) {
-    if (terminationSignal) {
+    try {
+      await stack.ready;
+    } catch (error) {
+      if (terminationSignal) {
+        await awaitTerminationCleanup();
+        return;
+      }
+
+      throw error;
+    }
+
+    process.stdout.write(
+      [
+        "",
+        "Local hosted dev is ready.",
+        ...(stack.webBaseUrl ? [`web:    ${stack.webBaseUrl}`] : []),
+        `worker: ${stack.workerBaseUrl}`,
+        "",
+      ].join("\n"),
+    );
+    emitReadyToken(process.env.MURPH_DEV_READY_TOKEN);
+
+    const result = await Promise.race([
+      stack.waitForExit().then((exited) => ({
+        exited,
+        type: "child-exit" as const,
+      })),
+      awaitTerminationCleanup().then(() => ({
+        type: "termination-cleanup" as const,
+      })),
+    ]);
+
+    if (result.type === "termination-cleanup") {
       return;
     }
 
-    throw error;
+    const { exited } = result;
+    await stopStack("SIGTERM");
+
+    if (terminationSignal) {
+      await awaitTerminationCleanup();
+      return;
+    }
+
+    if (exited.child.exitCode === 0) {
+      return;
+    }
+
+    throw new Error(`${exited.name} exited with code ${exited.child.exitCode ?? "unknown"}.`);
+  } finally {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
   }
-
-  process.stdout.write(
-    [
-      "",
-      "Local hosted dev is ready.",
-      ...(stack.webBaseUrl ? [`web:    ${stack.webBaseUrl}`] : []),
-      `worker: ${stack.workerBaseUrl}`,
-      "",
-    ].join("\n"),
-  );
-  emitReadyToken(process.env.MURPH_DEV_READY_TOKEN);
-
-  const exited = await stack.waitForExit();
-  await stack.stop("SIGTERM");
-
-  if (terminationSignal) {
-    return;
-  }
-
-  if (exited.child.exitCode === 0) {
-    return;
-  }
-
-  throw new Error(`${exited.name} exited with code ${exited.child.exitCode ?? "unknown"}.`);
 }
 
 function emitReadyToken(token: string | undefined): void {
