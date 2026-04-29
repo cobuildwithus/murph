@@ -787,7 +787,7 @@ export async function buildHostedDataExport(input: {
         documentVersionsJson: event.documentVersionsJson,
         idPresent: true,
         memberId: event.memberId,
-        metadataJson: event.metadataJson,
+        metadataPresent: event.metadataJson !== null,
         scope: event.scope,
         source: event.source,
       })),
