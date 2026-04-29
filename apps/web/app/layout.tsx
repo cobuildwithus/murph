@@ -63,7 +63,7 @@ export default function RootLayout(input: { children: React.ReactNode }) {
                       href="/consumer-health-data-privacy-policy"
                       className="max-w-full text-[12px] leading-snug font-semibold text-stone-700 underline underline-offset-4 transition-colors hover:text-stone-900"
                     >
-                      Consumer Health Data Privacy Policy
+                      Consumer Health Data Notice
                     </a>
                     <a
                       href="/legal/privacy"

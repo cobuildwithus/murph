@@ -72,6 +72,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsage",
+  "HostedConsentEvent",
+  "HostedConsentGrant",
   "HostedInvite",
   "HostedLinqDailyState",
   "HostedMember",
@@ -129,6 +131,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLegalConsentMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260429020000_hosted_legal_consent/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -138,6 +147,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260426020000_hosted_mailbox_payload_hash",
       "2026042700_hosted_runtime_hard_cut",
       "20260428010000_drop_hosted_share_tables",
+      "20260429020000_hosted_legal_consent",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -195,6 +205,17 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(dropHostedShareTablesMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_share_payload" CASCADE');
     expect(dropHostedShareTablesMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_share_link" CASCADE');
+    expect(hostedLegalConsentMigrationSql).toContain('CREATE TABLE "hosted_consent_event"');
+    expect(hostedLegalConsentMigrationSql).toContain('CREATE TABLE "hosted_consent_grant"');
+    expect(hostedLegalConsentMigrationSql).toContain(
+      'CONSTRAINT "hosted_consent_grant_pkey" PRIMARY KEY ("member_id", "scope")',
+    );
+    expect(hostedLegalConsentMigrationSql).toContain(
+      'CREATE INDEX "hosted_consent_event_member_id_scope_created_at_idx"',
+    );
+    expect(hostedLegalConsentMigrationSql).toContain(
+      'ALTER TABLE "hosted_consent_event" ADD CONSTRAINT "hosted_consent_event_member_id_fkey"',
+    );
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');
     expect(baselineMigrationSql).toContain('"trigger_kind" TEXT');

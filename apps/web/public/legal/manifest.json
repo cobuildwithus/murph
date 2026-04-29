@@ -1,0 +1,138 @@
+{
+  "schema": "murph.legal-document-manifest.v1",
+  "generatedBy": "apps/web/scripts/generate-legal-pdfs.ts",
+  "documents": [
+    {
+      "aliases": [],
+      "effectiveDate": "2026-04-09",
+      "id": "privacy-policy",
+      "latest": {
+        "bytes": 77906,
+        "path": "/legal/privacy.pdf",
+        "sha256": "19d13126f514f73ea08bf1af40c821538778f3996af1c099aa7f60c5da74a09d"
+      },
+      "lastUpdated": "2026-04-29",
+      "source": "apps/web/legal/privacy-policy.md",
+      "title": "Murph Privacy Policy",
+      "version": "2026-04-29",
+      "versions": [
+        {
+          "bytes": 77906,
+          "path": "/legal/privacy-2026-04-29.pdf",
+          "sha256": "19d13126f514f73ea08bf1af40c821538778f3996af1c099aa7f60c5da74a09d"
+        }
+      ]
+    },
+    {
+      "aliases": [],
+      "effectiveDate": "2026-04-29",
+      "id": "terms-of-service",
+      "latest": {
+        "bytes": 90478,
+        "path": "/legal/terms.pdf",
+        "sha256": "76650a0f75b9cb7e35e65a97b84c88e31dae53d277307fa174aa9892372d0a44"
+      },
+      "lastUpdated": "2026-04-29",
+      "source": "apps/web/legal/terms-of-service.md",
+      "title": "Murph Terms of Service",
+      "version": "2026-04-29",
+      "versions": [
+        {
+          "bytes": 90478,
+          "path": "/legal/terms-2026-04-29.pdf",
+          "sha256": "76650a0f75b9cb7e35e65a97b84c88e31dae53d277307fa174aa9892372d0a44"
+        }
+      ]
+    },
+    {
+      "aliases": [
+        {
+          "bytes": 34063,
+          "path": "/legal/consumer-health-data-privacy.pdf",
+          "sha256": "8ad3b5a2d61fdf5eef13b01db50a036acbca364d8d3363c104c99d21340bb411"
+        }
+      ],
+      "effectiveDate": "2026-04-29",
+      "id": "consumer-health-data-notice",
+      "latest": {
+        "bytes": 34063,
+        "path": "/legal/consumer-health-data-notice.pdf",
+        "sha256": "8ad3b5a2d61fdf5eef13b01db50a036acbca364d8d3363c104c99d21340bb411"
+      },
+      "lastUpdated": "2026-04-29",
+      "source": "apps/web/legal/consumer-health-data-notice.md",
+      "title": "Murph Consumer Health Data Notice",
+      "version": "2026-04-29",
+      "versions": [
+        {
+          "bytes": 34063,
+          "path": "/legal/consumer-health-data-notice-2026-04-29.pdf",
+          "sha256": "8ad3b5a2d61fdf5eef13b01db50a036acbca364d8d3363c104c99d21340bb411"
+        }
+      ]
+    },
+    {
+      "aliases": [],
+      "effectiveDate": "2026-04-29",
+      "id": "health-ai-safety-disclosure",
+      "latest": {
+        "bytes": 8460,
+        "path": "/legal/health-ai-safety-disclosure.pdf",
+        "sha256": "36deff9ac44018de23080da37b82be238f06deaf2fc378ffaf1b964ac22ef497"
+      },
+      "lastUpdated": "2026-04-29",
+      "source": "apps/web/legal/health-ai-safety-disclosure.md",
+      "title": "Murph Health AI Safety Disclosure",
+      "version": "2026-04-29",
+      "versions": [
+        {
+          "bytes": 8460,
+          "path": "/legal/health-ai-safety-disclosure-2026-04-29.pdf",
+          "sha256": "36deff9ac44018de23080da37b82be238f06deaf2fc378ffaf1b964ac22ef497"
+        }
+      ]
+    },
+    {
+      "aliases": [],
+      "effectiveDate": "2026-04-29",
+      "id": "subprocessors",
+      "latest": {
+        "bytes": 12324,
+        "path": "/legal/subprocessors.pdf",
+        "sha256": "2aef5d139fc76cc857aa43136599b7b6e7477b6a077aaab9ec53602a70f4c7fb"
+      },
+      "lastUpdated": "2026-04-29",
+      "source": "apps/web/legal/subprocessors.md",
+      "title": "Murph Subprocessors and Model Providers",
+      "version": "2026-04-29",
+      "versions": [
+        {
+          "bytes": 12324,
+          "path": "/legal/subprocessors-2026-04-29.pdf",
+          "sha256": "2aef5d139fc76cc857aa43136599b7b6e7477b6a077aaab9ec53602a70f4c7fb"
+        }
+      ]
+    },
+    {
+      "aliases": [],
+      "effectiveDate": "2026-04-29",
+      "id": "legal-documents",
+      "latest": {
+        "bytes": 4093,
+        "path": "/legal/legal-documents.pdf",
+        "sha256": "86c4ea62a0bbb37f89ed4ab8b92369a45422e7d1a45d3346116328f13902b42a"
+      },
+      "lastUpdated": "2026-04-29",
+      "source": "apps/web/legal/legal-documents.md",
+      "title": "Murph Legal Documents",
+      "version": "2026-04-29",
+      "versions": [
+        {
+          "bytes": 4093,
+          "path": "/legal/legal-documents-2026-04-29.pdf",
+          "sha256": "86c4ea62a0bbb37f89ed4ab8b92369a45422e7d1a45d3346116328f13902b42a"
+        }
+      ]
+    }
+  ]
+}

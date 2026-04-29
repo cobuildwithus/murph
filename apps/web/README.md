@@ -39,7 +39,7 @@ The UI receives the composed `Experiment` view model, but public protocol prose,
 - Oura, Strava, and WHOOP webhook intake
 - hosted Linq and Telegram webhook ingress plus sparse routing state
 - per-user device connection ownership mapping plus token audit history
-- hosted member core, identity, routing, billing, and email-authorization slices
+- hosted member core, identity, routing, billing, email-authorization, and legal-consent slices
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
@@ -64,7 +64,10 @@ PDFs:
 - `/legal/privacy`
 - `/legal/terms`
 - `/consumer-health-data-privacy-policy`
+- `/legal/health-ai-safety-disclosure`
+- `/legal`
 - `/subprocessors`
+- `/legal/manifest.json`
 
 For Google Health Connect distribution, the Google Play privacy-policy link and
 the Health Connect permission flow should point to the same `/legal/privacy`
@@ -82,6 +85,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references
 - `HostedMemberEmailAuthorization` owns verified-email and sender-authorization facts
+- `HostedConsentEvent` and `HostedConsentGrant` own append-only legal consent
+  history plus current launch-required and optional feature-consent state
 - `HostedMailboxItem`, `HostedMailboxPayload`, and `HostedMailboxLaneCounter`
   own append-only encrypted execution inputs and per-lane sequence allocation
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted

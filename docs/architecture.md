@@ -121,8 +121,8 @@ repo/
 ## Hosted Ownership
 
 - `apps/web` and hosted Postgres own hosted control-plane truth: hosted member
-  identity, routing, billing, email authorization, device-sync authority,
-  hosted AI usage reconciliation, external ingress
+  identity, routing, billing, email authorization, legal consent events/grants,
+  device-sync authority, hosted AI usage reconciliation, external ingress
   ordering, hosted mailbox rows, hosted workspace checkpoints, runtime logs,
   and runtime status.
 - `apps/cloudflare` owns execution coordination only: authenticated nudge/status
@@ -133,8 +133,8 @@ repo/
   coordination state; web-owned mailbox/workspace checkpoints are the durable
   progress truth.
 - Cloudflare is not the canonical owner of device-sync control-plane state,
-  hosted usage ledgers, gateway product truth, or any second mailbox/recovery
-  queue.
+  hosted legal consent, hosted usage ledgers, gateway product truth, or any
+  second mailbox/recovery queue.
 - The broad Cloudflare control seam is intentionally gone. There is no generic
   worker user-env CRUD route surface, no staged dispatch payload control plane
   or CRUD seam, and no Cloudflare-owned sharing or pending-usage durable

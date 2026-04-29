@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,9 +16,33 @@ type FontName = "F1" | "F2";
 type BlockType = "h1" | "h2" | "h3" | "p" | "bullet" | "numbered";
 
 interface DocumentSpec {
+  aliases?: string[];
+  effectiveDate: string;
+  id: string;
   input: string;
-  output: string;
+  lastUpdated: string;
+  latestOutput: string;
+  slug: string;
   title: string;
+  version: string;
+}
+
+interface GeneratedDocument {
+  aliases: ManifestFile[];
+  effectiveDate: string;
+  id: string;
+  latest: ManifestFile;
+  lastUpdated: string;
+  source: string;
+  title: string;
+  version: string;
+  versions: ManifestFile[];
+}
+
+interface ManifestFile {
+  bytes: number;
+  path: string;
+  sha256: string;
 }
 
 interface Style {
@@ -56,19 +81,65 @@ interface WriteLineInput {
 
 const DOCUMENTS = [
   {
+    effectiveDate: "2026-04-09",
+    id: "privacy-policy",
     input: "apps/web/legal/privacy-policy.md",
-    output: "apps/web/public/legal/privacy.pdf",
+    lastUpdated: "2026-04-29",
+    latestOutput: "apps/web/public/legal/privacy.pdf",
+    slug: "privacy",
     title: "Murph Privacy Policy",
+    version: "2026-04-29",
   },
   {
+    effectiveDate: "2026-04-29",
+    id: "terms-of-service",
     input: "apps/web/legal/terms-of-service.md",
-    output: "apps/web/public/legal/terms.pdf",
+    lastUpdated: "2026-04-29",
+    latestOutput: "apps/web/public/legal/terms.pdf",
+    slug: "terms",
     title: "Murph Terms of Service",
+    version: "2026-04-29",
   },
   {
-    input: "apps/web/legal/consumer-health-data-privacy-policy.md",
-    output: "apps/web/public/legal/consumer-health-data-privacy.pdf",
-    title: "Murph Consumer Health Data Privacy Policy",
+    aliases: ["apps/web/public/legal/consumer-health-data-privacy.pdf"],
+    effectiveDate: "2026-04-29",
+    id: "consumer-health-data-notice",
+    input: "apps/web/legal/consumer-health-data-notice.md",
+    lastUpdated: "2026-04-29",
+    latestOutput: "apps/web/public/legal/consumer-health-data-notice.pdf",
+    slug: "consumer-health-data-notice",
+    title: "Murph Consumer Health Data Notice",
+    version: "2026-04-29",
+  },
+  {
+    effectiveDate: "2026-04-29",
+    id: "health-ai-safety-disclosure",
+    input: "apps/web/legal/health-ai-safety-disclosure.md",
+    lastUpdated: "2026-04-29",
+    latestOutput: "apps/web/public/legal/health-ai-safety-disclosure.pdf",
+    slug: "health-ai-safety-disclosure",
+    title: "Murph Health AI Safety Disclosure",
+    version: "2026-04-29",
+  },
+  {
+    effectiveDate: "2026-04-29",
+    id: "subprocessors",
+    input: "apps/web/legal/subprocessors.md",
+    lastUpdated: "2026-04-29",
+    latestOutput: "apps/web/public/legal/subprocessors.pdf",
+    slug: "subprocessors",
+    title: "Murph Subprocessors and Model Providers",
+    version: "2026-04-29",
+  },
+  {
+    effectiveDate: "2026-04-29",
+    id: "legal-documents",
+    input: "apps/web/legal/legal-documents.md",
+    lastUpdated: "2026-04-29",
+    latestOutput: "apps/web/public/legal/legal-documents.pdf",
+    slug: "legal-documents",
+    title: "Murph Legal Documents",
+    version: "2026-04-29",
   },
 ] satisfies DocumentSpec[];
 
@@ -85,24 +156,82 @@ const STYLES: Record<BlockType, Style> = {
 };
 
 function main() {
+  const generatedDocuments: GeneratedDocument[] = [];
+
   for (const document of DOCUMENTS) {
     const inputPath = path.resolve(repoRoot, document.input);
-    const outputPath = path.resolve(repoRoot, document.output);
     const markdown = fs.readFileSync(inputPath, "utf8");
     const blocks = parseMarkdown(markdown);
     const pdf = renderPdf({
       blocks,
       title: document.title,
     });
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, pdf);
+    const latest = writePdfFile(document.latestOutput, pdf);
+    const versionedOutput = buildVersionedOutputPath(document);
+    const versioned = writePdfFile(versionedOutput, pdf);
+    const aliases = (document.aliases ?? []).map((alias) => writePdfFile(alias, pdf));
+
+    generatedDocuments.push({
+      aliases,
+      effectiveDate: document.effectiveDate,
+      id: document.id,
+      latest,
+      lastUpdated: document.lastUpdated,
+      source: toPublicManifestPath(document.input),
+      title: document.title,
+      version: document.version,
+      versions: [versioned],
+    });
   }
+
+  writeManifest(generatedDocuments);
+}
+
+function writePdfFile(relativeOutputPath: string, pdf: string): ManifestFile {
+  const outputPath = path.resolve(repoRoot, relativeOutputPath);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, pdf);
+  return describeManifestFile(relativeOutputPath);
+}
+
+function buildVersionedOutputPath(document: DocumentSpec): string {
+  return `apps/web/public/legal/${document.slug}-${document.version}.pdf`;
+}
+
+function writeManifest(documents: GeneratedDocument[]) {
+  const manifest = {
+    schema: "murph.legal-document-manifest.v1",
+    generatedBy: "apps/web/scripts/generate-legal-pdfs.ts",
+    documents,
+  };
+  const outputPath = path.resolve(repoRoot, "apps/web/public/legal/manifest.json");
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function describeManifestFile(relativePath: string): ManifestFile {
+  const filePath = path.resolve(repoRoot, relativePath);
+  const bytes = fs.readFileSync(filePath);
+
+  return {
+    bytes: bytes.byteLength,
+    path: toPublicManifestPath(relativePath),
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+function toPublicManifestPath(relativePath: string): string {
+  const publicPrefix = "apps/web/public";
+  return relativePath.startsWith(publicPrefix)
+    ? relativePath.slice(publicPrefix.length)
+    : relativePath;
 }
 
 function parseMarkdown(markdown: string): Block[] {
   const blocks: Block[] = [];
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   let paragraph: string[] = [];
+  let tableHeader: string[] | null = null;
 
   const flushParagraph = () => {
     if (paragraph.length === 0) {
@@ -121,17 +250,20 @@ function parseMarkdown(markdown: string): Block[] {
 
     if (trimmed.length === 0) {
       flushParagraph();
+      tableHeader = null;
       continue;
     }
 
     if (/^---+$/.test(trimmed)) {
       flushParagraph();
+      tableHeader = null;
       continue;
     }
 
     const headingMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
     if (headingMatch) {
       flushParagraph();
+      tableHeader = null;
       const level = headingMatch[1].length;
       blocks.push({
         text: normalizeInline(headingMatch[2]),
@@ -140,9 +272,27 @@ function parseMarkdown(markdown: string): Block[] {
       continue;
     }
 
+    if (isMarkdownTableLine(trimmed)) {
+      flushParagraph();
+      const cells = splitMarkdownTableRow(trimmed);
+      if (isMarkdownTableSeparatorRow(cells)) {
+        continue;
+      }
+      if (!tableHeader) {
+        tableHeader = cells;
+        continue;
+      }
+      blocks.push({
+        text: normalizeInline(formatMarkdownTableRowForPdf(tableHeader, cells)),
+        type: "p",
+      });
+      continue;
+    }
+
     const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
     if (bulletMatch) {
       flushParagraph();
+      tableHeader = null;
       blocks.push({
         marker: "-",
         text: normalizeInline(bulletMatch[1]),
@@ -154,6 +304,7 @@ function parseMarkdown(markdown: string): Block[] {
     const numberedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
     if (numberedMatch) {
       flushParagraph();
+      tableHeader = null;
       blocks.push({
         marker: `${numberedMatch[1]}.`,
         text: normalizeInline(numberedMatch[2]),
@@ -162,11 +313,38 @@ function parseMarkdown(markdown: string): Block[] {
       continue;
     }
 
+    tableHeader = null;
     paragraph.push(trimmed);
   }
 
   flushParagraph();
   return blocks;
+}
+
+function isMarkdownTableLine(line: string): boolean {
+  return line.startsWith("|") && line.endsWith("|") && line.includes("|");
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  return line
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparatorRow(cells: readonly string[]): boolean {
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/u.test(cell));
+}
+
+function formatMarkdownTableRowForPdf(
+  header: readonly string[],
+  cells: readonly string[],
+): string {
+  if (header.length !== cells.length) {
+    return cells.join(" | ");
+  }
+
+  return cells.map((cell, index) => `${header[index]}: ${cell}`).join("; ");
 }
 
 function normalizeInline(text: string): string {

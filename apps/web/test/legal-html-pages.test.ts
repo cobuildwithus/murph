@@ -6,6 +6,12 @@ import { test } from "vitest";
 import ConsumerHealthDataPrivacyPolicyAliasPage, {
   metadata as consumerHealthAliasMetadata,
 } from "../app/consumer-health-data-privacy-policy/page";
+import HealthAiSafetyDisclosurePage, {
+  metadata as healthAiSafetyMetadata,
+} from "../app/legal/health-ai-safety-disclosure/page";
+import LegalDocumentsPage, {
+  metadata as legalDocumentsMetadata,
+} from "../app/legal/page";
 import PrivacyPolicyPage, {
   metadata as privacyPolicyMetadata,
 } from "../app/legal/privacy/page";
@@ -21,7 +27,7 @@ test("HTML legal policy routes render authored policies with PDF downloads", asy
   assert.match(privacyMarkup, /Murph Privacy Policy/);
   assert.match(privacyMarkup, /href="\/legal\/privacy\.pdf"/u);
   assert.match(privacyMarkup, /Download PDF/);
-  assert.match(privacyMarkup, /Consumer Health Data Privacy Policy/);
+  assert.match(privacyMarkup, /Consumer Health Data Notice/);
   assert.match(privacyMarkup, /Operational prompt\/tool traces containing health data/);
   assert.match(
     privacyMarkup,
@@ -46,7 +52,7 @@ test("HTML legal policy routes render authored policies with PDF downloads", asy
 
   assert.equal(
     consumerHealthAliasMetadata.title,
-    "Murph Consumer Health Data Privacy Policy",
+    "Murph Consumer Health Data Notice",
   );
   assert.equal(
     consumerHealthAliasMetadata.alternates?.canonical,
@@ -55,12 +61,29 @@ test("HTML legal policy routes render authored policies with PDF downloads", asy
   const consumerHealthMarkup = renderToStaticMarkup(
     await ConsumerHealthDataPrivacyPolicyAliasPage(),
   );
-  assert.match(consumerHealthMarkup, /Murph Consumer Health Data Privacy Policy/);
+  assert.match(consumerHealthMarkup, /Murph Consumer Health Data Notice/);
   assert.match(
     consumerHealthMarkup,
-    /href="\/legal\/consumer-health-data-privacy\.pdf"/u,
+    /href="\/legal\/consumer-health-data-notice\.pdf"/u,
   );
   assert.match(consumerHealthMarkup, /including within 45 days/);
+
+  assert.equal(healthAiSafetyMetadata.title, "Murph Health AI Safety Disclosure");
+  assert.equal(
+    healthAiSafetyMetadata.alternates?.canonical,
+    "/legal/health-ai-safety-disclosure",
+  );
+  const healthAiMarkup = renderToStaticMarkup(await HealthAiSafetyDisclosurePage());
+  assert.match(healthAiMarkup, /Murph Health AI Safety Disclosure/);
+  assert.match(healthAiMarkup, /href="\/legal\/health-ai-safety-disclosure\.pdf"/u);
+  assert.match(healthAiMarkup, /not a substitute for professional medical judgment/u);
+
+  assert.equal(legalDocumentsMetadata.title, "Murph Legal Documents");
+  assert.equal(legalDocumentsMetadata.alternates?.canonical, "/legal");
+  const legalDocumentsMarkup = renderToStaticMarkup(await LegalDocumentsPage());
+  assert.match(legalDocumentsMarkup, /Murph Legal Documents/);
+  assert.match(legalDocumentsMarkup, /href="\/legal\/legal-documents\.pdf"/u);
+  assert.match(legalDocumentsMarkup, /\/legal\/manifest\.json/u);
 });
 
 test("SubprocessorsPage uses affirmative model and search provider wording", () => {

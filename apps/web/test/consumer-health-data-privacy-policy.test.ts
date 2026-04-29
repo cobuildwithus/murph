@@ -41,7 +41,7 @@ const redirectMock = vi.hoisted(() =>
 const policyMarkdown = readFileSync(
   path.resolve(
     process.cwd(),
-    "apps/web/legal/consumer-health-data-privacy-policy.md",
+    "apps/web/legal/consumer-health-data-notice.md",
   ),
   "utf8",
 );
@@ -68,7 +68,7 @@ vi.mock("next/navigation", () => ({
 
 import { SiteFooter } from "../src/components/homepage/site-footer";
 
-test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders the authored policy source", async () => {
+test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders the authored notice source", async () => {
   const {
     default: ConsumerHealthDataPrivacyPolicyPage,
     metadata: consumerHealthMetadata,
@@ -76,7 +76,7 @@ test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders
 
   assert.equal(
     consumerHealthMetadata.title,
-    "Murph Consumer Health Data Privacy Policy",
+    "Murph Consumer Health Data Notice",
   );
   assert.equal(
     consumerHealthMetadata.alternates?.canonical,
@@ -84,18 +84,18 @@ test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders
   );
   assert.equal(
     consumerHealthMetadata.description,
-    "Murph's separate Consumer Health Data Privacy Policy covering consumer health data categories, sources, purposes, sharing, rights, deletion, appeals, and sale/no-sale.",
+    "Murph's Consumer Health Data Notice covering consumer health data categories, sources, purposes, sharing, rights, deletion, appeals, and sale/no-sale.",
   );
 
   const markup = renderToStaticMarkup(await ConsumerHealthDataPrivacyPolicyPage());
 
-  assert.match(markup, /Murph Consumer Health Data Privacy Policy/);
+  assert.match(markup, /Murph Consumer Health Data Notice/);
   assert.match(markup, /Effective Date:<\/strong> April 29, 2026/);
   assert.match(
     markup,
-    /Murph may collect Consumer Health Data from the following sources:/,
+    /Murph may collect Consumer Health Data from:/,
   );
-  assert.match(markup, /href="\/legal\/consumer-health-data-privacy\.pdf"/u);
+  assert.match(markup, /href="\/legal\/consumer-health-data-notice\.pdf"/u);
   assert.match(markup, /Download PDF/);
 });
 
@@ -114,7 +114,7 @@ test("legacy Consumer Health Data Privacy Policy route redirects to the canonica
   );
 });
 
-test("SiteFooter exposes the consumer health data privacy link with wrapping-friendly legal nav styling", () => {
+test("SiteFooter exposes the consumer health data notice link with wrapping-friendly legal nav styling", () => {
   const markup = renderToStaticMarkup(
     createElement(SiteFooter, {
       authenticated: false,
@@ -123,6 +123,7 @@ test("SiteFooter exposes the consumer health data privacy link with wrapping-fri
 
   assert.match(markup, /aria-label="Legal and project links"/);
   assert.match(markup, /href="\/consumer-health-data-privacy-policy"/u);
+  assert.match(markup, /Consumer Health Data Notice/u);
   assert.match(
     markup,
     /font-semibold text-\[#f5f0e8\]\/70 underline underline-offset-4 transition-colors hover:text-\[#f5f0e8\]/u,

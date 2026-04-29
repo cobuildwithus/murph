@@ -255,6 +255,7 @@ run_next_build() {
     next build
 }
 
+run_timed_step "legal pdf" pnpm legal:pdf
 run_timed_step "prisma generate" pnpm prisma:generate
 
 if [[ "$verify_step_parallel" != "1" ]]; then

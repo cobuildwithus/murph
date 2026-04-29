@@ -40,7 +40,7 @@ export function SiteFooter({ authenticated }: { authenticated: boolean }) {
               href="/consumer-health-data-privacy-policy"
               className="font-semibold text-[#f5f0e8]/70 underline underline-offset-4 transition-colors hover:text-[#f5f0e8]"
             >
-              Consumer Health Data Privacy Policy
+              Consumer Health Data Notice
             </a>
             <a
               href="/legal/privacy"
