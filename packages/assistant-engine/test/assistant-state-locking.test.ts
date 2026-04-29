@@ -10,9 +10,6 @@ import {
   createAssistantStateWriteLock,
 } from '../src/assistant/state-write-lock.ts'
 import {
-  withAssistantStateDocumentWriteLock,
-} from '../src/assistant/state/locking.ts'
-import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from '../src/assistant/store/paths.ts'
@@ -193,50 +190,10 @@ test('assistant state write locks expose metadata guards and clear explicit lock
   assert.equal(after.state, 'unlocked')
 })
 
-test('assistant state document write locks surface held-lock metadata as a VaultCliError', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-assistant-state-doc-lock-',
-  )
-  cleanupPaths.push(parentRoot)
-
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  const lockPath = path.join(
-    paths.assistantStateRoot,
-    '.locks',
-    'assistant-state-doc-write',
-  )
-  const metadataPath = path.join(lockPath, 'owner.json')
-  await mkdir(lockPath, {
-    recursive: true,
-  })
-  await writeFile(
-    metadataPath,
-    JSON.stringify({
-      command: 'existing-state-writer',
-      pid: process.pid,
-      startedAt: '2026-04-08T12:34:56.000Z',
-    }),
-    'utf8',
-  )
-
-  await assert.rejects(
-    () => withAssistantStateDocumentWriteLock(paths, async () => undefined),
-    (error) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'ASSISTANT_STATE_WRITE_LOCKED')
-      assert.match(error.message, /pid=\d+/u)
-      assert.match(error.message, /existing-state-writer/u)
-      assert.match(error.message, /2026-04-08T12:34:56.000Z/u)
-      return true
-    },
-  )
-})
-
-test('assistant cron and state document locks fall back to generic held-lock details without metadata', async () => {
+test('assistant cron locks fall back to generic held-lock details without metadata', async () => {
   vi.resetModules()
 
   let capturedCronMessage: AssistantStateWriteLockFormatter | null = null
-  let capturedStateMessage: AssistantStateWriteLockFormatter | null = null
 
   vi.doMock('../src/assistant/state-write-lock.js', () => ({
     createAssistantStateWriteLock: (options: {
@@ -246,9 +203,6 @@ test('assistant cron and state document locks fall back to generic held-lock det
       if (options.heldLockErrorCode === 'ASSISTANT_CRON_LOCKED') {
         capturedCronMessage = options.formatHeldLockMessage
       }
-      if (options.heldLockErrorCode === 'ASSISTANT_STATE_WRITE_LOCKED') {
-        capturedStateMessage = options.formatHeldLockMessage
-      }
       return {
         withWriteLock: async <TResult>(_: unknown, run: () => Promise<TResult>) =>
           await run(),
@@ -256,10 +210,7 @@ test('assistant cron and state document locks fall back to generic held-lock det
     },
   }))
 
-  await Promise.all([
-    import('../src/assistant/cron/locking.ts'),
-    import('../src/assistant/state/locking.ts'),
-  ])
+  await import('../src/assistant/cron/locking.ts')
 
   const cronMessage: (
     metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
@@ -267,13 +218,6 @@ test('assistant cron and state document locks fall back to generic held-lock det
     capturedCronMessage ??
     ((_metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => {
       throw new Error('Expected cron lock mock to capture formatHeldLockMessage.')
-    })
-  const stateMessage: (
-    metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
-  ) => string =
-    capturedStateMessage ??
-    ((_metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => {
-      throw new Error('Expected state lock mock to capture formatHeldLockMessage.')
     })
   assert.equal(
     cronMessage(null),
@@ -287,13 +231,9 @@ test('assistant cron and state document locks fall back to generic held-lock det
     }),
     'Assistant cron writes are already in progress (pid=123, startedAt=2026-04-08T12:34:56.000Z, command=assistant-cron).',
   )
-  assert.equal(
-    stateMessage(null),
-    'Assistant state document writes are already in progress.',
-  )
 })
 
-test('assistant cron and state document locks fall back to generic held-lock messages when metadata is missing', async () => {
+test('assistant cron locks fall back to generic held-lock messages when metadata is missing', async () => {
   vi.resetModules()
   vi.doMock('../src/assistant/state-write-lock.ts', () => ({
     createAssistantStateWriteLock: (options: {
@@ -313,10 +253,7 @@ test('assistant cron and state document locks fall back to generic held-lock mes
   const { withAssistantCronWriteLock: withMockedAssistantCronWriteLock } = await import(
     '../src/assistant/cron/locking.ts'
   )
-  const {
-    withAssistantStateDocumentWriteLock: withMockedAssistantStateDocumentWriteLock,
-  } = await import('../src/assistant/state/locking.ts')
-  const paths = resolveAssistantStatePaths('/tmp/assistant-state-doc-generic-lock')
+  const paths = resolveAssistantStatePaths('/tmp/assistant-cron-generic-lock')
 
   await assert.rejects(
     () => withMockedAssistantCronWriteLock(paths, async () => undefined),
@@ -330,59 +267,4 @@ test('assistant cron and state document locks fall back to generic held-lock mes
       return true
     },
   )
-
-  await assert.rejects(
-    () => withMockedAssistantStateDocumentWriteLock(paths, async () => undefined),
-    (error) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'ASSISTANT_STATE_WRITE_LOCKED')
-      assert.equal(
-        error.message,
-        'Assistant state document writes are already in progress.',
-      )
-      return true
-    },
-  )
-})
-
-test('assistant cron and state document locks do not block each other on the same state root', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-assistant-independent-locks-',
-  )
-  cleanupPaths.push(parentRoot)
-
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  const stateHeld = createDeferred<void>()
-  const releaseState = createDeferred<void>()
-  const events: string[] = []
-
-  const stateWriter = withAssistantStateDocumentWriteLock(paths, async () => {
-    events.push('state:start')
-    stateHeld.resolve()
-    await releaseState.promise
-    events.push('state:end')
-  })
-
-  await stateHeld.promise
-
-  await withAssistantCronWriteLock(paths, async () => {
-    events.push('cron:start')
-    events.push('cron:end')
-  })
-
-  assert.deepEqual(events, [
-    'state:start',
-    'cron:start',
-    'cron:end',
-  ])
-
-  releaseState.resolve()
-  await stateWriter
-
-  assert.deepEqual(events, [
-    'state:start',
-    'cron:start',
-    'cron:end',
-    'state:end',
-  ])
 })

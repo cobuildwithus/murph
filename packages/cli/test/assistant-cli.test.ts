@@ -20,9 +20,6 @@ import {
   saveDefaultVaultConfig,
 } from '@murphai/operator-config/operator-config'
 import {
-  assistantMemoryTurnEnvKeys,
-} from '@murphai/assistant-engine/assistant/memory'
-import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
@@ -48,6 +45,14 @@ import {
 
 const cleanupPaths: string[] = []
 const ASSISTANT_CLI_TIMEOUT_MS = 60_000
+const assistantMemoryTurnEnvKeys = [
+  VAULT_ENV,
+  'ASSISTANT_MEMORY_BOUND_VAULT',
+  'ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT',
+  'ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT',
+  'ASSISTANT_MEMORY_BOUND_SESSION_ID',
+  'ASSISTANT_MEMORY_BOUND_TURN_ID',
+] as const
 
 function isolateAssistantMemoryEnv(
   env: NodeJS.ProcessEnv = {},

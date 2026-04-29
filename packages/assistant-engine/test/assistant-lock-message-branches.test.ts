@@ -48,7 +48,6 @@ describe('assistant lock message branches', () => {
 
     const runtimeLock = await import('../src/assistant/runtime-write-lock.ts')
     const cronLock = await import('../src/assistant/cron/locking.ts')
-    const stateLock = await import('../src/assistant/state/locking.ts')
     const turnLock = await import('../src/assistant/turn-lock.ts')
 
     expect(
@@ -60,9 +59,6 @@ describe('assistant lock message branches', () => {
       optionsByPrefix.get('assistant-cron')?.formatHeldLockMessage(null),
     ).toBe('Assistant cron writes are already in progress.')
     expect(
-      optionsByPrefix.get('assistant-state-doc')?.formatHeldLockMessage(null),
-    ).toBe('Assistant state document writes are already in progress.')
-    expect(
       optionsByPrefix.get('assistant-turn')?.formatHeldLockMessage(null),
     ).toBe('Assistant turn is already in progress for this vault.')
 
@@ -72,12 +68,6 @@ describe('assistant lock message branches', () => {
     await cronLock.withAssistantCronWriteLock(
       {
         assistantStateRoot: 'state-root:cron',
-      } as never,
-      async () => 'ok',
-    )
-    await stateLock.withAssistantStateDocumentWriteLock(
-      {
-        assistantStateRoot: 'state-root:doc',
       } as never,
       async () => 'ok',
     )
