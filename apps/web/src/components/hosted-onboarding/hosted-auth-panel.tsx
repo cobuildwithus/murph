@@ -1,19 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { PhoneIcon } from "lucide-react";
 
+import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
 
 import {
   HostedAuthLegalNotice,
 } from "./hosted-auth-shared";
+
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import { HostedTelegramAuthButton } from "./hosted-telegram-auth-button";
 
 type HostedAuthMethod = "phone" | "telegram" | "email";
-type HostedAlternateMethod = Exclude<HostedAuthMethod, "phone"> | null;
+type HostedPrimaryMethod = "phone" | "email";
 type HostedAuthMode = "login" | "signup";
 
 export function HostedAuthPanel({
@@ -21,32 +27,109 @@ export function HostedAuthPanel({
   methods,
   onCompleted,
   onSignOut,
+  requireLaunchConsentOnCompletion,
   showLegalNotice = false,
+  showPassiveLegalNotice,
+  size,
 }: {
   authMode?: HostedAuthMode;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  requireLaunchConsentOnCompletion?: boolean;
   showLegalNotice?: boolean;
+  showPassiveLegalNotice?: boolean;
+  size?: "default" | "compact";
 }) {
-  const [activeMethod, setActiveMethod] = useState<HostedAlternateMethod>(null);
+  const [primaryMethod, setPrimaryMethod] = useState<HostedPrimaryMethod>("phone");
+  const [codeSent, setCodeSent] = useState(false);
+  const [telegramActive, setTelegramActive] = useState(false);
+  const [pendingAuthCompletion, setPendingAuthCompletion] =
+    useState<HostedAuthCompletionResult | null>(null);
+  const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
   const disableSignup = authMode === "login";
   const includesPhone = methods.includes("phone");
   const includesTelegram = methods.includes("telegram");
   const includesEmail = methods.includes("email");
-  const showAlternateMethods = includesTelegram || includesEmail;
+  const canSwap = includesPhone && includesEmail;
+  const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
+  const shouldRequireLaunchConsent =
+    requireLaunchConsentOnCompletion ?? showLegalNotice;
+  const shouldShowPassiveLegalNotice =
+    showPassiveLegalNotice ?? showLegalNotice;
+
+  async function handleAuthCompleted(result: HostedAuthCompletionResult) {
+    if (shouldGateHostedAuthCompletionWithLaunchConsent({
+      result,
+      requireLaunchConsentOnCompletion: shouldRequireLaunchConsent,
+    })) {
+      pendingAuthCompletionRef.current = result;
+      setPendingAuthCompletion(result);
+      return;
+    }
+
+    if (onCompleted) {
+      await onCompleted(result.payload);
+      return;
+    }
+
+    window.location.assign(result.redirectUrl);
+  }
+
+  async function handleConsentSatisfied() {
+    const result = pendingAuthCompletionRef.current;
+    if (!result) return;
+
+    if (onCompleted) {
+      pendingAuthCompletionRef.current = null;
+      setPendingAuthCompletion(null);
+      await onCompleted(result.payload);
+      return;
+    }
+    window.location.assign(result.redirectUrl);
+  }
+
+  if (pendingAuthCompletion) {
+    return (
+      <HostedLegalConsentCard
+        mode="compact"
+        onAccepted={handleConsentSatisfied}
+        onRequirementChange={(required) => {
+          if (!required) {
+            void handleConsentSatisfied();
+          }
+        }}
+        preferredScope="launch.legal"
+        source="homepage-auth-dialog"
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
       <HostedPrivyCaptcha />
-      {includesPhone ? (
+
+      {primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
           disableSignup={disableSignup}
+          onAuthCompleted={handleAuthCompleted}
+          onCodeSent={() => setCodeSent(true)}
           onCompleted={onCompleted}
           onSignOut={onSignOut}
+          phoneInputAutoFocus
           renderCaptcha={false}
-          showPassiveConsentNotice={false}
-          suppressAuthenticatedSessionIssue={activeMethod !== null}
+          size={size}
+          suppressAuthenticatedSessionIssue={telegramActive}
+        />
+      ) : null}
+
+      {primaryMethod === "email" && includesEmail ? (
+        <HostedEmailAuthButton
+          active
+          disableSignup={disableSignup}
+          onCompleted={handleAuthCompleted}
+          onActivate={() => {}}
+          inline
         />
       ) : null}
 
@@ -57,26 +140,63 @@ export function HostedAuthPanel({
             OR
             <span className="h-px flex-1 bg-stone-200" />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
             {includesTelegram ? (
               <HostedTelegramAuthButton
-                active={activeMethod === "telegram"}
+                active={telegramActive}
                 disableSignup={disableSignup}
-                onActivate={() => setActiveMethod("telegram")}
+                onCompleted={handleAuthCompleted}
+                onActivate={() => {
+                  setPrimaryMethod("phone");
+                  setTelegramActive(true);
+                }}
               />
             ) : null}
-            {includesEmail ? (
-              <HostedEmailAuthButton
-                active={activeMethod === "email"}
-                disableSignup={disableSignup}
-                onActivate={() => setActiveMethod("email")}
-              />
+            {canSwap ? (
+              primaryMethod === "phone" ? (
+                <HostedEmailAuthButton
+                  active={false}
+                  disableSignup={disableSignup}
+                  onCompleted={handleAuthCompleted}
+                  onActivate={() => {
+                    setPrimaryMethod("email");
+                    setTelegramActive(false);
+                  }}
+                />
+              ) : (
+                <HostedInlineAuthButton
+                  active={false}
+                  disabled={false}
+                  icon={<PhoneIcon className="h-5 w-5" />}
+                  onClick={() => {
+                    setPrimaryMethod("phone");
+                    setTelegramActive(false);
+                  }}
+                >
+                  Phone
+                </HostedInlineAuthButton>
+              )
             ) : null}
           </div>
         </>
       ) : null}
 
-      {showLegalNotice ? <HostedAuthLegalNotice /> : null}
+      {shouldShowPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
     </div>
+  );
+}
+
+function shouldGateHostedAuthCompletionWithLaunchConsent({
+  requireLaunchConsentOnCompletion,
+  result,
+}: {
+  requireLaunchConsentOnCompletion: boolean;
+  result: HostedAuthCompletionResult;
+}): boolean {
+  if (!requireLaunchConsentOnCompletion) return false;
+
+  return (
+    result.payload.stage === "checkout"
+    || isHostedOnboardingAccessibleStage(result.payload.stage)
   );
 }

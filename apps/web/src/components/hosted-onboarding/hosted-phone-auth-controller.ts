@@ -25,7 +25,10 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-client";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
-import type { HostedPrivyClientSessionInput } from "./hosted-auth-completion";
+import type {
+  HostedAuthCompletionResult,
+  HostedPrivyClientSessionInput,
+} from "./hosted-auth-completion";
 
 import {
   createHostedPhoneVerificationAttempt,
@@ -58,6 +61,8 @@ interface HostedPhoneAuthControllerInput {
   disableSignup?: boolean;
   inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
+  onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
+  onCodeSent?: () => void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
@@ -70,6 +75,8 @@ export function useHostedPhoneAuthController({
   disableSignup = false,
   inviteCode,
   intent = "auth",
+  onAuthCompleted,
+  onCodeSent,
   onCompleted,
   onLinked,
   onSignOut,
@@ -287,6 +294,7 @@ export function useHostedPhoneAuthController({
     setPhoneVerificationAttempt(
       createHostedPhoneVerificationAttempt(nextPhoneNumber),
     );
+    onCodeSent?.();
   }
 
   async function handleResendCode() {
@@ -426,6 +434,7 @@ export function useHostedPhoneAuthController({
 
         await finalizeHostedPrivyVerification({
           inviteCode,
+          onAuthCompleted,
           onCompleted,
           ...authSession,
         });

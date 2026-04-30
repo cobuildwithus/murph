@@ -5,7 +5,7 @@ export function JoinInviteShell({ children }: { children: ReactNode }) {
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground md:flex-row">
       <style>{`#site-footer { display: none; }`}</style>
-      <aside className="relative hidden w-60 shrink-0 flex-col overflow-hidden bg-gradient-to-br from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-8 py-10 text-white md:flex lg:w-[280px] lg:px-10">
+      <aside className="relative hidden w-60 shrink-0 flex-col overflow-hidden bg-gradient-to-br from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-8 py-10 text-white md:sticky md:top-0 md:flex md:h-svh md:self-start lg:w-[280px] lg:px-10">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-[0.08]"
@@ -46,8 +46,8 @@ export function JoinInviteShell({ children }: { children: ReactNode }) {
         </Link>
       </header>
 
-      <section className="relative flex flex-1 items-center justify-center overflow-hidden px-6 py-12 sm:px-10 sm:py-16 lg:px-20">
-        <div className="w-full max-w-xl">{children}</div>
+      <section className="relative flex flex-1 items-start justify-start overflow-hidden px-6 py-12 sm:px-10 sm:py-16 lg:px-16 xl:px-20">
+        <div className="w-full max-w-5xl">{children}</div>
       </section>
     </main>
   );

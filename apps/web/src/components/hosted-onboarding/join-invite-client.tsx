@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CheckIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -26,6 +27,49 @@ import {
 } from "./join-invite-state";
 import { JoinInviteStageContent } from "./join-invite-sections";
 
+const JOIN_INVITE_STEPS = [
+  { step: 1, label: "Invite" },
+  { step: 2, label: "Contact" },
+  { step: 3, label: "Plan" },
+];
+
+function JoinInviteStepIndicator({ activeStep }: { activeStep: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      {JOIN_INVITE_STEPS.map((item, i) => {
+        const completed = item.step < activeStep;
+        const active = item.step === activeStep;
+
+        return (
+          <div key={item.step} className="flex items-center gap-2">
+            {i > 0 ? (
+              <div
+                className={`h-px w-6 ${completed || active ? "bg-olive/40" : "bg-border"}`}
+              />
+            ) : null}
+            <span
+              className={[
+                "flex size-7 items-center justify-center rounded-full text-xs font-medium",
+                completed
+                  ? "bg-olive text-white"
+                  : active
+                    ? "bg-olive/15 text-olive ring-1 ring-olive/30"
+                    : "bg-muted text-muted-foreground",
+              ].join(" ")}
+            >
+              {completed ? (
+                <CheckIcon className="size-3.5" strokeWidth={2.5} />
+              ) : (
+                item.step
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function resolveJoinInviteEyebrow(
   stage: HostedInviteStatusPayload["stage"],
 ): { label: string; tone: JoinInviteEyebrowTone } {
@@ -35,6 +79,8 @@ function resolveJoinInviteEyebrow(
       return { label: "Link no longer works", tone: "danger" };
     case "blocked":
       return { label: "Needs support", tone: "danger" };
+    case "verify":
+      return { label: "Chat with Murph", tone: "default" };
     default:
       return { label: "Murph", tone: "default" };
   }
@@ -236,6 +282,10 @@ export function JoinInviteClient({
 
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
     if (shouldGatePostPhoneVerificationWithLaunchConsent(payload)) {
+      if (payload.status.stage === "checkout") {
+        applyPhoneVerifiedStatus(payload);
+        return;
+      }
       setPendingLegalConsentCompletion(payload);
       setStatusRefreshErrorMessage(null);
       setHasCompletedInitialRefresh(true);
@@ -255,22 +305,33 @@ export function JoinInviteClient({
     applyPhoneVerifiedStatus(payload);
   }
 
-  const eyebrow = resolveJoinInviteEyebrow(status.stage);
-  const title = launchLegalConsentGateActive
-    ? "Review legal consent"
+  const consentGateOverridesChrome =
+    launchLegalConsentGateActive && status.stage !== "checkout";
+  const eyebrow = consentGateOverridesChrome
+    ? { label: "Murph", tone: "default" as const }
+    : resolveJoinInviteEyebrow(status.stage);
+  const title = consentGateOverridesChrome
+    ? "One quick step"
     : resolveJoinInviteTitle(status);
-  const subtitle = launchLegalConsentGateActive
-    ? "Accept the current Murph legal documents before choosing a hosted plan."
+  const subtitle = consentGateOverridesChrome
+    ? "Review and accept the legal agreements below to get started."
     : resolveJoinInviteSubtitle(status);
 
+  const showStepIndicator = !launchLegalConsentGateActive && status.stage === "verify";
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4">
+    <div
+      className={[
+        "flex w-full flex-col gap-6",
+        status.stage === "checkout" ? "max-w-5xl" : "max-w-xl",
+      ].join(" ")}
+    >
+      <div>
         <JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />
-        <h1 className="font-serif text-5xl font-normal leading-[1.04] tracking-[-0.03em] text-foreground lg:whitespace-nowrap sm:text-6xl">
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
           {title}
         </h1>
-        <p className="max-w-md text-base leading-relaxed text-muted-foreground">
+        <p className="mt-1 max-w-md text-sm text-muted-foreground">
           {subtitle}
         </p>
       </div>
