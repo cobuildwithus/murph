@@ -126,7 +126,7 @@ function ExperimentLayoutInner({
 
       <div className="w-full">
         <div ref={sentinelRef} aria-hidden="true" className="h-px" />
-        <div className="sticky top-0 z-20 -mx-6 border-b border-border bg-background/95 px-6 py-2 backdrop-blur-md md:-mx-14 md:px-14">
+        <div className="sticky top-0 z-20 -mx-6 border-b border-border bg-background/95 px-6 backdrop-blur-md md:-mx-14 md:px-14">
           <div className="flex items-center gap-4">
             <RouteTabs
               ariaLabel="Experiment tabs"
