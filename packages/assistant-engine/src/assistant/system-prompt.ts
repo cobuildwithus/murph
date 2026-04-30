@@ -421,7 +421,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. Supported connect-link requests are handled by the hosted runtime before the model turn when possible.`;
+  return `- Hosted wearable connection links are available for ${providerList}. Supported connect-link requests are handled by the hosted runtime before the model turn when possible. If no real link is present in the current turn, say you cannot create one right now instead of fabricating a URL.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(): string {
@@ -482,7 +482,7 @@ Prefer higher-level wording for sensitive topics, and suggest a more private fol
 }
 
 function buildAssistantToolTruthfulnessText(): string {
-  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real local command or runtime action happened.";
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real local command or runtime action happened. Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs. Only send a wearable connect link when it is present in the current turn as an actual runtime or helper result.";
 }
 
 function buildAssistantNotificationDecisionGuidanceText(
