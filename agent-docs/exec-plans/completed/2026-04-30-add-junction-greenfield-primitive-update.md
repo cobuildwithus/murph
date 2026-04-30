@@ -6,12 +6,7 @@ Updated: 2026-04-30
 
 ## Purpose
 
-This plan supersedes the implementation shape in:
-
-- `agent-docs/exec-plans/completed/2026-04-30-add-junction-device-sync.md`
-- `agent-docs/exec-plans/completed/2026-04-30-add-junction-parallelization.md`
-
-Those completed plans remain useful background, but they should not be the contract source for implementation. The user-supplied RTF plan and follow-up review found the higher-value primitive: do not bolt `hosted_link` onto the current OAuth-shaped provider interface. Instead, split device sync into three separate concepts:
+This is the canonical Junction implementation plan. It replaces the earlier Junction device-sync and parallelization drafts. The user-supplied RTF plan and follow-up review found the higher-value primitive: do not bolt `hosted_link` onto the current OAuth-shaped provider interface. Instead, split device sync into three separate concepts:
 
 ```txt
 connection flow       how the user connects
