@@ -67,6 +67,7 @@ export interface OAuthStateRecord {
   state: string;
   provider: string;
   returnTo: string | null;
+  ownerId?: string | null;
   metadata?: Record<string, unknown>;
   createdAt: string;
   expiresAt: string;

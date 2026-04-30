@@ -254,9 +254,12 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   includeProfile: "boolean",
   objectId: "string",
   occurredAt: "isoTimestamp",
+  resource: "string",
+  resourceCategory: "string",
   resourceId: "string",
   resourceType: "string",
   sourceEventType: "string",
+  sourceProviderSlug: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });

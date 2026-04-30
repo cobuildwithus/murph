@@ -492,7 +492,13 @@ Webhooks start only after polling, parent account persistence, and source projec
 
 ## Current Implementation Status
 
-PR 1, the PR 2 foundation, and the PR 3 polling MVP are committed as `509fce23b`. PR 4 Junction webhooks are committed as `08b71ada1`. PR 5 source-aware query/resource/UI work is implemented in the active checkout with required audit fixes applied and verification passing, pending scoped commit.
+PR 1, the PR 2 foundation, and the PR 3 polling MVP are committed as `509fce23b`. PR 4 Junction webhooks are committed as `08b71ada1`. PR 5 source-aware query/resource/UI work is committed as `384939154`. A final cross-plan/subagent hardening pass found and fixed the remaining PR 1-5 integration issues in this follow-up slice:
+
+- OAuth/connect state now keeps owner identity on the typed state record instead of generic callback metadata, and provider-supplied callback metadata continues to strip raw owner/user/client identifiers.
+- Existing disconnected seeded external-link accounts cannot be reactivated by stale callbacks; local and hosted connection upserts preserve existing lifecycle status when a callback omits `status`.
+- Junction webhook `resource` jobs use hosted wake-safe scalar payload fields that the hosted hint parser accepts.
+- Unknown-account webhooks only complete without provider retries when a durable unknown/orphan hook exists; otherwise they release the trace and remain retryable.
+- Junction resource webhook jobs skip opt-in resources such as glucose unless the resource is configured for that account/provider runtime.
 
 Current PR 3 landed slice:
 
@@ -554,7 +560,7 @@ The landed primitive/foundation slice includes:
 - Hosted Prisma `DeviceConnectionSource` / additive `2026050101_device_connection_sources` migration, aligned status vocabulary, deterministic listing, and same-provider multi-source coverage.
 - Source projection sanitation keeps account metadata shallow and strips raw identifier-shaped availability/source values from projection summaries.
 
-PR 5 is ready for required security/privacy, coverage, simplification, task-finish, and frontend review passes before commit.
+PR 5 required security/privacy, coverage, simplification, task-finish, and frontend review passes were run before commit. The final cross-plan review added the hardening fixes above without changing the core architecture.
 
 Latest PR 5 focused verification:
 
@@ -574,14 +580,23 @@ pnpm --dir apps/web typecheck
 pnpm exec vitest run apps/web/test/device-sync-settings-surface.test.ts apps/web/test/device-sync-hosted-wake.test.ts apps/web/test/dashboard-sidebar.test.ts --config apps/web/vitest.config.ts --no-coverage
 ```
 
-Known unrelated red hosted-web commands in the current dirty checkout:
+Final cross-plan hardening verification:
 
 ```txt
+pnpm --dir packages/device-syncd test -- public-ingress.test.ts hosted-runtime.test.ts junction-provider.test.ts
+pnpm exec vitest run apps/web/test/prisma-store-oauth-connection.test.ts --config apps/web/vitest.config.ts --no-coverage
+pnpm --dir packages/device-syncd typecheck
+pnpm --dir apps/web typecheck
 pnpm --dir apps/web lint
+```
+
+Known broader hosted-web test command in the current dirty checkout:
+
+```txt
 pnpm --dir apps/web test
 ```
 
-The hosted-web lint failure is in existing `site-footer`, biomarker detail, and join-invite files outside this slice. The hosted-web test failure is now 24 unrelated UI/content/migration expectation failures; the local-heartbeat credential failures found during this wave were fixed.
+The hosted-web lint lane now passes with four unrelated warnings in existing biomarker, protocol-tab, and join-invite files outside this slice. The broader hosted-web test failure from the PR 5 wave was 24 unrelated UI/content/migration expectation failures; the local-heartbeat credential failures found during that wave were fixed.
 
 ## Verification
 

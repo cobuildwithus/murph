@@ -291,7 +291,14 @@ export function createJunctionDeviceSyncProvider(
 
     if (resource) {
       const inferredCategory = inferJunctionResourceCategory(resourceCategory, resource);
-      if (inferredCategory === "timeseries") {
+      if (!isConfiguredJunctionResource(inferredCategory, resource)) {
+        context.logger.warn?.("Skipping Junction resource webhook job for a resource that is not enabled.", {
+          provider: "junction",
+          accountId: context.account.id,
+          resource,
+          resourceCategory: inferredCategory,
+        });
+      } else if (inferredCategory === "timeseries") {
         timeseries[resource] = await fetchTimeseriesResourceInChunks(
           context.account.externalAccountId,
           resource,
@@ -323,6 +330,15 @@ export function createJunctionDeviceSyncProvider(
     return {
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
     };
+  }
+
+  function isConfiguredJunctionResource(
+    category: "summary" | "timeseries",
+    resource: string,
+  ): boolean {
+    return category === "timeseries"
+      ? timeseriesResources.includes(resource)
+      : summaryResources.includes(resource);
   }
 
   async function verifyAndParseWebhook(

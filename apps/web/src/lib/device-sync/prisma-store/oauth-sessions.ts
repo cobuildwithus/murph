@@ -24,7 +24,7 @@ export class PrismaHostedOAuthSessionStore {
     await this.prisma.deviceOauthSession.create({
       data: {
         state: input.state,
-        userId: typeof input.metadata?.ownerId === "string" ? input.metadata.ownerId : null,
+        userId: input.ownerId ?? null,
         provider: input.provider,
         returnTo: input.returnTo,
         createdAt: new Date(input.createdAt),
@@ -92,7 +92,8 @@ export class PrismaHostedOAuthSessionStore {
           state: record.state,
           provider: record.provider,
           returnTo: record.returnTo,
-          metadata: record.userId ? { ownerId: record.userId } : {},
+          ownerId: record.userId,
+          metadata: {},
           createdAt: record.createdAt.toISOString(),
           expiresAt: record.expiresAt.toISOString(),
         } satisfies OAuthStateRecord,
