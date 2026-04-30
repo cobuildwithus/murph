@@ -38,9 +38,14 @@ export function BiomarkerLayoutClient({
     ? "research"
     : "overview";
 
+  const eyebrowParts = [
+    biomarker.categories[0] ? formatCategoryEyebrow(biomarker.categories[0]) : null,
+    biomarker.unit,
+  ].filter((part): part is string => Boolean(part));
+
   return (
     <BrowserVaultProvider>
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-7">
         <nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
           <Link
             href="/experiments"
@@ -53,6 +58,20 @@ export function BiomarkerLayoutClient({
           <span className="text-muted-foreground/60">→</span>
           <span className="font-medium text-foreground">{biomarker.shortName}</span>
         </nav>
+
+        <div className="flex max-w-3xl flex-col gap-3.5">
+          {eyebrowParts.length > 0 && (
+            <span className="font-mono text-[11px]/3.5 uppercase tracking-[0.12em] text-chart-5">
+              {eyebrowParts.join(" · ")}
+            </span>
+          )}
+          <h1 className="max-w-[24ch] font-serif text-3xl font-semibold tracking-tight text-foreground text-balance sm:text-[38px]">
+            {biomarker.title}
+          </h1>
+          <p className="max-w-[56ch] text-[16px] text-muted-foreground text-pretty">
+            {biomarker.summary}
+          </p>
+        </div>
 
         <Tabs value={currentTab} className="w-full">
           <div ref={sentinelRef} aria-hidden="true" className="h-px" />
@@ -86,9 +105,17 @@ export function BiomarkerLayoutClient({
               {biomarker.title}
             </span>
           </div>
-          <div className="pt-8">{children}</div>
+          <div className="pt-6">{children}</div>
         </Tabs>
       </div>
     </BrowserVaultProvider>
   );
+}
+
+function formatCategoryEyebrow(value: string): string {
+  return value
+    .split(/[-_\s]+/u)
+    .filter((part) => part.length > 0)
+    .map((part) => part.toUpperCase())
+    .join(" ");
 }
