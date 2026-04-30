@@ -43,19 +43,19 @@ relations:
     target: "biomarker:ldl-c"
   -
     type: "secondary_biomarker"
-    target: "biomarker:total-cholesterol"
+    target: "biomarker:apolipoprotein-b"
   -
     type: "secondary_biomarker"
     target: "biomarker:non-hdl-c"
+  -
+    type: "secondary_biomarker"
+    target: "biomarker:total-cholesterol"
   -
     type: "secondary_biomarker"
     target: "biomarker:triglycerides"
   -
     type: "secondary_biomarker"
     target: "biomarker:hdl-c"
-  -
-    type: "secondary_biomarker"
-    target: "biomarker:apolipoprotein-b"
   -
     type: "cites"
     target: "source_artifact:pmid-16260426"
@@ -176,11 +176,11 @@ testPlans:
     interventionDays: 84
     primaryBiomarkerKey: "biomarker:ldl-c"
     secondaryBiomarkerKeys:
-      - "biomarker:total-cholesterol"
+      - "biomarker:apolipoprotein-b"
       - "biomarker:non-hdl-c"
+      - "biomarker:total-cholesterol"
       - "biomarker:triglycerides"
       - "biomarker:hdl-c"
-      - "biomarker:apolipoprotein-b"
     safetyOutcomeKeys:
       - "biomarker:alanine-aminotransferase"
       - "biomarker:aspartate-aminotransferase"
@@ -197,22 +197,82 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: "biomarker:ldl-c"
-    description: "Some red yeast rice products can contain monacolin K, a statin-like compound that may lower cholesterol production in the liver. If the product is active and tolerated, LDL-C may fall."
-  -
-    biomarkerKey: "biomarker:total-cholesterol"
-    description: "Total cholesterol may fall when LDL-C falls, because LDL-C is part of the total value."
-  -
-    biomarkerKey: "biomarker:non-hdl-c"
-    description: "If active red yeast rice lowers LDL-related particles, non-HDL-C may fall too."
-  -
-    biomarkerKey: "biomarker:triglycerides"
-    description: "Triglycerides can fall indirectly if the product, diet, or weight change lowers the liver's output of triglyceride-rich particles."
-  -
-    biomarkerKey: "biomarker:hdl-c"
-    description: "Red yeast rice mainly targets LDL-related cholesterol production. HDL-C may stay unchanged even if LDL-C falls."
+    description: "Monacolin K inhibits hepatic cholesterol synthesis. Lower liver cholesterol increases LDL-receptor clearance, pulling LDL particles out of blood."
+    expected: "Likely lower"
+    estimatedChange:
+      kind: "absolute"
+      low: -40
+      high: -20
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "moderate"
+      basis: "Direct RYR trials and syntheses report LDL-C reductions around −34 to −39 mg/dL versus placebo, with several 8–12 week trials showing about 15–28% lower LDL-C; product-specific commercial null data keep confidence moderate."
+    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
-    description: "If monacolin K lowers liver cholesterol production, the liver may clear more LDL-related particles. Because each carries ApoB, ApoB may fall with LDL-C."
+    description: "Each LDL-related particle carries one ApoB. Receptor-driven particle clearance should lower ApoB, not just the cholesterol inside those particles."
+    expected: "Could fall"
+    estimatedChange:
+      kind: "relative_percent"
+      low: -25
+      high: -10
+      unit: "%"
+      window: "8–12 weeks"
+      confidence: "low"
+      basis: "ApoB fell 14–26% in direct RYR-only or separable monacolin-arm trials, but fewer studies measured it and a recent synthesis did not find ApoB consistently reduced."
+    protocolProminence: "focus"
+  -
+    biomarkerKey: "biomarker:non-hdl-c"
+    description: "Non-HDL-C sums cholesterol carried by LDL and other ApoB-containing particles. When LDL clearance rises and HDL-C stays stable, this total should drop."
+    expected: "Could fall"
+    estimatedChange:
+      kind: "absolute"
+      low: -40
+      high: -20
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "low"
+      basis: "Best estimate is inferred from LDL-C and total-cholesterol reductions with generally stable HDL-C; the extracted direct RYR corpus did not provide a clean pooled non-HDL-C estimate."
+    protocolProminence: "focus"
+  -
+    biomarkerKey: "biomarker:total-cholesterol"
+    description: "LDL-C makes up much of total cholesterol in the studied hyperlipidemia populations. When RYR pulls LDL-C down, total cholesterol usually follows."
+    expected: "Likely lower"
+    estimatedChange:
+      kind: "absolute"
+      low: -45
+      high: -25
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "moderate"
+      basis: "Direct trials and RYR syntheses commonly report total-cholesterol reductions near −37 mg/dL or roughly 11–22% over short follow-up windows."
+    protocolProminence: "focus"
+  -
+    biomarkerKey: "biomarker:triglycerides"
+    description: "Less hepatic cholesterol synthesis can reduce VLDL assembly and secretion, so fasting triglycerides may dip when diet, alcohol, weight, and exercise stay stable."
+    expected: "May decrease"
+    estimatedChange:
+      kind: "absolute"
+      low: -25
+      high: -5
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "low"
+      basis: "A placebo-controlled RYR meta-analysis found triglycerides about −0.23 mmol/L, or −20 mg/dL, while individual trials and later syntheses show more variable triglyceride effects than LDL-C."
+    protocolProminence: "context"
+  -
+    biomarkerKey: "biomarker:hdl-c"
+    description: "RYR targets LDL production and clearance, not HDL formation. HDL-C usually serves as a stability check while LDL-related markers move."
+    expected: "Usually stable"
+    estimatedChange:
+      kind: "absolute"
+      low: -3
+      high: 5
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "mixed"
+      basis: "Several direct syntheses found no significant HDL-C increase, while some older or product-specific trials reported HDL-C gains."
+    protocolProminence: "context"
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -1024,7 +1084,7 @@ It is not a cardiovascular-event-prevention protocol, a statin substitute, a rec
 
 ## What to measure
 
-Primary signal: LDL-C. Secondary signals: total cholesterol, non-HDL-C, triglycerides, HDL-C, and optional ApoB. Record fasting status, lab, LDL-C method, adherence, product identity, dose documentation, diet or weight change, exercise change, and medication or supplement changes.
+Primary signal: LDL-C. Secondary signals: ApoB when available, non-HDL-C, total cholesterol, triglycerides, and HDL-C. Record fasting status, lab, LDL-C method, adherence, product identity, dose documentation, diet or weight change, exercise change, and medication or supplement changes.
 
 ## Safety stance
 
