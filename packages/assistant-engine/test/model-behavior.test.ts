@@ -364,6 +364,8 @@ describe('assistant conversation onboarding guidance', () => {
     expect(prompt).toContain('WHOOP')
     expect(prompt).toContain('one lightweight, bounded experiment at a time')
     expect(prompt).toContain('sleep, strength, energy, or simple baseline logging')
+    expect(prompt).toContain('retrospective baseline')
+    expect(prompt).toContain('stale or sparse')
     expect(prompt).toContain('completion gates are satisfied')
     expect(prompt).toContain(
       'Creating an active experiment remains a separate confirmed flow',
