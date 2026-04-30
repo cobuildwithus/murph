@@ -3,7 +3,12 @@
 import { LineChartIcon, LockKeyholeIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import type { BrowserVaultQueryClient } from "@murphai/query/browser";
+import {
+  selectBrowserVaultBiomarkerPanel,
+  type BrowserVaultBiomarkerPanelStatus,
+  type BrowserVaultBiomarkerTrend,
+  type BrowserVaultQueryClient,
+} from "@murphai/query/browser";
 
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
@@ -12,14 +17,9 @@ import {
   useBrowserVault,
   type BrowserVaultStatus,
 } from "@/src/lib/browser-vault/context";
-import { generateMockedBiomarkerRows } from "@/src/lib/biomarkers/biomarker-mock-trend";
 import {
-  buildTrendComparison,
   formatMetricValue,
   formatTrendDeltaSummary,
-  hasNumericMetricValue,
-  type BrowserVaultMetricRowWithValue,
-  type TrendComparison,
 } from "@/src/lib/browser-vault/trend-comparison";
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
 import { isBrowserVaultMetricBinding } from "@/src/lib/health-commons/biomarker-bindings";
@@ -38,13 +38,13 @@ interface TrendLatestValue {
 
 type PrivateTrendState =
   | { status: "loading" }
-  | { message: string; status: "empty" }
+  | { body: string; detail?: string; panelStatus: BrowserVaultBiomarkerPanelStatus; status: "empty"; title: string }
   | { message: string; status: "error" }
-  | { message: string; pointCount: number; status: "insufficient_data" }
   | {
-      comparison: TrendComparison | null;
+      comparison: BrowserVaultBiomarkerTrend | null;
       latest: TrendLatestValue;
       series: TrendPoint[];
+      stale: boolean;
       status: "ready";
     };
 
@@ -70,25 +70,23 @@ export function BiomarkerPrivateTrendCard({ biomarker }: { biomarker: BiomarkerP
     );
   }
 
-  if (trend.status === "empty" || trend.status === "insufficient_data") {
+  if (trend.status === "empty") {
     return (
       <Card className="border border-border/60">
         <CardHeader>
           <div className="mb-1 flex size-10 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
             <LockKeyholeIcon className="size-5" aria-hidden />
           </div>
-          <CardTitle>Your private {biomarker.shortName}</CardTitle>
-          <CardDescription>{trend.message}</CardDescription>
+          <CardTitle>{trend.title}</CardTitle>
+          <CardDescription>{trend.body}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-            Connect wearable data or sync a browser-vault replica to see this module. Nothing
-            from this card is public.
+            {emptyStateGuidance(trend.panelStatus)}
           </div>
-          {trend.status === "insufficient_data" ? (
+          {trend.detail ? (
             <p className="text-xs text-muted-foreground">
-              Found {trend.pointCount} point{trend.pointCount === 1 ? "" : "s"}; Murph waits
-              for at least {biomarker.trendDefaults.minimumPoints} before summarizing a trend.
+              {trend.detail}
             </p>
           ) : null}
         </CardContent>
@@ -122,7 +120,9 @@ export function BiomarkerPrivateTrendCard({ biomarker }: { biomarker: BiomarkerP
             </p>
             <CardTitle>Your {biomarker.shortName} trend</CardTitle>
             <CardDescription>
-              Murph compares this to your own recent baseline, not to other people.
+              {trend.stale
+                ? "Your latest private value is older than the usual wearable sync window."
+                : "Murph compares this to your own recent baseline, not to other people."}
             </CardDescription>
           </div>
           <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -168,7 +168,7 @@ function TrendDeltaRow({
   precision,
   unit,
 }: {
-  comparison: TrendComparison;
+  comparison: BrowserVaultBiomarkerTrend;
   precision: number;
   unit: string;
 }) {
@@ -180,7 +180,7 @@ function TrendDeltaRow({
         <span className="text-muted-foreground">{comparison.label}</span>
         <span className="font-medium text-foreground">{deltaSummary}</span>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+      <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
         <span>Recent: {formatMetricValue(comparison.currentValue, precision)} {unit}</span>
         <span>Prior: {formatMetricValue(comparison.baselineValue, precision)} {unit}</span>
       </div>
@@ -235,74 +235,82 @@ function resolvePrivateTrend(input: {
     };
   }
 
-  // TEMPORARY: when no browser-vault client is connected, fall back to mocked
-  // rows so we can iterate on the populated trend visual. Drop once real
-  // wearable integration lands. Tracked in TODOS.md.
-  if (!input.client) {
-    return resolveMockedTrend(input.biomarker);
-  }
+  const panel = selectBrowserVaultBiomarkerPanel({
+    biomarkerKey: input.biomarker.key,
+    bindings: input.biomarker.privateMetricBindings
+      .filter(isBrowserVaultMetricBinding)
+      .map((binding) => ({
+        domain: binding.domain,
+        metric: binding.metric,
+        preferred: binding.preferred,
+        unit: binding.unit,
+      })),
+    client: input.client,
+    label: input.biomarker.shortName,
+    trendDefaults: input.biomarker.trendDefaults,
+    unit: input.biomarker.unit,
+    valuePrecision: input.biomarker.valuePrecision,
+  });
 
-  const binding = input.biomarker.privateMetricBindings.find(isBrowserVaultMetricBinding);
-
-  if (!binding) {
+  if (panel.status === "insufficient_data") {
+    const sampleCount = panel.primary?.sampleCount ?? 0;
     return {
-      message: "This biomarker does not have a browser-vault metric binding yet.",
+      body: "Murph found private values, but not enough for a clean trend yet.",
+      detail: `Found ${sampleCount} point${sampleCount === 1 ? "" : "s"}; Murph waits for at least ${input.biomarker.trendDefaults.minimumPoints} before summarizing a trend.`,
+      panelStatus: panel.status,
       status: "empty",
+      title: panel.emptyState?.title ?? "Not enough private data yet",
     };
   }
 
-  const rows = input.client.metrics
-    .series({ domain: binding.domain, metric: binding.metric })
-    .filter(hasNumericMetricValue)
-    .sort((left, right) => left.date.localeCompare(right.date));
-
-  if (rows.length < input.biomarker.trendDefaults.minimumPoints) {
+  if (panel.status !== "ready" && panel.status !== "stale") {
     return {
-      message: `Not enough ${input.biomarker.shortName} data yet for a clean trend.`,
-      pointCount: rows.length,
-      status: "insufficient_data",
+      body: panel.emptyState?.body ?? "Your private biomarker trend is not available yet.",
+      panelStatus: panel.status,
+      status: "empty",
+      title: panel.emptyState?.title ?? "Private trend unavailable",
     };
   }
 
-  const latestRow = rows.at(-1);
+  const latest = panel.primary?.latest;
 
-  if (!latestRow) {
+  if (!latest) {
     return {
-      message: `No ${input.biomarker.shortName} values were found in browser-vault.`,
+      body: panel.emptyState?.body ?? `No ${input.biomarker.shortName} values were found in browser-vault.`,
+      panelStatus: "no_data",
       status: "empty",
+      title: panel.emptyState?.title ?? "No private values yet",
     };
   }
 
   return {
-    comparison: buildTrendComparison(rows as BrowserVaultMetricRowWithValue[], input.biomarker),
+    comparison: panel.primary?.trend ?? null,
     latest: {
-      confidence: latestRow.confidence,
-      date: latestRow.date,
-      sourceLabel: latestRow.sourceKind ?? latestRow.sourceFamily ?? "wearable summary",
-      value: latestRow.value,
+      confidence: latest.confidence,
+      date: latest.date,
+      sourceLabel: panel.sources.length === 1 ? panel.sources[0]?.displayName ?? latest.sourceLabel : latest.sourceLabel,
+      value: latest.value,
     },
-    series: rows.map((row) => ({ date: row.date, value: row.value })),
+    series: panel.primary?.series.map((point) => ({ date: point.date, value: point.value })) ?? [],
+    stale: panel.status === "stale",
     status: "ready",
   };
 }
 
-function resolveMockedTrend(biomarker: BiomarkerPageModel): PrivateTrendState {
-  const rows = generateMockedBiomarkerRows(biomarker, 30);
-  const latestRow = rows.at(-1);
-  if (!latestRow) {
-    return { message: "Demo data unavailable.", status: "empty" };
+function emptyStateGuidance(status: BrowserVaultBiomarkerPanelStatus): string {
+  if (status === "unsupported") {
+    return "This public biomarker page does not have a private browser-vault metric binding yet.";
   }
-  return {
-    comparison: buildTrendComparison(rows, biomarker),
-    latest: {
-      confidence: latestRow.confidence,
-      date: latestRow.date,
-      sourceLabel: latestRow.sourceKind ?? "demo wearable",
-      value: latestRow.value,
-    },
-    series: rows.map((row) => ({ date: row.date, value: row.value })),
-    status: "ready",
-  };
+
+  if (status === "no_data") {
+    return "Your browser-vault replica is available, but it does not contain values for this biomarker yet.";
+  }
+
+  if (status === "insufficient_data") {
+    return "Keep syncing private data; this card will update automatically.";
+  }
+
+  return "Sync a browser-vault replica to see this module. Nothing from this card is public.";
 }
 
 function toSparklinePoints(series: readonly TrendPoint[]): Array<{ x: number; y: number }> {
