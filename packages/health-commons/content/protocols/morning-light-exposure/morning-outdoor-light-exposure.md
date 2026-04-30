@@ -313,20 +313,50 @@ testPlans:
     targetAdherenceSessions: 21
     notes:
       - Use a 7-day baseline with no deliberate morning-light change, then compare against the 21-day intervention window.
-      - Primary interpretation should combine exposure adherence, subjective sleep quality, bedtime/final wake time, and morning alertness.
-      - Sleep onset latency and sleep efficiency are secondary context; a wearable or sleep diary can be used, but consumer sleep stages are not promised endpoints.
+      - Primary interpretation should focus on same-scale sleep quality and sleep-onset latency, with sleep efficiency, bedtime/final wake time, and morning alertness as supporting context; use exposure adherence to explain whether the protocol was actually tested.
+      - Use a wearable or sleep diary for sleep-onset latency and sleep efficiency, but do not treat consumer sleep stages as promised endpoints.
       - Record evening light changes, travel, illness, alcohol, caffeine, exercise, stress, heat, UV, and weather as confounders.
 expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:sleep-quality
-    description: Morning outdoor light anchors the body clock early in the day. That can make evening sleep timing feel steadier and the next night more restorative.
+    description: Morning outdoor light strengthens the day-night contrast. When the clock is anchored earlier, sleep can feel more restorative even if wearable sleep-stage estimates barely move.
+    expected: Could feel more restorative
+    estimatedChange:
+      kind: absolute
+      low: 0.5
+      high: 1.5
+      unit: points on a 1-10 sleep-quality scale
+      window: 1-3 weeks
+      confidence: low
+      basis: Direct older-adult outdoor and natural-light studies reported better sleep-quality questionnaire scores, and an adult daily-diary study linked morning sunlight with better next-night sleep quality. The estimate is a practical same-scale daily-rating range, not a pooled effect size.
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: Bright morning light can help anchor the body clock earlier in the day. If evening timing lines up better, falling asleep may become easier.
+    description: Morning daylight gives the circadian clock an early daytime signal. If sleepiness arrives closer to bedtime, time to fall asleep can shorten on nights with stable evening light, caffeine, and bedtime.
+    expected: May fall asleep sooner
+    estimatedChange:
+      kind: absolute
+      low: -10
+      high: 0
+      unit: minutes
+      window: 1-3 weeks
+      confidence: low
+      basis: Mechanism and measured-light studies support sleep-timing plausibility, while the direct 2025 morning-sunlight survey did not find a significant sleep-latency association and direct outdoor trials did not provide a usable latency effect size.
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: A stronger light-dark rhythm may reduce night waking for some people, especially when late timing was the problem.
+    description: A brighter early-day signal can consolidate the sleep-wake rhythm. If it reduces quiet wakefulness after lights-out or early awakenings, sleep efficiency can edge higher.
+    expected: Could edge higher
+    estimatedChange:
+      kind: absolute
+      low: 0
+      high: 3
+      unit: percentage points
+      window: 1-3 weeks
+      confidence: low
+      basis: Sleep-efficiency evidence is indirect and mixed. A direct morning-sunlight survey found no significant association, while outdoor/daytime bright-light studies support tracking sleep-wake consolidation as a secondary signal.
+    protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
