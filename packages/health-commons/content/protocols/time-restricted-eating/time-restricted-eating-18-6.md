@@ -22,11 +22,11 @@ relations:
 - type: primary_biomarker
   target: biomarker:body-weight
 - type: secondary_biomarker
-  target: biomarker:waist-circumference
-- type: secondary_biomarker
   target: biomarker:blood-glucose
 - type: secondary_biomarker
   target: biomarker:morning-blood-pressure
+- type: secondary_biomarker
+  target: biomarker:waist-circumference
 - type: secondary_biomarker
   target: biomarker:sleep-efficiency
   note: Safety and quality context; not an expected efficacy gain.
@@ -141,7 +141,7 @@ protocol:
   - After the ramp, use the Murph operational target of 5-7 logged target-window days per week; the minimum analyzable exposure is 4 logged target-window days per week after the ramp. This is an analysis threshold, not an evidence-derived optimal dose.
   - Keep food quality, protein, fiber, training load, caffeine, alcohol, and sleep schedule as stable as possible so the experiment is not only measuring a new diet or recovery pattern.
   - During the fasting interval, use water as the default. Do not turn unverified zero-calorie beverage rules into evidence-backed claims for this protocol.
-  - Log missed days and context rather than trying to compensate with longer fasts; the useful signal is repeatable adherence without safety or quality-of-life deterioration.
+  - Log missed days and context rather than trying to compensate with longer fasts; repeatable adherence is interpretation context, not the outcome win.
   safetyNotes:
   - Potentially reasonable only as a safety-screened self-experiment for medically stable adults, with rollback rules.
   - Safety gating should take priority over efficacy interpretation.
@@ -195,9 +195,9 @@ testPlans:
   interventionDays: 42
   primaryBiomarkerKey: biomarker:body-weight
   secondaryBiomarkerKeys:
-  - biomarker:waist-circumference
   - biomarker:blood-glucose
   - biomarker:morning-blood-pressure
+  - biomarker:waist-circumference
   - biomarker:sleep-efficiency
   safetyOutcomeKeys:
   - safety:hypoglycemia-symptoms
@@ -216,23 +216,63 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:body-weight
   expected: down_or_stable
   protocolProminence: focus
-  description: Some direct and synthesis evidence supports possible modest short-term weight reduction, but calorie intake, adherence, protein, and body composition are major confounders.
+  description: A 6-hour eating window removes evening eating opportunity and often lowers total intake without calorie counting; if that creates an energy gap, weekly scale averages should drift down.
+  estimatedChange:
+    kind: relative_percent
+    low: -3
+    high: -1
+    unit: "%"
+    window: 8 weeks
+    confidence: low
+    basis: Direct 6-hour trials report about 3% loss or comparable 8-week loss in adults with overweight or obesity; calorie-controlled and synthesis evidence points to smaller or intake-dependent effects.
+- biomarkerKey: biomarker:blood-glucose
+  expected: down_or_stable
+  protocolProminence: focus
+  description: Earlier and shorter eating windows shift more calories into the part of the day with stronger insulin sensitivity and leave a longer overnight glucose-clearing interval, so CGM mean glucose or fasting glucose may fall.
+  estimatedChange:
+    kind: absolute
+    low: -5
+    high: 0
+    unit: mg/dL
+    window: 4 days to 8 weeks
+    confidence: low
+    basis: Early 6-hour studies lowered 24-hour or mean glucose by a few mg/dL, while fasting-glucose, later-window, isocaloric, and adjacent-window results are weaker or null.
+- biomarkerKey: biomarker:morning-blood-pressure
+  expected: down_or_stable
+  protocolProminence: focus
+  description: Moving calories earlier and extending the overnight fast can lower insulin exposure and align salt and vascular rhythms with daytime handling, so morning systolic pressure may ease.
+  estimatedChange:
+    kind: absolute
+    low: -6
+    high: -2
+    unit: mmHg SBP
+    window: 5 to 8 weeks
+    confidence: low
+    basis: Small early-window 6-hour trials reported larger systolic drops, and broader TRE synthesis suggests an average systolic reduction of roughly 4 mmHg; diastolic effects are less consistent.
 - biomarkerKey: biomarker:waist-circumference
   expected: down_or_stable
   protocolProminence: context
-  description: Waist can be tracked as body-composition context; changes should not be interpreted as timing-specific without food intake and adherence context.
-- biomarkerKey: biomarker:blood-glucose
-  expected: mixed_or_contextual
-  protocolProminence: context
-  description: Early 6-hour windows have selected glucose and insulin rationale, but adjacent and isocaloric evidence is mixed.
-- biomarkerKey: biomarker:morning-blood-pressure
-  expected: mixed_or_contextual
-  protocolProminence: context
-  description: Small supervised early-window studies include blood-pressure signals, but general wellness durability and medication interactions are not established.
+  description: If the narrower window produces real fat loss rather than only glycogen or water shifts, tape-measured waist can shrink alongside weight.
+  estimatedChange:
+    kind: absolute
+    low: -4
+    high: 0
+    unit: cm
+    window: 8 to 12 weeks
+    confidence: low
+    basis: Waist reduction is supported mainly by adjacent TRE trials and syntheses rather than direct 18:6 evidence, so it belongs behind weight, glucose, and blood pressure.
 - biomarkerKey: biomarker:sleep-efficiency
   expected: stable
   protocolProminence: context
-  description: Track sleep as a safety and quality signal; a direct 6-hour sleep analysis did not show a clear sleep advantage.
+  description: The window can reduce late meals for some people but can also add hunger, underfueling, or caffeine compensation; same-device sleep efficiency is mainly a tolerability check.
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 2
+    unit: "%"
+    window: 8 weeks
+    confidence: low
+    basis: The closest 6-hour sleep analysis found no clear change in sleep quality, timing, duration, latency, insomnia severity, or sleep-apnea symptoms.
 whyItWorks:
 - The protocol tests whether a narrower daily eating window changes eating opportunity, total intake, and clock-time exposure. Direct 6-hour studies support possible short-term weight or selected metabolic signals, but effects are not universal and may depend on energy intake, adherence, clinical population, and whether the window is early or later in the day.
 - Mechanistic and acute controlled-feeding studies can explain why early clock-time exposure might matter for glucose, insulin, appetite, fat oxidation, and circadian markers, but they should not be converted into durable weight-loss, energy-expenditure, or long-term safety promises.
@@ -341,7 +381,7 @@ safety:
 researchLandscape:
   bottomLine: The direct 6-hour evidence base is relevant but small, short-term, and selected-population. Adjacent-window, calorie-confounding, behavioral, clinical, safety-only, mechanistic, observational, registry, and protocol-only sources should remain separate evidence groups so the page does not convert context into direct 18:6 proof.
   confidenceLabel: limited
-  primaryClaim: 18:6 TRE with graded starter windows is best framed as a safety-screened personal experiment for medically stable adults, testing weight, waist, glucose, blood pressure, hunger, energy, adherence, and tolerability rather than a proven optimal fasting dose.
+  primaryClaim: 18:6 TRE with graded starter windows is best framed as a safety-screened personal experiment for medically stable adults, testing weight, glucose, blood pressure, waist, hunger, energy, and tolerability while logging adherence as interpretation context.
   mainCaveat: Many sources are adjacent variants or safety/context records. Effects may depend on total energy intake, protein/fiber, diet quality, adherence, body composition, timing, clinical population, and medication status.
   groups:
   - id: direct-18-6-six-hour-intervention-evidence
@@ -428,7 +468,7 @@ researchLandscape:
 ---
 # Intermittent Fasting
 
-Use a gradually narrowed eating window to test whether a consistent 18-hour fast and 6-hour eating window produces a personal signal in weight, waist, glucose, blood pressure, hunger, energy, or adherence without worsening sleep, symptoms, recovery, or safety.
+Use a gradually narrowed eating window to test whether a consistent 18-hour fast and 6-hour eating window produces a personal signal in weight, glucose, blood pressure, waist, hunger, or energy without worsening sleep, symptoms, recovery, or safety.
 
 ## What this protocol is
 
