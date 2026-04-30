@@ -182,6 +182,104 @@ describe("health commons catalog", () => {
       }),
     }));
 
+    const psylliumProtocol = catalog.entities.find(
+      (entity) => entity.key === "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol",
+    );
+    expect(psylliumProtocol?.expectedSignalDescriptions?.map((signal) => signal.biomarkerKey)).toEqual([
+      "biomarker:ldl-c",
+      "biomarker:non-hdl-c",
+      "biomarker:apolipoprotein-b",
+      "biomarker:total-cholesterol",
+      "biomarker:triglycerides",
+      "biomarker:hdl-c",
+    ]);
+    expect(psylliumProtocol?.expectedSignalDescriptions?.map((signal) => signal.protocolProminence)).toEqual([
+      "focus",
+      "focus",
+      "focus",
+      "focus",
+      "context",
+      "context",
+    ]);
+    expect(psylliumProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:ldl-c",
+      expected: "Could trend lower",
+      estimatedChange: expect.objectContaining({
+        basis: expect.any(String),
+        confidence: "moderate",
+        high: -8,
+        kind: "absolute",
+        low: -13,
+        unit: "mg/dL",
+      }),
+      protocolProminence: "focus",
+    }));
+    expect(psylliumProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:non-hdl-c",
+      expected: "Could trend lower",
+      estimatedChange: expect.objectContaining({
+        basis: expect.any(String),
+        confidence: "moderate",
+        kind: "absolute",
+        low: -15,
+        high: -10,
+        unit: "mg/dL",
+      }),
+      protocolProminence: "focus",
+    }));
+    expect(psylliumProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:apolipoprotein-b",
+      expected: "Could trend lower",
+      estimatedChange: expect.objectContaining({
+        basis: expect.any(String),
+        confidence: "moderate",
+        kind: "absolute",
+        low: -8,
+        high: -3,
+        unit: "mg/dL",
+      }),
+      protocolProminence: "focus",
+    }));
+    expect(psylliumProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:total-cholesterol",
+      expected: "Could trend lower",
+      estimatedChange: expect.objectContaining({
+        basis: expect.any(String),
+        confidence: "moderate",
+        kind: "absolute",
+        low: -15,
+        high: -9,
+        unit: "mg/dL",
+      }),
+      protocolProminence: "focus",
+    }));
+    expect(psylliumProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:triglycerides",
+      expected: "Small/no reliable change",
+      estimatedChange: expect.objectContaining({
+        basis: expect.any(String),
+        confidence: "mixed",
+        kind: "absolute",
+        low: -12,
+        high: 2,
+        unit: "mg/dL",
+      }),
+      protocolProminence: "context",
+    }));
+    expect(psylliumProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:hdl-c",
+      expected: "Usually stable",
+      estimatedChange: expect.objectContaining({
+        basis: expect.any(String),
+        confidence: "mixed",
+        kind: "absolute",
+        low: -1,
+        high: 2,
+        unit: "mg/dL",
+      }),
+      protocolProminence: "context",
+    }));
+
     expect(catalog.redirects).toContainEqual(
       expect.objectContaining({
         from: "experiment_family:sauna/finnish-dry",
