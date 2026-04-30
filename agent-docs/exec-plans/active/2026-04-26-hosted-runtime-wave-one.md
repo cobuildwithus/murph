@@ -48,8 +48,7 @@ Completed:
 
 - Added hosted semantic side-input DTOs/parsers/routes in
   `@murphai/hosted-execution` for mailbox payloads, share payload/import,
-  vault-sync payload/import, device-sync bridge envelopes, usage export, and
-  issue export.
+  device-sync bridge envelopes, usage export, and issue export.
 - Added optional hosted `mailboxPort`, `workspacePort`, and `logPort` fields to
   `HostedRuntimePlatform`, with fake-port tests and no new run/adopt/finalize
   semantics.

@@ -10,8 +10,7 @@ execution queue owner.
 Success criteria:
 
 - Phase 1 side-input port gap is closed with explicit runtime-facing ports for
-  mailbox payloads, share payload/import results, and vault-sync payload/import
-  results.
+  mailbox payloads and share payload/import results.
 - Runtime mailbox import helpers persist per-lane imported watermarks under
   portable assistant runtime state, not web-owned run cursors or inbox
   `source_cursor`.
@@ -53,8 +52,8 @@ Completed:
 - Wave One contract, runtime-port, and web storage groundwork is focused
   verified.
 - `HostedRuntimePlatform` has explicit semantic side-input ports for mailbox,
-  workspace, logs, share, vault-sync, device-sync, raw payloads, usage export,
-  issue export, and billing.
+  workspace, logs, share, device-sync, raw payloads, usage export, issue export,
+  and billing.
 - Runtime mailbox import owns per-lane imported watermarks under portable
   assistant runtime state and does not use web run cursors or inbox
   `source_cursor`.
@@ -63,8 +62,7 @@ Completed:
   before assistant delivery so local turn revision can see late same-conversation
   messages.
 - Conversation mailbox items route into the local capture/inbox path.
-- Vault-sync mailbox items are now imported by runtime-owned logic through
-  `vaultSyncPort`, then recorded through the semantic web callback.
+- The removed local import lane is no longer part of runtime-owned mailbox logic.
 - Cloudflare workspace-run bridge adapters now restore snapshots, import
   mailbox items, checkpoint via lease-validated workspace CAS, and route through
   the local hosted runtime entrypoint.

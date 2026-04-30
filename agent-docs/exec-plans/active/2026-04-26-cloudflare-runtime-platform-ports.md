@@ -1,7 +1,7 @@
 # Cloudflare Runtime Platform Ports
 
 Goal (incl. success criteria):
-- Add the Cloudflare-hosted runtime platform adapter for greenfield mailbox, workspace checkpoint, runtime log, share payload/import, and vault-sync payload/import ports.
+- Add the Cloudflare-hosted runtime platform adapter for greenfield mailbox, workspace checkpoint, runtime log, and share payload/import ports.
 - Keep Cloudflare as a transport/lease adapter only; do not add mailbox state, run acquire/commit/finalize, committed sequence, or queue-history ownership.
 - Focused Cloudflare tests prove route bodies, response parsing, and parent-owned web callback/proxy transport.
 
@@ -23,10 +23,10 @@ State:
 Done:
 - Required repo docs read.
 - Existing contracts and Cloudflare adapter inspected.
-- `apps/cloudflare/src/runtime-platform.ts` now exposes mailbox/workspace/log/share/vault-sync platform ports over the shared web callback route constants.
+- `apps/cloudflare/src/runtime-platform.ts` now exposes mailbox/workspace/log/share platform ports over the shared web callback route constants.
 - `apps/cloudflare/src/runner-outbound/*web-control*` now allows the new semantic web-control paths, GET payload fetch routes, and share-only signed-user proxy overrides.
 - Web-control proxy allowlisting is method-aware, and structured logs use static route templates for dynamic side-input callback paths.
-- Focused Cloudflare tests cover mailbox fetch, workspace checkpoint fencing fields, runtime logs, share owner signing, vault-sync payload/import proxying, and the actual parent outbound proxy path.
+- Focused Cloudflare tests cover mailbox fetch, workspace checkpoint fencing fields, runtime logs, share owner signing, and the actual parent outbound proxy path.
 - Verification passed:
   - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/runner-outbound.test.ts`
   - `pnpm --dir apps/cloudflare typecheck`
@@ -36,7 +36,7 @@ Now:
 - Handoff.
 
 Next:
-- Worker 1/web route integration should land or verify share/vault-sync payload/import handlers behind the shared route constants.
+- Worker 1/web route integration should land or verify share payload/import handlers behind the shared route constants.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: Worker 1 will land the actual web handlers under the shared route constants already present in `packages/hosted-execution`.

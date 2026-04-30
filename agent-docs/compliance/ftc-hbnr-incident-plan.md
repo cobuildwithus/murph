@@ -6,7 +6,7 @@ Last verified: 2026-04-29
 
 This is Murph's internal first-response playbook for suspected breaches of identifiable health data involving U.S. users. It is designed for the FTC Health Breach Notification Rule (HBNR), but it should be run together with any applicable state privacy, consumer health, contract, platform, payment, and security-incident obligations.
 
-Use this playbook for hosted Murph, supported local-to-hosted flows, vendor systems, support workflows, logs, telemetry, device integrations, message/email ingress, wearable sync, imported files, and any incident where Murph may have received, processed, stored, routed, or disclosed identifiable health data.
+Use this playbook for hosted Murph, vendor systems, support workflows, logs, telemetry, device integrations, message/email ingress, wearable sync, imported files, and any incident where Murph may have received, processed, stored, routed, or disclosed identifiable health data.
 
 ## Covered posture
 
