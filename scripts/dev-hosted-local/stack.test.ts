@@ -185,7 +185,7 @@ vi.mock("./environment.ts", () => ({
 
 vi.mock("./runtime.ts", () => ({
   assertHostedWebDevServerAvailable: vi.fn(async () => {}),
-  assertPortAvailable: vi.fn(async () => {}),
+  assertHostedWebPortAvailable: vi.fn(async () => {}),
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
   resolveHostedLocalWorkerPortMode,
@@ -282,6 +282,20 @@ describe("hosted local dev stack", () => {
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
         VERCEL_OIDC_TOKEN: "oidc-token",
+      }),
+      expect.any(Object),
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "web",
+      "pnpm",
+      expect.arrayContaining([
+        "--hostname",
+        "localhost",
+        "--port",
+        "3000",
+      ]),
+      expect.objectContaining({
+        MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
       }),
       expect.any(Object),
     );
