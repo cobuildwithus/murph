@@ -110,19 +110,28 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
     expect(protocolTab!.expectedSignals.map((signal) => signal.expected)).toContain(
-      "Possible change",
+      "Small drop possible",
+    );
+    expect(protocolTab!.expectedSignals.map((signal) => signal.expected)).toContain(
+      "Small change possible",
     );
     expect(protocolTab!.expectedSignals.map((signal) => signal.expected)).not.toContain(
       "mixed_or_contextual",
     );
-    expect(countOccurrences(markup, "data-card=")).toBe(3);
-    expect(markup).toContain('data-card="Resting Heart Rate"');
+    expect(protocolTab!.expectedSignals[0]?.label).toBe("Morning Blood Pressure");
+    expect(protocolTab!.expectedSignals[1]?.label).toBe("Resting Heart Rate");
+    expect(countOccurrences(markup, "data-card=")).toBe(2);
     expect(markup).toContain('data-card="Morning Blood Pressure"');
-    expect(markup).toContain("−4 to 0 mmHg");
-    expect(markup).toContain("Morning Blood Pressure projected −4 to 0 mmHg over 2-6 weeks");
-    expect(markup).toContain("Resting Heart Rate tracked as possible change over 2-6 weeks");
-    expect(markup).toContain(">Tracked</span>");
-    expect(markup).toContain('data-card="HRV / RMSSD"');
+    expect(markup).toContain('data-card="Resting Heart Rate"');
+    expect(markup.indexOf('data-card="Morning Blood Pressure"')).toBeLessThan(
+      markup.indexOf('data-card="Resting Heart Rate"'),
+    );
+    expect(markup).toContain("−5 to 0 mmHg");
+    expect(markup).toContain("−3 to +1 bpm");
+    expect(markup).toContain("Morning Blood Pressure projected −5 to 0 mmHg over 2-6 weeks");
+    expect(markup).toContain("Resting Heart Rate projected −3 to +1 bpm over 2-6 weeks");
+    expect(markup).not.toContain('data-card="HRV / RMSSD"');
+    expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("2-6 weeks");
     expect(markup).toContain(
       '<span class="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">2-6 weeks</span>',
@@ -353,7 +362,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("/measurement-methods/home-image-analysis");
     expect(markup).toContain("/measurement-methods/clinic-imaging");
     expect(countOccurrences(markup, ">Optional</span>")).toBe(2);
-    expect(countOccurrences(markup, "data-card=")).toBe(3);
+    expect(countOccurrences(markup, "data-card=")).toBe(2);
   });
 
 });
