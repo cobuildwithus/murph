@@ -17,6 +17,7 @@ export type {
   VaultReadModel,
 } from "./read-model.ts";
 export {
+  BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   buildOverviewWeeklyStatsFromDailySampleSummaries,
@@ -28,12 +29,24 @@ export {
   selectBrowserVaultExperimentResults,
   selectBrowserVaultHistory,
   selectBrowserVaultOverview,
+  selectBrowserVaultBiomarkerPanel,
   selectBrowserVaultSignals,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica.ts";
 export type {
   BrowserVaultActivitySummary,
   BrowserVaultAssistantSummary,
+  BrowserVaultBiomarkerMetricBinding,
+  BrowserVaultBiomarkerMetricPanel,
+  BrowserVaultBiomarkerPanel,
+  BrowserVaultBiomarkerPanelEmptyState,
+  BrowserVaultBiomarkerPanelSource,
+  BrowserVaultBiomarkerPanelStatus,
+  BrowserVaultBiomarkerPanelWarning,
+  BrowserVaultBiomarkerPanelWarningCode,
+  BrowserVaultBiomarkerSeriesPoint,
+  BrowserVaultBiomarkerTrend,
+  BrowserVaultBiomarkerTrendDefaults,
   BrowserVaultBodyStateSummary,
   BrowserVaultEntity,
   BrowserVaultEntityFilters,
@@ -76,6 +89,7 @@ export type {
   BrowserVaultSourceHealthRow,
   BrowserVaultTimelineFilters,
   BrowserVaultTimelineRow,
+  SelectBrowserVaultBiomarkerPanelInput,
 } from "./browser-replica.ts";
 export {
   buildOverviewMetrics,

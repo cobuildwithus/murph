@@ -1488,6 +1488,12 @@ export const healthCommonsBiomarkerPrivateMetricBindingSchema = z
           message: "browser_vault_metric bindings must include metric.",
           path: ["metric"],
         });
+      } else if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(binding.metric)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "browser_vault_metric bindings must use canonical browser-vault metric keys, not provider field paths.",
+          path: ["metric"],
+        });
       }
     }
 
