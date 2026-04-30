@@ -28,6 +28,7 @@ interface ResultsTabProps {
   onPrivateRunRetry?: () => Promise<void>;
   privateRunError: string | null;
   privateRunStatus: BrowserVaultStatus;
+  startAction?: ReactNode;
 }
 
 export interface ResultsTabExperiment {
@@ -56,6 +57,7 @@ export function ResultsTab({
   onPrivateRunRetry,
   privateRunError,
   privateRunStatus,
+  startAction,
 }: ResultsTabProps) {
   const isActive = experiment.status === "active";
   const isPaused = experiment.status === "paused";
@@ -89,12 +91,14 @@ export function ResultsTab({
           title="Run this on yourself"
           body="You're previewing the public protocol. Start the experiment to track your own baseline, sessions, and outcomes — kept private in your browser vault."
           action={
-            <StartExperimentButton
-              initialContactChannels={initialContactChannels}
-              murphPhoneNumber={murphPhoneNumber}
-              protocolDays={formatProtocolDays(experiment.durationDays, experiment.baselineDays)}
-              protocolTitle={experiment.title}
-            />
+            startAction ?? (
+              <StartExperimentButton
+                initialContactChannels={initialContactChannels}
+                murphPhoneNumber={murphPhoneNumber}
+                protocolDays={formatProtocolDays(experiment.durationDays, experiment.baselineDays)}
+                protocolTitle={experiment.title}
+              />
+            )
           }
         />
       )}

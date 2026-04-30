@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { StartExperimentButton } from "@/src/components/experiments/experiment-detail/start-experiment-button";
 import type { ExperimentStartContactChannels } from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentStatus } from "@/src/types/experiments";
@@ -21,6 +23,7 @@ interface ExperimentHeaderProps {
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphPhoneNumber?: string | null;
   showStartAction?: boolean;
+  startAction?: ReactNode;
 }
 
 export function ExperimentHeader({
@@ -39,6 +42,7 @@ export function ExperimentHeader({
   initialContactChannels,
   murphPhoneNumber,
   showStartAction = true,
+  startAction,
 }: ExperimentHeaderProps) {
   const sanitizedDescription = sanitizeExperimentDescription(description);
   const isActive = status === "active";
@@ -136,12 +140,14 @@ export function ExperimentHeader({
         </div>
 
         {status === "upcoming" && showStartAction && (
-          <StartExperimentButton
-            initialContactChannels={initialContactChannels}
-            murphPhoneNumber={murphPhoneNumber}
-            protocolDays={protocolDays}
-            protocolTitle={title}
-          />
+          startAction ?? (
+            <StartExperimentButton
+              initialContactChannels={initialContactChannels}
+              murphPhoneNumber={murphPhoneNumber}
+              protocolDays={protocolDays}
+              protocolTitle={title}
+            />
+          )
         )}
 
         {isActive && completionPercent != null && (

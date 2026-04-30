@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,10 +46,12 @@ vi.mock("@/src/components/experiments/experiment-detail/protocol-tab", () => ({
 vi.mock("../app/(dashboard)/experiments/[experimentId]/results/results-tab-client", () => ({
   ResultsTabClient({
     protocol,
+    startAction,
   }: {
     protocol: ExperimentResultsPublicProjection;
+    startAction?: ReactNode;
   }) {
-    mocks.resultsTabClient({ protocol });
+    mocks.resultsTabClient({ protocol, startAction });
 
     return createElement(
       "div",
@@ -59,6 +61,15 @@ vi.mock("../app/(dashboard)/experiments/[experimentId]/results/results-tab-clien
       },
       protocol.title,
     );
+  },
+}));
+
+vi.mock("../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server", () => ({
+  ExperimentStartButtonFallback({ protocolTitle }: { protocolTitle: string }) {
+    return createElement("button", { type: "button" }, protocolTitle);
+  },
+  HostedExperimentStartButton({ protocolTitle }: { protocolTitle: string }) {
+    return createElement("button", { type: "button" }, protocolTitle);
   },
 }));
 
