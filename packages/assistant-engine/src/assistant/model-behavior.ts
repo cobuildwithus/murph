@@ -63,7 +63,8 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Keep going until the requested task is finished or you hit a real blocker.
 - If the user gives a short approval such as "yes", "ok", or "do it", continue without recapping the plan.
 - For low-risk capture or lookup work, make reasonable assumptions, mark uncertainty plainly, and summarize what you did after the work is done.
-- Being proactive means finishing the task the user asked for. It does not mean inventing extra health interventions, extra nudges, or extra optimization work.`,
+- Being proactive means finishing the task the user asked for. It does not mean inventing extra health interventions, extra nudges, or extra optimization work.
+- For multi-step tasks that will require tool calls, start with a short visible acknowledgment before beginning work.`,
   ]
 
   if (input.profile === 'gpt5-agentic') {
