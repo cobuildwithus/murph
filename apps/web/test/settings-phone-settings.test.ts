@@ -58,7 +58,7 @@ describe("HostedPhoneSettings", () => {
     );
 
     expect(markup).toContain("•••• 7706");
-    expect(markup).toContain("message murph");
+    expect(markup).toContain("Message Murph");
     expect(markup).not.toContain("Message +1 555 010 0001");
     expect(markup).toContain('href="sms:+15550100001"');
   });

@@ -60,7 +60,7 @@ vi.mock("../app/providers", () => ({
 
 import RootLayout, { metadata } from "../app/layout";
 
-test("RootLayout renders the Apache footer with support and GitHub links", () => {
+test("RootLayout renders the site footer with legal and social links", () => {
   const markup = renderToStaticMarkup(
     RootLayout({
       children: "hosted-shell",
@@ -75,23 +75,24 @@ test("RootLayout renders the Apache footer with support and GitHub links", () =>
   assert.match(markup, /<html lang="en" class="[^"]*--font-serif[^"]*"/u);
   assert.match(markup, /<html lang="en" class="[^"]*--font-sans[^"]*"/u);
   assert.match(markup, /<html lang="en" class="[^"]*--font-mono[^"]*"/u);
-  assert.match(markup, /Murph is open source and licensed under Apache 2\.0\./);
-  assert.match(markup, /Consumer Health Data Notice/);
+  assert.match(markup, /Murph provides educational health information/);
+  assert.match(markup, /Consumer Health Data/);
   assert.match(
     markup,
-    /href="\/consumer-health-data-privacy-policy" class="max-w-full text-\[12px\] leading-snug font-semibold text-stone-700 underline underline-offset-4 transition-colors hover:text-stone-900"/u,
+    /href="\/consumer-health-data-privacy-policy"/u,
   );
   assert.match(markup, /Privacy Policy/);
   assert.match(markup, /\/legal\/privacy/u);
-  assert.match(markup, /Terms/);
+  assert.match(markup, /Terms of Use/);
   assert.match(markup, /\/legal\/terms/u);
   assert.match(markup, /Subprocessors/);
   assert.match(markup, /\/subprocessors/u);
-  assert.match(markup, /Contact support/);
-  assert.match(markup, /mailto:support@withmurph\.ai/u);
-  assert.match(markup, /text-\[11px\].*uppercase.*text-stone-600/u);
+  assert.match(markup, /Security/);
+  assert.match(markup, /\/security/u);
+  assert.match(markup, /Murph . 2025.2026/);
   assert.doesNotMatch(markup, /rounded-full/u);
-  assert.match(markup, /View the code on GitHub/);
+  assert.match(markup, /aria-label="Murph on GitHub"/);
+  assert.match(markup, /aria-label="Murph on X"/);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
 });
 

@@ -10,6 +10,7 @@ import {
   Timer,
 } from "lucide-react";
 
+import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
 import { SectionLabel } from "@/src/components/ui/section-label";
 import type {
   Expert,
@@ -84,7 +85,7 @@ const SIGNAL_ESTIMATE_FALLBACK: SignalEstimate = {
   window: "4-8 weeks",
   baseline: "Baseline",
   projected: "Tracked",
-  evidence: "Indicative",
+  evidence: "Limited",
   isNumeric: false,
 };
 
@@ -130,7 +131,7 @@ function formatEstimateConfidence(
     case "mixed":
       return "Mixed";
     case "low":
-      return "Indicative";
+      return "Limited";
     default:
       return SIGNAL_ESTIMATE_FALLBACK.evidence;
   }
@@ -372,7 +373,16 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
                         isPrimary ? "text-2xl" : "text-lg"
                       }`}
                     >
-                      {signal.label}
+                      {signal.biomarkerRouteId ? (
+                        <Link
+                          href={`/biomarkers/${signal.biomarkerRouteId}`}
+                          className="hover:text-primary transition-colors"
+                        >
+                          {signal.label}
+                        </Link>
+                      ) : (
+                        signal.label
+                      )}
                     </h3>
                     <p
                       className={`font-serif font-semibold text-primary ${
@@ -687,22 +697,31 @@ function ExpectedSignalContextPills({
       <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-muted-foreground">
         Also worth watching
       </span>
-      {signals.map((signal) => (
-        <span
-          key={signal.label}
-          className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/35 px-3 py-1.5 text-[12px]/4"
-        >
+      {signals.map((signal) => {
+        const pill = (
           <span
-            aria-hidden="true"
-            className="font-serif text-sm/4 text-primary"
+            key={signal.label}
+            className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/35 px-3 py-1.5 text-[12px]/4"
           >
-            {signalDirectionArrows[signal.direction]}
+            <BiomarkerIcon
+              routeId={signal.biomarkerRouteId ?? ""}
+              className="size-3.5"
+            />
+            <span className="font-semibold text-foreground">
+              {signal.label}
+            </span>
           </span>
-          <span className="font-semibold text-foreground">
-            {signal.label}
-          </span>
-        </span>
-      ))}
+        );
+        return signal.biomarkerRouteId ? (
+          <Link
+            key={signal.label}
+            href={`/biomarkers/${signal.biomarkerRouteId}`}
+            className="transition-opacity hover:opacity-75"
+          >
+            {pill}
+          </Link>
+        ) : pill;
+      })}
     </div>
   );
 }

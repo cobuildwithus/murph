@@ -87,7 +87,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /data-privy-captcha="mounted"/);
     assert.match(
       markup,
-      /data-slot="input"[^>]*class="[^"]*\bh-11\b[^"]*\brounded-2xl\b[^"]*\bpx-4\b[^"]*\bpy-2\.5\b/,
+      /data-slot="input"[^>]*class="[^"]*\bh-14\b[^"]*\brounded-2xl\b[^"]*\bpx-5\b[^"]*\bpy-3\.5\b/,
     );
     assert.doesNotMatch(markup, /Defaulting to United States/);
   });
@@ -219,17 +219,15 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("can hide the passive consent notice for homepage layouts that render their own copy", async () => {
+  it("does not render passive legal consent copy inside the phone auth form", async () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedPhoneAuth, {
-        showPassiveConsentNotice: false,
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
-    assert.match(markup, /Text me a code/);
-      assert.doesNotMatch(markup, /By continuing, you agree to our/);
+    assert.match(markup, /Send verification code/);
+    assert.doesNotMatch(markup, /By continuing, you agree to our/);
   });
 
   it("uses unique phone input ids for separate public auth instances", async () => {
@@ -289,7 +287,7 @@ describe("HostedPhoneAuth", () => {
               disabled: props.sendCodeDisabled,
               onClick: () => props.onSubmitPhoneEntry(),
             },
-            "Text me a code",
+            "Send verification code",
           ),
           props.activeAttempt
             ? React.createElement(
@@ -484,9 +482,9 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /Phone number/);
-    assert.match(markup, /Enter the number that received your Murph invite\./);
-    assert.match(markup, /Text me a code/);
-    assert.match(markup, /By continuing, you agree to our/);
+    assert.doesNotMatch(markup, /Enter the number that received your Murph invite\./);
+    assert.match(markup, /Send verification code/);
+    assert.doesNotMatch(markup, /By continuing, you agree to our/);
     assert.match(markup, /data-privy-captcha="mounted"/);
     assert.doesNotMatch(markup, /text a 6-digit code to your phone\./);
     assert.doesNotMatch(markup, /\*\*\* 4567/);
@@ -523,7 +521,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /autofocus=""/);
-    assert.match(markup, /class="[^"]*h-12[^"]*text-lg[^"]*"/);
+    assert.match(markup, /class="[^"]*h-16[^"]*text-xl[^"]*"/);
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
@@ -593,8 +591,8 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /Phone number/);
-    assert.match(markup, /Text me a code/);
-    assert.match(markup, /By continuing, you agree to our/);
+    assert.match(markup, /Send verification code/);
+    assert.doesNotMatch(markup, /By continuing, you agree to our/);
     assert.match(markup, /disabled=""/);
   });
 
@@ -626,8 +624,8 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /Phone number/);
-    assert.match(markup, /Text me a code/);
-    assert.match(markup, /By continuing, you agree to our/);
+    assert.match(markup, /Send verification code/);
+    assert.doesNotMatch(markup, /By continuing, you agree to our/);
     assert.doesNotMatch(markup, /disabled=""/);
   });
 
@@ -642,7 +640,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /\*\*\* 2671/);
-    assert.match(markup, /Text me a code/);
+    assert.match(markup, /Send verification code/);
     assert.match(markup, /Use a different number/);
     assert.doesNotMatch(markup, /name="phone-number"/);
     assert.doesNotMatch(markup, /\+14155552671/);
@@ -716,7 +714,7 @@ describe("HostedPhoneAuth", () => {
 
     try {
       const sendButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Text me a code") as
+        .find((button) => button.textContent === "Send verification code") as
           | HTMLButtonElement
           | undefined;
       assert.ok(sendButton);
@@ -767,7 +765,7 @@ describe("HostedPhoneAuth", () => {
     try {
       assert.match(container.textContent ?? "", /\*\*\* 2671/);
       assert.match(container.textContent ?? "", /Preparing phone verification/);
-      assert.doesNotMatch(container.textContent ?? "", /Text me a code/);
+      assert.doesNotMatch(container.textContent ?? "", /Send verification code/);
       expect(fetch).not.toHaveBeenCalled();
       expect(mocks.sendCode).not.toHaveBeenCalled();
     } finally {
@@ -841,7 +839,7 @@ describe("HostedPhoneAuth", () => {
 
     try {
       const sendButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Text me a code") as
+        .find((button) => button.textContent === "Send verification code") as
           | HTMLButtonElement
           | undefined;
       assert.ok(sendButton);
@@ -1326,7 +1324,7 @@ describe("HostedPhoneAuth", () => {
                 type: "button",
                 onClick: () => props.onSubmitPhoneEntry(),
               },
-              "Text me a code",
+              "Send verification code",
             ),
           );
         },
@@ -1391,7 +1389,7 @@ describe("HostedPhoneAuth", () => {
       });
 
       const sendCodeButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Text me a code") as
+        .find((button) => button.textContent === "Send verification code") as
           | HTMLButtonElement
           | undefined;
       assert.ok(sendCodeButton);
@@ -1427,7 +1425,7 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("uses tall secondary actions for the public homepage code step", async () => {
+  it("uses full-size code entry controls for the public homepage code step", async () => {
     const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const markup = renderToStaticMarkup(
@@ -1459,7 +1457,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Verify phone/);
     assert.match(markup, /Use a different number/);
-    assert.ok((markup.match(/h-12/g)?.length ?? 0) >= 3);
+    assert.ok((markup.match(/h-16/g)?.length ?? 0) >= 6);
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
@@ -1519,7 +1517,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(phoneEntryMarkup, /Your phone/);
     assert.doesNotMatch(phoneEntryMarkup, /Phone number on your account/);
-    assert.match(phoneEntryMarkup, /Text me a code/);
+    assert.match(phoneEntryMarkup, /Send verification code/);
     assert.doesNotMatch(phoneEntryMarkup, /Text me a sign-in code/);
     assert.match(codeEntryMarkup, /We texted the latest code to \*\*\* 2671\./);
     assert.match(codeEntryMarkup, />Verify phone</);
@@ -1902,7 +1900,7 @@ describe("HostedPhoneAuth", () => {
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
     assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "/settings");
+    assert.equal(assign.mock.calls[0]?.[0], "/home");
   });
 
   it("retries hosted completion once when the Privy cookie has not propagated yet", async () => {
@@ -2062,7 +2060,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(harness.flowProps.length, 0);
     assert.match(markup, /\*\*\* 2523/);
-    assert.match(markup, /Text me a code/);
+    assert.match(markup, /Send verification code/);
   });
 
   it("uses the manual-entry resend path while an invite code attempt is active", async () => {

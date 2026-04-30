@@ -13,24 +13,37 @@ import {
 
 describe("hosted legal consent registry", () => {
   it("requires the current launch legal document versions", () => {
-    const acceptedDocumentVersions = buildCurrentHostedConsentDocumentVersions(
-      "launch.required",
+    const legalVersions = buildCurrentHostedConsentDocumentVersions(
+      "launch.legal",
     );
-
-    expect(acceptedDocumentVersions).toEqual({
-      "consumer-health-data-notice": "2026-04-29",
+    expect(legalVersions).toEqual({
       "health-ai-safety-disclosure": "2026-04-29",
       "privacy-policy": "2026-04-29",
       "terms-of-service": "2026-04-29",
     });
     expect(parseHostedConsentAcceptRequest({
-      acceptedDocumentVersions,
-      scope: "launch.required",
+      acceptedDocumentVersions: legalVersions,
+      scope: "launch.legal",
       source: "  hosted   onboarding  ",
     })).toEqual({
-      acceptedDocumentVersions,
-      scope: "launch.required",
+      acceptedDocumentVersions: legalVersions,
+      scope: "launch.legal",
       source: "hosted onboarding",
+    });
+
+    const healthDataVersions = buildCurrentHostedConsentDocumentVersions(
+      "launch.health-data",
+    );
+    expect(healthDataVersions).toEqual({
+      "consumer-health-data-notice": "2026-04-29",
+    });
+    expect(parseHostedConsentAcceptRequest({
+      acceptedDocumentVersions: healthDataVersions,
+      scope: "launch.health-data",
+    })).toEqual({
+      acceptedDocumentVersions: healthDataVersions,
+      scope: "launch.health-data",
+      source: "hosted-web",
     });
   });
 
@@ -84,9 +97,13 @@ describe("hosted legal consent registry", () => {
     }
   });
 
-  it("keeps launch-required consent non-revocable", () => {
+  it("keeps launch consent scopes non-revocable", () => {
     expect(() => parseHostedConsentRevokeRequest({
-      scope: "launch.required",
+      scope: "launch.legal",
+    })).toThrowError(HostedOnboardingError);
+
+    expect(() => parseHostedConsentRevokeRequest({
+      scope: "launch.health-data",
     })).toThrowError(HostedOnboardingError);
 
     expect(parseHostedConsentRevokeRequest({
@@ -99,30 +116,44 @@ describe("hosted legal consent registry", () => {
   });
 
   it("marks stale grants as not currently granted", () => {
-    const grant: HostedConsentGrantSnapshot = {
+    const legalGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "consumer-health-data-notice": "2026-04-29",
         "privacy-policy": "2026-04-29",
         "terms-of-service": "2026-04-29",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
-      lastEventId: "hbce_test",
+      lastEventId: "hbce_test_legal",
       revokedAt: null,
-      scope: "launch.required",
+      scope: "launch.legal",
+      source: "hosted onboarding",
+      status: "granted",
+      updatedAt: "2026-04-29T00:00:00.000Z",
+    };
+    const healthDataGrant: HostedConsentGrantSnapshot = {
+      documentVersions: {
+        "consumer-health-data-notice": "2026-04-29",
+      },
+      grantedAt: "2026-04-29T00:00:00.000Z",
+      lastEventId: "hbce_test_health",
+      revokedAt: null,
+      scope: "launch.health-data",
       source: "hosted onboarding",
       status: "granted",
       updatedAt: "2026-04-29T00:00:00.000Z",
     };
     const status = buildHostedConsentStatus({
-      grants: [grant],
+      grants: [legalGrant, healthDataGrant],
       now: new Date("2026-04-29T01:00:00.000Z"),
     });
 
-    expect(status.launchRequired.granted).toBe(false);
-    expect(status.launchRequired.missingDocuments.map((document) => document.id)).toEqual([
+    const legalLaunchScope = status.launchScopes.find((s) => s.scope === "launch.legal");
+    expect(legalLaunchScope?.granted).toBe(false);
+    expect(legalLaunchScope?.missingDocuments.map((d) => d.id)).toEqual([
       "health-ai-safety-disclosure",
     ]);
-    expect(status.scopes.find((scope) => scope.scope === "launch.required")).toMatchObject({
+    expect(status.launchGranted).toBe(false);
+
+    expect(status.scopes.find((scope) => scope.scope === "launch.legal")).toMatchObject({
       current: false,
       granted: false,
     });

@@ -15,14 +15,17 @@ import { renderClientComponent } from "./render-client-component";
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
   HostedAuthPanel(props: {
     authMode?: "login" | "signup";
-    showLegalNotice?: boolean;
+    requireLaunchConsentOnCompletion?: boolean;
+    showPassiveLegalNotice?: boolean;
   }) {
     return createElement(
       "div",
       {
         "data-hosted-auth-mode": props.authMode ?? "signup",
-        "data-hosted-auth-legal-notice":
-          props.showLegalNotice ? "shown" : "hidden",
+        "data-hosted-auth-launch-consent":
+          props.requireLaunchConsentOnCompletion ? "required" : "not-required",
+        "data-hosted-auth-passive-legal-notice":
+          props.showPassiveLegalNotice ? "shown" : "hidden",
       },
       "Hosted auth panel",
     );
@@ -80,11 +83,11 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   });
 
   const authPanel = window.document.querySelector(
-    '[data-hosted-auth-legal-notice="shown"]',
+    '[data-hosted-auth-launch-consent="required"]',
   );
   expect(authPanel).toBeTruthy();
-  expect(authPanel?.getAttribute("data-hosted-auth-legal-notice")).toBe(
-    "shown",
+  expect(authPanel?.getAttribute("data-hosted-auth-passive-legal-notice")).toBe(
+    "hidden",
   );
   expect(window.document.body.textContent).toContain("Log in or sign up");
 });
@@ -154,7 +157,7 @@ test("LandingAuthActions splits the lower homepage CTA into login and signup act
   ).toBeTruthy();
   expect(
     container.querySelector(
-      '[data-hosted-auth-mode="login"][data-hosted-auth-legal-notice="hidden"]',
+      '[data-hosted-auth-mode="login"][data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 
@@ -165,7 +168,7 @@ test("LandingAuthActions splits the lower homepage CTA into login and signup act
   expect(container.textContent).toContain("Create your Murph account");
   expect(
     container.querySelector(
-      '[data-hosted-auth-mode="signup"][data-hosted-auth-legal-notice="shown"]',
+      '[data-hosted-auth-mode="signup"][data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 });
@@ -187,7 +190,7 @@ test("LandingAuthActions shows only an Open settings link for authenticated user
 
   const links = Array.from(container.querySelectorAll("a"));
   expect(links).toHaveLength(1);
-  expect(links[0]?.getAttribute("href")).toBe("/settings");
-  expect(links[0]?.textContent).toContain("Your account");
+  expect(links[0]?.getAttribute("href")).toBe("/home");
+  expect(links[0]?.textContent).toContain("Start your first experiment");
   expect(container.textContent).not.toContain("Log in or sign up");
 });

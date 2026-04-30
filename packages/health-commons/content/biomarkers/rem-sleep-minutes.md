@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: biomarker
 key: biomarker:rem-sleep-minutes
 slug: biomarkers/rem-sleep-minutes
-title: REM Sleep Minutes
-summary: A wearable-estimated REM-stage duration signal best treated as sleep-architecture context; useful for personal trends, too noisy to treat as a standalone nightly score.
+title: REM Sleep
+summary: Time spent in rapid-eye-movement sleep each night, where the brain fires almost as actively as when awake to consolidate memory, process emotion, and rehearse learned patterns.
 status: field-testing
 quality: usable
 aliases:
@@ -26,7 +26,7 @@ interpretationFrame:
   caveat: Consumer devices infer REM from movement, heart-rate, and related sensor patterns; validation studies show useful sleep/wake detection but substantially weaker agreement for stage totals such as REM.
 biomarker:
   shortName: REM
-  displayName: REM Sleep Minutes
+  displayName: REM Sleep
   unit: minutes
   valuePrecision: 0
   direction:

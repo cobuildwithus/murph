@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: biomarker
 key: biomarker:deep-sleep-minutes
 slug: biomarkers/deep-sleep-minutes
-title: Deep Sleep Minutes
-summary: A wearable-estimated N3 / slow-wave sleep trend that can add recovery context, but should be interpreted as a noisy within-person signal rather than exact brain physiology.
+title: Deep Sleep
+summary: Time spent in slow-wave sleep each night, where the brain's deepest electrical slowdown drives growth-hormone release, tissue repair, and waste clearance that lighter stages do not match.
 status: field-testing
 quality: usable
 aliases:
@@ -29,7 +29,7 @@ interpretationFrame:
   caveat: Wrist and finger wearables infer N3 without scalp EEG; deep sleep can be misclassified, especially with fragmented sleep, illness, alcohol, age-related EEG-amplitude changes, sleep apnea, or device changes.
 biomarker:
   shortName: Deep sleep
-  displayName: Deep Sleep Minutes
+  displayName: Deep Sleep
   unit: minutes
   valuePrecision: 0
   direction:

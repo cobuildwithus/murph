@@ -35,7 +35,7 @@ beforeEach(() => {
   });
 });
 
-test("completeHostedPrivyAuth sends active members to settings", async () => {
+test("completeHostedPrivyAuth sends active members to home", async () => {
   const { completeHostedPrivyAuth } = await import(
     "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
@@ -50,7 +50,7 @@ test("completeHostedPrivyAuth sends active members to settings", async () => {
       user: null,
     }),
   ).resolves.toMatchObject({
-    redirectUrl: "/settings",
+    redirectUrl: "/home",
   });
 
   expect(mocks.ensureHostedPrivyWalletReady).toHaveBeenCalledWith({
@@ -81,6 +81,52 @@ test("completeHostedPrivyAuth sends checkout users back to the invite join flow"
       user: {
         linkedAccounts: [{ type: "email" }],
       },
+    }),
+  ).resolves.toMatchObject({
+    redirectUrl: "https://join.example.test/join/invite-code",
+  });
+});
+
+test("completeHostedPrivyAuth sends activating members to home", async () => {
+  mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
+    activationPending: true,
+    inviteCode: "invite-code",
+    joinUrl: "https://join.example.test/join/invite-code",
+    stage: "activating",
+  });
+
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+
+  await expect(
+    completeHostedPrivyAuth({
+      createWallet: vi.fn(),
+      refreshUser: vi.fn().mockResolvedValue(null),
+      user: null,
+    }),
+  ).resolves.toMatchObject({
+    redirectUrl: "/home",
+  });
+});
+
+test("completeHostedPrivyAuth falls back to the invite join flow for blocked users", async () => {
+  mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
+    activationPending: false,
+    inviteCode: "invite-code",
+    joinUrl: "https://join.example.test/join/invite-code",
+    stage: "blocked",
+  });
+
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+
+  await expect(
+    completeHostedPrivyAuth({
+      createWallet: vi.fn(),
+      refreshUser: vi.fn().mockResolvedValue(null),
+      user: null,
     }),
   ).resolves.toMatchObject({
     redirectUrl: "https://join.example.test/join/invite-code",
@@ -145,7 +191,7 @@ test("completeHostedPrivyAuth uses the phone readiness path when requested", asy
       },
     }),
   ).resolves.toMatchObject({
-    redirectUrl: "/settings",
+    redirectUrl: "/home",
   });
 
   expect(mocks.ensureHostedPrivyPhoneReady).toHaveBeenCalledWith({

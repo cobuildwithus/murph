@@ -86,13 +86,13 @@ test("HomePage renders the canonical landing page at the root route", async () =
   const markup = renderToStaticMarkup(await HomePage());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(3);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     1,
     {
       authenticated: false,
       context: "nav",
-      authLabel: "Log in or sign up",
+      authLabel: "Dashboard",
       splitUnauthenticated: true,
     },
     undefined
@@ -116,16 +116,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
     },
     undefined
   );
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    4,
-    {
-      authenticated: false,
-      context: "footer",
-      authLabel: "Start your first experiment",
-    },
-    undefined
-  );
-  assert.match(markup, /#global-footer \{ display: none; \}/);
   assert.match(markup, /data-phone-country-code="GB"/);
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
@@ -136,18 +126,13 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /class="block text-\[#d4b87a\] lg:whitespace-nowrap">Now let(?:'|&#x27;)s experiment with it\./
   );
-  assert.match(markup, /data-root-landing-auth-actions-label="Log in or sign up"/);
+  assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,
     /data-root-landing-auth-actions-label="See what works for your body"/
   );
   assert.match(markup, /Discover what actually makes you healthier\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
-  assert.match(markup, /data-root-landing-auth-actions-split="true"/);
-  assert.match(
-    markup,
-    /data-root-landing-auth-actions-label="Start your first experiment"/
-  );
   assert.match(markup, /You can also install it locally\./);
   assert.match(
     markup,
@@ -160,12 +145,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /Research may be incomplete, mixed, or not applicable to your situation/);
   assert.doesNotMatch(markup, /GPT-5\.5 Pro/);
   assert.match(markup, /Wearable apps show status/);
-  assert.match(markup, /Murph provides educational health information/);
-  assert.match(markup, /not a substitute for professional medical advice/);
-  assert.match(markup, /Privacy Policy/);
-  assert.match(markup, /\/legal\/privacy/u);
-  assert.match(markup, /Subprocessors/);
-  assert.match(markup, /\/subprocessors/u);
   assert.doesNotMatch(markup, /Perplexity Health/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
 });
@@ -186,7 +165,7 @@ test("SecurityPage keeps the shared sticky nav on one auth button", async () => 
     {
       authenticated: false,
       context: "nav",
-      authLabel: "Log in or sign up",
+      authLabel: "Dashboard",
       splitUnauthenticated: false,
     },
     undefined
@@ -227,14 +206,14 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
 
   const markup = renderToStaticMarkup(await HomePage());
 
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(3);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     3,
     {
       authenticated: true,
       context: "footer",
-      authLabel: "Open settings",
-      signupLabel: "Open settings",
+      authLabel: "Go to dashboard",
+      signupLabel: "Go to dashboard",
     },
     undefined
   );

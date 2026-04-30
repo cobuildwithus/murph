@@ -25,7 +25,7 @@ export function DashboardShell({
 }) {
   return (
     <>
-      <style>{`#global-footer { display: none; }`}</style>
+      <style>{`#site-footer { display: none; }`}</style>
       <SidebarProvider>
         <Sidebar
           initialAuth={sidebarAuth}
@@ -36,7 +36,7 @@ export function DashboardShell({
           )}
         />
         <SidebarInset className="bg-background">
-          <header className="grid md:hidden grid-cols-[auto_1fr_auto] items-center bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
+          <header className="grid lg:hidden grid-cols-[auto_1fr_auto] items-center bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
             <SidebarTrigger className="text-white/80 hover:bg-white/5 hover:text-white" />
             <div className="flex justify-center">
               <Image

@@ -112,9 +112,9 @@ export function HostedPhoneSettings(props: {
       {props.murphPhoneNumber ? (
         <SettingsContactLink
           href={`sms:${props.murphPhoneNumber}`}
-          label="message murph"
+          label="Message Murph"
         >
-          message murph
+          Message Murph
         </SettingsContactLink>
       ) : null}
 
@@ -122,7 +122,6 @@ export function HostedPhoneSettings(props: {
         <HostedPhoneAuth
           intent="link"
           onLinked={handleLinked}
-          showPassiveConsentNotice={false}
         />
       ) : null}
 

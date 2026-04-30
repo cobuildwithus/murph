@@ -61,7 +61,7 @@ export async function completeHostedPrivyAuth(
   };
 }
 
-async function resolveHostedAuthRedirectUrl(input: {
+export async function resolveHostedAuthRedirectUrl(input: {
   payload: HostedPrivyCompletionPayload;
 }): Promise<string> {
   if (input.payload.stage === "checkout") {
@@ -69,7 +69,7 @@ async function resolveHostedAuthRedirectUrl(input: {
   }
 
   if (isHostedOnboardingAccessibleStage(input.payload.stage)) {
-    return "/settings";
+    return "/home";
   }
 
   return input.payload.joinUrl;

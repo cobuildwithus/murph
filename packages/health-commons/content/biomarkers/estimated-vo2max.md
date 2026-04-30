@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:estimated-vo2max
 slug: biomarkers/estimated-vo2max
 title: VO₂ Max
-summary: "A cardiorespiratory fitness marker: lab VO₂ max is maximal oxygen uptake during intense whole-body exercise, while wearable cardio-fitness values are useful but noisier estimates for personal trend tracking."
+summary: Maximum oxygen the body can deliver and use during all-out effort, where a higher ceiling means heart, lungs, and muscles work together to pull more oxygen from each breath and burn it faster.
 status: field-testing
 quality: reviewed
 aliases:

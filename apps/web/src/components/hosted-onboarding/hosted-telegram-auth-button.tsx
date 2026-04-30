@@ -13,6 +13,7 @@ import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 
 import {
   completeHostedPrivyAuth,
+  type HostedAuthCompletionResult,
   type HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
 import { toErrorMessage } from "./hosted-auth-shared";
@@ -22,10 +23,12 @@ export function HostedTelegramAuthButton({
   active = false,
   disableSignup = false,
   onActivate,
+  onCompleted,
 }: {
   active?: boolean;
   disableSignup?: boolean;
   onActivate: () => void;
+  onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
 }) {
   const { createWallet } = useCreateWallet();
   const { login, state } = useLoginWithTelegram();
@@ -51,6 +54,10 @@ export function HostedTelegramAuthButton({
       const result = await completeHostedPrivyAuth({
         ...authSession,
       });
+      if (onCompleted) {
+        await onCompleted(result);
+        return;
+      }
       window.location.assign(result.redirectUrl);
     } catch (error) {
       setErrorMessage(

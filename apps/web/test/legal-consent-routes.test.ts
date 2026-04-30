@@ -60,11 +60,11 @@ const memberAuth = {
 const currentStatus = {
   documents: [],
   generatedAt: "2026-04-29T01:02:03.000Z",
-  launchRequired: {
-    granted: true,
-    missingDocuments: [],
-    scope: "launch.required",
-  },
+  launchGranted: true,
+  launchScopes: [
+    { granted: true, missingDocuments: [], scope: "launch.legal" },
+    { granted: true, missingDocuments: [], scope: "launch.health-data" },
+  ],
   ok: true,
   schema: "murph.hosted-consent-status.v1",
   scopes: [],
@@ -109,17 +109,16 @@ describe("legal consent routes", () => {
     await expect(response.json()).resolves.toEqual(currentStatus);
   });
 
-  it("records launch-required consent against the launch scope helper", async () => {
+  it("records launch.legal consent against the launch scope helper", async () => {
     const response = await consentAcceptRoute.POST(
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-04-29",
             "health-ai-safety-disclosure": "2026-04-29",
             "privacy-policy": "2026-04-29",
             "terms-of-service": "2026-04-29",
           },
-          scope: "launch.required",
+          scope: "launch.legal",
           source: "  hosted   onboarding  ",
         }),
         headers: {
@@ -134,17 +133,48 @@ describe("legal consent routes", () => {
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
-        "consumer-health-data-notice": "2026-04-29",
         "health-ai-safety-disclosure": "2026-04-29",
         "privacy-policy": "2026-04-29",
         "terms-of-service": "2026-04-29",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,
+      scope: "launch.legal",
       source: "hosted onboarding",
     });
     expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(currentStatus);
+  });
+
+  it("records launch.health-data consent against the launch scope helper", async () => {
+    const response = await consentAcceptRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "consumer-health-data-notice": "2026-04-29",
+          },
+          scope: "launch.health-data",
+          source: "hosted onboarding",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
+      acceptedDocumentVersions: {
+        "consumer-health-data-notice": "2026-04-29",
+      },
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      scope: "launch.health-data",
+      source: "hosted onboarding",
+    });
+    expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
   });
 
   it("rejects consent mutations before auth when the hosted origin guard fails", async () => {
@@ -160,12 +190,11 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-04-29",
             "health-ai-safety-disclosure": "2026-04-29",
             "privacy-policy": "2026-04-29",
             "terms-of-service": "2026-04-29",
           },
-          scope: "launch.required",
+          scope: "launch.legal",
         }),
         headers: {
           "Content-Type": "application/json",
@@ -191,12 +220,11 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-04-29",
             "health-ai-safety-disclosure": "2026-01-01",
             "privacy-policy": "2026-04-29",
             "terms-of-service": "2026-04-29",
           },
-          scope: "launch.required",
+          scope: "launch.legal",
         }),
         headers: {
           "Content-Type": "application/json",
@@ -214,7 +242,7 @@ describe("legal consent routes", () => {
         code: "CONSENT_DOCUMENT_VERSIONS_STALE",
         details: {
           missingOrStaleDocumentIds: ["health-ai-safety-disclosure"],
-          scope: "launch.required",
+          scope: "launch.legal",
         },
         message: "Refresh the current Murph legal documents before accepting consent.",
         retryable: false,
@@ -258,11 +286,11 @@ describe("legal consent routes", () => {
     await expect(response.json()).resolves.toEqual(currentStatus);
   });
 
-  it("rejects launch-required revocation before reaching the revoke helper", async () => {
+  it("rejects launch scope revocation before reaching the revoke helper", async () => {
     const response = await consentRevokeRoute.POST(
       new Request("https://join.example.test/api/legal/consent/revoke", {
         body: JSON.stringify({
-          scope: "launch.required",
+          scope: "launch.legal",
           source: "settings",
         }),
         headers: {

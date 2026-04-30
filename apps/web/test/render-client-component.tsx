@@ -8,14 +8,26 @@ import { vi } from "vitest";
 
 const requireFromRenderClientComponentTest = createRequire(import.meta.url);
 
-export async function renderClientComponent(element: ReactElement): Promise<{
+type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
   assign: ReturnType<typeof vi.fn>;
-  button: HTMLButtonElement;
+  button: TButton;
   cleanup: () => Promise<void>;
   container: HTMLElement;
   open: ReturnType<typeof vi.fn>;
   window: Window & typeof globalThis;
-}> {
+};
+
+export async function renderClientComponent(
+  element: ReactElement,
+): Promise<RenderClientComponentResult<HTMLButtonElement>>;
+export async function renderClientComponent(
+  element: ReactElement,
+  options: { requireButton: false },
+): Promise<RenderClientComponentResult<HTMLButtonElement | null>>;
+export async function renderClientComponent(
+  element: ReactElement,
+  options: { requireButton?: boolean } = {},
+): Promise<RenderClientComponentResult<HTMLButtonElement | null>> {
   const { document, window } = loadLinkedom().parseHTML(
     "<html><body><div id='root'></div></body></html>",
   );
@@ -42,11 +54,13 @@ export async function renderClientComponent(element: ReactElement): Promise<{
   });
 
   const button = container.querySelector("button");
-  assert.ok(button instanceof window.HTMLButtonElement);
+  if (options.requireButton !== false) {
+    assert.ok(button instanceof window.HTMLButtonElement);
+  }
 
   return {
     assign,
-    button,
+    button: button instanceof window.HTMLButtonElement ? button : null,
     cleanup: async () => {
       await act(async () => {
         root.unmount();

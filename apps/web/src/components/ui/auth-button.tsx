@@ -83,7 +83,8 @@ function AuthButton({
           {authDialogOpen ? (
             <HostedAuthPanel
               methods={["phone", "telegram", "email"]}
-              showLegalNotice
+              requireLaunchConsentOnCompletion
+              size="compact"
             />
           ) : null}
         </DialogContent>

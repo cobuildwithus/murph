@@ -212,6 +212,7 @@ export function toExpectedSignal(
       ? { estimatedChange: protocolSignal.estimatedChange }
       : {}),
     expected,
+    biomarkerRouteId: biomarker.key.replace(/^biomarker:/u, ""),
     ...(description ? { description } : {}),
     ...(protocolProminence
       ? { protocolProminence }

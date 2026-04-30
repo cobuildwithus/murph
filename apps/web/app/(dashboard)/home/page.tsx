@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
+import { PageHeader } from "@/src/components/ui/page-header";
 import {
   UploadLabsActionFallback,
   UploadLabsMurphContactAction,
@@ -17,18 +18,11 @@ export const metadata: Metadata = createMurphPageMetadata({
 export default function HomePage() {
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Live Well
-        </span>
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-          Welcome to Murph
-        </h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Connect your data, pick an experiment, and see what actually makes you
-          healthier.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Live Well"
+        title="Welcome to Murph"
+        description="Connect your data, pick an experiment, and see what actually makes you healthier."
+      />
 
       <OnboardingSteps
         uploadLabsAction={

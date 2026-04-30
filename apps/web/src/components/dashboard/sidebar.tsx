@@ -65,7 +65,7 @@ const navItems: {
   { label: "Home", href: "/home", icon: Home },
   {
     label: "Biomarkers",
-    href: "/biomarkers/resting-heart-rate",
+    href: "/biomarkers",
     matchPrefix: "/biomarkers",
     icon: Activity,
   },
@@ -130,7 +130,8 @@ function SidebarAuthActions() {
           {authDialogOpen ? (
             <HostedAuthPanel
               methods={["phone", "telegram", "email"]}
-              showLegalNotice
+              requireLaunchConsentOnCompletion
+              size="compact"
             />
           ) : null}
         </DialogContent>

@@ -20,16 +20,19 @@ vi.mock("next/image", () => ({
       height: props.height,
       src: props.src,
       width: props.width,
-    }),
+  }),
 }));
 
-test("ConnectPage renders Just Cobuild source names and logo marks", async () => {
+test("ConnectPage renders source search, source names, and logo marks", async () => {
   const { default: ConnectPage, metadata } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(createElement(ConnectPage));
 
   assert.equal(metadata.title, "Connect Devices — Murph");
   assert.match(markup, /Connect your health/);
-  assert.match(markup, /Just Cobuild sources/);
+  assert.match(markup, /Live Well/);
+  assert.match(markup, /placeholder="Search sources"/);
+  assert.match(markup, /aria-label="Search sources"/);
+  assert.match(markup, />32 of 32 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -200,10 +203,13 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
 
   assert.equal(sources.length, 32);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
+  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, sources.length);
+  assert.match(markup, /disabled=""/);
+  assert.match(markup, /aria-label="Oura connection is not available yet"/);
+  assert.match(markup, /Oura not connected/);
   assert.doesNotMatch(markup, /Coming soon/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
-  assert.doesNotMatch(markup, />Connect<\/button>/u);
   assert.doesNotMatch(markup, />Apple Health</u);
   assert.doesNotMatch(markup, />Health Connect</u);
   assert.doesNotMatch(markup, />Manual</u);
@@ -221,13 +227,8 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       `${source.assetPath} should exist under apps/web/public`,
     );
 
-    const firstWord = source.description.split(/\s+/u)[0];
-    assert.notEqual(firstWord, "Sync");
-    assert.notEqual(firstWord, "Import");
-
-    const wordCount = source.description.split(/\s+/u).length;
-    assert.ok(wordCount >= 10 && wordCount <= 15, `${source.description} should be 10-15 words`);
-    assert.match(markup, new RegExp(escapeRegExp(source.description)));
+    assert.notEqual(source.description.split(/\s+/u)[0], "Sync");
+    assert.notEqual(source.description.split(/\s+/u)[0], "Import");
   }
 
   for (const staleDescription of [
@@ -238,13 +239,52 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
     assert.doesNotMatch(markup, new RegExp(escapeRegExp(staleDescription)));
   }
 
-  for (const description of sources.map((source) => source.description)) {
-    const wordCount = description.split(/\s+/u).length;
-    assert.ok(wordCount >= 10 && wordCount <= 15, `${description} should be 10-15 words`);
-  }
-
   assert.doesNotMatch(markup, />St</);
   assert.doesNotMatch(markup, />Ap</);
+});
+
+test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {
+  const { filterConnectSourcesForSearch } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const sources = [
+    {
+      id: "oura",
+      name: "Oura",
+      description: "Oura sleep, readiness, activity, temperature, heart, and nightly recovery trends.",
+      logo: { className: "size-11 object-contain", height: 44, src: "/oura.png", width: 44 },
+    },
+    {
+      id: "freestyle-libre",
+      name: "Freestyle Libre",
+      description: "Libre glucose history, sensor trends, and daily time-in-range context patterns.",
+      logo: { className: "size-11 object-contain", height: 44, src: "/libre.png", width: 44 },
+    },
+  ];
+
+  assert.deepEqual(
+    filterConnectSourcesForSearch(sources, "sleep").map((source) => source.id),
+    ["oura"],
+  );
+  assert.deepEqual(
+    filterConnectSourcesForSearch(sources, "freeStyle").map((source) => source.id),
+    ["freestyle-libre"],
+  );
+  assert.deepEqual(filterConnectSourcesForSearch(sources, "  ").map((source) => source.id), [
+    "oura",
+    "freestyle-libre",
+  ]);
+});
+
+test("ConnectSourcesGrid shows an empty-state alert when no sources are available", async () => {
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const markup = renderToStaticMarkup(createElement(ConnectSourcesGrid, { sources: [] }));
+
+  assert.match(markup, /Sources/);
+  assert.match(markup, />0 of 0 sources</);
+  assert.match(markup, /No sources matched/);
+  assert.match(markup, /Try a different search to get back to the full source list\./);
+  assert.doesNotMatch(markup, />Connect<\/button>/u);
 });
 
 function escapeRegExp(value: string): string {

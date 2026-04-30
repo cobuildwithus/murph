@@ -48,7 +48,8 @@ test("HostedLegalConsentCard uses tokenized flat card styling while loading", ()
   );
 
   expect(panelMarkup).toContain("rounded-2xl border border-border bg-card p-6");
-  expect(compactMarkup).toContain("rounded-xl border border-border bg-card p-4");
+  expect(compactMarkup).toContain("w-full");
+  expect(compactMarkup).not.toContain("rounded-xl border border-border bg-card p-4");
   expect(panelMarkup).toContain('role="status"');
   expect(panelMarkup).toContain('aria-busy="true"');
   expect(panelMarkup).not.toContain("shadow-");
@@ -77,11 +78,11 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and posts current 
       source: "settings-device-sync",
       onAccepted: mocks.onAccepted,
     }),
+    { requireButton: false },
   );
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Connect health sources");
     expect(container.textContent).toContain("Murph Privacy Policy");
     expect(container.textContent).toContain("Murph Consumer Health Data Notice");
   });
@@ -92,7 +93,7 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and posts current 
   expect(checkbox).toBeTruthy();
   expect((checkbox as HTMLInputElement).checked).toBe(false);
 
-  const acceptButton = findButtonByText(container, /Accept and continue/);
+  const acceptButton = findButtonByText(container, /Continue/);
   expect(acceptButton.disabled).toBe(true);
 
   await act(async () => {
@@ -131,6 +132,100 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and posts current 
   expect(container.querySelector("button")).toBeNull();
 });
 
+test("HostedLegalConsentCard records launch consent only after both checkboxes and Continue", async () => {
+  const currentStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: false,
+  });
+  const legalAcceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchHealthDataGranted: false,
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: true,
+  });
+
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce(currentStatus)
+    .mockResolvedValueOnce(legalAcceptedStatus)
+    .mockResolvedValueOnce(acceptedStatus);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      source: "homepage-signup-dialog",
+      onAccepted: mocks.onAccepted,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Before you start");
+    expect(container.textContent).toContain("Terms of Service");
+    expect(container.textContent).toContain("Consumer Health Data Notice");
+  });
+
+  const checkboxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+  expect(checkboxes).toHaveLength(2);
+  const continueButton = findButtonByText(container, /Continue/);
+  expect(continueButton.disabled).toBe(true);
+
+  await act(async () => {
+    setCheckboxChecked(window, checkboxes[0]!, true);
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+  expect(checkboxes[0]?.checked).toBe(true);
+  expect(container.textContent).toContain("Terms of Service");
+  expect(continueButton.disabled).toBe(true);
+
+  await act(async () => {
+    setCheckboxChecked(window, checkboxes[1]!, true);
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+  expect(checkboxes[0]?.checked).toBe(true);
+  expect(checkboxes[1]?.checked).toBe(true);
+  expect(container.textContent).toContain("Consumer Health Data Notice");
+  await vi.waitFor(() => {
+    expect(continueButton.disabled).toBe(false);
+  });
+
+  await act(async () => {
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      method: "POST",
+      payload: {
+        acceptedDocumentVersions: {
+          "health-ai-safety-disclosure": "2026-04-29",
+          "privacy-policy": "2026-04-29",
+          "terms-of-service": "2026-04-29",
+        },
+        scope: "launch.legal",
+        source: "homepage-signup-dialog",
+      },
+      url: "/api/legal/consent/accept",
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(3, {
+      method: "POST",
+      payload: {
+        acceptedDocumentVersions: {
+          "consumer-health-data-notice": "2026-04-29",
+        },
+        scope: "launch.health-data",
+        source: "homepage-signup-dialog",
+      },
+      url: "/api/legal/consent/accept",
+    });
+    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
+  });
+});
+
 test("HostedLegalConsentCard marks the accept action busy while consent is recording", async () => {
   const currentStatus = createConsentStatus({
     connectedHealthGranted: false,
@@ -153,11 +248,12 @@ test("HostedLegalConsentCard marks the accept action busy while consent is recor
       source: "settings-device-sync",
       onAccepted: mocks.onAccepted,
     }),
+    { requireButton: false },
   );
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Connect health sources");
+    expect(container.textContent).toContain("I agree to the above");
   });
 
   const checkbox = container.querySelector('input[type="checkbox"]');
@@ -167,14 +263,14 @@ test("HostedLegalConsentCard marks the accept action busy while consent is recor
     setCheckboxChecked(window, checkbox as HTMLInputElement, true);
   });
 
-  const acceptButton = findButtonByText(container, /Accept and continue/);
+  const acceptButton = findButtonByText(container, /Continue/);
 
   await act(async () => {
     acceptButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
   await vi.waitFor(() => {
-    expect(acceptButton.textContent).toContain("Recording...");
+    expect(acceptButton.textContent).toContain("Saving...");
     expect(acceptButton.getAttribute("aria-busy")).toBe("true");
     expect(acceptButton.disabled).toBe(true);
   });
@@ -206,6 +302,7 @@ test("HostedLegalConsentCard keeps a retryable error visible when consent status
       source: "settings-device-sync",
       onRequirementChange: () => {},
     }),
+    { requireButton: false },
   );
   cleanupRender = cleanup;
 
@@ -221,7 +318,7 @@ test("HostedLegalConsentCard keeps a retryable error visible when consent status
   });
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Connect health sources");
+    expect(container.textContent).toContain("I agree to the above");
   });
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
@@ -229,39 +326,48 @@ test("HostedLegalConsentCard keeps a retryable error visible when consent status
 
 function createConsentStatus(input: {
   connectedHealthGranted: boolean;
-  launchGranted: boolean;
+  launchGranted?: boolean;
+  launchHealthDataGranted?: boolean;
+  launchLegalGranted?: boolean;
 }): HostedConsentStatus {
-  const launchDocuments = [
+  const legalDocuments = [
     consentDocument("terms-of-service", "Murph Terms of Service", "/legal/terms"),
     consentDocument("privacy-policy", "Murph Privacy Policy", "/legal/privacy"),
-    consentDocument(
-      "consumer-health-data-notice",
-      "Murph Consumer Health Data Notice",
-      "/consumer-health-data-privacy-policy",
-    ),
     consentDocument(
       "health-ai-safety-disclosure",
       "Murph Health AI Safety Disclosure",
       "/legal/health-ai-safety-disclosure",
     ),
   ];
-  const connectedHealthDocuments = launchDocuments.filter(
+  const healthDataDocuments = [
+    consentDocument(
+      "consumer-health-data-notice",
+      "Murph Consumer Health Data Notice",
+      "/consumer-health-data-privacy-policy",
+    ),
+  ];
+  const allDocuments = [...legalDocuments, ...healthDataDocuments];
+  const connectedHealthDocuments = allDocuments.filter(
     (document) =>
       document.id === "privacy-policy" || document.id === "consumer-health-data-notice",
   );
+  const launchLegalGranted = input.launchLegalGranted ?? input.launchGranted ?? false;
+  const launchHealthDataGranted = input.launchHealthDataGranted ?? input.launchGranted ?? false;
+  const launchGranted = launchLegalGranted && launchHealthDataGranted;
 
   return {
-    documents: launchDocuments,
+    documents: allDocuments,
     generatedAt: "2026-04-30T00:00:00.000Z",
-    launchRequired: {
-      granted: input.launchGranted,
-      missingDocuments: input.launchGranted ? [] : launchDocuments,
-      scope: "launch.required",
-    },
+    launchGranted,
+    launchScopes: [
+      { granted: launchLegalGranted, missingDocuments: launchLegalGranted ? [] : legalDocuments, scope: "launch.legal" as const },
+      { granted: launchHealthDataGranted, missingDocuments: launchHealthDataGranted ? [] : healthDataDocuments, scope: "launch.health-data" as const },
+    ],
     ok: true,
     schema: "murph.hosted-consent-status.v1",
     scopes: [
-      consentScope("launch.required", "Launch-required legal consent", false, launchDocuments, input.launchGranted),
+      consentScope("launch.legal", "Terms, privacy, and AI disclosure", false, legalDocuments, launchLegalGranted),
+      consentScope("launch.health-data", "Health data collection consent", false, healthDataDocuments, launchHealthDataGranted),
       consentScope(
         "feature.connected-health-source",
         "Connected health source consent",

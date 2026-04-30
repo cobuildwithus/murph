@@ -114,21 +114,10 @@ test("legacy Consumer Health Data Privacy Policy route redirects to the canonica
   );
 });
 
-test("SiteFooter exposes the consumer health data notice link with wrapping-friendly legal nav styling", () => {
-  const markup = renderToStaticMarkup(
-    createElement(SiteFooter, {
-      authenticated: false,
-    }),
-  );
+test("SiteFooter exposes the consumer health data notice link in the legal nav column", () => {
+  const markup = renderToStaticMarkup(createElement(SiteFooter));
 
-  assert.match(markup, /aria-label="Legal and project links"/);
+  assert.match(markup, /aria-label="Legal links"/);
   assert.match(markup, /href="\/consumer-health-data-privacy-policy"/u);
-  assert.match(markup, /Consumer Health Data Notice/u);
-  assert.match(
-    markup,
-    /font-semibold text-\[#f5f0e8\]\/70 underline underline-offset-4 transition-colors hover:text-\[#f5f0e8\]/u,
-  );
-  assert.match(markup, /flex flex-wrap items-center gap-x-4 gap-y-2/u);
-  assert.match(markup, /data-landing-auth-actions-context="footer"/);
-  assert.match(markup, /Murph starts at \$0/);
+  assert.match(markup, /Consumer Health Data/u);
 });

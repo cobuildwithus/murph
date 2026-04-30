@@ -1,15 +1,13 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import {
   ArrowRightIcon,
   CheckCircleIcon,
   CheckIcon,
-  ChevronRightIcon,
   DiamondIcon,
-  ExternalLinkIcon,
   LoaderCircleIcon,
   PhoneIcon,
   SendIcon,
@@ -31,15 +29,6 @@ import type {
 } from "@/src/lib/hosted-onboarding/types";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import type {
-  HostedConsentScopeStatus,
-  HostedConsentStatus,
-} from "@/src/lib/legal/consent";
-
-import {
-  HostedOnboardingApiError,
-  requestHostedOnboardingJson,
-} from "./client-api";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
@@ -182,7 +171,6 @@ export function JoinInviteVerificationPanel({
   onRetryStatusRefresh,
 }: JoinInviteVerificationPanelProps) {
   const [contactMethod, setContactMethod] = useState<ContactMethod>("phone");
-  const [consentGated, setConsentGated] = useState(false);
 
   if (awaitingInviteSessionResolution) {
     if (statusRefreshErrorMessage) {
@@ -247,7 +235,6 @@ export function JoinInviteVerificationPanel({
               inviteCode={inviteCode}
               phoneAuthTarget={phoneAuthTarget}
               phoneHint={phoneHint}
-              sendCodeGated={consentGated}
               onSignOut={async () => {
                 await onRefreshStatus();
               }}
@@ -271,10 +258,6 @@ export function JoinInviteVerificationPanel({
             </p>
           </div>
         ) : null}
-
-        <div className="mt-5">
-          <InlineCheckoutConsent onGateChange={setConsentGated} />
-        </div>
       </div>
 
     </div>
@@ -303,19 +286,14 @@ export function JoinInviteLaunchLegalConsentPanel({
 
 export function JoinInviteMessagingSetupPanel({
   authenticated,
-  consentRequired = false,
   initialLinkedAccounts,
-  onConsentSatisfied,
   onRefreshStatus,
 }: {
   authenticated: boolean;
-  consentRequired?: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
-  onConsentSatisfied?: () => Promise<void>;
   onRefreshStatus: () => Promise<HostedInviteStatusPayload>;
 }) {
   const [contactMethod, setContactMethod] = useState<ContactMethod>("phone");
-  const [consentGated, setConsentGated] = useState(false);
 
   return (
     <div className="flex flex-col gap-5">
@@ -343,8 +321,6 @@ export function JoinInviteMessagingSetupPanel({
           {contactMethod === "phone" ? (
             <HostedPhoneAuth
               intent="link"
-              sendCodeGated={consentGated}
-              showPassiveConsentNotice={false}
               onLinked={async () => {
                 await onRefreshStatus();
               }}
@@ -358,13 +334,6 @@ export function JoinInviteMessagingSetupPanel({
               }}
             />
           )}
-        </div>
-
-        <div className="mt-5">
-          <InlineCheckoutConsent
-            onConsentSatisfied={onConsentSatisfied}
-            onGateChange={setConsentGated}
-          />
         </div>
       </div>
     </div>
@@ -400,20 +369,16 @@ const EDGE_FEATURES = [
 export function JoinInviteCheckoutPanel({
   billingReady,
   billingPlans,
-  consentRequired = false,
   onCheckout,
   onCheckoutSuccess,
   onCheckoutError,
-  onConsentSatisfied,
   onSelectBillingPlan,
 }: {
   billingReady: boolean;
   billingPlans: HostedInviteStatusPayload["billing"]["plans"];
-  consentRequired?: boolean;
   onCheckout: (billingPlanCode: HostedBillingPlanCode) => Promise<void>;
   onCheckoutSuccess: () => void;
   onCheckoutError: (error: unknown) => void;
-  onConsentSatisfied?: () => Promise<void>;
   onSelectBillingPlan: (billingPlanCode: HostedBillingPlanCode) => void;
 }) {
   const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly");
@@ -421,7 +386,7 @@ export function JoinInviteCheckoutPanel({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
         {/* Free */}
         <PricingTierCard
           tier="free"
@@ -501,12 +466,8 @@ export function JoinInviteCheckoutPanel({
         />
       </div>
 
-      {consentRequired ? (
-        <InlineCheckoutConsent onConsentSatisfied={onConsentSatisfied} />
-      ) : null}
-
       <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-0">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-0">
           <CheckoutTrustItem
             icon={LockIcon}
             label="Private by default"
@@ -530,161 +491,6 @@ export function JoinInviteCheckoutPanel({
   );
 }
 
-function InlineCheckoutConsent({
-  onConsentSatisfied,
-  onGateChange,
-}: {
-  onConsentSatisfied?: () => Promise<void>;
-  onGateChange?: (gated: boolean) => void;
-}) {
-  const [status, setStatus] = useState<HostedConsentStatus | null>(null);
-  const [legalAccepted, setLegalAccepted] = useState(false);
-  const [healthDataAccepted, setHealthDataAccepted] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  const loadStatus = useCallback(async () => {
-    setLoading(true);
-    try {
-      const nextStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
-        url: "/api/legal/consent/status",
-      });
-      setStatus(nextStatus);
-    } catch {
-      // Consent loading failed — let checkout proceed without blocking
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
-
-  const allLaunchScopes = status?.launchScopes ?? [];
-  const pendingLaunchScopes = useMemo(() => {
-    return allLaunchScopes.filter((s) => !s.granted);
-  }, [allLaunchScopes]);
-
-  const legalScope = status?.scopes.find((s) => s.scope === "launch.legal") ?? null;
-  const healthDataScope = status?.scopes.find((s) => s.scope === "launch.health-data") ?? null;
-
-  const hasLegal = allLaunchScopes.some((s) => s.scope === "launch.legal");
-  const hasHealthData = allLaunchScopes.some((s) => s.scope === "launch.health-data");
-  const legalGranted = legalScope?.granted ?? false;
-  const healthDataGranted = healthDataScope?.granted ?? false;
-
-  const consentVisible = !loading && allLaunchScopes.length > 0;
-  const allAccepted =
-    (!hasLegal || legalAccepted || legalGranted) &&
-    (!hasHealthData || healthDataAccepted || healthDataGranted);
-  const gated = consentVisible && !allAccepted;
-
-  useEffect(() => {
-    onGateChange?.(gated);
-  }, [gated, onGateChange]);
-
-  useEffect(() => {
-    if (status && pendingLaunchScopes.length === 0) {
-      void onConsentSatisfied?.();
-    }
-  }, [pendingLaunchScopes, onConsentSatisfied, status]);
-
-  async function handleCheck(
-    scope: "legal" | "health-data",
-    checked: boolean,
-  ) {
-    if (scope === "legal") setLegalAccepted(checked);
-    else setHealthDataAccepted(checked);
-
-    if (!checked || pending) return;
-
-    const targetScope = scope === "legal" ? legalScope : healthDataScope;
-    if (!targetScope || targetScope.granted) return;
-
-    setPending(true);
-    try {
-      const nextStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
-        method: "POST",
-        payload: {
-          acceptedDocumentVersions: Object.fromEntries(
-            targetScope.documents.map((doc) => [doc.id, doc.version]),
-          ),
-          scope: targetScope.scope,
-          source: "join-invite-checkout",
-        },
-        url: "/api/legal/consent/accept",
-      });
-      setStatus(nextStatus);
-      if (nextStatus.launchGranted) {
-        await onConsentSatisfied?.();
-      }
-    } catch {
-      if (scope === "legal") setLegalAccepted(false);
-      else setHealthDataAccepted(false);
-    } finally {
-      setPending(false);
-    }
-  }
-
-  if (!consentVisible) return null;
-
-  return (
-    <div className="space-y-3">
-      {hasLegal && legalScope ? (
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background p-4 text-sm leading-relaxed transition-colors hover:border-olive/30 active:bg-muted/40">
-          <input
-            type="checkbox"
-            checked={legalAccepted || legalGranted}
-            disabled={pending || legalGranted}
-            onChange={(event) => void handleCheck("legal", event.currentTarget.checked)}
-            className="mt-0.5 size-5 shrink-0 rounded border-border text-olive"
-          />
-          <span className="text-muted-foreground">
-            I agree to the{" "}
-            {legalScope.documents.map((doc, i) => (
-              <span key={doc.id}>
-                {i > 0 ? (i === legalScope.documents.length - 1 ? " and " : ", ") : ""}
-                <a
-                  href={doc.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-foreground underline-offset-4 hover:underline"
-                >
-                  {doc.title.replace("Murph ", "")}
-                </a>
-              </span>
-            ))}
-          </span>
-        </label>
-      ) : null}
-
-      {hasHealthData && healthDataScope ? (
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background p-4 text-sm leading-relaxed transition-colors hover:border-olive/30 active:bg-muted/40">
-          <input
-            type="checkbox"
-            checked={healthDataAccepted || healthDataGranted}
-            disabled={pending || healthDataGranted}
-            onChange={(event) => void handleCheck("health-data", event.currentTarget.checked)}
-            className="mt-0.5 size-5 shrink-0 rounded border-border text-olive"
-          />
-          <span className="text-muted-foreground">
-            I agree to the{" "}
-            <a
-              href={healthDataScope.documents[0]?.href ?? "#"}
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-foreground underline-offset-4 hover:underline"
-            >
-              Consumer Health Data Notice
-            </a>
-          </span>
-        </label>
-      ) : null}
-    </div>
-  );
-}
-
 function PricingTierCard({
   name,
   description,
@@ -703,7 +509,7 @@ function PricingTierCard({
   tier: "free" | "go" | "plus";
 }) {
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
+    <div className="flex min-w-0 flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
       <div className="flex items-center gap-3">
         <PricingDots tier={tier} />
         <h3 className="font-serif text-3xl font-normal tracking-tight text-foreground">
@@ -847,7 +653,7 @@ function CheckoutTrustItem({
     <div
       className={[
         "flex items-center gap-3 py-1",
-        divider ? "sm:border-l sm:border-border sm:pl-6" : "",
+        divider ? "lg:border-l lg:border-border lg:pl-6" : "",
       ].join(" ")}
     >
       <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40">

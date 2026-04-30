@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:resting-heart-rate
 slug: biomarkers/resting-heart-rate
 title: Resting Heart Rate
-summary: A widely available resting pulse trend that can make short experiments easier to interpret, especially when compared against your own baseline.
+summary: How many times the heart beats per minute at full rest, where a lower count usually means the heart pumps more blood per beat and needs fewer contractions to do the same job.
 status: field-testing
 quality: usable
 aliases:

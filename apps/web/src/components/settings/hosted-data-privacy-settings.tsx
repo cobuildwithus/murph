@@ -233,7 +233,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       <ConnectedAccountCard
         label="Export data"
         value="Download your Murph data"
-        meta="Exports account, messaging, vault sync, wearable, usage, and redacted diagnostic records. Tokens, lookup keys, nonces, invite codes, and encrypted vault payload blobs are not included."
+        meta="Exports account, messaging, wearable, usage, and redacted diagnostic records. Tokens, lookup keys, nonces, and invite codes are not included."
         action={
           <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} type="button" variant="outline">
             <DownloadIcon data-icon="inline-start" />
@@ -292,8 +292,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
             <DialogTitle>Confirm data export</DialogTitle>
             <DialogDescription>
               This download can contain decrypted account details and account metadata. Murph will omit mailbox payload
-              bodies, tokens, lookup keys, nonces, invite codes, API key environment names, and encrypted vault payload
-              blobs.
+              bodies, tokens, lookup keys, nonces, invite codes, and API key environment names.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (
@@ -360,14 +359,14 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
               <DialogHeader>
                 <DialogTitle>Review deletion first</DialogTitle>
                 <DialogDescription>
-                  This is the first confirmation. Murph will delete live account rows, mailbox payloads, vault sync payloads,
+                  This is the first confirmation. Murph will delete live account rows, mailbox payloads,
                   device tokens/audits, runtime logs, and workspace state. Provider and backup retention may still apply.
                 </DialogDescription>
               </DialogHeader>
               <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
                 <p className="font-medium text-foreground">High-value pieces included in this deletion</p>
                 <p className="mt-1">
-                  Prisma records, hosted mailbox/payloads, vault sync, wearable connections/tokens/audit rows,
+                  Prisma records, hosted mailbox/payloads, wearable connections/tokens/audit rows,
                   runtime logs, Linq/Telegram/email routing, and best-effort Cloudflare runner/R2 cleanup.
                 </p>
               </div>

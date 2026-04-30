@@ -120,7 +120,7 @@ test("SidebarChatWithMurphAction prefers the member assigned Murph text number",
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /data-slot="auth-button"[^>]*href="sms:\+15550100001"/);
+  assert.match(markup, /href="sms:\+15550100001"[^>]*data-slot="sidebar-menu-button"/);
   assert.match(markup, /aria-label="Chat with Murph in Messages"/);
   assert.doesNotMatch(markup, /\+14045550123/);
   assert.doesNotMatch(markup, /member@example\.test/);
@@ -159,7 +159,7 @@ test("SidebarChatWithMurphAction stays disabled when no connected chat channel e
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /data-slot="auth-button"/);
+  assert.match(markup, /data-slot="sidebar-menu-button"/);
   assert.doesNotMatch(markup, /href=/);
 });
 

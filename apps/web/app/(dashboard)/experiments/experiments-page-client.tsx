@@ -14,6 +14,7 @@ import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
+import { PageHeader } from "@/src/components/ui/page-header";
 import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/display";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
@@ -88,17 +89,11 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Library
-          </span>
-          <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-            Experiments
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Browse the public protocol library.
-          </p>
-        </div>
+        <PageHeader
+          eyebrow="Library"
+          title="Experiments"
+          description="Browse the public protocol library."
+        />
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto lg:items-center">
           <Input
             value={search}

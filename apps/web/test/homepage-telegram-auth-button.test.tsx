@@ -52,7 +52,7 @@ beforeEach(() => {
       joinUrl: "/join/invite-code",
       stage: "active",
     },
-    redirectUrl: "/settings",
+    redirectUrl: "/home",
   });
 });
 
@@ -90,7 +90,7 @@ test("HomepageTelegramAuthButton logs in with Telegram and redirects through the
     refreshUser: expect.any(Function),
     user: null,
   });
-  expect(assign).toHaveBeenCalledWith("/settings");
+  expect(assign).toHaveBeenCalledWith("/home");
 });
 
 test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", async () => {

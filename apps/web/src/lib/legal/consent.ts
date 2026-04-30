@@ -46,14 +46,21 @@ export const HOSTED_CONSENT_DOCUMENTS = [
 
 export const HOSTED_CONSENT_SCOPES = [
   {
-    scope: "launch.required",
-    label: "Launch-required legal consent",
+    scope: "launch.legal",
+    label: "Terms, privacy, and AI disclosure",
     revocable: false,
     documentIds: [
       "terms-of-service",
       "privacy-policy",
-      "consumer-health-data-notice",
       "health-ai-safety-disclosure",
+    ],
+  },
+  {
+    scope: "launch.health-data",
+    label: "Health data collection consent",
+    revocable: false,
+    documentIds: [
+      "consumer-health-data-notice",
     ],
   },
   {
@@ -89,8 +96,11 @@ export const HOSTED_CONSENT_SCOPES = [
 
 export type HostedConsentDocumentId = typeof HOSTED_CONSENT_DOCUMENTS[number]["id"];
 export type HostedConsentScope = typeof HOSTED_CONSENT_SCOPES[number]["scope"];
+export type HostedConsentLaunchScope = Extract<HostedConsentScope, `launch.${string}`>;
 export type HostedConsentGrantStatus = "granted" | "revoked";
 export type HostedConsentEventAction = "accepted" | "granted" | "revoked";
+
+const HOSTED_LAUNCH_SCOPES: readonly HostedConsentLaunchScope[] = ["launch.legal", "launch.health-data"];
 
 export interface HostedConsentDocumentSnapshot {
   href: string;
@@ -122,14 +132,17 @@ export interface HostedConsentScopeStatus {
   scope: HostedConsentScope;
 }
 
+export interface HostedConsentLaunchScopeStatus {
+  granted: boolean;
+  missingDocuments: HostedConsentDocumentSnapshot[];
+  scope: HostedConsentLaunchScope;
+}
+
 export interface HostedConsentStatus {
   documents: HostedConsentDocumentSnapshot[];
   generatedAt: string;
-  launchRequired: {
-    granted: boolean;
-    missingDocuments: HostedConsentDocumentSnapshot[];
-    scope: "launch.required";
-  };
+  launchGranted: boolean;
+  launchScopes: HostedConsentLaunchScopeStatus[];
   ok: true;
   scopes: HostedConsentScopeStatus[];
   schema: "murph.hosted-consent-status.v1";
@@ -223,16 +236,16 @@ export async function recordHostedLaunchRequiredConsent(input: {
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
+  scope: HostedConsentLaunchScope;
   source?: string;
 }): Promise<HostedConsentStatus> {
-  const scope = "launch.required";
   return recordHostedConsentGrant({
     action: "accepted",
     acceptedDocumentVersions: input.acceptedDocumentVersions,
     memberId: input.memberId,
     now: input.now,
     prisma: input.prisma,
-    scope,
+    scope: input.scope,
     source: input.source,
   });
 }
@@ -242,7 +255,7 @@ export async function grantHostedOptionalFeatureConsent(input: {
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
-  scope: Exclude<HostedConsentScope, "launch.required">;
+  scope: Exclude<HostedConsentScope, HostedConsentLaunchScope>;
   source?: string;
 }): Promise<HostedConsentStatus> {
   return recordHostedConsentGrant({
@@ -428,11 +441,22 @@ export async function assertHostedLaunchRequiredConsentGranted(input: {
   memberId: string;
   prisma: HostedConsentPrismaClient;
 }): Promise<void> {
-  await assertHostedConsentScopeGranted({
+  const status = await readHostedConsentStatus({
     memberId: input.memberId,
     prisma: input.prisma,
-    scope: "launch.required",
   });
+
+  if (!status.launchGranted) {
+    const missingScopes = status.launchScopes
+      .filter((s) => !s.granted)
+      .map((s) => s.scope);
+    throw hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      details: { missingScopes },
+      httpStatus: 403,
+      message: "Accept the current Murph legal consent before continuing.",
+    });
+  }
 }
 
 export function buildHostedConsentStatus(input: {
@@ -460,16 +484,21 @@ export function buildHostedConsentStatus(input: {
       scope: scopeDefinition.scope,
     };
   });
-  const launchRequired = scopes.find((scope) => scope.scope === "launch.required");
+
+  const launchScopes: HostedConsentLaunchScopeStatus[] = HOSTED_LAUNCH_SCOPES.map((launchScope) => {
+    const scopeStatus = scopes.find((s) => s.scope === launchScope);
+    return {
+      granted: scopeStatus?.granted ?? false,
+      missingDocuments: scopeStatus?.missingDocuments ?? getHostedConsentDocumentsForScope(launchScope),
+      scope: launchScope,
+    };
+  });
 
   return {
     documents: HOSTED_CONSENT_DOCUMENTS.map(projectHostedConsentDocument),
     generatedAt: input.now.toISOString(),
-    launchRequired: {
-      granted: launchRequired?.granted ?? false,
-      missingDocuments: launchRequired?.missingDocuments ?? getHostedConsentDocumentsForScope("launch.required"),
-      scope: "launch.required",
-    },
+    launchGranted: launchScopes.every((s) => s.granted),
+    launchScopes,
     ok: true,
     schema: "murph.hosted-consent-status.v1",
     scopes,

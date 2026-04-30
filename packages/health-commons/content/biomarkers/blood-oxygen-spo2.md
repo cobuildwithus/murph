@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:blood-oxygen-spo2
 slug: biomarkers/blood-oxygen-spo2
 title: "Blood Oxygen Saturation (SpO₂)"
-summary: "A respiratory and sleep-context signal that estimates the percentage of oxygen-saturated hemoglobin in blood; useful for spotting personal baseline shifts, repeated overnight desaturation patterns, altitude or illness context, and symptom-matched safety signals."
+summary: Percentage of hemoglobin carrying oxygen in the blood, where a consistently high reading means the lungs are loading red blood cells efficiently and tissue is getting the oxygen it needs.
 status: field-testing
 quality: usable
 aliases:
@@ -34,7 +34,7 @@ interpretationFrame:
   caveat: "SpO₂ is vulnerable to device class, skin pigmentation, perfusion, temperature, movement, nail polish, tobacco or carbon-monoxide exposure, altitude, illness, and sleep-disordered breathing. Compare same-device same-context trends and treat low or symptom-matched readings as medical context."
 biomarker:
   shortName: "SpO₂"
-  displayName: "Blood Oxygen Saturation (SpO₂)"
+  displayName: "SpO₂"
   unit: "%"
   valuePrecision: 1
   direction:
