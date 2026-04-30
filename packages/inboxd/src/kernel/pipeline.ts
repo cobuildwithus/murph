@@ -1,5 +1,4 @@
 import type { InboundCapture, PersistedCapture } from "../contracts/capture.ts";
-import type { StoredAttachment, StoredCapture } from "../contracts/capture.ts";
 import type { InboxRuntimeStore } from "./sqlite.ts";
 import {
   ensureInboxVault,
@@ -8,16 +7,9 @@ import {
   persistCanonicalInboxCapture,
 } from "../indexing/persist.ts";
 import {
-  buildAttachmentId,
   createDeterministicInboxCaptureId,
   generatePrefixedId,
 } from "../shared.ts";
-import {
-  buildInboxCaptureDirectory,
-  buildInboxEnvelopePath,
-  buildUnstoredAttachment,
-  stripEphemeralAttachmentFields,
-} from "../indexing/capture-shape.ts";
 
 export interface PipelineContext {
   vaultRoot: string;
@@ -119,82 +111,8 @@ export async function processCapture(
   };
 }
 
-export function stageRuntimeOnlyCapture(input: {
-  capture: InboundCapture;
-  eventId?: string;
-  runtime: InboxRuntimeStore;
-  storedAt?: string;
-}): PersistedCapture {
-  const eventId = input.eventId ?? generatePrefixedId("evt");
-  const captureId = createDeterministicInboxCaptureId(input.capture);
-  const existing = input.runtime.findByExternalId(
-    input.capture.source,
-    input.capture.accountId,
-    input.capture.externalId,
-  );
-
-  if (existing) {
-    return existing;
-  }
-
-  const storedAt = input.storedAt ?? new Date().toISOString();
-  const stored = buildRuntimeOnlyStoredCapture({
-    capture: input.capture,
-    captureId,
-    eventId,
-    storedAt,
-  });
-  const runtimeCaptureId = input.runtime.upsertCaptureIndex({
-    captureId,
-    eventId,
-    input: input.capture,
-    persistence: "runtime_only",
-    stored,
-  });
-
-  return {
-    captureId: runtimeCaptureId,
-    createdAt: stored.storedAt,
-    deduped: false,
-    envelopePath: stored.envelopePath,
-    eventId,
-  };
-}
-
 function defaultIds(): PipelineContext["ids"] {
   return {
     event: () => generatePrefixedId("evt"),
-  };
-}
-
-function buildRuntimeOnlyStoredCapture(input: {
-  capture: InboundCapture;
-  captureId: string;
-  eventId: string;
-  storedAt: string;
-}): StoredCapture {
-  const sourceDirectory = buildInboxCaptureDirectory(
-    input.capture,
-    input.captureId,
-  );
-
-  return {
-    attachments: input.capture.attachments.map((attachment, index): StoredAttachment => {
-      const ordinal = index + 1;
-
-      return buildUnstoredAttachment({
-        attachment: {
-          ...stripEphemeralAttachmentFields(attachment),
-          originalPath: null,
-        },
-        attachmentId: buildAttachmentId(input.captureId, ordinal),
-        ordinal,
-      });
-    }),
-    captureId: input.captureId,
-    envelopePath: buildInboxEnvelopePath(input.capture, input.captureId),
-    eventId: input.eventId,
-    sourceDirectory,
-    storedAt: input.storedAt,
   };
 }

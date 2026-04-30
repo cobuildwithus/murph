@@ -10,14 +10,10 @@ import {
 } from '@murphai/runtime-state/node'
 import type { AssistantStatePaths } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import type {
-  AssistantInputConversationRef,
-  AssistantInputCursor,
-  AssistantInputProjectionStatus,
-  AssistantInputSourceRef,
-} from './input-source.js'
-import { assistantInputIdFromInboxCaptureId } from './input-source.js'
-import { isSameAssistantConversationCapture } from './conversation-ref.js'
+import {
+  isSameAssistantConversationCapture,
+  type AssistantConversationCaptureRef,
+} from './conversation-ref.js'
 import { isMissingFileError, resolveTimestamp } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
@@ -28,9 +24,41 @@ export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
 export const ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH = 20_000
 export const ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT = 32
 
+export type AssistantInputConversationRef = AssistantConversationCaptureRef
+export type AssistantInputProjectionStatus =
+  | 'not_attempted'
+  | 'pending'
+  | 'succeeded'
+  | 'failed'
+  | 'quarantined'
+export interface AssistantInputCursor {
+  createdAt: string | null
+  inputId: string
+  occurredAt: string
+  sourceKind: AssistantInputSourceRef['kind']
+  sourcePosition?: string | null
+}
+export type AssistantInputSourceRef =
+  | {
+      captureId: string
+      kind: 'inbox-capture'
+      source: string
+      version: string | null
+    }
+  | {
+      dedupeKey: string | null
+      eventId: string
+      itemId: string
+      kind: 'hosted-mailbox'
+      lane: 'conversation' | 'system'
+      laneSeq: string
+      payloadSchema: string
+      payloadSource: 'inline' | 'sidecar'
+      source: 'hosted-mailbox'
+      wakeSchema: string
+    }
+
 const ASSISTANT_INPUT_RUNTIME_EVENT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
-const ASSISTANT_INPUT_INBOX_EVENT_ID_PATTERN =
-  /^inbox:[A-Za-z0-9][A-Za-z0-9_-]{0,191}$/u
 const ASSISTANT_INPUT_EVENT_REASON_CODE_PATTERN =
   /^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/u
 const ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u
@@ -58,7 +86,7 @@ const assistantInputSourceRefSchema = z.discriminatedUnion('kind', [
       dedupeKey: safeNullableAssistantInputTokenSchema('dedupeKey'),
       eventId: safeAssistantInputTokenSchema('eventId'),
       itemId: safeAssistantInputTokenSchema('itemId'),
-      kind: z.literal('hosted-mailbox-item'),
+      kind: z.literal('hosted-mailbox'),
       lane: z.enum(['conversation', 'system']),
       laneSeq: safeAssistantInputTokenSchema('laneSeq'),
       payloadSchema: safeAssistantInputTokenSchema('payloadSchema'),
@@ -89,7 +117,7 @@ const assistantInputCursorSchema = z
         message: 'inputId must be an assistant input event id.',
       }),
     occurredAt: safeAssistantInputTimestampSchema('occurredAt'),
-    sourceKind: z.enum(['inbox-capture', 'hosted-mailbox-item']),
+    sourceKind: z.enum(['inbox-capture', 'hosted-mailbox']),
     sourcePosition: safeNullableAssistantInputPositionSchema('sourcePosition'),
   })
   .strict()
@@ -131,6 +159,7 @@ const assistantInputProjectionSchema = z
   .object({
     captureId: safeNullableAssistantInputTokenSchema('captureId'),
     lastAttemptedAt: safeNullableAssistantInputTimestampSchema('lastAttemptedAt'),
+    nextAttemptAfter: safeNullableAssistantInputTimestampSchema('nextAttemptAfter'),
     reasonCode: safeNullableAssistantInputReasonCodeSchema(),
     status: z.enum(assistantInputProjectionStatusValues),
     updatedAt: safeNullableAssistantInputTimestampSchema('updatedAt'),
@@ -176,6 +205,9 @@ const assistantInputProjectionUpdateSchema = z
     lastAttemptedAt: safeAssistantInputTimestampSchema(
       'lastAttemptedAt',
     ).nullable().optional(),
+    nextAttemptAfter: safeAssistantInputTimestampSchema(
+      'nextAttemptAfter',
+    ).nullable().optional(),
     reasonCode: safeAssistantInputReasonCodeSchema().nullable().optional(),
     status: z.enum(assistantInputProjectionStatusValues),
     updatedAt: safeAssistantInputTimestampSchema('updatedAt')
@@ -215,9 +247,6 @@ export interface AssistantInputEventRecordParseFailure {
 export function createAssistantInputEventId(input: {
   sourceRef: AssistantInputSourceRef
 }): string {
-  if (input.sourceRef.kind === 'inbox-capture') {
-    return assistantInputIdFromInboxCaptureId(input.sourceRef.captureId)
-  }
   return `ain_${sha256Hex(stableStringify(assistantInputSourceRefIdentity(input.sourceRef))).slice(0, 32)}`
 }
 
@@ -383,6 +412,44 @@ export async function listAssistantInputEvents(input: {
   }
 }
 
+export async function listAssistantInputProjectionAttempts(input: {
+  afterCursor?: AssistantInputCursor | null
+  limit?: number
+  now?: Date
+  onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
+  paths?: AssistantStatePaths
+  skipInvalidRecords?: boolean
+  vault?: string
+}): Promise<{
+  events: AssistantInputEventRecord[]
+  nextCursor: AssistantInputCursor | null
+}> {
+  const now = resolveTimestamp(input.now)
+  const limit = normalizeAssistantInputEventListLimit(input.limit)
+  const listed = await listAssistantInputEvents({
+    afterCursor: input.afterCursor,
+    limit: Number.MAX_SAFE_INTEGER,
+    onInvalidRecord: input.onInvalidRecord,
+    paths: input.paths,
+    skipInvalidRecords: input.skipInvalidRecords,
+    vault: input.vault,
+  })
+
+  const events = listed.events
+    .filter((event) =>
+      isAssistantInputProjectionAttemptDue(event.projection, now),
+    )
+    .slice(0, limit)
+
+  return {
+    events,
+    // Projection retry eligibility is ordered by retry time, not by event
+    // cursor. Returning a cursor here can skip an older future-due record once
+    // it becomes due, so this scan is intentionally non-paginated.
+    nextCursor: null,
+  }
+}
+
 export async function updateAssistantInputProjection(input: {
   inputId: string
   now?: Date
@@ -511,6 +578,7 @@ function buildAssistantInputEventRecord(input: {
     projection: {
       captureId: null,
       lastAttemptedAt: null,
+      nextAttemptAfter: null,
       reasonCode: null,
       status: 'not_attempted',
       updatedAt: null,
@@ -571,10 +639,7 @@ function normalizeAssistantInputEventId(value: string): string {
 }
 
 function isAssistantInputEventId(value: string): boolean {
-  return (
-    ASSISTANT_INPUT_RUNTIME_EVENT_ID_PATTERN.test(value) ||
-    ASSISTANT_INPUT_INBOX_EVENT_ID_PATTERN.test(value)
-  )
+  return ASSISTANT_INPUT_RUNTIME_EVENT_ID_PATTERN.test(value)
 }
 
 function resolveAssistantInputContext(input: {
@@ -659,7 +724,7 @@ function assistantInputSourceRefIdentity(
 function assistantInputSourcePosition(
   sourceRef: AssistantInputSourceRef,
 ): string | null {
-  if (sourceRef.kind !== 'hosted-mailbox-item') {
+  if (sourceRef.kind !== 'hosted-mailbox') {
     return null
   }
   return [
@@ -698,6 +763,9 @@ function applyAssistantInputProjectionUpdate(input: {
     captureId: null,
     lastAttemptedAt:
       input.update.lastAttemptedAt ?? input.existing.lastAttemptedAt,
+    nextAttemptAfter: Object.hasOwn(input.update, 'nextAttemptAfter')
+      ? input.update.nextAttemptAfter ?? null
+      : input.existing.nextAttemptAfter,
     reasonCode: null,
     status: input.update.status,
     updatedAt: input.now,
@@ -706,6 +774,7 @@ function applyAssistantInputProjectionUpdate(input: {
   if (input.update.status === 'succeeded') {
     nextProjection.captureId =
       input.update.captureId ?? input.existing.captureId
+    nextProjection.nextAttemptAfter = null
   }
   if (
     input.update.status === 'failed' ||
@@ -714,14 +783,28 @@ function applyAssistantInputProjectionUpdate(input: {
     nextProjection.reasonCode =
       input.update.reasonCode ?? input.existing.reasonCode
   }
+  if (input.update.status === 'quarantined') {
+    nextProjection.nextAttemptAfter = null
+  }
 
   return assistantInputProjectionSchema.parse(nextProjection)
+}
+
+function isAssistantInputProjectionAttemptDue(
+  projection: AssistantInputEventProjection,
+  now: string,
+): boolean {
+  if (projection.status !== 'pending' && projection.status !== 'failed') {
+    return false
+  }
+  return !projection.nextAttemptAfter || projection.nextAttemptAfter <= now
 }
 
 function assertValidAssistantInputProjection(
   projection: {
     captureId: string | null
     lastAttemptedAt: string | null
+    nextAttemptAfter: string | null
     reasonCode: string | null
     status: AssistantInputProjectionStatus
     updatedAt: string | null

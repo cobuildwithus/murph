@@ -23,6 +23,7 @@ export {
 export {
   createAssistantInputEventId,
   listAssistantInputEvents,
+  listAssistantInputProjectionAttempts,
   readAssistantInputEvent,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
@@ -38,6 +39,7 @@ export {
   assistantInputIdFromInboxCaptureId,
   createInboxBackedAssistantInputSource,
   createNoopAssistantInputSource,
+  createStoreBackedAssistantInputSource,
   inboxCaptureIdFromAssistantInputId,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
@@ -51,15 +53,10 @@ export {
   type AssistantTurnConversationInputQuery,
 } from './input-source.js'
 export {
-  createInboxBackedAssistantTurnInputPort,
-  createNoopAssistantTurnInputPort,
   AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
   type AssistantActiveTurnInputCheckpointHook,
   type AssistantActiveTurnInputCheckpointInput,
-  type AssistantTurnConversationCaptureBatch,
-  type AssistantTurnConversationCaptureQuery,
-  type AssistantTurnInputPort,
   type AssistantTurnInputRefreshInput,
   type AssistantTurnInputRefreshPhase,
   type AssistantTurnInputRefreshResult,

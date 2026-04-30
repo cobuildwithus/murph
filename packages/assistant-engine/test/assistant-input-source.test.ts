@@ -1,15 +1,35 @@
-import { describe, expect, it } from 'vitest'
+import { rm } from 'node:fs/promises'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
+  updateAssistantInputProjection,
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.ts'
+import {
   assistantInputCandidateFromInboxCapture,
+  createStoreBackedAssistantInputSource,
   assistantInputIdFromInboxCaptureId,
   createInboxBackedAssistantInputSource,
   createNoopAssistantInputSource,
   inboxCaptureIdFromAssistantInputId,
 } from '../src/assistant/input-source.ts'
+import { createTempVaultContext } from './test-helpers.ts'
 
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
+
+const tempRoots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0).map((rootPath) =>
+      rm(rootPath, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  )
+})
 
 function createCaptureSummary(
   overrides: Partial<Omit<AssistantInboxCaptureSummary, 'createdAt'>> & {
@@ -112,6 +132,204 @@ function createListResult(input: {
   }
 }
 
+describe('store-backed assistant input source', () => {
+  it('lists stored input events as assistant-input accepted candidates', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-store-',
+    )
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          attachmentDescriptors: [
+            {
+              attachmentId: 'att_1',
+              contentType: 'audio/mp4',
+              fileName: 'voice-note.m4a',
+              kind: 'audio',
+              sizeBytes: 1234,
+            },
+          ],
+          text: 'stored input text',
+          userMessageContent: [
+            {
+              text: 'stored input text',
+              type: 'text',
+            },
+          ],
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:01.000Z',
+        sourceRef: createHostedMailboxSourceRef({
+          eventId: 'evt_store_source',
+          laneSeq: '42',
+        }),
+      },
+    })
+    const source = createStoreBackedAssistantInputSource({
+      vault: vaultRoot,
+    })
+
+    const result = await source.listInputCandidates({})
+
+    expect(result.inputs).toHaveLength(1)
+    expect(result.inputs[0]).toMatchObject({
+      acceptedInput: {
+        id: stored.inputId,
+        source: 'assistant-input',
+        captureIds: [],
+        contentRef: {
+          kind: 'assistant-input-event',
+          refId: stored.inputId,
+          version: 'murph.assistant-input-event.v1',
+        },
+      },
+      event: {
+        attachmentCount: 1,
+        inputId: stored.inputId,
+        source: 'linq',
+        text: 'stored input text',
+        transcriptText: 'stored input text',
+      },
+      projection: {
+        captureId: null,
+        reasonCode: null,
+        status: 'not_attempted',
+      },
+    })
+    expect(result.nextCursor).toEqual(stored.cursor)
+  })
+
+  it('filters stored input events by conversation and known input id', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-store-filter-',
+    )
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        eventId: 'evt_first',
+        laneSeq: '1',
+        threadId: 'chat_1',
+      }),
+    })
+    const known = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        eventId: 'evt_known',
+        laneSeq: '2',
+        threadId: 'chat_1',
+      }),
+    })
+    await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        eventId: 'evt_other',
+        laneSeq: '3',
+        threadId: 'chat_other',
+      }),
+    })
+    await updateAssistantInputProjection({
+      inputId: first.inputId,
+      vault: vaultRoot,
+      projection: {
+        captureId: 'cap_projected',
+        status: 'succeeded',
+      },
+    })
+    const source = createStoreBackedAssistantInputSource({
+      vault: vaultRoot,
+    })
+
+    const result = await source.listNewConversationInputs({
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'chat_1',
+        threadIsDirect: true,
+      },
+      knownInputIds: [known.inputId],
+    })
+
+    expect(result.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      first.inputId,
+    ])
+    expect(result.inputs[0]?.acceptedInput).toMatchObject({
+      captureIds: ['cap_projected'],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: first.inputId,
+      },
+      source: 'assistant-input',
+    })
+  })
+
+  it('pages past known projected events to find later conversation input', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-store-known-page-',
+    )
+    const knownCaptureIds: string[] = []
+    for (let index = 1; index <= 100; index += 1) {
+      const stored = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createStoredHostedMailboxInput({
+          eventId: `evt_known_${index}`,
+          laneSeq: String(index),
+          threadId: 'chat_1',
+        }),
+      })
+      const captureId = `cap_known_${index}`
+      knownCaptureIds.push(captureId)
+      await updateAssistantInputProjection({
+        inputId: stored.inputId,
+        vault: vaultRoot,
+        projection: {
+          captureId,
+          status: 'succeeded',
+        },
+      })
+    }
+    const eligible = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        eventId: 'evt_eligible_after_known_page',
+        laneSeq: '101',
+        threadId: 'chat_1',
+      }),
+    })
+    const source = createStoreBackedAssistantInputSource({
+      vault: vaultRoot,
+    })
+
+    const result = await source.listNewConversationInputs({
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'chat_1',
+        threadIsDirect: true,
+      },
+      knownCaptureIds,
+      limit: 1,
+    })
+
+    expect(result.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      eligible.inputId,
+    ])
+    expect(result.nextCursor).toEqual(eligible.cursor)
+  })
+})
+
 describe('assistant inbox input candidate adapter', () => {
   it('uses stable inbox input ids and accepted capture content refs', () => {
     const capture = createCaptureSummary({
@@ -129,7 +347,8 @@ describe('assistant inbox input candidate adapter', () => {
     expect(inboxCaptureIdFromAssistantInputId(candidate.event.inputId)).toBe(
       capture.captureId,
     )
-    expect(candidate.event).not.toHaveProperty('text')
+    expect(candidate.event.text).toBe('decoded message text')
+    expect(candidate.event.transcriptText).toBe('decoded message text')
     expect(candidate).toMatchObject({
       acceptedInput: {
         id: 'inbox:cap_stable',
@@ -524,7 +743,7 @@ describe('assistant inbox input candidate adapter', () => {
         createdAt: null,
         inputId: 'ain_00000000000000000000000000000000',
         occurredAt: '2026-04-22T09:59:00.000Z',
-        sourceKind: 'hosted-mailbox-item',
+        sourceKind: 'hosted-mailbox',
       },
     })
 
@@ -613,3 +832,60 @@ describe('createNoopAssistantInputSource', () => {
     })
   })
 })
+
+async function createAssistantInputSourceVault(prefix: string): Promise<{
+  parentRoot: string
+  vaultRoot: string
+}> {
+  const context = await createTempVaultContext(prefix)
+  tempRoots.push(context.parentRoot)
+  return context
+}
+
+function createStoredHostedMailboxInput(input: {
+  eventId: string
+  laneSeq: string
+  threadId: string
+}) {
+  const occurredAt = new Date(
+    Date.UTC(2026, 3, 22, 10, 0, Number(input.laneSeq)),
+  ).toISOString()
+  return {
+    content: {
+      text: `${input.eventId} text`,
+    },
+    conversation: {
+      accountId: 'acct_1',
+      actorId: 'actor_1',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: input.threadId,
+      threadIsDirect: true,
+    },
+    occurredAt,
+    receivedAt: occurredAt,
+    sourceRef: createHostedMailboxSourceRef({
+      eventId: input.eventId,
+      laneSeq: input.laneSeq,
+    }),
+  }
+}
+
+function createHostedMailboxSourceRef(input: {
+  eventId: string
+  itemId?: string
+  laneSeq: string
+}) {
+  return {
+    dedupeKey: `${input.eventId}_dedupe`,
+    eventId: input.eventId,
+    itemId: input.itemId ?? `${input.eventId}_item`,
+    kind: 'hosted-mailbox' as const,
+    lane: 'conversation' as const,
+    laneSeq: input.laneSeq,
+    payloadSchema: 'murph.hosted-payload.v1',
+    payloadSource: 'sidecar' as const,
+    source: 'hosted-mailbox' as const,
+    wakeSchema: 'murph.hosted-wake.v1',
+  }
+}

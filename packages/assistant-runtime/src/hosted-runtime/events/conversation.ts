@@ -16,7 +16,6 @@ import {
   createInboxPipeline,
   type PersistedCapture,
   openInboxRuntime,
-  stageRuntimeOnlyCapture,
 } from "@murphai/inboxd";
 import {
   createConfiguredParserRegistry,
@@ -48,8 +47,15 @@ export async function ingestHostedConversationMessageWake(input: {
 
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture;
-  capturePersistence: "canonical" | "runtime_only";
+  capturePersistence: "canonical";
   metrics: HostedConversationWakeMetrics;
+}
+
+export class HostedConversationInboxProjectionError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "HostedConversationInboxProjectionError";
+  }
 }
 
 export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
@@ -69,21 +75,13 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       vaultRoot: input.vaultRoot,
     });
     let persistedCapture: PersistedCapture;
-    let capturePersistence: HostedConversationWakeLocalImportResult["capturePersistence"] =
-      "canonical";
-
     try {
       persistedCapture = await pipeline.processCapture(capture);
     } catch (error) {
-      try {
-        persistedCapture = stageRuntimeOnlyCapture({
-          capture,
-          runtime,
-        });
-        capturePersistence = "runtime_only";
-      } catch {
-        throw error;
-      }
+      throw new HostedConversationInboxProjectionError(
+        "Canonical inbox capture projection failed.",
+        { cause: error },
+      );
     }
     const parserProcessed = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
@@ -97,7 +95,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     };
     return {
       capture: persistedCapture,
-      capturePersistence,
+      capturePersistence: "canonical",
       metrics,
     };
   } finally {

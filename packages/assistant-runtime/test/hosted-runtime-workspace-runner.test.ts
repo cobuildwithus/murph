@@ -7,7 +7,6 @@ import path from "node:path";
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
   type AssistantTurnInputRefreshResult,
-  type AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
 import type {
   HostedMailboxFetchRequest,
@@ -58,6 +57,30 @@ import type {
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_runner";
+type SyntheticConversationCursor = {
+  captureId: string;
+  createdAt: string | null;
+  occurredAt: string;
+};
+
+type SyntheticInputSource = {
+  refresh(input: { phase: "input_available" }): Promise<AssistantTurnInputRefreshResult>;
+  listNewConversationInputs(input: {
+    afterCursor: SyntheticConversationCursor;
+    conversation: {
+      accountId: string | null;
+      actorId: string | null;
+      actorIsSelf: boolean;
+      source: string;
+      threadId: string | null;
+      threadIsDirect: boolean | null;
+    };
+    knownCaptureIds?: readonly string[];
+  }): Promise<{
+    inputs: unknown[];
+    nextCursor: SyntheticConversationCursor;
+  }>;
+};
 const TEST_BROWSER_VAULT_REPLICA_REF = {
   byteLength: 256,
   dataVersion: "2026-04-26",
@@ -1041,7 +1064,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               occurredAt: "2026-04-26T00:00:02.000Z",
             }));
 
-            const turnInputPort: AssistantTurnInputPort = {
+            const inputSource: SyntheticInputSource = {
               async refresh(refreshInput) {
                 assert.equal(refreshInput.phase, "input_available");
                 events.push("refresh:start");
@@ -1055,10 +1078,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 events.push("refresh:done");
                 return refresh;
               },
-              async listNewConversationCaptures(query) {
+              async listNewConversationInputs(query) {
                 events.push("list");
                 return {
-                  captures: importedSeqs.includes("2")
+                  inputs: importedSeqs.includes("2")
                     ? [
                         {
                           accountId: null,
@@ -1087,12 +1110,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                         captureId: "capture_synthetic_late",
                         createdAt: "2026-04-26T00:00:02.000Z",
                         occurredAt: "2026-04-26T00:00:02.000Z",
-                      }
+                    }
                     : query.afterCursor,
                 };
               },
             };
-            await turnInputPort.refresh({
+            await inputSource.refresh({
               phase: "input_available",
             });
             const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
@@ -1107,7 +1130,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               turnId: "turn_synthetic",
               vault: vaultRoot,
             });
-            const lateCaptures = await turnInputPort.listNewConversationCaptures({
+            const lateInputs = await inputSource.listNewConversationInputs({
               afterCursor: {
                 captureId: "capture_synthetic_initial",
                 createdAt: "2026-04-26T00:00:01.000Z",
@@ -1123,7 +1146,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               },
               knownCaptureIds: ["capture_synthetic_initial"],
             });
-            assert.equal(lateCaptures.captures.length, 1);
+            assert.equal(lateInputs.inputs.length, 1);
             return {
               progressed: true,
             };

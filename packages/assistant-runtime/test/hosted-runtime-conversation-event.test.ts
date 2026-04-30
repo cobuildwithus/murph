@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => ({
   normalizeHostedTelegramConversationCapture: vi.fn(),
   openInboxRuntime: vi.fn(),
   readHostedRawEmailMessage: vi.fn(),
-  stageRuntimeOnlyCapture: vi.fn(),
   markLinqChatRead: vi.fn(),
   resolveHostedEmailSelfAddresses: vi.fn(),
 }));
@@ -30,7 +29,6 @@ vi.mock("@murphai/inboxd", () => ({
   createInboxPipeline: mocks.createInboxPipeline,
   createParsedInboxPipeline: mocks.createParsedInboxPipeline,
   openInboxRuntime: mocks.openInboxRuntime,
-  stageRuntimeOnlyCapture: mocks.stageRuntimeOnlyCapture,
 }));
 
 vi.mock("@murphai/inboxd/connectors/hosted-conversation", () => ({
@@ -113,13 +111,6 @@ beforeEach(() => {
   }));
   mocks.createInboxParserService.mockReturnValue({
     drain: vi.fn(async () => [{} as never, {} as never]),
-  });
-  mocks.stageRuntimeOnlyCapture.mockReturnValue({
-    captureId: "capture_runtime_only",
-    createdAt: "2026-04-08T00:00:00.000Z",
-    deduped: false,
-    envelopePath: "raw/inbox/linq/capture_runtime_only/envelope.json",
-    eventId: "evt_capture_runtime_only",
   });
 });
 
@@ -459,7 +450,7 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(mocks.createInboxParserService).not.toHaveBeenCalled();
   });
 
-  it("stages decoded conversation input in the runtime when canonical inbox persistence fails", async () => {
+  it("does not create runtime-only inbox projection rows when canonical inbox persistence fails", async () => {
     const runtimeStore = {
       close: vi.fn(),
     };
@@ -492,34 +483,27 @@ describe("ingestHostedConversationMessageWake", () => {
       drain: vi.fn(async () => []),
     });
 
-    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: createRuntime(),
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_runtime_only",
-        linqMessage: {
-          chatId: "chat_runtime_only",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_runtime_only",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
+    await expect(
+      importHostedConversationMessageWakeIntoLocalInbox({
+        runtime: createRuntime(),
+        vaultRoot: "/tmp/assistant-runtime-conversation",
+        wake: buildHostedExecutionLinqConversationMessageWake({
+          eventId: "evt_linq_runtime_only",
+          linqMessage: {
+            chatId: "chat_runtime_only",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "msg_runtime_only",
+            parts: [],
+          },
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          phoneLookupKey: "15551234567",
+          userId: "member_123",
+        }),
       }),
-    });
+    ).rejects.toThrow("Canonical inbox capture projection failed.");
 
-    expect(mocks.stageRuntimeOnlyCapture).toHaveBeenCalledWith({
-      capture,
-      runtime: runtimeStore,
-    });
-    expect(importResult.capturePersistence).toBe("runtime_only");
-    expect(importResult.capture.captureId).toBe("capture_runtime_only");
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
-      parserProcessed: 0,
-    });
+    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
     expect(pipelineClose).toHaveBeenCalledTimes(1);
   });
 

@@ -131,6 +131,41 @@ describe('assistant accepted active-turn input journal', () => {
     ).resolves.toEqual(journal)
   })
 
+  it('records assistant input events without requiring capture ids', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-assistant-input-',
+    )
+
+    const journal = await appendAssistantAcceptedTurnInputItems({
+      inputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: 'ain_00000000000000000000000000000000',
+            version: 'murph.assistant-input-event.v1',
+          },
+          id: 'ain_00000000000000000000000000000000',
+          source: 'assistant-input',
+        },
+      ],
+      now: new Date('2026-04-22T10:00:02.000Z'),
+      sessionId: 'session_assistant_input',
+      turnId: 'turn_assistant_input',
+      vault: vaultRoot,
+    })
+
+    expect(journal.inputs[0]).toMatchObject({
+      captureIds: [],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: 'ain_00000000000000000000000000000000',
+        version: 'murph.assistant-input-event.v1',
+      },
+      id: 'ain_00000000000000000000000000000000',
+      source: 'assistant-input',
+    })
+  })
+
   it('updates transcript refs without persisting raw prompt fallback text', async () => {
     const { paths, vaultRoot } = await createAssistantPaths(
       'assistant-active-turn-input-ref-update-',

@@ -1,4 +1,5 @@
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
+import type { AssistantInputCandidate } from '../input-source.js'
 import { isSameAssistantConversationCapture } from '../conversation-ref.js'
 import {
   loadTelegramAutoReplyMetadata,
@@ -6,6 +7,7 @@ import {
 } from './prompt-builder.js'
 
 export interface AssistantAutoReplyGroupItem {
+  inputCandidate?: AssistantInputCandidate | null
   summary: InboxListResult['items'][number]
   telegramMetadata: TelegramAutoReplyMetadata | null
 }
@@ -48,11 +50,14 @@ export async function collectAssistantAutoReplyGroup(input: {
 
 export async function loadAssistantAutoReplyGroupItems(input: {
   captures: readonly InboxListResult['items'][number][]
+  inputCandidatesByCaptureId?: ReadonlyMap<string, AssistantInputCandidate>
   vault: string
 }): Promise<AssistantAutoReplyGroupItem[]> {
   return Promise.all(
     input.captures.map((capture) =>
-      createAssistantAutoReplyGroupItem(input.vault, capture),
+      createAssistantAutoReplyGroupItem(input.vault, capture, {
+        inputCandidate: input.inputCandidatesByCaptureId?.get(capture.captureId) ?? null,
+      }),
     ),
   )
 }
@@ -60,8 +65,12 @@ export async function loadAssistantAutoReplyGroupItems(input: {
 async function createAssistantAutoReplyGroupItem(
   vault: string,
   capture: InboxListResult['items'][number],
+  input: {
+    inputCandidate?: AssistantInputCandidate | null
+  } = {},
 ): Promise<AssistantAutoReplyGroupItem> {
   return {
+    inputCandidate: input.inputCandidate ?? null,
     summary: capture,
     telegramMetadata: await loadCaptureTelegramMetadata(vault, capture),
   }

@@ -18,7 +18,6 @@ import {
   readInboxCaptureMutationHead,
   rebuildRuntimeFromVault,
   runPollConnector,
-  stageRuntimeOnlyCapture,
 } from "../src/index.ts";
 import {
   sanitizeRawMetadata,
@@ -345,111 +344,6 @@ test("processCapture caps canonical inbox-capture text while preserving full loc
     assert.equal(captureRecordText, fullText.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH));
   } finally {
     pipeline.close();
-  }
-});
-
-test("stageRuntimeOnlyCapture indexes decoded input without writing durable inbox evidence", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-only-vault");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-  const runtime = await openInboxRuntime({ vaultRoot });
-
-  try {
-    const staged = stageRuntimeOnlyCapture({
-      capture: {
-        source: "linq",
-        externalId: "linq:msg-runtime-only",
-        accountId: "self",
-        thread: {
-          id: "chat-runtime-only",
-          isDirect: true,
-        },
-        actor: {
-          id: "contact-runtime-only",
-          isSelf: false,
-        },
-        occurredAt: "2026-03-13T10:00:00.000Z",
-        receivedAt: "2026-03-13T10:00:01.000Z",
-        text: "runtime-only decoded input",
-        attachments: [],
-        raw: {
-          source: "synthetic-runtime-only",
-        },
-      },
-      eventId: "evt_runtime_only_capture",
-      runtime,
-      storedAt: "2026-03-13T10:00:02.000Z",
-    });
-
-    const runtimeCapture = runtime.findByExternalId(
-      "linq",
-      "self",
-      "linq:msg-runtime-only",
-    );
-    assert.ok(runtimeCapture);
-    assert.equal(runtimeCapture.eventId, "evt_runtime_only_capture");
-    assert.equal(
-      runtimeCapture.envelopePath.endsWith(`/${staged.captureId}/envelope.json`),
-      true,
-    );
-    assert.equal(runtime.getCapture(staged.captureId), null);
-    assert.deepEqual(runtime.listCaptures(), []);
-    assert.deepEqual(runtime.searchCaptures({ text: "decoded" }), []);
-    assert.equal(
-      runtime.getCapture(staged.captureId, { includeRuntimeOnly: true })?.text,
-      "runtime-only decoded input",
-    );
-    assert.deepEqual(
-      runtime
-        .listCaptures({ includeRuntimeOnly: true })
-        .map((capture) => capture.captureId),
-      [staged.captureId],
-    );
-    assert.deepEqual(
-      runtime.searchCaptures({ includeRuntimeOnly: true, text: "" }),
-      [],
-    );
-    assert.equal(await readInboxCaptureMutationHead(vaultRoot), 0);
-    assert.deepEqual(await listInboxCaptureMutations({ vaultRoot }), []);
-
-    const ledgerRecords = await readJsonlRecordsIfPresent(
-      vaultRoot,
-      "ledger/inbox-captures/2026/2026-03.jsonl",
-    );
-    assert.equal(ledgerRecords.length, 0);
-    await assert.rejects(
-      () => fs.access(path.join(vaultRoot, runtimeCapture.envelopePath)),
-      (error) => (error as NodeJS.ErrnoException).code === "ENOENT",
-    );
-
-    const stagedAgain = stageRuntimeOnlyCapture({
-      capture: {
-        source: "linq",
-        externalId: "linq:msg-runtime-only",
-        accountId: "self",
-        thread: {
-          id: "chat-runtime-only",
-          isDirect: true,
-        },
-        actor: {
-          id: "contact-runtime-only",
-          isSelf: false,
-        },
-        occurredAt: "2026-03-13T10:00:00.000Z",
-        receivedAt: "2026-03-13T10:00:01.000Z",
-        text: "runtime-only decoded input",
-        attachments: [],
-        raw: {
-          source: "synthetic-runtime-only",
-        },
-      },
-      eventId: "evt_runtime_only_capture_2",
-      runtime,
-      storedAt: "2026-03-13T10:00:03.000Z",
-    });
-    assert.equal(stagedAgain.captureId, staged.captureId);
-    assert.equal(stagedAgain.deduped, true);
-  } finally {
-    runtime.close();
   }
 });
 

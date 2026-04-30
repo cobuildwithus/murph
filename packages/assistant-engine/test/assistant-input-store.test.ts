@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   createAssistantInputEventId,
   listAssistantInputEvents,
+  listAssistantInputProjectionAttempts,
   readAssistantInputEvent,
   resolveAssistantInputEventPath,
   resolveAssistantInputEventsDirectory,
@@ -136,7 +137,7 @@ describe('assistant input event store', () => {
     expect((await stat(inputPath)).mode & 0o077).toBe(0)
   })
 
-  it('preserves inbox capture input ids for stored inbox source refs', async () => {
+  it('uses source-neutral ids for stored inbox source refs', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-inbox-id-',
     )
@@ -156,9 +157,18 @@ describe('assistant input event store', () => {
       },
     })
 
-    expect(stored.inputId).toBe('inbox:cap_1')
+    expect(stored.inputId).toBe(
+      createAssistantInputEventId({
+        sourceRef: {
+          captureId: 'cap_1',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      }),
+    )
     expect(stored.cursor).toMatchObject({
-      inputId: 'inbox:cap_1',
+      inputId: stored.inputId,
       sourceKind: 'inbox-capture',
     })
   })
@@ -312,6 +322,7 @@ describe('assistant input event store', () => {
     ])
     expect(listed.events[0]?.projection).toMatchObject({
       captureId: null,
+      nextAttemptAfter: null,
       reasonCode: 'conversation_import.capture_persist_failed',
       status: 'failed',
     })
@@ -357,6 +368,7 @@ describe('assistant input event store', () => {
     expect(updated.projection).toEqual({
       captureId: 'cap_1',
       lastAttemptedAt: '2026-04-22T10:00:59.000Z',
+      nextAttemptAfter: null,
       reasonCode: null,
       status: 'succeeded',
       updatedAt: '2026-04-22T10:01:00.000Z',
@@ -375,6 +387,7 @@ describe('assistant input event store', () => {
     expect(replayed.projection).toEqual({
       captureId: 'cap_1',
       lastAttemptedAt: '2026-04-22T10:00:59.000Z',
+      nextAttemptAfter: null,
       reasonCode: null,
       status: 'succeeded',
       updatedAt: '2026-04-22T10:02:00.000Z',
@@ -392,6 +405,134 @@ describe('assistant input event store', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_INPUT_PROJECTION_TERMINAL',
     })
+  })
+
+  it('lists due projection attempts from pending and retryable failed inputs', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-projection-attempts-',
+    )
+    const pending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_projection_pending',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:40',
+        text: 'pending projection',
+        threadId: 'chat_1',
+      }),
+    })
+    const failedDue = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_projection_failed_due',
+        occurredAt: '2026-04-22T10:01:00.000Z',
+        laneSeq: 'conversation:41',
+        text: 'failed due projection',
+        threadId: 'chat_1',
+      }),
+    })
+    const failedFuture = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_projection_failed_future',
+        occurredAt: '2026-04-22T10:02:00.000Z',
+        laneSeq: 'conversation:42',
+        text: 'failed future projection',
+        threadId: 'chat_1',
+      }),
+    })
+    const quarantined = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_projection_quarantined',
+        occurredAt: '2026-04-22T10:03:00.000Z',
+        laneSeq: 'conversation:43',
+        text: 'quarantined projection',
+        threadId: 'chat_1',
+      }),
+    })
+
+    await updateAssistantInputProjection({
+      inputId: pending.inputId,
+      vault: vaultRoot,
+      projection: {
+        status: 'pending',
+      },
+    })
+    await updateAssistantInputProjection({
+      inputId: failedDue.inputId,
+      vault: vaultRoot,
+      projection: {
+        nextAttemptAfter: '2026-04-22T10:05:00.000Z',
+        reasonCode: 'conversation_import.capture_persist_failed',
+        status: 'failed',
+      },
+    })
+    await updateAssistantInputProjection({
+      inputId: failedFuture.inputId,
+      vault: vaultRoot,
+      projection: {
+        nextAttemptAfter: '2026-04-22T10:10:01.000Z',
+        reasonCode: 'conversation_import.capture_persist_failed',
+        status: 'failed',
+      },
+    })
+    await updateAssistantInputProjection({
+      inputId: quarantined.inputId,
+      vault: vaultRoot,
+      projection: {
+        reasonCode: 'conversation_import.invalid_payload',
+        status: 'quarantined',
+      },
+    })
+
+    const attempts = await listAssistantInputProjectionAttempts({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:10:00.000Z'),
+    })
+
+    expect(attempts.events.map((event) => event.inputId)).toEqual([
+      pending.inputId,
+      failedDue.inputId,
+    ])
+    expect(attempts.nextCursor).toBeNull()
+  })
+
+  it('clears projection retry delay when nextAttemptAfter is explicitly null', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-clear-retry-',
+    )
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_clear_retry',
+        laneSeq: 'clear-retry',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        text: 'clear retry projection',
+        threadId: 'chat_1',
+      }),
+    })
+
+    await updateAssistantInputProjection({
+      inputId: event.inputId,
+      vault: vaultRoot,
+      projection: {
+        nextAttemptAfter: '2026-04-22T10:10:00.000Z',
+        reasonCode: 'conversation_import.capture_persist_failed',
+        status: 'failed',
+      },
+    })
+    const cleared = await updateAssistantInputProjection({
+      inputId: event.inputId,
+      vault: vaultRoot,
+      projection: {
+        nextAttemptAfter: null,
+        reasonCode: 'conversation_import.capture_persist_failed',
+        status: 'failed',
+      },
+    })
+
+    expect(cleared.projection.nextAttemptAfter).toBeNull()
   })
 
   it('orders hosted mailbox inputs by source position before timestamps', async () => {
@@ -982,7 +1123,7 @@ function createHostedMailboxSourceRef(input: {
     dedupeKey: `${input.eventId}_dedupe`,
     eventId: input.eventId,
     itemId: input.itemId ?? `${input.eventId}_item`,
-    kind: 'hosted-mailbox-item' as const,
+    kind: 'hosted-mailbox' as const,
     lane: input.lane ?? 'conversation',
     laneSeq: input.laneSeq,
     payloadSchema: 'murph.hosted-payload.v1',

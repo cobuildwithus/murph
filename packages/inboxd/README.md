@@ -23,7 +23,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - every inbound source normalizes into a single `InboundCapture` envelope
 - raw source evidence is persisted under `raw/inbox/<source>/...`
 - append-only `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` records the authoritative structured inbox-capture trail, with bounded text projection for list/search surfaces while the raw envelope can retain longer normalized message text
-- hosted/runtime-only consumers may stage a decoded capture into a hidden local runtime projection row when canonical capture persistence is unavailable; this is retryable transient input only, is excluded from normal list/show/search, capture mutation-cursor sync, and durable automation surfaces, and must not advance hosted mailbox watermarks by itself
+- assistant admission must not depend on hidden local inbox projection rows; decoded assistant input belongs in the assistant input store, while inbox capture remains a canonical/searchable projection
 - inbox intake and runtime rebuild rely on canonical inbox-capture ledger evidence, but they will backfill a missing inbox-capture record from a deterministic current-format raw envelope only when an unresolved `inbox_capture_persist` write operation shows raw writes completed before the ledger append
 - inbox SQLite projection state lives under `<vault>/.runtime/projections/inboxd.sqlite`
 - any idempotent promotion from inbox captures into canonical records must be derivable from canonical vault evidence rather than local `.runtime` state alone

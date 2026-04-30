@@ -1,6 +1,5 @@
 import type {
   HostedExecutionAssistantNotificationRequestedWake,
-  HostedExecutionConversationMessageWake,
   HostedExecutionRedactedLogEntry,
   HostedExecutionRunnerVaultSyncImport,
   HostedExecutionLogLevel,
@@ -19,14 +18,11 @@ import {
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
   isHostedConversationMessageWake,
-  isHostedLinqConversationMessageWake,
-  sanitizeHostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedWakeContext,
 } from "./context.ts";
-import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { handleHostedVaultSyncImportWake } from "./events/vault-sync.ts";
 import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
@@ -43,6 +39,9 @@ type HostedMailboxOutcome = HostedMailboxEffect & {
   mailboxLane: HostedMailboxLane;
 };
 
+const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
+  "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.";
+
 export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
@@ -55,6 +54,10 @@ export async function executeHostedMailboxEvent(input: {
   vaultRoot: string;
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxExecutionMetrics> {
+  if (isHostedConversationMessageWake(input.wake)) {
+    throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
+  }
+
   const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,
     input.wake,
@@ -94,11 +97,7 @@ async function handleHostedMailboxEvent(input: {
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
-    return executeHostedConversationWake({
-      wake: input.wake,
-      runtime: input.runtime,
-      vaultRoot: input.vaultRoot,
-    });
+    throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
   }
 
   return executeHostedSystemWake({
@@ -108,26 +107,6 @@ async function handleHostedMailboxEvent(input: {
     runtime: input.runtime,
     vaultRoot: input.vaultRoot,
     vaultSyncImport: input.vaultSyncImport ?? null,
-  });
-}
-
-async function executeHostedConversationWake(input: {
-  wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv" | "userEnv"
-  >;
-  vaultRoot: string;
-}): Promise<HostedMailboxOutcome> {
-  const conversationMetrics = await ingestHostedConversationMessageWake(input);
-  const redactedLogEntries = isHostedLinqConversationMessageWake(input.wake)
-    ? [emitHostedLinqConversationContextLog(input.wake)]
-    : [];
-
-  return createNoopMailboxEffect({
-    conversationMetrics,
-    mailboxLane: "conversation-message",
-    redactedLogEntries,
   });
 }
 
@@ -344,43 +323,6 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
       ...(extractHostedAssistantNotificationRedactedDetails(input.error) ?? {}),
       ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
     },
-  };
-}
-
-function emitHostedLinqConversationContextLog(
-  wake: HostedExecutionConversationMessageWake & {
-    message: Extract<
-      HostedExecutionConversationMessageWake["message"],
-      { channel: "linq" }
-    >;
-  },
-): HostedExecutionRedactedLogEntry {
-  const details = sanitizeHostedExecutionStructuredLogDetails({
-    contextSource: "linq-conversation-message",
-    ...buildHostedAssistantContextFingerprintDetails({
-      actorId: wake.message.linqMessage.from,
-      channel: "linq",
-      identityId: wake.message.phoneLookupKey,
-      threadId: wake.message.linqMessage.chatId,
-      threadIsDirect: true,
-    }),
-  });
-
-  emitHostedExecutionStructuredLog({
-    component: "runtime.context",
-    details,
-    message: "Hosted Linq conversation context fingerprints captured.",
-    phase: "wake.running",
-    wake,
-  });
-
-  return {
-    component: "runtime.context",
-    eventId: wake.eventId,
-    level: "info",
-    message: "Hosted Linq conversation context fingerprints captured.",
-    phase: "wake.running",
-    redacted: details,
   };
 }
 

@@ -7,7 +7,12 @@ import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
-import type { AssistantTurnInputPort } from '../turn-input.js'
+import {
+  assistantInputCandidateFromStoredEvent,
+  type AssistantInputCandidate,
+  type AssistantInputSource,
+} from '../input-source.js'
+import { readAssistantInputEvent } from '../input-store.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { readAssistantAutoReplyTerminalEvidence } from './evidence.js'
 import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
@@ -52,7 +57,7 @@ export interface RecoverAssistantAutoRepliesInput {
   scanCursor?: AssistantAutomationCursor | null
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
-  turnInputPort?: AssistantTurnInputPort
+  inputSource?: AssistantInputSource
   vault: string
 }
 
@@ -147,7 +152,7 @@ export async function recoverAssistantAutoReplies(
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-      turnInputPort: input.turnInputPort,
+      inputSource: input.inputSource,
       vault: input.vault,
     })
     summary.failed += result.failed
@@ -276,59 +281,120 @@ async function loadAutoReplyRecoveryContext(input: {
   requestId: string | null
   vault: string
 }) {
-  const shownCaptures = (
+  const groupItems = (
     await Promise.all(
-      input.candidate.captureIds.map(async (captureId) => {
-        try {
-          return (
-            await input.inboxServices.show({
-              captureId,
-              requestId: input.requestId,
-              vault: input.vault,
-            })
-          ).capture
-        } catch (error) {
-          if (isInboxCaptureNotFoundError(error)) {
-            return null
-          }
-          throw error
-        }
-      }),
+      input.candidate.captureIds.map((captureId) =>
+        loadAutoReplyRecoveryGroupItem({
+          captureId,
+          inboxServices: input.inboxServices,
+          requestId: input.requestId,
+          vault: input.vault,
+        }),
+      ),
     )
   )
-    .filter((capture): capture is NonNullable<typeof capture> => capture !== null)
-    .sort(compareAssistantCaptureOrder)
+    .filter((item): item is AssistantAutoReplyGroupItem => item !== null)
+    .sort((left, right) =>
+      compareAssistantCaptureOrder(left.summary, right.summary),
+    )
 
-  if (shownCaptures.length === 0) {
+  if (groupItems.length === 0) {
     return null
   }
 
-  const primaryCapture = shownCaptures.find(
-    (capture) => capture.captureId === input.candidate.primaryCaptureId,
+  const primaryItem = groupItems.find(
+    (item) => item.summary.captureId === input.candidate.primaryCaptureId,
   )
-  if (!primaryCapture || shownCaptures[0]?.captureId !== primaryCapture.captureId) {
+  if (!primaryItem || groupItems[0]?.summary.captureId !== primaryItem.summary.captureId) {
     return null
   }
   if (
-    shownCaptures.some(
-      (capture) =>
-        !shouldGroupAdjacentConversationCapture(primaryCapture, capture),
+    groupItems.some(
+      (item) =>
+        !shouldGroupAdjacentConversationCapture(primaryItem.summary, item.summary),
     )
   ) {
     return null
   }
 
-  const groupItems: AssistantAutoReplyGroupItem[] = await Promise.all(
-    shownCaptures.map(async (capture) => ({
-      summary: capture,
+  return createAssistantAutoReplyGroupContext(groupItems)
+}
+
+async function loadAutoReplyRecoveryGroupItem(input: {
+  captureId: string
+  inboxServices: InboxServices
+  requestId: string | null
+  vault: string
+}): Promise<AssistantAutoReplyGroupItem | null> {
+  try {
+    const shown = await input.inboxServices.show({
+      captureId: input.captureId,
+      requestId: input.requestId,
+      vault: input.vault,
+    })
+    return {
+      summary: shown.capture,
       telegramMetadata: await loadTelegramAutoReplyMetadata(
         input.vault,
-        capture.source === 'telegram' ? capture.envelopePath : null,
+        shown.capture.source === 'telegram' ? shown.capture.envelopePath : null,
       ),
-    })),
-  )
+    }
+  } catch (error) {
+    if (!isInboxCaptureNotFoundError(error)) {
+      throw error
+    }
+  }
 
-  return createAssistantAutoReplyGroupContext(groupItems)
+  if (!isAssistantInputEventId(input.captureId)) {
+    return null
+  }
+  const storedInput = await readAssistantInputEvent({
+    inputId: input.captureId,
+    vault: input.vault,
+  })
+  if (!storedInput) {
+    return null
+  }
+
+  const candidate = assistantInputCandidateFromStoredEvent(storedInput)
+  return {
+    inputCandidate: candidate,
+    summary: assistantRecoverySummaryFromInputCandidate(candidate),
+    telegramMetadata: null,
+  }
+}
+
+function isAssistantInputEventId(value: string): boolean {
+  return /^ain_[0-9a-f]{32}$/u.test(value)
+}
+
+function assistantRecoverySummaryFromInputCandidate(
+  input: AssistantInputCandidate,
+): AssistantAutoReplyGroupItem['summary'] {
+  const conversation = input.event.conversation
+  const captureId = input.projection.captureId ?? input.event.inputId
+  return {
+    accountId: conversation?.accountId ?? null,
+    actorId: conversation?.actorId ?? null,
+    actorIsSelf: conversation?.actorIsSelf ?? false,
+    actorName: null,
+    attachmentCount: input.event.attachmentCount,
+    captureId,
+    createdAt: input.event.receivedAt ?? input.event.occurredAt,
+    envelopePath: `assistant-input-events/${input.event.inputId}.json`,
+    eventId: input.event.inputId,
+    externalId: input.event.replyTarget?.messageId
+      ? `${input.event.source}:${input.event.replyTarget.messageId}`
+      : input.event.inputId,
+    occurredAt: input.event.occurredAt,
+    promotions: [],
+    receivedAt: input.event.receivedAt,
+    source: input.event.source,
+    text: input.event.transcriptText ?? input.event.text,
+    threadId: conversation?.threadId ?? input.event.inputId,
+    threadIsDirect: conversation?.threadIsDirect ?? false,
+    threadTitle: null,
+  }
 }
 
 function readAutoReplyReceiptMetadata(
