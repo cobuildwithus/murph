@@ -35,6 +35,8 @@ The supported worker HTTP surface stops at those three control routes, the deplo
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only to bridge local child-runtime requests back onto the same lease-scoped internal-worker bridge contract used by direct `http://*.worker` requests.
 
+Root `pnpm dev` starts the same local Cloudflare container path and, by default, exposes a tokened local Codex app-server bridge to the runner container. The bridge launches the local `codex app-server` command on the host and forwards only the app-server stream into the container, so local Codex auth material stays out of Docker images and generated worker vars. Generated local env files are treated as secret material. Set `MURPH_DEV_CODEX_BRIDGE=0` to disable this local-only bridge and use the hosted assistant provider env directly.
+
 ## Storage Contract
 
 - The `vault` bundle slot stores one encrypted hosted workspace snapshot. That snapshot is still sensitive canonical vault material, not a second product database.

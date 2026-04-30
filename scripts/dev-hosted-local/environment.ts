@@ -6,8 +6,11 @@ import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
   DEFAULT_STRIPE_ENV_FILE,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
+  WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES,
   WRANGLER_VAR_ALLOWLIST,
   webDir,
 } from "./constants.ts";
@@ -122,6 +125,9 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
+  if (!input.config.localCodexBridge) {
+    stripHostedLocalCodexBridgeProxyEnv(resolvedExisting);
+  }
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
@@ -192,6 +198,11 @@ function normalizeOptionalEnvOverrides(
   }
 
   return values;
+}
+
+function stripHostedLocalCodexBridgeProxyEnv(env: Record<string, string | undefined>): void {
+  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV];
+  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV];
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
@@ -377,6 +388,7 @@ export function buildWranglerEnvFileText(
   for (const key of [
     ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
     ...HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
+    ...WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES,
     ...WRANGLER_VAR_ALLOWLIST,
   ]) {
     const value = resolveWranglerEnvValue(key, source);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parsePort,
+  parseListenPort,
   parseWorkerProtocol,
   printHelp,
   resolveHostedLocalDevConfig,
@@ -12,6 +13,10 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(resolveHostedLocalDevConfig({})).toEqual({
       databaseUrlOverride: null,
       forceResetLocalDatabase: false,
+      localCodexBridge: true,
+      localCodexBridgeHost: "127.0.0.1",
+      localCodexBridgePort: 0,
+      localCodexCommand: "codex",
       skipHealthCommonsWatch: false,
       skipPrismaMigrate: false,
       skipRunnerSmoke: false,
@@ -32,6 +37,10 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(
       resolveHostedLocalDevConfig({
         MURPH_DEV_FORCE_RESET_LOCAL_DB: "1",
+        MURPH_DEV_CODEX_BRIDGE: "0",
+        MURPH_DEV_CODEX_BRIDGE_HOST: "127.0.0.1",
+        MURPH_DEV_CODEX_BRIDGE_PORT: "4567",
+        MURPH_DEV_CODEX_COMMAND: "codex-dev",
         MURPH_DEV_DATABASE_URL: "postgresql://127.0.0.1:5432/custom",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
         MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
@@ -50,6 +59,10 @@ describe("resolveHostedLocalDevConfig", () => {
     ).toEqual({
       databaseUrlOverride: "postgresql://127.0.0.1:5432/custom",
       forceResetLocalDatabase: true,
+      localCodexBridge: false,
+      localCodexBridgeHost: "127.0.0.1",
+      localCodexBridgePort: 4567,
+      localCodexCommand: "codex-dev",
       skipHealthCommonsWatch: true,
       skipPrismaMigrate: true,
       skipRunnerSmoke: true,
@@ -85,12 +98,30 @@ describe("printHelp", () => {
     const output = writes.join("");
     expect(output).toContain("MURPH_DEV_DATABASE_URL=...");
     expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
+    expect(output).toContain("MURPH_DEV_CODEX_BRIDGE=0");
+    expect(output).toContain("MURPH_DEV_CODEX_BRIDGE_HOST=127.0.0.1");
+    expect(output).toContain("MURPH_DEV_CODEX_BRIDGE_PORT=0");
     expect(output).toContain("MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1");
     expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
     expect(output).toContain("MURPH_DEV_STRIPE_ENV_FILE=.tmp/.env.hosted-local-stripe");
     expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
     expect(output).toContain("stripe listen");
+  });
+});
+
+describe("parseListenPort", () => {
+  it("allows port 0 for dynamic local listeners", () => {
+    expect(parseListenPort("0", 1234, "PORT")).toBe(0);
+  });
+
+  it("rejects invalid TCP listen ports", () => {
+    expect(() => parseListenPort("-1", 3000, "PORT")).toThrow(
+      "PORT must be a valid TCP listen port.",
+    );
+    expect(() => parseListenPort("70000", 3000, "PORT")).toThrow(
+      "PORT must be a valid TCP listen port.",
+    );
   });
 });
 

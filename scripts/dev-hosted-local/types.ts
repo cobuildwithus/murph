@@ -1,6 +1,10 @@
 export interface HostedLocalDevConfig {
   databaseUrlOverride: string | null;
   forceResetLocalDatabase: boolean;
+  localCodexBridge: boolean;
+  localCodexBridgeHost: string;
+  localCodexBridgePort: number;
+  localCodexCommand: string;
   skipHealthCommonsWatch: boolean;
   skipRunnerSmoke: boolean;
   skipPrismaMigrate: boolean;
