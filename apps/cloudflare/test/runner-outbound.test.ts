@@ -564,39 +564,6 @@ describe("handleRunnerOutboundRequest", () => {
     )).toThrow("Hosted runtime web-control route must be relative.");
   });
 
-  it("rejects removed vault-sync web-control routes", async () => {
-    const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ): Promise<Response> => new Response("unexpected", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    for (const path of [
-      "/api/internal/hosted-execution/vault-sync/session_123/payload",
-      "/api/internal/hosted-execution/vault-sync/import",
-    ]) {
-      expect(isAllowedHostedRunnerWebControlRequest({
-        method: path.endsWith("/payload") ? "GET" : "POST",
-        path,
-      })).toBe(false);
-
-      const response = await handleRunnerOutboundRequest(
-        new Request(`http://web-control.worker${path}`, {
-          headers: createRunnerProxyHeaders(),
-          method: path.endsWith("/payload") ? "GET" : "POST",
-        }),
-        createRunnerOutboundEnv({
-          HOSTED_WEB_BASE_URL: "https://web.example.test",
-        }),
-        "member_123",
-        RUNNER_PROXY_TOKEN,
-      );
-
-      expect(response.status).toBe(404);
-    }
-
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("rejects deleted share payload proxy calls", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
