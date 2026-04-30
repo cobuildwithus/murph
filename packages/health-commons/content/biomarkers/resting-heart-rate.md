@@ -54,13 +54,13 @@ biomarker:
       body: Resting heart rate is your pulse when your body is at rest. Murph treats it as a trend signal, not a one-morning verdict.
     -
       title: Why people care
-      body: It can reflect aerobic fitness, recovery load, sleep disruption, stress, illness, alcohol, and whether an experiment is adding too much strain.
+      body: "Reflects aerobic fitness, recovery load, stress, illness, alcohol, sleep disruption, and whether an experiment adds strain."
     -
-      title: How to measure it
-      body: Use the same wearable or the same quiet morning resting method. Compare like-with-like windows rather than mixing devices or time-of-day contexts.
+      title: How to read it
+      body: "Compare same-device overnight or quiet-morning trends. Use multi-day medians, not one-off readings."
     -
       title: What moves it
-      body: Cardio training, sleep, alcohol, heat exposure, illness, hard training, travel, dehydration, medications, and stress can all move RHR.
+      body: "Cardio training, sleep, alcohol, heat, illness, hard training, travel, dehydration, medications, stress, and device changes."
   measurement:
     bestContext: Overnight wearable readings or a consistent quiet morning resting measurement are best for self-comparison.
     howToMeasure:

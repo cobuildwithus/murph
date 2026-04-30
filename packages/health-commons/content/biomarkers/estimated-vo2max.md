@@ -103,16 +103,16 @@ biomarker:
       body: VO₂ max is the maximal rate your body can take in, transport, and use oxygen during intense large-muscle exercise. It is usually expressed relative to body mass as ml/kg/min.
     -
       title: Why people care
-      body: Cardiorespiratory fitness is one of the strongest whole-body fitness signals. The research literature links higher fitness with lower mortality and chronic-disease risk, but Murph treats this as population evidence, not a one-person verdict.
+      body: "Signals cardiorespiratory fitness; higher population-level fitness tracks with lower mortality and chronic-disease risk."
     -
       title: Lab vs wearable
       body: A lab cardiopulmonary exercise test with gas exchange is the reference context. Consumer wearables estimate VO₂ max from signals such as heart rate, pace, power, GPS, demographics, and device-specific algorithms.
     -
-      title: How to read a trend
-      body: Use same-device values across weeks or months. A sustained rise after well-executed aerobic training is more meaningful than a single new reading, especially because many devices update the estimate slowly.
+      title: How to read it
+      body: "Read same-device trends over weeks or months; sustained training-linked rises matter more than single updates."
     -
       title: What moves it
-      body: Aerobic interval training, endurance training, detraining, illness, heat, altitude, sensor fit, route/GPS quality, body-weight changes, medications that affect heart rate, and the specific test protocol can all change the number.
+      body: "Intervals, endurance training, detraining, illness, heat, altitude, sensors, GPS, body weight, heart-rate medications, and test protocol."
   measurement:
     bestContext: Lab CPET with respiratory gas analysis is best when a precise clinical or performance value matters. For Murph experiments, same-device wearable cardio-fitness estimates are acceptable as a private trend signal when interpreted cautiously.
     howToMeasure:

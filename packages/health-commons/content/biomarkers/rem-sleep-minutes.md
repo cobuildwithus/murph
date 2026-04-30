@@ -57,13 +57,13 @@ biomarker:
       body: REM sleep is a recurring sleep stage marked in the lab by rapid eye movements, low muscle tone, and an activated EEG pattern. Consumer wearables usually report an inferred REM duration for each sleep episode.
     -
       title: Why people care
-      body: REM is tied to dreaming, emotion processing, memory-related physiology, and autonomic changes. Cohort studies link lower PSG-measured REM percentage with adverse outcomes, but those findings are associations, not proof that chasing a higher wearable REM number improves health.
+      body: "Tracks REM-related dreaming, emotion, memory, and autonomic physiology; useful as a trend, not an optimization target."
     -
       title: How to read it
-      body: Read REM alongside total sleep time, sleep efficiency, awakenings, bedtime, wake time, and subjective sleep quality. A stable multi-night shift is more meaningful than a single low or high REM night.
+      body: "Read with total sleep, awakenings, timing, and subjective quality. Multi-night patterns beat single-night highs or lows."
     -
       title: What moves it
-      body: Short sleep opportunity, early alarms, alcohol, some medications, sleep apnea, CPAP initiation, withdrawal from REM-suppressing substances, stress, circadian disruption, illness, and device algorithm changes can all move the number.
+      body: "Sleep duration, early alarms, alcohol, medications, apnea, CPAP changes, substance withdrawal, stress, circadian disruption, illness, and algorithms."
   measurement:
     bestContext: Use the same wearable across a baseline and intervention window, preferably with at least a week of nights and notes on sleep opportunity, alcohol, medications, travel, illness, and sleep-disordered-breathing context.
     howToMeasure:

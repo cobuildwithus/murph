@@ -69,14 +69,14 @@ biomarker:
       title: "What it is"
       body: "SpO₂ is a pulse-oximetry estimate of the percentage of hemoglobin carrying oxygen. Murph treats it as a respiratory, sleep, altitude, illness, and safety-context signal rather than a performance score."
     -
-      title: "Why people care"
-      body: "SpO₂ can help contextualize sleep-disordered breathing patterns, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings. It is most useful when compared with your own same-device baseline."
+      title: Why people care
+      body: "Contextualizes breathing during sleep, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings."
     -
-      title: "How to read it"
-      body: "Use overnight wearable trends for repeated personal context and a medical-grade finger pulse oximeter for careful symptom-driven spot checks. Prefer medians and repeated patterns over one noisy reading."
+      title: How to read it
+      body: "Compare same-device trends; use finger pulse oximetry for symptom-driven spot checks. Repeated lows matter more than one noisy reading."
     -
-      title: "What can fool it"
-      body: "Cold hands, poor circulation, movement, sensor fit, nail polish or artificial nails, tobacco or carbon monoxide exposure, skin pigmentation, altitude, illness, and general-wellness device limits can all distort readings."
+      title: What moves it
+      body: "Altitude, illness, sleep apnea, perfusion, movement, sensor fit, nail polish, skin pigmentation, smoke exposure, and device limits."
   measurement:
     bestContext: "For self-tracking, overnight wearable SpO₂ is best for repeated personal trend and desaturation context; a medical-grade finger pulse oximeter is better for symptom-driven spot checks; arterial blood gas or clinical co-oximetry remains more definitive in clinical care."
     howToMeasure:
