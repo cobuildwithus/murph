@@ -3,7 +3,10 @@ import {
   type HostedSecretCodec,
 } from "../crypto";
 import { maybeIsoTimestamp, normalizeNullableString } from "../shared";
-import type { HostedConnectionRecord } from "./connection-records";
+import {
+  normalizeHostedDeviceSyncCredentialKind,
+  type HostedConnectionRecord,
+} from "./connection-records";
 
 export type HostedStoredConnectionTokenBundle = {
   accessToken: string;
@@ -37,6 +40,10 @@ export function readHostedStoredTokenBundle(
   record: HostedConnectionRecord,
   codec: HostedSecretCodec | null,
 ): HostedStoredConnectionTokenBundle | null {
+  if (normalizeHostedDeviceSyncCredentialKind(record.credentialKind) !== "oauth_tokens") {
+    return null;
+  }
+
   const accessTokenEncrypted = normalizeNullableString(record.accessTokenEncrypted);
   const keyVersion = normalizeNullableString(record.keyVersion);
   const tokenVersion = typeof record.tokenVersion === "number" ? record.tokenVersion : null;

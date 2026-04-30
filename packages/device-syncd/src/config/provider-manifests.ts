@@ -1,5 +1,6 @@
 import {
   garminProviderAdapter,
+  junctionProviderAdapter,
   ouraProviderAdapter,
   stravaProviderAdapter,
   whoopProviderAdapter,
@@ -7,14 +8,21 @@ import {
 } from "@murphai/importers";
 import {
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   normalizeDeviceProviderKey,
+  resolveDeviceProviderConnectionDescriptor,
   type DeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { createGarminDeviceSyncProvider } from "../providers/garmin.ts";
+import {
+  createJunctionDeviceSyncProvider,
+  JUNCTION_PROVIDER_CONFIG_KEY,
+} from "../providers/junction.ts";
+import { assertValidJunctionClientConfig } from "../providers/junction-client.ts";
 import { createOuraDeviceSyncProvider } from "../providers/oura.ts";
 import { createStravaDeviceSyncProvider } from "../providers/strava.ts";
 import { createWhoopDeviceSyncProvider } from "../providers/whoop.ts";
@@ -36,6 +44,22 @@ import {
   GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS,
   GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS,
   GARMIN_TOKEN_BASE_URL_ENV_KEYS,
+  JUNCTION_API_KEY_ENV_KEYS,
+  JUNCTION_BASE_URL_ENV_KEYS,
+  JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
+  JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
+  JUNCTION_ENV_ENV_KEYS,
+  JUNCTION_GLOBAL_CONCURRENCY_ENV_KEYS,
+  JUNCTION_PER_ACCOUNT_CONCURRENCY_ENV_KEYS,
+  JUNCTION_PROVIDER_FILTER_ENV_KEYS,
+  JUNCTION_RECONCILE_DAYS_ENV_KEYS,
+  JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS,
+  JUNCTION_REGION_ENV_KEYS,
+  JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS,
+  JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS,
+  JUNCTION_SUMMARY_RESOURCES_ENV_KEYS,
+  JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS,
+  JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS,
   OURA_API_BASE_URL_ENV_KEYS,
   OURA_AUTH_BASE_URL_ENV_KEYS,
   OURA_BACKFILL_DAYS_ENV_KEYS,
@@ -82,6 +106,7 @@ import type {
   DeviceSyncEnvSource,
   SerializableConfiguredDeviceSyncProviderConfigByKey,
 } from "./provider-types.ts";
+import type { DeviceSyncProviderCredentialPolicy } from "../types.ts";
 
 export type SerializableConfigFieldKind = "number" | "string" | "string[]";
 export type DeviceSyncJobPayloadFieldKind = "boolean" | "number" | "string" | "string[]";
@@ -127,6 +152,7 @@ export interface DeviceSyncConfiguredProviderManifest<
 > {
   provider: TProvider;
   capabilities: ConfiguredDeviceSyncProviderCapabilities;
+  credentialPolicy: DeviceSyncProviderCredentialPolicy;
   createProvider(config: TConfig): DeviceSyncProvider;
   descriptor: DeviceProviderDescriptor;
   disallowedSerializableFields?: Readonly<Record<string, string>>;
@@ -142,6 +168,11 @@ export interface DeviceSyncConfiguredProviderManifestByKey {
     "garmin",
     ConfiguredDeviceSyncProviderConfigByKey["garmin"],
     SerializableConfiguredDeviceSyncProviderConfigByKey["garmin"]
+  >;
+  junction: DeviceSyncConfiguredProviderManifest<
+    "junction",
+    ConfiguredDeviceSyncProviderConfigByKey["junction"],
+    SerializableConfiguredDeviceSyncProviderConfigByKey["junction"]
   >;
   oura: DeviceSyncConfiguredProviderManifest<
     "oura",
@@ -197,6 +228,9 @@ const GARMIN_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
   SerializableConfiguredDeviceSyncProviderConfigByKey["garmin"]
 >({
   provider: "garmin",
+  credentialPolicy: {
+    kind: "oauth_tokens",
+  },
   descriptor: GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   importer: garminProviderAdapter,
   env: GARMIN_DEVICE_SYNC_PROVIDER_ENV_SPEC,
@@ -259,12 +293,100 @@ const GARMIN_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
   },
 });
 
+const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
+  "junction",
+  ConfiguredDeviceSyncProviderConfigByKey["junction"],
+  SerializableConfiguredDeviceSyncProviderConfigByKey["junction"]
+>({
+  provider: "junction",
+  credentialPolicy: {
+    kind: "provider_config",
+    providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
+  },
+  descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+  importer: junctionProviderAdapter,
+  env: JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
+  readConfig(env) {
+    const apiKey = optionalEnv(env, JUNCTION_API_KEY_ENV_KEYS);
+    const clientUserIdSecret = optionalEnv(env, JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS);
+    const environment = optionalEnv(env, JUNCTION_ENV_ENV_KEYS);
+    const region = optionalEnv(env, JUNCTION_REGION_ENV_KEYS);
+
+    if (!apiKey && !clientUserIdSecret && !environment && !region) {
+      return null;
+    }
+
+    if (!apiKey || !clientUserIdSecret || !environment || !region) {
+      throw new TypeError(
+        "Junction configuration is incomplete. Set JUNCTION_API_KEY, JUNCTION_CLIENT_USER_ID_SECRET, JUNCTION_ENV, and JUNCTION_REGION together.",
+      );
+    }
+
+    const config = {
+      apiKey,
+      clientUserIdSecret,
+      environment: parseJunctionEnvironment(environment),
+      region: parseJunctionRegion(region),
+      baseUrl: optionalEnv(env, JUNCTION_BASE_URL_ENV_KEYS),
+      providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
+      summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
+      timeseriesResources: parseCsvEnv(env, JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS),
+      summaryBackfillDays: parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS),
+      timeseriesBackfillDays: parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS),
+      reconcileDays: parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS),
+      reconcileIntervalMs: parseIntegerEnv(env, JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS),
+      requestTimeoutMs: parseIntegerEnv(env, JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS),
+      perAccountConcurrency: parseIntegerEnv(env, JUNCTION_PER_ACCOUNT_CONCURRENCY_ENV_KEYS),
+      globalConcurrency: parseIntegerEnv(env, JUNCTION_GLOBAL_CONCURRENCY_ENV_KEYS),
+    };
+
+    assertValidJunctionClientConfig(config);
+    return config;
+  },
+  createProvider: createJunctionDeviceSyncProvider,
+  serializableFields: {
+    apiKey: "string",
+    baseUrl: "string",
+    clientUserIdSecret: "string",
+    environment: "string",
+    globalConcurrency: "number",
+    perAccountConcurrency: "number",
+    providerFilter: "string[]",
+    reconcileDays: "number",
+    reconcileIntervalMs: "number",
+    region: "string",
+    requestTimeoutMs: "number",
+    summaryBackfillDays: "number",
+    summaryResources: "string[]",
+    timeseriesBackfillDays: "number",
+    timeseriesResources: "string[]",
+  },
+  disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
+  jobs: {
+    backfill: {
+      payload: {
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
+    },
+    reconcile: {
+      payload: {
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
+    },
+  },
+});
+
 const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "oura",
   ConfiguredDeviceSyncProviderConfigByKey["oura"],
   SerializableConfiguredDeviceSyncProviderConfigByKey["oura"]
 >({
   provider: "oura",
+  credentialPolicy: {
+    kind: "oauth_tokens",
+  },
   descriptor: OURA_DEVICE_PROVIDER_DESCRIPTOR,
   importer: ouraProviderAdapter,
   env: OURA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
@@ -354,6 +476,9 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
   SerializableConfiguredDeviceSyncProviderConfigByKey["whoop"]
 >({
   provider: "whoop",
+  credentialPolicy: {
+    kind: "oauth_tokens",
+  },
   descriptor: WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   importer: whoopProviderAdapter,
   env: WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
@@ -432,6 +557,9 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
   SerializableConfiguredDeviceSyncProviderConfigByKey["strava"]
 >({
   provider: "strava",
+  credentialPolicy: {
+    kind: "oauth_tokens",
+  },
   descriptor: STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   importer: stravaProviderAdapter,
   env: STRAVA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
@@ -523,6 +651,7 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
 
 export const deviceSyncProviderManifestByKey = Object.freeze({
   garmin: GARMIN_DEVICE_SYNC_PROVIDER_MANIFEST,
+  junction: JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST,
   oura: OURA_DEVICE_SYNC_PROVIDER_MANIFEST,
   whoop: WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST,
   strava: STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST,
@@ -566,6 +695,23 @@ export function resolveConfiguredDeviceSyncProviderManifest(
   return deviceSyncProviderManifestByKey[key];
 }
 
+export function resolveDeviceSyncProviderCredentialPolicy(
+  provider: Pick<DeviceSyncProvider, "credentialPolicy" | "descriptor" | "provider">,
+): DeviceSyncProviderCredentialPolicy {
+  const manifest = resolveConfiguredDeviceSyncProviderManifest(provider.provider);
+  if (manifest) {
+    return manifest.credentialPolicy;
+  }
+
+  if (provider.credentialPolicy) {
+    return provider.credentialPolicy;
+  }
+
+  return provider.descriptor.oauth
+    ? { kind: "oauth_tokens" }
+    : { kind: "none" };
+}
+
 export function requireConfiguredDeviceSyncProviderManifest(
   provider: string,
 ): DeviceSyncConfiguredProviderManifest {
@@ -593,14 +739,18 @@ export function listConfiguredDeviceSyncProviderManifests(
 }
 
 export function listDeviceSyncProviderCatalog(): DeviceSyncProviderCatalogEntry[] {
-  return deviceSyncProviderManifests.map((manifest) => ({
-    provider: manifest.provider,
-    displayName: manifest.descriptor.displayName,
-    callbackPath: manifest.descriptor.oauth?.callbackPath ?? null,
-    webhookPath: manifest.descriptor.webhook?.path ?? null,
-    supportsWebhooks: manifest.capabilities.webhookPush,
-    defaultScopes: [...(manifest.descriptor.oauth?.defaultScopes ?? [])],
-  }));
+  return deviceSyncProviderManifests.map((manifest) => {
+    const connection = resolveDeviceProviderConnectionDescriptor(manifest.descriptor);
+
+    return {
+      provider: manifest.provider,
+      displayName: manifest.descriptor.displayName,
+      callbackPath: connection.callbackPath ?? null,
+      webhookPath: manifest.descriptor.webhook?.path ?? null,
+      supportsWebhooks: manifest.capabilities.webhookPush,
+      defaultScopes: [...(connection.defaultScopes ?? [])],
+    };
+  });
 }
 
 export function getConfiguredDeviceSyncProviderJobDefinition(
@@ -688,6 +838,22 @@ function isConfiguredDeviceSyncProviderKey(
   value: string,
 ): value is ConfiguredDeviceSyncProviderKey {
   return Object.prototype.hasOwnProperty.call(deviceSyncProviderManifestByKey, value);
+}
+
+function parseJunctionEnvironment(value: string): "sandbox" | "production" {
+  if (value === "sandbox" || value === "production") {
+    return value;
+  }
+
+  throw new TypeError("JUNCTION_ENV must be sandbox or production.");
+}
+
+function parseJunctionRegion(value: string): "us" | "eu" {
+  if (value === "us" || value === "eu") {
+    return value;
+  }
+
+  throw new TypeError("JUNCTION_REGION must be us or eu.");
 }
 
 function freezeDeviceSyncProviderEnvSpec(env: DeviceSyncProviderEnvSpec): DeviceSyncProviderEnvSpec {

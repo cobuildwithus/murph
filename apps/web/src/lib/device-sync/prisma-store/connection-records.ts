@@ -1,5 +1,8 @@
 import type { Prisma } from "@prisma/client";
-import type { DeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+import type {
+  DeviceAccountCredentialKind,
+  DeviceSyncAccount,
+} from "@murphai/device-syncd/types";
 import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-ingress";
 
 import type { HostedStaticDeviceSyncConnectionRecord } from "../internal-runtime";
@@ -14,6 +17,8 @@ export const hostedConnectionRecordArgs = {
     accessTokenExpiresAt: true,
     connectedAt: true,
     createdAt: true,
+    credentialKind: true,
+    credentialMetadataJson: true,
     displayName: true,
     externalAccountIdEncrypted: true,
     id: true,
@@ -28,8 +33,11 @@ export const hostedConnectionRecordArgs = {
     nextReconcileAt: true,
     provider: true,
     providerAccountBlindIndex: true,
+    providerConfigKey: true,
     refreshTokenEncrypted: true,
     scopesJson: true,
+    setupExpiresAt: true,
+    setupPhase: true,
     status: true,
     tokenVersion: true,
     updatedAt: true,
@@ -44,10 +52,15 @@ export type HostedStoredDeviceSyncAccount = DeviceSyncAccount & {
 };
 
 export function mapHostedConnectionRecord(record: HostedConnectionRecord): HostedStaticDeviceSyncConnectionRecord {
+  const credentialKind = normalizeHostedDeviceSyncCredentialKind(record.credentialKind);
+  validateHostedConnectionCredentialRecord(record, credentialKind);
+
   return {
     accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
     connectedAt: record.connectedAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
+    credentialKind,
+    credentialMetadata: readStoredCredentialMetadata(record.credentialMetadataJson),
     displayName: normalizeNullableString(record.displayName),
     externalAccountId: null,
     id: record.id,
@@ -60,8 +73,11 @@ export function mapHostedConnectionRecord(record: HostedConnectionRecord): Hoste
     metadata: readStoredMetadata(record.metadataJson),
     nextReconcileAt: maybeIsoTimestamp(record.nextReconcileAt),
     provider: record.provider,
+    providerConfigKey: normalizeNullableString(record.providerConfigKey),
     scopes: readStoredScopes(record.scopesJson),
-    status: record.status as HostedStaticDeviceSyncConnectionRecord["status"],
+    setupExpiresAt: maybeIsoTimestamp(record.setupExpiresAt),
+    setupPhase: normalizeHostedDeviceSyncSetupPhase(record.setupPhase),
+    status: normalizeHostedDeviceSyncLifecycleStatus(record.status),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
   } satisfies HostedStaticDeviceSyncConnectionRecord;
@@ -88,5 +104,130 @@ function readStoredMetadata(value: Prisma.JsonValue | null): Record<string, unkn
     return {};
   }
 
-  return sanitizeStoredDeviceSyncMetadata(value as Record<string, unknown>);
+  return sanitizeHostedDeviceSyncConnectionMetadata(value as Record<string, unknown>);
+}
+
+function readStoredCredentialMetadata(value: Prisma.JsonValue | null): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return sanitizeHostedDeviceSyncCredentialMetadata(value as Record<string, unknown>);
+}
+
+export function normalizeHostedDeviceSyncCredentialKind(
+  value: string | null | undefined,
+): DeviceAccountCredentialKind {
+  if (value === "provider_config" || value === "none" || value === "oauth_tokens") {
+    return value;
+  }
+
+  throw new TypeError("Hosted device-sync credential_kind is invalid.");
+}
+
+function validateHostedConnectionCredentialRecord(
+  record: HostedConnectionRecord,
+  credentialKind: DeviceAccountCredentialKind,
+): void {
+  if (credentialKind === "oauth_tokens") {
+    if (normalizeNullableString(record.providerConfigKey)) {
+      throw new TypeError("Hosted OAuth token credential rows must not contain providerConfigKey.");
+    }
+    return;
+  }
+
+  if (
+    normalizeNullableString(record.accessTokenEncrypted)
+    || normalizeNullableString(record.refreshTokenEncrypted)
+    || record.accessTokenExpiresAt
+    || normalizeNullableString(record.keyVersion)
+    || typeof record.tokenVersion === "number"
+  ) {
+    throw new TypeError("Hosted non-token credential rows must not contain token material.");
+  }
+
+  if (credentialKind === "provider_config") {
+    if (!normalizeNullableString(record.providerConfigKey)) {
+      throw new TypeError("Hosted provider-config credential rows require providerConfigKey.");
+    }
+    return;
+  }
+
+  if (normalizeNullableString(record.providerConfigKey)) {
+    throw new TypeError("Hosted none credential rows must not contain providerConfigKey.");
+  }
+}
+
+export function normalizeHostedDeviceSyncLifecycleStatus(
+  value: string | null | undefined,
+): HostedStaticDeviceSyncConnectionRecord["status"] {
+  if (value === "reauthorization_required" || value === "disconnected") {
+    return value;
+  }
+
+  return "active";
+}
+
+export function normalizeHostedDeviceSyncSetupPhase(
+  value: string | null | undefined,
+): HostedStaticDeviceSyncConnectionRecord["setupPhase"] {
+  if (
+    value === "pending_link"
+    || value === "link_returned"
+    || value === "source_confirmed"
+    || value === "failed"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+export function sanitizeHostedDeviceSyncConnectionMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
+
+  for (const key of Object.keys(sanitized)) {
+    if (isBlockedHostedDeviceSyncConnectionMetadataKey(key)) {
+      delete sanitized[key];
+    }
+  }
+
+  return sanitized;
+}
+
+export function sanitizeHostedDeviceSyncCredentialMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
+
+  for (const key of Object.keys(sanitized)) {
+    if (isBlockedHostedDeviceSyncConnectionMetadataKey(key)) {
+      delete sanitized[key];
+    }
+  }
+
+  return sanitized;
+}
+
+function isBlockedHostedDeviceSyncConnectionMetadataKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+
+  if (
+    (normalized.includes("ownerid")
+      || normalized.includes("userid")
+      || normalized.includes("clientuserid"))
+    && !normalized.includes("hash")
+    && !normalized.includes("blindindex")
+  ) {
+    return true;
+  }
+
+  return normalized.includes("secret")
+    || normalized.includes("connectedsources")
+    || normalized.includes("hmac")
+    || normalized.includes("resourceavailability")
+    || normalized.includes("webhook")
+    || normalized.includes("rawclientuserid");
 }

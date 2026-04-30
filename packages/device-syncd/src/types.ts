@@ -1,8 +1,12 @@
 import type {
+  DeviceConnectionSourceRecord,
+  DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
   DeviceSyncJobRecord,
   DeviceSyncProviderDescriptor,
+  ListDeviceConnectionSourcesInput,
+  UpsertDeviceConnectionSourceInput,
 } from "./client.ts";
 import type {
   DeviceProviderDescriptor,
@@ -10,6 +14,13 @@ import type {
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
+export type { DeviceSyncAccountSetupPhase } from "./client.ts";
+export type { DeviceConnectionSourceStatus } from "./client.ts";
+export type { DeviceConnectionSourceResourceAvailabilityValue } from "./client.ts";
+export type { DeviceConnectionSourceResourceAvailabilitySummary } from "./client.ts";
+export type { UpsertDeviceConnectionSourceInput } from "./client.ts";
+export type { ListDeviceConnectionSourcesInput } from "./client.ts";
+export type { DeviceConnectionSourceRecord } from "./client.ts";
 export type { DeviceSyncJobRecord } from "./client.ts";
 
 export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
@@ -62,10 +73,15 @@ export interface OAuthStateRecord {
 }
 
 export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
+export type PublicDeviceConnectionSource = DeviceConnectionSourceRecord;
+export type StoredDeviceConnectionSource = PublicDeviceConnectionSource;
 
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
   disconnectGeneration: number;
+  credentialKind?: DeviceAccountCredentialKind;
+  providerConfigKey?: string | null;
+  credentialMetadata?: Record<string, unknown>;
   accessTokenEncrypted: string;
   hostedObservedConnectionRevision: number;
   hostedObservedTokenRevision: number;
@@ -79,6 +95,9 @@ export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
 export interface DeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
   disconnectGeneration: number;
+  credentialKind?: DeviceAccountCredentialKind;
+  providerConfigKey?: string | null;
+  credentialMetadata?: Record<string, unknown>;
   accessToken: string;
   refreshToken: string | null;
 }
@@ -89,14 +108,60 @@ export interface ProviderAuthTokens {
   accessTokenExpiresAt?: string;
 }
 
+export type DeviceAccountCredentialKind =
+  | "oauth_tokens"
+  | "provider_config"
+  | "none";
+
+export type DeviceAccountCredential =
+  | {
+      kind: "oauth_tokens";
+      tokens: ProviderAuthTokens;
+    }
+  | {
+      kind: "provider_config";
+      providerConfigKey: string;
+      subject?: Record<string, string>;
+    }
+  | {
+      kind: "none";
+    };
+
+export type DeviceSyncProviderCredentialPolicy =
+  | {
+      kind: "oauth_tokens";
+    }
+  | {
+      kind: "provider_config";
+      providerConfigKey: string;
+    }
+  | {
+      kind: "none";
+    };
+
+export interface ProviderConnectionSeed {
+  externalAccountId: string;
+  displayName?: string | null;
+  status?: DeviceSyncAccountStatus;
+  setupPhase?: DeviceSyncAccountSetupPhase | null;
+  setupExpiresAt?: string | null;
+  scopes?: string[];
+  metadata?: Record<string, unknown>;
+  credential: DeviceAccountCredential;
+  nextReconcileAt?: string | null;
+}
+
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
   provider: string;
   externalAccountId: string;
   displayName?: string | null;
   status?: DeviceSyncAccountStatus;
+  setupPhase?: DeviceSyncAccountSetupPhase | null;
+  setupExpiresAt?: string | null;
   scopes?: string[];
-  tokens: ProviderAuthTokens;
+  credential?: DeviceAccountCredential;
+  tokens?: ProviderAuthTokens;
   metadata?: Record<string, unknown>;
   connectedAt: string;
   nextReconcileAt?: string | null;
@@ -177,12 +242,41 @@ export interface ProviderCallbackContext {
   grantedScopes: string[];
 }
 
+export interface ProviderBeginConnectionContext {
+  state: string;
+  callbackUrl: string;
+  publicBaseUrl: string;
+  now: string;
+  scopes: string[];
+  ownerId?: string | null;
+}
+
+export interface ProviderBeginConnectionResult {
+  authorizationUrl: string;
+  connectionSeed?: ProviderConnectionSeed;
+  stateMetadata?: Record<string, unknown>;
+  scopes?: string[];
+}
+
+export interface ProviderCompleteConnectionContext {
+  callbackUrl: string;
+  state: string;
+  stateMetadata?: Record<string, unknown>;
+  seededExternalAccountId?: string | null;
+  query: URLSearchParams;
+  now: string;
+  grantedScopes: string[];
+}
+
 export interface ProviderConnectionResult {
   externalAccountId: string;
   displayName?: string | null;
   scopes?: string[];
   metadata?: Record<string, unknown>;
-  tokens: ProviderAuthTokens;
+  credential?: DeviceAccountCredential;
+  tokens?: ProviderAuthTokens;
+  setupPhase?: DeviceSyncAccountSetupPhase | null;
+  setupExpiresAt?: string | null;
   initialJobs?: DeviceSyncJobInput[];
   nextReconcileAt?: string | null;
 }
@@ -284,6 +378,12 @@ export interface ProviderJobContext {
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
   importSnapshot(snapshot: unknown): Promise<unknown>;
+  upsertConnectionSource?(
+    input: Omit<UpsertDeviceConnectionSourceInput, "connectionId">,
+  ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
+  listConnectionSources?(
+    input?: Omit<ListDeviceConnectionSourcesInput, "connectionId">,
+  ): DeviceConnectionSourceRecord[] | Promise<DeviceConnectionSourceRecord[]>;
   refreshAccountTokens(): Promise<DeviceSyncAccount>;
   disconnectAccount?(): Promise<void>;
   logger: DeviceSyncLogger;
@@ -298,7 +398,10 @@ export interface ProviderJobResult {
 export interface DeviceSyncProvider {
   provider: string;
   descriptor: DeviceProviderDescriptor;
+  credentialPolicy?: DeviceSyncProviderCredentialPolicy;
   webhookAdmin?: ProviderWebhookAdminCapability;
+  beginConnection?(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
+  completeConnection?(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   buildConnectUrl(input: {
     state: string;
     callbackUrl: string;
@@ -332,14 +435,17 @@ export interface BeginConnectionResult {
   authorizationUrl: string;
 }
 
-export interface HandleOAuthCallbackInput {
+export interface HandleConnectionCallbackInput {
   provider: string;
   state?: string | null;
   code?: string | null;
   scope?: string | null;
   error?: string | null;
   errorDescription?: string | null;
+  query?: URLSearchParams;
 }
+
+export type HandleOAuthCallbackInput = HandleConnectionCallbackInput;
 
 export interface CompleteConnectionResult {
   account: PublicDeviceSyncAccount;

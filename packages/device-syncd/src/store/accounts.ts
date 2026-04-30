@@ -10,6 +10,9 @@ import {
   toIsoTimestamp,
 } from "../shared.ts";
 import type {
+  DeviceAccountCredential,
+  DeviceAccountCredentialKind,
+  DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
   ProviderAuthTokens,
   StoredDeviceSyncAccount,
@@ -17,13 +20,25 @@ import type {
 
 type SqliteRow = Record<string, unknown>;
 
+type EncryptedProviderAuthTokens = ProviderAuthTokens & {
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted?: string | null;
+};
+
+type StorageDeviceAccountCredential = DeviceAccountCredential & {
+  credentialMetadata?: Record<string, unknown>;
+};
+
 export interface AccountUpsertInput {
   provider: string;
   externalAccountId: string;
   displayName?: string | null;
   status?: DeviceSyncAccountStatus;
+  setupPhase?: DeviceSyncAccountSetupPhase | null;
+  setupExpiresAt?: string | null;
   scopes?: string[];
-  tokens: ProviderAuthTokens & { accessTokenEncrypted: string; refreshTokenEncrypted?: string | null };
+  tokens?: EncryptedProviderAuthTokens;
+  credential?: StorageDeviceAccountCredential;
   metadata?: Record<string, unknown>;
   connectedAt: string;
   nextReconcileAt?: string | null;
@@ -32,6 +47,8 @@ export interface AccountUpsertInput {
 export interface AccountPatchInput {
   displayName?: string | null;
   status?: DeviceSyncAccountStatus;
+  setupPhase?: DeviceSyncAccountSetupPhase | null;
+  setupExpiresAt?: string | null;
   scopes?: string[];
   metadata?: Record<string, unknown>;
   nextReconcileAt?: string | null;
@@ -44,11 +61,16 @@ export interface StoredAccountRow {
   external_account_id: string;
   display_name: string | null;
   status: DeviceSyncAccountStatus;
+  setup_phase: DeviceSyncAccountSetupPhase | null;
+  setup_expires_at: string | null;
   scopes_json: string | null;
   disconnect_generation: number;
-  access_token_encrypted: string;
+  credential_kind: DeviceAccountCredentialKind;
+  provider_config_key: string | null;
+  access_token_encrypted: string | null;
   refresh_token_encrypted: string | null;
   access_token_expires_at: string | null;
+  credential_metadata_json: string | null;
   hosted_observed_updated_at: string | null;
   hosted_observed_connection_revision: number;
   hosted_observed_token_version: number | null;
@@ -89,11 +111,16 @@ export const ACCOUNT_ROW_SELECT = `
     connection.external_account_id as external_account_id,
     connection.display_name as display_name,
     connection.status as status,
+    connection.setup_phase as setup_phase,
+    connection.setup_expires_at as setup_expires_at,
     connection.scopes_json as scopes_json,
     connection.disconnect_generation as disconnect_generation,
+    credential.credential_kind as credential_kind,
+    credential.provider_config_key as provider_config_key,
     credential.access_token_encrypted as access_token_encrypted,
     credential.refresh_token_encrypted as refresh_token_encrypted,
     credential.access_token_expires_at as access_token_expires_at,
+    credential.credential_metadata_json as credential_metadata_json,
     observation.hosted_observed_updated_at as hosted_observed_updated_at,
     observation.hosted_observed_connection_revision as hosted_observed_connection_revision,
     observation.hosted_observed_token_version as hosted_observed_token_version,
@@ -146,6 +173,272 @@ function expectNullableNumber(value: unknown, field: string): number | null {
   return expectNumber(value, field);
 }
 
+function expectDeviceAccountCredentialKind(
+  value: unknown,
+  field: string,
+): DeviceAccountCredentialKind {
+  if (value === "oauth_tokens" || value === "provider_config" || value === "none") {
+    return value;
+  }
+
+  throw new TypeError(`Expected ${field} to be a supported device account credential kind.`);
+}
+
+function expectDeviceSyncAccountStatus(
+  value: unknown,
+  field: string,
+): DeviceSyncAccountStatus {
+  if (value === "active" || value === "reauthorization_required" || value === "disconnected") {
+    return value;
+  }
+
+  throw new TypeError(`Expected ${field} to be a supported device account status.`);
+}
+
+function expectNullableDeviceSyncAccountSetupPhase(
+  value: unknown,
+  field: string,
+): DeviceSyncAccountSetupPhase | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (
+    value === "pending_link"
+    || value === "link_returned"
+    || value === "source_confirmed"
+    || value === "failed"
+  ) {
+    return value;
+  }
+
+  throw new TypeError(`Expected ${field} to be a supported device account setup phase.`);
+}
+
+function normalizeMetadataKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isRawDeviceSyncIdentifierMetadataKey(normalizedKey: string): boolean {
+  if (normalizedKey.includes("hash") || normalizedKey.includes("blindindex")) {
+    return false;
+  }
+
+  return normalizedKey.includes("ownerid")
+    || normalizedKey.includes("userid")
+    || normalizedKey.includes("clientuserid");
+}
+
+function sanitizeStoredDeviceSyncAccountMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
+
+  for (const key of Object.keys(sanitized)) {
+    const normalizedKey = normalizeMetadataKey(key);
+    if (
+      normalizedKey.includes("hmacsecret")
+      || normalizedKey.includes("webhooksecret")
+      || isRawDeviceSyncIdentifierMetadataKey(normalizedKey)
+    ) {
+      delete sanitized[key];
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeCredentialMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
+
+  for (const key of Object.keys(sanitized)) {
+    const normalizedKey = normalizeMetadataKey(key);
+    if (
+      normalizedKey.includes("hmacsecret")
+      || normalizedKey.includes("webhooksecret")
+      || isRawDeviceSyncIdentifierMetadataKey(normalizedKey)
+    ) {
+      delete sanitized[key];
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeCredentialSubject(
+  value: Record<string, string> | null | undefined,
+): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const subject: Record<string, string> = {};
+
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (Object.keys(subject).length >= 16) {
+      break;
+    }
+
+    const key = rawKey.trim();
+    const normalizedKey = normalizeMetadataKey(key);
+
+    if (
+      !key
+      || key.length > 64
+      || normalizedKey.includes("hmacsecret")
+      || normalizedKey.includes("webhooksecret")
+      || isRawDeviceSyncIdentifierMetadataKey(normalizedKey)
+    ) {
+      continue;
+    }
+
+    if (typeof rawValue === "string" && rawValue.length <= 256) {
+      subject[key] = rawValue;
+    }
+  }
+
+  return subject;
+}
+
+function parseCredentialMetadataJson(value: string | null): Record<string, unknown> {
+  return maybeParseJsonObject(value);
+}
+
+function buildCredentialMetadata(credential: StorageDeviceAccountCredential): Record<string, unknown> {
+  const metadata = sanitizeCredentialMetadata(credential.credentialMetadata ?? {});
+
+  if (credential.kind !== "provider_config") {
+    return metadata;
+  }
+
+  const subject = sanitizeCredentialSubject(credential.subject);
+  return Object.keys(subject).length > 0
+    ? {
+        ...metadata,
+        subject,
+      }
+    : metadata;
+}
+
+interface ResolvedAccountCredentialColumns {
+  credentialKind: DeviceAccountCredentialKind;
+  providerConfigKey: string | null;
+  accessTokenEncrypted: string | null;
+  refreshTokenEncrypted: string | null;
+  accessTokenExpiresAt: string | null;
+  credentialMetadataJson: string;
+}
+
+function hasEncryptedProviderAuthTokens(
+  tokens: ProviderAuthTokens,
+): tokens is EncryptedProviderAuthTokens {
+  const accessTokenEncrypted = Reflect.get(tokens, "accessTokenEncrypted");
+  const refreshTokenEncrypted = Reflect.get(tokens, "refreshTokenEncrypted");
+
+  return typeof accessTokenEncrypted === "string"
+    && (
+      refreshTokenEncrypted === undefined
+      || refreshTokenEncrypted === null
+      || typeof refreshTokenEncrypted === "string"
+    );
+}
+
+function requireEncryptedProviderAuthTokens(
+  tokens: ProviderAuthTokens,
+  message: string,
+): EncryptedProviderAuthTokens {
+  if (hasEncryptedProviderAuthTokens(tokens)) {
+    return tokens;
+  }
+
+  throw new TypeError(message);
+}
+
+function resolveAccountCredentialInput(input: AccountUpsertInput): ResolvedAccountCredentialColumns {
+  const credential = input.credential
+    ?? (input.tokens
+      ? {
+          kind: "oauth_tokens",
+          tokens: input.tokens,
+        } satisfies StorageDeviceAccountCredential
+      : null);
+
+  if (!credential) {
+    throw new TypeError("Device sync account upsert requires tokens or a credential.");
+  }
+
+  if (credential.kind === "oauth_tokens") {
+    const tokens = requireEncryptedProviderAuthTokens(
+      credential.tokens,
+      "OAuth token device account credentials require encrypted access token fields.",
+    );
+
+    return {
+      credentialKind: "oauth_tokens",
+      providerConfigKey: null,
+      accessTokenEncrypted: tokens.accessTokenEncrypted,
+      refreshTokenEncrypted: tokens.refreshTokenEncrypted ?? null,
+      accessTokenExpiresAt: tokens.accessTokenExpiresAt ?? null,
+      credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
+    };
+  }
+
+  if (credential.kind === "provider_config") {
+    const providerConfigKey = credential.providerConfigKey.trim();
+    if (!providerConfigKey) {
+      throw new TypeError("Provider-config device account credentials require providerConfigKey.");
+    }
+
+    return {
+      credentialKind: "provider_config",
+      providerConfigKey,
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
+    };
+  }
+
+  return {
+    credentialKind: "none",
+    providerConfigKey: null,
+    accessTokenEncrypted: null,
+    refreshTokenEncrypted: null,
+    accessTokenExpiresAt: null,
+    credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
+  };
+}
+
+function validateStoredCredentialRow(row: StoredAccountRow): void {
+  if (row.credential_kind === "oauth_tokens") {
+    if (row.provider_config_key !== null || row.access_token_encrypted === null) {
+      throw new TypeError("Stored OAuth token credential rows require an access token and no provider config key.");
+    }
+    return;
+  }
+
+  if (row.access_token_encrypted !== null && row.access_token_encrypted !== "") {
+    throw new TypeError("Stored non-token credential rows must not contain access tokens.");
+  }
+
+  if (row.refresh_token_encrypted !== null || row.access_token_expires_at !== null) {
+    throw new TypeError("Stored non-token credential rows must not contain token bundle fields.");
+  }
+
+  if (row.credential_kind === "provider_config") {
+    if (!row.provider_config_key) {
+      throw new TypeError("Stored provider-config credential rows require provider_config_key.");
+    }
+    return;
+  }
+
+  if (row.provider_config_key !== null) {
+    throw new TypeError("Stored none credential rows must not contain provider_config_key.");
+  }
+}
+
 function parseStoredStringArray(value: string | null, field: string): string[] {
   if (value === null) {
     return [];
@@ -170,7 +463,7 @@ function parseStoredStringArray(value: string | null, field: string): string[] {
 }
 
 export function decodeStoredAccountRow(row: SqliteRow): StoredAccountRow {
-  return {
+  const decoded: StoredAccountRow = {
     id: expectString(row.id, "device_connection.id"),
     provider: expectString(row.provider, "device_connection.provider"),
     external_account_id: expectString(
@@ -178,13 +471,29 @@ export function decodeStoredAccountRow(row: SqliteRow): StoredAccountRow {
       "device_connection.external_account_id",
     ),
     display_name: expectNullableString(row.display_name, "device_connection.display_name"),
-    status: expectString(row.status, "device_connection.status") as DeviceSyncAccountStatus,
+    status: expectDeviceSyncAccountStatus(row.status, "device_connection.status"),
+    setup_phase: expectNullableDeviceSyncAccountSetupPhase(
+      row.setup_phase,
+      "device_connection.setup_phase",
+    ),
+    setup_expires_at: expectNullableString(
+      row.setup_expires_at,
+      "device_connection.setup_expires_at",
+    ),
     scopes_json: expectNullableString(row.scopes_json, "device_connection.scopes_json"),
     disconnect_generation: expectNumber(
       row.disconnect_generation,
       "device_connection.disconnect_generation",
     ),
-    access_token_encrypted: expectString(
+    credential_kind: expectDeviceAccountCredentialKind(
+      row.credential_kind,
+      "device_credential_state.credential_kind",
+    ),
+    provider_config_key: expectNullableString(
+      row.provider_config_key,
+      "device_credential_state.provider_config_key",
+    ),
+    access_token_encrypted: expectNullableString(
       row.access_token_encrypted,
       "device_credential_state.access_token_encrypted",
     ),
@@ -195,6 +504,10 @@ export function decodeStoredAccountRow(row: SqliteRow): StoredAccountRow {
     access_token_expires_at: expectNullableString(
       row.access_token_expires_at,
       "device_credential_state.access_token_expires_at",
+    ),
+    credential_metadata_json: expectNullableString(
+      row.credential_metadata_json,
+      "device_credential_state.credential_metadata_json",
     ),
     hosted_observed_updated_at: expectNullableString(
       row.hosted_observed_updated_at,
@@ -253,6 +566,9 @@ export function decodeStoredAccountRow(row: SqliteRow): StoredAccountRow {
     created_at: expectString(row.created_at, "device_connection.created_at"),
     updated_at: expectString(row.updated_at, "device_connection.updated_at"),
   };
+
+  validateStoredCredentialRow(decoded);
+  return decoded;
 }
 
 export function decodeDeviceSyncSummaryRow(row: SqliteRow): DeviceSyncSummaryRow {
@@ -283,9 +599,14 @@ export function mapAccountRow(row: StoredAccountRow): StoredDeviceSyncAccount {
     externalAccountId: row.external_account_id,
     displayName: row.display_name,
     status: row.status,
+    setupPhase: row.setup_phase,
+    setupExpiresAt: row.setup_expires_at,
     scopes: parseStoredStringArray(row.scopes_json, "device_connection.scopes_json"),
     disconnectGeneration: row.disconnect_generation,
-    accessTokenEncrypted: row.access_token_encrypted,
+    credentialKind: row.credential_kind,
+    providerConfigKey: row.provider_config_key,
+    credentialMetadata: parseCredentialMetadataJson(row.credential_metadata_json),
+    accessTokenEncrypted: row.access_token_encrypted ?? "",
     hostedObservedConnectionRevision: row.hosted_observed_connection_revision,
     hostedObservedTokenRevision: row.hosted_observed_token_revision,
     hostedObservedTokenVersion: row.hosted_observed_token_version,
@@ -294,7 +615,7 @@ export function mapAccountRow(row: StoredAccountRow): StoredDeviceSyncAccount {
     localTokenRevision: row.local_token_revision,
     refreshTokenEncrypted: row.refresh_token_encrypted,
     accessTokenExpiresAt: row.access_token_expires_at,
-    metadata: sanitizeStoredDeviceSyncMetadata(maybeParseJsonObject(row.metadata_json)),
+    metadata: sanitizeStoredDeviceSyncAccountMetadata(maybeParseJsonObject(row.metadata_json)),
     connectedAt: row.connected_at,
     lastWebhookAt: row.last_webhook_at,
     lastSyncStartedAt: row.last_sync_started_at,
@@ -353,14 +674,23 @@ export function upsertAccount(
     const existing = getAccountByExternalAccount(database, input.provider, input.externalAccountId);
     const now = input.connectedAt;
     const status = input.status ?? "active";
+    const setupPhase = Object.prototype.hasOwnProperty.call(input, "setupPhase")
+      ? input.setupPhase ?? null
+      : existing?.setupPhase ?? null;
+    const setupExpiresAt = Object.prototype.hasOwnProperty.call(input, "setupExpiresAt")
+      ? input.setupExpiresAt ?? null
+      : existing?.setupExpiresAt ?? null;
     const scopesJson = stringifyJson(input.scopes ?? []);
-    const metadataJson = stringifyJson(sanitizeStoredDeviceSyncMetadata(input.metadata ?? {}));
+    const metadataJson = stringifyJson(sanitizeStoredDeviceSyncAccountMetadata(input.metadata ?? {}));
+    const credential = resolveAccountCredentialInput(input);
 
     if (existing) {
       database.prepare(`
         update device_connection
         set display_name = ?,
             status = ?,
+            setup_phase = ?,
+            setup_expires_at = ?,
             scopes_json = ?,
             metadata_json = ?,
             connected_at = ?,
@@ -369,6 +699,8 @@ export function upsertAccount(
       `).run(
         input.displayName ?? null,
         status,
+        setupPhase,
+        setupExpiresAt,
         scopesJson,
         metadataJson,
         input.connectedAt,
@@ -378,15 +710,21 @@ export function upsertAccount(
 
       database.prepare(`
         update device_credential_state
-        set access_token_encrypted = ?,
+        set credential_kind = ?,
+            provider_config_key = ?,
+            access_token_encrypted = ?,
             refresh_token_encrypted = ?,
             access_token_expires_at = ?,
+            credential_metadata_json = ?,
             updated_at = ?
         where account_id = ?
       `).run(
-        input.tokens.accessTokenEncrypted,
-        input.tokens.refreshTokenEncrypted ?? null,
-        input.tokens.accessTokenExpiresAt ?? null,
+        credential.credentialKind,
+        credential.providerConfigKey,
+        credential.accessTokenEncrypted,
+        credential.refreshTokenEncrypted,
+        credential.accessTokenExpiresAt,
+        credential.credentialMetadataJson,
         now,
         existing.id,
       );
@@ -420,18 +758,22 @@ export function upsertAccount(
         external_account_id,
         display_name,
         status,
+        setup_phase,
+        setup_expires_at,
         scopes_json,
         metadata_json,
         connected_at,
         created_at,
         updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.provider,
       input.externalAccountId,
       input.displayName ?? null,
       status,
+      setupPhase,
+      setupExpiresAt,
       scopesJson,
       metadataJson,
       input.connectedAt,
@@ -442,17 +784,23 @@ export function upsertAccount(
     database.prepare(`
       insert into device_credential_state (
         account_id,
+        credential_kind,
+        provider_config_key,
         access_token_encrypted,
         refresh_token_encrypted,
         access_token_expires_at,
+        credential_metadata_json,
         created_at,
         updated_at
-      ) values (?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
-      input.tokens.accessTokenEncrypted,
-      input.tokens.refreshTokenEncrypted ?? null,
-      input.tokens.accessTokenExpiresAt ?? null,
+      credential.credentialKind,
+      credential.providerConfigKey,
+      credential.accessTokenEncrypted,
+      credential.refreshTokenEncrypted,
+      credential.accessTokenExpiresAt,
+      credential.credentialMetadataJson,
       now,
       now,
     );
@@ -500,7 +848,7 @@ export function patchAccount(
     }
 
     const now = toIsoTimestamp(new Date());
-    const metadata = sanitizeStoredDeviceSyncMetadata(
+    const metadata = sanitizeStoredDeviceSyncAccountMetadata(
       patch.metadata ? { ...existing.metadata, ...patch.metadata } : existing.metadata,
     );
     const nextReconcileAt = Object.prototype.hasOwnProperty.call(patch, "nextReconcileAt")
@@ -512,11 +860,19 @@ export function patchAccount(
     const scopes = Object.prototype.hasOwnProperty.call(patch, "scopes")
       ? patch.scopes ?? []
       : existing.scopes;
+    const setupPhase = Object.prototype.hasOwnProperty.call(patch, "setupPhase")
+      ? patch.setupPhase ?? null
+      : existing.setupPhase ?? null;
+    const setupExpiresAt = Object.prototype.hasOwnProperty.call(patch, "setupExpiresAt")
+      ? patch.setupExpiresAt ?? null
+      : existing.setupExpiresAt ?? null;
 
     database.prepare(`
       update device_connection
       set display_name = ?,
           status = ?,
+          setup_phase = ?,
+          setup_expires_at = ?,
           scopes_json = ?,
           metadata_json = ?,
           updated_at = ?
@@ -524,6 +880,8 @@ export function patchAccount(
     `).run(
       displayName,
       patch.status ?? existing.status,
+      setupPhase,
+      setupExpiresAt,
       stringifyJson(scopes),
       stringifyJson(metadata),
       now,
@@ -556,7 +914,7 @@ export function patchAccount(
 export function updateAccountTokens(
   database: DatabaseSync,
   accountId: string,
-  tokens: ProviderAuthTokens & { accessTokenEncrypted: string; refreshTokenEncrypted?: string | null },
+  tokens: EncryptedProviderAuthTokens,
   disconnectGeneration?: number,
 ): StoredDeviceSyncAccount | null {
   return withImmediateTransaction(database, () => {
@@ -574,6 +932,7 @@ export function updateAccountTokens(
           access_token_expires_at = ?,
           updated_at = ?
       where account_id = ?
+        and credential_kind = 'oauth_tokens'
         and (? is null or exists (
           select 1
           from device_connection
@@ -619,6 +978,8 @@ export function disconnectAccount(
     database.prepare(`
       update device_connection
       set status = 'disconnected',
+          setup_phase = null,
+          setup_expires_at = null,
           disconnect_generation = disconnect_generation + 1,
           updated_at = ?
       where id = ?
@@ -626,7 +987,10 @@ export function disconnectAccount(
 
     database.prepare(`
       update device_credential_state
-      set access_token_encrypted = '',
+      set access_token_encrypted = case
+            when credential_kind = 'oauth_tokens' then ''
+            else null
+          end,
           refresh_token_encrypted = null,
           access_token_expires_at = null,
           updated_at = ?

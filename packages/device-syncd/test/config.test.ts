@@ -121,7 +121,7 @@ test("createConfiguredDeviceSyncRegistry assembles the configured providers in d
 });
 
 test("configuredDeviceSyncProviderKeys follow the shared descriptor order", () => {
-  assert.deepEqual(configuredDeviceSyncProviderKeys, ["garmin", "oura", "whoop", "strava"]);
+  assert.deepEqual(configuredDeviceSyncProviderKeys, ["garmin", "junction", "oura", "whoop", "strava"]);
 });
 
 test("shared provider-config helpers preserve descriptor order and report presence", () => {
@@ -141,6 +141,8 @@ test("shared provider runtime env key lists stay aligned with the configured pro
   assert.deepEqual(deviceSyncProviderRuntimeSecretEnvKeys, [
     "GARMIN_CLIENT_ID",
     "GARMIN_CLIENT_SECRET",
+    "JUNCTION_API_KEY",
+    "JUNCTION_CLIENT_USER_ID_SECRET",
     "OURA_CLIENT_ID",
     "OURA_CLIENT_SECRET",
     "WHOOP_CLIENT_ID",
@@ -156,6 +158,19 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "GARMIN_RECONCILE_INTERVAL_MS",
     "GARMIN_REQUEST_TIMEOUT_MS",
     "GARMIN_TOKEN_BASE_URL",
+    "JUNCTION_BASE_URL",
+    "JUNCTION_ENV",
+    "JUNCTION_GLOBAL_CONCURRENCY",
+    "JUNCTION_PER_ACCOUNT_CONCURRENCY",
+    "JUNCTION_PROVIDER_FILTER",
+    "JUNCTION_RECONCILE_DAYS",
+    "JUNCTION_RECONCILE_INTERVAL_MS",
+    "JUNCTION_REGION",
+    "JUNCTION_REQUEST_TIMEOUT_MS",
+    "JUNCTION_SUMMARY_BACKFILL_DAYS",
+    "JUNCTION_SUMMARY_RESOURCES",
+    "JUNCTION_TIMESERIES_BACKFILL_DAYS",
+    "JUNCTION_TIMESERIES_RESOURCES",
     "OURA_API_BASE_URL",
     "OURA_AUTH_BASE_URL",
     "OURA_BACKFILL_DAYS",

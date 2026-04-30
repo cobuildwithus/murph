@@ -136,6 +136,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceConnectionCredentialsMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050100_device_connection_credentials_setup/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const deviceConnectionSourcesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050101_device_connection_sources/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -146,6 +160,8 @@ describe("hosted Prisma baseline migration", () => {
       "2026042700_hosted_runtime_hard_cut",
       "20260428010000_drop_hosted_share_tables",
       "20260429020000_hosted_legal_consent",
+      "2026050100_device_connection_credentials_setup",
+      "2026050101_device_connection_sources",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -204,6 +220,43 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedLegalConsentMigrationSql).toContain(
       'ALTER TABLE "hosted_consent_event" ADD CONSTRAINT "hosted_consent_event_member_id_fkey"',
+    );
+    expect(deviceConnectionCredentialsMigrationSql).toContain('"credential_kind" TEXT NOT NULL DEFAULT \'oauth_tokens\'');
+    expect(deviceConnectionCredentialsMigrationSql).toContain('"provider_config_key" TEXT');
+    expect(deviceConnectionCredentialsMigrationSql).toContain('"credential_metadata_json" JSONB');
+    expect(deviceConnectionCredentialsMigrationSql).toContain('"setup_phase" TEXT');
+    expect(deviceConnectionCredentialsMigrationSql).toContain('"setup_expires_at" TIMESTAMP(3)');
+    expect(deviceConnectionCredentialsMigrationSql).toContain(
+      'CONSTRAINT "device_connection_credential_kind_check"',
+    );
+    expect(deviceConnectionCredentialsMigrationSql).toContain(
+      'CONSTRAINT "device_connection_setup_phase_check"',
+    );
+    expect(deviceConnectionCredentialsMigrationSql).toContain(
+      'CONSTRAINT "device_connection_credential_material_check"',
+    );
+    expect(deviceConnectionCredentialsMigrationSql).toContain(
+      'CREATE INDEX "device_connection_setup_phase_setup_expires_at_idx"',
+    );
+    expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
+    expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
+    expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');
+    expect(deviceConnectionSourcesMigrationSql).toContain('"resource_availability_summary_json" JSONB');
+    expect(deviceConnectionSourcesMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "device_connection_source_connection_id_source_instance_key_key"',
+    );
+    expect(deviceConnectionSourcesMigrationSql).toContain(
+      'CREATE INDEX "device_connection_source_list_idx"',
+    );
+    expect(deviceConnectionSourcesMigrationSql).toContain(
+      'CHECK ("status" IN (\'connected\', \'unavailable\', \'error\', \'disconnected\'))',
+    );
+    expect(deviceConnectionSourcesMigrationSql).toContain(
+      'CONSTRAINT "device_connection_source_connection_id_fkey"',
+    );
+    expect(deviceConnectionSourcesMigrationSql).toContain("ON DELETE CASCADE");
+    expect(deviceConnectionSourcesMigrationSql).toContain(
+      'CONSTRAINT "device_connection_source_resource_summary_shape_check"',
     );
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');

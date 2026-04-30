@@ -23,6 +23,7 @@ import {
   getConfiguredDeviceSyncProviderJobDefinition as rootGetConfiguredDeviceSyncProviderJobDefinition,
   resolveConfiguredDeviceSyncProviderManifest as rootResolveConfiguredDeviceSyncProviderManifest,
 } from "@murphai/device-syncd";
+import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 
 describe("deviceSyncProviderManifests", () => {
   it("keeps provider ids, descriptors, importers, and capabilities aligned", () => {
@@ -33,7 +34,11 @@ describe("deviceSyncProviderManifests", () => {
     for (const manifest of deviceSyncProviderManifests) {
       expect(manifest.descriptor.provider).toBe(manifest.provider);
       expect(manifest.importer.provider).toBe(manifest.provider);
-      expect(manifest.capabilities.auth).toBe("oauth2");
+      expect(manifest.capabilities.auth).toBe(
+        resolveDeviceProviderConnectionDescriptor(manifest.descriptor).kind === "oauth2"
+          ? "oauth2"
+          : null,
+      );
       expect(manifest.capabilities.scheduledPoll).toBe(
         manifest.descriptor.transportModes.includes("scheduled_poll"),
       );
@@ -53,12 +58,46 @@ describe("deviceSyncProviderManifests", () => {
     }
   });
 
+  it("pins Junction to provider_config credentials and validates its API key and base URL inputs", () => {
+    const junctionManifest = getConfiguredDeviceSyncProviderManifest("junction");
+
+    expect(junctionManifest.credentialPolicy).toEqual({
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    });
+
+    expect(() =>
+      junctionManifest.readConfig({
+        JUNCTION_API_KEY: "pk_us_test_manifest",
+        JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+        JUNCTION_ENV: "sandbox",
+        JUNCTION_REGION: "us",
+      }),
+    ).toThrow(/JUNCTION_API_KEY must start with sk_us_/u);
+
+    expect(() =>
+      junctionManifest.readConfig({
+        JUNCTION_API_KEY: "sk_us_test_manifest",
+        JUNCTION_BASE_URL: "https://api.sandbox.eu.junction.com/",
+        JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+        JUNCTION_ENV: "sandbox",
+        JUNCTION_REGION: "us",
+      }),
+    ).toThrow(/JUNCTION_BASE_URL must be https:\/\/api\.sandbox\.us\.junction\.com\/ for sandbox\/us\./u);
+  });
+
   it("declares provider-owned job definitions for every built-in provider job kind", () => {
     expect(getConfiguredDeviceSyncProviderJobDefinition("garmin", "backfill")).toMatchObject({
       payload: {
         dataType: { kind: "string" },
         dataTypes: { kind: "string[]" },
         includeProfile: { kind: "boolean", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
+      payload: {
+        windowEnd: { kind: "string", includeInHostedHint: true },
+        windowStart: { kind: "string", includeInHostedHint: true },
       },
     });
     expect(getConfiguredDeviceSyncProviderJobDefinition("oura", "resource")).toMatchObject({
@@ -94,6 +133,13 @@ describe("deviceSyncProviderManifests", () => {
     const catalog = listDeviceSyncProviderCatalog();
 
     expect(catalog.map((provider) => provider.provider)).toEqual(configuredDeviceSyncProviderKeys);
+    for (const manifest of deviceSyncProviderManifests) {
+      const connection = resolveDeviceProviderConnectionDescriptor(manifest.descriptor);
+      expect(catalog.find((provider) => provider.provider === manifest.provider)).toMatchObject({
+        callbackPath: connection.callbackPath ?? null,
+        defaultScopes: [...(connection.defaultScopes ?? [])],
+      });
+    }
     expect(catalog.find((provider) => provider.provider === "whoop")).toMatchObject({
       displayName: "WHOOP",
       callbackPath: "/oauth/whoop/callback",
@@ -106,18 +152,22 @@ describe("deviceSyncProviderManifests", () => {
   it("reads configured providers and creates runtime providers through the manifest registry", () => {
     const configs = readConfiguredDeviceSyncProviderConfigs({
       GARMIN_CLIENT_ID: "garmin-client-id",
-      GARMIN_CLIENT_SECRET: "garmin-client-secret",
+      GARMIN_CLIENT_SECRET: "<REDACTED_GARMIN_CLIENT_SECRET>",
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
       STRAVA_CLIENT_ID: "strava-client-id",
-      STRAVA_CLIENT_SECRET: "strava-client-secret",
+      STRAVA_CLIENT_SECRET: "<REDACTED_STRAVA_CLIENT_SECRET>",
       STRAVA_SCOPES: "activity:read, profile:read_all",
     });
 
-    expect(Object.keys(configs).sort()).toEqual(["garmin", "strava"]);
+    expect(Object.keys(configs).sort()).toEqual(["garmin", "junction", "strava"]);
 
     const providers = createConfiguredDeviceSyncProvidersFromConfigs(configs);
 
-    expect(providers.map((provider) => provider.provider)).toEqual(["garmin", "strava"]);
-    expect(providers[1]?.descriptor.oauth?.defaultScopes).toEqual([
+    expect(providers.map((provider) => provider.provider)).toEqual(["garmin", "junction", "strava"]);
+    expect(providers[2]?.descriptor.oauth?.defaultScopes).toEqual([
       "activity:read",
       "profile:read_all",
     ]);
@@ -130,30 +180,46 @@ describe("deviceSyncProviderManifests", () => {
         authBaseUrl: "https://connect.garmin.com",
         backfillDays: 14,
         clientId: "garmin-id",
-        clientSecret: "garmin-secret",
+        clientSecret: "<REDACTED_GARMIN_CLIENT_SECRET>",
         reconcileDays: 7,
         reconcileIntervalMs: 3_600_000,
         requestTimeoutMs: 15_000,
         tokenBaseUrl: "https://connectapi.garmin.com",
+      },
+      junction: {
+        apiKey: "sk_us_test_runtime",
+        clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+        environment: "sandbox",
+        region: "us",
+        providerFilter: ["oura", "withings"],
+        summaryResources: ["profile", "activity"],
+        timeseriesResources: ["steps", "heartrate"],
+        summaryBackfillDays: 90,
+        timeseriesBackfillDays: 14,
+        reconcileDays: 7,
+        reconcileIntervalMs: 3_600_000,
+        requestTimeoutMs: 10_000,
+        perAccountConcurrency: 1,
+        globalConcurrency: 4,
       },
       oura: {
         apiBaseUrl: "https://api.oura.com",
         authBaseUrl: "https://cloud.oura.com",
         backfillDays: 30,
         clientId: "oura-id",
-        clientSecret: "oura-secret",
+        clientSecret: "<REDACTED_OURA_CLIENT_SECRET>",
         reconcileDays: 14,
         reconcileIntervalMs: 7_200_000,
         requestTimeoutMs: 10_000,
         scopes: ["personal", "daily"],
         webhookTimestampToleranceMs: 300_000,
-        webhookVerificationToken: "provider-owned-secret",
+        webhookVerificationToken: "<REDACTED_WEBHOOK_SECRET>",
       },
       whoop: {
         backfillDays: 21,
         baseUrl: "https://api.prod.whoop.com",
         clientId: "whoop-id",
-        clientSecret: "whoop-secret",
+        clientSecret: "<REDACTED_WHOOP_CLIENT_SECRET>",
         reconcileDays: 14,
         reconcileIntervalMs: 7_200_000,
         requestTimeoutMs: 10_000,
@@ -165,17 +231,22 @@ describe("deviceSyncProviderManifests", () => {
         authBaseUrl: "https://www.strava.com",
         backfillDays: 30,
         clientId: "strava-id",
-        clientSecret: "strava-secret",
+        clientSecret: "<REDACTED_STRAVA_CLIENT_SECRET>",
         reconcileDays: 7,
         reconcileIntervalMs: 3_600_000,
         requestTimeoutMs: 10_000,
         scopes: ["activity:read"],
-        webhookVerifyToken: "provider-owned-secret",
+        webhookVerifyToken: "<REDACTED_WEBHOOK_SECRET>",
       },
     });
 
     expect(cloned.oura).not.toHaveProperty("webhookVerificationToken");
     expect(cloned.strava).not.toHaveProperty("webhookVerifyToken");
+    expect(cloned.junction).toMatchObject({
+      environment: "sandbox",
+      region: "us",
+      providerFilter: ["oura", "withings"],
+    });
 
     expect(
       parseSerializableConfiguredDeviceSyncProviderConfigs(
@@ -191,8 +262,8 @@ describe("deviceSyncProviderManifests", () => {
         {
           oura: {
             clientId: "oura-id",
-            clientSecret: "oura-secret",
-            webhookVerificationToken: "provider-owned-secret",
+            clientSecret: "<REDACTED_OURA_CLIENT_SECRET>",
+            webhookVerificationToken: "<REDACTED_WEBHOOK_SECRET>",
           },
         },
         "runtime.providerConfigs",
@@ -215,6 +286,20 @@ describe("deviceSyncProviderManifests", () => {
       includeProfile: true,
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-04-01T00:00:00.000Z",
+    });
+
+    expect(
+      shapeHostedDeviceSyncJobHintPayload("junction", {
+        kind: "backfill",
+        payload: {
+          resources: ["profile"],
+          windowEnd: "2026-04-22T00:00:00.000Z",
+          windowStart: "2026-01-22T00:00:00.000Z",
+        },
+      }),
+    ).toEqual({
+      windowEnd: "2026-04-22T00:00:00.000Z",
+      windowStart: "2026-01-22T00:00:00.000Z",
     });
 
     expect(

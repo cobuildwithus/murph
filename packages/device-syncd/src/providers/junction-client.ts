@@ -1,0 +1,517 @@
+import { setTimeout as delay } from "node:timers/promises";
+
+import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
+import { normalizeString } from "../shared.ts";
+
+export type JunctionEnvironment = "sandbox" | "production";
+export type JunctionRegion = "us" | "eu";
+
+export interface JunctionClientConfig {
+  apiKey: string;
+  environment: JunctionEnvironment;
+  region: JunctionRegion;
+  baseUrl?: string;
+  requestTimeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+export interface JunctionUser {
+  userId: string;
+}
+
+export interface JunctionLinkToken {
+  linkWebUrl: string;
+}
+
+export interface JunctionProviderConnection {
+  slug: string;
+  name: string | null;
+  status: string;
+  resourceAvailability: Record<string, unknown>;
+}
+
+export interface JunctionWindowInput {
+  resource: string;
+  userId: string;
+  windowStart: string;
+  windowEnd: string;
+}
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+const MAX_GET_ATTEMPTS = 3;
+const DEFAULT_RETRY_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 5_000;
+const MAX_COLLECTION_PAGES = 100;
+const MAX_COLLECTION_RECORDS = 25_000;
+
+const JUNCTION_ENVIRONMENT_MATRIX: Readonly<Record<
+  `${JunctionEnvironment}:${JunctionRegion}`,
+  { apiKeyPrefix: string; baseUrl: string }
+>> = Object.freeze({
+  "production:us": {
+    apiKeyPrefix: "pk_us_",
+    baseUrl: "https://api.us.junction.com/",
+  },
+  "production:eu": {
+    apiKeyPrefix: "pk_eu_",
+    baseUrl: "https://api.eu.junction.com/",
+  },
+  "sandbox:us": {
+    apiKeyPrefix: "sk_us_",
+    baseUrl: "https://api.sandbox.us.junction.com/",
+  },
+  "sandbox:eu": {
+    apiKeyPrefix: "sk_eu_",
+    baseUrl: "https://api.sandbox.eu.junction.com/",
+  },
+});
+
+export function resolveJunctionBaseUrl(config: Pick<JunctionClientConfig, "baseUrl" | "environment" | "region">): string {
+  const expected = requireJunctionEnvironmentProfile(config.environment, config.region);
+  const baseUrl = normalizeString(config.baseUrl) ?? expected.baseUrl;
+  return normalizeJunctionBaseUrl(baseUrl);
+}
+
+export function assertValidJunctionClientConfig(config: JunctionClientConfig): void {
+  const profile = requireJunctionEnvironmentProfile(config.environment, config.region);
+  const apiKey = normalizeString(config.apiKey);
+
+  if (!apiKey) {
+    throw new TypeError("JUNCTION_API_KEY must be a non-empty string.");
+  }
+
+  if (!apiKey.startsWith(profile.apiKeyPrefix)) {
+    throw new TypeError(
+      `JUNCTION_API_KEY must start with ${profile.apiKeyPrefix} for ${config.environment}/${config.region}.`,
+    );
+  }
+
+  const baseUrl = resolveJunctionBaseUrl(config);
+  const expectedBaseUrl = normalizeJunctionBaseUrl(profile.baseUrl);
+  if (baseUrl !== expectedBaseUrl) {
+    throw new TypeError(
+      `JUNCTION_BASE_URL must be ${expectedBaseUrl} for ${config.environment}/${config.region}.`,
+    );
+  }
+}
+
+export class JunctionClient {
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly requestTimeoutMs: number;
+
+  constructor(config: JunctionClientConfig) {
+    assertValidJunctionClientConfig(config);
+    this.apiKey = config.apiKey;
+    this.baseUrl = resolveJunctionBaseUrl(config);
+    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
+  async resolveUser(clientUserId: string): Promise<JunctionUser | null> {
+    const payload = await this.requestJson<Record<string, unknown> | null>(
+      "GET",
+      `/v2/user/resolve/${encodeURIComponent(clientUserId)}`,
+      undefined,
+      { optional404: true },
+    );
+
+    return payload ? parseJunctionUser(payload, "Junction resolve user response") : null;
+  }
+
+  async createUser(clientUserId: string): Promise<JunctionUser> {
+    const payload = await this.requestJson<Record<string, unknown>>("POST", "/v2/user/", {
+      client_user_id: clientUserId,
+    });
+    return parseJunctionUser(payload, "Junction create user response");
+  }
+
+  async createOrResolveUser(clientUserId: string): Promise<JunctionUser> {
+    const resolved = await this.resolveUser(clientUserId);
+    if (resolved) {
+      return resolved;
+    }
+
+    try {
+      return await this.createUser(clientUserId);
+    } catch (error) {
+      const retryResolved = await this.resolveUser(clientUserId);
+      if (retryResolved) {
+        return retryResolved;
+      }
+
+      throw error;
+    }
+  }
+
+  async createLinkToken(input: {
+    userId: string;
+    callbackUrl: string;
+    providerFilter?: readonly string[];
+  }): Promise<JunctionLinkToken> {
+    const body: Record<string, unknown> = {
+      user_id: input.userId,
+      redirect_url: input.callbackUrl,
+    };
+
+    if (input.providerFilter && input.providerFilter.length > 0) {
+      body.filter_on_providers = [...input.providerFilter];
+    }
+
+    const payload = await this.requestJson<Record<string, unknown>>("POST", "/v2/link/token", body);
+    const linkWebUrl = normalizeString(payload.link_web_url) ?? normalizeString(payload.linkWebUrl);
+
+    if (!linkWebUrl) {
+      throw deviceSyncError({
+        code: "JUNCTION_LINK_TOKEN_INVALID",
+        message: "Junction Link token response did not include link_web_url.",
+        retryable: false,
+        httpStatus: 502,
+      });
+    }
+
+    assertValidJunctionLinkWebUrl(linkWebUrl);
+    return { linkWebUrl };
+  }
+
+  async listUserProviders(userId: string): Promise<JunctionProviderConnection[]> {
+    const payload = await this.requestJson<unknown>(
+      "GET",
+      `/v2/user/providers/${encodeURIComponent(userId)}`,
+    );
+    return parseJunctionProviders(payload);
+  }
+
+  async listSummary(input: JunctionWindowInput): Promise<unknown[]> {
+    return this.fetchWindowedCollection(
+      `/v2/summary/${encodeURIComponent(input.resource)}/${encodeURIComponent(input.userId)}`,
+      input,
+    );
+  }
+
+  async listTimeseries(input: JunctionWindowInput): Promise<unknown[]> {
+    return this.fetchWindowedCollection(
+      `/v2/timeseries/${encodeURIComponent(input.userId)}/${encodeURIComponent(input.resource)}`,
+      input,
+    );
+  }
+
+  private async fetchWindowedCollection(
+    path: string,
+    input: JunctionWindowInput,
+  ): Promise<unknown[]> {
+    const records: unknown[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+
+    do {
+      if (pages >= MAX_COLLECTION_PAGES) {
+        throw deviceSyncError({
+          code: "JUNCTION_API_PAGINATION_LIMIT",
+          message: `Junction ${input.resource} response exceeded the configured page limit.`,
+          retryable: true,
+          httpStatus: 502,
+        });
+      }
+
+      const search = new URLSearchParams({
+        start_date: toDateParameter(input.windowStart),
+        end_date: toDateParameter(input.windowEnd),
+      });
+
+      if (cursor) {
+        search.set("cursor", cursor);
+      }
+
+      const payload = await this.requestJson<unknown>("GET", `${path}?${search.toString()}`);
+      records.push(...extractCollectionRecords(payload, input.resource));
+      pages += 1;
+
+      if (records.length > MAX_COLLECTION_RECORDS) {
+        throw deviceSyncError({
+          code: "JUNCTION_API_RECORD_LIMIT",
+          message: `Junction ${input.resource} response exceeded the configured record limit.`,
+          retryable: true,
+          httpStatus: 502,
+        });
+      }
+
+      cursor = extractNextCursor(payload);
+    } while (cursor);
+
+    return records;
+  }
+
+  private async requestJson<T>(
+    method: "GET" | "POST",
+    path: string,
+    body?: Record<string, unknown>,
+    options: { optional404?: boolean } = {},
+  ): Promise<T> {
+    const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+
+      try {
+        const response = await this.fetchImpl(new URL(path.replace(/^\/+/u, ""), this.baseUrl), {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            "x-vital-api-key": this.apiKey,
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+
+        if (options.optional404 && response.status === 404) {
+          return null as T;
+        }
+
+        const text = await response.text();
+        if (!response.ok) {
+          const retryable = method === "GET" && (response.status === 429 || response.status >= 500);
+          if (retryable && attempt < attempts) {
+            await delay(resolveRetryDelayMs(response, attempt));
+            continue;
+          }
+
+          throw deviceSyncError({
+            code: "JUNCTION_API_REQUEST_FAILED",
+            message: `Junction API request failed with status ${response.status}.`,
+            retryable,
+            httpStatus: response.status >= 400 && response.status < 600 ? 502 : undefined,
+            details: {
+              status: response.status,
+            },
+          });
+        }
+
+        return parseJsonResponse<T>(text);
+      } catch (error) {
+        lastError = error;
+
+        if (isDeviceSyncError(error) && !error.retryable) {
+          throw error;
+        }
+
+        if (attempt >= attempts || isDeviceSyncAbortError(error)) {
+          break;
+        }
+
+        await delay(resolveRetryDelayMs(null, attempt));
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    throw deviceSyncError({
+      code: "JUNCTION_API_REQUEST_FAILED",
+      message: "Junction API request failed.",
+      retryable: method === "GET",
+      httpStatus: 502,
+      cause: lastError,
+    });
+  }
+}
+
+function requireJunctionEnvironmentProfile(environment: JunctionEnvironment, region: JunctionRegion) {
+  const profile = JUNCTION_ENVIRONMENT_MATRIX[`${environment}:${region}`];
+  if (!profile) {
+    throw new TypeError("Junction environment and region must be one of sandbox|production and us|eu.");
+  }
+
+  return profile;
+}
+
+function normalizeJunctionBaseUrl(value: string): string {
+  const url = new URL(value);
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function assertValidJunctionLinkWebUrl(value: string): void {
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch (error) {
+    throw deviceSyncError({
+      code: "JUNCTION_LINK_TOKEN_INVALID",
+      message: "Junction Link token response included an invalid link_web_url.",
+      retryable: false,
+      httpStatus: 502,
+      cause: error,
+    });
+  }
+
+  if (url.protocol !== "https:" || !url.hostname.endsWith(".junction.com")) {
+    throw deviceSyncError({
+      code: "JUNCTION_LINK_TOKEN_INVALID",
+      message: "Junction Link token response included an unexpected link_web_url host.",
+      retryable: false,
+      httpStatus: 502,
+    });
+  }
+}
+
+function parseJunctionUser(payload: Record<string, unknown>, label: string): JunctionUser {
+  const userId =
+    normalizeString(payload.user_id)
+    ?? normalizeString(payload.userId)
+    ?? normalizeString(payload.id);
+
+  if (!userId) {
+    throw deviceSyncError({
+      code: "JUNCTION_USER_RESPONSE_INVALID",
+      message: `${label} did not include a user_id.`,
+      retryable: false,
+      httpStatus: 502,
+    });
+  }
+
+  return { userId };
+}
+
+function parseJunctionProviders(payload: unknown): JunctionProviderConnection[] {
+  return extractCollectionRecords(payload)
+    .map(parseJunctionProviderConnection)
+    .filter((provider): provider is JunctionProviderConnection => Boolean(provider));
+}
+
+function parseJunctionProviderConnection(value: unknown): JunctionProviderConnection | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const slug =
+    normalizeSourceSlug(record.slug)
+    ?? normalizeSourceSlug(record.provider_slug)
+    ?? normalizeSourceSlug(record.provider);
+
+  if (!slug) {
+    return null;
+  }
+
+  return {
+    slug,
+    name: normalizeString(record.name) ?? normalizeString(record.display_name) ?? null,
+    status: normalizeString(record.status) ?? "unknown",
+    resourceAvailability: readResourceAvailability(record),
+  };
+}
+
+function readResourceAvailability(record: Record<string, unknown>): Record<string, unknown> {
+  const value = record.resource_availability ?? record.resourceAvailability;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function normalizeSourceSlug(value: unknown): string | null {
+  const normalized = normalizeString(value)?.toLowerCase().replace(/[^a-z0-9_-]+/gu, "_").replace(/^_+|_+$/gu, "");
+  return normalized || null;
+}
+
+function extractCollectionRecords(payload: unknown, resource?: string): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const record = payload as Record<string, unknown>;
+  const resourceRecords = resource ? record[resource] : undefined;
+  if (Array.isArray(resourceRecords)) {
+    return resourceRecords;
+  }
+
+  const candidates = [
+    record.providers,
+    record.data,
+    record.results,
+    record.items,
+    record.records,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return resource ? [record] : [];
+}
+
+function extractNextCursor(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  return (
+    normalizeString(record.next_cursor)
+    ?? normalizeString(record.nextCursor)
+    ?? normalizeString(record.cursor)
+    ?? normalizeString(record.next)
+    ?? null
+  );
+}
+
+function toDateParameter(timestamp: string): string {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function parseJsonResponse<T>(text: string): T {
+  if (!text.trim()) {
+    return null as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    throw deviceSyncError({
+      code: "JUNCTION_API_INVALID_JSON",
+      message: "Junction API response was not valid JSON.",
+      retryable: false,
+      httpStatus: 502,
+      cause: error,
+    });
+  }
+}
+
+function resolveRetryDelayMs(response: Response | null, attempt: number): number {
+  const retryAfter = response?.headers.get("retry-after");
+  const retryAfterMs = retryAfter ? parseRetryAfterMs(retryAfter) : null;
+  if (retryAfterMs !== null) {
+    return Math.min(retryAfterMs, MAX_RETRY_DELAY_MS);
+  }
+
+  return Math.min(DEFAULT_RETRY_DELAY_MS * 2 ** Math.max(attempt - 1, 0), MAX_RETRY_DELAY_MS);
+}
+
+function parseRetryAfterMs(value: string): number | null {
+  const seconds = Number.parseInt(value, 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.max(parsed - Date.now(), 0);
+}
+
+function isDeviceSyncAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}

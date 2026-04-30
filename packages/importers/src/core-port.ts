@@ -68,6 +68,22 @@ export interface DeviceExternalRefPayload {
   facet?: string;
 }
 
+export interface DeviceDataOrigin {
+  version: 1;
+  aggregatorProvider?: string;
+  sourceProviderSlug?: string;
+  sourceName?: string;
+  sourceType?: string;
+  sourceDeviceId?: string | null;
+  sourceAppId?: string | null;
+  sourceWorkoutId?: string | null;
+  observedAtRaw?: string;
+  timeZoneOffsetMinutes?: number | null;
+  timestampSemantics?: "utc" | "offset" | "floating" | "unknown";
+  originConfidence?: "high" | "medium" | "low" | "unknown";
+  normalizerVersion?: string;
+}
+
 export interface DeviceEventLinkPayload {
   type: string;
   targetId: string;
@@ -86,6 +102,7 @@ export interface DeviceEventPayload {
   links?: DeviceEventLinkPayload[];
   rawArtifactRoles?: string[];
   externalRef?: DeviceExternalRefPayload;
+  dataOrigin?: DeviceDataOrigin;
   fields?: Record<string, unknown>;
 }
 
@@ -108,6 +125,7 @@ export interface DeviceSamplePayload {
   quality?: string;
   unit: string;
   externalRef?: DeviceExternalRefPayload;
+  dataOrigin?: DeviceDataOrigin;
   sample: DeviceSampleValuePayload;
 }
 
@@ -125,6 +143,7 @@ export interface DeviceBatchImportPayload {
   accountId?: string;
   importedAt?: string;
   source?: string;
+  dataOrigin?: DeviceDataOrigin;
   events?: DeviceEventPayload[];
   samples?: DeviceSamplePayload[];
   rawArtifacts?: DeviceRawArtifactPayload[];

@@ -300,6 +300,78 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   close();
 });
 
+test("device sync job context lets providers update source projections", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-source-projection-context");
+  let listedInsideJob = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          const upserted = await context.upsertConnectionSource?.({
+            sourceInstanceKey: "oura",
+            sourceProviderSlug: "oura",
+            displayName: "Oura",
+            status: "connected",
+            resourceAvailabilitySummary: {
+              sleep: "available",
+            },
+            lastSeenAt: context.now,
+          });
+          assert.equal(upserted?.sourceProviderSlug, "oura");
+
+          const sources = await context.listConnectionSources?.({
+            sourceProviderSlug: "oura",
+          });
+          listedInsideJob = sources?.length ?? 0;
+          return {};
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "source-projection",
+    });
+
+    await service.runWorkerOnce();
+
+    const sources = store.listConnectionSources({ connectionId: connected.account.id });
+    assert.equal(listedInsideJob, 1);
+    assert.equal(sources.length, 1);
+    assert.deepEqual(sources[0], {
+      id: sources[0]?.id,
+      connectionId: connected.account.id,
+      sourceInstanceKey: "oura",
+      sourceProviderSlug: "oura",
+      displayName: "Oura",
+      status: "connected",
+      resourceAvailabilitySummary: {
+        sleep: "available",
+      },
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: sources[0]?.firstSeenAt,
+      lastSeenAt: sources[0]?.lastSeenAt,
+      createdAt: sources[0]?.createdAt,
+      updatedAt: sources[0]?.updatedAt,
+    });
+  } finally {
+    close();
+  }
+});
+
 test("device sync service keeps connection-established webhook admin upkeep best-effort", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-webhook-admin-upkeep");
   const warnEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
@@ -2536,6 +2608,8 @@ test("sqlite store splits connection, credential, and observation state into exp
     "external_account_id",
     "display_name",
     "status",
+    "setup_phase",
+    "setup_expires_at",
     "scopes_json",
     "disconnect_generation",
     "metadata_json",
@@ -2545,9 +2619,12 @@ test("sqlite store splits connection, credential, and observation state into exp
   ]);
   assert.deepEqual(readTableColumnsForTesting(store, "device_credential_state"), [
     "account_id",
+    "credential_kind",
+    "provider_config_key",
     "access_token_encrypted",
     "refresh_token_encrypted",
     "access_token_expires_at",
+    "credential_metadata_json",
     "created_at",
     "updated_at",
   ]);
@@ -2572,9 +2649,12 @@ test("sqlite store splits connection, credential, and observation state into exp
 
   const credentialRow = readCredentialStateForTesting(store, created.id);
   assert.ok(credentialRow);
+  assert.equal(credentialRow.credential_kind, "oauth_tokens");
+  assert.equal(credentialRow.provider_config_key, null);
   assert.equal(credentialRow.access_token_encrypted, "enc:split-access");
   assert.equal(credentialRow.refresh_token_encrypted, "enc:split-refresh");
   assert.equal(credentialRow.access_token_expires_at, "2026-03-28T00:00:00.000Z");
+  assert.equal(credentialRow.credential_metadata_json, "{}");
 
   const observationRow = readObservationStateForTesting(store, created.id);
   assert.ok(observationRow);

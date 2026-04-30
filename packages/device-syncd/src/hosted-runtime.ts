@@ -16,6 +16,19 @@ const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
 const HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN =
   /\b(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b(\s*[:=]\s*)((?:Bearer\s+)?[^\s,;]+)/giu;
+const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
+  "secret",
+  "authorization",
+  "authheader",
+  "bearer",
+  "token",
+  "apikey",
+  "clientsecret",
+  "hmac",
+  "webhook",
+] as const;
+const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN =
+  /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|hmac|webhook[_-]?secret)\b|\bBearer\s+\S+/iu;
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;
@@ -32,6 +45,56 @@ export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
   tokenVersion: number;
 }
 
+export type HostedExecutionDeviceSyncRuntimeCredentialSnapshot =
+  | {
+      kind: "oauth_tokens";
+      tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle;
+    }
+  | {
+      kind: "provider_config";
+      providerConfigKey: string;
+      credentialMetadata?: Record<string, unknown>;
+    }
+  | {
+      kind: "none";
+    };
+
+export type HostedExecutionDeviceSyncRuntimeCredentialUpdate =
+  | HostedExecutionDeviceSyncRuntimeCredentialSnapshot
+  | {
+      clearTokens: true;
+      kind: "oauth_tokens";
+    };
+
+export type HostedExecutionDeviceSyncRuntimeConnectionStatus =
+  | "active"
+  | "reauthorization_required"
+  | "disconnected";
+
+export type HostedExecutionDeviceSyncRuntimeSetupPhase =
+  | "pending_link"
+  | "link_returned"
+  | "source_confirmed"
+  | "failed";
+
+export function sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
+  const credentialMetadata: Record<string, unknown> = {};
+
+  for (const [key, entry] of Object.entries(sanitized)) {
+    if (
+      !isBlockedHostedDeviceSyncCredentialMetadataKey(key)
+      && !isBlockedHostedDeviceSyncCredentialMetadataValue(entry)
+    ) {
+      credentialMetadata[key] = entry;
+    }
+  }
+
+  return credentialMetadata;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
   accessTokenExpiresAt: string | null;
   connectedAt: string;
@@ -42,7 +105,9 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
   metadata: Record<string, unknown>;
   provider: string;
   scopes: string[];
-  status: "active" | "reauthorization_required" | "disconnected";
+  setupExpiresAt?: string | null;
+  setupPhase?: HostedExecutionDeviceSyncRuntimeSetupPhase | null;
+  status: HostedExecutionDeviceSyncRuntimeConnectionStatus;
   updatedAt?: string;
 }
 
@@ -58,12 +123,14 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
   connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
+  credential?: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
   localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
   connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
+  credential?: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
   localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }
@@ -84,7 +151,9 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionStateUpdate {
   displayName?: string | null;
   metadata?: Record<string, unknown>;
   scopes?: string[];
-  status?: "active" | "reauthorization_required" | "disconnected";
+  setupExpiresAt?: string | null;
+  setupPhase?: HostedExecutionDeviceSyncRuntimeSetupPhase | null;
+  status?: HostedExecutionDeviceSyncRuntimeConnectionStatus;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
@@ -101,6 +170,7 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
 export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   connectionId: string;
   connection?: HostedExecutionDeviceSyncRuntimeConnectionStateUpdate;
+  credential?: HostedExecutionDeviceSyncRuntimeCredentialUpdate;
   localState?: HostedExecutionDeviceSyncRuntimeLocalStateUpdate;
   observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
@@ -528,9 +598,9 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
       record.localState,
       `Hosted device-sync runtime snapshot response connections[${index}].localState`,
     ),
-    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-      record.tokenBundle,
-      `Hosted device-sync runtime snapshot response connections[${index}].tokenBundle`,
+    ...parseHostedExecutionDeviceSyncRuntimeCredentialSnapshotFields(
+      record,
+      `Hosted device-sync runtime snapshot response connections[${index}]`,
     ),
   };
 }
@@ -630,6 +700,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnection(
     ),
     provider: requireString(record.provider, `${label}.provider`),
     scopes: requireStringArray(record.scopes, `${label}.scopes`),
+    ...(record.setupExpiresAt === undefined
+      ? {}
+      : { setupExpiresAt: readNullableIsoTimestamp(record.setupExpiresAt, `${label}.setupExpiresAt`) }),
+    ...(record.setupPhase === undefined
+      ? {}
+      : { setupPhase: readNullableHostedExecutionDeviceSyncRuntimeSetupPhase(record.setupPhase, `${label}.setupPhase`) }),
     status,
     ...(record.updatedAt === undefined
       ? {}
@@ -687,6 +763,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
   const seed = record.seed === undefined
     ? undefined
     : parseHostedExecutionDeviceSyncRuntimeConnectionSeed(record.seed, index);
+  const credential = record.credential === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncRuntimeCredentialUpdate(
+        record.credential,
+        `Hosted device-sync runtime apply request updates[${index}].credential`,
+      );
   const tokenBundle = record.tokenBundle === undefined
     ? undefined
     : parseHostedExecutionDeviceSyncRuntimeTokenBundle(
@@ -694,13 +776,21 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
         `Hosted device-sync runtime apply request updates[${index}].tokenBundle`,
       );
 
+  if (credential !== undefined && tokenBundle !== undefined) {
+    throw new TypeError(
+      `Hosted device-sync runtime apply request updates[${index}] must not include both credential and tokenBundle.`,
+    );
+  }
+
   assertHostedExecutionDeviceSyncRuntimeMutationFences({
     connection: connection !== undefined || seed !== undefined,
+    credential,
     index,
     localState: localState !== undefined || seed !== undefined,
     observedTokenVersion,
     observedUpdatedAt,
-    tokenBundle: tokenBundle !== undefined || seed !== undefined,
+    seed,
+    tokenBundle: tokenBundle !== undefined,
   });
 
   return {
@@ -709,6 +799,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
       `Hosted device-sync runtime apply request updates[${index}].connectionId`,
     ),
     ...(connection === undefined ? {} : { connection }),
+    ...(credential === undefined ? {} : { credential }),
     ...(localState === undefined ? {} : { localState }),
     ...(observedUpdatedAt === undefined ? {} : { observedUpdatedAt }),
     ...(observedTokenVersion === undefined ? {} : { observedTokenVersion }),
@@ -719,10 +810,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
 
 function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {
   connection: boolean;
+  credential: HostedExecutionDeviceSyncRuntimeCredentialUpdate | undefined;
   index: number;
   localState: boolean;
   observedTokenVersion: number | null | undefined;
   observedUpdatedAt: string | null | undefined;
+  seed: HostedExecutionDeviceSyncRuntimeConnectionSeed | undefined;
   tokenBundle: boolean;
 }): void {
   if ((input.connection || input.localState) && input.observedUpdatedAt === undefined) {
@@ -731,9 +824,13 @@ function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {
     );
   }
 
-  if (input.tokenBundle && input.observedTokenVersion === undefined) {
+  const tokenMutationRequiresFence = input.tokenBundle
+    || hostedRuntimeCredentialUpdateRequiresTokenFence(input.credential)
+    || hostedRuntimeSeedRequiresTokenFence(input.seed);
+
+  if (tokenMutationRequiresFence && input.observedTokenVersion === undefined) {
     throw new TypeError(
-      `Hosted device-sync runtime apply request updates[${input.index}].observedTokenVersion is required when tokenBundle mutations are present.`,
+      `Hosted device-sync runtime apply request updates[${input.index}].observedTokenVersion is required when credential or tokenBundle mutations are present.`,
     );
   }
 }
@@ -743,6 +840,10 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
   index: number,
 ): HostedExecutionDeviceSyncRuntimeConnectionSeed {
   const record = requireObject(value, `Hosted device-sync runtime apply request updates[${index}].seed`);
+  const fields = parseHostedExecutionDeviceSyncRuntimeCredentialSnapshotFields(
+    record,
+    `Hosted device-sync runtime apply request updates[${index}].seed`,
+  );
 
   return {
     connection: parseHostedExecutionDeviceSyncRuntimeConnection(
@@ -753,10 +854,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
       record.localState,
       `Hosted device-sync runtime apply request updates[${index}].seed.localState`,
     ),
-    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-      record.tokenBundle,
-      `Hosted device-sync runtime apply request updates[${index}].seed.tokenBundle`,
-    ),
+    ...fields,
   };
 }
 
@@ -785,6 +883,18 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
     next.scopes = requireStringArray(
       record.scopes,
       `Hosted device-sync runtime apply request updates[${index}].connection.scopes`,
+    );
+  }
+  if (record.setupExpiresAt !== undefined) {
+    next.setupExpiresAt = readNullableIsoTimestamp(
+      record.setupExpiresAt,
+      `Hosted device-sync runtime apply request updates[${index}].connection.setupExpiresAt`,
+    );
+  }
+  if (record.setupPhase !== undefined) {
+    next.setupPhase = readNullableHostedExecutionDeviceSyncRuntimeSetupPhase(
+      record.setupPhase,
+      `Hosted device-sync runtime apply request updates[${index}].connection.setupPhase`,
     );
   }
   if (record.status !== undefined) {
@@ -851,6 +961,202 @@ function parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(
   }
 
   return next;
+}
+
+function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshotFields(
+  record: Record<string, unknown>,
+  label: string,
+): Pick<HostedExecutionDeviceSyncRuntimeConnectionSnapshot, "credential" | "tokenBundle"> {
+  const hasCredential = record.credential !== undefined;
+  const hasTokenBundle = record.tokenBundle !== undefined;
+
+  if (hasCredential) {
+    const credential = parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
+      record.credential,
+      `${label}.credential`,
+    );
+    const tokenBundle = hasTokenBundle
+      ? parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+          record.tokenBundle,
+          `${label}.tokenBundle`,
+        )
+      : credential.kind === "oauth_tokens"
+        ? credential.tokenBundle
+        : null;
+    const expectedTokenBundle = credential.kind === "oauth_tokens"
+      ? credential.tokenBundle
+      : null;
+
+    if (!equalHostedExecutionDeviceSyncRuntimeTokenBundles(tokenBundle, expectedTokenBundle)) {
+      throw new TypeError(`${label}.tokenBundle must match credential.`);
+    }
+
+    return {
+      credential,
+      tokenBundle,
+    };
+  }
+
+  if (hasTokenBundle) {
+    return {
+      tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+        record.tokenBundle,
+        `${label}.tokenBundle`,
+      ),
+    };
+  }
+
+  throw new TypeError(`${label}.credential is required.`);
+}
+
+function equalHostedExecutionDeviceSyncRuntimeTokenBundles(
+  left: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
+  right: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
+): boolean {
+  if (left === null || right === null) {
+    return left === right;
+  }
+
+  return left.accessToken === right.accessToken
+    && left.accessTokenExpiresAt === right.accessTokenExpiresAt
+    && left.keyVersion === right.keyVersion
+    && left.refreshToken === right.refreshToken
+    && left.tokenVersion === right.tokenVersion;
+}
+
+function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeCredentialSnapshot {
+  const record = requireObject(value, label);
+  const kind = requireString(record.kind, `${label}.kind`);
+
+  switch (kind) {
+    case "oauth_tokens":
+      assertHostedExecutionCredentialFields(record, label, ["kind", "tokenBundle"]);
+      return {
+        kind,
+        tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+          record.tokenBundle,
+          `${label}.tokenBundle`,
+        ) ?? rejectNullHostedExecutionCredentialTokenBundle(`${label}.tokenBundle`),
+      };
+    case "provider_config": {
+      assertHostedExecutionCredentialFields(record, label, [
+        "credentialMetadata",
+        "kind",
+        "providerConfigKey",
+      ]);
+      const credentialMetadata = parseHostedExecutionDeviceSyncCredentialMetadata(
+        record.credentialMetadata,
+        `${label}.credentialMetadata`,
+      );
+      return {
+        kind,
+        providerConfigKey: requireString(record.providerConfigKey, `${label}.providerConfigKey`),
+        ...(credentialMetadata === undefined ? {} : { credentialMetadata }),
+      };
+    }
+    case "none":
+      assertHostedExecutionCredentialFields(record, label, ["kind"]);
+      return {
+        kind,
+      };
+    default:
+      throw new TypeError(`${label}.kind is invalid.`);
+  }
+}
+
+function parseHostedExecutionDeviceSyncRuntimeCredentialUpdate(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeCredentialUpdate {
+  const record = requireObject(value, label);
+  const kind = requireString(record.kind, `${label}.kind`);
+
+  if (kind === "oauth_tokens" && record.clearTokens === true) {
+    assertHostedExecutionCredentialFields(record, label, ["clearTokens", "kind"]);
+    return {
+      clearTokens: true,
+      kind,
+    };
+  }
+
+  return parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(value, label);
+}
+
+function rejectNullHostedExecutionCredentialTokenBundle(label: string): never {
+  throw new TypeError(`${label} must be an object.`);
+}
+
+function assertHostedExecutionCredentialFields(
+  record: Record<string, unknown>,
+  label: string,
+  allowedFields: readonly string[],
+): void {
+  const allowed = new Set(allowedFields);
+
+  for (const field of Object.keys(record)) {
+    if (!allowed.has(field)) {
+      throw new TypeError(`${label}.${field} is not supported.`);
+    }
+  }
+}
+
+function parseHostedExecutionDeviceSyncCredentialMetadata(
+  value: unknown,
+  label: string,
+): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
+    requireObject(value, label),
+  );
+}
+
+function isBlockedHostedDeviceSyncCredentialMetadataKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+
+  return HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS.some((token) =>
+    normalized.includes(token),
+  ) || isBlockedHostedDeviceSyncCredentialMetadataIdentifierKey(normalized);
+}
+
+function isBlockedHostedDeviceSyncCredentialMetadataIdentifierKey(normalized: string): boolean {
+  if (normalized.includes("hash") || normalized.includes("blindindex")) {
+    return false;
+  }
+
+  return normalized.includes("ownerid")
+    || normalized.includes("userid")
+    || normalized.includes("clientuserid");
+}
+
+function isBlockedHostedDeviceSyncCredentialMetadataValue(value: unknown): boolean {
+  return typeof value === "string"
+    && HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN.test(value);
+}
+
+function hostedRuntimeCredentialUpdateRequiresTokenFence(
+  credential: HostedExecutionDeviceSyncRuntimeCredentialUpdate | undefined,
+): boolean {
+  return credential !== undefined;
+}
+
+function hostedRuntimeSeedRequiresTokenFence(
+  seed: HostedExecutionDeviceSyncRuntimeConnectionSeed | undefined,
+): boolean {
+  if (!seed) {
+    return false;
+  }
+
+  if (seed.credential) {
+    return true;
+  }
+
+  return seed.tokenBundle !== undefined;
 }
 
 function parseHostedExecutionDeviceSyncRuntimeTokenBundle(
@@ -1019,6 +1325,27 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
   }
 
   return requireIsoTimestamp(value, label);
+}
+
+function readNullableHostedExecutionDeviceSyncRuntimeSetupPhase(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeSetupPhase | null {
+  if (value === null) {
+    return null;
+  }
+
+  const phase = requireString(value, label);
+  if (
+    phase === "pending_link"
+    || phase === "link_returned"
+    || phase === "source_confirmed"
+    || phase === "failed"
+  ) {
+    return phase;
+  }
+
+  throw new TypeError(`${label} is invalid.`);
 }
 
 function requireIsoTimestamp(value: unknown, label: string): string {

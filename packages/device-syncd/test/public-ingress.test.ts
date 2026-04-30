@@ -18,6 +18,7 @@ import type {
   DeviceSyncWebhookTraceRecord,
   OAuthStateRecord,
   ProviderAuthTokens,
+  ProviderConnectionResult,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
 } from "../src/types.ts";
@@ -86,20 +87,33 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     return this.oauthStates.has(state);
   }
 
+  peekOAuthState(state: string): OAuthStateRecord | null {
+    return this.oauthStates.get(state) ?? null;
+  }
+
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount {
     const key = `${input.provider}:${input.externalAccountId}`;
     const existingId = this.accountsByProviderExternal.get(key) ?? null;
     const existing = existingId ? this.accounts.get(existingId) ?? null : null;
     const now = input.connectedAt;
     const id = existing?.id ?? `acct_${String(++this.accountCounter).padStart(2, "0")}`;
+    const tokens = readOAuthCredentialTokens(input);
+    const setupPhase = Object.prototype.hasOwnProperty.call(input, "setupPhase")
+      ? input.setupPhase ?? null
+      : existing?.setupPhase ?? null;
+    const setupExpiresAt = Object.prototype.hasOwnProperty.call(input, "setupExpiresAt")
+      ? input.setupExpiresAt ?? null
+      : existing?.setupExpiresAt ?? null;
     const record: PublicDeviceSyncAccount = {
       id,
       provider: input.provider,
       externalAccountId: input.externalAccountId,
       displayName: input.displayName ?? null,
       status: input.status ?? "active",
+      setupPhase,
+      setupExpiresAt,
       scopes: [...(input.scopes ?? [])],
-      accessTokenExpiresAt: input.tokens.accessTokenExpiresAt ?? null,
+      accessTokenExpiresAt: tokens?.accessTokenExpiresAt ?? null,
       metadata: { ...(input.metadata ?? {}) },
       connectedAt: input.connectedAt,
       lastWebhookAt: existing?.lastWebhookAt ?? null,
@@ -140,6 +154,8 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       lastErrorMessage: input.message,
       lastSyncErrorAt: input.now,
       nextReconcileAt: null,
+      setupPhase: "failed",
+      setupExpiresAt: null,
       status: "reauthorization_required",
       updatedAt: input.now,
     };
@@ -249,6 +265,14 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 }
 
+function readOAuthCredentialTokens(input: UpsertPublicDeviceSyncConnectionInput): ProviderAuthTokens | null {
+  if (input.credential) {
+    return input.credential.kind === "oauth_tokens" ? input.credential.tokens : null;
+  }
+
+  return input.tokens ?? null;
+}
+
 function completeWebhookAcceptDurably(
   store: InMemoryPublicIngressStore,
   account: PublicDeviceSyncAccount,
@@ -306,8 +330,8 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
           connectedBy: code,
         },
         tokens: {
-          accessToken: "access-token",
-          refreshToken: "refresh-token",
+          accessToken: "<REDACTED_ACCESS_TOKEN>",
+          refreshToken: "<REDACTED_REFRESH_TOKEN>",
         } satisfies ProviderAuthTokens,
         initialJobs: [
           {
@@ -322,7 +346,7 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
     },
     async refreshTokens() {
       return {
-        accessToken: "access-token-2",
+        accessToken: "<REDACTED_ACCESS_TOKEN_2>",
       };
     },
     async verifyAndParseWebhook() {
@@ -370,8 +394,8 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
               connectedBy: code,
             },
             tokens: {
-              accessToken: "access-token",
-              refreshToken: "refresh-token",
+              accessToken: "<REDACTED_ACCESS_TOKEN>",
+              refreshToken: "<REDACTED_REFRESH_TOKEN>",
             } satisfies ProviderAuthTokens,
             initialJobs: [
               {
@@ -422,7 +446,7 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
   assert.deepEqual(seenStates, [begin.state]);
 });
 
-test("public ingress describes providers and rejects providers without OAuth callbacks", () => {
+test("public ingress describes providers with nullable callbacks and rejects unsupported connection starts", async () => {
   const descriptorOnlyProvider = createFakeProvider({
     provider: "descriptor-only",
     descriptor: {
@@ -458,6 +482,8 @@ test("public ingress describes providers and rejects providers without OAuth cal
     [
       {
         provider: "demo",
+        connectionKind: "oauth2",
+        credentialPolicy: "oauth_tokens",
         callbackPath: "/oauth/demo/callback",
         callbackUrl: "https://sync.example.test/device-sync/oauth/demo/callback",
         webhookPath: "/webhooks/demo",
@@ -467,13 +493,749 @@ test("public ingress describes providers and rejects providers without OAuth cal
       },
     ],
   );
-  assert.throws(
-    () => descriptorOnlyIngress.describeProvider(descriptorOnlyProvider),
+  assert.deepEqual(
+    descriptorOnlyIngress.describeProvider(descriptorOnlyProvider),
+    {
+      provider: "descriptor-only",
+      connectionKind: "none",
+      credentialPolicy: "none",
+      callbackPath: null,
+      callbackUrl: null,
+      webhookPath: null,
+      webhookUrl: null,
+      supportsWebhooks: false,
+      defaultScopes: [],
+    },
+  );
+  await assert.rejects(
+    () => descriptorOnlyIngress.startConnection({ provider: "descriptor-only" }),
     (error: unknown) =>
       error instanceof DeviceSyncError
-      && error.code === "OAUTH_NOT_SUPPORTED"
+      && error.code === "CONNECTION_FLOW_NOT_SUPPORTED"
       && error.httpStatus === 500,
   );
+});
+
+test("public ingress rejects callback-required connection starts without callback paths", async () => {
+  const provider = createFakeProvider({
+    provider: "callback-required",
+    descriptor: {
+      provider: "callback-required",
+      displayName: "Callback Required",
+      transportModes: ["external_link"],
+      connection: {
+        kind: "external_link",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 50,
+        metricFamilies: {
+          activity: 50,
+        },
+      },
+    },
+    async beginConnection() {
+      return {
+        authorizationUrl: "https://provider.example/connect",
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  assert.deepEqual(ingress.describeProvider(provider), {
+    provider: "callback-required",
+    connectionKind: "external_link",
+    credentialPolicy: "none",
+    callbackPath: null,
+    callbackUrl: null,
+    webhookPath: null,
+    webhookUrl: null,
+    supportsWebhooks: false,
+    defaultScopes: [],
+  });
+  await assert.rejects(
+    () => ingress.startConnection({ provider: "callback-required" }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_CALLBACK_URL_REQUIRED"
+      && error.httpStatus === 500,
+  );
+});
+
+test("public ingress persists validated provider-config connection seeds before external-link redirects", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection(input) {
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          displayName: "Junction",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          metadata: {
+            linkOutcome: "pending",
+          },
+        },
+        stateMetadata: {
+          clientUserIdHash: "client-hash-1",
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+    returnTo: "https://sync.example.test/settings/devices",
+  });
+
+  assert.equal(begin.authorizationUrl, `https://junction.example/link?murph_state=${begin.state}`);
+  const account = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.equal(account?.status, "active");
+  assert.equal(account?.setupPhase, "pending_link");
+  assert.ok(account?.setupExpiresAt);
+  assert.equal(account?.accessTokenExpiresAt, null);
+  assert.deepEqual(account?.metadata, {
+    linkOutcome: "pending",
+  });
+  const stateRecord = store.peekOAuthState(begin.state);
+  assert.equal(
+    account ? Object.values(stateRecord?.metadata ?? {}).includes(account.id) : false,
+    true,
+  );
+});
+
+test("public ingress completes external-link callbacks with sanitized state metadata and setup phase", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let callbackStateMetadata: Record<string, unknown> | undefined;
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection(input) {
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          displayName: "Junction",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+        },
+        stateMetadata: {
+          ownerId: "<REDACTED_OWNER_ID>",
+          rawUserId: "<REDACTED_USER_ID>",
+          junctionUserId: "<REDACTED_PROVIDER_USER_ID>",
+          user: "<REDACTED_PROVIDER_USER_ID>",
+          accessToken: "<REDACTED_ACCESS_TOKEN>",
+          webhookSecret: "<REDACTED_WEBHOOK_SECRET>",
+          clientId: "<REDACTED_CLIENT_ID>",
+          clientUserId: "<REDACTED_CLIENT_USER_ID>",
+          clientUserIdHash: "client-hash-1",
+        },
+      };
+    },
+    async completeConnection(input) {
+      callbackStateMetadata = input.stateMetadata;
+      return {
+        externalAccountId: "external-account-1",
+        displayName: "Junction",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+    returnTo: "https://sync.example.test/settings/devices",
+  });
+  const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.ok(seeded?.setupExpiresAt);
+  const completed = await ingress.handleConnectionCallback({
+    provider: "junction",
+    query: new URLSearchParams({
+      murph_state: begin.state,
+      result: "success",
+    }),
+  });
+
+  assert.deepEqual(callbackStateMetadata, {
+    clientUserIdHash: "client-hash-1",
+  });
+  assert.equal(completed.account.setupPhase, "link_returned");
+  assert.equal(completed.account.setupExpiresAt, seeded.setupExpiresAt);
+  assert.equal(completed.account.externalAccountId, "external-account-1");
+  assert.equal(Object.values(callbackStateMetadata ?? {}).includes(completed.account.id), false);
+});
+
+test("public ingress rejects external-link callbacks that do not match the seeded account", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection(input) {
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+        },
+      };
+    },
+    async completeConnection() {
+      return {
+        externalAccountId: "external-account-2",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+  });
+  const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.equal(seeded?.setupPhase, "pending_link");
+
+  await assert.rejects(
+    () =>
+      ingress.handleConnectionCallback({
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: begin.state,
+          result: "success",
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SEEDED_ACCOUNT_MISMATCH"
+      && error.httpStatus === 500,
+  );
+
+  const failed = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.ok(failed);
+  assert.equal(failed.id, seeded?.id);
+  assert.equal(failed.status, "reauthorization_required");
+  assert.equal(failed.setupPhase, "failed");
+  assert.equal(failed.lastErrorCode, "CONNECTION_SEEDED_ACCOUNT_MISMATCH");
+  assert.equal(store.getConnectionByExternalAccount("junction", "external-account-2"), null);
+});
+
+test("public ingress marks seeded external-link accounts failed when callbacks fail before upsert", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const callbackError = new DeviceSyncError({
+    code: "EXTERNAL_LINK_CALLBACK_FAILED",
+    message: "External link callback could not be completed.",
+    httpStatus: 400,
+  });
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection(input) {
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+        },
+      };
+    },
+    async completeConnection() {
+      throw callbackError;
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+  });
+  const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.equal(seeded?.status, "active");
+  assert.equal(seeded?.setupPhase, "pending_link");
+
+  await assert.rejects(
+    () =>
+      ingress.handleConnectionCallback({
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: begin.state,
+          result: "failure",
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "EXTERNAL_LINK_CALLBACK_FAILED"
+      && error.httpStatus === 400,
+  );
+
+  const failed = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.ok(failed);
+  assert.equal(failed.id, seeded?.id);
+  assert.equal(failed.status, "reauthorization_required");
+  assert.equal(failed.setupPhase, "failed");
+  assert.equal(failed.setupExpiresAt, null);
+  assert.equal(failed.lastErrorCode, "EXTERNAL_LINK_CALLBACK_FAILED");
+  assert.equal(failed.lastErrorMessage, "External link callback could not be completed.");
+  assert.ok(failed.lastSyncErrorAt);
+});
+
+test("public ingress marks seeded external-link accounts failed when callback credentials violate policy", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection(input) {
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+        },
+      };
+    },
+    async completeConnection() {
+      return {
+        externalAccountId: "external-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "unexpected-profile",
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+  });
+
+  await assert.rejects(
+    () =>
+      ingress.handleConnectionCallback({
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: begin.state,
+          result: "success",
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "PROVIDER_CONFIG_KEY_MISMATCH"
+      && error.httpStatus === 500,
+  );
+
+  const failed = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.ok(failed);
+  assert.equal(failed.status, "reauthorization_required");
+  assert.equal(failed.setupPhase, "failed");
+  assert.equal(failed.lastErrorCode, "PROVIDER_CONFIG_KEY_MISMATCH");
+});
+
+test("public ingress rejects callback credentials that violate provider credential policy", async () => {
+  const makeIngress = (connection: ProviderConnectionResult) => {
+    const store = new InMemoryPublicIngressStore();
+    const provider = createFakeProvider({
+      provider: "junction",
+      credentialPolicy: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      descriptor: {
+        provider: "junction",
+        displayName: "Junction",
+        transportModes: ["external_link", "scheduled_poll"],
+        connection: {
+          kind: "external_link",
+          callbackPath: "/connect/junction/callback",
+        },
+        normalization: {
+          metricFamilies: ["activity"],
+          snapshotParser: "schema",
+        },
+        sourcePriorityHints: {
+          defaultPriority: 60,
+          metricFamilies: {
+            activity: 60,
+          },
+        },
+      },
+      async beginConnection(input) {
+        return {
+          authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        };
+      },
+      async completeConnection() {
+        return connection;
+      },
+    });
+    return {
+      ingress: createDeviceSyncPublicIngress({
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        registry: createDeviceSyncRegistry([provider]),
+        store,
+      }),
+      store,
+    };
+  };
+
+  const wrongKey = makeIngress({
+    externalAccountId: "external-account-1",
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "other-profile",
+    },
+  });
+  const wrongKeyState = await wrongKey.ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+  });
+  await assert.rejects(
+    () =>
+      wrongKey.ingress.handleConnectionCallback({
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: wrongKeyState.state,
+          result: "success",
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "PROVIDER_CONFIG_KEY_MISMATCH"
+      && error.httpStatus === 500,
+  );
+  assert.equal(wrongKey.store.getConnectionByExternalAccount("junction", "external-account-1"), null);
+
+  const wrongKind = makeIngress({
+    externalAccountId: "external-account-2",
+    credential: {
+      kind: "none",
+    },
+  });
+  const wrongKindState = await wrongKind.ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+  });
+  await assert.rejects(
+    () =>
+      wrongKind.ingress.handleConnectionCallback({
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: wrongKindState.state,
+          result: "success",
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_CREDENTIAL_POLICY_MISMATCH"
+      && error.httpStatus === 500,
+  );
+  assert.equal(wrongKind.store.getConnectionByExternalAccount("junction", "external-account-2"), null);
+
+  const mixedCredential = makeIngress({
+    externalAccountId: "external-account-3",
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    tokens: {
+      accessToken: "<REDACTED_ACCESS_TOKEN>",
+      refreshToken: "<REDACTED_REFRESH_TOKEN>",
+    },
+  });
+  const mixedCredentialState = await mixedCredential.ingress.startConnection({
+    provider: "junction",
+    ownerId: "<REDACTED_OWNER_ID>",
+  });
+  await assert.rejects(
+    () =>
+      mixedCredential.ingress.handleConnectionCallback({
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: mixedCredentialState.state,
+          result: "success",
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_CREDENTIAL_AMBIGUOUS"
+      && error.httpStatus === 500,
+  );
+  assert.equal(mixedCredential.store.getConnectionByExternalAccount("junction", "external-account-3"), null);
+});
+
+test("public ingress rejects provider-config connection seeds with the wrong provider config key", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection() {
+      return {
+        authorizationUrl: "https://junction.example/link",
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "other-profile",
+          },
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  await assert.rejects(
+    () => ingress.startConnection({ provider: "junction", ownerId: "<REDACTED_OWNER_ID>" }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "PROVIDER_CONFIG_KEY_MISMATCH"
+      && error.httpStatus === 500,
+  );
+  assert.equal(store.getConnectionByExternalAccount("junction", "external-account-1"), null);
+});
+
+test("configured provider manifests own credential policy over provider instances", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider({
+    provider: "oura",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "oura",
+      displayName: "Fake Oura",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/oura/callback",
+      },
+      normalization: {
+        metricFamilies: ["sleep"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 90,
+        metricFamilies: {
+          sleep: 90,
+        },
+      },
+    },
+    async beginConnection() {
+      return {
+        authorizationUrl: "https://oura.example/link",
+        connectionSeed: {
+          externalAccountId: "oura-account-1",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  await assert.rejects(
+    () => ingress.startConnection({ provider: "oura", ownerId: "<REDACTED_OWNER_ID>" }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_CREDENTIAL_POLICY_MISMATCH"
+      && error.httpStatus === 500,
+  );
+  assert.equal(store.getConnectionByExternalAccount("oura", "oura-account-1"), null);
 });
 
 test("public ingress validates OAuth callback state ownership and required parameters", async () => {
@@ -574,7 +1336,7 @@ test("public ingress falls back to granted scopes when the provider omits scopes
             displayName: "Demo abc",
             metadata: {},
             tokens: {
-              accessToken: "access-token",
+              accessToken: "<REDACTED_ACCESS_TOKEN>",
             } satisfies ProviderAuthTokens,
           };
         },
@@ -1157,7 +1919,7 @@ test("public ingress omits provider-supplied OAuth error descriptions from warni
         provider: "demo",
         state: begin.state,
         error: "access_denied",
-        errorDescription: "Bearer very-secret-token",
+        errorDescription: "<REDACTED_PROVIDER_ERROR_DESCRIPTION>",
       }),
     (error: unknown) =>
       error instanceof DeviceSyncError && error.code === "OAUTH_CALLBACK_REJECTED",
@@ -1434,7 +2196,7 @@ test("public ingress best-effort revokes pending provider access when OAuth pers
 
   assert.deepEqual(revokeCalls, [
     {
-      accessToken: "access-token",
+      accessToken: "<REDACTED_ACCESS_TOKEN>",
       externalAccountId: "demo-abc",
     },
   ]);
@@ -1855,8 +2617,8 @@ test("public ingress rejects built-in OAuth callback jobs that drift from the pr
             scopes: ["activity:read"],
             metadata: {},
             tokens: {
-              accessToken: "access-token",
-              refreshToken: "refresh-token",
+              accessToken: "<REDACTED_ACCESS_TOKEN>",
+              refreshToken: "<REDACTED_REFRESH_TOKEN>",
             },
             initialJobs: [
               {

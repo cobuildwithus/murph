@@ -8,6 +8,8 @@ import { buildHostedDeviceSyncSettingsSources } from "@/src/lib/device-sync/sett
 const GARMIN_PROVIDER: PublicProviderDescriptor = {
   callbackPath: "/oauth/garmin/callback",
   callbackUrl: "https://example.com/oauth/garmin/callback",
+  connectionKind: "oauth2",
+  credentialPolicy: "oauth_tokens",
   defaultScopes: ["activity"],
   provider: "garmin",
   supportsWebhooks: false,
@@ -18,6 +20,8 @@ const GARMIN_PROVIDER: PublicProviderDescriptor = {
 const STRAVA_PROVIDER: PublicProviderDescriptor = {
   callbackPath: "/oauth/strava/callback",
   callbackUrl: "https://example.com/oauth/strava/callback",
+  connectionKind: "oauth2",
+  credentialPolicy: "oauth_tokens",
   defaultScopes: ["activity:read"],
   provider: "strava",
   supportsWebhooks: true,
@@ -28,6 +32,8 @@ const STRAVA_PROVIDER: PublicProviderDescriptor = {
 const OURA_PROVIDER: PublicProviderDescriptor = {
   callbackPath: "/oauth/oura/callback",
   callbackUrl: "https://example.com/oauth/oura/callback",
+  connectionKind: "oauth2",
+  credentialPolicy: "oauth_tokens",
   defaultScopes: ["daily"],
   provider: "oura",
   supportsWebhooks: true,
@@ -168,6 +174,70 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       secondaryAction: { kind: "disconnect", label: "Disconnect" },
       state: "reauthorization_required",
       statusLabel: "Needs reconnect",
+      tone: "attention",
+    });
+  });
+
+  it("keeps pending external-link setup separate from the active lifecycle state", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        connectedAt: "2026-04-03T10:00:00.000Z",
+        setupExpiresAt: "2026-04-03T13:00:00.000Z",
+        setupPhase: "pending_link",
+        updatedAt: "2026-04-03T10:00:00.000Z",
+      })],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      headline: "Finishing setup",
+      primaryAction: null,
+      secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      state: "active",
+      statusLabel: "Setting up",
+      tone: "muted",
+    });
+  });
+
+  it("recommends reconnect when external-link setup fails or expires", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        connectedAt: "2026-04-03T08:00:00.000Z",
+        setupExpiresAt: "2026-04-03T11:00:00.000Z",
+        setupPhase: "link_returned",
+        updatedAt: "2026-04-03T11:05:00.000Z",
+      })],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      headline: "Setup needs attention",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      state: "active",
+      statusLabel: "Setup incomplete",
+      tone: "attention",
+    });
+  });
+
+  it("treats pending external-link setup without a valid expiry as needing attention", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        connectedAt: "2026-04-03T08:00:00.000Z",
+        setupExpiresAt: null,
+        setupPhase: "pending_link",
+        updatedAt: "2026-04-03T11:05:00.000Z",
+      })],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      headline: "Setup needs attention",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      statusLabel: "Setup incomplete",
       tone: "attention",
     });
   });

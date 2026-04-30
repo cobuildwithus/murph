@@ -115,6 +115,10 @@ export class HostedDeviceSyncAgentSessionService {
     const now = toIsoTimestamp(new Date());
     const connection = await this.requireOwnedConnection(session.userId, connectionId);
     const storedAccount = await this.store.getStoredConnectionAccountForUser(session.userId, connectionId);
+    if (!storedAccount) {
+      const record = await this.store.getConnectionRecordForUser(session.userId, connectionId);
+      throwIfHostedTokenBundleUnsupported(record, connectionId);
+    }
     const tokenBundle = buildTokenExport(
       requireHostedDeviceSyncStoredTokenBundle({
         connectionId,
@@ -158,6 +162,7 @@ export class HostedDeviceSyncAgentSessionService {
           userId: session.userId,
         },
         select: {
+          credentialKind: true,
           id: true,
         },
       });
@@ -172,13 +177,8 @@ export class HostedDeviceSyncAgentSessionService {
       }
 
       const currentAccount = await this.store.getStoredConnectionAccountForUser(session.userId, connectionId, tx);
-      const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
-        connectionId,
-        storedTokenBundle: buildStoredTokenBundle(currentAccount),
-        userId: session.userId,
-      });
-
       if (!currentAccount) {
+        throwIfHostedTokenBundleUnsupported(record, connectionId);
         throw deviceSyncError({
           code: "CONNECTION_SECRET_MISSING",
           message: "Hosted device-sync connection no longer has a stored token bundle.",
@@ -186,6 +186,12 @@ export class HostedDeviceSyncAgentSessionService {
           httpStatus: 409,
         });
       }
+
+      const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
+        connectionId,
+        storedTokenBundle: buildStoredTokenBundle(currentAccount),
+        userId: session.userId,
+      });
 
       const currentConnection = currentAccount;
 
@@ -426,4 +432,26 @@ export class HostedDeviceSyncAgentSessionService {
   private async assertCurrentAgentSessionStillActive(): Promise<void> {
     await this.agentSessions.requireAgentSession();
   }
+}
+
+function throwIfHostedTokenBundleUnsupported(
+  record: { credentialKind?: string | null } | null,
+  connectionId: string,
+): void {
+  const credentialKind = record?.credentialKind;
+
+  if (credentialKind !== "provider_config" && credentialKind !== "none") {
+    return;
+  }
+
+  throw deviceSyncError({
+    code: "OAUTH_TOKENS_REQUIRED",
+    message: "This hosted device-sync connection does not use OAuth token credentials.",
+    retryable: false,
+    httpStatus: 409,
+    details: {
+      connectionId,
+      credentialKind,
+    },
+  });
 }

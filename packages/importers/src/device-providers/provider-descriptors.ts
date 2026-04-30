@@ -1,5 +1,6 @@
 export type DeviceProviderTransportMode =
   | "oauth_callback"
+  | "external_link"
   | "scheduled_poll"
   | "webhook_push"
   | "async_export"
@@ -25,6 +26,19 @@ export type DeviceProviderWebhookDeliveryMode = "notification" | "resource";
 export interface DeviceProviderOAuthDescriptor {
   callbackPath: string;
   defaultScopes: readonly string[];
+}
+
+export type DeviceConnectionFlowKind =
+  | "oauth2"
+  | "external_link"
+  | "sdk"
+  | "manual"
+  | "none";
+
+export interface DeviceProviderConnectionDescriptor {
+  kind: DeviceConnectionFlowKind;
+  callbackPath?: string;
+  defaultScopes?: readonly string[];
 }
 
 export interface DeviceProviderWebhookDescriptor {
@@ -61,6 +75,7 @@ export interface DeviceProviderDescriptor {
   provider: string;
   displayName: string;
   transportModes: readonly DeviceProviderTransportMode[];
+  connection?: DeviceProviderConnectionDescriptor;
   oauth?: DeviceProviderOAuthDescriptor;
   webhook?: DeviceProviderWebhookDescriptor;
   sync?: DeviceProviderSyncDescriptor;
@@ -136,6 +151,26 @@ export function requireDeviceProviderOAuthDescriptor(
   }
 
   return descriptor.oauth;
+}
+
+export function resolveDeviceProviderConnectionDescriptor(
+  descriptor: DeviceProviderDescriptor,
+): DeviceProviderConnectionDescriptor {
+  if (descriptor.connection) {
+    return descriptor.connection;
+  }
+
+  if (descriptor.oauth) {
+    return {
+      kind: "oauth2",
+      callbackPath: descriptor.oauth.callbackPath,
+      defaultScopes: descriptor.oauth.defaultScopes,
+    };
+  }
+
+  return {
+    kind: "none",
+  };
 }
 
 export function requireDeviceProviderWebhookDescriptor(
@@ -310,10 +345,38 @@ const STRAVA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   totalElevationGainMeters: 90,
 } as const satisfies Record<string, number>);
 
+const JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
+  activeCalories: 55,
+  activityScore: 55,
+  averageHeartRate: 55,
+  awakeMinutes: 55,
+  bmi: 55,
+  bodyFatPercentage: 55,
+  deepMinutes: 55,
+  distanceKm: 55,
+  hrv: 55,
+  lightMinutes: 55,
+  maxHeartRate: 55,
+  remMinutes: 55,
+  respiratoryRate: 55,
+  restingHeartRate: 55,
+  sleepScore: 55,
+  spo2: 55,
+  steps: 55,
+  totalCalories: 55,
+  totalSleepMinutes: 55,
+  weightKg: 55,
+} as const satisfies Record<string, number>);
+
 export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "garmin",
   displayName: "Garmin",
   transportModes: ["oauth_callback", "scheduled_poll"],
+  connection: {
+    kind: "oauth2",
+    callbackPath: "/oauth/garmin/callback",
+    defaultScopes: [],
+  },
   oauth: {
     callbackPath: "/oauth/garmin/callback",
     defaultScopes: [],
@@ -357,6 +420,11 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "oura",
   displayName: "Oura",
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+  connection: {
+    kind: "oauth2",
+    callbackPath: "/oauth/oura/callback",
+    defaultScopes: ["personal", "daily", "heartrate", "workout", "session", "spo2"],
+  },
   oauth: {
     callbackPath: "/oauth/oura/callback",
     defaultScopes: ["personal", "daily", "heartrate", "workout", "session", "spo2"],
@@ -407,6 +475,11 @@ export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "strava",
   displayName: "Strava",
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+  connection: {
+    kind: "oauth2",
+    callbackPath: "/oauth/strava/callback",
+    defaultScopes: ["activity:read"],
+  },
   oauth: {
     callbackPath: "/oauth/strava/callback",
     defaultScopes: ["activity:read"],
@@ -445,6 +518,19 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "whoop",
   displayName: "WHOOP",
   transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+  connection: {
+    kind: "oauth2",
+    callbackPath: "/oauth/whoop/callback",
+    defaultScopes: [
+      "offline",
+      "read:profile",
+      "read:body_measurement",
+      "read:sleep",
+      "read:recovery",
+      "read:cycles",
+      "read:workout",
+    ],
+  },
   oauth: {
     callbackPath: "/oauth/whoop/callback",
     defaultScopes: [
@@ -490,11 +576,49 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   },
 } as const satisfies DeviceProviderDescriptor;
 
+export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
+  provider: "junction",
+  displayName: "Junction",
+  transportModes: ["external_link", "scheduled_poll"],
+  connection: {
+    kind: "external_link",
+    callbackPath: "/connect/junction/callback",
+  },
+  sync: {
+    windows: {
+      backfillDays: 90,
+      reconcileDays: 7,
+      reconcileIntervalMs: 6 * 60 * 60_000,
+    },
+    jobKinds: ["backfill", "reconcile"],
+    supportsRemoteDisconnect: false,
+    supportsTokenRefresh: false,
+  },
+  normalization: {
+    metricFamilies: ["activity", "sleep", "cardio", "respiration", "blood_oxygen", "body", "session"],
+    snapshotParser: "schema",
+  },
+  sourcePriorityHints: {
+    defaultPriority: 55,
+    metricFamilies: {
+      activity: 55,
+      sleep: 55,
+      cardio: 55,
+      respiration: 55,
+      blood_oxygen: 55,
+      body: 55,
+      session: 55,
+    },
+    metrics: JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES,
+  },
+} as const satisfies DeviceProviderDescriptor;
+
 export const defaultDeviceProviderDescriptors = Object.freeze([
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
 ] as const);
 
 export function resolveDeviceProviderDescriptor(

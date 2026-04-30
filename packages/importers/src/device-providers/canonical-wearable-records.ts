@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   DeviceBatchImportPayload,
+  DeviceDataOrigin,
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceSamplePayload,
@@ -16,6 +17,8 @@ import { stableStringify, type WearableRawIngestEnvelope } from "./raw-ingest-en
 export type CanonicalWearableRecordKind = "observation" | "sample" | "session" | "tombstone";
 export type CanonicalWearableSchemaVersion = "wearable.canonical_record.v1";
 
+export type { DeviceDataOrigin } from "../core-port.ts";
+
 export interface CanonicalWearableSource {
   provider: string;
   connectionId?: string;
@@ -26,6 +29,7 @@ export interface CanonicalWearableSource {
   providerAccountIdHash?: string;
   normalizerVersion: string;
   externalRef?: DeviceExternalRefPayload;
+  origin?: DeviceDataOrigin;
   rawArtifactRoles: readonly string[];
 }
 
@@ -84,9 +88,13 @@ export type CanonicalWearableRecord =
 export interface CanonicalizeDeviceBatchOptions {
   rawEnvelope?: WearableRawIngestEnvelope;
   connectionId?: string;
+  dataOrigin?: DeviceDataOrigin;
   normalizerVersion?: string;
   observedAt?: string;
 }
+
+type CanonicalizeContext = Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
+  Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "dataOrigin" | "rawEnvelope">;
 
 export function canonicalizeDeviceBatchPayload(
   payload: DeviceBatchImportPayload,
@@ -101,12 +109,14 @@ export function canonicalizeDeviceBatchPayload(
       normalizerVersion,
       rawEnvelope: options.rawEnvelope,
       connectionId: options.connectionId,
+      dataOrigin: options.dataOrigin,
     })),
     ...(payload.samples ?? []).flatMap((sample) => canonicalizeSample(sample, payload, {
       observedAt,
       normalizerVersion,
       rawEnvelope: options.rawEnvelope,
       connectionId: options.connectionId,
+      dataOrigin: options.dataOrigin,
     })),
   ];
 }
@@ -114,8 +124,7 @@ export function canonicalizeDeviceBatchPayload(
 function canonicalizeEvent(
   event: DeviceEventPayload,
   payload: DeviceBatchImportPayload,
-  context: Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
-    Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "rawEnvelope">,
+  context: CanonicalizeContext,
 ): CanonicalWearableRecord[] {
   if (isDeletionEvent(event)) {
     return [buildTombstoneRecord(event, payload, context)];
@@ -148,7 +157,7 @@ function canonicalizeEvent(
     recordedAt: event.recordedAt,
     occurredAt: event.occurredAt,
     timeZone: event.timeZone,
-    source: buildCanonicalSource(payload, event.externalRef, event.rawArtifactRoles, context),
+    source: buildCanonicalSource(payload, event, event.externalRef, event.rawArtifactRoles, context),
     metric: normalizedMetric.key,
     unit: normalizedMetric.unit,
     value: normalizedMetric.value,
@@ -162,8 +171,7 @@ function canonicalizeEvent(
 function canonicalizeSample(
   sample: DeviceSamplePayload,
   payload: DeviceBatchImportPayload,
-  context: Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
-    Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "rawEnvelope">,
+  context: CanonicalizeContext,
 ): CanonicalWearableRecord[] {
   const sleepStageRecord = canonicalizeSleepStageSample(sample, payload, context);
 
@@ -191,7 +199,7 @@ function canonicalizeSample(
     recordedAt: sample.recordedAt ?? sample.sample.recordedAt,
     occurredAt: sample.sample.occurredAt,
     timeZone: sample.timeZone,
-    source: buildCanonicalSource(payload, sample.externalRef, [], context),
+    source: buildCanonicalSource(payload, sample, sample.externalRef, [], context),
     metric: canonicalMetric,
     unit: sample.unit,
     value,
@@ -203,8 +211,7 @@ function canonicalizeSample(
 function canonicalizeSleepStageSample(
   sample: DeviceSamplePayload,
   payload: DeviceBatchImportPayload,
-  context: Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
-    Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "rawEnvelope">,
+  context: CanonicalizeContext,
 ): CanonicalWearableSampleRecord | null {
   if (sample.stream !== "sleep_stage") {
     return null;
@@ -231,7 +238,7 @@ function canonicalizeSleepStageSample(
     recordedAt: sample.recordedAt ?? sample.sample.recordedAt,
     occurredAt: sample.sample.occurredAt,
     timeZone: sample.timeZone,
-    source: buildCanonicalSource(payload, sample.externalRef, [], context),
+    source: buildCanonicalSource(payload, sample, sample.externalRef, [], context),
     metric: canonicalMetric,
     unit: "minutes",
     value,
@@ -241,8 +248,7 @@ function canonicalizeSleepStageSample(
 function buildSessionRecord(
   event: DeviceEventPayload,
   payload: DeviceBatchImportPayload,
-  context: Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
-    Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "rawEnvelope">,
+  context: CanonicalizeContext,
 ): CanonicalWearableSessionRecord {
   return stripUndefined({
     id: buildCanonicalRecordId("session", payload, event, {
@@ -255,7 +261,7 @@ function buildSessionRecord(
     recordedAt: event.recordedAt,
     occurredAt: event.occurredAt,
     timeZone: event.timeZone,
-    source: buildCanonicalSource(payload, event.externalRef, event.rawArtifactRoles, context),
+    source: buildCanonicalSource(payload, event, event.externalRef, event.rawArtifactRoles, context),
     sessionKind: event.kind,
     durationMinutes: readFiniteNumberField(event.fields, "durationMinutes") ?? undefined,
     endAt: readStringField(event.fields, "endAt") ?? undefined,
@@ -268,8 +274,7 @@ function buildSessionRecord(
 function buildTombstoneRecord(
   event: DeviceEventPayload,
   payload: DeviceBatchImportPayload,
-  context: Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
-    Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "rawEnvelope">,
+  context: CanonicalizeContext,
 ): CanonicalWearableTombstoneRecord {
   const providerResourceType = readStringField(event.fields, "resourceType")
     ?? event.externalRef?.resourceType
@@ -291,7 +296,7 @@ function buildTombstoneRecord(
     recordedAt: event.recordedAt,
     occurredAt: event.occurredAt,
     timeZone: event.timeZone,
-    source: buildCanonicalSource(payload, event.externalRef, event.rawArtifactRoles, context),
+    source: buildCanonicalSource(payload, event, event.externalRef, event.rawArtifactRoles, context),
     providerResourceType,
     providerResourceId,
     deletedAt: event.occurredAt,
@@ -301,19 +306,21 @@ function buildTombstoneRecord(
 
 function buildCanonicalSource(
   payload: DeviceBatchImportPayload,
+  record: DeviceEventPayload | DeviceSamplePayload,
   externalRef: DeviceExternalRefPayload | undefined,
   rawArtifactRoles: readonly string[] | undefined,
-  context: Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
-    Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "rawEnvelope">,
+  context: CanonicalizeContext,
 ): CanonicalWearableSource {
   const provider = payload.provider;
   const providerResourceType = externalRef?.resourceType;
   const providerResourceId = externalRef?.resourceId;
   const providerAccountIdHash = payload.accountId ? sha256Hex(payload.accountId).slice(0, 24) : undefined;
+  const origin = resolveDeviceDataOrigin(record, payload, context);
   const dataSourceId = buildDataSourceId({
     provider,
     connectionId: context.connectionId,
     providerAccountIdHash,
+    origin,
   });
 
   return stripUndefined({
@@ -326,6 +333,7 @@ function buildCanonicalSource(
     providerAccountIdHash,
     normalizerVersion: context.normalizerVersion,
     externalRef,
+    origin,
     rawArtifactRoles: rawArtifactRoles ?? [],
   });
 }
@@ -357,9 +365,109 @@ function buildDataSourceId(input: {
   provider: string;
   connectionId?: string;
   providerAccountIdHash?: string;
+  origin?: DeviceDataOrigin;
 }): string {
-  const digest = sha256Hex(stableStringify(input)).slice(0, 16);
+  const digest = sha256Hex(stableStringify(stripUndefined({
+    provider: input.provider,
+    connectionId: input.connectionId,
+    providerAccountIdHash: input.providerAccountIdHash,
+    origin: buildDataSourceOriginIdentity(input.origin),
+  }))).slice(0, 16);
   return `wearable_source_${digest}`;
+}
+
+function resolveDeviceDataOrigin(
+  record: DeviceEventPayload | DeviceSamplePayload,
+  payload: DeviceBatchImportPayload,
+  context: CanonicalizeContext,
+): DeviceDataOrigin | undefined {
+  return normalizeDeviceDataOrigin(record.dataOrigin)
+    ?? normalizeDeviceDataOrigin(payload.dataOrigin)
+    ?? normalizeDeviceDataOrigin(context.dataOrigin);
+}
+
+function normalizeDeviceDataOrigin(value: DeviceDataOrigin | undefined): DeviceDataOrigin | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = stripUndefined({
+    version: 1 as const,
+    aggregatorProvider: normalizeOriginString(value.aggregatorProvider),
+    sourceProviderSlug: normalizeOriginString(value.sourceProviderSlug),
+    sourceName: normalizeOriginString(value.sourceName),
+    sourceType: normalizeOriginString(value.sourceType),
+    sourceDeviceId: normalizeNullableOriginString(value.sourceDeviceId),
+    sourceAppId: normalizeNullableOriginString(value.sourceAppId),
+    sourceWorkoutId: normalizeNullableOriginString(value.sourceWorkoutId),
+    observedAtRaw: normalizeOriginString(value.observedAtRaw),
+    timeZoneOffsetMinutes: normalizeNullableFiniteNumber(value.timeZoneOffsetMinutes),
+    timestampSemantics: normalizeTimestampSemantics(value.timestampSemantics),
+    originConfidence: normalizeOriginConfidence(value.originConfidence),
+    normalizerVersion: normalizeOriginString(value.normalizerVersion),
+  });
+
+  return hasMeaningfulDeviceDataOriginContent(normalized) ? normalized : undefined;
+}
+
+function hasMeaningfulDeviceDataOriginContent(origin: DeviceDataOrigin): boolean {
+  return Object.entries(origin).some(([key, value]) => key !== "version" && value !== null);
+}
+
+function buildDataSourceOriginIdentity(origin: DeviceDataOrigin | undefined): Record<string, unknown> | undefined {
+  if (!origin) {
+    return undefined;
+  }
+
+  const identity = stripUndefined({
+    sourceProviderSlug: origin.sourceProviderSlug,
+    sourceType: origin.sourceType,
+    sourceDeviceId: origin.sourceDeviceId,
+    sourceAppId: origin.sourceAppId,
+  });
+
+  return Object.keys(identity).length > 0 ? identity : undefined;
+}
+
+function normalizeOriginString(value: string | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeNullableOriginString(value: string | null | undefined): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  return normalizeOriginString(value);
+}
+
+function normalizeNullableFiniteNumber(value: number | null | undefined): number | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeTimestampSemantics(
+  value: DeviceDataOrigin["timestampSemantics"] | undefined,
+): DeviceDataOrigin["timestampSemantics"] | undefined {
+  return value === "utc" || value === "offset" || value === "floating" || value === "unknown"
+    ? value
+    : undefined;
+}
+
+function normalizeOriginConfidence(
+  value: DeviceDataOrigin["originConfidence"] | undefined,
+): DeviceDataOrigin["originConfidence"] | undefined {
+  return value === "high" || value === "medium" || value === "low" || value === "unknown"
+    ? value
+    : undefined;
 }
 
 function mapSleepStageToCanonicalMetric(stage: unknown): WearableCanonicalMetricKey | null {

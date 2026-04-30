@@ -4,7 +4,7 @@ import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  handleOAuthCallback: vi.fn(),
+  handleConnectionCallback: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -12,20 +12,23 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 }));
 
 type CallbackRouteModule = typeof import("../app/api/device-sync/oauth/[provider]/callback/route");
+type ConnectCallbackRouteModule = typeof import("../app/api/device-sync/connect/[provider]/callback/route");
 
 let callbackRoute: CallbackRouteModule;
+let connectCallbackRoute: ConnectCallbackRouteModule;
 
 describe("hosted device-sync callback route", () => {
   beforeAll(async () => {
     callbackRoute = await import("../app/api/device-sync/oauth/[provider]/callback/route");
+    connectCallbackRoute = await import("../app/api/device-sync/connect/[provider]/callback/route");
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      handleOAuthCallback: mocks.handleOAuthCallback,
+      handleConnectionCallback: mocks.handleConnectionCallback,
     });
-    mocks.handleOAuthCallback.mockResolvedValue({
+    mocks.handleConnectionCallback.mockResolvedValue({
       account: {
         id: "dsc_123",
         provider: "oura",
@@ -35,7 +38,7 @@ describe("hosted device-sync callback route", () => {
   });
 
   it("uses provider-only callback params in redirects", async () => {
-    mocks.handleOAuthCallback.mockResolvedValue({
+    mocks.handleConnectionCallback.mockResolvedValue({
       account: {
         id: "dsc_123",
         provider: "oura",
@@ -56,6 +59,28 @@ describe("hosted device-sync callback route", () => {
     expect(location).not.toContain("dsc_123");
   });
 
+  it("serves the generic connect callback route for external-link providers", async () => {
+    mocks.handleConnectionCallback.mockResolvedValue({
+      account: {
+        id: "dsc_junction",
+        provider: "junction",
+      },
+      returnTo: "https://app.example.test/settings?tab=wearables",
+    });
+
+    const response = await connectCallbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz&result=success"),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    expect(mocks.handleConnectionCallback).toHaveBeenCalledWith("junction");
+    const location = response.headers.get("location");
+    expect(location).toContain("deviceSyncStatus=connected");
+    expect(location).toContain("deviceSyncProvider=junction");
+    expect(location).not.toContain("dsc_junction");
+  });
+
   it("does not include the raw connection id in the fallback callback html", async () => {
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
@@ -70,7 +95,7 @@ describe("hosted device-sync callback route", () => {
 
   it("returns callback html instead of json for unexpected callback failures", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.handleOAuthCallback.mockRejectedValue(new Error("boom"));
+    mocks.handleConnectionCallback.mockRejectedValue(new Error("boom"));
 
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
@@ -84,7 +109,7 @@ describe("hosted device-sync callback route", () => {
     expect(html).toContain("Please retry from Murph.");
     expect(html).not.toContain('"error"');
     expect(errorSpy).toHaveBeenCalledWith(
-      "Hosted device-sync OAuth callback failed unexpectedly.",
+      "Hosted device-sync connection callback failed unexpectedly.",
       expect.objectContaining({
         errorType: "Error",
         provider: "oura",
@@ -110,7 +135,7 @@ describe("hosted device-sync callback route", () => {
   });
 
   it("falls back to callback html when the stored returnTo is not a safe redirect URL", async () => {
-    mocks.handleOAuthCallback.mockResolvedValue({
+    mocks.handleConnectionCallback.mockResolvedValue({
       account: {
         id: "dsc_123",
         provider: "oura",
@@ -130,7 +155,7 @@ describe("hosted device-sync callback route", () => {
 
   it("keeps unexpected type errors on the 500 callback html path", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.handleOAuthCallback.mockRejectedValue(new TypeError("boom"));
+    mocks.handleConnectionCallback.mockRejectedValue(new TypeError("boom"));
 
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
@@ -140,7 +165,7 @@ describe("hosted device-sync callback route", () => {
     expect(response.status).toBe(500);
     expect(await response.text()).toContain("Please retry from Murph.");
     expect(errorSpy).toHaveBeenCalledWith(
-      "Hosted device-sync OAuth callback failed unexpectedly.",
+      "Hosted device-sync connection callback failed unexpectedly.",
       expect.objectContaining({
         errorType: "TypeError",
         provider: "oura",

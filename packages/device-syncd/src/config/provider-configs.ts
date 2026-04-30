@@ -19,6 +19,7 @@ import type {
   DeviceSyncEnvSource,
 } from "./provider-types.ts";
 import type { GarminDeviceSyncProviderConfig } from "../providers/garmin.ts";
+import type { JunctionDeviceSyncProviderConfig } from "../providers/junction.ts";
 import type { OuraDeviceSyncProviderConfig } from "../providers/oura.ts";
 import type { StravaDeviceSyncProviderConfig } from "../providers/strava.ts";
 import type { WhoopDeviceSyncProviderConfig } from "../providers/whoop.ts";
@@ -43,7 +44,7 @@ export function readConfiguredDeviceSyncProviderConfigs(
     const config = manifest.readConfig(env);
 
     if (config) {
-      configs[provider] = config;
+      configs[provider] = config as never;
     }
   }
 
@@ -54,6 +55,12 @@ export function readConfiguredGarminDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,
 ): GarminDeviceSyncProviderConfig | null {
   return getConfiguredDeviceSyncProviderManifest("garmin").readConfig(env);
+}
+
+export function readConfiguredJunctionDeviceSyncProviderConfig(
+  env: DeviceSyncEnvSource,
+): JunctionDeviceSyncProviderConfig | null {
+  return getConfiguredDeviceSyncProviderManifest("junction").readConfig(env);
 }
 
 export function readConfiguredWhoopDeviceSyncProviderConfig(

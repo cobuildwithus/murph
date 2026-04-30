@@ -4,7 +4,14 @@ import { test, vi } from "vitest";
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
-import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.ts";
+import type {
+  DeviceSyncAccount,
+  DeviceSyncJobRecord,
+  ProviderAuthTokens,
+  ProviderConnectionResult,
+  ProviderJobContext,
+  StoredDeviceSyncAccount,
+} from "../src/types.ts";
 
 function readRequestBody(init?: RequestInit): string | null {
   if (typeof init?.body === "string") {
@@ -54,6 +61,14 @@ function createStoredAccount(scopes: string[], overrides: Partial<StoredDeviceSy
     localTokenRevision: overrides.localTokenRevision ?? 0,
     refreshTokenEncrypted: "encrypted-refresh-token",
   };
+}
+
+function requireOAuthTokens(connection: ProviderConnectionResult): ProviderAuthTokens {
+  const tokens = connection.credential?.kind === "oauth_tokens"
+    ? connection.credential.tokens
+    : connection.tokens;
+  assert.ok(tokens);
+  return tokens;
 }
 
 function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJobRecord {
@@ -141,7 +156,7 @@ test("Garmin provider builds a PKCE connect URL and exchanges an auth code into 
 
   assert.equal(connection.externalAccountId, "garmin-user-1");
   assert.equal(connection.displayName, "Garmin garmin-user-1");
-  assert.equal(connection.tokens.refreshToken, "refresh-token");
+  assert.equal(requireOAuthTokens(connection).refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["HEALTH_EXPORT", "ACTIVITY_EXPORT"]);
   assert.equal(connection.metadata?.syncMode, "polling");
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");

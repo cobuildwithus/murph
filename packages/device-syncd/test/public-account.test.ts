@@ -16,6 +16,8 @@ test("public-account helpers always drop metadata while preserving the public ac
     externalAccountId: "oura-user-1",
     displayName: "Oura User",
     status: "active",
+    setupPhase: null,
+    setupExpiresAt: null,
     scopes: ["daily", "personal"],
     accessTokenExpiresAt: "2026-04-07T01:00:00.000Z",
     metadata: {

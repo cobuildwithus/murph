@@ -197,6 +197,89 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     vi.clearAllMocks();
   });
 
+  it("fails closed when an agent asks to export a provider-config connection", async () => {
+    const createTokenAudit = vi.fn(async () => ({ id: 1 }));
+    const store: PrismaDeviceSyncControlPlaneStore = Object.assign(
+      Object.create(PrismaDeviceSyncControlPlaneStore.prototype),
+      {
+        createTokenAudit,
+        async getConnectionForUser() {
+          const connection = createConnectionRecord();
+
+          return {
+            ...connection,
+            accessTokenExpiresAt: connection.accessTokenExpiresAt.toISOString(),
+            connectedAt: connection.connectedAt.toISOString(),
+            createdAt: connection.createdAt.toISOString(),
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+            updatedAt: connection.updatedAt.toISOString(),
+          };
+        },
+        async getStoredConnectionAccountForUser() {
+          return null;
+        },
+        async getConnectionRecordForUser() {
+          return {
+            credentialKind: "provider_config",
+          };
+        },
+      },
+    );
+    const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+    const service = new HostedDeviceSyncAgentSessionService({
+      request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", "hbds_agent_token"),
+      store,
+      registry,
+    });
+
+    await expect(service.exportTokenBundle(SESSION, "conn-1")).rejects.toMatchObject({
+      code: "OAUTH_TOKENS_REQUIRED",
+    });
+    expect(createTokenAudit).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when an agent asks to refresh a provider-config connection", async () => {
+    const createTokenAudit = vi.fn(async () => ({ id: 1 }));
+    const tx = {
+      deviceConnection: {
+        findFirst: vi.fn(async () => ({
+          credentialKind: "provider_config",
+          id: "conn-1",
+        })),
+      },
+    };
+    const store: PrismaDeviceSyncControlPlaneStore = Object.assign(
+      Object.create(PrismaDeviceSyncControlPlaneStore.prototype),
+      {
+        createTokenAudit,
+        async getStoredConnectionAccountForUser() {
+          return null;
+        },
+        async withConnectionRefreshLock<TResult>(
+          _connectionId: string,
+          callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+        ): Promise<TResult> {
+          return callback(Object.assign(Object.create(null), tx));
+        },
+      },
+    );
+    const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+    const service = new HostedDeviceSyncAgentSessionService({
+      request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", "hbds_agent_token"),
+      store,
+      registry,
+    });
+
+    await expect(service.refreshTokenBundle(SESSION, "conn-1", { force: true })).rejects.toMatchObject({
+      code: "OAUTH_TOKENS_REQUIRED",
+    });
+    expect(createTokenAudit).not.toHaveBeenCalled();
+  });
+
   it("lets export-token-bundle retry with the original bearer after a lost response", async () => {
     vi.useFakeTimers();
     try {
