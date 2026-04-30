@@ -46,12 +46,6 @@ relations:
   type: secondary_biomarker
   target: biomarker:perceived-stiffness
 -
-  type: secondary_biomarker
-  target: biomarker:stretching-adherence-sessions
--
-  type: secondary_biomarker
-  target: biomarker:stretching-session-burden
--
   type: safety_outcome
   target: biomarker:stretching-symptoms
 -
@@ -586,8 +580,6 @@ testPlans:
   - biomarker:ankle-knee-to-wall-distance
   - biomarker:shoulder-reach-distance
   - biomarker:perceived-stiffness
-  - biomarker:stretching-adherence-sessions
-  - biomarker:stretching-session-burden
   safetyOutcomeKeys:
   - biomarker:stretching-symptoms
   minimumAdherenceSessions: 20
@@ -608,8 +600,6 @@ testPlans:
   primaryBiomarkerKey: biomarker:ankle-knee-to-wall-distance
   secondaryBiomarkerKeys:
   - biomarker:perceived-stiffness
-  - biomarker:stretching-adherence-sessions
-  - biomarker:stretching-session-burden
   safetyOutcomeKeys:
   - biomarker:stretching-symptoms
   minimumAdherenceSessions: 20
@@ -626,8 +616,6 @@ testPlans:
   primaryBiomarkerKey: biomarker:shoulder-reach-distance
   secondaryBiomarkerKeys:
   - biomarker:perceived-stiffness
-  - biomarker:stretching-adherence-sessions
-  - biomarker:stretching-session-burden
   safetyOutcomeKeys:
   - biomarker:stretching-symptoms
   minimumAdherenceSessions: 20
@@ -639,25 +627,66 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:toe-touch-distance
-  description: "Repeated back-of-leg holds can increase tolerated reach and range of motion, letting fingertips move closer to the floor."
+  expected: Could move closer to floor
+  protocolProminence: focus
+  description: Hamstring and posterior-chain holds repeatedly load the forward-bend end range. Higher stretch tolerance and less end-range resistance let the same setup reach farther; with fingertip-to-floor scoring, the number goes down.
+  estimatedChange:
+    kind: absolute
+    low: -6
+    high: -2
+    unit: cm
+    window: 6 weeks
+    confidence: low
+    basis: "Source-backed anchor: source_artifact:pmid-40046899 and source_artifact:pmid-23896197 measured about 5-13° knee-extension ROM gains over 6 weeks; source_artifact:pmid-22935854 supports toe-touch as a practical hamstring endpoint. This is a conservative cm proxy."
 -
   biomarkerKey: biomarker:sit-and-reach-distance
-  description: "Hamstring and back-of-leg stretching can make the seated reach position more tolerable. Sit-and-reach distance may improve if that target area is trained."
+  expected: Could reach farther
+  protocolProminence: focus
+  description: Seated hamstring holds train the hip-flexed reach position. More tolerated posterior-chain length lets the hands slide farther on the same box, ruler, or chair setup.
+  estimatedChange:
+    kind: absolute
+    low: 2
+    high: 6
+    unit: cm
+    window: 6 weeks
+    confidence: low
+    basis: "Source-backed anchor: source_artifact:pmid-23896197 and source_artifact:pmid-20309785 support multi-week hamstring ROM gains; sit-and-reach centimeters depend on the exact field-test setup and do not map cleanly from goniometer degrees."
 -
   biomarkerKey: biomarker:ankle-knee-to-wall-distance
-  description: "Calf and ankle holds can increase how far the ankle bends forward. Knee-to-wall distance may rise when the ankle target is part of the routine."
+  expected: Could increase
+  protocolProminence: focus
+  description: Calf holds load the heel-down dorsiflexion end range. If the calf-Achilles unit lets the tibia move farther over the foot, the foot can start farther from the wall before the heel lifts.
+  estimatedChange:
+    kind: absolute
+    low: 1
+    high: 3
+    unit: cm
+    window: 6 weeks
+    confidence: low
+    basis: "Source-backed anchor: source_artifact:pmid-18171487 reported about +12° passive dorsiflexion over 6 weeks, while source_artifact:pmid-16926259 and source_artifact:pmid-29223884 frame ankle effects as small-to-moderate. Knee-to-wall centimeters are setup-dependent."
 -
   biomarkerKey: biomarker:shoulder-reach-distance
-  description: "Repeated shoulder, chest, or upper-back holds can increase tolerance and range in the trained reach pattern."
+  expected: Could change in the trained reach
+  protocolProminence: focus
+  description: The selected chest, lat, or posterior-shoulder hold trains one reach path. Less end-range guarding or passive resistance can change that same reach distance; it does not prove general shoulder function changed.
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: 6 weeks
+    confidence: low
+    basis: "Source-backed anchor: source_artifact:pmid-17416125 and source_artifact:doi-10.3928/19425864-20100524-01 support shoulder ROM changes, but home scores use different directions and scales such as back-scratch gap, hand-behind-back reach, or wall-slide height."
 -
   biomarkerKey: biomarker:perceived-stiffness
-  description: "Gentle repeated holds can alter stretch sensation and reduce tightness, even when range changes only a little."
--
-  biomarkerKey: biomarker:stretching-adherence-sessions
-  description: "A short home routine lowers setup cost and makes repeated exposure easier. Completed sessions may increase when the routine feels manageable."
--
-  biomarkerKey: biomarker:stretching-session-burden
-  description: "Simple self-guided holds can keep hassle low. It can still feel like too much if too many target areas are included."
+  expected: May feel less stiff
+  protocolProminence: context
+  description: Repeated mild holds can recalibrate the stretch sensation. The target area may feel less tight even when the ROM gain is small, so use stiffness as context for the measured reach.
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 0
+    unit: 0-10 score points
+    window: 6 weeks
+    confidence: low
+    basis: "Source-backed anchor: source_artifact:pmid-37231582 supports objective stiffness reduction after long-term static stretching, but user-rated stiffness is not the main pooled endpoint; a 0-2 point decrease is a practical low-confidence sensation range."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
