@@ -1,4 +1,5 @@
 import { act, createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
@@ -31,6 +32,28 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+});
+
+test("HostedLegalConsentCard uses tokenized flat card styling while loading", () => {
+  const panelMarkup = renderToStaticMarkup(
+    createElement(HostedLegalConsentCard, {
+      source: "join-invite-phone-verify",
+    }),
+  );
+  const compactMarkup = renderToStaticMarkup(
+    createElement(HostedLegalConsentCard, {
+      mode: "compact",
+      source: "settings-device-sync",
+    }),
+  );
+
+  expect(panelMarkup).toContain("rounded-2xl border border-border bg-card p-6");
+  expect(compactMarkup).toContain("rounded-xl border border-border bg-card p-4");
+  expect(panelMarkup).toContain('role="status"');
+  expect(panelMarkup).toContain('aria-busy="true"');
+  expect(panelMarkup).not.toContain("shadow-");
+  expect(panelMarkup).not.toContain("#c4a882");
+  expect(panelMarkup).not.toContain("#fefdf8");
 });
 
 test("HostedLegalConsentCard gates acceptance on the checkbox and posts current settings consent versions", async () => {
@@ -106,6 +129,64 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and posts current 
 
   expect(container.textContent).not.toContain("Connect health sources");
   expect(container.querySelector("button")).toBeNull();
+});
+
+test("HostedLegalConsentCard marks the accept action busy while consent is recording", async () => {
+  const currentStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    connectedHealthGranted: true,
+    launchGranted: true,
+  });
+  const acceptRequest = createDeferred<HostedConsentStatus>();
+
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce(currentStatus)
+    .mockReturnValueOnce(acceptRequest.promise);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      mode: "compact",
+      preferredScope: "feature.connected-health-source",
+      source: "settings-device-sync",
+      onAccepted: mocks.onAccepted,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Connect health sources");
+  });
+
+  const checkbox = container.querySelector('input[type="checkbox"]');
+  expect(checkbox).toBeTruthy();
+
+  await act(async () => {
+    setCheckboxChecked(window, checkbox as HTMLInputElement, true);
+  });
+
+  const acceptButton = findButtonByText(container, /Accept and continue/);
+
+  await act(async () => {
+    acceptButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(acceptButton.textContent).toContain("Recording...");
+    expect(acceptButton.getAttribute("aria-busy")).toBe("true");
+    expect(acceptButton.disabled).toBe(true);
+  });
+
+  await act(async () => {
+    acceptRequest.resolve(acceptedStatus);
+    await acceptRequest.promise;
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
+  });
 });
 
 test("HostedLegalConsentCard keeps a retryable error visible when consent status fails to load", async () => {
@@ -238,4 +319,21 @@ function setCheckboxChecked(
   input.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true }));
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
   input.dispatchEvent(new window.Event("change", { bubbles: true }));
+}
+
+function createDeferred<T>() {
+  let resolvePromise: ((value: T) => void) | null = null;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+
+  return {
+    promise,
+    resolve(value: T) {
+      if (!resolvePromise) {
+        throw new Error("Deferred promise resolver was not initialized.");
+      }
+      resolvePromise(value);
+    },
+  };
 }

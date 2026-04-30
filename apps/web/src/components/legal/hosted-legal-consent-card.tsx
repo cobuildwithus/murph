@@ -106,7 +106,12 @@ export function HostedLegalConsentCard({
   if (loading) {
     return (
       <div className={joinClassNames(cardClassName(mode), className)}>
-        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <div
+          aria-busy="true"
+          aria-live="polite"
+          className="flex items-center gap-3 text-sm text-muted-foreground"
+          role="status"
+        >
           <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />
           <span>Checking Murph legal consent...</span>
         </div>
@@ -187,7 +192,13 @@ export function HostedLegalConsentCard({
             </Alert>
           ) : null}
 
-          <Button type="button" onClick={handleAccept} disabled={!accepted || pending} size="lg">
+          <Button
+            aria-busy={pending}
+            type="button"
+            onClick={handleAccept}
+            disabled={!accepted || pending}
+            size="lg"
+          >
             {pending ? "Recording..." : "Accept and continue"}
           </Button>
         </div>
@@ -218,8 +229,8 @@ function readConsentErrorMessage(error: unknown, fallback: string): string {
 
 function cardClassName(mode: HostedLegalConsentCardMode): string {
   return mode === "compact"
-    ? "rounded-xl border border-[#c4a882]/35 bg-[#fefdf8] p-4"
-    : "rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]";
+    ? "rounded-xl border border-border bg-card p-4"
+    : "rounded-2xl border border-border bg-card p-6";
 }
 
 function joinClassNames(...values: Array<string | null | undefined>): string {
