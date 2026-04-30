@@ -46,7 +46,7 @@ relations:
   -
     type: secondary_biomarker
     target: biomarker:gi-tolerance
-    note: 'Manual candidate experiment signal: GI tolerance is a practical safety and adherence endpoint, especially with loading or large single servings.'
+    note: 'Manual candidate experiment signal: GI tolerance is a practical tolerability endpoint, especially with loading or large single servings.'
   -
     type: secondary_biomarker
     target: biomarker:lean-body-mass
@@ -1012,10 +1012,9 @@ testPlans:
     primaryBiomarkerKey: biomarker:training-performance
     secondaryBiomarkerKeys:
       - biomarker:body-weight
-      - biomarker:gi-tolerance
       - biomarker:lean-body-mass
+      - biomarker:gi-tolerance
       - biomarker:training-volume
-      - biomarker:perceived-recovery
     minimumAdherenceSessions: 28
     targetAdherenceSessions: 42
     notes:
@@ -1031,7 +1030,6 @@ testPlans:
     primaryBiomarkerKey: biomarker:gi-tolerance
     secondaryBiomarkerKeys:
       - biomarker:body-weight
-      - biomarker:adherence
       - biomarker:training-performance
     minimumAdherenceSessions: 21
     targetAdherenceSessions: 28
@@ -1042,22 +1040,63 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:training-performance
-    description: "Creatine can raise quick energy stores in muscle. That can help with short hard efforts and may improve repeated reps, power, or load under similar conditions."
+    expected: "Max strength may improve"
+    protocolProminence: focus
+    description: "Extra intramuscular creatine raises phosphocreatine availability and speeds ATP recycling. The clearest numeric signal is selected max-strength testing; repeated hard sets, short sprints, and power work are useful context when measured the same way."
+    estimatedChange:
+      kind: absolute
+      low: 4
+      high: 11
+      unit: kg
+      window: "4-12 weeks on max-strength tests"
+      confidence: moderate
+      basis: "Best fit for resistance-training strength tests: an adults-under-50 meta-analysis estimated about +4.4 kg upper-body and +11.4 kg lower-body maximal-strength gains versus placebo; sprint and female-subgroup effects are less consistent."
   -
     biomarkerKey: biomarker:body-weight
-    description: "Creatine often pulls more water into muscle and can support more training work. Scale weight may rise even when fat mass has not changed."
-  -
-    biomarkerKey: biomarker:gi-tolerance
-    description: "Large servings or loading can leave more creatine in the gut at once. Symptoms such as nausea, bloating, or diarrhea may change with dose size and splitting."
+    expected: "May increase"
+    protocolProminence: focus
+    description: "Creatine-loaded muscle holds more water as stores rise; same-condition scale weight can climb quickly even when fat mass has not changed."
+    estimatedChange:
+      kind: absolute
+      low: 0.5
+      high: 2
+      unit: kg
+      window: "1-4 weeks"
+      confidence: moderate
+      basis: "Short loading/body-water studies commonly show about +1 kg, and resistance-training syntheses often center near +1 kg body-mass gains; response varies with loading, diet, glycogen, and training."
   -
     biomarkerKey: biomarker:lean-body-mass
-    description: "Creatine can increase muscle water quickly. With training, it may also support more lean mass before true muscle growth is clear."
+    expected: "May increase"
+    protocolProminence: focus
+    description: "Creatine-loaded muscle holds more water, and easier repeated high-tension work can add hypertrophy stimulus; DXA and BIA lean-mass changes are useful but water-sensitive."
+    estimatedChange:
+      kind: absolute
+      low: 0.5
+      high: 1.5
+      unit: kg
+      window: "1-12 weeks"
+      confidence: moderate
+      basis: "Pooled resistance-training and older-adult estimates often land around +1.1 to +1.3 kg lean or fat-free mass; a recent 7-day wash-in trial saw about +0.5 kg before no added 12-week gain."
+  -
+    biomarkerKey: biomarker:gi-tolerance
+    expected: "Symptoms should stay low"
+    protocolProminence: focus
+    description: "Large single servings leave more creatine in the gut at once; nausea, bloating, belching, or diarrhea are most likely during loading or unsplit doses above 5 g."
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: "during loading or dose changes"
+      confidence: moderate
+      basis: "A dose-dependence trial flags higher diarrhea risk with 10 g in one serving, while split 5 g doses are better tolerated; pooled symptom-score changes were not extractable."
   -
     biomarkerKey: biomarker:training-volume
-    description: "More quick muscle energy may make repeated sets or sprints easier to complete, so planned work can go up."
-  -
-    biomarkerKey: biomarker:perceived-recovery
-    description: "Creatine supports quick muscle energy, which can make repeated hard efforts feel easier. Recovery may feel better when sessions create less strain."
+    expected: "Context signal"
+    protocolProminence: context
+    description: "Faster phosphocreatine recycling can make the last sets or intervals easier to finish, but completed volume only means something when the plan, loads, rest periods, and deloads stay comparable."
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: "1-6 weeks"
+      confidence: low
+      basis: "Small repeated-set and overreaching studies show more completed work in some settings; equalized training programs and task-specific nulls make a single percent estimate misleading."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -3548,7 +3587,7 @@ Use plain creatine monohydrate daily. The default path is **3–5 g/day without 
 
 ## What to measure
 
-The strongest practical read is not “did creatine make everything better?” It is whether a repeatable training endpoint, training volume, body-weight context, and tolerance changed while training and diet stayed stable enough to interpret. Good endpoints include repeated strength outputs, reps at a fixed load, total tonnage, repeated sprint/power work, body weight, GI symptoms, adherence, and perceived recovery as context.
+The strongest practical read is not “did creatine make everything better?” It is whether a repeatable training endpoint, same-condition scale weight, body-composition proxy, and tolerance score changed while training and diet stayed stable enough to interpret. Good endpoints include repeated strength outputs, reps at a fixed load, repeated sprint/power work, body weight, lean-mass trend, and GI symptoms. Training volume helps interpret work capacity when the plan stays stable; dose completion and missed servings explain attribution but are not outcome wins.
 
 ## What the evidence supports
 
