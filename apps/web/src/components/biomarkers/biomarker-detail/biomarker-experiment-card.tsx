@@ -9,7 +9,7 @@ import type {
 import { resolveHealthCommonsExperimentShell } from "@/src/lib/health-commons/experiment-projections";
 import { cn } from "@/src/lib/utils";
 
-const CARD_IMAGE_SIZES = "(min-width: 640px) 195px, 100vw";
+const CARD_IMAGE_SIZES = "(min-width: 640px) 160px, 100vw";
 
 export function BiomarkerExperimentCard({
   biomarker,
@@ -31,12 +31,12 @@ export function BiomarkerExperimentCard({
   const expectedHighlight = signal
     ? `${directionArrow} ${signal.range}`
     : `${directionArrow} ${directionLabel}`;
-  const expectedSub = signal ? `over ${signal.window}` : undefined;
+  const durationHighlight = signal?.window ?? "—";
 
-  const evidenceHighlight = signal?.evidence
-    ? formatChipLabel(signal.evidence)
-    : formatChipLabel(protocol.confidence);
-  const evidenceSub = `Burden ${protocol.burdenLabel.toLowerCase()} · Caution ${protocol.cautionLabel.toLowerCase()}`;
+  const evidenceLabel = signal?.evidence
+    ? `${formatChipLabel(signal.evidence)} evidence`
+    : `${formatChipLabel(protocol.confidence)} evidence`;
+  const cautionLabel = `Caution ${protocol.cautionLabel.toLowerCase()}`;
 
   return (
     <Link
@@ -44,7 +44,7 @@ export function BiomarkerExperimentCard({
       className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border"
     >
       <div className="flex flex-col gap-4 p-5 sm:flex-row">
-        <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg sm:h-[110px] sm:w-[195px]">
+        <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg sm:h-[90px] sm:w-[160px]">
           {imageSrc ? (
             <Image
               src={imageSrc}
@@ -61,38 +61,50 @@ export function BiomarkerExperimentCard({
             </div>
           )}
         </div>
-
-        <div className="flex flex-1 flex-col gap-2 min-w-0">
-          <div className="flex flex-col gap-1.5">
-            <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
-              {protocol.category}
-            </span>
-            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-balance">
-              {protocol.title}
-            </h3>
+        <div className="flex flex-1 items-start justify-between gap-4 min-w-0">
+          <div className="flex flex-col gap-2 min-w-0">
+            <div className="flex flex-col gap-1.5">
+              <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
+                {protocol.category}
+              </span>
+              <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-balance">
+                {protocol.title}
+              </h3>
+            </div>
+            <p className="text-sm/5.5 text-muted-foreground text-pretty">{protocol.mechanism}</p>
           </div>
-          <p className="text-sm/5.5 text-muted-foreground text-pretty">{protocol.mechanism}</p>
+          <div className="flex shrink-0 flex-col items-end gap-0.5">
+            <span className="font-serif text-2xl/6 font-semibold tabular-nums text-primary">
+              {matchPercent}%
+            </span>
+            <span className="font-mono text-[9px]/3 uppercase tracking-[0.14em] text-muted-foreground">
+              match
+            </span>
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-3 divide-x divide-border/60 border-t border-border/60 bg-muted/30">
         <StatCell
-          label="Match"
-          highlight={`${matchPercent}%`}
-          highlightClassName="font-serif text-3xl/8 font-semibold tabular-nums text-primary"
-        />
-        <StatCell
           label="Expected change"
-          highlight={expectedHighlight}
-          highlightClassName="font-serif text-lg/6 font-semibold text-primary"
-          sub={expectedSub}
+          value={expectedHighlight}
+          valueClassName="font-serif text-base/6 font-semibold text-primary"
         />
         <StatCell
-          label="Evidence"
-          highlight={evidenceHighlight}
-          highlightClassName="text-base/6 font-medium text-foreground"
-          sub={evidenceSub}
+          label="Duration"
+          value={durationHighlight}
+          valueClassName="font-serif text-base/6 font-semibold text-foreground"
         />
+        <StatCell
+          label="Burden"
+          value={formatChipLabel(protocol.burdenLabel)}
+          valueClassName="text-base/6 font-medium text-foreground"
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-5 py-3">
+        <Pill>{evidenceLabel}</Pill>
+        <Pill>{cautionLabel}</Pill>
       </div>
     </Link>
   );
@@ -100,27 +112,28 @@ export function BiomarkerExperimentCard({
 
 function StatCell({
   label,
-  highlight,
-  highlightClassName,
-  sub,
+  value,
+  valueClassName,
 }: {
   label: string;
-  highlight: string;
-  highlightClassName: string;
-  sub?: string;
+  value: string;
+  valueClassName: string;
 }) {
   return (
-    <div className="flex flex-col gap-2 px-5 py-4 min-w-0">
+    <div className="flex flex-col gap-1.5 px-5 py-4 min-w-0">
       <span className="font-mono text-[10px]/3 uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </span>
-      <span className={cn("text-pretty", highlightClassName)}>{highlight}</span>
-      {sub ? (
-        <span className="font-mono text-[10px]/4 uppercase tracking-[0.1em] text-muted-foreground/80 text-pretty">
-          {sub}
-        </span>
-      ) : null}
+      <span className={cn("text-pretty", valueClassName)}>{value}</span>
     </div>
+  );
+}
+
+function Pill({ children }: { children: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-border/70 bg-background/40 px-2.5 py-0.5 text-[11px] text-muted-foreground">
+      {children}
+    </span>
   );
 }
 
