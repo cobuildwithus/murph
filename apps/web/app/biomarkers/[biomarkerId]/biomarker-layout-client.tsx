@@ -63,7 +63,7 @@ export function BiomarkerLayoutClient({
             </p>
           </div>
           <Link
-            href="/experiments"
+            href="/biomarkers"
             className="mt-1 inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" strokeWidth={1.75} aria-hidden />
