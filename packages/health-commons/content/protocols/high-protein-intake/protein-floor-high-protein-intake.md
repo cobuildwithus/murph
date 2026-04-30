@@ -33,9 +33,6 @@ relations:
   target: experiment_family:high-protein-intake
 -
   type: primary_biomarker
-  target: biomarker:subjective-satiety
--
-  type: secondary_biomarker
   target: biomarker:body-weight
 -
   type: secondary_biomarker
@@ -45,13 +42,25 @@ relations:
   target: biomarker:lean-mass
 -
   type: secondary_biomarker
+  target: biomarker:subjective-satiety
+-
+  type: secondary_biomarker
+  target: biomarker:triglycerides
+-
+  type: secondary_biomarker
+  target: biomarker:ldl-c
+-
+  type: secondary_biomarker
+  target: biomarker:blood-pressure
+-
+  type: secondary_biomarker
   target: biomarker:digestive-comfort
 -
   type: secondary_biomarker
-  target: biomarker:dietary-fiber-g-day
+  target: biomarker:serum-creatinine
 -
   type: secondary_biomarker
-  target: biomarker:saturated-fat-g-day
+  target: biomarker:estimated-gfr
 -
   type: cites
   target: source_artifact:high-protein-intake-bibliography
@@ -123,14 +132,17 @@ testPlans:
   durationDays: 70
   baselineDays: 14
   interventionDays: 56
-  primaryBiomarkerKey: biomarker:subjective-satiety
+  primaryBiomarkerKey: biomarker:body-weight
   secondaryBiomarkerKeys:
-  - biomarker:body-weight
   - biomarker:body-fat-percent
   - biomarker:lean-mass
+  - biomarker:subjective-satiety
+  - biomarker:triglycerides
+  - biomarker:ldl-c
+  - biomarker:blood-pressure
   - biomarker:digestive-comfort
-  - biomarker:dietary-fiber-g-day
-  - biomarker:saturated-fat-g-day
+  - biomarker:serum-creatinine
+  - biomarker:estimated-gfr
   safetyOutcomeKeys:
   - biomarker:serum-creatinine
   - biomarker:estimated-gfr
@@ -146,31 +158,134 @@ testPlans:
   minimumAdherenceSessions: 42
   targetAdherenceSessions: 56
   notes:
-  - Daily protein g/kg, total protein grams, and daily energy intake are exposure or interpretation context, not outcome wins.
-  - Body-composition, appetite, and weight outcomes must be interpreted by energy balance and training context.
-  - Safety labs are optional for low-risk users but important when kidney, gout, stone, metabolic, lipid, age, diabetes-related renal-risk, or clinician context makes them relevant.
+  - Daily protein g/kg, total protein grams, energy intake, fiber, saturated fat, and source mix are exposure or interpretation context, not outcome wins.
+  - Weight, body-composition, appetite, blood-pressure, and lipid outcomes must be interpreted by energy balance, training context, medication changes, and source mix.
+  - Kidney and liver safety labs are optional for low-risk users but important when kidney, gout, stone, metabolic, lipid, age, diabetes-related renal-risk, or clinician context makes them relevant.
 expectedSignalDescriptions:
 -
-  biomarkerKey: biomarker:subjective-satiety
-  description: Protein tends to digest slowly and can trigger fullness. Satiety may rise when meals hit the planned dose.
--
   biomarkerKey: biomarker:body-weight
-  description: Protein can increase fullness and change calories. Scale weight moves only if that changes energy balance, training, or body composition.
+  expected: Goal-dependent
+  description: Protein-rich meals digest slowly and cost more energy to process. If that helps a calorie deficit stick, weekly scale weight can drift down; in maintenance or muscle-gain runs, stable weight may be the useful result.
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: 8 weeks
+    confidence: low
+    basis: Direction depends on energy balance and training; direct and adjacent trials support small weight-loss or regain-control advantages mainly in hypocaloric or post-weight-loss settings.
+  protocolProminence: focus
 -
   biomarkerKey: biomarker:body-fat-percent
-  description: When calories are lower or training changes, higher protein can push weight change more toward fat loss than lean loss. The link is less clear when weight is stable.
+  expected: Could trend lower
+  description: A protein floor supplies amino acids during a deficit, so more of the lost weight can come from fat instead of lean tissue. Same-method body-composition trends are more useful than single BIA readings.
+  estimatedChange:
+    kind: absolute
+    low: -2.0
+    high: -0.5
+    unit: percentage points
+    window: 8-12 weeks
+    confidence: low
+    basis: Direct 1.6 g/kg/day weight-loss trials show better fat-loss partitioning, but estimates shrink in weight-stable runs and home body-composition tools are noisy.
+  protocolProminence: focus
 -
   biomarkerKey: biomarker:lean-mass
-  description: Adequate protein supports muscle repair and rebuilding, especially with resistance training. Lean mass still depends on training and calories.
+  expected: Hold steadier
+  description: Extra amino acids support muscle repair and protein turnover. The measurable signal is usually less lean-mass loss during dieting, or a small gain when resistance training is already in place.
+  estimatedChange:
+    kind: absolute
+    low: 0.0
+    high: 0.8
+    unit: kg
+    window: 8-12 weeks
+    confidence: low
+    basis: Above-RDA protein meta-analyses show about 0.3 kg overall lean-mass advantage and roughly 0.8 kg with resistance training; diet-only target-dose trials are mixed.
+  protocolProminence: focus
+-
+  biomarkerKey: biomarker:subjective-satiety
+  expected: Could feel fuller
+  description: Protein-rich meals slow digestion and trigger gut satiety signals. If the target replaces lower-satiety calories, hunger ratings can improve within days.
+  estimatedChange:
+    kind: absolute
+    low: 0.5
+    high: 1.5
+    unit: 1-10 score points
+    window: days to 2 weeks
+    confidence: low
+    basis: Acute protein studies show higher fullness and lower hunger, while longer diet trials do not consistently separate protein dose, source, calories, and weight change.
+  protocolProminence: focus
+-
+  biomarkerKey: biomarker:triglycerides
+  expected: Could trend lower
+  description: When lean protein replaces refined carbohydrate and body fat falls, the liver can export less triglyceride-rich VLDL. A lipid panel is most likely to move when weight, carbohydrate quality, alcohol, or glycemic control also changes.
+  estimatedChange:
+    kind: absolute
+    low: -20
+    high: -5
+    unit: mg/dL
+    window: 8-16 weeks
+    confidence: low
+    basis: Direct 1.6 g/kg/day and broader higher-protein weight-loss evidence show triglyceride improvements, but protein-only attribution is weak because carbohydrate intake and weight often change too.
+  protocolProminence: context
+-
+  biomarkerKey: biomarker:ldl-c
+  expected: Source-dependent
+  description: LDL-C follows the protein source mix more than the gram target. Lean, plant, or low-saturated-fat dairy sources can leave it steady; more fatty meat or high-saturated-fat dairy can push it up.
+  estimatedChange:
+    kind: absolute
+    low: -5
+    high: 10
+    unit: mg/dL
+    window: 8-16 weeks
+    confidence: mixed
+    basis: Direct target-dose and metabolic trials show mixed LDL-C effects, including cases where the lower-protein comparator looked better; saturated-fat drift drives the range.
+  protocolProminence: context
+-
+  biomarkerKey: biomarker:blood-pressure
+  expected: Could dip slightly
+  description: If the protein floor helps weight loss or replaces refined carbohydrates, vascular load can ease and home blood pressure may fall a little. Extra sodium or processed meats can erase or reverse that.
+  estimatedChange:
+    kind: absolute
+    low: -4
+    high: 0
+    unit: mmHg
+    window: 8-16 weeks
+    confidence: low
+    basis: Higher-protein diet meta-analyses and short energy-restricted trials show small systolic or diastolic improvements, but protein is bundled with weight and carbohydrate changes.
+  protocolProminence: context
 -
   biomarkerKey: biomarker:digestive-comfort
-  description: A higher-protein plan can alter digestion when food sources shift, portions grow, or fiber gets crowded out.
+  expected: Watch GI comfort
+  description: Larger protein portions and source swaps change gastric load, lactose or whey exposure, legume intake, and fiber displacement. Constipation, reflux, bloating, or diarrhea means the food mix needs redesign.
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: days to 2 weeks
+    confidence: low
+    basis: Target-range food-based trials were generally tolerable, while low-carb or low-fiber high-protein patterns shifted gut metabolites; symptom direction depends on source and fiber.
+  protocolProminence: context
 -
-  biomarkerKey: biomarker:dietary-fiber-g-day
-  description: Protein-focused meals can crowd out legumes, whole grains, fruit, and other plant foods, which can lower fiber.
+  biomarkerKey: biomarker:serum-creatinine
+  expected: Should stay stable
+  description: Higher protein changes renal workload and creatinine context through meat intake, creatine, training, and lean mass. A meaningful rise is a safety signal, not a success signal.
+  estimatedChange:
+    kind: absolute
+    low: 0.0
+    high: 0.1
+    unit: mg/dL
+    window: 8-12 weeks
+    confidence: low
+    basis: Healthy-adult high-protein trials and reviews usually show stable creatinine over short windows, with small renal-workload shifts and limited long-term certainty.
+  protocolProminence: context
 -
-  biomarkerKey: biomarker:saturated-fat-g-day
-  description: A protein target built from fatty meats or dairy can raise saturated fat; leaner sources may not.
+  biomarkerKey: biomarker:estimated-gfr
+  expected: Should stay stable
+  description: Protein raises renal blood-flow demand; eGFR may stay stable or shift with hydration, creatinine, and lab-equation inputs. A sustained drop needs clinician review.
+  estimatedChange:
+    kind: absolute
+    low: -5
+    high: 5
+    unit: mL/min/1.73 m2
+    window: 8-12 weeks
+    confidence: low
+    basis: Healthy-adult evidence generally does not show adverse short-term GFR change, but trials use surrogate renal markers and exclude kidney-risk groups.
+  protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -1332,25 +1447,18 @@ confoundersToTrack:
 - bariatric_frailty_malnutrition_or_post_hospital_context
 expectedSignal:
   primary:
-    biomarkerKey: biomarker:subjective-satiety
-    direction: improve_or_mixed
-    latency: hours_to_2_weeks
-    confidence: low
-    sourceKeys:
-    - source_artifact:pmid-26947338
-    - source_artifact:pmid-32768415
-    - source_artifact:pmid-16434457
-  secondary:
-
-  -
     biomarkerKey: biomarker:body-weight
     direction: mixed
     latency: 2-8 weeks
     confidence: low
     sourceKeys:
-    - source_artifact:pmid-15941879
+    - source_artifact:pmid-18990242
+    - source_artifact:pmid-19158228
     - source_artifact:pmid-19246357
     - source_artifact:pmid-21105792
+    - source_artifact:pmid-21524314
+  secondary:
+
   -
     biomarkerKey: biomarker:body-fat-percent
     direction: decrease_or_no_clear_change
@@ -1363,6 +1471,57 @@ expectedSignal:
     - source_artifact:pmid-23739654
     - source_artifact:pmid-33975325
   -
+    biomarkerKey: biomarker:lean-mass
+    direction: stable_or_increase
+    latency: 6-12 weeks
+    confidence: low_to_moderate
+    sourceKeys:
+    - source_artifact:pmid-22691622
+    - source_artifact:pmid-23739654
+    - source_artifact:pmid-31794597
+    - source_artifact:pmid-33300582
+    - source_artifact:pmid-39002131
+  -
+    biomarkerKey: biomarker:subjective-satiety
+    direction: improve_or_mixed
+    latency: hours_to_2_weeks
+    confidence: low
+    sourceKeys:
+    - source_artifact:pmid-26947338
+    - source_artifact:pmid-32768415
+    - source_artifact:pmid-16434457
+    - source_artifact:pmid-16002798
+  -
+    biomarkerKey: biomarker:triglycerides
+    direction: decrease_or_no_clear_change
+    latency: 8-16 weeks
+    confidence: low
+    sourceKeys:
+    - source_artifact:pmid-18990242
+    - source_artifact:pmid-19158228
+    - source_artifact:pmid-34120735
+    - source_artifact:pmid-21524314
+  -
+    biomarkerKey: biomarker:ldl-c
+    direction: mixed
+    latency: 8-16 weeks
+    confidence: mixed
+    sourceKeys:
+    - source_artifact:pmid-18990242
+    - source_artifact:pmid-22104550
+    - source_artifact:pmid-21524314
+    - source_artifact:pmid-17536130
+  -
+    biomarkerKey: biomarker:blood-pressure
+    direction: decrease_or_mixed
+    latency: 8-16 weeks
+    confidence: low
+    sourceKeys:
+    - source_artifact:pmid-34120735
+    - source_artifact:pmid-21524314
+    - source_artifact:pmid-23587198
+    - source_artifact:pmid-22104550
+  -
     biomarkerKey: biomarker:digestive-comfort
     direction: mixed
     latency: days_to_2_weeks
@@ -1371,6 +1530,26 @@ expectedSignal:
     - source_artifact:pmid-32199523
     - source_artifact:pmid-41640738
     - source_artifact:pmid-21389180
+  -
+    biomarkerKey: biomarker:serum-creatinine
+    direction: stable_or_mild_increase
+    latency: 8-12 weeks
+    confidence: low
+    sourceKeys:
+    - source_artifact:pmid-30032227
+    - source_artifact:pmid-30383278
+    - source_artifact:pmid-37457969
+    - source_artifact:pmid-37516903
+  -
+    biomarkerKey: biomarker:estimated-gfr
+    direction: stable_or_mixed
+    latency: 8-12 weeks
+    confidence: low
+    sourceKeys:
+    - source_artifact:pmid-30032227
+    - source_artifact:pmid-22653255
+    - source_artifact:pmid-30383278
+    - source_artifact:pmid-23219108
 ---
 
 ## Question this experiment answers
@@ -1383,7 +1562,7 @@ Run a 70-day experiment: 14 baseline days, then 56 intervention days. Choose a d
 
 ## What to watch
 
-The main read is not “did protein magically work?” It is whether achieved daily protein, energy balance, source quality, training context, and tolerability line up with a useful personal outcome. Body-composition and satiety signals are plausible but mixed; kidney, gout, stone, pregnancy, liver, lipid, and digestive boundaries are kept stronger than the efficacy language.
+The main read is whether achieved daily protein changes measurable downstream signals without breaking diet quality or safety context. Start with weekly scale trend, same-method body composition, satiety, GI comfort, and optional blood pressure or lipid/kidney labs; interpret all of them through energy balance, training, source mix, fiber, and medication changes.
 
 ## What to log every day
 
