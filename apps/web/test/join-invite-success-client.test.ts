@@ -9,7 +9,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  routerReplace: vi.fn(),
   useHostedInviteStatusRefresh: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    replace: mocks.routerReplace,
+  }),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
@@ -113,7 +120,7 @@ test("checkout-stage success page reconciles the returned session once and redir
     }),
     method: "POST",
   }));
-  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();
@@ -140,7 +147,7 @@ test("activating success page reconciles the returned session when webhooks won 
     }),
     method: "POST",
   }));
-  expect(view.locationReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).not.toHaveBeenCalled();
 
   await view.cleanup();
 });
@@ -166,7 +173,7 @@ test("active success page reconciles the returned session when the invite is alr
     }),
     method: "POST",
   }));
-  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -187,7 +194,7 @@ test("active success page waits for the returned session reconciliation before r
   await act(async () => {});
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.locationReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).not.toHaveBeenCalled();
 
   const openHomeButton = findButtonByText(view.container, /Open home/);
 
@@ -195,7 +202,7 @@ test("active success page waits for the returned session reconciliation before r
     openHomeButton.click();
   });
 
-  expect(view.locationReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).not.toHaveBeenCalled();
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   resolveFetch(
@@ -206,7 +213,7 @@ test("active success page waits for the returned session reconciliation before r
 
   await act(async () => {});
 
-  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -221,7 +228,7 @@ test("active success page redirects home even when returned session reconciliati
   await flushJoinInviteSuccessClientEffects();
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -280,17 +287,17 @@ test("active success page redirects to home without a returned checkout session"
   });
   await flushJoinInviteSuccessClientEffects();
 
-  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
-  view.locationReplace.mockClear();
+  view.routerReplace.mockClear();
   const continueButton = findButtonByText(view.container, /Open home/);
 
   await act(async () => {
     continueButton.click();
   });
 
-  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();
@@ -311,7 +318,7 @@ test("active success page with an unmatched session keeps the invite fallback gu
   });
   await flushJoinInviteSuccessClientEffects();
 
-  expect(view.locationReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).not.toHaveBeenCalled();
 
   const continueButton = findButtonByText(view.container, /Open home/);
 
@@ -320,7 +327,7 @@ test("active success page with an unmatched session keeps the invite fallback gu
   });
 
   expect(view.locationAssign).toHaveBeenCalledWith("/join/invite-code");
-  expect(view.locationReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).not.toHaveBeenCalled();
 
   await view.cleanup();
 });
@@ -333,7 +340,7 @@ test("preview active success page stays on the success page", async () => {
   });
   await flushJoinInviteSuccessClientEffects();
 
-  expect(view.locationReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).not.toHaveBeenCalled();
   assert.match(view.container.textContent ?? "", /You’re all set/);
   assert.match(view.container.textContent ?? "", /Open home/);
 
@@ -417,6 +424,7 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
     container,
     locationAssign,
     locationReplace,
+    routerReplace: mocks.routerReplace,
   };
 }
 

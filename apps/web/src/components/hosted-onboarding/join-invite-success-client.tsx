@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { CheckCircleIcon, LoaderCircleIcon, MailIcon } from "lucide-react";
 
@@ -39,6 +40,7 @@ export function JoinInviteSuccessClient({
   sessionId,
   preview = false,
 }: JoinInviteSuccessClientProps) {
+  const router = useRouter();
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [delayedSetupSupportStage, setDelayedSetupSupportStage] = useState<
@@ -140,8 +142,8 @@ export function JoinInviteSuccessClient({
       return;
     }
 
-    window.location.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
-  }, [preview, shouldRedirectToHome, successSyncCompletionCount]);
+    router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
+  }, [preview, router, shouldRedirectToHome, successSyncCompletionCount]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}`;
   const successState = resolveHostedInviteSuccessState(status);
@@ -228,7 +230,7 @@ export function JoinInviteSuccessClient({
               return;
             }
 
-            window.location.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
+            router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
             return;
           }
 
