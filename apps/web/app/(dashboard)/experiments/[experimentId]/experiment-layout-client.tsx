@@ -149,7 +149,7 @@ function ExperimentLayoutInner({
             </span>
           </div>
         </div>
-        <div className="pt-4">{children}</div>
+        <div className="pt-6">{children}</div>
       </div>
     </div>
   );
