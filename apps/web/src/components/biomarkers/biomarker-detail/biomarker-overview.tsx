@@ -19,30 +19,12 @@ const ICON_SVG: Record<AboutKey, string> = {
 
 export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerPageModel }) {
   const about = resolveBiomarkerAbout(biomarker.routeId);
-  const eyebrowParts = [
-    biomarker.categories[0] ? formatCategoryEyebrow(biomarker.categories[0]) : null,
-    biomarker.unit,
-  ].filter((part): part is string => Boolean(part));
   const hasExperiments = biomarker.protocolRankings.length > 0;
 
   return (
-    <div className="flex flex-col gap-14 pb-12">
+    <div className="flex flex-col gap-12 pb-12">
       <section className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
         <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-3.5">
-            {eyebrowParts.length > 0 && (
-              <span className="font-mono text-[11px]/3.5 uppercase tracking-[0.12em] text-chart-5">
-                {eyebrowParts.join(" · ")}
-              </span>
-            )}
-            <h1 className="max-w-[24ch] font-serif text-3xl font-semibold tracking-tight text-foreground text-balance sm:text-[38px]">
-              {biomarker.title}
-            </h1>
-            <p className="max-w-[56ch] text-[16px] text-muted-foreground text-pretty">
-              {biomarker.summary}
-            </p>
-          </div>
-
           {about ? <AboutGrid about={about} /> : null}
         </div>
 
@@ -120,10 +102,3 @@ function AboutColumn({
   );
 }
 
-function formatCategoryEyebrow(value: string): string {
-  return value
-    .split(/[-_\s]+/u)
-    .filter((part) => part.length > 0)
-    .map((part) => part.toUpperCase())
-    .join(" ");
-}
