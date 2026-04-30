@@ -36,6 +36,7 @@ export {
   readConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredGarminDeviceSyncProviderConfig,
+  readConfiguredJunctionDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredStravaDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
@@ -68,6 +69,24 @@ export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";
 export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
 export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
+export {
+  buildJunctionClientUserId,
+  createJunctionDeviceSyncProvider,
+  normalizeJunctionProviderFilter,
+} from "./providers/junction.ts";
+export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
+export type { JunctionDeviceSyncProviderConfig } from "./providers/junction.ts";
+export {
+  assertValidJunctionClientConfig,
+  JunctionClient,
+  resolveJunctionBaseUrl,
+} from "./providers/junction-client.ts";
+export type {
+  JunctionClientConfig,
+  JunctionEnvironment,
+  JunctionProviderConnection,
+  JunctionRegion,
+} from "./providers/junction-client.ts";
 export { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";

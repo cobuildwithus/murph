@@ -49,6 +49,14 @@ export function markSyncSucceeded(
     const connectionResult = database.prepare(`
       update device_connection
       set status = case when status = 'disconnected' then status else 'active' end,
+          setup_phase = case
+            when setup_phase in ('pending_link', 'link_returned') then 'source_confirmed'
+            else setup_phase
+          end,
+          setup_expires_at = case
+            when setup_phase in ('pending_link', 'link_returned') then null
+            else setup_expires_at
+          end,
           metadata_json = ?,
           updated_at = ?
       where id = ?
@@ -131,6 +139,8 @@ export function markConnectionSetupFailed(
     database.prepare(`
       update device_connection
       set status = 'reauthorization_required',
+          setup_phase = 'failed',
+          setup_expires_at = null,
           updated_at = ?
       where id = ?
     `).run(now, accountId);

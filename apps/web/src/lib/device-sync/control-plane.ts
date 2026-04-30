@@ -94,7 +94,11 @@ export class HostedDeviceSyncControlPlane {
   }
 
   async handleOAuthCallback(provider: string) {
-    return this.connections.handleOAuthCallback(provider);
+    return this.handleConnectionCallback(provider);
+  }
+
+  async handleConnectionCallback(provider: string) {
+    return this.connections.handleConnectionCallback(provider);
   }
 
   async readWebhookRawBody() {

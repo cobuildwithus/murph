@@ -48,6 +48,10 @@ import {
   ensureDeviceSyncStoreSchema,
 } from "./store/schema.ts";
 import {
+  listConnectionSources as listStoredConnectionSources,
+  upsertConnectionSource as upsertStoredConnectionSource,
+} from "./store/sources.ts";
+import {
   markSyncFailed as markStoredSyncFailed,
   markConnectionSetupFailed as markStoredConnectionSetupFailed,
   markSyncStarted as markStoredSyncStarted,
@@ -69,9 +73,12 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncServiceSummary,
+  ListDeviceConnectionSourcesInput,
   OAuthStateRecord,
   ProviderAuthTokens,
+  StoredDeviceConnectionSource,
   StoredDeviceSyncAccount,
+  UpsertDeviceConnectionSourceInput,
 } from "./types.ts";
 
 export class SqliteDeviceSyncStore {
@@ -163,6 +170,14 @@ export class SqliteDeviceSyncStore {
 
   patchAccount(accountId: string, patch: AccountPatchInput): StoredDeviceSyncAccount {
     return patchStoredAccount(this.database, accountId, patch);
+  }
+
+  upsertConnectionSource(input: UpsertDeviceConnectionSourceInput): StoredDeviceConnectionSource {
+    return upsertStoredConnectionSource(this.database, input);
+  }
+
+  listConnectionSources(input: ListDeviceConnectionSourcesInput): StoredDeviceConnectionSource[] {
+    return listStoredConnectionSources(this.database, input);
   }
 
   updateAccountTokens(

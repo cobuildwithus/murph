@@ -11,6 +11,8 @@ import type {
   DeviceSyncAccount,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
+  ProviderAuthTokens,
+  ProviderConnectionResult,
   ProviderJobContext,
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
@@ -55,6 +57,14 @@ function createStoredAccount(scopes: string[], overrides: Partial<StoredDeviceSy
     localTokenRevision: overrides.localTokenRevision ?? 0,
     refreshTokenEncrypted: "encrypted-refresh-token",
   };
+}
+
+function requireOAuthTokens(connection: ProviderConnectionResult): ProviderAuthTokens {
+  const tokens = connection.credential?.kind === "oauth_tokens"
+    ? connection.credential.tokens
+    : connection.tokens;
+  assert.ok(tokens);
+  return tokens;
 }
 
 function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJobRecord {
@@ -167,7 +177,7 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
 
   assert.equal(connection.externalAccountId, "whoop-user-1");
   assert.equal(connection.displayName, "WHOOP whoop-user-1");
-  assert.equal(connection.tokens.refreshToken, "refresh-token");
+  assert.equal(requireOAuthTokens(connection).refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["offline", "read:profile", "read:workout"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");
   assert.deepEqual(connection.initialJobs?.[0]?.payload, {

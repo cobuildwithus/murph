@@ -12,8 +12,11 @@ export interface DeviceSyncJobRowForTesting {
 }
 
 export interface DeviceSyncCredentialStateRowForTesting {
-  access_token_encrypted: string;
+  access_token_encrypted: string | null;
   access_token_expires_at: string | null;
+  credential_kind: string;
+  credential_metadata_json: string;
+  provider_config_key: string | null;
   refresh_token_encrypted: string | null;
 }
 
@@ -208,13 +211,48 @@ export function setConnectionScopesJsonForTesting(
   });
 }
 
+export function deleteConnectionForTesting(
+  store: SqliteDeviceSyncStore,
+  accountId: string,
+): void {
+  withStoreDatabase(store, (database) => {
+    database.prepare("delete from device_connection where id = ?").run(accountId);
+  });
+}
+
+export function setCredentialStateForTesting(
+  store: SqliteDeviceSyncStore,
+  accountId: string,
+  patch: Partial<DeviceSyncCredentialStateRowForTesting>,
+): void {
+  const entries = Object.entries(patch);
+  if (entries.length === 0) {
+    return;
+  }
+
+  const assignments = entries
+    .map(([key]) => `${assertSqlIdentifier(key)} = ?`)
+    .join(", ");
+  const values = entries.map(([, value]) => value);
+
+  withStoreDatabase(store, (database) => {
+    database.prepare(`update device_credential_state set ${assignments} where account_id = ?`).run(...values, accountId);
+  });
+}
+
 export function readCredentialStateForTesting(
   store: SqliteDeviceSyncStore,
   accountId: string,
 ): DeviceSyncCredentialStateRowForTesting | null {
   return withStoreDatabase(store, (database) =>
     (database.prepare(`
-      select access_token_encrypted, refresh_token_encrypted, access_token_expires_at
+      select
+        credential_kind,
+        provider_config_key,
+        access_token_encrypted,
+        refresh_token_encrypted,
+        access_token_expires_at,
+        credential_metadata_json
       from device_credential_state
       where account_id = ?
     `).get(accountId) as DeviceSyncCredentialStateRowForTesting | undefined) ?? null);

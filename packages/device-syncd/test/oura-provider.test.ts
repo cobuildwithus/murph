@@ -9,7 +9,14 @@ import { OURA_DEFAULT_WEBHOOK_TARGETS } from "../src/providers/oura-webhooks.ts"
 import { subtractDays } from "../src/shared.ts";
 import { createJsonResponse, requireValue } from "./helpers.ts";
 
-import type { DeviceSyncAccount, DeviceSyncJobRecord, DeviceSyncProvider, ProviderJobContext } from "../src/types.ts";
+import type {
+  DeviceSyncAccount,
+  DeviceSyncJobRecord,
+  DeviceSyncProvider,
+  ProviderAuthTokens,
+  ProviderConnectionResult,
+  ProviderJobContext,
+} from "../src/types.ts";
 
 function createAccount(scopes: string[]): DeviceSyncAccount {
   return {
@@ -81,6 +88,14 @@ function createOuraWebhookHeaders(secret: string, timestamp: string, rawBody: Bu
   });
 }
 
+function requireOAuthTokens(connection: ProviderConnectionResult): ProviderAuthTokens {
+  const tokens = connection.credential?.kind === "oauth_tokens"
+    ? connection.credential.tokens
+    : connection.tokens;
+  assert.ok(tokens);
+  return tokens;
+}
+
 function requireVerifyAndParseWebhook(
   provider: DeviceSyncProvider,
 ): NonNullable<DeviceSyncProvider["verifyAndParseWebhook"]> {
@@ -128,7 +143,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
 
   assert.equal(connection.externalAccountId, "oura-user-1");
   assert.equal(connection.displayName, "Oura");
-  assert.equal(connection.tokens.refreshToken, "refresh-token");
+  assert.equal(requireOAuthTokens(connection).refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["personal", "daily", "heartrate"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");
   assert.equal(connection.metadata, undefined);

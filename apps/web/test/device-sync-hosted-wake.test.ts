@@ -120,6 +120,8 @@ function buildHostedConnection(
     nextReconcileAt: string | null;
     provider: string;
     scopes: string[];
+    setupExpiresAt: string | null;
+    setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
     status: "active" | "reauthorization_required" | "disconnected";
     updatedAt: string;
   }> = {},
@@ -141,6 +143,8 @@ function buildHostedConnection(
     nextReconcileAt: null,
     provider: "oura",
     scopes: ["heartrate"],
+    setupExpiresAt: null,
+    setupPhase: null,
     status: "active" as const,
     updatedAt: "2026-03-26T12:00:00.000Z",
     ...overrides,
@@ -521,7 +525,10 @@ describe("appendHostedDeviceSyncWake", () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
-    const activeConnection = buildHostedConnection();
+    const activeConnection = buildHostedConnection({
+      setupExpiresAt: "2026-03-26T12:30:00.000Z",
+      setupPhase: "pending_link",
+    });
     const disconnectedConnection = buildHostedConnection({
       status: "disconnected",
     });
@@ -554,6 +561,8 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "dsc_123",
+        setupExpiresAt: null,
+        setupPhase: null,
         status: "disconnected",
       }),
       mocks.prismaTx,
@@ -688,6 +697,8 @@ describe("appendHostedDeviceSyncWake", () => {
           accessTokenExpiresAt: null,
           metadata: {},
           connectedAt: "2026-03-26T12:00:00.000Z",
+          setupExpiresAt: null,
+          setupPhase: null,
           lastWebhookAt: null,
           lastSyncStartedAt: null,
           lastSyncCompletedAt: null,
@@ -723,6 +734,8 @@ describe("appendHostedDeviceSyncWake", () => {
         accessTokenExpiresAt: null,
         metadata: {},
         connectedAt: "2026-03-26T12:00:00.000Z",
+        setupExpiresAt: null,
+        setupPhase: null,
         lastWebhookAt: null,
         lastSyncStartedAt: null,
         lastSyncCompletedAt: null,

@@ -4,14 +4,23 @@ import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { generatePrefixedId, sanitizeStoredDeviceSyncMetadata, stringifyJson } from "../shared.ts";
 import type {
+  DeviceAccountCredential,
+  DeviceAccountCredentialKind,
+  DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
   ProviderAuthTokens,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import {
-  getAccountByExternalAccount,
-  getAccountById,
-} from "./accounts.ts";
+import { getAccountByExternalAccount, getAccountById } from "./accounts.ts";
+
+type EncryptedProviderAuthTokens = ProviderAuthTokens & {
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted?: string | null;
+};
+
+type HostedAccountCredentialInput = DeviceAccountCredential & {
+  credentialMetadata?: Record<string, unknown>;
+};
 
 export interface HostedAccountHydrationInput {
   clearTokens?: boolean;
@@ -22,6 +31,8 @@ export interface HostedAccountHydrationInput {
     metadata: Record<string, unknown>;
     provider: string;
     scopes: string[];
+    setupExpiresAt?: string | null;
+    setupPhase?: DeviceSyncAccountSetupPhase | null;
     status: DeviceSyncAccountStatus;
     updatedAt: string;
   };
@@ -36,10 +47,347 @@ export interface HostedAccountHydrationInput {
     lastWebhookAt: string | null;
     nextReconcileAt: string | null;
   };
-  tokens?: ProviderAuthTokens & {
-    accessTokenEncrypted: string;
-    refreshTokenEncrypted?: string | null;
+  tokens?: EncryptedProviderAuthTokens;
+  credential?: HostedAccountCredentialInput;
+}
+
+interface ResolvedHostedCredentialColumns {
+  credentialKind: DeviceAccountCredentialKind;
+  providerConfigKey: string | null;
+  accessTokenEncrypted: string | null;
+  refreshTokenEncrypted: string | null;
+  accessTokenExpiresAt: string | null;
+  credentialMetadataJson: string;
+}
+
+function normalizeMetadataKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isRawHostedDeviceSyncIdentifierMetadataKey(normalizedKey: string): boolean {
+  if (normalizedKey.includes("hash") || normalizedKey.includes("blindindex")) {
+    return false;
+  }
+
+  return normalizedKey.includes("ownerid")
+    || normalizedKey.includes("userid")
+    || normalizedKey.includes("clientuserid");
+}
+
+function sanitizeHostedConnectionMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
+
+  for (const key of Object.keys(sanitized)) {
+    const normalizedKey = normalizeMetadataKey(key);
+    if (
+      normalizedKey.includes("hmacsecret")
+      || normalizedKey.includes("webhooksecret")
+      || isRawHostedDeviceSyncIdentifierMetadataKey(normalizedKey)
+    ) {
+      delete sanitized[key];
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeCredentialMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
+
+  for (const key of Object.keys(sanitized)) {
+    const normalizedKey = normalizeMetadataKey(key);
+    if (
+      normalizedKey.includes("hmacsecret")
+      || normalizedKey.includes("webhooksecret")
+      || isRawHostedDeviceSyncIdentifierMetadataKey(normalizedKey)
+    ) {
+      delete sanitized[key];
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeCredentialSubject(
+  value: Record<string, string> | null | undefined,
+): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const subject: Record<string, string> = {};
+
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (Object.keys(subject).length >= 16) {
+      break;
+    }
+
+    const key = rawKey.trim();
+    const normalizedKey = normalizeMetadataKey(key);
+
+    if (
+      !key
+      || key.length > 64
+      || normalizedKey.includes("hmacsecret")
+      || normalizedKey.includes("webhooksecret")
+      || isRawHostedDeviceSyncIdentifierMetadataKey(normalizedKey)
+    ) {
+      continue;
+    }
+
+    if (typeof rawValue === "string" && rawValue.length <= 256) {
+      subject[key] = rawValue;
+    }
+  }
+
+  return subject;
+}
+
+function buildCredentialMetadata(credential: HostedAccountCredentialInput): Record<string, unknown> {
+  const metadata = sanitizeCredentialMetadata(credential.credentialMetadata ?? {});
+
+  if (credential.kind !== "provider_config") {
+    return metadata;
+  }
+
+  const subject = sanitizeCredentialSubject(credential.subject);
+  return Object.keys(subject).length > 0
+    ? {
+        ...metadata,
+        subject,
+      }
+    : metadata;
+}
+
+function readStoredCredentialKind(account: StoredDeviceSyncAccount | null): DeviceAccountCredentialKind {
+  const value = account?.credentialKind;
+
+  if (value === "provider_config" || value === "none" || value === "oauth_tokens") {
+    return value;
+  }
+
+  return "oauth_tokens";
+}
+
+function readStoredProviderConfigKey(account: StoredDeviceSyncAccount | null): string | null {
+  const value = account?.providerConfigKey;
+  return typeof value === "string" && value ? value : null;
+}
+
+function readStoredCredentialMetadata(account: StoredDeviceSyncAccount | null): Record<string, unknown> {
+  const value = account?.credentialMetadata;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function hasEncryptedProviderAuthTokens(
+  tokens: ProviderAuthTokens,
+): tokens is EncryptedProviderAuthTokens {
+  const accessTokenEncrypted = Reflect.get(tokens, "accessTokenEncrypted");
+  const refreshTokenEncrypted = Reflect.get(tokens, "refreshTokenEncrypted");
+
+  return typeof accessTokenEncrypted === "string"
+    && (
+      refreshTokenEncrypted === undefined
+      || refreshTokenEncrypted === null
+      || typeof refreshTokenEncrypted === "string"
+    );
+}
+
+function requireEncryptedProviderAuthTokens(
+  tokens: ProviderAuthTokens,
+  message: string,
+): EncryptedProviderAuthTokens {
+  if (hasEncryptedProviderAuthTokens(tokens)) {
+    return tokens;
+  }
+
+  throw new TypeError(message);
+}
+
+function getHostedHydrationTokenInput(
+  input: HostedAccountHydrationInput,
+): HostedAccountHydrationInput["tokens"] {
+  if (input.tokens) {
+    return input.tokens;
+  }
+
+  if (input.credential?.kind === "oauth_tokens") {
+    return requireEncryptedProviderAuthTokens(
+      input.credential.tokens,
+      "Hosted OAuth credential hydration requires encrypted access token fields.",
+    );
+  }
+
+  return undefined;
+}
+
+function buildCredentialColumnsFromCredential(
+  credential: HostedAccountCredentialInput,
+): ResolvedHostedCredentialColumns {
+  if (credential.kind === "oauth_tokens") {
+    const tokens = requireEncryptedProviderAuthTokens(
+      credential.tokens,
+      "Hosted OAuth credential hydration requires encrypted access token fields.",
+    );
+
+    return {
+      credentialKind: "oauth_tokens",
+      providerConfigKey: null,
+      accessTokenEncrypted: tokens.accessTokenEncrypted,
+      refreshTokenEncrypted: tokens.refreshTokenEncrypted ?? null,
+      accessTokenExpiresAt: tokens.accessTokenExpiresAt ?? null,
+      credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
+    };
+  }
+
+  if (credential.kind === "provider_config") {
+    const providerConfigKey = credential.providerConfigKey.trim();
+    if (!providerConfigKey) {
+      throw new TypeError("Hosted provider-config hydration requires providerConfigKey.");
+    }
+
+    return {
+      credentialKind: "provider_config",
+      providerConfigKey,
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
+    };
+  }
+
+  return {
+    credentialKind: "none",
+    providerConfigKey: null,
+    accessTokenEncrypted: null,
+    refreshTokenEncrypted: null,
+    accessTokenExpiresAt: null,
+    credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
   };
+}
+
+function buildCredentialColumnsFromExisting(
+  existing: StoredDeviceSyncAccount | null,
+): ResolvedHostedCredentialColumns {
+  const credentialKind = readStoredCredentialKind(existing);
+  const credentialMetadataJson = stringifyJson(readStoredCredentialMetadata(existing));
+
+  if (credentialKind === "provider_config") {
+    return {
+      credentialKind,
+      providerConfigKey: readStoredProviderConfigKey(existing),
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialMetadataJson,
+    };
+  }
+
+  if (credentialKind === "none") {
+    return {
+      credentialKind,
+      providerConfigKey: null,
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialMetadataJson,
+    };
+  }
+
+  return {
+    credentialKind: "oauth_tokens",
+    providerConfigKey: null,
+    accessTokenEncrypted: existing?.accessTokenEncrypted ?? "",
+    refreshTokenEncrypted: existing?.refreshTokenEncrypted ?? null,
+    accessTokenExpiresAt: existing?.accessTokenExpiresAt ?? null,
+    credentialMetadataJson,
+  };
+}
+
+function buildClearedCredentialColumnsFromExisting(
+  existing: StoredDeviceSyncAccount | null,
+): ResolvedHostedCredentialColumns {
+  const credentialKind = readStoredCredentialKind(existing);
+  const credentialMetadataJson = stringifyJson(readStoredCredentialMetadata(existing));
+
+  if (credentialKind === "provider_config") {
+    return {
+      credentialKind,
+      providerConfigKey: readStoredProviderConfigKey(existing),
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialMetadataJson,
+    };
+  }
+
+  if (credentialKind === "none") {
+    return {
+      credentialKind,
+      providerConfigKey: null,
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialMetadataJson,
+    };
+  }
+
+  return {
+    credentialKind: "oauth_tokens",
+    providerConfigKey: null,
+    accessTokenEncrypted: "",
+    refreshTokenEncrypted: null,
+    accessTokenExpiresAt: null,
+    credentialMetadataJson,
+  };
+}
+
+function resolveHydratedHostedAccountCredential(input: {
+  connectionAccepted: boolean;
+  existing: StoredDeviceSyncAccount | null;
+  hydration: HostedAccountHydrationInput;
+  inputTokens: HostedAccountHydrationInput["tokens"];
+  shouldClearTokens: boolean;
+}): ResolvedHostedCredentialColumns {
+  if (input.inputTokens) {
+    if (input.hydration.credential?.kind === "oauth_tokens") {
+      return buildCredentialColumnsFromCredential(input.hydration.credential);
+    }
+
+    return {
+      credentialKind: "oauth_tokens",
+      providerConfigKey: null,
+      accessTokenEncrypted: input.inputTokens.accessTokenEncrypted,
+      refreshTokenEncrypted: input.inputTokens.refreshTokenEncrypted ?? null,
+      accessTokenExpiresAt: input.inputTokens.accessTokenExpiresAt ?? null,
+      credentialMetadataJson: stringifyJson(
+        buildCredentialMetadata({
+          kind: "oauth_tokens",
+          tokens: input.inputTokens,
+        }),
+      ),
+    };
+  }
+
+  if (
+    input.connectionAccepted
+    && input.hydration.credential
+    && input.hydration.credential.kind !== "oauth_tokens"
+  ) {
+    return buildCredentialColumnsFromCredential(input.hydration.credential);
+  }
+
+  if (input.shouldClearTokens) {
+    return buildClearedCredentialColumnsFromExisting(input.existing);
+  }
+
+  return buildCredentialColumnsFromExisting(input.existing);
 }
 
 export function resolveHydratedHostedAccountTokens(input: {
@@ -90,14 +438,19 @@ export function resolveHostedAccountHydrationPlan(input: {
 } {
   const connectionAccepted = input.existing === null || (!input.connectionStateStale && !input.connectionStateReplayed);
   const tokenAccepted = !input.tokenStateStale && !input.tokenStateReplayed;
+  const inputTokens = getHostedHydrationTokenInput(input.hydration);
   const tokenClearRequested = input.hydration.clearTokens === true
-    || (input.hydration.connection.status === "disconnected" && input.hydration.tokens === undefined);
+    || (
+      input.hydration.connection.status === "disconnected"
+      && inputTokens === undefined
+      && input.hydration.credential === undefined
+    );
 
   let tokenPayloadAction: HostedHydratedTokenPayloadAction = "keep";
 
-  if (input.hydration.tokens !== undefined && tokenAccepted) {
+  if (inputTokens !== undefined && tokenAccepted) {
     tokenPayloadAction = "apply_bundle";
-  } else if (tokenClearRequested && input.hydration.tokens === undefined && connectionAccepted && tokenAccepted) {
+  } else if (tokenClearRequested && inputTokens === undefined && connectionAccepted && tokenAccepted) {
     tokenPayloadAction = "clear";
   }
 
@@ -197,7 +550,7 @@ export function hydrateHostedAccount(
       input.connection.externalAccountId,
     );
 
-    if (!existing && input.tokens === undefined) {
+    if (!existing && getHostedHydrationTokenInput(input) === undefined && input.credential === undefined) {
       return null;
     }
 
@@ -235,10 +588,13 @@ export function hydrateHostedAccount(
       : existing?.updatedAt ?? input.connection.updatedAt;
     const rowUpdatedAt = latestIsoTimestamp(existing?.updatedAt ?? null, connectionUpdatedAt)
       ?? connectionUpdatedAt;
-    const { accessTokenEncrypted, refreshTokenEncrypted, accessTokenExpiresAt } = resolveHydratedHostedAccountTokens({
-      existing,
-      inputTokens: hydrationPlan.tokenPayloadAction === "apply_bundle" ? input.tokens : undefined,
+    const inputTokens = getHostedHydrationTokenInput(input);
+    const credentialColumns = resolveHydratedHostedAccountCredential({
+      connectionAccepted: hydrationPlan.connectionAccepted,
       shouldClearTokens,
+      existing,
+      hydration: input,
+      inputTokens: hydrationPlan.tokenPayloadAction === "apply_bundle" ? inputTokens : undefined,
     });
     const hostedObservedUpdatedAt = hydrationPlan.connectionAccepted
       ? input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null
@@ -260,10 +616,16 @@ export function hydrateHostedAccount(
     const status = hydrationPlan.connectionAccepted
       ? input.connection.status
       : existing?.status ?? input.connection.status;
+    const setupPhase = hydrationPlan.connectionAccepted
+      ? input.connection.setupPhase ?? null
+      : existing?.setupPhase ?? input.connection.setupPhase ?? null;
+    const setupExpiresAt = hydrationPlan.connectionAccepted
+      ? input.connection.setupExpiresAt ?? null
+      : existing?.setupExpiresAt ?? input.connection.setupExpiresAt ?? null;
     const scopes = hydrationPlan.connectionAccepted
       ? input.connection.scopes
       : existing?.scopes ?? input.connection.scopes;
-    const metadata = sanitizeStoredDeviceSyncMetadata(
+    const metadata = sanitizeHostedConnectionMetadata(
       hydrationPlan.connectionAccepted
         ? input.connection.metadata
         : existing?.metadata ?? input.connection.metadata,
@@ -284,6 +646,8 @@ export function hydrateHostedAccount(
         update device_connection
         set display_name = ?,
             status = ?,
+            setup_phase = ?,
+            setup_expires_at = ?,
             scopes_json = ?,
             disconnect_generation = ?,
             metadata_json = ?,
@@ -293,6 +657,8 @@ export function hydrateHostedAccount(
       `).run(
         displayName,
         status,
+        setupPhase,
+        setupExpiresAt,
         stringifyJson(scopes),
         disconnectGeneration,
         stringifyJson(metadata),
@@ -303,15 +669,21 @@ export function hydrateHostedAccount(
 
       database.prepare(`
         update device_credential_state
-        set access_token_encrypted = ?,
+        set credential_kind = ?,
+            provider_config_key = ?,
+            access_token_encrypted = ?,
             refresh_token_encrypted = ?,
             access_token_expires_at = ?,
+            credential_metadata_json = ?,
             updated_at = ?
         where account_id = ?
       `).run(
-        accessTokenEncrypted,
-        refreshTokenEncrypted,
-        accessTokenExpiresAt,
+        credentialColumns.credentialKind,
+        credentialColumns.providerConfigKey,
+        credentialColumns.accessTokenEncrypted,
+        credentialColumns.refreshTokenEncrypted,
+        credentialColumns.accessTokenExpiresAt,
+        credentialColumns.credentialMetadataJson,
         rowUpdatedAt,
         existing.id,
       );
@@ -358,19 +730,23 @@ export function hydrateHostedAccount(
         external_account_id,
         display_name,
         status,
+        setup_phase,
+        setup_expires_at,
         scopes_json,
         disconnect_generation,
         metadata_json,
         connected_at,
         created_at,
         updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.connection.provider,
       input.connection.externalAccountId,
       displayName,
       status,
+      setupPhase,
+      setupExpiresAt,
       stringifyJson(scopes),
       disconnectGeneration,
       stringifyJson(metadata),
@@ -382,17 +758,23 @@ export function hydrateHostedAccount(
     database.prepare(`
       insert into device_credential_state (
         account_id,
+        credential_kind,
+        provider_config_key,
         access_token_encrypted,
         refresh_token_encrypted,
         access_token_expires_at,
+        credential_metadata_json,
         created_at,
         updated_at
-      ) values (?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
-      accessTokenEncrypted,
-      refreshTokenEncrypted,
-      accessTokenExpiresAt,
+      credentialColumns.credentialKind,
+      credentialColumns.providerConfigKey,
+      credentialColumns.accessTokenEncrypted,
+      credentialColumns.refreshTokenEncrypted,
+      credentialColumns.accessTokenExpiresAt,
+      credentialColumns.credentialMetadataJson,
       input.connection.updatedAt,
       rowUpdatedAt,
     );

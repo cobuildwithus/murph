@@ -5,7 +5,157 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 1;
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 4;
+
+interface SqliteTableColumn {
+  name?: unknown;
+  notnull?: unknown;
+}
+
+const DEVICE_CREDENTIAL_STATE_MIGRATION_TABLE =
+  "device_credential_state_legacy_credential_kind_migration";
+const DEVICE_CONNECTION_SETUP_COLUMNS = {
+  setupPhase: "setup_phase",
+  setupExpiresAt: "setup_expires_at",
+} as const;
+
+function tableExists(database: DatabaseSync, tableName: string): boolean {
+  const row = database.prepare(`
+    select name
+    from sqlite_master
+    where type = 'table' and name = ?
+  `).get(tableName) as { name?: string } | undefined;
+
+  return row?.name === tableName;
+}
+
+function readDeviceCredentialStateColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(device_credential_state)").all() as SqliteTableColumn[];
+}
+
+function readDeviceConnectionColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(device_connection)").all() as SqliteTableColumn[];
+}
+
+function columnNames(columns: readonly SqliteTableColumn[]): Set<string> {
+  return new Set(
+    columns
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === "string"),
+  );
+}
+
+function isAccessTokenColumnNullable(columns: readonly SqliteTableColumn[]): boolean {
+  const accessTokenColumn = columns.find((column) => column.name === "access_token_encrypted");
+  return accessTokenColumn?.notnull === 0;
+}
+
+function isCurrentDeviceCredentialStateSchema(columns: readonly SqliteTableColumn[]): boolean {
+  const names = columnNames(columns);
+
+  return names.has("credential_kind")
+    && names.has("provider_config_key")
+    && names.has("credential_metadata_json")
+    && isAccessTokenColumnNullable(columns);
+}
+
+function createDeviceCredentialStateTable(database: DatabaseSync): void {
+  database.exec(`
+    create table if not exists device_credential_state (
+      account_id text primary key references device_connection(id) on delete cascade,
+      credential_kind text not null default 'oauth_tokens',
+      provider_config_key text,
+      access_token_encrypted text,
+      refresh_token_encrypted text,
+      access_token_expires_at text,
+      credential_metadata_json text not null default '{}',
+      created_at text not null,
+      updated_at text not null,
+      check (credential_kind in ('oauth_tokens', 'provider_config', 'none')),
+      check (
+        (
+          credential_kind = 'oauth_tokens'
+          and provider_config_key is null
+          and access_token_encrypted is not null
+        )
+        or (
+          credential_kind = 'provider_config'
+          and provider_config_key is not null
+          and (access_token_encrypted is null or access_token_encrypted = '')
+          and refresh_token_encrypted is null
+          and access_token_expires_at is null
+        )
+        or (
+          credential_kind = 'none'
+          and provider_config_key is null
+          and (access_token_encrypted is null or access_token_encrypted = '')
+          and refresh_token_encrypted is null
+          and access_token_expires_at is null
+        )
+      )
+    );
+  `);
+}
+
+function ensureDeviceCredentialStateSchema(database: DatabaseSync): void {
+  if (!tableExists(database, "device_credential_state")) {
+    createDeviceCredentialStateTable(database);
+    return;
+  }
+
+  const existingColumns = readDeviceCredentialStateColumns(database);
+  if (isCurrentDeviceCredentialStateSchema(existingColumns)) {
+    return;
+  }
+
+  database.exec(`
+    drop table if exists ${DEVICE_CREDENTIAL_STATE_MIGRATION_TABLE};
+
+    alter table device_credential_state
+    rename to ${DEVICE_CREDENTIAL_STATE_MIGRATION_TABLE};
+  `);
+
+  createDeviceCredentialStateTable(database);
+
+  database.exec(`
+    insert into device_credential_state (
+      account_id,
+      credential_kind,
+      provider_config_key,
+      access_token_encrypted,
+      refresh_token_encrypted,
+      access_token_expires_at,
+      credential_metadata_json,
+      created_at,
+      updated_at
+    )
+    select
+      account_id,
+      'oauth_tokens',
+      null,
+      access_token_encrypted,
+      refresh_token_encrypted,
+      access_token_expires_at,
+      '{}',
+      created_at,
+      updated_at
+    from ${DEVICE_CREDENTIAL_STATE_MIGRATION_TABLE};
+
+    drop table ${DEVICE_CREDENTIAL_STATE_MIGRATION_TABLE};
+  `);
+}
+
+function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
+  const names = columnNames(readDeviceConnectionColumns(database));
+
+  if (!names.has(DEVICE_CONNECTION_SETUP_COLUMNS.setupPhase)) {
+    database.exec("alter table device_connection add column setup_phase text");
+  }
+
+  if (!names.has(DEVICE_CONNECTION_SETUP_COLUMNS.setupExpiresAt)) {
+    database.exec("alter table device_connection add column setup_expires_at text");
+  }
+}
 
 export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   database.exec(`
@@ -27,6 +177,8 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         external_account_id text not null,
         display_name text,
         status text not null,
+        setup_phase text,
+        setup_expires_at text,
         scopes_json text not null,
         disconnect_generation integer not null default 0,
         metadata_json text not null,
@@ -39,13 +191,30 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
       create index if not exists device_connection_provider_idx
       on device_connection (provider, updated_at desc);
 
-      create table if not exists device_credential_state (
-        account_id text primary key references device_connection(id) on delete cascade,
-        access_token_encrypted text not null,
-        refresh_token_encrypted text,
-        access_token_expires_at text,
+      create table if not exists device_connection_source (
+        id text primary key,
+        connection_id text not null references device_connection(id) on delete cascade,
+        source_instance_key text not null,
+        source_provider_slug text not null,
+        display_name text,
+        status text not null,
+        resource_availability_summary_json text not null default '{}',
+        last_error_code text,
+        last_error_message text,
+        first_seen_at text not null,
+        last_seen_at text not null,
         created_at text not null,
-        updated_at text not null
+        updated_at text not null,
+        unique (connection_id, source_instance_key),
+        check (status in ('connected', 'unavailable', 'error', 'disconnected'))
+      );
+
+      create index if not exists device_connection_source_list_idx
+      on device_connection_source (
+        connection_id,
+        last_seen_at desc,
+        source_provider_slug asc,
+        source_instance_key asc
       );
 
       create table if not exists device_observation_state (
@@ -113,4 +282,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
       create index if not exists webhook_trace_received_idx
       on webhook_trace (received_at desc);
     `);
+
+  ensureDeviceCredentialStateSchema(database);
+  ensureDeviceConnectionSetupColumns(database);
 }

@@ -10,6 +10,9 @@ type StaticConnectionRecord = {
   provider: string;
   providerAccountBlindIndex: string;
   status: "active" | "disconnected" | "reauthorization_required";
+  credentialKind: "oauth_tokens" | "provider_config" | "none";
+  credentialMetadataJson: Record<string, unknown> | null;
+  providerConfigKey: string | null;
   connectedAt: Date;
   displayName: string | null;
   externalAccountIdEncrypted?: string | null;
@@ -24,6 +27,8 @@ type StaticConnectionRecord = {
   nextReconcileAt: Date | null;
   refreshTokenEncrypted?: string | null;
   scopesJson: string[] | null;
+  setupExpiresAt: Date | null;
+  setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
   tokenVersion?: number | null;
   createdAt: Date;
   updatedAt: Date;
@@ -52,6 +57,9 @@ function createHeartbeatStore(seed: Partial<Pick<
     provider: "oura",
     providerAccountBlindIndex: "hbdi_test",
     status: "active",
+    credentialKind: "oauth_tokens",
+    credentialMetadataJson: null,
+    providerConfigKey: null,
     displayName: "Oura ring",
     connectedAt: new Date("2026-03-25T00:00:00.000Z"),
     lastWebhookAt: null,
@@ -65,6 +73,8 @@ function createHeartbeatStore(seed: Partial<Pick<
     },
     nextReconcileAt: null,
     scopesJson: ["daily", "sleep"],
+    setupExpiresAt: null,
+    setupPhase: null,
     createdAt: new Date("2026-03-25T00:00:00.000Z"),
     updatedAt: new Date("2026-03-25T00:00:00.000Z"),
     ...seed,

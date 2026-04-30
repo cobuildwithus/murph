@@ -30,10 +30,35 @@ export type DeviceSyncAccountStatus =
   | "reauthorization_required"
   | "disconnected";
 
+export type DeviceSyncAccountSetupPhase =
+  | "pending_link"
+  | "link_returned"
+  | "source_confirmed"
+  | "failed";
+
+export type DeviceConnectionSourceStatus =
+  | "connected"
+  | "unavailable"
+  | "error"
+  | "disconnected";
+
+export type DeviceConnectionSourceResourceAvailabilityValue =
+  | string
+  | number
+  | boolean
+  | null;
+
+export type DeviceConnectionSourceResourceAvailabilitySummary = Record<
+  string,
+  DeviceConnectionSourceResourceAvailabilityValue
+>;
+
 export interface DeviceSyncProviderDescriptor {
   provider: string;
-  callbackPath: string;
-  callbackUrl: string;
+  connectionKind: "oauth2" | "external_link" | "sdk" | "manual" | "none";
+  credentialPolicy: "oauth_tokens" | "provider_config" | "none";
+  callbackPath: string | null;
+  callbackUrl: string | null;
   webhookPath: string | null;
   webhookUrl: string | null;
   supportsWebhooks: boolean;
@@ -46,6 +71,8 @@ export interface DeviceSyncAccountRecord {
   externalAccountId: string;
   displayName: string | null;
   status: DeviceSyncAccountStatus;
+  setupPhase?: DeviceSyncAccountSetupPhase | null;
+  setupExpiresAt?: string | null;
   scopes: string[];
   accessTokenExpiresAt?: string | null;
   metadata: Record<string, unknown>;
@@ -59,6 +86,41 @@ export interface DeviceSyncAccountRecord {
   nextReconcileAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DeviceConnectionSourceRecord {
+  id: string;
+  connectionId: string;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+  displayName: string | null;
+  status: DeviceConnectionSourceStatus;
+  resourceAvailabilitySummary: DeviceConnectionSourceResourceAvailabilitySummary;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertDeviceConnectionSourceInput {
+  connectionId: string;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+  displayName?: string | null;
+  status: DeviceConnectionSourceStatus;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  firstSeenAt?: string | null;
+  lastSeenAt: string;
+}
+
+export interface ListDeviceConnectionSourcesInput {
+  connectionId: string;
+  sourceProviderSlug?: string | null;
+  status?: DeviceConnectionSourceStatus | null;
 }
 
 export interface DeviceSyncJobRecord {

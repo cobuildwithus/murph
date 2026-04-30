@@ -265,48 +265,20 @@ const DEVICE_SYNC_HTTP_ROUTES = [
   }),
   createParameterizedRoute({
     method: "GET",
+    pattern: /^\/connect\/([^/]+)\/callback$/u,
+    paramNames: ["provider"],
+    surface: "public",
+    async handle(input) {
+      await handleDeviceConnectionCallback(input);
+    },
+  }),
+  createParameterizedRoute({
+    method: "GET",
     pattern: /^\/oauth\/([^/]+)\/callback$/u,
     paramNames: ["provider"],
     surface: "public",
-    async handle({ response, service, url, params }) {
-      const provider = params.provider ?? "";
-
-      try {
-        const result = await service.handleOAuthCallback({
-          provider,
-          code: url.searchParams.get("code"),
-          state: url.searchParams.get("state"),
-          scope: url.searchParams.get("scope"),
-          error: url.searchParams.get("error"),
-          errorDescription: url.searchParams.get("error_description"),
-        });
-
-        const redirectLocation = buildDeviceSyncCallbackSuccessRedirectLocation({
-          returnTo: result.returnTo,
-          provider: result.account.provider,
-        });
-
-        if (redirectLocation) {
-          redirect(response, redirectLocation);
-          return;
-        }
-
-        sendHtml(
-          response,
-          200,
-          renderCallbackHtml({
-            title: `${formatProviderLabel(result.account.provider)} connected`,
-            body: `Connected ${formatProviderLabel(result.account.provider)} successfully.`,
-          }),
-        );
-      } catch (error) {
-        if (isDeviceSyncError(error)) {
-          sendCallbackErrorResponse(response, provider, error);
-          return;
-        }
-
-        throw error;
-      }
+    async handle(input) {
+      await handleDeviceConnectionCallback(input);
     },
   }),
   createParameterizedRoute({
@@ -415,6 +387,56 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     },
   }),
 ] satisfies readonly DeviceSyncHttpRouteDescriptor[];
+
+async function handleDeviceConnectionCallback({
+  response,
+  service,
+  url,
+  params,
+}: DeviceSyncHttpRouteHandlerInput): Promise<void> {
+  const provider = params.provider ?? "";
+
+  try {
+    const handleConnectionCallback = typeof Reflect.get(service, "handleConnectionCallback") === "function"
+      ? service.handleConnectionCallback.bind(service)
+      : service.handleOAuthCallback.bind(service);
+    const result = await handleConnectionCallback({
+      provider,
+      query: url.searchParams,
+      code: url.searchParams.get("code"),
+      state: url.searchParams.get("murph_state") ?? url.searchParams.get("state"),
+      scope: url.searchParams.get("scope"),
+      error: url.searchParams.get("error"),
+      errorDescription: url.searchParams.get("error_description"),
+    });
+
+    const redirectLocation = buildDeviceSyncCallbackSuccessRedirectLocation({
+      returnTo: result.returnTo,
+      provider: result.account.provider,
+    });
+
+    if (redirectLocation) {
+      redirect(response, redirectLocation);
+      return;
+    }
+
+    sendHtml(
+      response,
+      200,
+      renderCallbackHtml({
+        title: `${formatProviderLabel(result.account.provider)} connected`,
+        body: `Connected ${formatProviderLabel(result.account.provider)} successfully.`,
+      }),
+    );
+  } catch (error) {
+    if (isDeviceSyncError(error)) {
+      sendCallbackErrorResponse(response, provider, error);
+      return;
+    }
+
+    throw error;
+  }
+}
 
 async function routeRequest(input: {
   request: IncomingMessage;

@@ -34,6 +34,8 @@ function buildHostedRecord(
     accessTokenExpiresAt: string | null;
     connectedAt: string;
     createdAt: string;
+    credentialKind: "oauth_tokens" | "provider_config" | "none";
+    credentialMetadata: Record<string, unknown>;
     displayName: string | null;
     externalAccountId: string | null;
     id: string;
@@ -46,7 +48,10 @@ function buildHostedRecord(
     metadata: Record<string, unknown>;
     nextReconcileAt: string | null;
     provider: string;
+    providerConfigKey: string | null;
     scopes: string[];
+    setupExpiresAt: string | null;
+    setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
     status: "active" | "reauthorization_required" | "disconnected";
     updatedAt: string | undefined;
     userId: string;
@@ -56,6 +61,8 @@ function buildHostedRecord(
     accessTokenExpiresAt: null,
     connectedAt: "2026-04-06T09:00:00.000Z",
     createdAt: "2026-04-06T09:00:00.000Z",
+    credentialKind: "oauth_tokens" as const,
+    credentialMetadata: {},
     displayName: "Hosted Device",
     externalAccountId: "acct_123",
     id: "conn_123",
@@ -70,7 +77,10 @@ function buildHostedRecord(
     },
     nextReconcileAt: null,
     provider: "oura",
+    providerConfigKey: null,
     scopes: ["daily"],
+    setupExpiresAt: null,
+    setupPhase: null,
     status: "active" as const,
     updatedAt: "2026-04-06T10:00:00.000Z",
     userId: "user_123",
@@ -96,6 +106,8 @@ function buildPublicConnection(record: ReturnType<typeof buildHostedRecord>) {
     nextReconcileAt: record.nextReconcileAt,
     provider: record.provider,
     scopes: [...record.scopes],
+    setupExpiresAt: record.setupExpiresAt,
+    setupPhase: record.setupPhase,
     status: record.status,
     updatedAt: record.updatedAt,
   };
@@ -151,6 +163,8 @@ function createAuthorityHarness(input: {
       nextReconcileAt: account.nextReconcileAt,
       provider: account.provider,
       scopes: [...account.scopes],
+      setupExpiresAt: account.setupExpiresAt,
+      setupPhase: account.setupPhase,
       status: account.status,
       updatedAt: "2026-04-06T10:11:00.000Z",
     };
@@ -171,9 +185,19 @@ function createAuthorityHarness(input: {
   });
 
   const findFirst = vi.fn(async () => currentRecord);
+  const update = vi.fn(async ({ data }: { data: Partial<ReturnType<typeof buildHostedRecord>> }) => {
+    currentRecord = {
+      ...currentRecord,
+      ...data,
+      updatedAt: "2026-04-06T10:11:00.000Z",
+    };
+    currentStoredAccount = null;
+    return currentRecord;
+  });
   const tx = {
     deviceConnection: {
       findFirst,
+      update,
     },
   };
 
@@ -193,7 +217,7 @@ function createAuthorityHarness(input: {
     syncDurableConnectionState,
     withConnectionRefreshLock: vi.fn(async (
       _connectionId: string,
-      callback: (tx: { deviceConnection: { findFirst: typeof findFirst } }) => Promise<unknown>,
+      callback: (tx: { deviceConnection: { findFirst: typeof findFirst; update: typeof update } }) => Promise<unknown>,
     ) =>
       callback(tx)),
   };
@@ -212,6 +236,7 @@ function createAuthorityHarness(input: {
     persistStoredConnectionTokenBundle,
     store,
     syncDurableConnectionState,
+    updateConnectionRecord: update,
   };
 }
 
@@ -275,7 +300,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         }),
         trustedUserId: "user_123",
       }),
-    ).rejects.toThrow(/observedTokenVersion is required when tokenBundle mutations are present/u);
+    ).rejects.toThrow(/observedTokenVersion is required when credential or tokenBundle mutations are present/u);
 
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   });
@@ -523,6 +548,244 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       ],
       userId: "user_123",
     });
+  });
+
+  it("reads provider-config hosted snapshots without token material", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        accessTokenExpiresAt: null,
+        credentialKind: "provider_config",
+        credentialMetadata: {
+          client_user_id: "raw-client-user",
+          hmacSecret: "do-not-store",
+          region: "us",
+        },
+        externalAccountId: null,
+        provider: "junction",
+        providerConfigKey: "junction",
+        setupExpiresAt: "2026-04-06T09:30:00.000Z",
+        setupPhase: "pending_link",
+      }),
+      storedAccount: null,
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+    harness.store.getConnectionForUser.mockResolvedValue({
+      ...buildPublicConnection(buildHostedRecord({
+        provider: "junction",
+      })),
+      externalAccountId: "junction-user-123",
+    });
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections[0]).not.toHaveProperty("tokenBundle");
+    expect(response.connections[0]).toMatchObject({
+      connection: expect.objectContaining({
+        externalAccountId: "junction-user-123",
+        provider: "junction",
+        setupExpiresAt: "2026-04-06T09:30:00.000Z",
+        setupPhase: "pending_link",
+      }),
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {
+          region: "us",
+        },
+      },
+    });
+    expect(JSON.stringify(response)).not.toContain("raw-client-user");
+    expect(JSON.stringify(response)).not.toContain("do-not-store");
+  });
+
+  it("applies runtime setup phase updates through durable connection state", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        setupExpiresAt: "2026-04-06T09:30:00.000Z",
+        setupPhase: "pending_link",
+      }),
+      storedAccount: null,
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                setupExpiresAt: null,
+                setupPhase: "source_confirmed",
+              },
+              connectionId: "conn_123",
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connection: expect.objectContaining({
+        setupExpiresAt: null,
+        setupPhase: "source_confirmed",
+      }),
+      connectionId: "conn_123",
+      tokenUpdate: "missing",
+      writeUpdate: "applied",
+    });
+    expect(harness.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        setupExpiresAt: null,
+        setupPhase: "source_confirmed",
+      }),
+      expect.anything(),
+    );
+    expect(harness.record.setupExpiresAt).toBe(null);
+    expect(harness.record.setupPhase).toBe("source_confirmed");
+  });
+
+  it("persists provider-config runtime credentials without writing token bundles", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        accessTokenExpiresAt: null,
+        credentialKind: "provider_config",
+        provider: "junction",
+        providerConfigKey: "junction",
+      }),
+      storedAccount: null,
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              credential: {
+                kind: "provider_config",
+                providerConfigKey: "junction",
+                credentialMetadata: {
+                  client_user_id: "raw-client-user",
+                  hmacSecret: "do-not-store",
+                  region: "us",
+                },
+              },
+              observedTokenVersion: null,
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "missing",
+      writeUpdate: "applied",
+    });
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(harness.updateConnectionRecord).toHaveBeenCalledWith({
+      where: {
+        id: "conn_123",
+      },
+      data: expect.objectContaining({
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        credentialKind: "provider_config",
+        credentialMetadataJson: {
+          region: "us",
+        },
+        keyVersion: null,
+        providerConfigKey: "junction",
+        refreshTokenEncrypted: null,
+        tokenVersion: null,
+      }),
+    });
+  });
+
+  it("rejects provider-config runtime credential replacement for OAuth manifest providers", async () => {
+    const harness = createAuthorityHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    await expect(applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              credential: {
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              observedTokenVersion: null,
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/credential.*oauth_tokens|provider-config.*profile/u);
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(harness.updateConnectionRecord).not.toHaveBeenCalled();
+  });
+
+  it("rejects token-bundle mutations for provider-config runtime credentials", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        accessTokenExpiresAt: null,
+        credentialKind: "provider_config",
+        provider: "junction",
+        providerConfigKey: "junction",
+      }),
+      storedAccount: null,
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    await expect(applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              observedTokenVersion: null,
+              tokenBundle: null,
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/do not support tokenBundle mutations/u);
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
   });
 
   it("applies fresh null fences once and rejects a replay after the hosted version advances", async () => {

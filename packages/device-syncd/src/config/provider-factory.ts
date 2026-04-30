@@ -40,7 +40,7 @@ export function createConfiguredDeviceSyncProvidersFromConfigs(
       continue;
     }
 
-    providers.push(createConfiguredDeviceSyncProviderFromConfig(provider, config));
+    providers.push(createConfiguredDeviceSyncProviderFromConfig(provider, config as never));
   }
 
   return providers;
@@ -60,7 +60,28 @@ function createConfiguredDeviceSyncProviderFromConfig<
   provider: TProvider,
   config: ConfiguredDeviceSyncProviderConfigByKey[TProvider],
 ): DeviceSyncProvider {
-  return getConfiguredDeviceSyncProviderManifest(provider).createProvider(config);
+  switch (provider) {
+    case "garmin":
+      return getConfiguredDeviceSyncProviderManifest("garmin").createProvider(
+        config as ConfiguredDeviceSyncProviderConfigByKey["garmin"],
+      );
+    case "junction":
+      return getConfiguredDeviceSyncProviderManifest("junction").createProvider(
+        config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
+      );
+    case "oura":
+      return getConfiguredDeviceSyncProviderManifest("oura").createProvider(
+        config as ConfiguredDeviceSyncProviderConfigByKey["oura"],
+      );
+    case "whoop":
+      return getConfiguredDeviceSyncProviderManifest("whoop").createProvider(
+        config as ConfiguredDeviceSyncProviderConfigByKey["whoop"],
+      );
+    case "strava":
+      return getConfiguredDeviceSyncProviderManifest("strava").createProvider(
+        config as ConfiguredDeviceSyncProviderConfigByKey["strava"],
+      );
+  }
 }
 
 export { configuredDeviceSyncProviderKeys };

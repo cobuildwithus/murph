@@ -38,6 +38,8 @@ import type {
   DeviceSyncServiceConfig,
   DeviceSyncServiceSummary,
   DisconnectAccountResult,
+  DeviceAccountCredential,
+  HandleConnectionCallbackInput,
   HandleOAuthCallbackInput,
   HandleWebhookResult,
   ProviderAuthTokens,
@@ -81,6 +83,7 @@ export interface DeviceSyncService {
   stop(): void;
   close(): void;
   startConnection(input: StartConnectionInput): Promise<BeginConnectionResult>;
+  handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
   handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
   getNextWakeAt(now?: string): string | null;
@@ -144,12 +147,15 @@ class DeviceSyncServiceController {
               externalAccountId: record.externalAccountId,
               displayName: record.displayName ?? null,
               status: record.status,
+              setupPhase: record.setupPhase,
+              setupExpiresAt: record.setupExpiresAt,
               scopes: record.scopes,
-              tokens: this.encryptTokens(
+              credential: this.toStoredConnectionCredential(
                 {
                   externalAccountId: record.externalAccountId,
                   provider: record.provider,
                 },
+                record.credential,
                 record.tokens,
               ),
               metadata: record.metadata,
@@ -256,7 +262,11 @@ class DeviceSyncServiceController {
   }
 
   async handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult> {
-    return this.publicIngress.handleOAuthCallback(input);
+    return this.handleConnectionCallback(input);
+  }
+
+  async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
+    return this.publicIngress.handleConnectionCallback(input);
   }
 
   async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
@@ -502,8 +512,39 @@ class DeviceSyncServiceController {
               vaultRoot: this.vaultRoot,
             });
           },
+          upsertConnectionSource: (input) => {
+            ensureExecutionActive();
+            return this.store.upsertConnectionSource({
+              ...input,
+              connectionId: currentAccount.id,
+            });
+          },
+          listConnectionSources: (input = {}) => {
+            ensureExecutionActive();
+            return this.store.listConnectionSources({
+              ...input,
+              connectionId: currentAccount.id,
+            });
+          },
           refreshAccountTokens: async () => {
             ensureExecutionActive();
+            if (currentAccount.credentialKind && currentAccount.credentialKind !== "oauth_tokens") {
+              throw deviceSyncError({
+                code: "DEVICE_SYNC_CREDENTIAL_REFRESH_UNSUPPORTED",
+                message: "Provider-config device sync credentials cannot be refreshed as OAuth tokens.",
+                retryable: false,
+                httpStatus: 409,
+              });
+            }
+
+            if (!provider.refreshTokens) {
+              throw deviceSyncError({
+                code: "TOKEN_REFRESH_NOT_SUPPORTED",
+                message: `Device sync provider ${provider.provider} does not support account token refresh.`,
+                retryable: false,
+                httpStatus: 409,
+              });
+            }
             const refreshed = await provider.refreshTokens(currentAccount);
             ensureExecutionActive();
             const updated = this.store.updateAccountTokens(
@@ -729,6 +770,37 @@ class DeviceSyncServiceController {
     };
   }
 
+  private toStoredConnectionCredential(
+    account: Pick<StoredDeviceSyncAccount, "externalAccountId" | "provider">,
+    credential: DeviceAccountCredential | undefined,
+    legacyTokens: ProviderAuthTokens | undefined,
+  ): DeviceAccountCredential {
+    if (!credential) {
+      if (!legacyTokens) {
+        throw deviceSyncError({
+          code: "CONNECTION_CREDENTIAL_MISSING",
+          message: "Device sync connection did not provide account credentials.",
+          retryable: false,
+          httpStatus: 500,
+        });
+      }
+
+      return {
+        kind: "oauth_tokens",
+        tokens: this.encryptTokens(account, legacyTokens),
+      };
+    }
+
+    if (credential.kind !== "oauth_tokens") {
+      return credential;
+    }
+
+    return {
+      kind: "oauth_tokens",
+      tokens: this.encryptTokens(account, credential.tokens),
+    };
+  }
+
   private enqueueJobs(
     account: Pick<PublicDeviceSyncAccount, "id" | "provider">,
     jobs: readonly DeviceSyncJobInput[],
@@ -800,6 +872,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     stop: () => controller.stop(),
     close: () => controller.close(),
     startConnection: (startConnectionInput) => controller.startConnection(startConnectionInput),
+    handleConnectionCallback: (callbackInput) => controller.handleConnectionCallback(callbackInput),
     handleOAuthCallback: (callbackInput) => controller.handleOAuthCallback(callbackInput),
     handleWebhook: (providerName, headers, rawBody) => controller.handleWebhook(providerName, headers, rawBody),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),

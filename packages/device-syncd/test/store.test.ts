@@ -9,11 +9,13 @@ import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { makeTempDirectory } from "./helpers.ts";
 import {
+  deleteConnectionForTesting,
   insertWebhookTraceRowForTesting,
   readCredentialStateForTesting,
   readObservationStateForTesting,
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceRowForTesting,
+  setCredentialStateForTesting,
   setConnectionScopesJsonForTesting,
   setConnectionUpdatedAtForTesting,
 } from "./store-test-helpers.ts";
@@ -284,6 +286,490 @@ test("device sync store hosted hydration preserves existing tokens until disconn
     assert.equal(reconnected?.accessTokenEncrypted, "enc:reconnected-access-token");
     assert.equal(reconnected?.refreshTokenEncrypted, "enc:reconnected-refresh-token");
     assert.equal(reconnected?.hostedObservedTokenVersion, 1);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store stores provider-config and none credentials without token bundles", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-provider-config");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const providerConfigAccount = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-hash",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        subject: {
+          clientUserId: "raw-client-user-id",
+          clientUserIdHash: "client-user-id-hash",
+          ownerId: "raw-owner-id",
+          ownerIdHash: "owner-id-hash",
+          userId: "raw-user-id",
+          userIdHash: "user-id-hash",
+        },
+        credentialMetadata: {
+          hmacSecret: "drop-me",
+          mode: "external-link",
+          ownerId: "drop-owner",
+          ownerIdHash: "keep-owner-hash",
+          userId: "drop-user",
+          userIdHash: "keep-user-hash",
+          webhookSecret: "drop-me-too",
+        },
+      },
+      metadata: {
+        apiKey: "drop-me",
+        clientUserId: "drop-me-too",
+        clientUserIdHash: "drop-me-three",
+        hmacSecret: "drop-me-four",
+        ownerId: "drop-owner",
+        ownerIdHash: "keep-owner-hash",
+        safe: "kept",
+        userId: "drop-user",
+        userIdHash: "keep-user-hash",
+        webhookSecret: "drop-me-five",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    assert.equal(providerConfigAccount.accessTokenEncrypted, "");
+    assert.equal(providerConfigAccount.refreshTokenEncrypted, null);
+    assert.equal(providerConfigAccount.accessTokenExpiresAt, null);
+    assert.deepEqual(providerConfigAccount.metadata, {
+      clientUserIdHash: "drop-me-three",
+      ownerIdHash: "keep-owner-hash",
+      safe: "kept",
+      userIdHash: "keep-user-hash",
+    });
+
+    const providerConfigCredential = readCredentialStateForTesting(store, providerConfigAccount.id);
+    assert.ok(providerConfigCredential);
+    assert.deepEqual({ ...providerConfigCredential }, {
+      access_token_encrypted: null,
+      access_token_expires_at: null,
+      credential_kind: "provider_config",
+      credential_metadata_json: JSON.stringify({
+        mode: "external-link",
+        ownerIdHash: "keep-owner-hash",
+        userIdHash: "keep-user-hash",
+        subject: {
+          clientUserIdHash: "client-user-id-hash",
+          ownerIdHash: "owner-id-hash",
+          userIdHash: "user-id-hash",
+        },
+      }),
+      provider_config_key: "junction",
+      refresh_token_encrypted: null,
+    });
+
+    assert.equal(
+      store.updateAccountTokens(providerConfigAccount.id, {
+        accessToken: "should-not-store",
+        accessTokenEncrypted: "enc:should-not-store",
+      }),
+      null,
+    );
+    const providerConfigCredentialAfterRefresh = readCredentialStateForTesting(store, providerConfigAccount.id);
+    assert.ok(providerConfigCredentialAfterRefresh);
+    assert.deepEqual({ ...providerConfigCredentialAfterRefresh }, {
+      access_token_encrypted: null,
+      access_token_expires_at: null,
+      credential_kind: "provider_config",
+      credential_metadata_json: JSON.stringify({
+        mode: "external-link",
+        ownerIdHash: "keep-owner-hash",
+        userIdHash: "keep-user-hash",
+        subject: {
+          clientUserIdHash: "client-user-id-hash",
+          ownerIdHash: "owner-id-hash",
+          userIdHash: "user-id-hash",
+        },
+      }),
+      provider_config_key: "junction",
+      refresh_token_encrypted: null,
+    });
+
+    const disconnected = store.disconnectAccount(providerConfigAccount.id, "2026-04-07T02:00:00.000Z");
+    assert.equal(disconnected.status, "disconnected");
+    const providerConfigCredentialAfterDisconnect = readCredentialStateForTesting(store, providerConfigAccount.id);
+    assert.ok(providerConfigCredentialAfterDisconnect);
+    assert.deepEqual({ ...providerConfigCredentialAfterDisconnect }, {
+      access_token_encrypted: null,
+      access_token_expires_at: null,
+      credential_kind: "provider_config",
+      credential_metadata_json: JSON.stringify({
+        mode: "external-link",
+        ownerIdHash: "keep-owner-hash",
+        userIdHash: "keep-user-hash",
+        subject: {
+          clientUserIdHash: "client-user-id-hash",
+          ownerIdHash: "owner-id-hash",
+          userIdHash: "user-id-hash",
+        },
+      }),
+      provider_config_key: "junction",
+      refresh_token_encrypted: null,
+    });
+
+    const noneAccount = store.upsertAccount({
+      provider: "manual-device",
+      externalAccountId: "manual-device-account",
+      displayName: "Manual Device",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      metadata: {},
+      connectedAt: "2026-04-07T03:00:00.000Z",
+    });
+    const noneCredential = readCredentialStateForTesting(store, noneAccount.id);
+    assert.ok(noneCredential);
+    assert.deepEqual({ ...noneCredential }, {
+      access_token_encrypted: null,
+      access_token_expires_at: null,
+      credential_kind: "none",
+      credential_metadata_json: "{}",
+      provider_config_key: null,
+      refresh_token_encrypted: null,
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store hosted hydration can create provider-config accounts without tokens", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-provider-config");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const hydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Junction",
+        externalAccountId: "junction-hosted-user",
+        metadata: {
+          clientUserId: "drop-me",
+          hmacSecret: "drop-me-too",
+          linked: true,
+          webhookSecret: "drop-me-three",
+        },
+        provider: "junction",
+        scopes: [],
+        status: "active",
+        updatedAt: "2026-04-07T00:00:00.000Z",
+      },
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        subject: {
+          clientUserIdHash: "hosted-client-user-id-hash",
+        },
+      },
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-04-07T00:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: "2026-04-07T01:00:00.000Z",
+      },
+    });
+
+    assert.ok(hydrated);
+    assert.equal(hydrated?.provider, "junction");
+    assert.equal(hydrated?.accessTokenEncrypted, "");
+    assert.deepEqual(hydrated?.metadata, {
+      linked: true,
+    });
+    const hydratedCredential = readCredentialStateForTesting(store, hydrated!.id);
+    assert.ok(hydratedCredential);
+    assert.deepEqual({ ...hydratedCredential }, {
+      access_token_encrypted: null,
+      access_token_expires_at: null,
+      credential_kind: "provider_config",
+      credential_metadata_json: JSON.stringify({
+        subject: {
+          clientUserIdHash: "hosted-client-user-id-hash",
+        },
+      }),
+      provider_config_key: "junction",
+      refresh_token_encrypted: null,
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store keeps source instances distinct and lists them deterministically", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-sources");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const connection = store.upsertAccount({
+      provider: "aggregator",
+      externalAccountId: "aggregator-account",
+      displayName: "Aggregator",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      metadata: {
+        shallow: true,
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    const ouraB = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_oura_hash_b",
+      sourceProviderSlug: "oura",
+      displayName: "Oura Ring",
+      status: "connected",
+      resourceAvailabilitySummary: {
+        dailySleep: "available",
+        deviceId: "provider-device-identifier",
+        note: "provider-device-identifier",
+        serialNumber: "provider-serial-identifier",
+      },
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+    const ouraA = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_oura_hash_a",
+      sourceProviderSlug: "oura",
+      displayName: "Oura Ring",
+      status: "connected",
+      resourceAvailabilitySummary: {
+        dailySleep: "available",
+        workoutCount: 2,
+      },
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+    const dexcom = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_dexcom_hash_c",
+      sourceProviderSlug: "dexcom",
+      displayName: "Dexcom",
+      status: "unavailable",
+      resourceAvailabilitySummary: {
+        glucose: "not_granted",
+      },
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    assert.notEqual(ouraA.id, ouraB.id);
+    assert.notEqual(ouraA.id, dexcom.id);
+    assert.deepEqual(
+      store.listConnectionSources({ connectionId: connection.id }).map((source) => source.sourceInstanceKey),
+      ["src_dexcom_hash_c", "src_oura_hash_a", "src_oura_hash_b"],
+    );
+    assert.deepEqual(
+      store.listConnectionSources({
+        connectionId: connection.id,
+        sourceProviderSlug: "oura",
+      }).map((source) => source.sourceInstanceKey),
+      ["src_oura_hash_a", "src_oura_hash_b"],
+    );
+
+    const updatedOuraA = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_oura_hash_a",
+      sourceProviderSlug: "oura",
+      status: "error",
+      lastErrorCode: "SOURCE_UNAVAILABLE",
+      lastErrorMessage: "source temporarily unavailable",
+      lastSeenAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    assert.equal(updatedOuraA.id, ouraA.id);
+    assert.equal(updatedOuraA.displayName, "Oura Ring");
+    assert.equal(updatedOuraA.firstSeenAt, "2026-04-07T01:00:00.000Z");
+    assert.equal(updatedOuraA.lastSeenAt, "2026-04-07T02:00:00.000Z");
+    assert.deepEqual(updatedOuraA.resourceAvailabilitySummary, {
+      dailySleep: "available",
+      workoutCount: 2,
+    });
+    assert.deepEqual(ouraB.resourceAvailabilitySummary, {
+      dailySleep: "available",
+    });
+    assert.deepEqual(
+      store.listConnectionSources({ connectionId: connection.id }).map((source) => ({
+        key: source.sourceInstanceKey,
+        status: source.status,
+      })),
+      [
+        {
+          key: "src_oura_hash_a",
+          status: "error",
+        },
+        {
+          key: "src_dexcom_hash_c",
+          status: "unavailable",
+        },
+        {
+          key: "src_oura_hash_b",
+          status: "connected",
+        },
+      ],
+    );
+    assert.deepEqual(store.getAccountById(connection.id)?.metadata, {
+      shallow: true,
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store cascades source projection rows when the parent connection is deleted", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-source-cascade");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const connection = store.upsertAccount({
+      provider: "aggregator",
+      externalAccountId: "aggregator-source-cascade",
+      displayName: "Aggregator",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      metadata: {},
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_hash_one",
+      sourceProviderSlug: "source-provider",
+      displayName: "Source One",
+      status: "connected",
+      resourceAvailabilitySummary: {
+        sleep: true,
+      },
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    assert.equal(store.listConnectionSources({ connectionId: connection.id }).length, 1);
+
+    deleteConnectionForTesting(store, connection.id);
+
+    assert.deepEqual(store.listConnectionSources({ connectionId: connection.id }), []);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store rejects raw source instance keys before persistence", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-source-key-privacy");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const connection = store.upsertAccount({
+      provider: "aggregator",
+      externalAccountId: "aggregator-source-key-privacy",
+      displayName: "Aggregator",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      metadata: {},
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    assert.throws(
+      () =>
+        store.upsertConnectionSource({
+          connectionId: connection.id,
+          sourceInstanceKey: "oura:provider-device-identifier",
+          sourceProviderSlug: "oura",
+          status: "connected",
+          lastSeenAt: "2026-04-07T01:00:00.000Z",
+        }),
+      /sourceInstanceKey must be a stable opaque lowercase slug/u,
+    );
+    assert.deepEqual(store.listConnectionSources({ connectionId: connection.id }), []);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store rejects malformed provider-config credential rows", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-provider-config-invalid");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-invalid-row",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      metadata: {},
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    assert.throws(
+      () =>
+        setCredentialStateForTesting(store, account.id, {
+          provider_config_key: null,
+        }),
+      /CHECK constraint failed/u,
+    );
+
+    setCredentialStateForTesting(store, account.id, {
+      provider_config_key: "",
+    });
+    assert.throws(
+      () => store.getAccountById(account.id),
+      /Stored provider-config credential rows require provider_config_key/u,
+    );
+
+    assert.throws(
+      () =>
+        setCredentialStateForTesting(store, account.id, {
+          provider_config_key: "junction",
+          access_token_encrypted: "enc:should-not-exist",
+        }),
+      /CHECK constraint failed/u,
+    );
   } finally {
     store.close();
     await rm(tempDir, {
@@ -1140,6 +1626,136 @@ test("device sync store rejects pre-cutover sqlite user_version values", async (
   }
 });
 
+test("device sync store migrates existing token-only credential rows as oauth token credentials", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-credential-migration");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  const database = openSqliteRuntimeDatabase(databasePath);
+
+  database.exec(`
+    create table device_connection (
+      id text primary key,
+      provider text not null,
+      external_account_id text not null,
+      display_name text,
+      status text not null,
+      scopes_json text not null,
+      disconnect_generation integer not null default 0,
+      metadata_json text not null,
+      connected_at text not null,
+      created_at text not null,
+      updated_at text not null,
+      unique (provider, external_account_id)
+    );
+
+    create table device_credential_state (
+      account_id text primary key references device_connection(id) on delete cascade,
+      access_token_encrypted text not null,
+      refresh_token_encrypted text,
+      access_token_expires_at text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table device_observation_state (
+      account_id text primary key references device_connection(id) on delete cascade,
+      hosted_observed_updated_at text,
+      hosted_observed_connection_revision integer not null default 0,
+      hosted_observed_token_version integer,
+      hosted_observed_token_revision integer not null default 0,
+      local_connection_revision integer not null default 0,
+      local_token_revision integer not null default 0,
+      last_webhook_at text,
+      last_sync_started_at text,
+      last_sync_completed_at text,
+      last_sync_error_at text,
+      last_error_code text,
+      last_error_message text,
+      next_reconcile_at text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    insert into device_connection (
+      id,
+      provider,
+      external_account_id,
+      display_name,
+      status,
+      scopes_json,
+      metadata_json,
+      connected_at,
+      created_at,
+      updated_at
+    ) values (
+      'dsa_legacy',
+      'oura',
+      'oura-legacy',
+      'Legacy Oura',
+      'active',
+      '["daily"]',
+      '{}',
+      '2026-04-07T00:00:00.000Z',
+      '2026-04-07T00:00:00.000Z',
+      '2026-04-07T00:00:00.000Z'
+    );
+
+    insert into device_credential_state (
+      account_id,
+      access_token_encrypted,
+      refresh_token_encrypted,
+      access_token_expires_at,
+      created_at,
+      updated_at
+    ) values (
+      'dsa_legacy',
+      'enc:legacy-access',
+      'enc:legacy-refresh',
+      '2026-04-07T02:00:00.000Z',
+      '2026-04-07T00:00:00.000Z',
+      '2026-04-07T00:00:00.000Z'
+    );
+
+    insert into device_observation_state (
+      account_id,
+      created_at,
+      updated_at
+    ) values (
+      'dsa_legacy',
+      '2026-04-07T00:00:00.000Z',
+      '2026-04-07T00:00:00.000Z'
+    );
+
+    pragma user_version = 1;
+  `);
+  database.close();
+
+  const store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    const migrated = store.getAccountById("dsa_legacy");
+    assert.ok(migrated);
+    assert.equal(migrated?.accessTokenEncrypted, "enc:legacy-access");
+    assert.equal(migrated?.refreshTokenEncrypted, "enc:legacy-refresh");
+    assert.equal(migrated?.accessTokenExpiresAt, "2026-04-07T02:00:00.000Z");
+    const migratedCredential = readCredentialStateForTesting(store, "dsa_legacy");
+    assert.ok(migratedCredential);
+    assert.deepEqual({ ...migratedCredential }, {
+      access_token_encrypted: "enc:legacy-access",
+      access_token_expires_at: "2026-04-07T02:00:00.000Z",
+      credential_kind: "oauth_tokens",
+      credential_metadata_json: "{}",
+      provider_config_key: null,
+      refresh_token_encrypted: "enc:legacy-refresh",
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store fails closed when stored scopes_json is malformed", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-bad-scopes");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -1458,8 +2074,11 @@ test("device sync store clears tokens and requires reauthorization after connect
     assert.ok(credentialState);
     assert.deepEqual({ ...credentialState }, {
       access_token_encrypted: "",
-      refresh_token_encrypted: null,
       access_token_expires_at: null,
+      credential_kind: "oauth_tokens",
+      credential_metadata_json: "{}",
+      provider_config_key: null,
+      refresh_token_encrypted: null,
     });
     const observationState = readObservationStateForTesting(store, account.id);
     assert.ok(observationState);

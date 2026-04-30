@@ -40,6 +40,7 @@ export {
   type CanonicalWritePort,
   type SampleImportBatchProvenance,
   type DeviceBatchImportPayload,
+  type DeviceDataOrigin,
   type DeviceEventPayload,
   type DeviceExternalRefPayload,
   type DeviceRawArtifactPayload,

@@ -136,6 +136,235 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect("buildHostedExecutionUserDeviceSyncRuntimePath" in hostedRuntime).toBe(false);
   });
 
+  it("parses provider-config credential snapshots without token material", () => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-04-12T08:00:00+00:00",
+            createdAt: "2026-04-12T07:55:00+00:00",
+            displayName: "Junction",
+            externalAccountId: "junction-user-1",
+            id: "conn_junction",
+            metadata: {
+              accountTier: "team",
+            },
+            provider: "junction",
+            scopes: [],
+            setupExpiresAt: "2026-04-12T08:15:00+00:00",
+            setupPhase: "pending_link",
+            status: "active",
+            updatedAt: "2026-04-12T08:01:00+00:00",
+          },
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+            credentialMetadata: {
+              Authorization: "Bearer secret",
+              authHeader: "Bearer header-secret",
+              clientUserId: "raw-client-user",
+              clientUserIdHash: "hash_client_user",
+              credentialNote: "Authorization: Bearer secret-token",
+              hmacSecret: "secret",
+              ownerId: "raw-owner",
+              sourceCount: 2,
+              webhookSecret: "secret",
+            },
+          },
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
+        },
+      ],
+      generatedAt: "2026-04-12T08:02:00.000Z",
+      userId: "user_123",
+    });
+
+    expect(parsed.connections[0]).toEqual({
+      connection: {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-04-12T08:00:00.000Z",
+        createdAt: "2026-04-12T07:55:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-1",
+        id: "conn_junction",
+        metadata: {
+          accountTier: "team",
+        },
+        provider: "junction",
+        scopes: [],
+        setupExpiresAt: "2026-04-12T08:15:00.000Z",
+        setupPhase: "pending_link",
+        status: "active",
+        updatedAt: "2026-04-12T08:01:00.000Z",
+      },
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {
+          clientUserIdHash: "hash_client_user",
+          sourceCount: 2,
+        },
+      },
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: null,
+      },
+      tokenBundle: null,
+    });
+  });
+
+  it("parses OAuth and none credential snapshots and none credential updates", () => {
+    const localState = {
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      nextReconcileAt: null,
+    };
+    const tokenBundle = {
+      accessToken: "access-token",
+      accessTokenExpiresAt: "2026-04-12T10:00:00.000Z",
+      keyVersion: "kv_credential",
+      refreshToken: "refresh-token",
+      tokenVersion: 9,
+    };
+
+    expect(
+      parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+        connections: [
+          {
+            connection: {
+              accessTokenExpiresAt: "2026-04-12T10:00:00.000Z",
+              connectedAt: "2026-04-12T08:00:00.000Z",
+              createdAt: "2026-04-12T07:55:00.000Z",
+              displayName: "Oura",
+              externalAccountId: "oura-user-credential",
+              id: "conn_oauth_credential",
+              metadata: {},
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+              updatedAt: "2026-04-12T08:01:00.000Z",
+            },
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle,
+            },
+            localState,
+          },
+          {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-12T08:05:00.000Z",
+              createdAt: "2026-04-12T08:05:00.000Z",
+              displayName: "Manual",
+              externalAccountId: "manual-user-credential",
+              id: "conn_none_credential",
+              metadata: {},
+              provider: "manual",
+              scopes: [],
+              status: "active",
+              updatedAt: "2026-04-12T08:06:00.000Z",
+            },
+            credential: {
+              kind: "none",
+            },
+            localState,
+          },
+        ],
+        generatedAt: "2026-04-12T08:07:00.000Z",
+        userId: "user_123",
+      }),
+    ).toEqual({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-04-12T10:00:00.000Z",
+            connectedAt: "2026-04-12T08:00:00.000Z",
+            createdAt: "2026-04-12T07:55:00.000Z",
+            displayName: "Oura",
+            externalAccountId: "oura-user-credential",
+            id: "conn_oauth_credential",
+            metadata: {},
+            provider: "oura",
+            scopes: ["daily"],
+            status: "active",
+            updatedAt: "2026-04-12T08:01:00.000Z",
+          },
+          credential: {
+            kind: "oauth_tokens",
+            tokenBundle,
+          },
+          localState,
+          tokenBundle,
+        },
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-04-12T08:05:00.000Z",
+            createdAt: "2026-04-12T08:05:00.000Z",
+            displayName: "Manual",
+            externalAccountId: "manual-user-credential",
+            id: "conn_none_credential",
+            metadata: {},
+            provider: "manual",
+            scopes: [],
+            status: "active",
+            updatedAt: "2026-04-12T08:06:00.000Z",
+          },
+          credential: {
+            kind: "none",
+          },
+          localState,
+          tokenBundle: null,
+        },
+      ],
+      generatedAt: "2026-04-12T08:07:00.000Z",
+      userId: "user_123",
+    });
+
+    expect(
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_none_credential",
+            credential: {
+              kind: "none",
+            },
+            observedTokenVersion: null,
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toEqual({
+      updates: [
+        {
+          connectionId: "conn_none_credential",
+          credential: {
+            kind: "none",
+          },
+          observedTokenVersion: null,
+        },
+      ],
+      userId: "user_123",
+    });
+  });
+
   it("accepts string error fields while keeping timestamp fields strict", () => {
     const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
@@ -368,6 +597,110 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       attempts: 2,
       nullValue: null,
     });
+  });
+
+  it("parses credential apply mutations and fences credential changes", () => {
+    expect(
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_provider_config",
+            credential: {
+              kind: "provider_config",
+              providerConfigKey: "junction",
+              credentialMetadata: {
+                authHeader: "Bearer drop-me",
+                clientUserId: "raw-client-user",
+                clientUserIdHash: "hash_client_user",
+                credentialNote: "Authorization: Bearer drop-me",
+                ownerId: "raw-owner",
+                providerApiKey: "drop-me",
+              },
+            },
+            observedTokenVersion: null,
+          },
+          {
+            connectionId: "conn_clear_tokens",
+            credential: {
+              clearTokens: true,
+              kind: "oauth_tokens",
+            },
+            observedTokenVersion: 8,
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toEqual({
+      updates: [
+        {
+          connectionId: "conn_provider_config",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+            credentialMetadata: {
+              clientUserIdHash: "hash_client_user",
+            },
+          },
+          observedTokenVersion: null,
+        },
+        {
+          connectionId: "conn_clear_tokens",
+          credential: {
+            clearTokens: true,
+            kind: "oauth_tokens",
+          },
+          observedTokenVersion: 8,
+        },
+      ],
+      userId: "user_123",
+    });
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_provider_config",
+            credential: {
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/observedTokenVersion is required/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_clear_tokens",
+            credential: {
+              clearTokens: true,
+              kind: "oauth_tokens",
+            },
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/observedTokenVersion is required/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_provider_config",
+            credential: {
+              kind: "provider_config",
+              providerConfigKey: "junction",
+              tokenBundle: null,
+            },
+            observedTokenVersion: null,
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/credential\.tokenBundle is not supported/u);
   });
 
   it("parses apply request and response payloads across seed, local-state, and token-bundle branches", () => {
@@ -671,7 +1004,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
         userId: "user_123",
       }),
-    ).toThrowError(/observedTokenVersion is required when tokenBundle mutations are present/u);
+    ).toThrowError(/observedTokenVersion is required when credential or tokenBundle mutations are present/u);
 
     const seed = {
       connection: {
@@ -721,7 +1054,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
         userId: "user_123",
       }),
-    ).toThrowError(/observedTokenVersion is required when tokenBundle mutations are present/u);
+    ).toThrowError(/observedTokenVersion is required when credential or tokenBundle mutations are present/u);
 
     expect(() =>
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({

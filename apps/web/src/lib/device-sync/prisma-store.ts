@@ -18,6 +18,11 @@ import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-a
 import { PrismaHostedConnectionStore } from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
+import {
+  PrismaHostedConnectionSourceStore,
+  type HostedDeviceConnectionSource,
+  type UpsertHostedDeviceConnectionSourceInput,
+} from "./prisma-store/sources";
 import type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
@@ -38,6 +43,13 @@ export {
   type HostedConnectionRecord,
 } from "./prisma-store/connections";
 export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
+export {
+  hostedConnectionSourceRecordArgs,
+  mapHostedConnectionSourceRecord,
+  type HostedConnectionSourceRecord,
+  type HostedDeviceConnectionSource,
+  type UpsertHostedDeviceConnectionSourceInput,
+} from "./prisma-store/sources";
 export type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
@@ -57,6 +69,7 @@ export class PrismaDeviceSyncControlPlaneStore
   private readonly connections: PrismaHostedConnectionStore;
   private readonly webhookTraces: PrismaHostedWebhookTraceStore;
   private readonly signals: PrismaHostedSignalStore;
+  private readonly sources: PrismaHostedConnectionSourceStore;
   private readonly browserAssertionNonces: PrismaHostedBrowserAssertionNonceStore;
   private readonly agentSessions: PrismaHostedAgentSessionStore;
   private readonly localHeartbeats: PrismaHostedLocalHeartbeatStore;
@@ -74,6 +87,7 @@ export class PrismaDeviceSyncControlPlaneStore
       prisma: this.prisma,
     });
     this.signals = new PrismaHostedSignalStore(this.prisma);
+    this.sources = new PrismaHostedConnectionSourceStore(this.prisma);
     this.browserAssertionNonces = new PrismaHostedBrowserAssertionNonceStore(this.prisma);
     this.agentSessions = new PrismaHostedAgentSessionStore(this.prisma);
     this.localHeartbeats = new PrismaHostedLocalHeartbeatStore({
@@ -187,6 +201,16 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async createTokenAudit(input: CreateHostedTokenAuditInput): Promise<HostedTokenAuditRecord> {
     return this.tokenAudits.createTokenAudit(input);
+  }
+
+  async upsertConnectionSource(
+    input: UpsertHostedDeviceConnectionSourceInput,
+  ): Promise<HostedDeviceConnectionSource> {
+    return this.sources.upsertConnectionSource(input);
+  }
+
+  async listConnectionSources(connectionId: string): Promise<HostedDeviceConnectionSource[]> {
+    return this.sources.listConnectionSources(connectionId);
   }
 
   async listSignalsForUser(userId: string, options: { afterId?: number; limit?: number } = {}): Promise<HostedSignalRecord[]> {

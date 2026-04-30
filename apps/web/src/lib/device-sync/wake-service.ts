@@ -112,6 +112,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     lastErrorCode: disconnectLocalState.lastErrorCode,
     lastErrorMessage: disconnectLocalState.lastErrorMessage,
     nextReconcileAt: null,
+    setupExpiresAt: null,
+    setupPhase: null,
     status: "disconnected",
     updatedAt: now,
   };

@@ -3,9 +3,14 @@ import { describe, expect, it } from "vitest";
 import { defaultDeviceProviderAdapters } from "../src/device-providers/defaults.ts";
 import {
   defaultDeviceProviderDescriptors,
+  GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  resolveDeviceProviderConnectionDescriptor,
   resolveDeviceProviderSourcePriority,
   resolveDeviceProviderDescriptor,
+  STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
+  WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
 } from "../src/device-providers/provider-descriptors.ts";
 import { createDeviceProviderRegistry } from "../src/device-providers/registry.ts";
 
@@ -47,5 +52,34 @@ describe("device provider descriptors", () => {
         metricFamily: "activity",
       }),
     );
+  });
+
+  it("registers Junction as an external-link scheduled-poll provider without webhook or credential policy", () => {
+    const descriptor = resolveDeviceProviderDescriptor("JUNCTION");
+
+    expect(descriptor).toBe(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR);
+    expect(descriptor?.transportModes).toEqual(["external_link", "scheduled_poll"]);
+    expect(descriptor ? resolveDeviceProviderConnectionDescriptor(descriptor) : undefined).toEqual({
+      kind: "external_link",
+      callbackPath: "/connect/junction/callback",
+    });
+    expect(descriptor?.oauth).toBeUndefined();
+    expect(descriptor?.webhook).toBeUndefined();
+    expect(descriptor && "credentialPolicy" in descriptor).toBe(false);
+    const junctionSleepPriority = resolveDeviceProviderSourcePriority(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR, {
+      metric: "sleepScore",
+      metricFamily: "sleep",
+    });
+    const directProviderPriorities = [
+      OURA_DEVICE_PROVIDER_DESCRIPTOR,
+      GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
+      WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+      STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
+    ].map((directDescriptor) => resolveDeviceProviderSourcePriority(directDescriptor, {
+      metric: "sleepScore",
+      metricFamily: "sleep",
+    }));
+
+    expect(directProviderPriorities.every((priority) => junctionSleepPriority < priority)).toBe(true);
   });
 });

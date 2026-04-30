@@ -31,12 +31,17 @@ type MutableConnectionRecord = {
   userId: string;
   provider: string;
   providerAccountBlindIndex: string;
+  credentialKind: "oauth_tokens" | "provider_config" | "none";
+  credentialMetadataJson: Record<string, unknown> | null;
+  providerConfigKey: string | null;
   displayName: string | null;
   externalAccountIdEncrypted: string | null;
   keyVersion: string | null;
   metadataJson: Record<string, unknown> | null;
   refreshTokenEncrypted: string | null;
   scopesJson: string[] | null;
+  setupExpiresAt: Date | null;
+  setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
   status: "active" | "disconnected" | "reauthorization_required";
   tokenVersion: number | null;
   connectedAt: Date;
@@ -392,6 +397,154 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
   });
 
+  it("creates provider-config hosted connections without fake OAuth token material", async () => {
+    const createdArtifacts: {
+      connection: MutableConnectionRecord | null;
+    } = {
+      connection: null,
+    };
+
+    const tx = {
+      deviceConnection: {
+        findUnique: async () => null,
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          createdArtifacts.connection = normalizeCreatedConnection(data);
+          return cloneConnection(createdArtifacts.connection);
+        },
+        findFirst: async () => null,
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const created = await store.upsertConnection({
+      ownerId: "user-123",
+      provider: "junction",
+      externalAccountId: "junction-user-123",
+      displayName: "Junction",
+      status: "active",
+      setupPhase: "pending_link",
+      setupExpiresAt: "2026-03-25T00:30:00.000Z",
+      scopes: ["profile"],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        subject: {
+          client_user_id: "raw-client-user",
+          hmacSecret: "do-not-store",
+          ownerId: "raw-owner",
+          ownerIdHash: "owner-hash",
+          region: "us",
+          userId: "raw-user",
+          userIdHash: "user-hash",
+        },
+      },
+      metadata: {
+        client_user_id: "raw-client-user",
+        connectedSources: ["oura"],
+        hmacSecret: "do-not-store",
+        ownerId: "raw-owner",
+        ownerIdHash: "owner-hash",
+        region: "us",
+        resourceAvailability: ["profile"],
+        userId: "raw-user",
+        userIdHash: "user-hash",
+      },
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    } as Parameters<typeof store.upsertConnection>[0] & {
+      setupExpiresAt: string;
+      setupPhase: "pending_link";
+    });
+
+    expect(created).toEqual(expect.objectContaining({
+      id: expect.stringMatching(/^dsc_[A-Za-z0-9_-]+$/u),
+      provider: "junction",
+      status: "active",
+    }));
+    expect(createdArtifacts.connection).toMatchObject({
+      accessTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialKind: "provider_config",
+      credentialMetadataJson: {
+        "subject.ownerIdHash": "owner-hash",
+        "subject.region": "us",
+        "subject.userIdHash": "user-hash",
+      },
+      externalAccountIdEncrypted: "enc:junction-user-123",
+      keyVersion: null,
+      metadataJson: {
+        ownerIdHash: "owner-hash",
+        region: "us",
+        userIdHash: "user-hash",
+      },
+      provider: "junction",
+      providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+        key: BLIND_INDEX_KEY,
+        provider: "junction",
+        externalAccountId: "junction-user-123",
+      }),
+      providerConfigKey: "junction",
+      refreshTokenEncrypted: null,
+      setupExpiresAt: new Date("2026-03-25T00:30:00.000Z"),
+      setupPhase: "pending_link",
+      status: "active",
+      tokenVersion: null,
+    });
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("connectedSources");
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("resourceAvailability");
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-owner");
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-user");
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-client-user");
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("do-not-store");
+  });
+
+  it("rejects provider-config hosted connection credentials with unexpected provider profile keys", async () => {
+    let createCalled = false;
+    const tx = {
+      deviceConnection: {
+        findUnique: async () => null,
+        create: async () => {
+          createCalled = true;
+          throw new Error("create should not be called");
+        },
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      provider: "junction",
+      externalAccountId: "junction-user-123",
+      displayName: "Junction",
+      status: "active",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "wrong-profile",
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_CONFIG_KEY_MISMATCH",
+    });
+    expect(createCalled).toBe(false);
+  });
+
   it("updates an existing connection without writing a Prisma secret row", async () => {
     const existing = createConnection({
       id: "dsc_123",
@@ -500,6 +653,8 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         lastErrorMessage: null,
         nextReconcileAt: null,
         refreshTokenEncrypted: null,
+        setupExpiresAt: null,
+        setupPhase: "failed",
         status: "reauthorization_required",
         tokenVersion: null,
       }),
@@ -513,6 +668,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     }));
     expect(stored.accessTokenEncrypted).toBeNull();
     expect(stored.refreshTokenEncrypted).toBeNull();
+    expect(stored.setupPhase).toBe("failed");
   });
 
   it("serves ordinary hosted connection lists from durable Prisma metadata without live runtime reads", async () => {
@@ -749,6 +905,61 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     );
   });
 
+  it("fails closed when provider-config rows contain token material", async () => {
+    const connection = createConnection({
+      accessTokenEncrypted: "enc:legacy-token",
+      credentialKind: "provider_config",
+      externalAccountIdEncrypted: "enc:junction-user-123",
+      keyVersion: "v1",
+      provider: "junction",
+      providerConfigKey: "junction",
+      refreshTokenEncrypted: "enc:legacy-refresh",
+      tokenVersion: 7,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+            where.id === connection.id && where.userId === connection.userId ? cloneConnection(connection) : null,
+        },
+      } as never,
+    });
+
+    await expect(
+      store.getStoredConnectionAccountForUser("user-123", "dsc_123"),
+    ).rejects.toThrow(/non-token credential rows must not contain token material/u);
+  });
+
+  it("fails closed when hosted credential rows use an unknown credential kind", async () => {
+    const connection = createConnection({
+      accessTokenEncrypted: "enc:legacy-token",
+      credentialKind: "bogus" as MutableConnectionRecord["credentialKind"],
+      externalAccountIdEncrypted: "enc:acct_456",
+      keyVersion: "v1",
+      provider: "oura",
+      refreshTokenEncrypted: "enc:legacy-refresh",
+      tokenVersion: 7,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+            where.id === connection.id && where.userId === connection.userId ? cloneConnection(connection) : null,
+        },
+      } as never,
+    });
+
+    await expect(
+      store.getStoredConnectionAccountForUser("user-123", "dsc_123"),
+    ).rejects.toThrow(/credential_kind is invalid/u);
+  });
+
   it("clears the stored external account binding only when explicitly requested", async () => {
     let connection = createConnection({
       accessTokenEncrypted: "enc:access-token",
@@ -868,12 +1079,17 @@ function createConnection(overrides: Partial<MutableConnectionRecord>): MutableC
         provider: overrides.provider ?? "oura",
         externalAccountId: "acct_456",
       }),
+    credentialKind: overrides.credentialKind ?? "oauth_tokens",
+    credentialMetadataJson: overrides.credentialMetadataJson ?? {},
+    providerConfigKey: overrides.providerConfigKey ?? null,
     displayName: overrides.displayName ?? "Oura ring",
     externalAccountIdEncrypted: overrides.externalAccountIdEncrypted ?? "enc:acct_456",
     keyVersion: overrides.keyVersion ?? null,
     metadataJson: overrides.metadataJson ?? {},
     refreshTokenEncrypted: overrides.refreshTokenEncrypted ?? null,
     scopesJson: overrides.scopesJson ?? [],
+    setupExpiresAt: overrides.setupExpiresAt ?? null,
+    setupPhase: overrides.setupPhase ?? null,
     status: overrides.status ?? "reauthorization_required",
     tokenVersion: overrides.tokenVersion ?? null,
     connectedAt: overrides.connectedAt ?? new Date("2026-03-25T00:00:00.000Z"),
@@ -895,6 +1111,15 @@ function normalizeCreatedConnection(data: Record<string, unknown>): MutableConne
     userId: String(data.userId),
     provider: String(data.provider),
     providerAccountBlindIndex: String(data.providerAccountBlindIndex),
+    credentialKind: (data.credentialKind as MutableConnectionRecord["credentialKind"]) ?? "oauth_tokens",
+    credentialMetadataJson: (data.credentialMetadataJson as Record<string, unknown> | null) ?? {},
+    externalAccountIdEncrypted: typeof data.externalAccountIdEncrypted === "string"
+      ? data.externalAccountIdEncrypted
+      : null,
+    metadataJson: (data.metadataJson as Record<string, unknown> | null) ?? {},
+    providerConfigKey: typeof data.providerConfigKey === "string" ? data.providerConfigKey : null,
+    setupExpiresAt: data.setupExpiresAt instanceof Date ? data.setupExpiresAt : null,
+    setupPhase: (data.setupPhase as MutableConnectionRecord["setupPhase"]) ?? null,
     status: (data.status as MutableConnectionRecord["status"]) ?? "active",
     connectedAt: data.connectedAt instanceof Date ? data.connectedAt : new Date("2026-03-25T00:00:00.000Z"),
     nextReconcileAt: data.nextReconcileAt instanceof Date ? data.nextReconcileAt : null,

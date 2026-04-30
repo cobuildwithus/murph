@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultDeviceProviderDescriptors,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
@@ -10,6 +11,7 @@ import {
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
+import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
 import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
@@ -20,6 +22,12 @@ describe("device-sync providers", () => {
       createGarminDeviceSyncProvider({
         clientId: "garmin-client",
         clientSecret: "garmin-secret",
+      }),
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_junction-test",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
       }),
       createWhoopDeviceSyncProvider({
         clientId: "whoop-client",
@@ -48,6 +56,26 @@ describe("device-sync providers", () => {
       expect(provider.descriptor.provider).toBe(provider.provider);
       expect(provider.descriptor.displayName).toBe(descriptor?.displayName);
     }
+  });
+
+  it("hydrates Junction provider defaults from the shared descriptor", () => {
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_junction-test",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+    });
+
+    expect(provider.provider).toBe(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.provider);
+    expect(provider.descriptor.displayName).toBe(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.displayName);
+    expect(provider.descriptor.transportModes).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.transportModes);
+    expect(provider.descriptor.connection).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.connection);
+    expect(provider.descriptor.sync?.windows).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows);
+    expect(provider.descriptor.webhook).toBeUndefined();
+    expect(provider.credentialPolicy).toEqual({
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    });
   });
 
   it("hydrates Garmin provider defaults from the shared descriptor", () => {

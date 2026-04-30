@@ -1,0 +1,602 @@
+# Junction Greenfield Primitive V2
+
+Status: active
+Created: 2026-04-30
+Updated: 2026-05-01
+
+## Purpose
+
+This active plan supersedes the completed snapshot at `agent-docs/exec-plans/completed/2026-04-30-add-junction-greenfield-primitive-update.md` for future Junction work. The completed file remains immutable history. This revision folds in the latest review feedback before the next implementation wave.
+
+The core architecture remains:
+
+```txt
+connection flow       how the user connects
+account credential    how Murph authenticates later API calls
+data origin           where a normalized wearable record really came from
+```
+
+For Junction:
+
+```txt
+provider              junction
+connection.kind       external_link
+credential.kind       provider_config
+externalAccountId     Junction user_id
+data origin           upstream Junction source/device/app
+externalRef.system    junction
+```
+
+## Non-Negotiable Fixes
+
+- Use `external_link`, not `hosted_link`.
+- Make `DeviceAccountCredential` first-class across storage, public account upsert, hosted runtime snapshots, hydration, token export, token refresh, disconnect, revoke, and job context.
+- Store provider config profiles, not secret refs, in account rows: `credential_kind = "provider_config"` plus `provider_config_key = "junction"`.
+- Built-in provider manifest credential policy is authoritative over provider instance fields. Provider-config credentials must not be accepted for an OAuth manifest provider.
+- Do not store raw owner ids, raw `client_user_id`, Junction API keys, HMAC secrets, or webhook secrets in account metadata or runtime snapshots.
+- Persist the Junction parent account before redirect through an ingress-owned `connectionSeed` contract.
+- Keep lifecycle `status` scoped to account health. Model pending external-link setup with `setupPhase` and `setupExpiresAt`, not `status = "connecting"`.
+- Settings/status surfaces must treat `setupPhase` as an overlay on lifecycle status so an active pending-link parent is findable by webhook/reconcile without looking fully connected to the user.
+- External-link callbacks must match the seeded parent account and preserve bounded setup expiry while the account is still pending Link confirmation.
+- Provider callback results cannot contain both new `credential` material and legacy `tokens`; mixed material is rejected instead of guessed.
+- Make `DeviceDataOrigin` real before importing Junction data; it is not a substitute for the source projection table.
+- Keep Junction provider priority lower than direct Oura/Garmin/WHOOP/Strava until source-aware query policy exists.
+
+## Descriptor Primitives
+
+Add connection flow metadata to shared provider descriptors. Keep credential policy in the device-sync provider manifest because it is runtime/storage authority, not importer/catalog behavior:
+
+```ts
+export type DeviceConnectionFlowKind =
+  | "oauth2"
+  | "external_link"
+  | "sdk"
+  | "manual"
+  | "none";
+
+export interface DeviceProviderConnectionDescriptor {
+  kind: DeviceConnectionFlowKind;
+  callbackPath?: string;
+  defaultScopes?: readonly string[];
+}
+
+export interface DeviceProviderDescriptor {
+  provider: string;
+  displayName: string;
+  transportModes: readonly DeviceProviderTransportMode[];
+  connection?: DeviceProviderConnectionDescriptor;
+  oauth?: DeviceProviderOAuthDescriptor;
+  webhook?: DeviceProviderWebhookDescriptor;
+  sync?: DeviceProviderSyncDescriptor;
+  normalization: DeviceProviderNormalizationDescriptor;
+  sourcePriorityHints: DeviceProviderSourcePriorityHints;
+}
+```
+
+Device-sync manifests own credential policy:
+
+```ts
+export type DeviceProviderCredentialPolicy =
+  | { kind: "oauth_tokens" }
+  | { kind: "provider_config"; providerConfigKey: string }
+  | { kind: "none" };
+```
+
+This is a security boundary. Ingress/storage must validate:
+
+```txt
+oauth_tokens policy:
+  credential.kind = oauth_tokens
+
+provider_config policy:
+  credential.kind = provider_config
+  credential.providerConfigKey = the provider manifest/config key
+
+none policy:
+  credential.kind = none
+```
+
+This prevents arbitrary `providerConfigKey` values from being smuggled into account rows.
+
+## Connection Contract
+
+Providers can use generic connection hooks:
+
+```ts
+export interface ProviderConnectionSeed {
+  externalAccountId: string;
+  displayName?: string | null;
+  status?: "active" | "reauthorization_required" | "disconnected";
+  setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed";
+  setupExpiresAt?: string;
+  scopes?: string[];
+  metadata?: Record<string, unknown>;
+  credential: DeviceAccountCredential;
+  nextReconcileAt?: string | null;
+}
+
+export interface ProviderBeginConnectionResult {
+  authorizationUrl: string;
+  connectionSeed?: ProviderConnectionSeed;
+  stateMetadata?: Record<string, unknown>;
+}
+```
+
+Public ingress owns persistence:
+
+```txt
+provider.beginConnection()
+  returns authorizationUrl, connectionSeed, stateMetadata
+
+public ingress
+  validates connectionSeed.credential against manifest credentialPolicy
+  validates providerConfigKey against the provider manifest/config profile
+  upserts the parent account
+  persists state metadata
+  returns authorizationUrl
+```
+
+Junction must not reach around public ingress to write accounts. The parent account should be upserted before returning the Junction Link URL, normally as `status = "active"`, `setupPhase = "pending_link"`, and a bounded `setupExpiresAt`. Abandoned setup rows need cleanup/expiry behavior rather than permanent zombie accounts.
+
+Use generic callback routes:
+
+```txt
+local daemon: /connect/:provider/callback
+hosted web:  /api/device-sync/connect/[provider]/callback
+```
+
+Keep old OAuth callback routes as aliases for existing OAuth providers.
+
+## Credential Contract
+
+Use a credential union:
+
+```ts
+export type DeviceAccountCredential =
+  | {
+      kind: "oauth_tokens";
+      tokens: ProviderAuthTokens;
+    }
+  | {
+      kind: "provider_config";
+      providerConfigKey: string;
+      subject?: Record<string, string>;
+    }
+  | {
+      kind: "none";
+    };
+```
+
+Hosted runtime snapshots should use the same idea:
+
+```ts
+export type HostedDeviceConnectionCredentialSnapshot =
+  | {
+      kind: "oauth_tokens";
+      tokenBundle: HostedRuntimeTokenBundle;
+    }
+  | {
+      kind: "provider_config";
+      providerConfigKey: string;
+      credentialMetadata?: Record<string, unknown>;
+    }
+  | {
+      kind: "none";
+    };
+```
+
+Token clearing should be explicit and only valid for OAuth token credentials. `tokenBundle: null` must not mean both "missing token" and "clear tokens" after provider-config accounts exist.
+
+Provider-config credentials cannot be exported or refreshed as token bundles. Tests must prove:
+
+```txt
+refreshTokens(provider_config account) -> unsupported credential error
+exportTokenBundle(provider_config account) -> unsupported credential error
+hosted token-bundle mutation on provider_config account -> rejected unless it is an explicit credential replacement
+```
+
+## Data Origin
+
+Version `DeviceDataOrigin` now:
+
+```ts
+export interface DeviceDataOrigin {
+  version: 1;
+  aggregatorProvider?: string;
+  sourceProviderSlug?: string;
+  sourceName?: string;
+  sourceType?: string;
+  sourceDeviceId?: string | null;
+  sourceAppId?: string | null;
+  sourceWorkoutId?: string | null;
+  observedAtRaw?: string;
+  timeZoneOffsetMinutes?: number | null;
+  timestampSemantics?: "utc" | "offset" | "floating" | "unknown";
+  originConfidence?: "high" | "medium" | "low" | "unknown";
+  normalizerVersion?: string;
+}
+```
+
+For Junction-sourced records, keep `externalRef.system = "junction"` and put upstream attribution in `DeviceDataOrigin`. Use contract-safe resource types such as `junction-oura-sleep`, not colon-delimited values.
+
+Canonical wearable source identity must include origin identity so `Oura via Junction`, `Dexcom via Junction`, and `Withings via Junction` do not collapse into one source.
+
+## Source Projection
+
+Add a separate `device_connection_source` projection in PR 2 before Junction polling/importer work. It is not a replacement for per-record origin.
+
+```txt
+device_connection_source
+  id
+  connection_id
+  source_instance_key
+  source_provider_slug
+  display_name
+  status
+  resource_availability_summary_json
+  last_error_code
+  last_error_message
+  first_seen_at
+  last_seen_at
+  updated_at
+```
+
+Account metadata remains shallow/scalar. Source status, scope/resource availability, and UI source cards belong in the projection.
+
+## Junction Config
+
+Use explicit environment and region config:
+
+```txt
+JUNCTION_API_KEY
+JUNCTION_CLIENT_USER_ID_SECRET
+JUNCTION_ENV=sandbox | production
+JUNCTION_REGION=us | eu
+JUNCTION_BASE_URL=optional override
+JUNCTION_PROVIDER_FILTER
+JUNCTION_SUMMARY_RESOURCES
+JUNCTION_TIMESERIES_RESOURCES
+JUNCTION_SUMMARY_BACKFILL_DAYS
+JUNCTION_TIMESERIES_BACKFILL_DAYS
+JUNCTION_RESOURCE_OVERRIDES
+JUNCTION_RECONCILE_DAYS
+JUNCTION_RECONCILE_INTERVAL_MS
+JUNCTION_REQUEST_TIMEOUT_MS
+JUNCTION_PER_ACCOUNT_CONCURRENCY
+JUNCTION_GLOBAL_CONCURRENCY
+JUNCTION_WEBHOOK_SECRET
+```
+
+Validate environment, region, API-key prefix, and base URL together:
+
+```txt
+production + us -> pk_us_* and api.us.junction.com
+production + eu -> pk_eu_* and api.eu.junction.com
+sandbox + us    -> sk_us_* and api.sandbox.us.junction.com
+sandbox + eu    -> sk_eu_* and api.sandbox.eu.junction.com
+```
+
+`JUNCTION_BASE_URL` is an override, not the main safety mechanism.
+
+Keep these secrets separate because they have different lifetimes and blast radius:
+
+```txt
+Junction API key
+client-user HMAC secret
+webhook secret
+```
+
+## Junction Client
+
+The client must be bounded:
+
+```txt
+- timeout every Junction request
+- retry idempotent GETs with bounded exponential backoff
+- respect 429 / Retry-After when present
+- cap per-account resource fetch concurrency
+- cap global Junction concurrency
+- page until exhaustion where endpoints paginate
+- emit metrics by resource/source/status code
+```
+
+Provider jobs should build bounded snapshots. Importers should normalize snapshots only.
+
+## Provider Filter
+
+Web Link MVP should include cloud providers only:
+
+```txt
+oura
+fitbit
+garmin
+whoop
+strava
+withings
+dexcom_v3
+freestyle_libre
+abbott_libreview
+eight_sleep
+renpho
+```
+
+Exclude SDK-only sources until there is a mobile ingestion slice:
+
+```txt
+apple_health_kit
+health_connect
+samsung_health
+```
+
+## Resource Windows
+
+Use split defaults:
+
+```ts
+summaryBackfillDays: 90,
+timeseriesBackfillDays: 14,
+reconcileDays: 7,
+resourceOverrides: {
+  heartrate: { backfillDays: 7 },
+  steps: { backfillDays: 14 },
+  hrv: { backfillDays: 30 },
+  weight: { backfillDays: 90 },
+}
+```
+
+Default summaries:
+
+```txt
+profile
+activity
+sleep
+workouts
+body
+```
+
+Default timeseries:
+
+```txt
+steps
+heartrate
+hrv
+respiratory_rate
+blood_oxygen
+weight
+```
+
+Do not default-enable every high-frequency or source-sensitive resource. Glucose/CGM, blood pressure, nutrition, ECG, body temperature deltas, stress, menstrual cycle, and workout streams are later slices.
+
+## Timestamp Interpretation
+
+Make timestamp handling explicit:
+
+```ts
+type TimestampInterpretation =
+  | {
+      kind: "offset_bearing";
+      observedAtRaw: string;
+      observedAtUtc: string;
+      timezoneOffsetSeconds?: number | null;
+    }
+  | {
+      kind: "floating";
+      observedAtRaw: string;
+      observedAtUtc?: string;
+      fallbackTimeZone?: string;
+      reason: "junction_floating_time";
+    }
+  | {
+      kind: "absent_timezone";
+      observedAtRaw: string;
+      observedAtUtc: string;
+      timezoneOffsetSeconds: null;
+    };
+```
+
+Libre/Freestyle-style floating timestamps must not be silently interpreted as UTC. If Murph converts local wall time to UTC, the chosen fallback timezone must be explicit in raw evidence/provenance.
+
+## Webhooks
+
+Polling/reconcile is authoritative. Webhooks are freshness/data triggers.
+
+Do not rely on Junction retry for known-persistable unknown-account events:
+
+```txt
+valid signature + known account:
+  persist trace
+  enqueue job
+  return 204
+
+valid signature + unknown account:
+  persist orphan trace keyed by hashed Junction user/client identity
+  enqueue delayed bind/reconcile
+  return 202 or 204
+
+invalid signature:
+  return 400 or 401
+```
+
+Only use provider retries when Murph cannot durably persist the event.
+
+Historical completion events should enqueue bounded fetches. Do not import data-less notifications as data.
+
+## Landing Slices
+
+### PR 1: primitives
+
+- `DeviceConnectionFlow`
+- device-sync manifest `DeviceProviderCredentialPolicy`
+- `DeviceAccountCredential`
+- `credential_kind` storage locally and hosted
+- hosted credential snapshot union
+- `setupPhase` / `setupExpiresAt` storage and hydration
+- ingress-owned `connectionSeed` persistence
+- OAuth compatibility routes and adapters
+- provider-config token export/refresh rejection
+- raw owner/user/client identifier stripping from account, credential, state, and hosted runtime metadata
+- hosted runtime credential replacement validation against manifest credential policy
+
+### PR 2: provenance foundation
+
+- versioned `DeviceDataOrigin`
+- origin-aware `dataSourceId`
+- source projection table/service
+- typed timestamp interpretation contract and fixtures
+- origin confidence and normalizer-version provenance
+- tests proving multiple Junction upstream sources do not collapse into one canonical source
+
+### PR 3: Junction polling MVP
+
+- Junction descriptor/manifest/config
+- env/region/key-prefix validation
+- Junction REST client with bounded retry/pagination/concurrency
+- HMAC `client_user_id`
+- external-link begin/callback outcome
+- parent account seed before redirect
+- reconcile/resource jobs
+- importer for default summaries/timeseries
+- split summary/timeseries backfill windows
+
+### PR 4: webhooks
+
+- raw signature verification
+- trace/dedupe
+- orphan trace and delayed bind/reconcile
+- event-to-job routing
+- webhook health
+
+### PR 5: source-aware query and richer resources
+
+- direct-vs-Junction priority policy
+- unsupported-source winning policy
+- glucose/CGM and source-sensitive resources
+- richer settings/source UI
+
+## Parallelization
+
+Wave 0 remains parent-owned: contract names, manifest credential policy, snapshot parser shape, setup phase contract, connection seed persistence, source projection contract, timestamp interpretation shape, and job hint field names.
+
+After Wave 0 compiles, parallelize:
+
+- local SQLite credential/source storage
+- hosted Prisma credential/source storage
+- hosted runtime snapshot and assistant-runtime hydration
+- data-origin/canonical source fixtures
+
+After descriptor/registry mini-gate, parallelize:
+
+- Junction client/provider polling
+- Junction importer
+- routes and callback aliases
+- fixture corpus
+
+Webhooks start only after polling, parent account persistence, and source projection are proven.
+
+## Current Implementation Status
+
+PR 1, the PR 2 foundation, and the PR 3 polling MVP are implemented in the active checkout but not committed because the tree contains many unrelated active rows. Webhooks remain deferred to PR 4.
+
+Current PR 3 landed slice:
+
+- Junction importer descriptor/adapter lane under `packages/importers/src/device-providers/{junction,provider-descriptors,defaults,index}.ts` plus focused importer tests.
+- Junction device-syncd provider/client/config lane under `packages/device-syncd/src/providers/junction*.ts`, `packages/device-syncd/src/config/{provider-env,provider-types,provider-manifests}.ts`, plus focused provider/manifest tests.
+- Provider manifest registers Junction with `provider_config` credential policy and lower source priority than direct providers.
+- Junction config validates env/region/key-prefix/base-url consistency and keeps API key, HMAC client-user secret, and webhook secret as separate provider-owned values.
+- `beginConnection` creates/resolves the Junction user with HMAC `client_user_id`, generates Link, and returns an ingress-persisted parent `connectionSeed` before redirect.
+- `completeConnection` treats Link return as weak, uses the seeded external account as authority, rejects seeded/callback user-id mismatches, updates setup phase, and enqueues scalar polling jobs.
+- Polling jobs reconcile Junction source projection rows, fetch bounded summary/timeseries windows from config, and import one Junction snapshot through the importer.
+- Default resources remain conservative: profile/activity/sleep/workouts/body plus steps/heartrate/hrv/respiratory-rate/blood-oxygen/weight. Glucose/CGM remains deferred.
+- CLI provider validation now includes Junction in the supported provider list.
+
+PR 3 must stay polling-first: do not add webhook delivery, Svix verification, orphan webhook traces, source-aware query policy, glucose/CGM, or SDK-only Link sources in this wave.
+
+The landed primitive/foundation slice includes:
+
+- `external_link` descriptor support and generic local/hosted callback routes, with OAuth callback routes kept as aliases.
+- `DeviceAccountCredential` and hosted credential snapshot unions for `oauth_tokens`, `provider_config`, and `none`.
+- Local SQLite and hosted Prisma credential/setup storage using additive schema changes.
+- Ingress-owned `connectionSeed` persistence before redirect, with `setupPhase` / `setupExpiresAt` rather than `status = "connecting"`.
+- Seeded external-link callback/setup failures mark the pre-created parent account as `setupPhase = "failed"` / `status = "reauthorization_required"` instead of leaving active pending setup rows indefinitely.
+- Public provider descriptors can represent callback-less `sdk`, `manual`, and `none` flows with null callback fields, while `oauth2` and `external_link` connection starts still fail explicitly if no callback URL is configured.
+- Provider catalog entries now resolve the generic connection descriptor instead of reading OAuth-only descriptor fields.
+- Device-sync manifest credential policy validation, including provider-config profile-key checks.
+- Built-in manifest credential policy takes precedence over provider instance overrides.
+- External-link callbacks must resolve to the seeded parent account; mismatches fail the seeded setup instead of creating a second account row.
+- Pending external-link setup expiry is preserved on callback until the provider explicitly clears it or confirms the source.
+- Callback results that include both new credential material and legacy OAuth tokens are rejected as ambiguous.
+- Fail-closed provider-config behavior for token refresh/export and hosted token-bundle mutation paths.
+- Metadata sanitization that strips raw owner/user/client ids and provider secrets while preserving explicit hash/blind-index fields, including provider-supplied callback state metadata.
+- Hosted credential-row validation and Prisma `CHECK` constraints for credential kind, setup phase, and token-material/provider-config consistency.
+- Settings-source rendering that shows `pending_link` / `link_returned` setup as still setting up, and expired or failed setup as reconnectable, without changing account lifecycle status.
+- Hosted local-heartbeat store fixtures use explicit `oauth_tokens` credential rows so the new fail-closed credential mapper is covered by existing heartbeat tests.
+- `DeviceDataOrigin` provenance fields for upstream source identity, timestamp semantics, origin confidence, and normalizer version.
+- Origin-aware canonical wearable data-source identity, with tests proving two Junction upstream source slugs under one aggregator account do not collapse.
+- Local SQLite `device_connection_source` projection storage keyed by parent connection plus opaque source instance key, with deterministic listing and cascade-delete coverage.
+- Hosted Prisma `DeviceConnectionSource` / additive `2026050101_device_connection_sources` migration, aligned status vocabulary, deterministic listing, and same-provider multi-source coverage.
+- Source projection sanitation keeps account metadata shallow and strips raw identifier-shaped availability/source values from projection summaries.
+
+Pause here before starting PR 4. The next wave should add Junction webhooks on top of the now-present polling MVP, parent account seeding, source projection, and importer path.
+
+Latest PR 3 verification:
+
+```txt
+pnpm --dir packages/importers typecheck
+pnpm --dir packages/importers test
+pnpm --dir packages/device-syncd typecheck
+pnpm --dir packages/device-syncd test
+pnpm --dir packages/operator-config typecheck
+pnpm --dir packages/operator-config test
+pnpm --dir packages/query typecheck
+pnpm --dir packages/cli typecheck
+pnpm --dir packages/cli test
+git diff --check -- packages/importers packages/device-syncd packages/operator-config packages/cli agent-docs/exec-plans/active/2026-04-30-junction-greenfield-primitive-v2.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md
+```
+
+Known unrelated red hosted-web commands in the current dirty checkout:
+
+```txt
+pnpm --dir apps/web lint
+pnpm --dir apps/web test
+```
+
+The hosted-web lint failure is in existing `site-footer`, biomarker detail, and join-invite files outside this slice. The hosted-web test failure is now 24 unrelated UI/content/migration expectation failures; the local-heartbeat credential failures found during this wave were fixed.
+
+## Verification
+
+Minimum primitive checks:
+
+```txt
+pnpm typecheck
+pnpm test:diff packages/importers/src/device-providers/provider-descriptors.ts packages/device-syncd/src/types.ts packages/device-syncd/src/public-ingress.ts packages/device-syncd/src/store/schema.ts packages/device-syncd/src/hosted-runtime.ts apps/web/prisma/schema.prisma packages/assistant-runtime/src/hosted-device-sync-runtime.ts
+pnpm --dir packages/device-syncd test:coverage
+pnpm --dir packages/assistant-runtime test:coverage
+pnpm --dir apps/web verify
+```
+
+Minimum Junction polling checks:
+
+```txt
+pnpm typecheck
+pnpm test:diff packages/device-syncd/src/providers/junction.ts packages/device-syncd/src/providers/junction-client.ts packages/importers/src/device-providers/junction.ts
+pnpm --dir packages/device-syncd test:coverage
+pnpm --dir packages/importers test:coverage
+```
+
+Required review passes for implementation:
+
+- security/privacy review
+- coverage-write
+- task-finish-review
+- frontend-review only when user-facing settings UI changes
+
+## Do Not Do
+
+- Do not add `junction_oura`, `junction_garmin`, or other pseudo-providers.
+- Do not fake OAuth or fake empty token bundles.
+- Do not store Junction API keys, webhook secrets, HMAC secrets, raw owner ids, or raw client user ids in account rows.
+- Do not put source arrays or resource availability maps into account metadata.
+- Do not set `externalRef.system` to an upstream provider for Junction-sourced data.
+- Do not import webhooks inline before polling/reconcile exists.
+- Do not include SDK-only sources in the web-Link MVP.
+- Do not silently treat floating timestamps as UTC.

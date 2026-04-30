@@ -146,7 +146,7 @@ test('device provider inputs reject unsupported provider keys before daemon rout
     assert.equal(result.ok, false)
     if (!result.ok) {
       assert.match(result.error.message ?? '', /Unsupported device-sync provider/u)
-      assert.match(result.error.message ?? '', /garmin, oura, whoop, strava/u)
+      assert.match(result.error.message ?? '', /garmin, junction, oura, whoop, strava/u)
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

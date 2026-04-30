@@ -242,6 +242,11 @@ describe("device-sync hosted runtime helpers", () => {
     expect(buildHostedPublicDeviceSyncAccount({
       record: {
         accessTokenExpiresAt: null,
+        credentialKind: "oauth_tokens",
+        credentialMetadata: {},
+        providerConfigKey: null,
+        setupExpiresAt: null,
+        setupPhase: null,
         displayName: null,
         externalAccountId: "oura_alice",
         id: "dsc_123",

@@ -101,12 +101,21 @@ export class HostedDeviceSyncPublicIngressService {
   }
 
   async handleOAuthCallback(provider: string): Promise<CompleteConnectionResult> {
-    const url = new URL(this.context.request.url);
+    return this.handleConnectionCallback(provider);
+  }
 
-    return this.ingress.handleOAuthCallback({
+  async handleConnectionCallback(provider: string): Promise<CompleteConnectionResult> {
+    const url = new URL(this.context.request.url);
+    const handleConnectionCallback =
+      typeof Reflect.get(this.ingress, "handleConnectionCallback") === "function"
+        ? this.ingress.handleConnectionCallback.bind(this.ingress)
+        : this.ingress.handleOAuthCallback.bind(this.ingress);
+
+    return handleConnectionCallback({
       provider,
+      query: url.searchParams,
       code: url.searchParams.get("code"),
-      state: url.searchParams.get("state"),
+      state: url.searchParams.get("murph_state") ?? url.searchParams.get("state"),
       scope: url.searchParams.get("scope"),
       error: url.searchParams.get("error"),
       errorDescription: url.searchParams.get("error_description"),

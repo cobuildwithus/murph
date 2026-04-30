@@ -9,6 +9,8 @@ import {
   prepareDeviceProviderSnapshotImport,
   resolveWearableCanonicalMetricKey,
   resolveWearableMetricTolerance,
+  type DeviceDataOrigin,
+  type DeviceEventPayload,
   type DeviceProviderAdapter,
   type DeviceProviderSnapshotImportPayload,
   type NormalizedDeviceBatch,
@@ -111,6 +113,349 @@ test("canonicalizeDeviceBatchPayload preserves hashed account identity and maps 
   assert.ok(records.every((record) => !("accountId" in record.source)));
   assert.ok(records.every((record) => record.source.providerAccountIdHash?.length === 24));
   assert.ok(records.every((record) => record.source.dataSourceId.startsWith("wearable_source_")));
+});
+
+test("canonicalizeDeviceBatchPayload separates Junction upstream origins without changing externalRef system", () => {
+  const baseOrigin = {
+    version: 1,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "oura",
+    sourceType: "ring",
+    sourceAppId: "oura-cloud-app-raw",
+  } satisfies DeviceDataOrigin;
+  const events: DeviceEventPayload[] = [
+    {
+      kind: "observation",
+      occurredAt: "2026-04-21T06:00:00.000Z",
+      dayKey: "2026-04-21",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-oura-sleep",
+        resourceId: "junction-sleep-1",
+        facet: "sleep-score",
+      },
+      dataOrigin: {
+        ...baseOrigin,
+        observedAtRaw: "2026-04-21T06:00:00+00:00",
+        sourceName: "Oura Ring",
+        sourceDeviceId: "oura-ring-raw-a",
+        sourceWorkoutId: "oura-sleep-window-raw-a",
+        timeZoneOffsetMinutes: 0,
+        timestampSemantics: "offset",
+        originConfidence: "high",
+        normalizerVersion: "junction-normalizer.v1",
+      },
+      fields: {
+        metric: "sleep-score",
+        unit: "score",
+        value: 82,
+      },
+    },
+    {
+      kind: "observation",
+      occurredAt: "2026-04-21T06:05:00.000Z",
+      dayKey: "2026-04-21",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-oura-sleep",
+        resourceId: "junction-sleep-2",
+        facet: "sleep-score",
+      },
+      dataOrigin: {
+        ...baseOrigin,
+        sourceName: "Travel Ring",
+        sourceDeviceId: "oura-ring-raw-b",
+        sourceWorkoutId: "oura-sleep-window-raw-b",
+      },
+      fields: {
+        metric: "sleep-score",
+        unit: "score",
+        value: 79,
+      },
+    },
+    {
+      kind: "observation",
+      occurredAt: "2026-04-21T17:00:00.000Z",
+      dayKey: "2026-04-21",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-oura-workout",
+        resourceId: "junction-workout-1",
+        facet: "steps",
+      },
+      dataOrigin: {
+        ...baseOrigin,
+        sourceName: "Renamed Ring",
+        sourceDeviceId: "oura-ring-raw-a",
+        sourceWorkoutId: "oura-workout-raw-c",
+      },
+      fields: {
+        metric: "daily-steps",
+        unit: "count",
+        value: 6400,
+      },
+    },
+    {
+      kind: "observation",
+      occurredAt: "2026-04-21T18:00:00.000Z",
+      dayKey: "2026-04-21",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-oura-sleep",
+        resourceId: "junction-sleep-3",
+        facet: "sleep-score",
+      },
+      dataOrigin: {
+        ...baseOrigin,
+        sourceName: "Oura Ring",
+        sourceDeviceId: "oura-ring-raw-a",
+        sourceAppId: "oura-companion-app-raw",
+        sourceWorkoutId: "oura-sleep-window-raw-d",
+      },
+      fields: {
+        metric: "sleep-score",
+        unit: "score",
+        value: 84,
+      },
+    },
+    {
+      kind: "observation",
+      occurredAt: "2026-04-21T19:00:00.000Z",
+      dayKey: "2026-04-21",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-withings-body",
+        resourceId: "junction-body-1",
+        facet: "weight",
+      },
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "withings",
+        sourceName: "Withings",
+        sourceType: "scale",
+        sourceDeviceId: "withings-scale-raw-a",
+        timestampSemantics: "utc",
+        normalizerVersion: "junction-normalizer.v1",
+      },
+      fields: {
+        metric: "weight",
+        unit: "kg",
+        value: 82.4,
+      },
+    },
+  ];
+
+  const records = canonicalizeDeviceBatchPayload({
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-21T18:00:00.000Z",
+    events,
+  }, {
+    connectionId: "conn_junction_01",
+    normalizerVersion: "junction-normalizer.v1",
+    observedAt: "2026-04-21T18:05:00.000Z",
+  });
+
+  assert.equal(records.length, 5);
+  assert.ok(records.every((record) => record.source.provider === "junction"));
+  assert.ok(records.every((record) => record.source.externalRef?.system === "junction"));
+  assert.deepEqual(records.map((record) => record.source.externalRef?.resourceType), [
+    "junction-oura-sleep",
+    "junction-oura-sleep",
+    "junction-oura-workout",
+    "junction-oura-sleep",
+    "junction-withings-body",
+  ]);
+  assert.equal(records[0]?.source.origin?.sourceProviderSlug, "oura");
+  assert.equal(records[0]?.source.origin?.version, 1);
+  assert.equal(records[0]?.source.origin?.sourceDeviceId, "oura-ring-raw-a");
+  assert.equal(records[0]?.source.origin?.sourceAppId, "oura-cloud-app-raw");
+  assert.equal(records[0]?.source.origin?.sourceWorkoutId, "oura-sleep-window-raw-a");
+  assert.equal(records[0]?.source.origin?.observedAtRaw, "2026-04-21T06:00:00+00:00");
+  assert.equal(records[0]?.source.origin?.timeZoneOffsetMinutes, 0);
+  assert.equal(records[0]?.source.origin?.timestampSemantics, "offset");
+  assert.equal(records[0]?.source.origin?.originConfidence, "high");
+  assert.equal(records[0]?.source.origin?.normalizerVersion, "junction-normalizer.v1");
+  assert.equal(records[4]?.source.origin?.sourceProviderSlug, "withings");
+  assert.ok(records.every((record) => !record.source.externalRef?.resourceType.includes(":")));
+  assert.notEqual(records[0]?.source.dataSourceId, records[1]?.source.dataSourceId);
+  assert.equal(records[0]?.source.dataSourceId, records[2]?.source.dataSourceId);
+  assert.notEqual(records[0]?.source.dataSourceId, records[3]?.source.dataSourceId);
+  assert.notEqual(records[0]?.source.dataSourceId, records[4]?.source.dataSourceId);
+
+  const serializedTransportFields = JSON.stringify(records.map((record) => ({
+    id: record.id,
+    providerResourceId: record.source.providerResourceId,
+    providerResourceType: record.source.providerResourceType,
+    externalRef: record.source.externalRef,
+  })));
+  assert.ok(!serializedTransportFields.includes("oura-ring-raw-a"));
+  assert.ok(!serializedTransportFields.includes("oura-ring-raw-b"));
+  assert.ok(!serializedTransportFields.includes("oura-cloud-app-raw"));
+  assert.ok(!serializedTransportFields.includes("oura-companion-app-raw"));
+  assert.ok(!serializedTransportFields.includes("oura-workout-raw-c"));
+  assert.ok(!serializedTransportFields.includes("withings-scale-raw-a"));
+});
+
+test("canonicalizeDeviceBatchPayload keys Junction data sources by upstream source provider slug", () => {
+  const records = canonicalizeDeviceBatchPayload({
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-04-22T06:00:00.000Z",
+        dayKey: "2026-04-22",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-oura-sleep",
+          resourceId: "junction-summary-oura",
+          facet: "steps",
+        },
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "oura",
+          sourceType: "cloud-provider",
+        },
+        fields: {
+          metric: "daily-steps",
+          unit: "count",
+          value: 7200,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-22T06:00:00.000Z",
+        dayKey: "2026-04-22",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-withings-activity",
+          resourceId: "junction-summary-withings",
+          facet: "steps",
+        },
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "withings",
+          sourceType: "cloud-provider",
+        },
+        fields: {
+          metric: "daily-steps",
+          unit: "count",
+          value: 7100,
+        },
+      },
+    ],
+  }, {
+    connectionId: "conn_junction_01",
+    normalizerVersion: "junction-normalizer.v1",
+    observedAt: "2026-04-22T12:05:00.000Z",
+  });
+
+  assert.equal(records.length, 2);
+  assert.equal(records[0]?.source.provider, "junction");
+  assert.equal(records[1]?.source.provider, "junction");
+  assert.equal(records[0]?.source.connectionId, "conn_junction_01");
+  assert.equal(records[1]?.source.connectionId, "conn_junction_01");
+  assert.equal(records[0]?.source.providerAccountIdHash, records[1]?.source.providerAccountIdHash);
+  assert.equal(records[0]?.source.origin?.aggregatorProvider, "junction");
+  assert.equal(records[1]?.source.origin?.aggregatorProvider, "junction");
+  assert.equal(records[0]?.source.origin?.sourceProviderSlug, "oura");
+  assert.equal(records[1]?.source.origin?.sourceProviderSlug, "withings");
+  assert.notEqual(records[0]?.source.dataSourceId, records[1]?.source.dataSourceId);
+  assert.ok(records.every((record) => record.source.externalRef?.system === "junction"));
+  assert.deepEqual(records.map((record) => record.source.externalRef?.resourceType), [
+    "junction-oura-sleep",
+    "junction-withings-activity",
+  ]);
+  assert.ok(records.every((record) => !record.source.externalRef?.resourceType.includes(":")));
+});
+
+test("canonicalizeDeviceBatchPayload preserves sample origins and falls back from sparse record origins", () => {
+  const payloadOrigin = {
+    version: 1,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "oura",
+    sourceType: "ring",
+    observedAtRaw: "2026-04-22T07:00:00+00:00",
+    timeZoneOffsetMinutes: 0,
+    timestampSemantics: "offset",
+    originConfidence: "high",
+    normalizerVersion: "junction-normalizer.v1",
+  } satisfies DeviceDataOrigin;
+  const records = canonicalizeDeviceBatchPayload({
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    dataOrigin: payloadOrigin,
+    samples: [
+      {
+        stream: "heart_rate",
+        unit: "bpm",
+        dayKey: "2026-04-22",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-oura-heartrate",
+          resourceId: "junction-hr-1",
+        },
+        dataOrigin: {
+          version: 1,
+        },
+        sample: {
+          occurredAt: "2026-04-22T07:00:00.000Z",
+          value: 54,
+        },
+      },
+      {
+        stream: "sleep_stage",
+        unit: "minutes",
+        dayKey: "2026-04-22",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-oura-sleep",
+          resourceId: "junction-sleep-stage-1",
+          facet: "deep",
+        },
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          sourceDeviceId: "oura-ring-raw-stage",
+          observedAtRaw: "2026-04-22 07:15:00",
+          timeZoneOffsetMinutes: null,
+          timestampSemantics: "floating",
+          originConfidence: "medium",
+          normalizerVersion: "junction-normalizer.v1",
+        },
+        sample: {
+          occurredAt: "2026-04-22T07:15:00.000Z",
+          stage: "deep",
+          durationMinutes: 22,
+        },
+      },
+    ],
+  }, {
+    connectionId: "conn_junction_01",
+    normalizerVersion: "junction-normalizer.v1",
+    observedAt: "2026-04-22T12:05:00.000Z",
+  });
+
+  assert.equal(records.length, 2);
+  assert.equal(records[0]?.kind, "sample");
+  assert.equal(records[0]?.source.origin?.sourceProviderSlug, "oura");
+  assert.equal(records[0]?.source.origin?.observedAtRaw, "2026-04-22T07:00:00+00:00");
+  assert.equal(records[0]?.source.origin?.timestampSemantics, "offset");
+  assert.equal(records[0]?.source.origin?.originConfidence, "high");
+  assert.equal(records[1]?.kind, "sample");
+  assert.equal(records[1]?.source.origin?.sourceDeviceId, "oura-ring-raw-stage");
+  assert.equal(records[1]?.source.origin?.observedAtRaw, "2026-04-22 07:15:00");
+  assert.equal(records[1]?.source.origin?.timeZoneOffsetMinutes, null);
+  assert.equal(records[1]?.source.origin?.timestampSemantics, "floating");
+  assert.equal(records[1]?.source.origin?.originConfidence, "medium");
 });
 
 test("wearable metric normalization converts energy-burned to total calories and preserves WHOOP workout metrics", () => {
@@ -256,6 +601,14 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
             occurredAt: "2026-04-20T09:00:00.000Z",
             dayKey: "2026-04-20",
             rawArtifactRoles: ["daily-summary"],
+            dataOrigin: {
+              version: 1,
+              aggregatorProvider: "junction",
+              sourceProviderSlug: "polar",
+              sourceType: "watch",
+              sourceDeviceId: "polar-watch-raw-1",
+              sourceAppId: "polar-app-raw",
+            },
             fields: {
               metric: "daily-steps",
               unit: "count",
@@ -299,8 +652,125 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
   assert.equal(canonicalRecords.length, 1);
   assert.equal(canonicalRecords[0]?.kind, "observation");
   assert.equal(canonicalRecords[0] && "metric" in canonicalRecords[0] ? canonicalRecords[0].metric : null, "steps");
+  assert.equal(canonicalRecords[0]?.source.origin?.version, 1);
+  assert.equal(canonicalRecords[0]?.source.origin?.sourceProviderSlug, "polar");
+  assert.equal(canonicalRecords[0]?.source.origin?.sourceDeviceId, "polar-watch-raw-1");
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === `wearable-raw-envelope:${rawEnvelope?.id}`));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === `wearable-canonical-records:${rawEnvelope?.id}`));
+  const canonicalArtifact = payload.rawArtifacts?.find(
+    (artifact) => artifact.role === `wearable-canonical-records:${rawEnvelope?.id}`,
+  );
+  assert.ok(canonicalArtifact);
+  const canonicalArtifactContent = canonicalArtifact.content as {
+    records?: Array<{
+      source?: {
+        normalizerVersion?: string;
+        origin?: DeviceDataOrigin;
+      };
+    }>;
+  };
+  assert.equal(canonicalArtifactContent.records?.[0]?.source?.origin?.sourceDeviceId, "polar-watch-raw-1");
+});
+
+test("prepareDeviceProviderSnapshotImport preserves timestamp origin semantics in canonical provenance", async () => {
+  const registry = createDeviceProviderRegistry([
+    makeTestDeviceProviderAdapter({
+      provider: "junction",
+      normalizeSnapshot(snapshot): NormalizedDeviceBatch {
+        return {
+          provider: "junction",
+          accountId: "junction-user-1",
+          importedAt: "2026-04-22T09:00:00.000Z",
+          source: "device",
+          events: [{
+            kind: "observation",
+            occurredAt: "2026-04-22T09:00:00.000Z",
+            dayKey: "2026-04-22",
+            externalRef: {
+              system: "junction",
+              resourceType: "junction-withings-body",
+              resourceId: "body-2026-04-22",
+              facet: "weight",
+            },
+            dataOrigin: {
+              version: 1,
+              aggregatorProvider: "junction",
+              sourceProviderSlug: "withings",
+              sourceName: "Withings",
+              sourceType: "scale",
+              observedAtRaw: "2026-04-22 17:00:00",
+              timeZoneOffsetMinutes: null,
+              timestampSemantics: "floating",
+              originConfidence: "medium",
+              normalizerVersion: "junction-normalizer.v2",
+            },
+            fields: {
+              metric: "weight",
+              unit: "kg",
+              value: 82.4,
+            },
+          }],
+          rawArtifacts: [{
+            role: "body-summary",
+            fileName: "body-summary.json",
+            content: snapshot,
+          }],
+        };
+      },
+    }),
+  ]);
+
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    snapshot: {
+      body_summary: {
+        weight_kg: 82.4,
+      },
+    },
+    connectionId: "conn_junction_01",
+    userId: "user_01",
+    sourceKind: "poll",
+    deliveryMode: "full_payload",
+    resourceType: "junction-withings-body",
+    resourceId: "body-2026-04-22",
+    normalizerVersion: "junction-normalizer.v2",
+  } satisfies DeviceProviderSnapshotImportPayload, {
+    providerRegistry: registry,
+  });
+
+  const recordOrigin = payload.canonicalWearableRecords?.[0]?.source.origin;
+  assert.equal(payload.canonicalWearableRecords?.[0]?.source.normalizerVersion, "junction-normalizer.v2");
+  assert.equal(recordOrigin?.aggregatorProvider, "junction");
+  assert.equal(recordOrigin?.sourceProviderSlug, "withings");
+  assert.equal(recordOrigin?.observedAtRaw, "2026-04-22 17:00:00");
+  assert.equal(recordOrigin?.timeZoneOffsetMinutes, null);
+  assert.equal(recordOrigin?.timestampSemantics, "floating");
+  assert.equal(recordOrigin?.originConfidence, "medium");
+  assert.equal(recordOrigin?.normalizerVersion, "junction-normalizer.v2");
+  assert.equal(payload.provenance?.normalizerVersion, "junction-normalizer.v2");
+
+  const rawEnvelope = payload.rawIngestEnvelopes?.[0];
+  assert.ok(rawEnvelope);
+  const canonicalArtifact = payload.rawArtifacts?.find(
+    (artifact) => artifact.role === `wearable-canonical-records:${rawEnvelope.id}`,
+  );
+  assert.ok(canonicalArtifact);
+  const canonicalArtifactContent = canonicalArtifact.content as {
+    records?: Array<{
+      source?: {
+        normalizerVersion?: string;
+        origin?: DeviceDataOrigin;
+      };
+    }>;
+  };
+  const artifactOrigin = canonicalArtifactContent.records?.[0]?.source?.origin;
+  assert.equal(canonicalArtifactContent.records?.[0]?.source?.normalizerVersion, "junction-normalizer.v2");
+  assert.equal(artifactOrigin?.aggregatorProvider, "junction");
+  assert.equal(artifactOrigin?.sourceProviderSlug, "withings");
+  assert.equal(artifactOrigin?.observedAtRaw, "2026-04-22 17:00:00");
+  assert.equal(artifactOrigin?.timeZoneOffsetMinutes, null);
+  assert.equal(artifactOrigin?.timestampSemantics, "floating");
+  assert.equal(artifactOrigin?.originConfidence, "medium");
+  assert.equal(artifactOrigin?.normalizerVersion, "junction-normalizer.v2");
 });
 
 test("prepareDeviceProviderSnapshotImport keeps raw envelope identity stable across replayed payloads", async () => {

@@ -7,24 +7,56 @@ import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   type HostedExecutionDeviceSyncRuntimeApplyEntry,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
+  type HostedExecutionDeviceSyncRuntimeConnectionUpdate,
+  type HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
+  type HostedExecutionDeviceSyncRuntimeCredentialUpdate,
   type HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
+import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
-import { buildHostedPublicDeviceSyncAccount } from "./internal-runtime";
+import {
+  buildHostedPublicDeviceSyncAccount,
+  type HostedStaticDeviceSyncConnectionRecord,
+} from "./internal-runtime";
 import {
   hostedConnectionRecordArgs,
   mapHostedConnectionRecord,
   type HostedConnectionRecord,
+  type HostedPrismaTransactionClient,
   type HostedStoredDeviceSyncAccount,
 } from "./prisma-store";
+import {
+  normalizeHostedDeviceSyncLifecycleStatus,
+  sanitizeHostedDeviceSyncCredentialMetadata,
+} from "./prisma-store/connection-records";
+import { toPrismaJsonObject } from "./prisma-store/prisma-json";
+
+type HostedRuntimeConnectionSnapshot = Omit<
+  HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
+  "credential"
+> & {
+  credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
+};
+
+type HostedRuntimeConnectionSnapshotWire = Omit<
+  HostedRuntimeConnectionSnapshot,
+  "tokenBundle"
+>;
+
+type HostedRuntimeSnapshotWireResponse = Omit<
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  "connections"
+> & {
+  connections: HostedRuntimeConnectionSnapshotWire[];
+};
 
 export async function readHostedDeviceSyncRuntimeState(input: {
   request: Request;
   trustedUserId: string;
-}): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
+}): Promise<HostedRuntimeSnapshotWireResponse> {
   const parsed = parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
     await input.request.json(),
     input.trustedUserId,
@@ -59,7 +91,7 @@ export async function readHostedDeviceSyncRuntimeState(input: {
   );
 
   return {
-    connections: sortHostedRuntimeConnectionSnapshots(connections),
+    connections: sortHostedRuntimeConnectionSnapshots(connections).map(toHostedRuntimeConnectionSnapshotWire),
     generatedAt: new Date().toISOString(),
     userId: input.trustedUserId,
   };
@@ -118,17 +150,36 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           storedAccount,
           durableExternalAccountId,
         );
-        const disconnectClearsTokens = update.connection?.status === "disconnected";
+        const baselineUsesOAuthCredential =
+          baseline.credential.kind === "oauth_tokens" || record.credentialKind === "oauth_tokens";
+        const disconnectClearsTokens =
+          update.connection?.status === "disconnected"
+          && baselineUsesOAuthCredential;
         const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
-        const tokenMutationRequested = update.tokenBundle !== undefined || disconnectClearsTokens;
-        const connectionWriteRequested = stateMutationRequested || tokenMutationRequested;
+        const credentialMutationRequested =
+          update.credential !== undefined || update.tokenBundle !== undefined || disconnectClearsTokens;
+        const connectionWriteRequested = stateMutationRequested || credentialMutationRequested;
         const connectionVersionMismatch = stateMutationRequested
           && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
-        const tokenVersionMismatch = update.tokenBundle !== undefined
+        const tokenVersionMismatch = hostedRuntimeCredentialMutationRequiresTokenFence(update)
           && (baseline.tokenBundle?.tokenVersion ?? null) !== update.observedTokenVersion;
         const versionMismatch = connectionVersionMismatch || tokenVersionMismatch;
+        const credentialUpdate = update.credential === undefined
+          ? undefined
+          : resolveHostedRuntimeCredentialUpdate(update.credential);
+        if (credentialUpdate) {
+          validateHostedRuntimeCredentialMutation({
+            baseline,
+            credential: credentialUpdate,
+            provider: record.provider,
+          });
+        }
         const nextAccount = buildPublicConnectionFromRuntimeSnapshot(baseline);
         let tokenBundleToPersist: HostedExecutionDeviceSyncRuntimeTokenBundle | null | undefined;
+        let tokenBundlePersistenceRequested = false;
+        let credentialToPersist:
+          | Exclude<HostedExecutionDeviceSyncRuntimeCredentialSnapshot, { kind: "oauth_tokens" }>
+          | undefined;
 
         if (!versionMismatch && update.connection) {
           if (Object.prototype.hasOwnProperty.call(update.connection, "displayName")) {
@@ -141,7 +192,13 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             nextAccount.scopes = [...(update.connection.scopes ?? [])];
           }
           if (Object.prototype.hasOwnProperty.call(update.connection, "status") && update.connection.status) {
-            nextAccount.status = update.connection.status;
+            nextAccount.status = normalizeHostedDeviceSyncLifecycleStatus(update.connection.status);
+          }
+          if (Object.prototype.hasOwnProperty.call(update.connection, "setupExpiresAt")) {
+            nextAccount.setupExpiresAt = update.connection.setupExpiresAt ?? null;
+          }
+          if (Object.prototype.hasOwnProperty.call(update.connection, "setupPhase")) {
+            nextAccount.setupPhase = update.connection.setupPhase ?? null;
           }
         }
 
@@ -169,8 +226,41 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
         if (versionMismatch) {
           tokenUpdate = "skipped_version_mismatch";
+        } else if (update.credential !== undefined) {
+          if (!credentialUpdate) {
+            throw new TypeError("Hosted device-sync runtime credential update was not parsed.");
+          }
+
+          if (credentialUpdate.kind === "oauth_tokens") {
+            if ("clearTokens" in credentialUpdate) {
+              tokenBundleToPersist = null;
+              tokenBundlePersistenceRequested = true;
+              nextAccount.accessTokenExpiresAt = null;
+              tokenUpdate = baseline.tokenBundle ? "cleared" : "missing";
+            } else {
+              tokenBundleToPersist = {
+                ...credentialUpdate.tokenBundle,
+                tokenVersion: computeNextHostedTokenVersion(
+                  baseline.tokenBundle,
+                  credentialUpdate.tokenBundle,
+                ),
+              };
+              tokenBundlePersistenceRequested = true;
+              nextAccount.accessTokenExpiresAt = tokenBundleToPersist.accessTokenExpiresAt;
+              tokenUpdate = "applied";
+            }
+          } else {
+            credentialToPersist = credentialUpdate;
+            nextAccount.accessTokenExpiresAt = null;
+            tokenUpdate = baseline.tokenBundle ? "cleared" : "missing";
+          }
+        } else if (update.tokenBundle !== undefined && !baselineUsesOAuthCredential) {
+          throw new TypeError(
+            "Hosted provider-config device-sync credentials do not support tokenBundle mutations; use credential updates instead.",
+          );
         } else if (disconnectClearsTokens || update.tokenBundle === null) {
           tokenBundleToPersist = null;
+          tokenBundlePersistenceRequested = baselineUsesOAuthCredential;
           nextAccount.accessTokenExpiresAt = null;
           tokenUpdate = baseline.tokenBundle ? "cleared" : "missing";
         } else if (update.tokenBundle === undefined) {
@@ -183,6 +273,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               update.tokenBundle,
             ),
           };
+          tokenBundlePersistenceRequested = true;
           nextAccount.accessTokenExpiresAt = tokenBundleToPersist.accessTokenExpiresAt;
           tokenUpdate = "applied";
         }
@@ -197,7 +288,13 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           await controlPlane.store.syncDurableConnectionState(nextAccount, tx);
         }
 
-        if (!versionMismatch && tokenMutationRequested) {
+        if (!versionMismatch && credentialToPersist) {
+          await persistHostedRuntimeCredentialSnapshot({
+            connectionId: update.connectionId,
+            credential: credentialToPersist,
+            tx,
+          });
+        } else if (!versionMismatch && tokenBundlePersistenceRequested) {
           await controlPlane.store.persistStoredConnectionTokenBundle({
             connectionId: update.connectionId,
             externalAccountId: storedAccount?.externalAccountId,
@@ -249,15 +346,21 @@ function buildHostedRuntimeConnectionSnapshot(
   record: HostedConnectionRecord,
   storedAccount: HostedStoredDeviceSyncAccount | null,
   fallbackExternalAccountId: string | null = null,
-): HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
+): HostedRuntimeConnectionSnapshot {
+  const mappedRecord = mapHostedConnectionRecord(record);
   const publicConnection = storedAccount
     ? storedAccount
     : buildHostedPublicDeviceSyncAccount({
-        record: mapHostedConnectionRecord(record),
+        record: mappedRecord,
         fallback: {
           externalAccountId: fallbackExternalAccountId,
         },
       });
+  const credential = buildHostedRuntimeCredentialSnapshot({
+    record: mappedRecord,
+    storedAccount,
+  });
+  const tokenBundle = getHostedRuntimeCredentialTokenBundle(credential);
 
   return {
     connection: {
@@ -270,6 +373,8 @@ function buildHostedRuntimeConnectionSnapshot(
       metadata: sanitizeStoredDeviceSyncMetadata(publicConnection.metadata ?? {}),
       provider: publicConnection.provider,
       scopes: [...publicConnection.scopes],
+      setupExpiresAt: publicConnection.setupExpiresAt ?? null,
+      setupPhase: publicConnection.setupPhase ?? null,
       status: publicConnection.status,
       updatedAt: publicConnection.updatedAt,
     },
@@ -282,15 +387,8 @@ function buildHostedRuntimeConnectionSnapshot(
       lastWebhookAt: publicConnection.lastWebhookAt,
       nextReconcileAt: publicConnection.nextReconcileAt,
     },
-    tokenBundle: storedAccount
-      ? {
-          accessToken: storedAccount.accessToken,
-          accessTokenExpiresAt: storedAccount.accessTokenExpiresAt ?? null,
-          keyVersion: storedAccount.keyVersion,
-          refreshToken: storedAccount.refreshToken,
-          tokenVersion: storedAccount.tokenVersion,
-        }
-      : null,
+    credential,
+    tokenBundle,
   };
 }
 
@@ -314,18 +412,190 @@ function buildPublicConnectionFromRuntimeSnapshot(
     nextReconcileAt: snapshot.localState.nextReconcileAt,
     provider: snapshot.connection.provider,
     scopes: [...snapshot.connection.scopes],
-    status: snapshot.connection.status,
+    setupExpiresAt: snapshot.connection.setupExpiresAt ?? null,
+    setupPhase: snapshot.connection.setupPhase ?? null,
+    status: normalizeHostedDeviceSyncLifecycleStatus(snapshot.connection.status),
     updatedAt: snapshot.connection.updatedAt ?? snapshot.connection.createdAt,
   };
 }
 
 function sortHostedRuntimeConnectionSnapshots(
-  connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[],
-): HostedExecutionDeviceSyncRuntimeConnectionSnapshot[] {
+  connections: HostedRuntimeConnectionSnapshot[],
+): HostedRuntimeConnectionSnapshot[] {
   return [...connections].sort((left, right) => {
     const leftUpdatedAt = left.connection.updatedAt ?? left.connection.createdAt;
     const rightUpdatedAt = right.connection.updatedAt ?? right.connection.createdAt;
     return rightUpdatedAt.localeCompare(leftUpdatedAt) || left.connection.id.localeCompare(right.connection.id);
+  });
+}
+
+function buildHostedRuntimeCredentialSnapshot(input: {
+  record: HostedStaticDeviceSyncConnectionRecord;
+  storedAccount: HostedStoredDeviceSyncAccount | null;
+}): HostedExecutionDeviceSyncRuntimeCredentialSnapshot {
+  if (input.storedAccount) {
+    return {
+      kind: "oauth_tokens",
+      tokenBundle: {
+        accessToken: input.storedAccount.accessToken,
+        accessTokenExpiresAt: input.storedAccount.accessTokenExpiresAt ?? null,
+        keyVersion: input.storedAccount.keyVersion,
+        refreshToken: input.storedAccount.refreshToken,
+        tokenVersion: input.storedAccount.tokenVersion,
+      },
+    };
+  }
+
+  if (input.record.credentialKind === "provider_config") {
+    if (!input.record.providerConfigKey) {
+      throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+    }
+
+    const credentialMetadata = sanitizeHostedDeviceSyncCredentialMetadata(
+      input.record.credentialMetadata,
+    );
+
+    return {
+      kind: "provider_config",
+      providerConfigKey: input.record.providerConfigKey,
+      ...(Object.keys(credentialMetadata).length > 0 ? { credentialMetadata } : {}),
+    };
+  }
+
+  return {
+    kind: "none",
+  };
+}
+
+function getHostedRuntimeCredentialTokenBundle(
+  credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
+): HostedExecutionDeviceSyncRuntimeTokenBundle | null {
+  return credential.kind === "oauth_tokens" ? credential.tokenBundle : null;
+}
+
+function toHostedRuntimeConnectionSnapshotWire(
+  snapshot: HostedRuntimeConnectionSnapshot,
+): HostedRuntimeConnectionSnapshotWire {
+  return {
+    connection: snapshot.connection,
+    credential: snapshot.credential,
+    localState: snapshot.localState,
+  };
+}
+
+function hostedRuntimeCredentialMutationRequiresTokenFence(
+  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate,
+): boolean {
+  return update.tokenBundle !== undefined
+    || update.credential !== undefined;
+}
+
+function resolveHostedRuntimeCredentialUpdate(
+  credential: HostedExecutionDeviceSyncRuntimeCredentialUpdate,
+): HostedExecutionDeviceSyncRuntimeCredentialSnapshot | Extract<
+  HostedExecutionDeviceSyncRuntimeCredentialUpdate,
+  { clearTokens: true; kind: "oauth_tokens" }
+> {
+  if (credential.kind === "oauth_tokens" && "clearTokens" in credential) {
+    return credential;
+  }
+
+  return credential;
+}
+
+function validateHostedRuntimeCredentialMutation(input: {
+  baseline: HostedRuntimeConnectionSnapshot;
+  credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot | Extract<
+    HostedExecutionDeviceSyncRuntimeCredentialUpdate,
+    { clearTokens: true; kind: "oauth_tokens" }
+  >;
+  provider: string;
+}): void {
+  const manifest = resolveConfiguredDeviceSyncProviderManifest(input.provider);
+  const policy = manifest?.credentialPolicy;
+
+  switch (input.credential.kind) {
+    case "oauth_tokens":
+      if (policy && policy.kind !== "oauth_tokens") {
+        throw new TypeError(
+          `Hosted device-sync runtime credential update for ${input.provider} must match the configured ${policy.kind} credential policy.`,
+        );
+      }
+      if (!policy && input.baseline.credential.kind !== "oauth_tokens") {
+        throw new TypeError(
+          "Hosted device-sync runtime cannot replace non-token credentials with OAuth tokens without a manifest policy.",
+        );
+      }
+      return;
+    case "provider_config": {
+      const providerConfigKey = input.credential.providerConfigKey.trim();
+      if (!providerConfigKey) {
+        throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+      }
+
+      if (policy) {
+        if (policy.kind !== "provider_config" || policy.providerConfigKey !== providerConfigKey) {
+          throw new TypeError(
+            `Hosted provider-config device-sync credential for ${input.provider} does not match the configured provider profile.`,
+          );
+        }
+        return;
+      }
+
+      if (
+        input.baseline.credential.kind !== "provider_config"
+        || input.baseline.credential.providerConfigKey !== providerConfigKey
+      ) {
+        throw new TypeError(
+          "Hosted device-sync runtime cannot replace account credentials with a provider-config profile without a matching manifest policy.",
+        );
+      }
+      return;
+    }
+    case "none":
+      if (policy && policy.kind !== "none") {
+        throw new TypeError(
+          `Hosted device-sync runtime credential update for ${input.provider} must match the configured ${policy.kind} credential policy.`,
+        );
+      }
+      if (!policy && input.baseline.credential.kind !== "none") {
+        throw new TypeError(
+          "Hosted device-sync runtime cannot replace account credentials with none without a manifest policy.",
+        );
+      }
+      return;
+  }
+}
+
+async function persistHostedRuntimeCredentialSnapshot(input: {
+  connectionId: string;
+  credential: Exclude<HostedExecutionDeviceSyncRuntimeCredentialSnapshot, { kind: "oauth_tokens" }>;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  if (input.credential.kind === "provider_config" && !input.credential.providerConfigKey.trim()) {
+    throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+  }
+
+  const credentialMetadataJson = input.credential.kind === "provider_config"
+    ? sanitizeHostedDeviceSyncCredentialMetadata(input.credential.credentialMetadata ?? {})
+    : {};
+
+  await input.tx.deviceConnection.update({
+    where: {
+      id: input.connectionId,
+    },
+    data: {
+      accessTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialKind: input.credential.kind,
+      credentialMetadataJson: toPrismaJsonObject(credentialMetadataJson),
+      keyVersion: null,
+      providerConfigKey: input.credential.kind === "provider_config"
+        ? input.credential.providerConfigKey.trim()
+        : null,
+      refreshTokenEncrypted: null,
+      tokenVersion: null,
+    },
   });
 }
 

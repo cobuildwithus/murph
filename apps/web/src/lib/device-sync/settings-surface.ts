@@ -180,6 +180,7 @@ function buildConnectedSource(input: {
   const lastSuccessfulSyncAgeMs = ageInMilliseconds(lastSuccessfulSyncAt, now);
   const hasRecentError = isIsoTimestampNewer(connection.lastSyncErrorAt, connection.lastSyncCompletedAt);
   const connectedAgeMs = ageInMilliseconds(connection.connectedAt, now);
+  const setupPhase = connection.setupPhase ?? null;
 
   if (connection.status === "disconnected") {
     return {
@@ -208,6 +209,46 @@ function buildConnectedSource(input: {
       state: connection.status,
       statusLabel: "Disconnected",
       tone: "muted",
+      updatedAt: connection.updatedAt,
+    } satisfies HostedDeviceSyncSettingsSource;
+  }
+
+  if (setupPhase === "pending_link" || setupPhase === "link_returned" || setupPhase === "failed") {
+    const setupExpired =
+      setupPhase !== "failed" && !isFutureIsoTimestamp(connection.setupExpiresAt, now);
+    const setupNeedsAttention = setupPhase === "failed" || setupExpired;
+
+    return {
+      connectionId: connection.id,
+      connectedAt: connection.connectedAt,
+      detail: setupNeedsAttention
+        ? "The provider connection setup did not finish cleanly."
+        : "Waiting for the provider to confirm the source.",
+      displayName,
+      guidance: setupNeedsAttention
+        ? "Reconnect when you're ready, or disconnect this source if you no longer need it."
+        : "Murph can keep listening for provider confirmation in the background.",
+      headline: setupNeedsAttention ? "Setup needs attention" : "Finishing setup",
+      lastActivityAt,
+      lastSuccessfulSyncAt,
+      lastWebhookAt: connection.lastWebhookAt,
+      nextReconcileAt: connection.nextReconcileAt,
+      primaryAction: setupNeedsAttention
+        ? {
+            kind: "reconnect",
+            label: "Reconnect",
+          }
+        : null,
+      provider: connection.provider,
+      providerConfigured: true,
+      providerLabel,
+      secondaryAction: {
+        kind: "disconnect",
+        label: "Disconnect",
+      },
+      state: connection.status,
+      statusLabel: setupNeedsAttention ? "Setup incomplete" : "Setting up",
+      tone: setupNeedsAttention ? "attention" : "muted",
       updatedAt: connection.updatedAt,
     } satisfies HostedDeviceSyncSettingsSource;
   }
@@ -487,6 +528,20 @@ function ageInMilliseconds(value: string | null | undefined, now: Date): number 
   }
 
   return Math.max(0, now.getTime() - parsed);
+}
+
+function isFutureIsoTimestamp(value: string | null | undefined, now: Date): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const parsed = Date.parse(value);
+
+  if (Number.isNaN(parsed)) {
+    return false;
+  }
+
+  return parsed > now.getTime();
 }
 
 function isIsoTimestampNewer(left: string | null | undefined, right: string | null | undefined): boolean {

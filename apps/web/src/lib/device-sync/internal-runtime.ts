@@ -2,9 +2,9 @@ import {
   deviceSyncError,
   sanitizeStoredDeviceSyncMetadata,
   type DeviceSyncAccount,
-  type DeviceSyncAccountStatus,
   type PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
+import type { DeviceAccountCredentialKind } from "@murphai/device-syncd/types";
 import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
@@ -20,9 +20,14 @@ export interface HostedStaticDeviceSyncConnectionRecord {
   provider: string;
   displayName: string | null;
   externalAccountId: string | null;
+  credentialKind: DeviceAccountCredentialKind;
+  providerConfigKey: string | null;
+  credentialMetadata: Record<string, unknown>;
+  setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
+  setupExpiresAt: string | null;
   metadata: Record<string, unknown>;
   scopes: string[];
-  status: DeviceSyncAccountStatus;
+  status: "active" | "reauthorization_required" | "disconnected";
   connectedAt: string;
   lastWebhookAt: string | null;
   lastSyncStartedAt: string | null;
@@ -50,7 +55,9 @@ interface HostedPublicDeviceSyncAccountFallback {
   metadata?: Record<string, unknown> | null;
   nextReconcileAt?: string | null;
   scopes?: readonly string[] | null;
-  status?: DeviceSyncAccountStatus;
+  setupExpiresAt?: string | null;
+  setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
+  status?: "active" | "reauthorization_required" | "disconnected";
   updatedAt?: string | null;
 }
 
@@ -107,6 +114,8 @@ export function buildHostedPublicDeviceSyncAccount(input: {
     status: fallback.status ?? input.record.status,
     scopes: input.record.scopes.length > 0 ? [...input.record.scopes] : fallback.scopes ? [...fallback.scopes] : [],
     accessTokenExpiresAt: input.record.accessTokenExpiresAt ?? fallback.accessTokenExpiresAt ?? null,
+    setupExpiresAt: fallback.setupExpiresAt ?? input.record.setupExpiresAt,
+    setupPhase: fallback.setupPhase ?? input.record.setupPhase,
     metadata: sanitizeStoredDeviceSyncMetadata(
       Object.keys(input.record.metadata).length > 0 ? input.record.metadata : fallback.metadata ?? {},
     ),

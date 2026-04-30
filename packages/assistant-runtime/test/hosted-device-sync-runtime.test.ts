@@ -15,6 +15,8 @@ import {
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeConnectionStatus,
+  HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 
@@ -169,7 +171,10 @@ function buildRuntimeSnapshot(input: {
     nextReconcileAt?: string | null;
   };
   metadata?: Record<string, unknown>;
-  status?: "active" | "reauthorization_required" | "disconnected";
+  setupExpiresAt?: string | null;
+  setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
+  status?: HostedExecutionDeviceSyncRuntimeConnectionStatus;
+  credential?: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
   tokenBundle?: {
     accessToken: string;
     accessTokenExpiresAt: string | null;
@@ -177,11 +182,25 @@ function buildRuntimeSnapshot(input: {
     tokenVersion: number;
   } | null;
 }): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  const credentialTokenBundle = input.credential?.kind === "oauth_tokens"
+    ? input.credential.tokenBundle
+    : null;
+  const tokenBundleForConnection = credentialTokenBundle ?? (
+    input.tokenBundle === null
+      ? null
+      : {
+          accessToken: input.tokenBundle?.accessToken ?? "hosted-access-token",
+          accessTokenExpiresAt: input.tokenBundle?.accessTokenExpiresAt ?? "2026-04-05T00:00:00.000Z",
+          keyVersion: "hosted-runtime",
+          refreshToken: input.tokenBundle?.refreshToken ?? "hosted-refresh-token",
+          tokenVersion: input.tokenBundle?.tokenVersion ?? 4,
+        }
+  );
   return {
     connections: [
       {
         connection: {
-          accessTokenExpiresAt: input.tokenBundle?.accessTokenExpiresAt ?? null,
+          accessTokenExpiresAt: tokenBundleForConnection?.accessTokenExpiresAt ?? null,
           connectedAt: input.connectedAt ?? "2026-04-04T09:00:00.000Z",
           createdAt: input.connectedAt ?? "2026-04-04T09:00:00.000Z",
           displayName: input.displayName ?? "Hosted Demo",
@@ -192,6 +211,8 @@ function buildRuntimeSnapshot(input: {
           },
           provider: "demo",
           scopes: ["offline", "read:data"],
+          ...(input.setupExpiresAt === undefined ? {} : { setupExpiresAt: input.setupExpiresAt }),
+          ...(input.setupPhase === undefined ? {} : { setupPhase: input.setupPhase }),
           status: input.status ?? "active",
           updatedAt: input.hostedUpdatedAt ?? "2026-04-04T09:05:00.000Z",
         },
@@ -204,15 +225,9 @@ function buildRuntimeSnapshot(input: {
           lastWebhookAt: input.localState?.lastWebhookAt ?? null,
           nextReconcileAt: input.localState?.nextReconcileAt ?? null,
         },
-        tokenBundle: input.tokenBundle === null
-          ? null
-          : {
-              accessToken: input.tokenBundle?.accessToken ?? "hosted-access-token",
-              accessTokenExpiresAt: input.tokenBundle?.accessTokenExpiresAt ?? "2026-04-05T00:00:00.000Z",
-              keyVersion: "hosted-runtime",
-              refreshToken: input.tokenBundle?.refreshToken ?? "hosted-refresh-token",
-              tokenVersion: input.tokenBundle?.tokenVersion ?? 4,
-            },
+        ...(input.credential
+          ? { credential: input.credential, tokenBundle: tokenBundleForConnection }
+          : { tokenBundle: tokenBundleForConnection }),
       },
     ],
     generatedAt: input.generatedAt ?? "2026-04-04T09:10:00.000Z",
@@ -448,6 +463,8 @@ describe("hosted device-sync runtime", () => {
               metadata: {
                 hosted: true,
               },
+              setupExpiresAt: null,
+              setupPhase: null,
             },
           },
         ],
@@ -648,6 +665,111 @@ describe("hosted device-sync runtime", () => {
             observedUpdatedAt: "2026-04-06T09:20:00.000Z",
           },
         ],
+      });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("sync hydrates provider-config credentials without token material or export", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "provider-config",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_provider_config",
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:15:00.000Z",
+        setupExpiresAt: "2026-04-06T09:45:00.000Z",
+        setupPhase: "pending_link",
+        status: "active",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "demo",
+          credentialMetadata: {
+            authHeader: "Bearer hosted-secret",
+            clientUserId: "raw-client-user",
+            clientUserIdHash: "hash_client_user",
+            ownerId: "raw-owner",
+            webhookSecret: "hosted-secret",
+          },
+        },
+        metadata: {
+          providerConfig: true,
+        },
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T09:20:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during sync");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:16:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(state.snapshot?.connections[0]?.credential, {
+        kind: "provider_config",
+        providerConfigKey: "demo",
+        credentialMetadata: {
+          clientUserIdHash: "hash_client_user",
+        },
+      });
+      assert.equal(state.snapshot?.connections[0]?.tokenBundle, null);
+
+      const stored = getStore(service).getAccountById(connected.account.id);
+      assert.ok(stored);
+      assert.equal(stored.status, "active");
+      assert.equal(stored.setupPhase, "pending_link");
+      assert.equal(stored.setupExpiresAt, "2026-04-06T09:45:00.000Z");
+      assert.equal(stored.credentialKind, "provider_config");
+      assert.equal(stored.providerConfigKey, "demo");
+      assert.deepEqual(stored.credentialMetadata, {
+        clientUserIdHash: "hash_client_user",
+      });
+      assert.equal(stored.hostedObservedTokenVersion, null);
+      assert.equal(stored.accessTokenEncrypted, "");
+      assert.equal(stored.refreshTokenEncrypted, null);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:20:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
+        occurredAt: "2026-04-06T09:20:00.000Z",
+        updates: [],
       });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -2541,6 +2663,86 @@ describe("hosted device-sync runtime", () => {
         observedTokenVersion: 4,
         observedUpdatedAt: "2026-04-04T09:05:00.000Z",
         tokenBundle: null,
+      });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("reconciliation clears hosted OAuth credentials with explicit credential update", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_clear_oauth_credential",
+        externalAccountId: "demo-clear-oauth-credential",
+        credential: {
+          kind: "oauth_tokens",
+          tokenBundle: {
+            accessToken: "hosted-access",
+            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+            keyVersion: "hosted-runtime",
+            refreshToken: "hosted-refresh",
+            tokenVersion: 4,
+          },
+        },
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T10:10:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during reconciliation");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_clear_oauth_credential");
+      assert.ok(localAccountId);
+
+      getStore(service).updateAccountTokens(localAccountId, {
+        accessToken: "",
+        accessTokenEncrypted: "",
+        refreshToken: null,
+        refreshTokenEncrypted: null,
+      });
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
+        connectionId: "hosted_conn_clear_oauth_credential",
+        credential: {
+          clearTokens: true,
+          kind: "oauth_tokens",
+        },
+        observedTokenVersion: 4,
+        observedUpdatedAt: "2026-04-04T09:05:00.000Z",
       });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);

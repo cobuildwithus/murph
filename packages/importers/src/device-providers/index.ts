@@ -12,6 +12,7 @@ export {
   defaultDeviceProviderAdapters,
   defaultDeviceProviderDescriptors,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
@@ -21,6 +22,13 @@ export {
   garminProviderAdapter,
   type GarminSnapshotInput,
 } from "./garmin.ts";
+export {
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  junctionProviderAdapter,
+  normalizeJunctionSnapshot,
+  type JunctionSnapshotInput,
+} from "./junction.ts";
 export {
   normalizeOuraSnapshot,
   ouraProviderAdapter,
@@ -49,10 +57,13 @@ export {
   requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
+  resolveDeviceProviderConnectionDescriptor,
   resolveDeviceProviderSourcePriority,
   resolveDeviceProviderDescriptor,
 } from "./provider-descriptors.ts";
 export type {
+  DeviceConnectionFlowKind,
+  DeviceProviderConnectionDescriptor,
   DeviceProviderDescriptor,
   DeviceProviderMetricFamily,
   DeviceProviderNormalizationDescriptor,
@@ -80,6 +91,7 @@ export type {
   CanonicalWearableSessionRecord,
   CanonicalWearableSource,
   CanonicalWearableTombstoneRecord,
+  DeviceDataOrigin,
 } from "./canonical-wearable-records.ts";
 export {
   resolveWearableCanonicalMetricKey,

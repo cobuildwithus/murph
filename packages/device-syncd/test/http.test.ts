@@ -566,6 +566,52 @@ test("device sync http handler routes control and public requests without socket
   assert.match(callbackSuccess.readText(), /Connected Demo successfully\./u);
   assert.doesNotMatch(callbackSuccess.readText(), /acct_demo_01/u);
 
+  const genericCallbackCalls: unknown[] = [];
+  const genericCallback = await invokeHandler({
+    service: createStubService({
+      async handleConnectionCallback(input) {
+        genericCallbackCalls.push(input);
+        return {
+          account: {
+            ...accountRecord,
+            provider: "junction",
+            setupPhase: "link_returned",
+            setupExpiresAt: null,
+          },
+          returnTo: null,
+        };
+      },
+    }),
+    method: "GET",
+    url: "/device-sync/connect/junction/callback?murph_state=state_junction_01&result=success",
+    surface: "public",
+  });
+  assert.equal(genericCallback.statusCode, 200);
+  assert.match(genericCallback.readText(), /Junction connected/u);
+  assert.equal(genericCallbackCalls.length, 1);
+  assert.deepEqual(
+    Object.fromEntries((genericCallbackCalls[0] as { query: URLSearchParams }).query.entries()),
+    {
+      murph_state: "state_junction_01",
+      result: "success",
+    },
+  );
+  assert.deepEqual(
+    {
+      ...(genericCallbackCalls[0] as Record<string, unknown>),
+      query: undefined,
+    },
+    {
+      provider: "junction",
+      query: undefined,
+      code: null,
+      state: "state_junction_01",
+      scope: null,
+      error: null,
+      errorDescription: null,
+    },
+  );
+
   const reconcile = await invokeHandler({
     service,
     method: "POST",
