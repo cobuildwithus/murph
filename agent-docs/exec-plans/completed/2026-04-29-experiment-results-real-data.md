@@ -1,8 +1,13 @@
 # Wire real experiment results data into the Results tab
 
-Status: active
+Status: completed
 Created: 2026-04-29
-Updated: 2026-04-29
+Updated: 2026-04-30
+
+## Completion note
+
+- Final review fixes tightened the BrowserVault event projection beyond the original structured-field sketch: browser event rows now keep only the metadata needed for Results matching and schedule bucketing, with raw event body, title, tags, links, broad lookup ids, provider/external ids, provenance, symptoms, confounders, timing, temperature, duration, intervention type, and regimen ids withheld from browser entities, timeline rows, and search rows.
+- `done` private runs normalize as finished, top-level run windows have run-plan fallback semantics, explicit `scheduledLocalDate` / `sessionLocalDate` drive session bucketing, expected ranges declare `dayOrigin`, and experiment-run cron contracts now match the browser expander's simple subset.
 
 ## Goal
 
@@ -723,3 +728,4 @@ Implementation verification when this plan is executed:
 - `apps/web/src/components/experiments/experiment-detail/experiment-schedule.tsx`
 - `apps/web/app/(dashboard)/experiments/[experimentId]/results/results-tab-client.tsx`
 - `apps/web/src/components/experiments/experiment-detail/**`
+Completed: 2026-04-30

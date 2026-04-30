@@ -414,6 +414,7 @@ const experimentCheckpointPayloadSchema = experimentSelectorPayloadSchema.extend
   note: z.string().min(1).optional(),
 })
 const experimentSessionPayloadSchema = z.object({
+  date: localDateSchema.optional(),
   occurredAt: isoTimestampSchema.optional(),
   source: eventSourceSchema.optional(),
   title: z.string().min(1).optional(),
@@ -935,6 +936,7 @@ export async function logExperimentSessionRecordFromInput(input: {
 export async function logExperimentSessionRecord(input: {
   vault: string
   lookup: string
+  date?: string
   occurredAt?: string
   source?: z.infer<typeof eventSourceSchema>
   title?: string
@@ -983,6 +985,7 @@ export async function logExperimentSessionRecord(input: {
       durationMinutes: input.durationMinutes,
       protocolId: normalizeOptionalText(input.protocolId) ?? undefined,
       sessionStatus: input.sessionStatus ?? input.status ?? 'completed',
+      sessionLocalDate: input.date,
       timing: normalizeOptionalText(input.timing) ?? undefined,
       temperatureC: input.temperatureC,
       afterExercise: input.afterExercise,

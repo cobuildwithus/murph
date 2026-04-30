@@ -779,6 +779,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   logExperimentSession(
     input: CommandContext & {
       lookup: string
+      date?: string
       occurredAt?: string
       source?: EventSource
       title?: string

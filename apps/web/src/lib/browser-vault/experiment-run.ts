@@ -25,13 +25,13 @@ const FINISHED_EXPERIMENT_STATUSES = new Set([
   "complete",
   "completed",
   "concluded",
+  "done",
   "finished",
 ]);
 
 const STOPPED_EXPERIMENT_STATUSES = new Set([
   "abandoned",
   "closed",
-  "done",
 ]);
 
 export interface ResolveBrowserVaultExperimentRunInput {
@@ -296,7 +296,7 @@ function buildTrends(results: BrowserVaultExperimentResultsView): TrendData[] {
         unit,
         baseline,
         active,
-        expectedRange: buildExpectedRangePoints(biomarker),
+        expectedRange: buildExpectedRangePoints(biomarker, results.experiment),
         baselineAvg: roundMetric(biomarker.baseline.mean),
         currentValue: roundMetric(currentValue),
         delta: biomarker.deltaAbs === null ? "" : formatDelta(biomarker.deltaAbs, unit),
@@ -306,14 +306,21 @@ function buildTrends(results: BrowserVaultExperimentResultsView): TrendData[] {
 
 function buildExpectedRangePoints(
   biomarker: BrowserVaultExperimentBiomarkerResult,
+  experiment: BrowserVaultExperimentResultsView["experiment"],
 ): TrendData["expectedRange"] | undefined {
   const range = biomarker.expectedEffect.expectedRange;
+  const runStart = experiment.windows.baselineStart ?? experiment.startedOn;
 
-  if (!range || range.sourceKeys.length === 0 || range.startDay > range.endDay) {
+  if (!range || range.sourceKeys.length === 0 || range.startDay > range.endDay || !runStart) {
     return undefined;
   }
 
   const points: NonNullable<TrendData["expectedRange"]> = [];
+  const dayOffset = resolveExpectedRangeDayOffset(range, experiment, runStart);
+
+  if (dayOffset === null) {
+    return undefined;
+  }
 
   for (let day = range.startDay; day <= range.endDay; day += 1) {
     const low = convertExpectedRangeValue(range.low, range, biomarker.baseline.mean);
@@ -324,13 +331,30 @@ function buildExpectedRangePoints(
     }
 
     points.push({
-      day,
+      day: day + dayOffset,
       low: roundMetric(Math.min(low, high)),
       high: roundMetric(Math.max(low, high)),
     });
   }
 
   return points.length > 0 ? points : undefined;
+}
+
+function resolveExpectedRangeDayOffset(
+  range: BrowserVaultExperimentExpectedRange,
+  experiment: BrowserVaultExperimentResultsView["experiment"],
+  runStart: string,
+): number | null {
+  if (range.dayOrigin === "run") {
+    return 0;
+  }
+
+  const interventionStart = experiment.windows.interventionStart;
+  if (!interventionStart) {
+    return null;
+  }
+
+  return daysBetweenInclusive(runStart, interventionStart) - 1;
 }
 
 function convertExpectedRangeValue(

@@ -265,6 +265,47 @@ test("matches session events to schedule cells using the run schedule time zone"
   );
 });
 
+test("buckets session events by scheduledLocalDate before occurredAt", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-11T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-11",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        sessionEvent("2026-04-11", "completed", {
+          attributes: {
+            scheduledLocalDate: "2026-04-09",
+          },
+          occurredAt: "2026-04-11T03:30:00.000Z",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run", {
+    asOf: "2026-04-11T12:00:00.000Z",
+  });
+
+  assert.ok(result);
+  assert.deepEqual(
+    result.schedule?.cells
+      .filter((cell) => cell.source === "event")
+      .map((cell) => [cell.localDate, cell.kind]),
+    [["2026-04-09", "completed"]],
+  );
+});
+
 test("uses the run schedule time zone for phase and adherence dates", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -332,6 +373,46 @@ test("includes timestamped session events by run-local date before asOf filterin
     [["2026-04-29", "completed"]],
   );
   assert.equal(result.progress?.adherence.completedSessions, 1);
+});
+
+test("uses explicit session local dates for after-midnight session logs", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-11T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-10",
+            interventionEnd: "2026-04-11",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "20:00",
+              timeZone: "America/New_York",
+            },
+            targetSessions: 2,
+          },
+        }),
+        sessionEvent("2026-04-11", "completed", {
+          attributes: {
+            sessionLocalDate: "2026-04-10",
+          },
+          occurredAt: "2026-04-11T04:30:00.000Z",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.deepEqual(
+    result.schedule?.cells
+      .filter((cell) => cell.source === "event")
+      .map((cell) => [cell.localDate, cell.kind]),
+    [["2026-04-10", "completed"]],
+  );
 });
 
 test("computes expected sessions from structured schedule cells when a schedule exists", () => {
@@ -441,6 +522,51 @@ test("builds finished outcomes when enough baseline and intervention data exists
   assert.equal(result.biomarkers[0]?.completeness, "good");
   assert.equal(result.biomarkers[0]?.deltaAbs, -4);
   assert.equal(result.biomarkers[0]?.movedAsExpected, true);
+});
+
+test("treats done private runs as review-due outcomes", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          status: "done",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-06",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+            targetSessions: 3,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-04-04", "completed"),
+        sessionEvent("2026-04-05", "completed"),
+        sessionEvent("2026-04-06", "completed"),
+      ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 63],
+        ["2026-04-02", 62],
+        ["2026-04-03", 61],
+        ["2026-04-04", 59],
+        ["2026-04-05", 58],
+        ["2026-04-06", 57],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.experiment.status, "done");
+  assert.equal(result.experiment.phase, "review_due");
+  assert.equal(result.outcome?.status, "enough_data");
+  assert.equal(result.outcome?.confidence.level, "high");
 });
 
 test("keeps sparse finished outcomes low-confidence instead of inventing certainty", () => {
@@ -622,6 +748,7 @@ test("parses only complete expected-effect ranges", () => {
   const malformed = selectBrowserVaultExperimentResults(client, "bad-range-run");
 
   assert.equal(valid?.biomarkers[0]?.expectedEffect.expectedRange?.scale, "percent");
+  assert.equal(valid?.biomarkers[0]?.expectedEffect.expectedRange?.dayOrigin, "run");
   assert.deepEqual(valid?.biomarkers[0]?.expectedEffect.expectedRange?.sourceKeys, [
     "source_artifact:range",
   ]);
@@ -660,6 +787,73 @@ test("lets expected-effect ranges inherit parent source keys", () => {
   assert.deepEqual(result?.biomarkers[0]?.expectedEffect.expectedRange?.sourceKeys, [
     "source_artifact:parent",
   ]);
+});
+
+test("parses explicit intervention-origin expected-effect ranges", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          expectedSignalDescriptions: [
+            {
+              biomarkerKey: "biomarker:resting-heart-rate",
+              sourceKeys: ["source_artifact:parent"],
+              range: {
+                dayOrigin: "intervention",
+                startDay: 1,
+                endDay: 7,
+                low: -5,
+                high: -2,
+                scale: "percent",
+              },
+            },
+          ],
+        }),
+      ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 62],
+        ["2026-04-08", 60],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.equal(result?.biomarkers[0]?.expectedEffect.expectedRange?.dayOrigin, "intervention");
+  assert.equal(result?.biomarkers[0]?.expectedEffect.expectedRange?.startDay, 1);
+});
+
+test("drops expected-effect ranges with unsupported day origins", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          expectedSignalDescriptions: [
+            {
+              biomarkerKey: "biomarker:resting-heart-rate",
+              sourceKeys: ["source_artifact:parent"],
+              range: {
+                dayOrigin: "baseline",
+                startDay: 1,
+                endDay: 7,
+                low: -5,
+                high: -2,
+                scale: "percent",
+              },
+            },
+          ],
+        }),
+      ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 62],
+        ["2026-04-08", 60],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.equal(result?.biomarkers[0]?.expectedEffect.expectedRange, null);
 });
 
 test("returns null schedule when the run has no structured schedule", () => {
@@ -778,13 +972,16 @@ function experimentEntity(input: {
 function sessionEvent(
   date: string,
   sessionStatus: string,
-  overrides: Partial<Pick<BrowserVaultEntity, "occurredAt">> = {},
+  overrides: Partial<Pick<BrowserVaultEntity, "occurredAt">> & {
+    attributes?: Record<string, unknown>;
+  } = {},
 ): BrowserVaultEntity {
   return {
     attributes: {
       experimentId: "exp_sauna",
       experimentSlug: "finnish-sauna-run",
       sessionStatus,
+      ...overrides.attributes,
     },
     bodyPreview: null,
     date,

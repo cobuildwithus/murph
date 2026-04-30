@@ -6902,6 +6902,14 @@
             "skipped"
           ]
         },
+        "sessionLocalDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "scheduledLocalDate": {
+          "type": "string",
+          "format": "date"
+        },
         "timing": {
           "type": "string",
           "minLength": 1,

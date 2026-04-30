@@ -68,6 +68,21 @@ describe("experiment run schedule intents", () => {
         expression: "@daily",
         timeZone: "Europe/London",
       },
+      {
+        kind: "cron",
+        expression: "0 8 * * 1-5",
+        timeZone: "Europe/London",
+      },
+      {
+        kind: "cron",
+        expression: "0 8 */2 * 2,4,6",
+        timeZone: "Europe/London",
+      },
+      {
+        kind: "cron",
+        expression: "0 8 * * MON",
+        timeZone: "Europe/London",
+      },
     ];
 
     for (const schedule of invalidSchedules) {
@@ -81,6 +96,8 @@ describe("experiment run schedule intents", () => {
     const cronSchema = findScheduleVariant(scheduleSchema, "cron");
     const expressionSchema = requiredProperty(cronSchema, "expression");
 
-    expect(expressionSchema.pattern).toBe("^\\S+(?:\\s+\\S+){4}$");
+    expect(expressionSchema.pattern).toBe(
+      "^(?:[0-5]?\\d)\\s+(?:[01]?\\d|2[0-3])\\s+\\*\\s+\\*\\s+[0-7](?:,[0-7])*$",
+    );
   });
 });

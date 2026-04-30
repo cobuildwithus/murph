@@ -182,7 +182,9 @@ test("browser vault replica projects experiment event fields only for relevant e
             runPlan: {
               interventionStart: "2026-04-20",
             },
+            scheduledLocalDate: "2026-04-20",
             sessionStatus: "partial",
+            sessionLocalDate: "2026-04-20",
             summary: "Generic event summary should not be projected.",
             symptoms: ["lightheaded"],
             temperatureC: 88,
@@ -191,7 +193,16 @@ test("browser vault replica projects experiment event fields only for relevant e
           body: "# Session note\n\nFelt lightheaded near the end.",
           experimentSlug: "sauna-rhr",
           kind: "intervention_session",
-          title: "Sauna session",
+          links: [
+            {
+              targetId: "reg_sauna",
+              type: "related_to",
+            },
+          ],
+          lookupIds: ["provider-session-1", "reg_sauna"],
+          primaryLookupId: "provider-session-1",
+          tags: ["dry-sauna", "lightheaded"],
+          title: "Dry sauna 25 minutes lightheaded",
         }),
         createEntity("event", "evt_context", {
           attributes: {
@@ -210,6 +221,15 @@ test("browser vault replica projects experiment event fields only for relevant e
           body: "# Context note\n\nTravel day.",
           experimentSlug: "sauna-rhr",
           kind: "experiment_context",
+          links: [
+            {
+              targetId: "provider-context-1",
+              type: "related_to",
+            },
+          ],
+          lookupIds: ["provider-context-1"],
+          primaryLookupId: "provider-context-1",
+          tags: ["travel"],
           title: "Travel day",
         }),
         createEntity("event", "evt_activity", {
@@ -226,6 +246,7 @@ test("browser vault replica projects experiment event fields only for relevant e
           },
           body: "# Activity note\n\nUnrelated activity details.",
           kind: "activity_session",
+          tags: ["morning-run"],
           title: "Morning run",
         }),
         createEntity("journal", "journal_structured_keys", {
@@ -255,22 +276,21 @@ test("browser vault replica projects experiment event fields only for relevant e
 
   assert.ok(session);
   assert.deepEqual(session.attributes, {
-    afterExercise: true,
-    confounders: {
-      travel: true,
-      trainingLoad: "heavy",
-    },
-    durationMinutes: 18,
     experimentId: "exp_sauna",
     experimentSlug: "sauna-rhr",
-    interventionType: "dry-sauna",
     protocolId: "prot_sauna",
-    regimenId: "reg_sauna",
+    scheduledLocalDate: "2026-04-20",
     sessionStatus: "partial",
-    symptoms: ["lightheaded"],
-    temperatureC: 88,
-    timing: "evening",
+    sessionLocalDate: "2026-04-20",
   });
+  assert.equal(Object.hasOwn(session.attributes, "afterExercise"), false);
+  assert.equal(Object.hasOwn(session.attributes, "confounders"), false);
+  assert.equal(Object.hasOwn(session.attributes, "durationMinutes"), false);
+  assert.equal(Object.hasOwn(session.attributes, "interventionType"), false);
+  assert.equal(Object.hasOwn(session.attributes, "regimenId"), false);
+  assert.equal(Object.hasOwn(session.attributes, "symptoms"), false);
+  assert.equal(Object.hasOwn(session.attributes, "temperatureC"), false);
+  assert.equal(Object.hasOwn(session.attributes, "timing"), false);
   assert.equal(Object.hasOwn(session.attributes, "note"), false);
   assert.equal(Object.hasOwn(session.attributes, "markdownBody"), false);
   assert.equal(Object.hasOwn(session.attributes, "externalId"), false);
@@ -281,6 +301,10 @@ test("browser vault replica projects experiment event fields only for relevant e
   assert.equal(Object.hasOwn(session.attributes, "runPlan"), false);
   assert.equal(Object.hasOwn(session.attributes, "summary"), false);
   assert.equal(session.bodyPreview, null);
+  assert.deepEqual(session.links, []);
+  assert.deepEqual(session.lookupIds, ["evt_session"]);
+  assert.deepEqual(session.tags, []);
+  assert.equal(session.title, null);
 
   assert.ok(context);
   assert.deepEqual(context.attributes, {
@@ -295,10 +319,37 @@ test("browser vault replica projects experiment event fields only for relevant e
   assert.equal(Object.hasOwn(context.attributes, "rawProvenance"), false);
   assert.equal(Object.hasOwn(context.attributes, "summary"), false);
   assert.equal(context.bodyPreview, null);
+  assert.deepEqual(context.links, []);
+  assert.deepEqual(context.lookupIds, ["evt_context"]);
+  assert.deepEqual(context.tags, []);
+  assert.equal(context.title, null);
 
   assert.ok(activity);
   assert.deepEqual(activity.attributes, {});
   assert.equal(activity.bodyPreview, null);
+  assert.deepEqual(activity.links, []);
+  assert.deepEqual(activity.lookupIds, ["evt_activity"]);
+  assert.deepEqual(activity.tags, []);
+  assert.equal(activity.title, null);
+
+  const timelineTitlesByEntityId = new Map(
+    client.replica.timelineRows.map((row) => [row.entityId, row.title]),
+  );
+  assert.equal(timelineTitlesByEntityId.get("evt_session"), "Intervention session");
+  assert.equal(timelineTitlesByEntityId.get("evt_context"), "Experiment context");
+  assert.equal(timelineTitlesByEntityId.get("evt_activity"), "Event");
+
+  const timelineTagsByEntityId = new Map(
+    client.replica.timelineRows.map((row) => [row.entityId, row.tags]),
+  );
+  assert.deepEqual(timelineTagsByEntityId.get("evt_session"), []);
+  assert.deepEqual(timelineTagsByEntityId.get("evt_context"), []);
+  assert.deepEqual(timelineTagsByEntityId.get("evt_activity"), []);
+
+  assert.deepEqual(client.search("sauna", { families: ["event"] }), []);
+  assert.deepEqual(client.search("lightheaded", { families: ["event"] }), []);
+  assert.deepEqual(client.search("travel", { families: ["event"] }), []);
+  assert.deepEqual(client.search("run", { families: ["event"] }), []);
 
   assert.ok(journal);
   assert.deepEqual(journal.attributes, {});
