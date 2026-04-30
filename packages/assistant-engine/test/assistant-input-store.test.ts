@@ -1,0 +1,993 @@
+import { rm, stat, symlink, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  createAssistantInputEventId,
+  listAssistantInputEvents,
+  readAssistantInputEvent,
+  resolveAssistantInputEventPath,
+  resolveAssistantInputEventsDirectory,
+  updateAssistantInputProjection,
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import { createTempVaultContext } from './test-helpers.ts'
+
+const tempRoots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0).map((rootPath) =>
+      rm(rootPath, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  )
+})
+
+describe('assistant input event store', () => {
+  it('creates deterministic ids and treats identical replays as idempotent', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-idempotent-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_1',
+      itemId: 'item_1',
+      laneSeq: '42',
+    })
+
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:02.000Z'),
+      event: {
+        content: {
+          attachmentDescriptors: [
+            {
+              attachmentId: 'att_1',
+              contentType: 'audio/mp4',
+              fileName: 'voice-note.m4a',
+              kind: 'audio',
+              sizeBytes: 1234,
+            },
+          ],
+          text: 'decoded hosted text',
+          transcriptText: 'Linq: decoded hosted text',
+          userMessageContent: [
+            {
+              text: 'decoded hosted text',
+              type: 'text',
+            },
+          ],
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:03.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'msg_1',
+          threadId: 'chat_1',
+        },
+        sourceRef,
+      },
+    })
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:05:00.000Z'),
+      event: {
+        content: {
+          attachmentDescriptors: [
+            {
+              attachmentId: 'att_1',
+              contentType: 'audio/mp4',
+              fileName: 'voice-note.m4a',
+              kind: 'audio',
+              sizeBytes: 1234,
+            },
+          ],
+          text: 'decoded hosted text',
+          transcriptText: 'Linq: decoded hosted text',
+          userMessageContent: [
+            {
+              text: 'decoded hosted text',
+              type: 'text',
+            },
+          ],
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:01.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'msg_1',
+          threadId: 'chat_1',
+        },
+        sourceRef,
+      },
+    })
+
+    expect(first.inputId).toBe(createAssistantInputEventId({ sourceRef }))
+    expect(second).toEqual(first)
+    await expect(
+      readAssistantInputEvent({
+        inputId: first.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(first)
+
+    const inputPath = resolveAssistantInputEventPath({
+      inputId: first.inputId,
+      paths: resolveAssistantStatePaths(vaultRoot),
+    })
+    expect((await stat(inputPath)).mode & 0o077).toBe(0)
+  })
+
+  it('preserves inbox capture input ids for stored inbox source refs', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-inbox-id-',
+    )
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'capture projection text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: {
+          captureId: 'cap_1',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+
+    expect(stored.inputId).toBe('inbox:cap_1')
+    expect(stored.cursor).toMatchObject({
+      inputId: 'inbox:cap_1',
+      sourceKind: 'inbox-capture',
+    })
+  })
+
+  it('rejects changed immutable content for the same source reference', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-conflict-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_conflict',
+      laneSeq: '42',
+    })
+    await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'original text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef,
+      },
+    })
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'changed text',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_INPUT_EVENT_CONFLICT',
+    })
+  })
+
+  it('keys hosted mailbox events by envelope identity, not projection metadata', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-hosted-identity-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_same_mailbox',
+      itemId: 'item_same_mailbox',
+      laneSeq: '42',
+    })
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'same mailbox text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef,
+      },
+    })
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'same mailbox text',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: {
+            ...sourceRef,
+            payloadSchema: 'murph.changed-payload.v1',
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_INPUT_EVENT_CONFLICT',
+    })
+
+    expect(
+      createAssistantInputEventId({
+        sourceRef: {
+          ...sourceRef,
+          payloadSchema: 'murph.changed-payload.v1',
+        },
+      }),
+    ).toBe(stored.inputId)
+  })
+
+  it('lists inputs by conversation and leaves projection failures listable', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-list-',
+    )
+    const matchingFirst = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_first',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:1',
+        text: 'first',
+        threadId: 'chat_1',
+      }),
+    })
+    const otherConversation = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:20.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_other',
+        occurredAt: '2026-04-22T10:01:00.000Z',
+        laneSeq: 'conversation:2',
+        text: 'other',
+        threadId: 'chat_2',
+      }),
+    })
+    const matchingSecond = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:30.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_second',
+        occurredAt: '2026-04-22T10:02:00.000Z',
+        laneSeq: 'conversation:3',
+        text: 'second',
+        threadId: 'chat_1',
+      }),
+    })
+
+    await updateAssistantInputProjection({
+      inputId: matchingFirst.inputId,
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:40.000Z'),
+      projection: {
+        reasonCode: 'conversation_import.capture_persist_failed',
+        status: 'failed',
+      },
+    })
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'chat_1',
+        threadIsDirect: true,
+      },
+    })
+
+    expect(listed.events.map((event) => event.inputId)).toEqual([
+      matchingFirst.inputId,
+      matchingSecond.inputId,
+    ])
+    expect(listed.events[0]?.projection).toMatchObject({
+      captureId: null,
+      reasonCode: 'conversation_import.capture_persist_failed',
+      status: 'failed',
+    })
+    expect(listed.nextCursor).toEqual(matchingSecond.cursor)
+
+    const afterFirst = await listAssistantInputEvents({
+      vault: vaultRoot,
+      afterCursor: matchingFirst.cursor,
+    })
+    expect(afterFirst.events.map((event) => event.inputId)).toEqual([
+      otherConversation.inputId,
+      matchingSecond.inputId,
+    ])
+  })
+
+  it('records succeeded projection status without changing immutable content', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-projection-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_projection',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:42',
+        text: 'projection',
+        threadId: 'chat_1',
+      }),
+    })
+
+    const updated = await updateAssistantInputProjection({
+      inputId: input.inputId,
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:01:00.000Z'),
+      projection: {
+        captureId: 'cap_1',
+        lastAttemptedAt: '2026-04-22T10:00:59.000Z',
+        status: 'succeeded',
+      },
+    })
+
+    expect(updated.content).toEqual(input.content)
+    expect(updated.projection).toEqual({
+      captureId: 'cap_1',
+      lastAttemptedAt: '2026-04-22T10:00:59.000Z',
+      reasonCode: null,
+      status: 'succeeded',
+      updatedAt: '2026-04-22T10:01:00.000Z',
+    })
+
+    const replayed = await updateAssistantInputProjection({
+      inputId: input.inputId,
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:02:00.000Z'),
+      projection: {
+        captureId: null,
+        lastAttemptedAt: null,
+        status: 'succeeded',
+      },
+    })
+    expect(replayed.projection).toEqual({
+      captureId: 'cap_1',
+      lastAttemptedAt: '2026-04-22T10:00:59.000Z',
+      reasonCode: null,
+      status: 'succeeded',
+      updatedAt: '2026-04-22T10:02:00.000Z',
+    })
+
+    await expect(
+      updateAssistantInputProjection({
+        inputId: input.inputId,
+        vault: vaultRoot,
+        projection: {
+          reasonCode: 'conversation_import.retry',
+          status: 'failed',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_INPUT_PROJECTION_TERMINAL',
+    })
+  })
+
+  it('orders hosted mailbox inputs by source position before timestamps', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-source-position-',
+    )
+    const laneSeqPosition = (laneSeq: string) => laneSeq.padStart(39, '0')
+    const laterSourcePosition = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_later_position',
+        occurredAt: '2026-04-22T10:01:00.000Z',
+        laneSeq: '2',
+        text: 'later position',
+        threadId: 'chat_1',
+      }),
+    })
+    const earlierSourcePosition = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:20.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_earlier_position',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: '10',
+        text: 'earlier position',
+        threadId: 'chat_1',
+      }),
+    })
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'chat_1',
+        threadIsDirect: true,
+      },
+    })
+
+    expect(listed.events.map((event) => event.inputId)).toEqual([
+      laterSourcePosition.inputId,
+      earlierSourcePosition.inputId,
+    ])
+    expect(listed.events.map((event) => event.occurredAt)).toEqual([
+      '2026-04-22T10:01:00.000Z',
+      '2026-04-22T10:00:00.000Z',
+    ])
+    expect(listed.events.map((event) => event.cursor.sourcePosition)).toEqual([
+      `hosted-mailbox:conversation:${laneSeqPosition('2')}:evt_later_position_item`,
+      `hosted-mailbox:conversation:${laneSeqPosition('10')}:evt_earlier_position_item`,
+    ])
+  })
+
+  it('uses source position ordering only within the same hosted mailbox lane', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-cross-lane-cursor-',
+    )
+    const systemEvent = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_system_first',
+        lane: 'system',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: '1',
+        text: 'system first',
+        threadId: 'chat_1',
+      }),
+    })
+    const conversationEvent = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:20.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_conversation_later',
+        lane: 'conversation',
+        occurredAt: '2026-04-22T10:01:00.000Z',
+        laneSeq: '1',
+        text: 'conversation later',
+        threadId: 'chat_1',
+      }),
+    })
+
+    const afterSystem = await listAssistantInputEvents({
+      vault: vaultRoot,
+      afterCursor: systemEvent.cursor,
+    })
+
+    expect(afterSystem.events.map((event) => event.inputId)).toEqual([
+      conversationEvent.inputId,
+    ])
+  })
+
+  it('rejects excessive attachment descriptors', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-attachment-count-',
+    )
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            attachmentDescriptors: Array.from({ length: 33 }, (_, index) => ({
+              attachmentId: `att_${index}`,
+              contentType: 'audio/mp4',
+              fileName: `audio-${index}.m4a`,
+              kind: 'audio',
+              sizeBytes: 1,
+            })),
+            text: 'too many attachments',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_many_attachments',
+            laneSeq: '42',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/at most 32|Too big/iu)
+  })
+
+  it('rejects raw path or URL shaped attachment descriptors', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-path-guard-',
+    )
+    const unsafeDescriptor = {
+      attachmentId: 'att_unsafe',
+      contentType: null,
+      fileName: null,
+      kind: 'audio',
+      path: '/tmp/raw-audio.m4a',
+      url: 'https://example.invalid/signed-url',
+    }
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            attachmentDescriptors: [unsafeDescriptor],
+            text: 'unsafe attachment',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_unsafe',
+            laneSeq: '42',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/unrecognized key/iu)
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            attachmentDescriptors: [
+              {
+                attachmentId: 'https://example.invalid/signed-url',
+                contentType: 'audio/mp4',
+                fileName: '/tmp/raw-audio.m4a',
+                kind: 'audio',
+              },
+            ],
+            text: 'unsafe attachment values',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_unsafe_values',
+            laneSeq: '43',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/paths or URLs/iu)
+  })
+
+  it('rejects raw provider payload, auth header, and oversized text', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-text-guard-',
+    )
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: `${Array.from({ length: 24 }, () => 'preamble').join('\n')}\nX-Api-Key: redacted\nhello`,
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_auth_header',
+            laneSeq: '42',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/auth headers/iu)
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: JSON.stringify({
+              headers: {
+                cookie: 'secret',
+              },
+              model: 'gpt',
+              messages: [
+                {
+                  role: 'user',
+                  content: 'raw provider request',
+                },
+              ],
+            }),
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_provider_payload',
+            laneSeq: '43',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/provider request payloads/iu)
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'x'.repeat(20_001),
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_oversized',
+            laneSeq: '44',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/Too big/iu)
+  })
+
+  it('rejects paths, URLs, and raw email headers in prompt text fields', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-raw-text-shapes-',
+    )
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'downloaded from https://example.invalid/raw-message',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_text_url',
+            laneSeq: '42',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/paths or URLs/iu)
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            transcriptText:
+              'From: sender@example.invalid\nTo: inbox@example.invalid\nSubject: raw',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_transcript_email',
+            laneSeq: '43',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/raw email/iu)
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            userMessageContent: [
+              {
+                text: 'read /tmp/raw-email.eml before replying',
+                type: 'text',
+              },
+            ],
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_user_message_path',
+            laneSeq: '44',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/paths or URLs/iu)
+  })
+
+  it('rejects unsafe source, conversation, and reply metadata', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-metadata-guard-',
+    )
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'unsafe metadata',
+          },
+          conversation: {
+            accountId: 'acct_1',
+            actorId: 'actor_1',
+            actorIsSelf: false,
+            source: 'linq',
+            threadId: 'https://example.invalid/thread',
+            threadIsDirect: true,
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          replyTarget: {
+            channel: 'linq',
+            messageId: 'msg_1',
+            threadId: 'chat_1',
+          },
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_metadata_thread',
+            laneSeq: '45',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/opaque token|paths or URLs/iu)
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'unsafe source metadata',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          replyTarget: {
+            channel: 'linq',
+            messageId: 'msg_1',
+            threadId: '/tmp/raw-thread',
+          },
+          sourceRef: {
+            ...createHostedMailboxSourceRef({
+              eventId: 'evt_metadata_source',
+              laneSeq: '46',
+            }),
+            itemId: 'https://example.invalid/item',
+          },
+        },
+      }),
+    ).rejects.toThrow(/opaque token|paths or URLs/iu)
+  })
+
+  it('restricts projection reason codes to compact machine-readable values', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-reason-code-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_reason_code',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:42',
+        text: 'reason code',
+        threadId: 'chat_1',
+      }),
+    })
+
+    await expect(
+      updateAssistantInputProjection({
+        inputId: input.inputId,
+        vault: vaultRoot,
+        projection: {
+          reasonCode: 'failed at /tmp/raw-email.eml',
+          status: 'failed',
+        },
+      }),
+    ).rejects.toThrow(/Invalid string/iu)
+  })
+
+  it('rejects mismatched vault and paths context before writing', async () => {
+    const first = await createAssistantInputStoreVault(
+      'assistant-input-store-context-a-',
+    )
+    const second = await createAssistantInputStoreVault(
+      'assistant-input-store-context-b-',
+    )
+
+    await expect(
+      upsertAssistantInputEvent({
+        paths: resolveAssistantStatePaths(first.vaultRoot),
+        vault: second.vaultRoot,
+        event: createHostedMailboxEventInput({
+          eventId: 'evt_context',
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          laneSeq: 'conversation:42',
+          text: 'context',
+          threadId: 'chat_1',
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_INPUT_EVENT_CONTEXT_MISMATCH',
+    })
+
+    await expect(
+      upsertAssistantInputEvent({
+        paths: {
+          ...resolveAssistantStatePaths(first.vaultRoot),
+          assistantStateRoot: resolveAssistantStatePaths(second.vaultRoot)
+            .assistantStateRoot,
+        },
+        event: createHostedMailboxEventInput({
+          eventId: 'evt_paths_only_context',
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          laneSeq: 'conversation:43',
+          text: 'context',
+          threadId: 'chat_1',
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_INPUT_EVENT_CONTEXT_MISMATCH',
+    })
+  })
+
+  it('rejects invalid timestamps before writing', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-timestamp-',
+    )
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createHostedMailboxEventInput({
+          eventId: 'evt_invalid_timestamp',
+          occurredAt: '2026-04-22 10:00',
+          laneSeq: 'conversation:42',
+          text: 'invalid timestamp',
+          threadId: 'chat_1',
+        }),
+      }),
+    ).rejects.toThrow(/datetime/iu)
+  })
+
+  it('rejects symlinked assistant input event files on read', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-symlink-',
+    )
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_symlink',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:42',
+        text: 'valid',
+        threadId: 'chat_1',
+      }),
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const inputPath = resolveAssistantInputEventPath({
+      inputId: stored.inputId,
+      paths,
+    })
+    const externalPath = path.join(vaultRoot, 'escaped-input.json')
+    await writeFile(externalPath, '{"ok":false}')
+    await rm(inputPath)
+    await symlink(externalPath, inputPath)
+
+    await expect(
+      readAssistantInputEvent({
+        inputId: stored.inputId,
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow(/must not contain symlinks/u)
+
+    await expect(
+      listAssistantInputEvents({
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow(/regular JSON files|must not contain symlinks/u)
+
+    const failures: string[] = []
+    const skipped = await listAssistantInputEvents({
+      vault: vaultRoot,
+      skipInvalidRecords: true,
+      onInvalidRecord(failure) {
+        failures.push(failure.fileName)
+      },
+    })
+    expect(skipped.events).toEqual([])
+    expect(failures).toEqual([path.basename(inputPath)])
+  })
+
+  it('fails closed on corrupt records and can explicitly skip invalid files', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-corrupt-',
+    )
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_valid',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:42',
+        text: 'valid',
+        threadId: 'chat_1',
+      }),
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await writeFile(
+      path.join(resolveAssistantInputEventsDirectory(paths), 'corrupt.json'),
+      '{"not":"a versioned event"}',
+    )
+
+    await expect(
+      listAssistantInputEvents({
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow(/versioned murph\.assistant-input-event\.v1/u)
+
+    const failures: string[] = []
+    const skipped = await listAssistantInputEvents({
+      vault: vaultRoot,
+      skipInvalidRecords: true,
+      onInvalidRecord(failure) {
+        failures.push(failure.fileName)
+      },
+    })
+
+    expect(skipped.events.map((event) => event.inputId)).toEqual([
+      stored.inputId,
+    ])
+    expect(failures).toEqual(['corrupt.json'])
+  })
+})
+
+async function createAssistantInputStoreVault(prefix: string): Promise<{
+  parentRoot: string
+  vaultRoot: string
+}> {
+  const context = await createTempVaultContext(prefix)
+  tempRoots.push(context.parentRoot)
+  return context
+}
+
+function createHostedMailboxEventInput(input: {
+  eventId: string
+  lane?: 'conversation' | 'system'
+  occurredAt: string
+  laneSeq: string
+  text: string
+  threadId: string
+}) {
+  return {
+    content: {
+      text: input.text,
+    },
+    conversation: {
+      accountId: 'acct_1',
+      actorId: 'actor_1',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: input.threadId,
+      threadIsDirect: true,
+    },
+    occurredAt: input.occurredAt,
+    receivedAt: input.occurredAt,
+    sourceRef: createHostedMailboxSourceRef({
+      eventId: input.eventId,
+      lane: input.lane,
+      laneSeq: input.laneSeq.replace(/^conversation:/u, ''),
+    }),
+  }
+}
+
+function createHostedMailboxSourceRef(input: {
+  eventId: string
+  itemId?: string
+  lane?: 'conversation' | 'system'
+  laneSeq: string
+}) {
+  return {
+    dedupeKey: `${input.eventId}_dedupe`,
+    eventId: input.eventId,
+    itemId: input.itemId ?? `${input.eventId}_item`,
+    kind: 'hosted-mailbox-item' as const,
+    lane: input.lane ?? 'conversation',
+    laneSeq: input.laneSeq,
+    payloadSchema: 'murph.hosted-payload.v1',
+    payloadSource: 'sidecar' as const,
+    source: 'hosted-mailbox' as const,
+    wakeSchema: 'murph.hosted-wake.v1',
+  }
+}

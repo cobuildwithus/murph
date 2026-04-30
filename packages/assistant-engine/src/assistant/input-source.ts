@@ -22,16 +22,16 @@ export type AssistantInputConversationRef = AssistantConversationCaptureRef
 
 export type AssistantInputProjectionStatus =
   | 'not_attempted'
-  | 'canonical'
-  | 'runtime_only'
+  | 'pending'
+  | 'succeeded'
   | 'failed'
-  | 'timed_out'
   | 'quarantined'
 
 export interface AssistantInputCursor {
   createdAt: string | null
   inputId: string
   sourceKind: AssistantInputSourceRef['kind']
+  sourcePosition?: string | null
   occurredAt: string
 }
 
@@ -43,11 +43,16 @@ export type AssistantInputSourceRef =
       version: string | null
     }
   | {
+      dedupeKey: string | null
       eventId: string
-      kind: 'runtime-event'
-      sequence: string | null
-      source: string
-      version: string | null
+      itemId: string
+      kind: 'hosted-mailbox-item'
+      lane: 'conversation' | 'system'
+      laneSeq: string
+      payloadSchema: string
+      payloadSource: 'inline' | 'sidecar'
+      source: 'hosted-mailbox'
+      wakeSchema: string
     }
 
 export interface AssistantInputProjection {
@@ -318,7 +323,7 @@ export function assistantInputCandidateFromInboxCapture(
     projection: {
       captureId: capture.captureId,
       reasonCode: null,
-      status: 'canonical',
+      status: 'succeeded',
     },
   }
 }
