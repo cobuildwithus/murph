@@ -28,9 +28,9 @@ relations:
 - type: primary_biomarker
   target: biomarker:muscle-soreness-score
 - type: secondary_biomarker
-  target: biomarker:perceived-recovery-score
-- type: secondary_biomarker
   target: biomarker:leg-heaviness-score
+- type: secondary_biomarker
+  target: biomarker:perceived-recovery-score
 - type: safety_outcome
   target: biomarker:adverse-symptoms
 - type: cites
@@ -254,16 +254,53 @@ testPlans:
   interventionDays: 21
   primaryBiomarkerKey: biomarker:muscle-soreness-score
   secondaryBiomarkerKeys:
-  - biomarker:perceived-recovery-score
   - biomarker:leg-heaviness-score
+  - biomarker:perceived-recovery-score
   safetyOutcomeKeys:
   - biomarker:adverse-symptoms
   minimumAdherenceSessions: 8
   targetAdherenceSessions: 12
   notes:
-  - Baseline records soreness, perceived recovery, leg heaviness, and symptoms without pneumatic compression.
+  - Baseline records soreness, leg heaviness, perceived recovery, and symptoms without pneumatic compression.
   - Intervention uses the same device, pressure/intensity, session length, and timing whenever practical.
   - Do not interpret this plan as VTE prophylaxis, swelling treatment, or a medical compression prescription.
+expectedSignalDescriptions:
+- biomarkerKey: biomarker:muscle-soreness-score
+  description: "Compression cycles squeeze the legs, driving venous blood and interstitial fluid out of compressed tissue and then allowing refill. After hard lower-body work, less pooling and stiffness can show up as a lower same-muscle soreness score across the DOMS window."
+  expected: Could trend lower
+  estimatedChange:
+    kind: absolute
+    low: -1
+    high: -0.3
+    unit: 0–10 score points
+    window: 24–96 hours after hard lower-body training
+    confidence: moderate
+    basis: "source_artifact:pmid-35456170 reports SMD -0.33 for soreness from 24–96 hours after DOMS induction; source_artifact:pmid-39416507 supports pain/soreness as a clearer practical signal than objective recovery. The range maps that small standardized effect to a 0–10 score."
+  protocolProminence: focus
+- biomarkerKey: biomarker:leg-heaviness-score
+  description: "Sequential pressure empties the lower legs during inflation and allows refill during deflation. After standing, sitting, or a heavy-leg day, the practical signal is lighter legs soon after the session."
+  expected: Could trend lower
+  estimatedChange:
+    kind: absolute
+    low: -1.5
+    high: -0.5
+    unit: 0–10 score points
+    window: Same evening or within 2 hours after a standing/sitting trigger
+    confidence: low
+    basis: "source_artifact:pmid-34260560 and source_artifact:pmid-36419142 reported leg-pain and circumference improvements after prolonged-standing contexts. Confidence stays low because leg heaviness was not pooled and this consumer protocol is not a swelling-treatment plan."
+  protocolProminence: focus
+- biomarkerKey: biomarker:perceived-recovery-score
+  description: "Compression adds a quiet recovery block while the device cycles fluid through the legs. When that reduces immediate fatigue, readiness can rise even if jump, strength, or running-power tests stay unchanged."
+  expected: Could improve
+  estimatedChange:
+    kind: absolute
+    low: 0.3
+    high: 1
+    unit: 0–10 score points
+    window: Immediately after the session to next morning
+    confidence: low
+    basis: "source_artifact:doi-10.1007-s11332-024-01217-5 reported higher total-quality-recovery without better cycling power, and source_artifact:pmid-27011305 reported immediate fatigue relief after ultramarathon IPC. Null athlete trials keep confidence low."
+  protocolProminence: focus
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
