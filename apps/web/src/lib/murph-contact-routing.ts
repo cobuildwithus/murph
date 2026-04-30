@@ -46,7 +46,6 @@ export function resolvePreferredMurphContactOption(input: {
 }): MurphContactOption | null {
   const contactChannels = normalizeMurphContactChannels(input.contactChannels);
   const message = normalizeMurphContactMessage(input.message);
-  const hasMessageDraft = message.body !== null || message.subject !== null;
   const murphPhoneNumber = normalizePhoneNumber(input.murphPhoneNumber);
 
   if (murphPhoneNumber && contactChannels.text) {
@@ -56,12 +55,8 @@ export function resolvePreferredMurphContactOption(input: {
     });
   }
 
-  if (hasMessageDraft && contactChannels.email) {
-    return buildMurphEmailContactOption({ message });
-  }
-
   if (contactChannels.telegram) {
-    return buildMurphTelegramContactOption();
+    return buildMurphTelegramContactOption({ message });
   }
 
   if (contactChannels.email) {
@@ -157,9 +152,19 @@ function buildMurphTextContactOption(input: {
   };
 }
 
-function buildMurphTelegramContactOption(): MurphContactOption {
+function buildMurphTelegramContactOption(input: {
+  message: NormalizedMurphContactMessage;
+}): MurphContactOption {
+  const query = new URLSearchParams();
+
+  if (input.message.body) {
+    query.set("text", input.message.body);
+  }
+
+  const queryString = query.toString();
+
   return {
-    href: MURPH_TELEGRAM_URL,
+    href: queryString ? `${MURPH_TELEGRAM_URL}?${queryString}` : MURPH_TELEGRAM_URL,
     kind: "telegram",
     label: "Telegram",
     rel: "noopener noreferrer",

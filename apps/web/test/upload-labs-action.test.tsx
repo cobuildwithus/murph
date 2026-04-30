@@ -143,7 +143,7 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
   assert.doesNotMatch(markup, /member@example\.test/);
 });
 
-test("UploadLabsMurphContactAction prefers email over Telegram when drafting the lab-report message", async () => {
+test("UploadLabsMurphContactAction prefers Telegram over email with the lab-report draft", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -171,19 +171,21 @@ test("UploadLabsMurphContactAction prefers email over Telegram when drafting the
   );
   const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
 
-  assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai\?/);
-  assert.match(markup, /subject=Lab\+reports\+for\+Murph/);
   assert.match(
     markup,
-    /body=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A/,
+    /href="https:\/\/t\.me\/withmurph_bot\?text=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A"/,
   );
-  assert.doesNotMatch(markup, /href="https:\/\/t\.me\/withmurph_bot/);
+  assert.match(
+    markup,
+    /aria-label="Upload labs to Murph in Telegram \(opens in a new tab\)"/,
+  );
+  assert.doesNotMatch(markup, /href="mailto:murph@mail\.withmurph\.ai/);
   assert.doesNotMatch(markup, /tg_user_123/);
   assert.doesNotMatch(markup, /member_handle/);
   assert.doesNotMatch(markup, /member@example\.test/);
 });
 
-test("UploadLabsMurphContactAction opens plain Telegram when it is the only connected channel", async () => {
+test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when it is the only connected channel", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -206,8 +208,10 @@ test("UploadLabsMurphContactAction opens plain Telegram when it is the only conn
   );
   const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
 
-  assert.match(markup, /href="https:\/\/t\.me\/withmurph_bot"/);
-  assert.doesNotMatch(markup, /[?&]text=/);
+  assert.match(
+    markup,
+    /href="https:\/\/t\.me\/withmurph_bot\?text=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A"/,
+  );
   assert.match(
     markup,
     /aria-label="Upload labs to Murph in Telegram \(opens in a new tab\)"/,
