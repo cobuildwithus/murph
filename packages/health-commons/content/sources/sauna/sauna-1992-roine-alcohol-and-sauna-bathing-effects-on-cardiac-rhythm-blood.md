@@ -30,7 +30,7 @@ researchEvidence:
   designKind: "crossover_trial"
   designLabel: "Alcohol/sauna crossover study"
   participantCount: 10
-  participantCountKind: "approximate"
+  participantCountKind: "reported"
   populationLabel: "Healthy adult volunteers"
   durationLabel: "Acute alcohol plus sauna exposure"
   aggregateRole: "primary"

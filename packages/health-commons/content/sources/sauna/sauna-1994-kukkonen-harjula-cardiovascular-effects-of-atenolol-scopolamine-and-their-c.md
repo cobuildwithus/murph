@@ -30,7 +30,7 @@ researchEvidence:
   designKind: "crossover_trial"
   designLabel: "Medication/sauna crossover study"
   participantCount: 12
-  participantCountKind: "approximate"
+  participantCountKind: "reported"
   populationLabel: "Healthy adult volunteers"
   durationLabel: "Acute sauna exposure under drug conditions"
   aggregateRole: "primary"

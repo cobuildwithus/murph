@@ -30,7 +30,7 @@ researchEvidence:
   designKind: "crossover_trial"
   designLabel: "Pharmacokinetic crossover study"
   participantCount: 10
-  participantCountKind: "approximate"
+  participantCountKind: "reported"
   populationLabel: "Healthy adult volunteers"
   durationLabel: "Acute sauna plus midazolam exposure"
   aggregateRole: "primary"
