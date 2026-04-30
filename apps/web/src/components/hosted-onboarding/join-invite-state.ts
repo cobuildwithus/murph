@@ -43,9 +43,9 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
     case "expired":
       return "Invite link expired";
     case "verify":
-      return "Confirm your number";
+      return "Let Murph reach you";
     case "checkout":
-      return "Start your first experiment";
+      return "Start experimenting";
     case "activating":
       return "Finishing your setup";
     case "blocked":
@@ -63,10 +63,10 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "expired":
       return "Text Murph again for a fresh link.";
     case "verify":
-      return "Verify the number you texted Murph from.";
+      return "Choose a contact method for experiment check-ins and updates.";
     case "checkout":
       return status.messagingSetupRequired
-        ? "Add a phone number or Telegram so Murph can reach you after payment."
+        ? "Add your phone or Telegram so Murph can message you."
         : "Self-host with your own keys, or let us run it for you.";
     case "activating":
       return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;

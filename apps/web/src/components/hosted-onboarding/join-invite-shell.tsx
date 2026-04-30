@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 export function JoinInviteShell({ children }: { children: ReactNode }) {
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground md:flex-row">
+      <style>{`#site-footer { display: none; }`}</style>
       <aside className="relative hidden w-60 shrink-0 flex-col overflow-hidden bg-gradient-to-br from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-8 py-10 text-white md:flex lg:w-[280px] lg:px-10">
         <div
           aria-hidden
@@ -46,7 +47,7 @@ export function JoinInviteShell({ children }: { children: ReactNode }) {
       </header>
 
       <section className="relative flex flex-1 items-center justify-center overflow-hidden px-6 py-12 sm:px-10 sm:py-16 lg:px-20">
-        <div className="w-full max-w-5xl">{children}</div>
+        <div className="w-full max-w-xl">{children}</div>
       </section>
     </main>
   );

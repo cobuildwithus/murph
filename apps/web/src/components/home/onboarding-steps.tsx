@@ -5,14 +5,13 @@ import { ArrowRight } from "lucide-react";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 import {
-  ChartPulseIcon,
   FlaskSparkleIcon,
   LabReportIcon,
   WatchHeartIcon,
 } from "./home-icons";
 
 const steps: {
-  id: "devices" | "experiments" | "labs" | "biomarkers";
+  id: "devices" | "experiments" | "labs";
   step: number;
   title: string;
   description: string;
@@ -27,38 +26,28 @@ const steps: {
     description:
       "Add Apple Health or a wearable to sync sleep, activity, recovery, and more.",
     cta: "Connect devices",
-    href: "/settings",
+    href: "/connect",
     icon: WatchHeartIcon,
   },
   {
-    id: "experiments",
+    id: "labs",
     step: 2,
+    title: "Share labs",
+    description:
+      "Import blood work or lab results to track biomarkers over time.",
+    cta: "Share labs",
+    href: "/settings",
+    icon: LabReportIcon,
+  },
+  {
+    id: "experiments",
+    step: 3,
     title: "Start an experiment",
     description:
       "Browse protocols like sauna, creatine, or zone 2 and measure what changes.",
     cta: "View experiments",
     href: "/experiments",
     icon: FlaskSparkleIcon,
-  },
-  {
-    id: "labs",
-    step: 3,
-    title: "Upload labs",
-    description:
-      "Import blood work or lab results to track biomarkers over time.",
-    cta: "Upload labs",
-    href: "/settings",
-    icon: LabReportIcon,
-  },
-  {
-    id: "biomarkers",
-    step: 4,
-    title: "Explore biomarkers",
-    description:
-      "See the signals Murph tracks: sleep, resting heart rate, HRV, weight, glucose, and more.",
-    cta: "View biomarkers",
-    href: "/biomarkers/resting-heart-rate",
-    icon: ChartPulseIcon,
   },
 ];
 
@@ -74,7 +63,7 @@ export function OnboardingSteps({
   uploadLabsAction?: ReactNode;
 }) {
   return (
-    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
       {steps.map((step, i) => {
         const Icon = step.icon;
         const isPrimary = i === 0;
@@ -106,7 +95,7 @@ export function OnboardingSteps({
         return (
           <div
             key={step.step}
-            className="group flex flex-col justify-between rounded-2xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-7 transition-colors duration-300 hover:border-[#7a8c6e]/25"
+            className={`group flex flex-col justify-between rounded-2xl border p-7 transition-colors duration-300 ${isPrimary ? "border-primary/35 bg-primary/12 hover:border-primary/45" : "border-border/50 bg-[rgba(255,252,246,0.9)] hover:border-[#7a8c6e]/25"}`}
           >
             <div>
               <div className="mb-6 flex items-start justify-between">

@@ -8,7 +8,6 @@ import { HowItWorksSection } from "@/src/components/homepage/how-it-works-sectio
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
-import { SiteFooter } from "@/src/components/homepage/site-footer";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
@@ -47,10 +46,10 @@ export default async function HomePage() {
   const signupCta: HomepageSignupCta = authenticated
     ? {
         body: "Manage billing and connected wearables from one place.",
-        eyebrow: "Your account",
+        eyebrow: "Welcome back",
         metaItems: ["Subscription and billing", "Wearable connections"],
         note: null,
-        signupLabel: "Open settings",
+        signupLabel: "Go to dashboard",
         title: "You’re already set up.",
       }
     : {
@@ -67,7 +66,6 @@ export default async function HomePage() {
 
   return (
     <HostedPhoneCountryCodeBoundary>
-      <style>{`#global-footer { display: none; }`}</style>
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
         <StickyNav
           authenticated={authenticated}
@@ -81,7 +79,6 @@ export default async function HomePage() {
         <FaqSection />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
-        <SiteFooter authenticated={authenticated} />
       </main>
     </HostedPhoneCountryCodeBoundary>
   );

@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { Activity, ChevronsUpDown, FlaskConical, Home, MessageCircle } from "lucide-react";
+import { Activity, ChevronsUpDown, FlaskConical, Home } from "lucide-react";
 import {
   useEffect,
   useState,
@@ -51,6 +51,10 @@ import type {
   SidebarDeviceSyncStatusResponse,
 } from "@/src/lib/device-sync/sidebar-status";
 import { cn } from "@/src/lib/utils";
+import {
+  SIDEBAR_NAV_ICON_CLASS,
+  SIDEBAR_NAV_ITEM_CLASS,
+} from "./sidebar-nav-classes";
 
 const navItems: {
   label: string;
@@ -203,17 +207,17 @@ function AccountMenu({
             render={
               <SidebarMenuButton
                 size="lg"
-                className="h-auto py-2 text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5"
+                className="h-auto py-3 text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5 md:py-2"
               />
             }
           >
-            <Avatar className="size-8 border border-white/15">
+            <Avatar className="size-10 border border-white/15 md:size-8">
               <AvatarFallback className="bg-white/5 text-[0.6875rem] font-medium text-white/80">
                 {initials}
               </AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left leading-tight">
-              <span className="truncate text-xs font-medium text-white/90">
+              <span className="truncate text-sm font-medium text-white/90 md:text-xs">
                 {primaryLabel}
               </span>
               {deviceSyncStatus ? (
@@ -232,6 +236,9 @@ function AccountMenu({
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" className="min-w-56">
             <DropdownMenuGroup>
+              <DropdownMenuItem render={<Link href="/connect" />}>
+                Devices
+              </DropdownMenuItem>
               <DropdownMenuItem render={<Link href="/settings" />}>
                 Settings
               </DropdownMenuItem>
@@ -301,7 +308,7 @@ export function Sidebar({
       </SidebarHeader>
 
       <SidebarContent className="justify-center px-2">
-        <SidebarMenu className="gap-3">
+        <SidebarMenu className="gap-3 md:gap-3">
           {navItems.map((item) => {
             const activePrefix = item.matchPrefix ?? item.href;
             const isActive =
@@ -313,13 +320,10 @@ export function Sidebar({
                 <SidebarMenuButton
                   isActive={isActive}
                   size="lg"
-                  className={cn(
-                    "rounded-lg px-4 py-3.5 text-[15px] text-white/70 hover:bg-white/5 hover:text-white/80 active:bg-white/5 active:text-white/80",
-                    "data-active:bg-white/10 data-active:text-white",
-                  )}
+                  className={SIDEBAR_NAV_ITEM_CLASS}
                   render={
                     <Link href={item.href}>
-                      {Icon ? <Icon className="size-5 shrink-0" /> : null}
+                      {Icon ? <Icon className={SIDEBAR_NAV_ICON_CLASS} /> : null}
                       {item.label}
                     </Link>
                   }
@@ -327,24 +331,7 @@ export function Sidebar({
               </SidebarMenuItem>
             );
           })}
-          {chatAction ?? (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={pathname === "/chat"}
-                size="lg"
-                className={cn(
-                  "rounded-lg px-4 py-3.5 text-[15px] text-white/70 hover:bg-white/5 hover:text-white/80 active:bg-white/5 active:text-white/80",
-                  "data-active:bg-white/10 data-active:text-white",
-                )}
-                render={
-                  <Link href="/chat">
-                    <MessageCircle className="size-5 shrink-0" />
-                    Chat with Murph
-                  </Link>
-                }
-              />
-            </SidebarMenuItem>
-          )}
+          {chatAction}
         </SidebarMenu>
       </SidebarContent>
 

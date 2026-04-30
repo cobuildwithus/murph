@@ -146,8 +146,8 @@ export function LandingAuthActions({
   if (authenticated) {
     return (
       <div className={styles.container}>
-        <a href="/settings" className={styles.settings}>
-          Your account
+        <a href="/home" className={styles.settings}>
+          {authLabel}
         </a>
       </div>
     );
