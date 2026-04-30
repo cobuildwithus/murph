@@ -213,7 +213,7 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '043320833726339c31040071aaf4b323c4b7eb5f017c859868d7a26fa6326331',
+      'b718ad73ceee5afe17242671b5a41da03a7957181d187e4f0887518f8ce6c2be',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
