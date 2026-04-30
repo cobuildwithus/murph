@@ -94,6 +94,21 @@ export async function assertPortAvailable(host: string, port: number, message: s
   }
 }
 
+export async function assertHostedWebPortAvailable(input: {
+  host: string;
+  message: string;
+  port: number;
+  stderrTarget?: NodeJS.WritableStream;
+}): Promise<void> {
+  const available = await isPortAvailable(input.host, input.port);
+  const recovered = await recoverStaleHostedWebDevPortOwner(input);
+  if (available || recovered) {
+    return;
+  }
+
+  throw new Error(input.message);
+}
+
 export async function resolveHostedLocalWorkerPortMode(input: {
   host: string;
   message: string;
@@ -149,6 +164,169 @@ async function isPortAvailable(host: string, port: number): Promise<boolean> {
     });
     server.listen(port, host);
   });
+}
+
+async function recoverStaleHostedWebDevPortOwner(input: {
+  host: string;
+  port: number;
+  stderrTarget?: NodeJS.WritableStream;
+}): Promise<boolean> {
+  const owner = findHostedWebDevPortOwner(input.port);
+  if (owner === null) {
+    return false;
+  }
+
+  const stderrTarget = input.stderrTarget ?? process.stderr;
+  stderrTarget.write(
+    `Recovering stale hosted-web dev listener on port ${input.port} (pid ${owner.pid}).\n`,
+  );
+
+  terminateProcessId(owner.pid, "SIGTERM");
+  if (await waitForHostedWebDevPortOwnerGone(input.port, 5_000)) {
+    return true;
+  }
+
+  if (owner.processGroupId !== null) {
+    terminateProcessGroup(owner.processGroupId, "SIGKILL");
+  }
+  terminateProcessId(owner.pid, "SIGKILL");
+  return await waitForHostedWebDevPortOwnerGone(input.port, 5_000);
+}
+
+function findHostedWebDevPortOwner(port: number): {
+  pid: number;
+  processGroupId: number | null;
+} | null {
+  for (const listenerPid of listListeningProcessIds(port)) {
+    const owner = findHostedWebDevAncestor(listenerPid);
+    if (owner !== null) {
+      return owner;
+    }
+  }
+
+  return null;
+}
+
+function listListeningProcessIds(port: number): number[] {
+  let output: string;
+
+  try {
+    output = execFileSync("lsof", [
+      "-nP",
+      `-iTCP:${port}`,
+      "-sTCP:LISTEN",
+      "-t",
+    ], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return [];
+  }
+
+  return output
+    .split(/\r?\n/u)
+    .map((line) => Number.parseInt(line.trim(), 10))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+}
+
+function findHostedWebDevAncestor(listenerPid: number): {
+  pid: number;
+  processGroupId: number | null;
+} | null {
+  let currentPid = listenerPid;
+  const seenPids = new Set<number>();
+
+  for (let depth = 0; depth < 12; depth += 1) {
+    if (seenPids.has(currentPid)) {
+      return null;
+    }
+    seenPids.add(currentPid);
+
+    const info = readProcessInfo(currentPid);
+    if (info === null) {
+      return null;
+    }
+    if (isHostedWebDevCommand(info.command)) {
+      return {
+        pid: currentPid,
+        processGroupId: info.processGroupId,
+      };
+    }
+    if (info.parentPid <= 1) {
+      return null;
+    }
+
+    currentPid = info.parentPid;
+  }
+
+  return null;
+}
+
+function readProcessInfo(pid: number): {
+  command: string;
+  parentPid: number;
+  processGroupId: number | null;
+} | null {
+  let output: string;
+
+  try {
+    output = execFileSync("ps", [
+      "-p",
+      String(pid),
+      "-o",
+      "ppid=",
+      "-o",
+      "pgid=",
+      "-o",
+      "command=",
+    ], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+
+  const match = /^\s*(\d+)\s+(\d+)\s+([\s\S]*)$/u.exec(output.trim());
+  if (!match) {
+    return null;
+  }
+
+  const parentPid = Number.parseInt(match[1] ?? "", 10);
+  const processGroupId = Number.parseInt(match[2] ?? "", 10);
+  return {
+    command: match[3] ?? "",
+    parentPid,
+    processGroupId: Number.isInteger(processGroupId) && processGroupId > 0
+      ? processGroupId
+      : null,
+  };
+}
+
+function isHostedWebDevCommand(command: string): boolean {
+  const normalizedCommand = command.replace(/\\/gu, "/");
+  return (
+    normalizedCommand.includes("apps/web/scripts/dev-local.ts")
+    && normalizedCommand.includes(repoRoot.replace(/\\/gu, "/"))
+  );
+}
+
+async function waitForHostedWebDevPortOwnerGone(
+  port: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (findHostedWebDevPortOwner(port) === null) {
+      return true;
+    }
+
+    await sleep(250);
+  }
+
+  return findHostedWebDevPortOwner(port) === null;
 }
 
 export function spawnChildProcess(
@@ -687,6 +865,17 @@ function terminateProcessGroup(
     process.kill(-pid, signal);
   } catch {
     // Ignore missing/already-dead process groups.
+  }
+}
+
+function terminateProcessId(
+  pid: number,
+  signal: NodeJS.Signals,
+): void {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Ignore missing/already-dead processes.
   }
 }
 

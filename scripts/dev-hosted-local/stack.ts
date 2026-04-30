@@ -30,7 +30,7 @@ import {
 } from "./environment.ts";
 import {
   assertHostedWebDevServerAvailable,
-  assertPortAvailable,
+  assertHostedWebPortAvailable,
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
   resolveHostedLocalWorkerPortMode,
@@ -102,10 +102,15 @@ export async function startHostedLocalDevStack(input: {
   }
   if (!config.skipWeb) {
     await assertHostedWebDevServerAvailable(initialEnv);
-    await assertPortAvailable(config.webHost, config.webPort, [
-      `Local hosted web port ${config.webPort} is already in use on ${config.webHost}.`,
-      "Stop the existing listener or set MURPH_DEV_WEB_PORT to a free port before running `pnpm dev`.",
-    ].join(" "));
+    await assertHostedWebPortAvailable({
+      host: config.webHost,
+      message: [
+        `Local hosted web port ${config.webPort} is already in use on ${config.webHost}.`,
+        "Stop the existing listener or set MURPH_DEV_WEB_PORT to a free port before running `pnpm dev`.",
+      ].join(" "),
+      port: config.webPort,
+      stderrTarget: input.stderrTarget,
+    });
   }
   const workerPortMode = await resolveHostedLocalWorkerPortMode({
     host: config.workerHost,
@@ -403,7 +408,10 @@ export async function startHostedLocalDevStack(input: {
         config.webHost,
         "--port",
         String(config.webPort),
-      ], runtimeEnv, {
+      ], {
+        ...runtimeEnv,
+        MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
+      }, {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,
