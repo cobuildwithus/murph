@@ -30,6 +30,7 @@ import {
 
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
+const duplicateWelcomeUserId = `member_local_linq_duplicate_welcome_${Date.now()}`;
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
 const postAssistantReplyUserId = `member_local_linq_post_assistant_reply_${Date.now()}`;
 const linqWebhookSecret = "linq-local-webhook-secret";
@@ -233,6 +234,102 @@ describe("hosted local Linq first-contact e2e", () => {
       scenario: requireScenario(),
       userId: directReplyUserId,
     });
+  }, 300_000);
+
+  it("reproduces the duplicate welcome after signup and the first inbound Linq greeting", async () => {
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: buildLinqHomePhoneNumber(duplicateWelcomeUserId),
+      memberId: duplicateWelcomeUserId,
+      memberPhone: buildLinqRecipientPhoneNumber(duplicateWelcomeUserId),
+    });
+    await requireScenario().runWake(
+      buildActivationWake(duplicateWelcomeUserId),
+      duplicateWelcomeUserId,
+    );
+    await requireScenario().waitForHostedCompletion(duplicateWelcomeUserId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId:
+          `assistant.notification.requested:local:${duplicateWelcomeUserId}:evt_linq_duplicate_welcome`,
+        userId: duplicateWelcomeUserId,
+      }),
+      duplicateWelcomeUserId,
+    );
+
+    const createChatRequest = await requireLinqStub().waitForSend({
+      expectedPath: requireLinqStub().createChatPath,
+      matchRequest: requireLinqStub().createCreateChatRequestMatcher(duplicateWelcomeUserId),
+      scenario: requireScenario(),
+      userId: duplicateWelcomeUserId,
+    });
+    expect(createChatRequest.method).toBe("POST");
+    expect(requireLinqStub().readObservedMessageText(createChatRequest)).toBe(
+      MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    );
+    await requireScenario().waitForHostedCompletion(duplicateWelcomeUserId);
+
+    const materializedChatId = requireLinqStub().requireObservedChatId(duplicateWelcomeUserId);
+    const expectedDirectReplyChatPath =
+      `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const outboundCountBeforeReply =
+      requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    const assistantProviderResponseCountBefore =
+      countAssistantProviderResponsesApiRequests();
+    requireScenario().queueAssistantResponses([MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE]);
+
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      duplicateWelcomeUserId,
+      materializedChatId,
+      {
+        eventId: `evt_duplicate_welcome_${duplicateWelcomeUserId}`,
+        messageId: `msg_duplicate_welcome_${duplicateWelcomeUserId}`,
+        text: "Hey mate yea",
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(duplicateWelcomeUserId);
+    const completionPromise = requireScenario()
+      .waitForHostedCompletion(duplicateWelcomeUserId);
+    const duplicateWelcomeSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: expectedDirectReplyChatPath,
+      scenario: requireScenario(),
+      userId: duplicateWelcomeUserId,
+    });
+    expect(requireLinqStub().readObservedMessageText(duplicateWelcomeSend)).toBe(
+      MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    );
+
+    const finalStatus = await completionPromise;
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+
+    const assistantProviderResponseRequests = requireScenario().assistantProviderRequests
+      .filter((request) => request.url === "/v1/responses")
+      .slice(assistantProviderResponseCountBefore);
+    expect(assistantProviderResponseRequests).toHaveLength(1);
+
+    const firstInboundPromptText = readAssistantProviderRequestText(
+      assistantProviderResponseRequests[0]!,
+    );
+    expect(firstInboundPromptText).toContain("Conversation onboarding:");
+    expect(firstInboundPromptText).toContain(
+      "If the user's opener is a greeting or vague request",
+    );
+    expect(firstInboundPromptText).toContain("User message:\nSource: linq");
+    expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
+    expect(firstInboundPromptText).not.toContain("Conversation so far:\nAssistant:\n");
   }, 300_000);
 
   it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {
@@ -472,6 +569,26 @@ function countAssistantProviderResponsesApiRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
   ).length;
+}
+
+function readAssistantProviderRequestText(request: { body: string }): string {
+  return collectJsonStrings(JSON.parse(request.body)).join("\n\n");
+}
+
+function collectJsonStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectJsonStrings(entry));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
+  }
+
+  return [];
 }
 
 function buildActivationWake(userId: string) {
