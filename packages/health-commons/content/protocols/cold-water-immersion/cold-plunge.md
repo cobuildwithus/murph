@@ -29,9 +29,11 @@ relations:
 - type: primary_biomarker
   target: biomarker:self-reported-mood
 - type: secondary_biomarker
+  target: biomarker:resting-heart-rate
+- type: secondary_biomarker
   target: biomarker:hrv-rmssd
 - type: secondary_biomarker
-  target: biomarker:resting-heart-rate
+  target: biomarker:morning-blood-pressure
 - type: secondary_biomarker
   target: biomarker:sleep-efficiency
 - type: safety_outcome
@@ -129,33 +131,78 @@ testPlans:
   interventionDays: 14
   primaryBiomarkerKey: biomarker:self-reported-mood
   secondaryBiomarkerKeys:
-  - biomarker:hrv-rmssd
   - biomarker:resting-heart-rate
+  - biomarker:hrv-rmssd
+  - biomarker:morning-blood-pressure
   - biomarker:sleep-efficiency
   safetyOutcomeKeys:
   - biomarker:morning-blood-pressure
   minimumAdherenceSessions: 4
   targetAdherenceSessions: 6
   notes:
-  - 'Primary read: repeated self-rated mood, stress/tolerance, burden, and stop-condition logs before and after sessions.'
-  - Wearable HRV, resting heart rate, sleep efficiency, and morning blood pressure are context/safety signals, not promised benefits.
+  - 'Primary read: repeatable same-scale mood lift after sessions, with stop conditions, cold-shock intensity, recovery burden, and rewarming logged beside it.'
+  - Resting heart rate, HRV/RMSSD, morning blood pressure, and sleep efficiency are wearable/home context signals for strain and recovery, not promised benefits.
   - Exclude or annotate days with illness, alcohol/sedatives, sauna/heat exposure, unusual training load, travel, major sleep disruption, or protocol deviations.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:self-reported-mood
-  description: Use the same 0–10 or 1–5 scale before the session and again 30–180 minutes after. Acute mood is the most defensible first-run target, but it remains short-horizon and source-limited.
-  expected: possible acute improvement
+  description: Cold water delivers a sharp arousal jolt, then relief and challenge-appraisal after exit. Log the same mood scale before the session and 30–180 minutes after; a useful signal is a repeatable post-session lift without stop conditions or heavy rewarming burden.
+  expected: acute mood may rise
+  estimatedChange:
+    kind: absolute
+    low: 0.5
+    high: 2
+    unit: 0–10 score points
+    window: 30–180 min post-session vs pre-session
+    confidence: low
+    basis: Direct single-session CWI studies reported POMS/TMD mood improvements, but those scales and 5–20 minute exposures do not map cleanly to a 1–3 minute Murph run; this is a conservative user-scale translation.
   protocolProminence: focus
-- biomarkerKey: biomarker:hrv-rmssd
-  description: Track HRV as recovery/autonomic context only; acute cold and post-exercise CWI can shift autonomic signals, but HRV is not a direct wellness benefit verdict.
-  expected: contextual
-  protocolProminence: context
 - biomarkerKey: biomarker:resting-heart-rate
-  description: Track resting heart rate for recovery strain and context. Direct repeated-CWI cardiovascular findings are small and unclear, so avoid calling a change a benefit without the full context.
-  expected: contextual
+  description: Immersion raises cardiac load while you are in the water; next-morning resting heart rate shows whether that stress is resolving. Compare same-device overnight or morning averages; persistent upward drift means the protocol is adding strain.
+  expected: stable or slightly lower
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 2
+    unit: bpm
+    window: 14-day morning or overnight average vs baseline
+    confidence: low
+    basis: Direct repeated-CWI and habituation sources show acute heart-rate load with mixed or unclear repeated-dose effects; a near-baseline range is the defensible expectation for consumer resting heart rate.
+  protocolProminence: context
+- biomarkerKey: biomarker:hrv-rmssd
+  description: Cold acutely shifts the nervous system toward sympathetic drive, so RMSSD can dip around the session and should recover by overnight or morning. Use same-device RMSSD to catch recovery cost, not to score one dramatic session.
+  expected: stable with possible acute dip
+  estimatedChange:
+    kind: relative_percent
+    low: -10
+    high: 10
+    unit: '%'
+    window: overnight RMSSD during intervention vs baseline
+    confidence: low
+    basis: Direct CWI HRV data are limited and include small acute/post-exercise contexts; adjacent athlete recovery studies are positive in places but not direct evidence of better baseline RMSSD.
+  protocolProminence: context
+- biomarkerKey: biomarker:morning-blood-pressure
+  description: Cold water constricts peripheral vessels and can raise pressure during exposure. Morning cuff averages should stay near baseline; a sustained rise or symptomatic reading means the cold load is too much.
+  expected: should stay stable
+  estimatedChange:
+    kind: absolute
+    low: -3
+    high: 3
+    unit: mmHg systolic
+    window: 14-day morning average vs baseline
+    confidence: low
+    basis: Cold-shock and safety sources support acute pressure load, while direct repeated-dose and WHM-adjacent data do not establish a durable home-BP improvement.
   protocolProminence: context
 - biomarkerKey: biomarker:sleep-efficiency
-  description: Track sleep efficiency only as a confounder and burden signal; sleep evidence is mixed and often adjacent to cryotherapy, athletes, or post-exercise recovery.
-  expected: contextual
+  description: A late or stressful plunge can disrupt thermoregulation, arousal, or shivering; an earlier well-tolerated session may leave sleep unchanged. Track sleep efficiency to catch burden, especially after evening sessions.
+  expected: no clear change
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 2
+    unit: percentage points
+    window: intervention nights vs baseline nights
+    confidence: low
+    basis: Sleep evidence is mostly adjacent to athletes, cryotherapy, or post-exercise recovery and includes null findings; stable sleep efficiency is the best supported expectation.
   protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
@@ -420,12 +467,12 @@ experimentOnboarding:
       requiredSignals:
       - biomarker:self-reported-mood
       optionalSignals:
-      - biomarker:hrv-rmssd
       - biomarker:resting-heart-rate
-      - biomarker:sleep-efficiency
+      - biomarker:hrv-rmssd
       - biomarker:morning-blood-pressure
+      - biomarker:sleep-efficiency
       notes:
-      - Configure mood and safety logs before creating the active experiment. Wearable signals can be linked later as context.
+      - Configure mood and safety logs before creating the active experiment. Wearable and home-device signals can be linked later as context.
     reusableSetup:
       enabled: true
       target:
@@ -957,7 +1004,7 @@ Run a 21-day experiment:
 - treat that cap as a safety-first field-test configuration, not an evidence-proven optimal dose
 - head stays out, no breathwork, no breath-holding, no face submersion, no open water, no alcohol or sedatives
 
-The primary read is subjective: mood before the session and again after the session using the same scale. Wearable HRV, resting heart rate, sleep efficiency, and morning blood pressure are context and safety signals, not promised benefits.
+The primary read is subjective: mood before the session and again after the session using the same scale. Resting heart rate, HRV/RMSSD, morning blood pressure, and sleep efficiency are wearable/home-device context and safety signals, not promised benefits.
 
 ## What this protocol is
 
