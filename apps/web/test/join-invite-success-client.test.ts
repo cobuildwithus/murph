@@ -94,9 +94,9 @@ test("activating success page explains when vault and assistant setup is still r
   assert.match(markup, /We&#x27;ll keep checking automatically/);
 });
 
-test("checkout-stage success page reconciles the returned session once and updates the ready copy", async () => {
+test("checkout-stage success page reconciles the returned session once and redirects home when active", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify(createStatus("activating")), {
+    new Response(JSON.stringify(createStatus("active")), {
       status: 200,
     }),
   );
@@ -113,6 +113,8 @@ test("checkout-stage success page reconciles the returned session once and updat
     }),
     method: "POST",
   }));
+  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();
 });
@@ -138,6 +140,7 @@ test("activating success page reconciles the returned session when webhooks won 
     }),
     method: "POST",
   }));
+  expect(view.locationReplace).not.toHaveBeenCalled();
 
   await view.cleanup();
 });
@@ -163,6 +166,62 @@ test("active success page reconciles the returned session when the invite is alr
     }),
     method: "POST",
   }));
+  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+
+  await view.cleanup();
+});
+
+test("active success page waits for the returned session reconciliation before redirecting home", async () => {
+  let resolveFetch!: (response: Response) => void;
+  const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+    () =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("active"),
+  });
+  await act(async () => {});
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(view.locationReplace).not.toHaveBeenCalled();
+
+  const openHomeButton = findButtonByText(view.container, /Open home/);
+
+  await act(async () => {
+    openHomeButton.click();
+  });
+
+  expect(view.locationReplace).not.toHaveBeenCalled();
+  expect(view.locationAssign).not.toHaveBeenCalled();
+
+  resolveFetch(
+    new Response(JSON.stringify(createStatus("active")), {
+      status: 200,
+    }),
+  );
+
+  await act(async () => {});
+
+  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+
+  await view.cleanup();
+});
+
+test("active success page redirects home even when returned session reconciliation fails", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error("Stripe unavailable"));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("active"),
+  });
+  await flushJoinInviteSuccessClientEffects();
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(view.locationReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -214,21 +273,79 @@ test("pending success page shows email support after the setup delay", async () 
   await view.cleanup();
 });
 
-test("active success page returns to the invite with a hard navigation", async () => {
+test("active success page redirects to home without a returned checkout session", async () => {
   const view = await renderJoinInviteSuccessClientForEffects({
     initialStatus: createStatus("active"),
     sessionId: null,
   });
-  const continueButton = findButtonByText(view.container, /Continue/);
+  await flushJoinInviteSuccessClientEffects();
+
+  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.locationAssign).not.toHaveBeenCalled();
+
+  view.locationReplace.mockClear();
+  const continueButton = findButtonByText(view.container, /Open home/);
+
+  await act(async () => {
+    continueButton.click();
+  });
+
+  expect(view.locationReplace).toHaveBeenCalledWith("/home");
+  expect(view.locationAssign).not.toHaveBeenCalled();
+
+  await view.cleanup();
+});
+
+test("active success page with an unmatched session keeps the invite fallback guarded", async () => {
+  const activeStatus = createStatus("active");
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: {
+      ...activeStatus,
+      session: {
+        ...activeStatus.session,
+        authenticated: false,
+        matchesInvite: false,
+      },
+    },
+    sessionId: null,
+  });
+  await flushJoinInviteSuccessClientEffects();
+
+  expect(view.locationReplace).not.toHaveBeenCalled();
+
+  const continueButton = findButtonByText(view.container, /Open home/);
 
   await act(async () => {
     continueButton.click();
   });
 
   expect(view.locationAssign).toHaveBeenCalledWith("/join/invite-code");
+  expect(view.locationReplace).not.toHaveBeenCalled();
 
   await view.cleanup();
 });
+
+test("preview active success page stays on the success page", async () => {
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("active"),
+    preview: true,
+    sessionId: null,
+  });
+  await flushJoinInviteSuccessClientEffects();
+
+  expect(view.locationReplace).not.toHaveBeenCalled();
+  assert.match(view.container.textContent ?? "", /You’re all set/);
+  assert.match(view.container.textContent ?? "", /Open home/);
+
+  await view.cleanup();
+});
+
+async function flushJoinInviteSuccessClientEffects() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
 
 function createStatus(
   stage: HostedInviteStatusPayload["stage"],
@@ -259,11 +376,18 @@ function createStatus(
 
 async function renderJoinInviteSuccessClientForEffects(input?: {
   initialStatus?: HostedInviteStatusPayload;
+  preview?: boolean;
   sessionId?: string | null;
 }) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
   const locationAssign = vi.fn();
-  const cleanupGlobals = installJoinInviteSuccessClientGlobals(window, document, locationAssign);
+  const locationReplace = vi.fn();
+  const cleanupGlobals = installJoinInviteSuccessClientGlobals(
+    window,
+    document,
+    locationAssign,
+    locationReplace,
+  );
   activeJoinInviteSuccessClientCleanups.add(cleanupGlobals);
   const container = document.getElementById("root");
   assert.ok(container);
@@ -275,7 +399,8 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
       createElement(JoinInviteSuccessClient, {
         initialStatus: input?.initialStatus ?? createStatus("checkout"),
         inviteCode: "invite-code",
-        sessionId: input?.sessionId ?? "cs_123",
+        preview: input?.preview ?? false,
+        sessionId: input && "sessionId" in input ? (input.sessionId ?? null) : "cs_123",
       }),
     );
   });
@@ -291,6 +416,7 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
     },
     container,
     locationAssign,
+    locationReplace,
   };
 }
 
@@ -298,10 +424,12 @@ function installJoinInviteSuccessClientGlobals(
   window: Window & typeof globalThis,
   document: Document,
   locationAssign: ReturnType<typeof vi.fn>,
+  locationReplace: ReturnType<typeof vi.fn>,
 ) {
   const location = {
     ...window.location,
     assign: locationAssign,
+    replace: locationReplace,
   };
   const restoreEntries = [
     setJoinInviteSuccessClientGlobal("window", window),
