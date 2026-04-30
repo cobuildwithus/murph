@@ -101,6 +101,20 @@ test("activating success page explains when vault and assistant setup is still r
   assert.match(markup, /We&#x27;ll keep checking automatically/);
 });
 
+test("checkout-stage success page stays blank while the returned session reconciles", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteSuccessClient, {
+      initialStatus: createStatus("checkout"),
+      inviteCode: "invite-code",
+      sessionId: "cs_123",
+    }),
+  );
+
+  assert.equal(markup, "");
+  assert.doesNotMatch(markup, /Payment received/);
+  assert.doesNotMatch(markup, /Private by default/);
+});
+
 test("checkout-stage success page reconciles the returned session once and redirects home when active", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify(createStatus("active")), {
@@ -195,15 +209,7 @@ test("active success page waits for the returned session reconciliation before r
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(view.routerReplace).not.toHaveBeenCalled();
-
-  const openHomeButton = findButtonByText(view.container, /Open home/);
-
-  await act(async () => {
-    openHomeButton.click();
-  });
-
-  expect(view.routerReplace).not.toHaveBeenCalled();
-  expect(view.locationAssign).not.toHaveBeenCalled();
+  expect(view.container.textContent ?? "").toBe("");
 
   resolveFetch(
     new Response(JSON.stringify(createStatus("active")), {
