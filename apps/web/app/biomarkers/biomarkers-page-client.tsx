@@ -10,6 +10,7 @@ import { PageHeader } from "@/src/components/ui/page-header";
 export interface BiomarkerBrowseEntry {
   routeId: string;
   title: string;
+  shortName: string;
   summary: string | null;
   unit: string | null;
   categories: string[];
@@ -87,7 +88,7 @@ export function BiomarkersPageClient({ biomarkers }: BiomarkersPageClientProps) 
               <BiomarkerBrowseCard
                 key={card.routeId}
                 routeId={card.routeId}
-                title={card.title}
+                title={card.shortName}
                 category={card.primaryCategory}
                 unit={card.unit}
                 summary={card.summary}

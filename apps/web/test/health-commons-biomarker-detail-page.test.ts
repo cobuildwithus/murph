@@ -182,7 +182,7 @@ describe("BiomarkerPage", () => {
       key: "biomarker:blood-oxygen-spo2",
       routeId: "blood-oxygen-spo2",
       shortName: "SpO₂",
-      title: "SpO₂",
+      title: "Blood Oxygen Saturation (SpO₂)",
       unit: "%",
       valuePrecision: 1,
     }));
