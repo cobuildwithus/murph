@@ -35,6 +35,7 @@ describe("hosted local device connect e2e", () => {
         DEVICE_SYNC_ENCRYPTION_KEY_VERSION: "v1",
         DEVICE_SYNC_PUBLIC_BASE_URL: deviceSyncPublicBaseUrl,
         DEVICE_SYNC_SECRET: "synthetic-device-sync-runtime-secret",
+        HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
         WHOOP_BASE_URL: whoopBaseUrl,
         WHOOP_CLIENT_ID: whoopClientId,
         WHOOP_CLIENT_SECRET: whoopClientSecret,
@@ -106,6 +107,7 @@ describe("hosted local device connect e2e", () => {
     );
     expect(authorizationUrl.searchParams.get("response_type")).toBe("code");
     expect(authorizationUrl.searchParams.get("state")).toEqual(expect.any(String));
+    expect(authorizationUrl.searchParams.has("client_secret")).toBe(false);
     expect(connectLink?.authorizationUrl).not.toContain(whoopClientSecret);
     expect(requireScenario().harness.stderrTail()).not.toContain(
       "No device sync providers are configured",
