@@ -1,15 +1,18 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { chmodSync, closeSync, openSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import {
   DEVICE_DAEMON_HEALTH_POLL_MS,
   type DeviceDaemonDependencies,
 } from './types.js'
 
+const execFileAsync = promisify(execFile)
 const DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE = 0o700
 const DEVICE_DAEMON_LOG_FILE_MODE = 0o600
 const REDACTED_SECRET_TEXT = '[REDACTED]'
+const PROCESS_INSPECTION_TIMEOUT_MS = 1_000
 const SENSITIVE_DAEMON_LOG_VALUE_PATTERN =
   /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu
 const SENSITIVE_DAEMON_HEADER_ASSIGNMENT_PATTERN =
@@ -32,6 +35,29 @@ export function defaultIsProcessAlive(pid: number): boolean {
   } catch {
     return false
   }
+}
+
+export async function defaultFindUnmanagedDeviceSyncDaemonPid(input: {
+  baseUrl: string
+  expectedBinPath: string
+  port: string | null
+}): Promise<number | null> {
+  if (!input.port || !/^\d+$/u.test(input.port)) {
+    return null
+  }
+
+  const pids = await listListeningTcpPids(input.port)
+  if (pids.length !== 1) {
+    return null
+  }
+
+  const command = await readProcessCommand(pids[0])
+  return command !== null && commandReferencesExpectedBinPath(
+    command,
+    input.expectedBinPath,
+  )
+    ? pids[0]
+    : null
 }
 
 export async function defaultSpawnDeviceDaemonProcess(input: {
@@ -100,6 +126,112 @@ export async function defaultSpawnDeviceDaemonProcess(input: {
       reject(error)
     }
   })
+}
+
+async function listListeningTcpPids(port: string): Promise<number[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'lsof',
+      ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'],
+      {
+        timeout: PROCESS_INSPECTION_TIMEOUT_MS,
+        maxBuffer: 8 * 1024,
+      },
+    )
+    return [
+      ...new Set(
+        stdout
+          .split(/\r?\n/u)
+          .map((line) => Number.parseInt(line.trim(), 10))
+          .filter((pid) => Number.isInteger(pid) && pid > 0),
+      ),
+    ]
+  } catch {
+    return []
+  }
+}
+
+async function readProcessCommand(pid: number): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'ps',
+      ['-p', String(pid), '-o', 'command='],
+      {
+        timeout: PROCESS_INSPECTION_TIMEOUT_MS,
+        maxBuffer: 32 * 1024,
+      },
+    )
+    return stdout.trim() || null
+  } catch {
+    return null
+  }
+}
+
+function commandReferencesExpectedBinPath(
+  command: string,
+  expectedBinPath: string,
+): boolean {
+  const normalizedExpected = normalizeProcessPath(expectedBinPath)
+  return parseProcessCommandArguments(command).some(
+    (argument) => normalizeProcessPath(argument) === normalizedExpected,
+  )
+}
+
+function normalizeProcessPath(value: string): string {
+  return path.resolve(value).replace(/\\/gu, '/')
+}
+
+function parseProcessCommandArguments(command: string): string[] {
+  const args: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  let escaped = false
+
+  for (const char of command) {
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+
+    if (quote !== null) {
+      if (char === quote) {
+        quote = null
+      } else {
+        current += char
+      }
+      continue
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+
+    if (/\s/u.test(char)) {
+      if (current.length > 0) {
+        args.push(current)
+        current = ''
+      }
+      continue
+    }
+
+    current += char
+  }
+
+  if (escaped) {
+    current += '\\'
+  }
+  if (current.length > 0) {
+    args.push(current)
+  }
+
+  return args
 }
 
 export async function isDeviceDaemonHealthy(

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, test, vi } from 'vitest'
 
 import {
@@ -906,6 +907,156 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
     createFileDependencies(),
   )
 
+  const orphanVault = await createTempVault('operator-config-device-daemon-orphan-')
+  let orphanAlive = true
+  let freshDaemonSpawned = false
+  let killedOrphanPid: number | null = null
+  const recoveryChecks: Array<{
+    baseUrl: string
+    expectedBinPath: string
+    port: string | null
+  }> = []
+  const recoveryAuthorizations: Array<string | null> = []
+  const recovered = await startManagedDeviceSyncDaemon({
+    vault: orphanVault,
+    env: {
+      DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+      ...TEST_WHOOP_PROVIDER_ENV,
+    },
+    dependencies: {
+      fetchImpl: async (_input, init) => {
+        const authorization = new Headers(init?.headers).get('Authorization')
+        recoveryAuthorizations.push(authorization)
+        if (!freshDaemonSpawned) {
+          return new Response(null, deviceSyncAuthResponse(401))
+        }
+        return new Response(
+          null,
+          deviceSyncAuthResponse(
+            authorization === 'Bearer control-token-for-tests' ? 200 : 401,
+          ),
+        )
+      },
+      findUnmanagedDeviceSyncDaemonPid: async (input) => {
+        recoveryChecks.push(input)
+        return 7777
+      },
+      isProcessAlive: (pid) => (pid === 7777 ? orphanAlive : pid === 8181),
+      killProcess: (pid) => {
+        killedOrphanPid = pid
+        orphanAlive = false
+      },
+      now: () => new Date('2026-04-08T00:00:00.000Z'),
+      resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+      spawnProcess: async () => {
+        freshDaemonSpawned = true
+        return { pid: 8181 }
+      },
+    },
+  })
+  assert.equal(recovered.started, true)
+  assert.equal(recovered.pid, 8181)
+  assert.equal(
+    recovered.message,
+    'Murph stopped an orphaned local device sync daemon and started a fresh managed daemon.',
+  )
+  assert.deepEqual(recoveryChecks, [
+    {
+      baseUrl: 'http://localhost:8788',
+      expectedBinPath: '/opt/device-syncd/dist/bin.js',
+      port: '8788',
+    },
+  ])
+  assert.equal(killedOrphanPid, 7777)
+  assert.deepEqual(recoveryAuthorizations, [
+    null,
+    'Bearer control-token-for-tests',
+  ])
+
+  const unknownListenerVault = await createTempVault('operator-config-device-daemon-unknown-listener-')
+  let unknownListenerKillAttempted = false
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: unknownListenerVault,
+        env: TEST_WHOOP_PROVIDER_ENV,
+        dependencies: {
+          fetchImpl: async () => new Response(null, deviceSyncAuthResponse(401)),
+          findUnmanagedDeviceSyncDaemonPid: async () => null,
+          isProcessAlive: () => true,
+          killProcess: () => {
+            unknownListenerKillAttempted = true
+          },
+          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          spawnProcess: async () => {
+            throw new Error('spawnProcess should not be called')
+          },
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+      /this vault is not managing it/u.test(error.message) &&
+      /lsof -nP -iTCP:8788 -sTCP:LISTEN/u.test(error.message),
+  )
+  assert.equal(unknownListenerKillAttempted, false)
+
+  const missingConfigOrphanVault = await createTempVault('operator-config-device-daemon-missing-config-orphan-')
+  let missingConfigKillAttempted = false
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: missingConfigOrphanVault,
+        dependencies: {
+          fetchImpl: async () => new Response(null, deviceSyncAuthResponse(401)),
+          findUnmanagedDeviceSyncDaemonPid: async () => 7777,
+          isProcessAlive: () => true,
+          killProcess: () => {
+            missingConfigKillAttempted = true
+          },
+          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          spawnProcess: async () => {
+            throw new Error('spawnProcess should not be called')
+          },
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+      /this vault is not managing it/u.test(error.message),
+  )
+  assert.equal(missingConfigKillAttempted, false)
+
+  const unresolvedBinVault = await createTempVault('operator-config-device-daemon-unresolved-bin-')
+  let unresolvedBinFindAttempted = false
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: unresolvedBinVault,
+        env: TEST_WHOOP_PROVIDER_ENV,
+        dependencies: {
+          fetchImpl: async () => new Response(null, deviceSyncAuthResponse(401)),
+          findUnmanagedDeviceSyncDaemonPid: async () => {
+            unresolvedBinFindAttempted = true
+            return 7777
+          },
+          isProcessAlive: () => true,
+          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          resolveDeviceSyncPackageEntry: () => {
+            throw new Error('package missing')
+          },
+          spawnProcess: async () => {
+            throw new Error('spawnProcess should not be called')
+          },
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+      /this vault is not managing it/u.test(error.message),
+  )
+  assert.equal(unresolvedBinFindAttempted, false)
+
   const conflictVault = await createTempVault('operator-config-device-daemon-conflict-')
   await assert.rejects(
     () =>
@@ -1455,6 +1606,67 @@ test('device-daemon management also covers explicit spawn tokens and default kil
   assert.equal(resolveManagedControlToken(defaultStopPaths), null)
 })
 
+test('default unmanaged listener finder requires an exact device-syncd bin path', async () => {
+  const vault = await createTempVault('operator-config-device-daemon-finder-')
+  const expectedBinPath = path.join(vault, 'device syncd', 'dist', 'bin.js')
+  let lsofStdout = '1234\n'
+  let psStdout = `${process.execPath} "${expectedBinPath}" --managed\n`
+
+  const processModule = await importDeviceDaemonProcessWithMocks(() => {
+    const execFileMock = Object.assign(
+      vi.fn(),
+      {
+        [promisify.custom]: async (command: string) => {
+          if (command === 'lsof') {
+            return { stdout: lsofStdout, stderr: '' }
+          }
+          if (command === 'ps') {
+            return { stdout: psStdout, stderr: '' }
+          }
+          throw new Error(`Unexpected command ${command}`)
+        },
+      },
+    )
+
+    vi.doMock('node:child_process', () => ({
+      execFile: execFileMock,
+      spawn() {
+        throw new Error('spawn should not be called')
+      },
+    }))
+  })
+
+  assert.equal(
+    await processModule.defaultFindUnmanagedDeviceSyncDaemonPid({
+      baseUrl: 'http://localhost:8788',
+      expectedBinPath,
+      port: '8788',
+    }),
+    1234,
+  )
+
+  psStdout = `${process.execPath} /tmp/packages/device-syncd/dist/bin.js --note="${expectedBinPath}.bak"\n`
+  assert.equal(
+    await processModule.defaultFindUnmanagedDeviceSyncDaemonPid({
+      baseUrl: 'http://localhost:8788',
+      expectedBinPath,
+      port: '8788',
+    }),
+    null,
+  )
+
+  lsofStdout = '1234\n5678\n'
+  psStdout = `${process.execPath} "${expectedBinPath}" --managed\n`
+  assert.equal(
+    await processModule.defaultFindUnmanagedDeviceSyncDaemonPid({
+      baseUrl: 'http://localhost:8788',
+      expectedBinPath,
+      port: '8788',
+    }),
+    null,
+  )
+})
+
 test('default spawn helper covers pid-less and synchronous child-process failures', async () => {
   const vault = await createTempVault('operator-config-device-daemon-spawn-errors-')
 
@@ -1466,6 +1678,9 @@ test('default spawn helper covers pid-less and synchronous child-process failure
 
   const pidlessModule = await importDeviceDaemonProcessWithMocks(() => {
     vi.doMock('node:child_process', () => ({
+      execFile() {
+        throw new Error('execFile should not be called')
+      },
       spawn() {
         const child = new MockChild()
         process.nextTick(() => child.emit('spawn'))
@@ -1489,6 +1704,9 @@ test('default spawn helper covers pid-less and synchronous child-process failure
 
   const errorModule = await importDeviceDaemonProcessWithMocks(() => {
     vi.doMock('node:child_process', () => ({
+      execFile() {
+        throw new Error('execFile should not be called')
+      },
       spawn() {
         const child = new MockChild()
         child.pid = 9500
@@ -1513,6 +1731,9 @@ test('default spawn helper covers pid-less and synchronous child-process failure
 
   const throwingModule = await importDeviceDaemonProcessWithMocks(() => {
     vi.doMock('node:child_process', () => ({
+      execFile() {
+        throw new Error('execFile should not be called')
+      },
       spawn() {
         throw new Error('spawn exploded')
       },

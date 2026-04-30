@@ -68,6 +68,11 @@ export interface DeviceDaemonDependencies {
   fetchImpl: typeof fetch
   isProcessAlive(pid: number): boolean
   killProcess(pid: number, signal?: NodeJS.Signals | number): void
+  findUnmanagedDeviceSyncDaemonPid(input: {
+    baseUrl: string
+    expectedBinPath: string
+    port: string | null
+  }): Promise<number | null>
   spawnProcess(input: {
     command: string
     args: string[]
