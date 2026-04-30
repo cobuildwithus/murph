@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimeResolvedConfig,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   readHostedRuntimeCommitTimeoutConfigValue,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -111,6 +113,8 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
@@ -122,6 +126,9 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]:
+        "tcp://host.docker.internal:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         "http://host.docker.internal:4111/v1",
       NODE_ENV: "production",
@@ -135,6 +142,8 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
@@ -145,6 +154,8 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
@@ -239,6 +250,8 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("preserves hosted automation runner secrets while dropping operator-only keys", () => {
     expect(filterHostedRunnerSecrets({
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "member-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://evil.example.test:1234",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
@@ -256,10 +269,13 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("rejects ingress-only secrets from runner secrets even when explicitly allowlisted", () => {
     expect(filterHostedRunnerSecrets(
       {
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "member-token",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://evil.example.test:1234",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
       {
-        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "LINQ_WEBHOOK_SECRET",
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:
+          `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV},${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV},LINQ_WEBHOOK_SECRET`,
       },
     )).toEqual({});
   });

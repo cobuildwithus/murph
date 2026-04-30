@@ -22,6 +22,10 @@ import type {
 const localConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  localCodexBridge: true,
+  localCodexBridgeHost: "127.0.0.1",
+  localCodexBridgePort: 0,
+  localCodexCommand: "codex",
   skipHealthCommonsWatch: false,
   skipPrismaMigrate: false,
   skipRunnerSmoke: false,
@@ -184,6 +188,27 @@ describe("mergeCloudflareLocalEnv", () => {
 
     expect(merged.LINQ_API_BASE_URL).toBe("http://127.0.0.1:4011");
     expect(merged.LINQ_API_TOKEN).toBe("linq-local-test-token");
+  });
+
+  it("drops stale local Codex bridge proxy values when the bridge is disabled", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: {
+        ...localConfig,
+        localCodexBridge: false,
+      },
+      existing: {
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
+      },
+      oidcIdentity,
+      overrides: {
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "override-token",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:9999",
+      },
+    });
+
+    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
+    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
   });
 
   it("preserves an explicit current worker bridge override instead of resetting to the listen host", () => {
@@ -396,6 +421,8 @@ describe("buildWranglerVarArgs", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
         ALLOW_LOCAL_INTERNAL_PROXY: "true",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
@@ -450,11 +477,27 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
     ).toContain('LINQ_API_TOKEN="linq-secret"');
+    expect(
+      buildWranglerEnvFileText({
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
+      }),
+    ).toContain('MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN="bridge-token"');
+    expect(
+      buildWranglerEnvFileText({
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
+      }),
+    ).toContain('MURPH_DEV_CODEX_APP_SERVER_PROXY_URL="tcp://127.0.0.1:4123"');
   });
 });
 
