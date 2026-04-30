@@ -49,7 +49,6 @@ export function SignupCtaSection({
             authenticated={authenticated}
             context="footer"
             signupLabel={signupCta.signupLabel}
-            splitUnauthenticated
           />
         </div>
 

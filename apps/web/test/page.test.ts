@@ -111,9 +111,8 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "footer",
-      authLabel: "Signup",
-      signupLabel: "Signup",
-      splitUnauthenticated: true,
+      authLabel: "Get started",
+      signupLabel: "Get started",
     },
     undefined
   );
@@ -143,7 +142,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     /data-root-landing-auth-actions-label="See what works for your body"/
   );
   assert.match(markup, /Discover what actually makes you healthier\./);
-  assert.match(markup, /data-root-landing-auth-actions-label="Signup"/);
+  assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
   assert.match(markup, /data-root-landing-auth-actions-split="true"/);
   assert.match(
     markup,
@@ -236,7 +235,6 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
       context: "footer",
       authLabel: "Open settings",
       signupLabel: "Open settings",
-      splitUnauthenticated: true,
     },
     undefined
   );
