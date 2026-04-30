@@ -155,93 +155,108 @@ export function JoinInviteSuccessClient({
     && Boolean(sessionId)
     && successState.pending
     && delayedSetupSupportStage === status.stage;
+  const shouldShowSuccessUi = shouldShowHostedInviteSuccessUi({
+    errorMessage,
+    preview,
+    sessionId,
+    showSetupDelaySupport,
+    status,
+  });
+
+  if (!shouldShowSuccessUi) {
+    return null;
+  }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3">
-        {successState.variant === "terminal" ? (
-          <JoinInviteEyebrow label="Something went wrong" tone="danger" />
-        ) : (
-          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
-            {successState.variant === "active" ? (
-              <CheckCircleIcon className="size-4" />
+    <main className="flex min-h-screen items-start justify-center bg-background px-6 py-16 text-foreground sm:px-10 sm:py-20">
+      <section className="w-full max-w-xl">
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-3">
+            {successState.variant === "terminal" ? (
+              <JoinInviteEyebrow label="Something went wrong" tone="danger" />
             ) : (
-              <LoaderCircleIcon className="size-4 animate-spin" />
-            )}
-            <span>{successState.variant === "active" ? "Ready" : "Working on it"}</span>
-          </div>
-        )}
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
-          {successState.title}
-        </h1>
-        <p className="leading-relaxed text-muted-foreground">{successState.description}</p>
-      </div>
-
-      {successState.pending && !showSetupDelaySupport ? (
-        <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
-          We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
-        </div>
-      ) : null}
-
-      {showSetupDelaySupport && successState.pending ? (
-        <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-5 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-2">
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[#736a58]">
-                <span className="size-1.5 rounded-full bg-[#c4a882]" />
-                <span>Support ready</span>
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
+                {successState.variant === "active" ? (
+                  <CheckCircleIcon className="size-4" />
+                ) : (
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                )}
+                <span>{successState.variant === "active" ? "Ready" : "Working on it"}</span>
               </div>
-              <div className="space-y-1">
-                <p className="font-serif text-lg font-semibold leading-snug text-[#2d3436]">
-                  Setup is taking longer than expected
-                </p>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  We&apos;ll keep checking automatically. If you&apos;re stuck here,
-                  email support and the draft will include the setup context we need.
-                </p>
+            )}
+            <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
+              {successState.title}
+            </h1>
+            <p className="leading-relaxed text-muted-foreground">{successState.description}</p>
+          </div>
+
+          {successState.pending && !showSetupDelaySupport ? (
+            <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
+              We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
+            </div>
+          ) : null}
+
+          {showSetupDelaySupport && successState.pending ? (
+            <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-5 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[#736a58]">
+                    <span className="size-1.5 rounded-full bg-[#c4a882]" />
+                    <span>Support ready</span>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="font-serif text-lg font-semibold leading-snug text-[#2d3436]">
+                      Setup is taking longer than expected
+                    </p>
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      We&apos;ll keep checking automatically. If you&apos;re stuck here,
+                      email support and the draft will include the setup context we need.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full border-[#c4a882]/45 bg-white text-[#2d3436] hover:border-olive/45 hover:bg-olive/5 sm:w-fit"
+                  onClick={() => window.location.assign(supportMailtoHref)}
+                >
+                  <MailIcon className="size-4" />
+                  Email support
+                </Button>
               </div>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full border-[#c4a882]/45 bg-white text-[#2d3436] hover:border-olive/45 hover:bg-olive/5 sm:w-fit"
-              onClick={() => window.location.assign(supportMailtoHref)}
-            >
-              <MailIcon className="size-4" />
-              Email support
-            </Button>
-          </div>
+          ) : null}
+
+          {errorMessage ? (
+            <Alert variant="destructive">
+              <AlertTitle>Unable to refresh status</AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <Button
+            type="button"
+            onClick={() => {
+              if (!preview && shouldRedirectToHome) {
+                if (successSyncInFlightRef.current) {
+                  return;
+                }
+
+                router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
+                return;
+              }
+
+              window.location.assign(href);
+            }}
+            size="lg"
+            className="w-fit"
+          >
+            {successState.buttonLabel}
+          </Button>
         </div>
-      ) : null}
-
-      {errorMessage ? (
-        <Alert variant="destructive">
-          <AlertTitle>Unable to refresh status</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Button
-        type="button"
-        onClick={() => {
-          if (!preview && shouldRedirectToHome) {
-            if (successSyncInFlightRef.current) {
-              return;
-            }
-
-            router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
-            return;
-          }
-
-          window.location.assign(href);
-        }}
-        size="lg"
-        className="w-fit"
-      >
-        {successState.buttonLabel}
-      </Button>
-    </div>
+      </section>
+    </main>
   );
 }
 
@@ -253,6 +268,26 @@ function shouldRedirectHostedInviteSuccessToHome(status: HostedInviteStatusPaylo
   return status.stage === "active"
     && status.session.authenticated
     && status.session.matchesInvite;
+}
+
+function shouldShowHostedInviteSuccessUi(input: {
+  errorMessage: string | null;
+  preview: boolean;
+  sessionId: string | null;
+  showSetupDelaySupport: boolean;
+  status: HostedInviteStatusPayload;
+}): boolean {
+  return input.preview
+    || input.errorMessage !== null
+    || isHostedInviteSuccessTerminalStage(input.status.stage)
+    || input.sessionId === null
+    || !input.status.session.authenticated
+    || !input.status.session.matchesInvite
+    || input.showSetupDelaySupport;
+}
+
+function isHostedInviteSuccessTerminalStage(stage: HostedInviteStatusPayload["stage"]): boolean {
+  return stage === "blocked" || stage === "expired" || stage === "invalid";
 }
 
 function buildHostedCheckoutSuccessSupportMailto(input: {

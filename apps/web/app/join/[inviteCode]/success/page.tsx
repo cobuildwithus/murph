@@ -7,7 +7,6 @@ import {
 } from "@/src/components/hosted-onboarding/join-invite-preview";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
-import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-shell";
 import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -33,14 +32,12 @@ export default async function JoinInviteSuccessPage(input: {
 
   if (previewStage) {
     return (
-      <JoinInviteShell>
-        <JoinInviteSuccessClient
-          initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
-          inviteCode={decodedInviteCode}
-          sessionId={null}
-          preview
-        />
-      </JoinInviteShell>
+      <JoinInviteSuccessClient
+        initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
+        inviteCode={decodedInviteCode}
+        sessionId={null}
+        preview
+      />
     );
   }
 
@@ -51,12 +48,10 @@ export default async function JoinInviteSuccessPage(input: {
   });
 
   return (
-    <JoinInviteShell>
-      <JoinInviteSuccessClient
-        initialStatus={initialStatus}
-        inviteCode={decodedInviteCode}
-        sessionId={sessionId}
-      />
-    </JoinInviteShell>
+    <JoinInviteSuccessClient
+      initialStatus={initialStatus}
+      inviteCode={decodedInviteCode}
+      sessionId={sessionId}
+    />
   );
 }
