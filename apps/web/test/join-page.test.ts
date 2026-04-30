@@ -120,6 +120,21 @@ test("JoinInvitePage passes invite status into the client tree without legacy sh
   assert.doesNotMatch(markup, /data-share-code/);
 });
 
+test("JoinInvitePage keeps the desktop invite rail sticky", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+
+  const markup = renderToStaticMarkup(
+    await JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "invite-code" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    }),
+  );
+
+  assert.match(markup, /md:sticky/);
+  assert.match(markup, /md:top-0/);
+  assert.match(markup, /md:h-svh/);
+});
+
 test("JoinInvitePage keeps route copy and inherits the shared Open Graph image", async () => {
   const { metadata } = await import("../app/join/[inviteCode]/page");
 

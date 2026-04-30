@@ -56,7 +56,7 @@ beforeEach(() => {
       joinUrl: "/join/invite-code",
       stage: "active",
     },
-    redirectUrl: "/settings",
+    redirectUrl: "/home",
   });
 });
 
@@ -150,7 +150,7 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
     refreshUser: expect.any(Function),
     user: null,
   });
-  expect(assign).toHaveBeenCalledWith("/settings");
+  expect(assign).toHaveBeenCalledWith("/home");
 });
 
 test("HomepageEmailAuthButton uses no-signup mode for login code sends and resends", async () => {

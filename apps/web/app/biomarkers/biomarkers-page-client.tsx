@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { BiomarkerBrowseCard } from "@/src/components/biomarkers/biomarker-browse-card";
 import { CategoryFilter } from "@/src/components/experiments/category-filter";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { PageHeader } from "@/src/components/ui/page-header";
 
 export interface BiomarkerBrowseEntry {
   routeId: string;
@@ -50,17 +51,11 @@ export function BiomarkersPageClient({ biomarkers }: BiomarkersPageClientProps) 
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Library
-        </span>
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-          Biomarkers
-        </h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Track and understand the signals that move your health, then run experiments to see what changes.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Library"
+        title="Biomarkers"
+        description="Track and understand the signals that move your health, then run experiments to see what changes."
+      />
 
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

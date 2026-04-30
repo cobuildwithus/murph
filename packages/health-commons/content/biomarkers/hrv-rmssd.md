@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:hrv-rmssd
 slug: biomarkers/hrv-rmssd
 title: HRV / RMSSD
-summary: "A recovery and autonomic-balance signal based on beat-to-beat timing variation. Useful for personal trend monitoring, but noisy enough that Murph treats it as context, not a diagnosis or a one-day verdict."
+summary: Beat-to-beat variation in heart timing measured at rest, where more variation signals stronger vagal brake on the heart and a nervous system with room to respond rather than one stuck in overdrive.
 status: field-testing
 quality: reviewed
 aliases:
@@ -30,7 +30,7 @@ interpretationFrame:
   caveat: "HRV is sensitive to sleep, alcohol, illness, inflammation, psychological stress, training load, breathing, posture, timing, arrhythmias, ectopy, device placement, and proprietary wearable algorithms."
 biomarker:
   shortName: HRV
-  displayName: Heart Rate Variability (RMSSD)
+  displayName: Heart Rate Variability
   unit: ms
   valuePrecision: 0
   direction:

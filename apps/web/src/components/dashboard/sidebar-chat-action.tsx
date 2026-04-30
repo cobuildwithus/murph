@@ -34,6 +34,8 @@ export async function SidebarChatWithMurphAction() {
     return <SidebarChatWithMurphFallback />;
   }
 
+  const opensInNewTab = option.target === "_blank";
+
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -44,7 +46,9 @@ export async function SidebarChatWithMurphAction() {
             href={option.href}
             target={option.target}
             rel={option.rel}
-            aria-label="Chat with Murph"
+            aria-label={`Chat with Murph in ${option.label}${
+              opensInNewTab ? " (opens in a new tab)" : ""
+            }`}
           >
             <MessageCircle className={SIDEBAR_NAV_ICON_CLASS} />
             Chat with Murph

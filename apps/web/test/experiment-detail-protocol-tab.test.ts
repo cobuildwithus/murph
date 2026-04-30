@@ -132,7 +132,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Morning Blood Pressure");
     expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("Sleep Efficiency");
-    expect(markup).toContain("Deep Sleep Minutes");
+    expect(markup).toContain("Deep Sleep");
     expect(researchMarkup).toContain("Bottom line");
     expect(researchMarkup).toContain("Mixed");
     expect(researchMarkup).not.toContain("Evidence backbone and claim calibration");
@@ -290,7 +290,7 @@ describe("ProtocolTab", () => {
     expect(markup).not.toContain("Primary marker");
     expect(markup).not.toContain("Sleep context");
     expect(markup).not.toContain("Exploratory signal");
-    expect(markup).toContain("Deep Sleep Minutes");
+    expect(markup).toContain("Deep Sleep");
     expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("Resting Heart Rate");
     expect(markup).toContain("Sleep Efficiency");

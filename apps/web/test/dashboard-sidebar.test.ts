@@ -172,10 +172,10 @@ test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(markup, /href="\/biomarkers\/resting-heart-rate"/);
+  assert.match(markup, /href="\/biomarkers"/);
   assert.match(
     markup,
-    /data-active="true">\s*<a[^>]*href="\/biomarkers\/resting-heart-rate"[^>]*>[\s\S]*Biomarkers<\/a>/,
+    /data-active="true">\s*<a[^>]*href="\/biomarkers"[^>]*>[\s\S]*Biomarkers<\/a>/,
   );
 });
 
@@ -186,7 +186,7 @@ test("Sidebar keeps the Biomarkers tab active across biomarker section routes", 
 
   assert.match(
     markup,
-    /data-active="true">\s*<a[^>]*href="\/biomarkers\/resting-heart-rate"[^>]*>[\s\S]*Biomarkers<\/a>/,
+    /data-active="true">\s*<a[^>]*href="\/biomarkers"[^>]*>[\s\S]*Biomarkers<\/a>/,
   );
 });
 

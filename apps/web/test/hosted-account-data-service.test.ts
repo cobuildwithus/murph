@@ -281,13 +281,13 @@ describe("buildHostedDataExport", () => {
             action: "accepted",
             idPresent: true,
             metadataPresent: true,
-            scope: "launch.required",
+            scope: "launch.legal",
             source: "settings",
           },
         ],
         grants: [
           {
-            scope: "launch.required",
+            scope: "launch.legal",
             source: "settings",
             status: "granted",
             lastEventIdPresent: true,
@@ -762,7 +762,7 @@ function createHostedAccountDataExportPrisma(input: {
           metadataJson: {
             surface: "secret-consent-metadata",
           },
-          scope: "launch.required",
+          scope: "launch.legal",
           source: "settings",
         },
       ],
@@ -780,7 +780,7 @@ function createHostedAccountDataExportPrisma(input: {
           lastEventId: "consent-event-1",
           memberId,
           revokedAt: null,
-          scope: "launch.required",
+          scope: "launch.legal",
           source: "settings",
           status: "granted",
           updatedAt: new Date("2026-04-27T00:18:31.000Z"),

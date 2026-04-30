@@ -57,9 +57,6 @@ export function BiomarkerExperimentCardHero({
             </span>
           </div>
         )}
-        <span className="absolute left-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-foreground/90 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-background backdrop-blur-sm">
-          Recommended for you
-        </span>
       </div>
 
       <div className="flex flex-1 flex-col gap-5 p-6 lg:p-7">

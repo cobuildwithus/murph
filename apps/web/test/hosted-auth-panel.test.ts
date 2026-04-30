@@ -8,8 +8,27 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   createWallet: vi.fn(),
+  hostedPhoneAuthProps: null as {
+    onAuthCompleted?: (result: {
+      payload: {
+        activationPending: boolean;
+        inviteCode: string;
+        joinUrl: string;
+        stage: string;
+      };
+      redirectUrl: string;
+    }) => Promise<void> | void;
+    onCompleted?: (payload: unknown) => Promise<void> | void;
+  } | null,
   loginWithCode: vi.fn(),
   loginWithTelegram: vi.fn(),
+  legalConsentCardProps: null as {
+    mode?: string;
+    onAccepted?: () => Promise<void> | void;
+    onRequirementChange?: (required: boolean) => void;
+    preferredScope?: string;
+    source?: string;
+  } | null,
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
   useUser: vi.fn(),
@@ -45,20 +64,43 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
   completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
 }));
 
+vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
+  HostedLegalConsentCard(props: {
+    onAccepted?: () => Promise<void> | void;
+    onRequirementChange?: (required: boolean) => void;
+    source: string;
+  }) {
+    mocks.legalConsentCardProps = props;
+    return createElement(
+      "div",
+      { "data-hosted-legal-consent-card": "mounted" },
+      createElement("p", null, "Hosted legal consent card"),
+      createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => void props.onAccepted?.(),
+        },
+        "Continue",
+      ),
+    );
+  },
+}));
+
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: {
     disableSignup?: boolean;
-    showPassiveConsentNotice?: boolean;
+    onAuthCompleted?: unknown;
+    onCompleted?: unknown;
     suppressAuthenticatedSessionIssue?: boolean;
   }) {
+    mocks.hostedPhoneAuthProps = input as typeof mocks.hostedPhoneAuthProps;
     return createElement(
       "div",
       {
         "data-hosted-phone-auth": "mounted",
         "data-hosted-phone-auth-disable-signup":
           input.disableSignup ? "yes" : "no",
-        "data-hosted-phone-auth-passive-consent":
-          input.showPassiveConsentNotice === false ? "hidden" : "shown",
         "data-hosted-phone-auth-suppressed":
           input.suppressAuthenticatedSessionIssue ? "yes" : "no",
       },
@@ -96,6 +138,8 @@ let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.hostedPhoneAuthProps = null;
+  mocks.legalConsentCardProps = null;
   mocks.usePrivy.mockReturnValue({
     ready: true,
   });
@@ -103,6 +147,7 @@ beforeEach(() => {
     refreshUser: vi.fn(),
     user: null,
   });
+  mocks.loginWithTelegram.mockResolvedValue(undefined);
   mocks.sendCode.mockResolvedValue(undefined);
   mocks.loginWithCode.mockResolvedValue(undefined);
   mocks.completeHostedPrivyAuth.mockResolvedValue({
@@ -112,7 +157,7 @@ beforeEach(() => {
       joinUrl: "/join/invite-code",
       stage: "active",
     },
-    redirectUrl: "/settings",
+    redirectUrl: "/home",
   });
 });
 
@@ -129,7 +174,7 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   const { cleanup, container } = await renderClientComponent(
     createElement(HostedAuthPanel, {
       methods: ["phone", "telegram", "email"],
-      showLegalNotice: true,
+      requireLaunchConsentOnCompletion: true,
     }),
   );
   cleanupRender = cleanup;
@@ -140,12 +185,11 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
 
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth-disable-signup="no"]')).toBeTruthy();
-  expect(container.querySelector('[data-hosted-phone-auth-passive-consent="hidden"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth-suppressed="no"]')).toBeTruthy();
   expect(container.querySelectorAll("[data-privy-captcha]").length).toBe(1);
   expect(telegramButton?.textContent).toContain("Telegram");
   expect(emailButton?.textContent).toContain("Email");
-  expect(container.textContent).toContain("By continuing, you agree to our");
+  expect(container.textContent).not.toContain("By continuing, you agree to our");
 
   await act(async () => {
     telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));
@@ -159,7 +203,6 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
     emailButton?.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
-  expect(container.querySelector('[data-hosted-phone-auth-suppressed="yes"]')).toBeTruthy();
   expect(container.textContent).not.toContain("Telegram popup closed");
   expect(container.querySelector('input[id="homepage-email-address"]')).toBeTruthy();
 
@@ -215,6 +258,133 @@ test("HostedAuthPanel passes login mode through as no-signup auth", async () => 
     email: "login@example.com",
     disableSignup: true,
   });
+});
+
+test("HostedAuthPanel can require launch consent after homepage login completion", async () => {
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      authMode: "login",
+      methods: ["phone", "telegram", "email"],
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.loginWithTelegram).toHaveBeenCalledWith({
+    disableSignup: true,
+  });
+  expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(mocks.legalConsentCardProps).toMatchObject({
+    mode: "compact",
+    preferredScope: "launch.legal",
+    source: "homepage-auth-dialog",
+  });
+});
+
+test("HostedAuthPanel shows launch consent after homepage signup auth before redirecting", async () => {
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  ) as HTMLButtonElement | undefined;
+  expect(telegramButton).toBeTruthy();
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(mocks.legalConsentCardProps).toMatchObject({
+    mode: "compact",
+    preferredScope: "launch.legal",
+    source: "homepage-auth-dialog",
+  });
+
+  const continueButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Continue"),
+  );
+  await act(async () => {
+    continueButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(assign).toHaveBeenCalledWith("/home");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
+  expect(container.textContent).not.toContain("Hosted phone auth");
+  expect(container.textContent).toContain("Hosted legal consent card");
+});
+
+test("HostedAuthPanel phone signup completion pauses on launch consent before redirecting", async () => {
+  const onCompleted = vi.fn();
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      onCompleted,
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(mocks.hostedPhoneAuthProps?.onAuthCompleted).toBeTypeOf("function");
+
+  await act(async () => {
+    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
+      payload: {
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    });
+  });
+
+  expect(assign).not.toHaveBeenCalled();
+  expect(onCompleted).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Hosted legal consent card");
+  expect(mocks.legalConsentCardProps).toMatchObject({
+    mode: "compact",
+    preferredScope: "launch.legal",
+    source: "homepage-auth-dialog",
+  });
+
+  const continueButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Continue"),
+  );
+  await act(async () => {
+    continueButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(onCompleted).toHaveBeenCalledWith({
+    activationPending: false,
+    inviteCode: "invite-code",
+    joinUrl: "/join/invite-code",
+    stage: "active",
+  });
+  expect(onCompleted).toHaveBeenCalledTimes(1);
+  expect(assign).not.toHaveBeenCalled();
+
+  await act(async () => {
+    mocks.legalConsentCardProps?.onRequirementChange?.(false);
+  });
+
+  expect(onCompleted).toHaveBeenCalledTimes(1);
+  expect(assign).not.toHaveBeenCalled();
 });
 
 function setInputValue(

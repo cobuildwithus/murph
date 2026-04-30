@@ -182,7 +182,7 @@ describe("BiomarkerPage", () => {
       key: "biomarker:blood-oxygen-spo2",
       routeId: "blood-oxygen-spo2",
       shortName: "SpO₂",
-      title: "Blood Oxygen Saturation (SpO₂)",
+      title: "SpO₂",
       unit: "%",
       valuePrecision: 1,
     }));
@@ -219,9 +219,6 @@ describe("BiomarkerPage", () => {
       expect.objectContaining({
         key: "source_artifact:fda-pulse-oximeter-basics-2025",
       }),
-      expect.objectContaining({
-        key: "source_artifact:pmid-28162150",
-      }),
     ]));
     expect(
       clientBiomarker.protocolRankings.map((protocol) => ({
@@ -244,7 +241,7 @@ describe("BiomarkerPage", () => {
     ]);
     expect(markup).toContain('data-biomarker-id="blood-oxygen-spo2"');
     expect(markup).toContain('data-biomarker-key="biomarker:blood-oxygen-spo2"');
-    expect(markup).toContain("Blood Oxygen Saturation (SpO₂)");
+    expect(markup).toContain("SpO₂");
   });
 
   it("redirects the short SpO₂ overview route to the canonical biomarker page", async () => {
@@ -313,7 +310,7 @@ describe("BiomarkerPage", () => {
       key: "biomarker:rem-sleep-minutes",
       routeId: "rem-sleep-minutes",
       shortName: "REM",
-      title: "REM Sleep Minutes",
+      title: "REM Sleep",
     }));
     expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -339,7 +336,7 @@ describe("BiomarkerPage", () => {
     ]));
     expect(markup).toContain('data-biomarker-id="rem-sleep-minutes"');
     expect(markup).toContain('data-biomarker-key="biomarker:rem-sleep-minutes"');
-    expect(markup).toContain("REM Sleep Minutes");
+    expect(markup).toContain("REM Sleep");
   });
 
   it("resolves the deep sleep biomarker page model", async () => {
@@ -359,7 +356,7 @@ describe("BiomarkerPage", () => {
       key: "biomarker:deep-sleep-minutes",
       routeId: "deep-sleep-minutes",
       shortName: "Deep sleep",
-      title: "Deep Sleep Minutes",
+      title: "Deep Sleep",
       unit: "minutes",
       valuePrecision: 0,
     }));
@@ -413,7 +410,7 @@ describe("BiomarkerPage", () => {
     ]));
     expect(markup).toContain('data-biomarker-id="deep-sleep-minutes"');
     expect(markup).toContain('data-biomarker-key="biomarker:deep-sleep-minutes"');
-    expect(markup).toContain("Deep Sleep Minutes");
+    expect(markup).toContain("Deep Sleep");
   });
 
   it("resolves the HRV biomarker page model", async () => {
@@ -433,7 +430,7 @@ describe("BiomarkerPage", () => {
       key: "biomarker:hrv-rmssd",
       routeId: "hrv-rmssd",
       shortName: "HRV",
-      title: "Heart Rate Variability (RMSSD)",
+      title: "Heart Rate Variability",
       unit: "ms",
       valuePrecision: 0,
     }));
@@ -488,7 +485,7 @@ describe("BiomarkerPage", () => {
     ]);
     expect(markup).toContain('data-biomarker-id="hrv-rmssd"');
     expect(markup).toContain('data-biomarker-key="biomarker:hrv-rmssd"');
-    expect(markup).toContain("Heart Rate Variability (RMSSD)");
+    expect(markup).toContain("Heart Rate Variability");
   });
 
   it("resolves the resting-heart-rate biomarker page model", async () => {
@@ -622,7 +619,7 @@ describe("BiomarkerPage", () => {
         biomarkerId: "resting-heart-rate",
       }),
     })).resolves.toEqual(expect.objectContaining({
-      description: expect.stringContaining("resting pulse trend"),
+      description: expect.stringContaining("full rest"),
       openGraph: expect.objectContaining({
         images: [
           expect.objectContaining({

@@ -11,10 +11,12 @@ import { useRef, useState, type FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
+import { Label } from "@/src/components/ui/label";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 
 import {
   completeHostedPrivyAuth,
+  type HostedAuthCompletionResult,
   type HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
 import {
@@ -28,11 +30,15 @@ import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 export function HostedEmailAuthButton({
   active = false,
   disableSignup = false,
+  inline = false,
   onActivate,
+  onCompleted,
 }: {
   active?: boolean;
   disableSignup?: boolean;
+  inline?: boolean;
   onActivate: () => void;
+  onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
 }) {
   const { createWallet } = useCreateWallet();
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
@@ -154,6 +160,10 @@ export function HostedEmailAuthButton({
       const result = await completeHostedPrivyAuth({
         ...authSession,
       });
+      if (onCompleted) {
+        await onCompleted(result);
+        return;
+      }
       window.location.assign(result.redirectUrl);
     } catch (error) {
       setErrorMessage(
@@ -172,6 +182,79 @@ export function HostedEmailAuthButton({
     setCode("");
     setErrorMessage(null);
     setPendingEmailAddress(null);
+  }
+
+  if (inline) {
+    return (
+      <div className="space-y-3">
+        {showCodeEntry ? (
+          <HostedVerificationCodeStep
+            code={code}
+            description={
+              disableSignup
+                ? `If an account exists for ${pendingEmailAddress}, we emailed the latest code there.`
+                : `We emailed the latest code to ${pendingEmailAddress}.`
+            }
+            disabled={disabled}
+            inputRef={codeInputRef}
+            pendingAction={loading ? "verify-code" : null}
+            primaryActionLabel="Verify email"
+            primaryActionPendingLabel="Verifying..."
+            secondaryAction={
+              <Button
+                type="button"
+                variant="ghost"
+                size="lg"
+                disabled={disabled}
+                onClick={handleUseAnotherEmail}
+                className="w-full text-muted-foreground hover:text-foreground"
+              >
+                Use another email
+              </Button>
+            }
+            onCodeChange={setCode}
+            onResendCode={handleResendCode}
+            onSubmit={handleVerifyCode}
+          />
+        ) : (
+          <form className="space-y-3" onSubmit={handleSendCode}>
+            <div className="space-y-3">
+              <Label htmlFor="homepage-email-address">Your email</Label>
+              <Input
+                id="homepage-email-address"
+                autoComplete="off"
+                autoFocus
+                data-bwignore="true"
+                inputMode="email"
+                placeholder="you@example.com"
+                ref={emailInputRef}
+                value={emailAddress}
+                onChange={(event) => setEmailAddress(event.currentTarget.value)}
+                inputSize="xl"
+                className="w-full border-stone-200 bg-white"
+              />
+            </div>
+            <Button
+              type="submit"
+              size="lg"
+              disabled={disabled}
+              className="w-full"
+            >
+              {state.status === "sending-code"
+                ? "Sending..."
+                : "Email me a code"}
+            </Button>
+          </form>
+        )}
+
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>Unable to continue</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+      </div>
+    );
   }
 
   return (
@@ -229,7 +312,8 @@ export function HostedEmailAuthButton({
                 ref={emailInputRef}
                 value={emailAddress}
                 onChange={(event) => setEmailAddress(event.currentTarget.value)}
-                className="w-full border-stone-200 bg-white px-4 text-base md:text-sm"
+                inputSize="xl"
+                className="w-full border-stone-200 bg-white"
               />
               <Button
                 type="submit"

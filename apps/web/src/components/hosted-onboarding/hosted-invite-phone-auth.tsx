@@ -38,6 +38,7 @@ interface HostedInvitePhoneAuthProps {
   inviteCode: string;
   phoneAuthTarget?: HostedInvitePhoneAuthTarget | null;
   phoneHint?: string | null;
+  sendCodeGated?: boolean;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
 }
@@ -46,6 +47,7 @@ export function HostedInvitePhoneAuth({
   inviteCode,
   phoneAuthTarget,
   phoneHint,
+  sendCodeGated = false,
   onCompleted,
   onSignOut,
 }: HostedInvitePhoneAuthProps) {
@@ -162,7 +164,7 @@ export function HostedInvitePhoneAuth({
       {showMaskedPhoneHint && savedPhoneHint ? (
         controller.privyReady ? (
           <HostedInviteMaskedPhoneStep
-            disabled={controller.flowDisabled}
+            disabled={controller.flowDisabled || sendCodeGated}
             pendingAction={controller.pendingAction}
             phoneHint={savedPhoneHint}
             onSendCode={handleInviteSendCode}
@@ -177,10 +179,11 @@ export function HostedInvitePhoneAuth({
       ) : (
         <HostedPhoneAuthFlow
           {...controller.sharedFlowProps}
-          phoneFieldDescription="Enter the number that received your Murph invite."
+          phoneFieldDescription={null}
           phoneFieldLabel="Phone number"
           phoneInputAutoFocus={manualEntryVisible}
           secondaryActionSize="sm"
+          sendCodeDisabled={controller.sharedFlowProps.sendCodeDisabled || sendCodeGated}
           onResendCode={handleResendCode}
           onUseDifferentNumber={handleUseDifferentNumber}
         />

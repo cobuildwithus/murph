@@ -34,7 +34,7 @@ const steps: {
     step: 2,
     title: "Share labs",
     description:
-      "Import blood work or lab results to track biomarkers over time.",
+      "Share blood work or lab results to track biomarkers over time.",
     cta: "Share labs",
     href: "/settings",
     icon: LabReportIcon,
@@ -44,7 +44,7 @@ const steps: {
     step: 3,
     title: "Start an experiment",
     description:
-      "Browse protocols like sauna, creatine, or zone 2 and measure what changes.",
+      "Browse protocols like sauna, creatine, or zone 2 and see what improves your markers.",
     cta: "View experiments",
     href: "/experiments",
     icon: FlaskSparkleIcon,

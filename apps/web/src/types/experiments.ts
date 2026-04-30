@@ -112,6 +112,7 @@ export interface ExperimentSignal {
   estimatedChange?: ExperimentSignalEstimatedChange;
   expected: string;
   baseline?: string;
+  biomarkerRouteId?: string;
   description?: string;
   protocolProminence?: ExperimentSignalProminence;
 }

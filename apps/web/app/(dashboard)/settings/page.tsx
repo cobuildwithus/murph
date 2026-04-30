@@ -8,6 +8,7 @@ import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
 import { HostedTelegramCardSettings } from "@/src/components/settings/hosted-telegram-card-settings";
+import { PageHeader } from "@/src/components/ui/page-header";
 import { getPrisma } from "@/src/lib/prisma";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -35,17 +36,11 @@ export default async function SettingsPage() {
   return (
     <HostedPhoneCountryCodeBoundary>
       <div className="flex flex-col gap-8">
-        <div>
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Settings
-          </span>
-          <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-            Your account
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Subscription, connected accounts, data sources, and data privacy.
-          </p>
-        </div>
+        <PageHeader
+          eyebrow="Settings"
+          title="Your account"
+          description="Subscription, connected accounts, data sources, and data privacy."
+        />
 
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">

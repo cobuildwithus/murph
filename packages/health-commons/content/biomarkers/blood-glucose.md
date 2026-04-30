@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:blood-glucose
 slug: biomarkers/blood-glucose
 title: Blood Glucose
-summary: A high-signal but context-heavy metabolic biomarker from lab fasting plasma glucose, finger-stick blood glucose, or CGM/sensor glucose; useful for personal trends only when timing, device, meal, medication, sleep, illness, and activity context stay visible.
+summary: Sugar circulating in the blood, where insulin signals cells to pull it in for energy and how fast it clears after eating reflects how well that signaling works.
 status: field-testing
 quality: usable
 aliases:
@@ -62,13 +62,13 @@ biomarker:
       body: Blood glucose is the amount of glucose in blood at a moment in time. Murph treats imported glucose values as a private trend signal, not as a diagnostic label.
     -
       title: Why people care
-      body: Glucose patterns can show fasting control, post-meal excursions, overnight stability, hypoglycemia risk, and how meals, exercise, sleep, stress, alcohol, and illness interact.
+      body: Can show fasting control, post-meal excursions, overnight stability, hypoglycemia risk, and how meals, exercise, sleep, stress, alcohol, and illness interact.
     -
       title: How to read it
-      body: Compare like with like. A fasting lab glucose should not be averaged with a post-dinner finger-stick or a CGM sensor value during exercise. Segment by timing and device before deciding what changed.
+      body: A fasting lab glucose should not be averaged with a post-dinner finger-stick or a CGM sensor value during exercise. Segment by timing and device before deciding what changed.
     -
       title: What moves it
-      body: Meal carbohydrate, meal timing, activity, exercise timing, diabetes medications, illness, stress, sleep loss, circadian disruption, alcohol, dehydration, sensor placement, strip handling, and calibration issues can all move the number.
+      body: Meal carbohydrate and timing, activity, diabetes medications, illness, stress, sleep loss, alcohol, dehydration, sensor placement, and calibration issues.
     -
       title: Safety first
       body: Hypoglycemia is an immediate safety issue. If readings are unexpectedly low, symptoms do not match the device, or insulin or sulfonylurea dosing is involved, follow the clinical plan and confirm with an approved meter or clinician-guided workflow.

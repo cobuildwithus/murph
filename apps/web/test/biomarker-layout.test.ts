@@ -34,7 +34,7 @@ test("BiomarkersLayout renders biomarker pages inside the shared dashboard shell
     }),
   );
 
-  assert.match(markup, /#global-footer \{ display: none; \}/);
+  assert.match(markup, /#site-footer \{ display: none; \}/);
   assert.match(markup, /data-dashboard-sidebar="true"/);
   assert.match(markup, /data-biomarker-page="true"/);
   assert.match(markup, /data-slot="sidebar-wrapper"/);

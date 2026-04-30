@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { PageHeader } from "@/src/components/ui/page-header";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type {
   HostedInviteStatusPayload,
@@ -141,6 +142,7 @@ export function JoinInviteClient({
     useState<HostedPrivyCompletionPayload | null>(null);
   const [launchLegalConsentSatisfied, setLaunchLegalConsentSatisfied] = useState(false);
   const pendingLegalConsentCompletionRef = useRef<HostedPrivyCompletionPayload | null>(null);
+  const pendingLegalConsentRefreshRef = useRef(false);
   const checkoutOutcomeRef = useRef<
     | { kind: "redirect"; url: string }
     | { kind: "alreadyActive" }
@@ -282,10 +284,6 @@ export function JoinInviteClient({
 
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
     if (shouldGatePostPhoneVerificationWithLaunchConsent(payload)) {
-      if (payload.status.stage === "checkout") {
-        applyPhoneVerifiedStatus(payload);
-        return;
-      }
       setPendingLegalConsentCompletion(payload);
       setStatusRefreshErrorMessage(null);
       setHasCompletedInitialRefresh(true);
@@ -300,9 +298,15 @@ export function JoinInviteClient({
     setLaunchLegalConsentSatisfied(true);
 
     if (!payload) return;
+    if (pendingLegalConsentRefreshRef.current) return;
 
-    setPendingLegalConsentCompletion(null);
-    applyPhoneVerifiedStatus(payload);
+    pendingLegalConsentRefreshRef.current = true;
+    try {
+      await refreshStatus();
+      setPendingLegalConsentCompletion(null);
+    } finally {
+      pendingLegalConsentRefreshRef.current = false;
+    }
   }
 
   const consentGateOverridesChrome =
@@ -326,15 +330,11 @@ export function JoinInviteClient({
         status.stage === "checkout" ? "max-w-5xl" : "max-w-xl",
       ].join(" ")}
     >
-      <div>
-        <JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-          {title}
-        </h1>
-        <p className="mt-1 max-w-md text-sm text-muted-foreground">
-          {subtitle}
-        </p>
-      </div>
+      <PageHeader
+        eyebrow={<JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />}
+        title={title}
+        description={subtitle}
+      />
 
       <div className="flex flex-col gap-4">
         {errorMessage ? (

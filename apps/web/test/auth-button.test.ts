@@ -21,12 +21,12 @@ vi.mock("@privy-io/react-auth", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
-  HostedAuthPanel(props: { showLegalNotice?: boolean }) {
+  HostedAuthPanel(props: { requireLaunchConsentOnCompletion?: boolean }) {
     return createElement(
       "div",
       {
-        "data-hosted-auth-legal-notice":
-          props.showLegalNotice ? "shown" : "hidden",
+        "data-hosted-auth-launch-consent":
+          props.requireLaunchConsentOnCompletion ? "required" : "not-required",
       },
       "Hosted auth panel",
     );
@@ -102,6 +102,7 @@ test("AuthButton opens hosted auth instead of calling onClick when signed out", 
   expect(onConnect).toHaveBeenCalledTimes(1);
   expect(container.textContent).toContain("Log in or sign up");
   expect(container.textContent).toContain("Hosted auth panel");
+  expect(container.querySelector('[data-hosted-auth-launch-consent="required"]')).toBeTruthy();
 });
 
 test("AuthButton passes through to onClick when signed in", async () => {
