@@ -37,12 +37,6 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
     name: "MapMyFitness",
   },
   {
-    description: "Apple Watch, iPhone, app, and HealthKit metrics in one health stream.",
-    id: "apple-health",
-    logo: logoAsset("apple-health.png"),
-    name: "Apple Health",
-  },
-  {
     description: "Ring-based sleep, recovery, temperature, movement, and metabolic insight signals from Ultrahuman.",
     id: "ultrahuman",
     logo: logoAsset("ultrahuman.jpg"),
@@ -221,12 +215,6 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
     id: "polar",
     logo: logoAsset("polar.png"),
     name: "Polar",
-  },
-  {
-    description: "Android Health Connect activity, sleep, vitals, nutrition, and body measurements.",
-    id: "health-connect",
-    logo: logoAsset("health-connect.png"),
-    name: "Health Connect",
   },
 ] as const;
 
