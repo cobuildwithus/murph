@@ -47,11 +47,6 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "MapMyFitness",
     },
     {
-      assetPath: "/brand-logos/connect/apple-health.png",
-      description: "Apple Watch, iPhone, app, and HealthKit metrics in one health stream.",
-      name: "Apple Health",
-    },
-    {
       assetPath: "/brand-logos/connect/ultrahuman.jpg",
       description: "Ring-based sleep, recovery, temperature, movement, and metabolic insight signals from Ultrahuman.",
       name: "Ultrahuman",
@@ -201,19 +196,16 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       description: "Polar training, sleep, heart rate, recovery, and cardio load data.",
       name: "Polar",
     },
-    {
-      assetPath: "/brand-logos/connect/health-connect.png",
-      description: "Android Health Connect activity, sleep, vitals, nutrition, and body measurements.",
-      name: "Health Connect",
-    },
   ];
 
-  assert.equal(sources.length, 34);
+  assert.equal(sources.length, 32);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.doesNotMatch(markup, /Coming soon/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Connect<\/button>/u);
+  assert.doesNotMatch(markup, />Apple Health</u);
+  assert.doesNotMatch(markup, />Health Connect</u);
   assert.doesNotMatch(markup, />Manual</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
 
