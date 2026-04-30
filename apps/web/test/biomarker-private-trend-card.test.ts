@@ -44,7 +44,7 @@ test("does not render mocked private biomarker values when browser-vault is unav
     createElement(BiomarkerPrivateTrendCard, { biomarker }),
   );
 
-  assert.match(markup, /Private trend unavailable/u);
+  assert.match(markup, /Biomarker unavailable/u);
   assert.match(markup, /Connect a health device/u);
   assert.match(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
@@ -175,7 +175,7 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
     createElement(BiomarkerPrivateTrendCard, { biomarker: unsupportedBiomarker }),
   );
 
-  assert.match(markup, /Private trend unavailable/u);
+  assert.match(markup, /Biomarker unavailable/u);
   assert.match(markup, /Private tracking for this biomarker is not available yet/u);
   assert.doesNotMatch(markup, /Connect a device/u);
 });

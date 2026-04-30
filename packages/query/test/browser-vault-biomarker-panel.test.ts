@@ -26,7 +26,7 @@ test("returns no_private_vault when no browser-vault client is available", () =>
   assert.equal(panel.status, "no_private_vault");
   assert.equal(panel.primary, null);
   assert.equal(panel.privacy.defaultShare, "private");
-  assert.match(panel.emptyState?.body ?? "", /Nothing from this card is public/u);
+  assert.match(panel.emptyState?.body ?? "", /Your data stays private/u);
 });
 
 test("builds a ready biomarker panel from browser-vault metric rows", () => {
