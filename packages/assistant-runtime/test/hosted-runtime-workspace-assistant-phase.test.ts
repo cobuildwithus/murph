@@ -469,7 +469,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         conversationMetrics: null,
         mailboxLane: "assistant-notification",
         redactedLogEntries: [],
-        vaultSyncImportResult: null,
       },
       status: "processed",
     });
@@ -512,7 +511,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         conversationMetrics: null,
         mailboxLane: "assistant-notification",
         redactedLogEntries: [],
-        vaultSyncImportResult: null,
       },
       status: "processed",
     });
@@ -566,7 +564,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         conversationMetrics: null,
         mailboxLane: "assistant-notification",
         redactedLogEntries: [],
-        vaultSyncImportResult: null,
       },
       status: "processed",
     });

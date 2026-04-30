@@ -24,7 +24,6 @@ export type {
   HostedRuntimePlatform,
   HostedRuntimeUsageExportPort,
   HostedRuntimeUsageRecordResponse,
-  HostedRuntimeVaultSyncPort,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
 export type {

@@ -14,8 +14,6 @@ import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeVaultSyncImportResponse,
-  parseHostedRuntimeVaultSyncPayloadFetchResponse,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -26,10 +24,8 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
-  HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
-  buildHostedRuntimeVaultSyncPayloadPath,
 } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
@@ -178,12 +174,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport: hostedWebControlTransport,
           }),
           mailboxPort: createHostedWebMailboxPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport: hostedWebControlTransport,
-          }),
-          vaultSyncPort: createHostedWebVaultSyncPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,
@@ -732,49 +722,6 @@ function createHostedWebRuntimeLogPort(input: {
   };
 }
 
-function createHostedWebVaultSyncPort(input: {
-  boundUserId: string;
-  fetchImpl: typeof fetch;
-  timeoutMs: number;
-  transport: HostedWebControlTransport;
-}) {
-  return {
-    async fetchPayload(
-      request: Parameters<NonNullable<HostedRuntimePlatform["vaultSyncPort"]>["fetchPayload"]>[0],
-    ) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        boundUserId: input.boundUserId,
-        description: "Hosted vault-sync payload fetch",
-        fetchImpl: input.fetchImpl,
-        method: "GET",
-        path: appendHostedRuntimeRequestIdQuery(
-          buildHostedRuntimeVaultSyncPayloadPath(request.sessionId),
-          request.requestId,
-        ),
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
-
-      return parseHostedRuntimeVaultSyncPayloadFetchResponse(payload);
-    },
-    async recordImport(
-      request: Parameters<NonNullable<HostedRuntimePlatform["vaultSyncPort"]>["recordImport"]>[0],
-    ) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
-        boundUserId: input.boundUserId,
-        description: "Hosted vault-sync import record",
-        fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
-
-      return parseHostedRuntimeVaultSyncImportResponse(payload);
-    },
-  };
-}
-
 function createHostedWebBillingPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -903,10 +850,6 @@ function createHostedWebControlProxyUrl(path: string): URL {
 
 function createHostedWebControlLogPath(path: string): string {
   const url = new URL(path.replace(/^\/+/u, ""), "https://hosted-runtime.invalid/");
-  if (/^\/api\/internal\/hosted-execution\/vault-sync\/[^/]+\/payload$/u.test(url.pathname)) {
-    return "/api/internal/hosted-execution/vault-sync/:sessionId/payload";
-  }
-
   return url.pathname;
 }
 

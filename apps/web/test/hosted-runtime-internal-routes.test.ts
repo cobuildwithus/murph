@@ -99,7 +99,7 @@ describe("hosted runtime internal web routes", () => {
           dedupeKey: "system-dedupe-1",
           expiresAt: null,
           id: "mailbox_item_2",
-          kind: "vault.sync.import",
+          kind: "assistant.notification.requested",
           lane: "system",
           laneSeq: "3",
           occurredAt: FIXED_NOW,

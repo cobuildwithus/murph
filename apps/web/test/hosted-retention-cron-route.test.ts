@@ -26,13 +26,8 @@ describe("hosted retention cron route", () => {
     vi.clearAllMocks();
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.runHostedRetentionCleanup.mockResolvedValue({
-      completedVaultSyncPayloadsDeleted: 1,
-      expiredVaultSyncPayloadsDeleted: 3,
-      expiredVaultSyncSessionsDeleted: 4,
-      expiredVaultSyncSessionsMarked: 5,
-      oldRunLogsDeleted: 6,
-      staleIngressEventsDeleted: 7,
-      staleIngressEventsQuarantined: 8,
+      expiredMailboxItemsDeleted: 7,
+      oldRuntimeLogsDeleted: 6,
     });
   });
 
@@ -47,13 +42,8 @@ describe("hosted retention cron route", () => {
     expect(mocks.runHostedRetentionCleanup).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       cleanup: {
-        completedVaultSyncPayloadsDeleted: 1,
-        expiredVaultSyncPayloadsDeleted: 3,
-        expiredVaultSyncSessionsDeleted: 4,
-        expiredVaultSyncSessionsMarked: 5,
-        oldRunLogsDeleted: 6,
-        staleIngressEventsDeleted: 7,
-        staleIngressEventsQuarantined: 8,
+        expiredMailboxItemsDeleted: 7,
+        oldRuntimeLogsDeleted: 6,
       },
     });
   });

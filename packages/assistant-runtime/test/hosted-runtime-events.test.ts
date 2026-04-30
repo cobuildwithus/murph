@@ -47,7 +47,6 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-
 import {
   executeHostedMailboxEvent,
 } from "../src/hosted-runtime/events.ts";
@@ -381,7 +380,6 @@ describe("executeHostedMailboxEvent", () => {
           }),
         },
       ],
-      vaultSyncImportResult: null,
     });
   });
 
@@ -743,7 +741,6 @@ describe("executeHostedMailboxEvent", () => {
       conversationMetrics: null,
       mailboxLane: "member-channels-updated",
       redactedLogEntries: [],
-      vaultSyncImportResult: null,
     });
   });
 

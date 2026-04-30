@@ -15,7 +15,6 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
-  HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_REASONS,
@@ -42,12 +41,6 @@ import {
   parseHostedRuntimeUsageExportRequest,
   parseHostedRuntimeUsageExportResponse,
   parseHostedRuntimeWebStatusResponse,
-  parseHostedRuntimeVaultSyncImportPayload,
-  parseHostedRuntimeVaultSyncImportRequest,
-  parseHostedRuntimeVaultSyncImportResponse,
-  parseHostedRuntimeVaultSyncImportSummary,
-  parseHostedRuntimeVaultSyncPayloadFetchRequest,
-  parseHostedRuntimeVaultSyncPayloadFetchResponse,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
@@ -68,7 +61,6 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
-      "vault.sync.import",
     ]);
     expect(HOSTED_WORKSPACE_CHECKPOINT_REASONS).toEqual([
       "import",
@@ -330,86 +322,6 @@ describe("hosted runtime control contracts", () => {
         retryable: false,
       },
     })).toThrow(/must not include both/u);
-  });
-
-  it("parses vault-sync payload fetch and sanitized import result contracts", () => {
-    const payload = {
-      bundleBase64: "dmF1bHQtc3luYy1idW5kbGU=",
-      localManifestHash: "manifest_hash_123",
-      payloadSchema: HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
-      sessionId: "vsi_123",
-      sourceSchemaVersion: "1",
-    };
-    const summary = {
-      conflictCount: 1,
-      importedJsonlRecords: 2,
-      importedRawFiles: 3,
-      importedTextFiles: 4,
-      skippedDuplicates: 5,
-      skippedExcludedFiles: 6,
-    };
-
-    expect(parseHostedRuntimeVaultSyncImportPayload(payload)).toEqual(payload);
-    expect(parseHostedRuntimeVaultSyncPayloadFetchRequest({
-      requestId: "vault-sync-fetch-1",
-      sessionId: "vsi_123",
-    })).toEqual({
-      requestId: "vault-sync-fetch-1",
-      sessionId: "vsi_123",
-    });
-    expect(parseHostedRuntimeVaultSyncPayloadFetchResponse({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload,
-    })).toEqual({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload,
-    });
-    expect(parseHostedRuntimeVaultSyncPayloadFetchResponse({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload: null,
-      unavailable: {
-        code: "gone",
-        retryable: false,
-      },
-    })).toEqual({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload: null,
-      unavailable: {
-        code: "gone",
-        retryable: false,
-      },
-    });
-    expect(parseHostedRuntimeVaultSyncImportSummary(summary)).toEqual(summary);
-    expect(parseHostedRuntimeVaultSyncImportRequest({
-      importedAt: "2026-04-26T00:00:05.000Z",
-      sessionId: "vsi_123",
-      status: "imported_with_conflicts",
-      summary,
-    })).toEqual({
-      importedAt: "2026-04-26T00:00:05.000Z",
-      sessionId: "vsi_123",
-      status: "imported_with_conflicts",
-      summary,
-    });
-    expect(parseHostedRuntimeVaultSyncImportResponse({
-      recorded: true,
-      sessionId: "vsi_123",
-      status: "imported_with_conflicts",
-    })).toEqual({
-      recorded: true,
-      sessionId: "vsi_123",
-      status: "imported_with_conflicts",
-    });
-    expect(() => parseHostedRuntimeVaultSyncImportRequest({
-      importedAt: "2026-04-26T00:00:05.000Z",
-      sessionId: "vsi_123",
-      status: "committed",
-      summary,
-    })).toThrow(/vault-sync import status/u);
-    expect(() => parseHostedRuntimeVaultSyncImportSummary({
-      ...summary,
-      conflictCount: -1,
-    })).toThrow(/non-negative integer/u);
   });
 
   it("delegates device-sync bridge envelopes to the device-sync runtime owner", () => {

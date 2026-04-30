@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-04-29
+Last verified: 2026-04-30
 
 ## Decision
 
@@ -16,7 +16,7 @@ The live ownership split is:
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
-  rows, runs assistant/device/vault-sync work, and checkpoints the
+  rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.
 
 The final seam is:
@@ -25,12 +25,25 @@ The final seam is:
 append encrypted mailbox item
 nudge runner
 restore hosted workspace
-import mailbox prefix into local runtime state
+import mailbox prefix into local runtime state and stage AssistantInputEvent rows
 checkpoint after import
 run local runtime work until idle or budget
 checkpoint final runtime state
 project redacted status/logs
 ```
+
+Hosted execution is a thin containerized runner over the same local runtime
+input spine used by local automation:
+
+```text
+source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / active turn -> accepted-input journal -> Codex
+```
+
+The hosted adapter is the mailbox importer. It decodes a conversation mailbox
+row into a bounded `AssistantInputEvent` before inbox projection. Inbox capture
+and parser state remain useful projections for search, display, attachment
+enrichment, and debugging, but hosted callers must not stage hidden
+runtime-only inbox rows to make Codex admission succeed.
 
 ## Current Protocol
 
@@ -46,27 +59,27 @@ only. It does not persist queue history, per-message completion, outbox truth,
 assistant channel enablement state, or checkpoint recovery truth.
 
 The runtime reads `HostedWorkspace`, restores the encrypted local workspace,
-fetches mailbox rows after its checkpointed per-lane watermarks, imports them
-into local runtime state, and checkpoints immediately after import. Conversation
-import is discovery, not assistant handling: mailbox watermarks prove only that
-raw capture evidence was imported. A conversation capture remains pending until
-the assistant runtime writes durable terminal auto-reply evidence for that
-capture, such as committed reply intent evidence or explicit suppression
+fetches mailbox rows after its checkpointed per-lane watermarks, stages decoded
+conversation rows as assistant input, imports any available inbox projection
+state, and checkpoints immediately after import. Conversation import is
+discovery, not assistant handling: mailbox watermarks prove only that source
+input was staged and local projection was attempted. A conversation input remains
+pending until the assistant runtime writes durable terminal auto-reply evidence
+for that input, such as committed reply intent evidence or explicit suppression
 evidence. Auto-reply channel state stores only a fixed `eligibleAfter` seed
 boundary for channel enablement; it is never advanced as handling progress.
 Inbox projections are rebuildable scan acceleration and must not hide
-imported-but-unhandled captures. Late
-same-conversation input is supported by the hosted mailbox-backed active-turn
-input refresh: at provider request boundaries and at the final commit barrier,
-the runtime refreshes mailbox rows, imports any new items, checkpoints accepted
-input state, and continues the same logical assistant turn before outbox intent
-creation.
+imported-but-unhandled assistant input. Late same-conversation input is
+supported by the hosted mailbox-backed active-turn input refresh: at provider
+request boundaries and at the final commit barrier, the runtime refreshes
+mailbox rows, stages any new input, checkpoints accepted input state, and
+continues the same logical assistant turn before outbox intent creation.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after mailbox import checkpointing
 but before assistant handling, the next invocation starts with an advanced
 mailbox watermark and no new fetched items. That must still run the assistant
-phase, because replay authority comes from raw capture evidence plus missing
+phase, because replay authority comes from staged assistant input plus missing
 terminal auto-reply evidence, not from mailbox import progress.
 
 Mailbox import has no pre-assistant side-effect phase. Provider-visible cleanup,
@@ -96,7 +109,6 @@ silently dropped from later checkpoints.
 - `HostedRuntimeLog`
 - runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
 - hosted member identity/routing/billing/email authorization
-- hosted vault-sync sessions and encrypted import payloads
 - hosted device-sync authority
 - hosted AI usage ledger
 - anonymized assistant-runtime issue sink
@@ -104,6 +116,7 @@ silently dropped from later checkpoints.
 ### Runtime Owns
 
 - mailbox import watermarks
+- staged assistant input events and accepted-input journal state
 - fixed auto-reply channel enablement boundaries
 - auto-reply terminal handling evidence
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents

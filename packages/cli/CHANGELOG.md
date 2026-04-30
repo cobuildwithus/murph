@@ -40,7 +40,6 @@ All notable changes to `@murphai/murph` will be documented in this file.
 - add red-light evidence metadata
 - refine experiment signal prominence copy
 - reuse experiment protocol timeline summary
-- add hosted vault sync import
 - restructure protocol details
 - expand finnish sauna corpus
 - refresh user-facing experiment copy

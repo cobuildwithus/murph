@@ -121,9 +121,6 @@ The current hosted path has these correctness owners:
   - hosted side-effect journal/finalization callbacks
 - `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`
   - committed side-effect phase that mirrors local outbox into a hosted finalize protocol
-- Hosted vault-sync code paths
-  - queued ingress event references
-  - run-summary commit helpers
 - Cloudflare outbound/bootstrap code paths
   - `runtime_bootstrapped`
   - `bootstrapUser`
@@ -135,13 +132,13 @@ The hard cut replaces that with mailbox import plus runtime checkpoints.
 
 ### `apps/web` Owns
 
-- Hosted member identity, routing, billing, auth, onboarding, email authorization, device-sync authority, share metadata, vault-sync sessions, usage ledger, and other product/control-plane facts.
+- Hosted member identity, routing, billing, auth, onboarding, email authorization, device-sync authority, share metadata, usage ledger, and other product/control-plane facts.
 - Encrypted external mailbox rows.
 - Encrypted raw payload storage when payloads are too large for inline mailbox ciphertext.
 - Latest encrypted hosted workspace checkpoint pointer.
 - Redacted runtime status projection.
 - Redacted runtime logs.
-- Narrow signed callbacks for side inputs the runtime needs from web-owned authority, such as share payload fetch, vault-sync payload fetch, device-sync snapshot/apply, usage record export, and issue export.
+- Narrow signed callbacks for side inputs the runtime needs from web-owned authority, such as share payload fetch, device-sync snapshot/apply, usage record export, and issue export.
 
 ### `apps/web` Does Not Own
 
@@ -179,7 +176,7 @@ The hard cut replaces that with mailbox import plus runtime checkpoints.
 
 - Mailbox import into local inbox/capture state.
 - Assistant sessions, transcripts, receipts, diagnostics, automation cursors, status snapshots, and outbox intents under `.runtime/operations/assistant/**`.
-- Inbox/parser/device-sync/share/vault-sync execution semantics.
+- Inbox/parser/device-sync/share execution semantics.
 - Same-conversation late-input revision.
 - Outbox dispatch and receipt/reconciliation policy.
 - Runtime timers and next wake projection.
@@ -354,7 +351,7 @@ system
 Rules:
 
 - `conversation` includes `conversation.message`.
-- `system` includes activation, channel updates, assistant notification requests, device-sync wakes, share acceptance, and vault-sync imports.
+- `system` includes activation, channel updates, assistant notification requests, device-sync wakes, and share acceptance.
 - Each lane has its own strict `laneSeq`.
 - Web assigns lane seqs atomically at append time.
 - Runtime imports strict prefixes per lane.
@@ -432,7 +429,6 @@ interface HostedRuntimePlatform {
   effectsPort: HostedRuntimeEffectsPort;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   sharePort?: HostedRuntimeSharePort | null;
-  vaultSyncPort?: HostedRuntimeVaultSyncPort | null;
   rawPayloadPort?: HostedRuntimeRawPayloadPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
@@ -444,7 +440,7 @@ The child runtime should not know web routes. It should call semantic ports.
 
 `workspacePort.checkpoint` is a semantic runtime operation, not a bundle API. The runtime asks for a checkpoint with a reason, status projection, and next wake hint. The hosted adapter snapshots the current workspace, writes encrypted objects, performs web CAS, and returns the new workspace version. The runtime should not pass or reason about `snapshotRef`.
 
-Side-input ports are also semantic. Share payloads, vault-sync import payloads, raw email/message payloads, device-sync snapshots, usage export, and issue export should be named by product meaning, not by hosted-run dispatch payloads or Cloudflare storage internals.
+Side-input ports are also semantic. Share payloads, raw email/message payloads, device-sync snapshots, usage export, and issue export should be named by product meaning, not by hosted-run dispatch payloads or Cloudflare storage internals.
 
 If the child must talk over HTTP because it runs in an isolated process, collapse the current multi-host internal proxy into one worker-owned runtime bridge:
 
@@ -454,7 +450,6 @@ POST /__internal/runtime-bridge/workspace/checkpoint
 POST /__internal/runtime-bridge/logs/write
 GET  /__internal/runtime-bridge/payloads/email/:key
 GET  /__internal/runtime-bridge/share/:payloadId
-GET  /__internal/runtime-bridge/vault-sync/:payloadId
 POST /__internal/runtime-bridge/effects/email/send
 POST /__internal/runtime-bridge/device-sync/*
 POST /__internal/runtime-bridge/usage/record
@@ -597,7 +592,6 @@ The entrypoint should:
    - notification requests
    - device-sync work
    - share imports
-   - vault-sync imports
    - outbox retry/reconciliation
 7. Before delivery, refresh hosted mailbox again.
 8. If new same-conversation captures arrived, checkpoint and throw/use `AssistantTurnRevisionRequiredError`.
@@ -628,7 +622,6 @@ events/email.ts
 events/linq.ts
 events/telegram.ts
 events/share.ts
-events/vault-sync.ts
 hosted-device-sync-runtime.ts
 ```
 
@@ -797,7 +790,6 @@ Producers:
 - assistant notification request
 - device-sync wake
 - share accepted
-- vault-sync import ready
 
 Dedupe:
 
@@ -946,14 +938,13 @@ Keep:
 - encryption helpers
 - payload storage helpers
 - Cloudflare auth/signing
-- usage, issue, share, vault-sync, billing, device-sync callback routes
+- usage, issue, share, billing, device-sync callback routes
 
 Replace:
 
 - `src/lib/hosted-ingress/**` with `src/lib/hosted-mailbox/**`
 - `src/lib/hosted-run/status.ts` with hosted workspace/status/log readers
 - `src/lib/hosted-execution/control.ts` wake client names from run language to runner/mailbox language
-- vault-sync run-summary completion helpers with runtime/product status that does not depend on run commit/finalize.
 
 Delete:
 
@@ -966,7 +957,6 @@ Delete:
 - `app/api/internal/hosted-run/turn-input/adopt/route.ts`
 - run-owned log/status routes after replacements exist
 - `HostedMember` relation fields that point at old cursor/ingress/run/log rows.
-- `HostedVaultSyncSession` queued run/ingress coupling such as queued event ids once mailbox append owns readiness.
 
 Rename or move:
 
@@ -996,7 +986,7 @@ Keep:
 - runner env/launch spec
 - container supervisor/child isolation
 - hosted email send/read plumbing
-- device-sync/share/vault-sync/usage/issue web callbacks
+- device-sync/share/usage/issue web callbacks
 - deployment artifact helpers
 
 Replace:
@@ -1109,7 +1099,7 @@ In `packages/hosted-execution`:
 3. Add workspace state/checkpoint contracts.
 4. Add bounded runtime log event contracts.
 5. Add runner nudge/status contracts.
-6. Add semantic side-input contracts for share, vault-sync, raw payload, device-sync, usage, and issues where they still need shared web/Cloudflare parsing.
+6. Add semantic side-input contracts for share, raw payload, device-sync, usage, and issues where they still need shared web/Cloudflare parsing.
 7. Add parsers for those contracts.
 8. Add route builders for those contracts.
 9. Keep old run contracts temporarily only until call sites are deleted in this branch.
@@ -1178,7 +1168,6 @@ member.channels.updated -> channel reconciliation
 assistant.notification.requested -> notification work
 device-sync.wake -> device-sync work
 vault.share.accepted -> sharePort fetch + import
-vault.sync.import -> vaultSyncPort fetch + import
 ```
 
 Acceptance:
@@ -1227,7 +1216,7 @@ In `apps/web`:
    - add `HostedWorkspace`
    - add `HostedRuntimeLog`
 2. Remove old `HostedMember` relation fields pointing at cursor/ingress/run/log rows.
-3. Remove vault-sync queued run/ingress coupling, including queued event ids and run-summary commit helpers.
+3. Remove queued run/ingress coupling, including queued event ids and run-summary commit helpers.
 4. Replace `hosted-ingress` store with `hosted-mailbox` store.
 5. Keep append helpers simple:
    - assign lane
@@ -1374,13 +1363,13 @@ Already landed:
   local vault root before mailbox import, or creates a local null-bootstrap
   workspace when web has no snapshot yet. Missing snapshot bytes fail closed
   before any mailbox fetch/import/checkpoint work.
-- Cloudflare runtime platform has mailbox/workspace/log/share/vault-sync/device
+- Cloudflare runtime platform has mailbox/workspace/log/share/device
   callback ports and a workspace read port.
 - Cloudflare node/container transport now has an additive discriminated
   `workspace-invocation` job envelope parsed at the container HTTP boundary, DO invoke
   boundary, isolated child boundary, and child-stdin boundary. Workspace jobs
   route toward `runHostedWorkspaceRuntimeJobInProcess` with real snapshot,
-  checkpoint, conversation mailbox import, and vault-sync mailbox import bridge
+  checkpoint and conversation mailbox import
   adapters.
 - Cloudflare exposes a run-free runner nudge route and a runner-status route.
 - Web handoff calls the runner nudge route through the configured control
@@ -1403,14 +1392,6 @@ Already landed:
   that acquires the runner lease, reads the latest hosted workspace, invokes one
   `workspace-invocation` container job, clears invocation state, and schedules the next
   alarm from the workspace projection or pending nudge.
-- Web vault-sync upload now writes the side input, updates the session, appends
-  a `vault.sync.import` mailbox item in the same transaction, and nudges the
-  runner best-effort after commit. Hosted-run commit/finalize no longer owns
-  vault-sync session completion.
-- Runtime-owned vault-sync mailbox import now fetches the side input through
-  `vaultSyncPort`, runs the local vault-sync merge helper, records terminal
-  import metrics through the semantic port, and advances/quarantines mailbox
-  progress according to runtime import outcomes.
 - Web's executor-facing hosted-run routes, `src/lib/hosted-run/**` helpers,
   and `src/lib/hosted-ingress/**` helpers have been deleted in the active
   checkout.
@@ -1638,16 +1619,6 @@ And does not call web peek/adopt
 And does not rely on the default local inbox-backed port being auto-created
 ```
 
-### 13. Vault-Sync Import Has No Run Coupling
-
-```text
-Given a vault-sync import payload is ready
-When web records product readiness
-Then it appends a `vault.sync.import` mailbox item
-And stores no queued run id, queued ingress event id, or run-summary commit dependency
-And runtime imports through `vaultSyncPort`
-```
-
 ### 14. Child Has No Web Credentials
 
 ```text
@@ -1812,7 +1783,6 @@ Mitigation:
 - Delete web coalescing aliases for first cut.
 - Delete global execution sequencing.
 - Delete Cloudflare-hosted-control run naming.
-- Delete vault-sync queued run/ingress completion coupling.
 - Delete hosted-only side-effect status vocabulary.
 - Keep mailbox append-only.
 - Keep only per-lane mailbox counters.
@@ -1830,7 +1800,6 @@ Mitigation:
 - Late same-conversation input before delivery revises the reply.
 - Local outbox semantics are used for hosted delivery.
 - Child runtime has no direct web credentials.
-- Vault-sync import readiness and completion are not tied to hosted run summaries.
 - Docs match the new architecture.
 - `rg` finds no live run-centric protocol symbols outside obsolete migration/history references.
 - Required verification is green or unrelated failures are documented with exact failing targets.

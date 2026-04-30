@@ -85,8 +85,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMailboxLaneCounter",
   "HostedMailboxPayload",
   "HostedRuntimeLog",
-  "HostedVaultSyncPayload",
-  "HostedVaultSyncSession",
   "HostedWorkspace",
 ]);
 
@@ -163,14 +161,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_email_authorization"');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_share_link"');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_share_payload"');
-    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_vault_sync_session"');
-    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_vault_sync_payload"');
-    expect(baselineMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_vault_sync_session_pairing_code_hash_key"',
-    );
-    expect(baselineMigrationSql).toContain(
-      'ALTER TABLE "hosted_vault_sync_payload" ADD CONSTRAINT "hosted_vault_sync_payload_session_id_fkey"',
-    );
+    expect(baselineMigrationSql).not.toContain(["hosted", "vault", "sync"].join("_"));
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_reply_alias_lookup_key_key"');
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT');
@@ -188,9 +179,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_run" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_execution_cursor" CASCADE');
-    expect(hostedRuntimeHardCutMigrationSql).toContain(
-      'ALTER TABLE "hosted_vault_sync_session" DROP COLUMN IF EXISTS "queued_ingress_event_id"',
-    );
+    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_vault_sync_payload" CASCADE');
+    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_vault_sync_session" CASCADE');
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_webhook_event"');
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_recipient_binding"');
     expect(dropRevnetIssuanceMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_revnet_issuance"');

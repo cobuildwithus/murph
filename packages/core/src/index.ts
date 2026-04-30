@@ -29,30 +29,6 @@ export {
 export { walkVaultFiles } from "./fs.ts";
 
 export {
-  VAULT_SYNC_CONFLICT_MANIFEST_SCHEMA,
-  VAULT_SYNC_IMPORT_BUNDLE_KIND,
-  VAULT_SYNC_IMPORT_MANIFEST_SCHEMA,
-  buildVaultSyncImportPack,
-  mergeVaultSyncImportIntoVault,
-  readVaultSyncImportManifest,
-  restoreVaultSyncImportPack,
-} from "./vault-sync.ts";
-export type {
-  BuildVaultSyncImportPackInput,
-  BuildVaultSyncImportPackResult,
-  MergeVaultSyncImportInput,
-  RestoreVaultSyncImportPackInput,
-  RestoreVaultSyncImportPackResult,
-  VaultSyncImportConflict,
-  VaultSyncImportFileKind,
-  VaultSyncImportManifest,
-  VaultSyncImportManifestExcludedFile,
-  VaultSyncImportManifestFile,
-  VaultSyncImportMergeResult,
-  VaultSyncSourceVaultMetadata,
-  VaultSyncConflictManifest,
-} from "./vault-sync.ts";
-export {
   buildAttachmentCompatibilityProjections,
   cleanupStagedEventAttachments,
   prepareEventAttachments,

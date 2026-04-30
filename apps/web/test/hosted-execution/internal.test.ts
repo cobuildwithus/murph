@@ -149,7 +149,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     const request = await createSignedCallbackRequest({
       body: JSON.stringify({ eventId: "evt_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/vault-sync/import",
+      path: "/api/internal/hosted-runtime/log",
       privateJwkJson: currentPrivateJwkJson,
       search: "?attempt=1",
       userId: "member_123",
@@ -165,7 +165,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     const replayedRequest = await createSignedCallbackRequest({
       body: JSON.stringify({ eventId: "evt_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/vault-sync/import",
+      path: "/api/internal/hosted-runtime/log",
       privateJwkJson: currentPrivateJwkJson,
       search: "?attempt=1",
       userId: "member_123",

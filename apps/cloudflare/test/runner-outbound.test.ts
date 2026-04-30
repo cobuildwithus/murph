@@ -9,7 +9,10 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import { resolveRunnerOutboundUserRunnerStub } from "../src/runner-outbound/shared.ts";
-import { readHostedRunnerWebControlRoute } from "../src/runner-outbound/shared-web-control-policy.ts";
+import {
+  isAllowedHostedRunnerWebControlRequest,
+  readHostedRunnerWebControlRoute,
+} from "../src/runner-outbound/shared-web-control-policy.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import type {
   WorkerBindUserRunnerStubLike,
@@ -28,6 +31,16 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync runtime snapshot",
     path: "/api/internal/device-sync/runtime/snapshot",
+  },
+  {
+    body: {
+      changes: [],
+      connectionId: "conn_123",
+      expectedRevision: "12",
+      userId: "member_123",
+    },
+    name: "device-sync runtime apply",
+    path: "/api/internal/device-sync/runtime/apply",
   },
   {
     body: {
@@ -65,6 +78,18 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      itemId: "mailbox_item_123",
+      payloadRef: {
+        kind: "hosted-mailbox-payload",
+        payloadId: "payload_123",
+      },
+      requestId: "request_payload_1",
+    },
+    name: "hosted mailbox payload fetch",
+    path: "/api/internal/hosted-mailbox/payload/fetch",
+  },
+  {
+    body: {
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
       leaseGeneration: "9",
@@ -90,6 +115,21 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted runtime log",
     path: "/api/internal/hosted-runtime/log",
+  },
+  {
+    body: {
+      component: "mailbox",
+      detailsJson: {},
+      environment: "production",
+      fingerprint: "mailbox.unexpected",
+      issueKind: "unexpected-mailbox-item",
+      occurredAt: "2026-04-26T00:00:03.000Z",
+      phase: "import",
+      severity: "warning",
+      summary: "Unexpected mailbox item",
+    },
+    name: "hosted issue recording",
+    path: "/api/internal/hosted-execution/issues/record",
   },
 ] as const;
 
@@ -345,6 +385,11 @@ describe("handleRunnerOutboundRequest", () => {
   it.each(ALLOWLISTED_WEB_CONTROL_CASES)(
     "proxies allowlisted hosted web-control path: $name",
     async ({ body, path }) => {
+      expect(isAllowedHostedRunnerWebControlRequest({
+        method: "POST",
+        path,
+      })).toBe(true);
+
       const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
       const fetchMock = vi.fn(async (
         ..._args: Parameters<typeof fetch>
@@ -458,62 +503,6 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies allowlisted hosted web-control GET payload routes without a body", async () => {
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-    const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ): Promise<Response> => new Response(JSON.stringify({
-      fetchedAt: "2026-04-26T00:00:06.000Z",
-      payload: null,
-      unavailable: {
-        code: "not_found",
-        retryable: false,
-      },
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(
-        "http://web-control.worker/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
-        {
-          headers: createRunnerProxyHeaders(),
-          method: "GET",
-        },
-      ),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
-      }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      fetchedAt: "2026-04-26T00:00:06.000Z",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the allowlisted web-control GET fetch to run.");
-    }
-    const [url, init] = firstCall;
-    expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
-    );
-    expect(init?.method).toBe("GET");
-    expect(init?.body).toBeUndefined();
-    const headers = new Headers(init?.headers);
-    expect(headers.get("content-type")).toBeNull();
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(timeoutSpy).toHaveBeenCalledWith(45_000);
-  });
-
   it("proxies the hosted workspace read route through web-control GET", async () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const fetchMock = vi.fn(async (
@@ -573,6 +562,39 @@ describe("handleRunnerOutboundRequest", () => {
     expect(() => readHostedRunnerWebControlRoute(
       `https://example.test${HOSTED_RUNTIME_WORKSPACE_PATH}`,
     )).toThrow("Hosted runtime web-control route must be relative.");
+  });
+
+  it("rejects removed vault-sync web-control routes", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response("unexpected", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const path of [
+      "/api/internal/hosted-execution/vault-sync/session_123/payload",
+      "/api/internal/hosted-execution/vault-sync/import",
+    ]) {
+      expect(isAllowedHostedRunnerWebControlRequest({
+        method: path.endsWith("/payload") ? "GET" : "POST",
+        path,
+      })).toBe(false);
+
+      const response = await handleRunnerOutboundRequest(
+        new Request(`http://web-control.worker${path}`, {
+          headers: createRunnerProxyHeaders(),
+          method: path.endsWith("/payload") ? "GET" : "POST",
+        }),
+        createRunnerOutboundEnv({
+          HOSTED_WEB_BASE_URL: "https://web.example.test",
+        }),
+        "member_123",
+        RUNNER_PROXY_TOKEN,
+      );
+
+      expect(response.status).toBe(404);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects deleted share payload proxy calls", async () => {
@@ -636,11 +658,7 @@ describe("handleRunnerOutboundRequest", () => {
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> => new Response(JSON.stringify({
       fetchedAt: "2026-04-26T00:00:05.000Z",
-      payload: null,
-      unavailable: {
-        code: "not_found",
-        retryable: false,
-      },
+      workspace: null,
     }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -650,15 +668,12 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(
-        "http://web-control.worker/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
-        {
-          headers: createRunnerProxyHeaders({
-            "x-hosted-runtime-web-control-user-id": "member_sender",
-          }),
-          method: "GET",
-        },
-      ),
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: createRunnerProxyHeaders({
+          "x-hosted-runtime-web-control-user-id": "member_sender",
+        }),
+        method: "GET",
+      }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
@@ -670,7 +685,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
     if (!firstCall) {
-      throw new Error("Expected the vault-sync payload web-control fetch to run.");
+      throw new Error("Expected the workspace web-control fetch to run.");
     }
     const [_url, init] = firstCall;
     const headers = new Headers(init?.headers);
@@ -693,18 +708,15 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
     const postGetOnlyResponse = await handleRunnerOutboundRequest(
-      new Request(
-        "http://web-control.worker/api/internal/hosted-execution/vault-sync/vsi_123/payload?requestId=request_vault_sync_1",
-        {
-          body: JSON.stringify({
-            requestId: "request_vault_sync_1",
-          }),
-          headers: createRunnerProxyHeaders({
-            "content-type": "application/json; charset=utf-8",
-          }),
-          method: "POST",
-        },
-      ),
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        body: JSON.stringify({
+          requestId: "request_workspace_1",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),

@@ -9,7 +9,6 @@ import {
 
 const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
-  ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   sendAssistantNotification: vi.fn(),
@@ -40,10 +39,6 @@ vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
 
 vi.mock("@murphai/gateway-local", () => ({
   sendGatewayMessageLocal: vi.fn(),
-}));
-
-vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
-  ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
@@ -88,10 +83,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
-  mocks.ingestHostedConversationMessageWake.mockResolvedValue({
-    nextWakeAt: null,
-    parserProcessed: 0,
-  });
   mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
     deviceSyncProcessed: 1,
     deviceSyncSkipped: false,
@@ -131,7 +122,6 @@ describe("hosted runtime event coverage", () => {
       conversationMetrics: null,
       mailboxLane: "member-activated",
       redactedLogEntries: [],
-      vaultSyncImportResult: null,
     });
   });
 
@@ -157,7 +147,6 @@ describe("hosted runtime event coverage", () => {
       conversationMetrics: null,
       mailboxLane: "device-sync",
       redactedLogEntries: [],
-      vaultSyncImportResult: null,
     });
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith({
       deviceSyncPort: null,

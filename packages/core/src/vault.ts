@@ -568,10 +568,6 @@ function rawManifestDirectoryForArtifact(relativePath: string): string {
   return path.posix.dirname(relativePath);
 }
 
-function isVaultSyncImportRawPath(relativePath: string): boolean {
-  return relativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/sync-imports/`);
-}
-
 function isEnvelopeBasedInboxRawPath(relativePath: string): boolean {
   return relativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`);
 }
@@ -862,10 +858,6 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   const manifestDirectories = new Set<string>();
 
   for (const relativePath of rawFiles) {
-    if (isVaultSyncImportRawPath(relativePath)) {
-      continue;
-    }
-
     const inboxCaptureDirectory = inboxCaptureRootForRawPath(relativePath);
 
     if (inboxCaptureDirectory !== null) {

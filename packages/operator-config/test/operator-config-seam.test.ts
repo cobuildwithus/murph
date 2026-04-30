@@ -273,24 +273,15 @@ test('operator config resolves default vaults and injects them only for eligible
     ['query', 'projection', 'status', '--vault', '/tmp/default'],
   )
   assert.deepEqual(
+    applyDefaultVaultToArgs(['sync'], '/tmp/default'),
+    ['sync'],
+  )
+  assert.deepEqual(
     applyDefaultVaultToArgs(
       ['sync', 'push', '--session', 'PAIRING-CODE', '--host', 'https://www.withmurph.ai'],
       '/tmp/default',
     ),
-    [
-      'sync',
-      'push',
-      '--session',
-      'PAIRING-CODE',
-      '--host',
-      'https://www.withmurph.ai',
-      '--vault',
-      '/tmp/default',
-    ],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['sync'], '/tmp/default'),
-    ['sync'],
+    ['sync', 'push', '--session', 'PAIRING-CODE', '--host', 'https://www.withmurph.ai'],
   )
   assert.deepEqual(
     applyDefaultVaultToArgs(['query'], '/tmp/default'),

@@ -27,15 +27,12 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
-  "vault.sync.import",
 ] as const;
 
 export type HostedMailboxKind = (typeof HOSTED_MAILBOX_KINDS)[number];
 
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";
 export const HOSTED_MAILBOX_PAYLOAD_SCHEMA = "murph.hosted-mailbox-payload.v1";
-export const HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA =
-  "murph.hosted-vault-sync-payload.v1";
 
 export interface HostedMailboxItem {
   createdAt: string;
@@ -117,57 +114,6 @@ export interface HostedMailboxFetchResponse {
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
   userId: string;
-}
-
-export interface HostedRuntimeVaultSyncImportPayload {
-  bundleBase64: string;
-  localManifestHash?: string | null;
-  payloadSchema: typeof HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA;
-  sessionId: string;
-  sourceSchemaVersion?: string | null;
-}
-
-export interface HostedRuntimeVaultSyncPayloadFetchRequest {
-  requestId: string;
-  sessionId: string;
-}
-
-export interface HostedRuntimeVaultSyncPayloadFetchResponse {
-  fetchedAt: string;
-  payload: HostedRuntimeVaultSyncImportPayload | null;
-  unavailable?: HostedRuntimeSideInputUnavailable | null;
-}
-
-export const HOSTED_RUNTIME_VAULT_SYNC_IMPORT_STATUSES = [
-  "imported",
-  "imported_with_conflicts",
-  "failed",
-] as const;
-
-export type HostedRuntimeVaultSyncImportStatus =
-  (typeof HOSTED_RUNTIME_VAULT_SYNC_IMPORT_STATUSES)[number];
-
-export interface HostedRuntimeVaultSyncImportSummary {
-  conflictCount: number;
-  importedJsonlRecords: number;
-  importedRawFiles: number;
-  importedTextFiles: number;
-  skippedDuplicates: number;
-  skippedExcludedFiles: number;
-}
-
-export interface HostedRuntimeVaultSyncImportRequest {
-  errorCode?: string | null;
-  importedAt: string;
-  sessionId: string;
-  status: HostedRuntimeVaultSyncImportStatus;
-  summary: HostedRuntimeVaultSyncImportSummary;
-}
-
-export interface HostedRuntimeVaultSyncImportResponse {
-  recorded: boolean;
-  sessionId: string;
-  status: HostedRuntimeVaultSyncImportStatus;
 }
 
 export const HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS = [
@@ -291,7 +237,6 @@ export const HOSTED_RUNTIME_LOG_COMPONENTS = [
   "outbox",
   "runner",
   "runtime",
-  "vault-sync",
   "workspace",
 ] as const;
 

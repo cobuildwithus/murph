@@ -487,7 +487,7 @@ export function toHostedBundleBytes(value: Uint8Array | ArrayBuffer): Uint8Array
 }
 
 function isHostedExecutionBundleKind(value: unknown): value is HostedExecutionBundleKind {
-  return value === "vault" || value === "vault-sync-import";
+  return value === "vault";
 }
 
 function normalizeHostedBundleRoot(value: string): string {
