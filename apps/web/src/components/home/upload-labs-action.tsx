@@ -1,7 +1,7 @@
 import { ArrowRight } from "lucide-react";
 
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
-import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
+import { MurphContactAuthButton } from "@/src/components/murph/murph-contact-auth-button";
 import { cn } from "@/src/lib/utils";
 import { getOnboardingStepActionClass } from "./onboarding-steps";
 
@@ -32,18 +32,17 @@ export async function UploadLabsMurphContactAction() {
     },
   });
 
-  if (!option) {
-    return <UploadLabsActionFallback />;
-  }
-
   return (
-    <MurphContactLink
+    <MurphContactAuthButton
       actionLabel="Upload labs to Murph"
       className={getOnboardingStepActionClass(false)}
       option={option}
     >
       Upload labs
-      <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-    </MurphContactLink>
+      <ArrowRight
+        data-icon="inline-end"
+        className="transition-transform duration-200 group-hover:translate-x-0.5"
+      />
+    </MurphContactAuthButton>
   );
 }
