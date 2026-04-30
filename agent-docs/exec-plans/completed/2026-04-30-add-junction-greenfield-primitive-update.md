@@ -49,6 +49,42 @@ The current code is still OAuth-shaped:
 - Canonical wearable source identity currently hashes provider, connection id, and provider account hash. That would collapse all Junction upstream sources into one source.
 - Query candidate provider identity is derived from `externalRef.system`, so a Junction record with `system = "junction"` will be ranked as Junction until source-aware query policy exists.
 
+## Required Fix Checklist
+
+These fixes are non-negotiable for the implementation. They turn the RTF architecture into the shape Murph should actually land.
+
+1. Replace `hosted_link` with `external_link`.
+   "Hosted" is overloaded in this repo. The durable idea is provider-owned linking, not hosted-web linking. Use local `/connect/:provider/callback` and hosted `/api/device-sync/connect/[provider]/callback`, while keeping OAuth callback routes as aliases for existing providers.
+
+2. Make `DeviceAccountCredential` first-class everywhere.
+   The credential kind must reach stored accounts, public accounts, job context, hosted runtime snapshots, hydration, disconnect/revoke, token export, and token refresh. A partial change will force fake empty-token behavior because current code still requires tokens in provider results, public upsert, SQLite credentials, and hosted upsert.
+
+3. Use provider config profiles, not `env:*` secret refs in account rows.
+   Store `credential_kind = "provider_config"` and `provider_config_key = "junction"`. The runtime/provider manifest resolves the actual API key. Keep the Junction API key, client-user HMAC secret, and webhook secret as separate provider-owned secrets with different lifetimes.
+
+4. Do not store raw `clientUserId`.
+   Replace raw `murph:<owner-id>` examples with the HMAC-derived Junction `client_user_id`. Store Junction `user_id` as the encrypted/blind-indexed external account id. Do not duplicate raw `clientUserId` or Junction `user_id` into generic credential metadata unless a concrete operational boundary needs it.
+
+5. Add a hosted runtime credential snapshot union.
+   `tokenBundle: null` is ambiguous because it can mean clear or missing token material. Use a credential snapshot union such as `{ kind: "oauth_tokens"; tokenBundle } | { kind: "provider_config"; providerConfigKey } | { kind: "none" }`. Token clearing should be explicit and valid only for token credentials.
+
+6. Persist the parent account before redirect as a generic begin-flow contract.
+   `beginConnection()` must return a connection seed that ingress persists before returning the Link URL. State metadata alone is not enough. This is the webhook-race protection that lets `provider.connection.created` resolve the parent `junction` account even if it arrives before browser callback.
+
+7. Make `DeviceDataOrigin` real before importing Junction data.
+   Keep `externalRef.system = "junction"`, but do not pack origin only into `resourceType`. Colon examples such as `oura:sleep` may violate current slug assumptions. Add typed origin/provenance and include it in canonical wearable source/data-source identity so Oura-via-Junction and Dexcom-via-Junction do not collapse into one Junction source.
+
+8. Keep source projection plus origin.
+   `DeviceDataOrigin` is per-record provenance. It does not replace `device_connection_source`. Keep a compact local/hosted source-status projection for reconcile, webhooks, and UI. Key it by parent connection plus a stable source instance when possible; source slug alone can be too weak.
+
+9. Gate hosted job hints.
+   Junction webhook resource jobs should use scalar hosted-hint fields through the manifest hint mechanism. Rename ambiguous `providerSlug` fields to `sourceProviderSlug` or `upstreamSourceSlug`, and add tests proving the hosted hint parser accepts every Junction resource-job hint that workers emit.
+
+10. Keep Junction low priority now and source-aware later.
+    Register Junction below direct Oura/Garmin/WHOOP/Strava immediately. Full source-aware query should wait until origin fixtures exist, but the first data-bearing PR must not let Junction outrank direct providers by accident.
+
+Carry forward the earlier safeguards: HMAC client-user ids, parent account before redirect, polling-first ingestion, webhooks as fetch triggers, conservative default resources, and no raw source/device identifiers in web-visible projections.
+
 ## Updated Primitive 1: DeviceConnectionFlow
 
 Add a provider-level connection descriptor:
