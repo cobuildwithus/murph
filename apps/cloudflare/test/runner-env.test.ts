@@ -766,6 +766,16 @@ describe("hosted deploy automation device-sync surface", () => {
     );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining([
+        "JUNCTION_API_KEY",
+        "JUNCTION_CLIENT_USER_ID_SECRET",
+        "JUNCTION_WEBHOOK_SECRET",
+      ]),
+    );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
+      expect.arrayContaining(["JUNCTION_ENV", "JUNCTION_REGION"]),
+    );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
+      expect.arrayContaining([
         "LINQ_API_TOKEN",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",
