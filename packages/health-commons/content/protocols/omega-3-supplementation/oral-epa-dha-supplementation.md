@@ -522,6 +522,23 @@ protocol:
   - Do not stop, replace, or reduce prescribed medications because of this protocol; medication changes belong with the prescribing clinician.
 testPlans:
 -
+  planId: lipid-panel-context-98d
+  durationDays: 98
+  baselineDays: 14
+  interventionDays: 84
+  primaryBiomarkerKey: biomarker:fasting-triglycerides
+  secondaryBiomarkerKeys:
+  - biomarker:ldl-cholesterol
+  - biomarker:non-hdl-cholesterol
+  - biomarker:omega-3-index
+  minimumAdherenceSessions: 56
+  targetAdherenceSessions: 84
+  notes:
+  - Use fasting baseline and follow-up lipid panels where possible and record medication, diet, weight, alcohol, illness, and supplement changes.
+  - This plan is most interpretable when baseline triglycerides are elevated, but persistent or very high triglycerides belong in clinician-managed care.
+  - Watch LDL-C and non-HDL-C rather than assuming all lipid markers improve.
+  - If liver disease, elevated ALT/AST, LDL-C monitoring, severe hypertriglyceridemia, pancreatitis history, diabetes/CVD risk, or lipid-treatment decisions are present, route to clinician-managed care rather than using this as a stand-alone wellness experiment.
+-
   planId: omega3-index-status-98d
   durationDays: 98
   baselineDays: 14
@@ -539,36 +556,59 @@ testPlans:
   - Keep product, dose, meal timing, seafood intake, and other omega-3 sources stable enough that a before/after signal is interpretable.
   - Use lipid-panel changes as clinical-context signals and do not convert them into cardiovascular-event prevention claims.
   - Do not use omega-3 index movement as permission to change prescribed medications or to infer cardiovascular-event, mood, cognition, dry-eye, recovery, or inflammation benefit.
--
-  planId: lipid-panel-context-98d
-  durationDays: 98
-  baselineDays: 14
-  interventionDays: 84
-  primaryBiomarkerKey: biomarker:fasting-triglycerides
-  secondaryBiomarkerKeys:
-  - biomarker:ldl-cholesterol
-  - biomarker:non-hdl-cholesterol
-  - biomarker:omega-3-index
-  minimumAdherenceSessions: 56
-  targetAdherenceSessions: 84
-  notes:
-  - Use fasting baseline and follow-up lipid panels where possible and record medication, diet, weight, alcohol, illness, and supplement changes.
-  - This plan is most interpretable when baseline triglycerides are elevated, but persistent or very high triglycerides belong in clinician-managed care.
-  - Watch LDL-C and non-HDL-C rather than assuming all lipid markers improve.
-  - If liver disease, elevated ALT/AST, LDL-C monitoring, severe hypertriglyceridemia, pancreatitis history, diabetes/CVD risk, or lipid-treatment decisions are present, route to clinician-managed care rather than using this as a stand-alone wellness experiment.
 expectedSignalDescriptions:
 -
-  biomarkerKey: biomarker:omega-3-index
-  description: EPA/DHA supplements can get built into red blood cells over weeks when intake is consistent.
--
   biomarkerKey: biomarker:fasting-triglycerides
-  description: EPA/DHA can lower fasting triglycerides in some people, especially when baseline triglycerides are high. The likely path is liver fat handling and fewer particles carrying triglycerides.
+  description: EPA/DHA can reduce hepatic triglyceride output and VLDL export, so a fasting lipid panel can show lower triglycerides after the 12-week run.
+  expected: Could trend lower
+  estimatedChange:
+    kind: absolute
+    low: -30
+    high: 0
+    unit: mg/dL
+    window: 12 weeks
+    confidence: moderate
+    basis: Most consistent in elevated-baseline triglyceride or higher-dose contexts; meta-analyses report about -18 to -30 mg/dL, while lower-dose or normal-baseline runs can be near zero.
+  protocolProminence: focus
 -
   biomarkerKey: biomarker:ldl-cholesterol
-  description: EPA/DHA alter how the liver makes and clears triglyceride-rich particles. As those particles are remodeled, LDL-C can shift, especially with higher-dose or DHA-heavy patterns.
+  description: As triglyceride-rich particles shrink and remodel, LDL-C can stay flat or rise; DHA-heavy and higher-dose patterns create the clearest upward signal.
+  expected: May rise or stay flat
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 10
+    unit: mg/dL
+    window: 12 weeks
+    confidence: moderate
+    basis: Component-specific and hyperlipidemia syntheses show small average LDL-C rises, with DHA-focused evidence around +7 to +9 mg/dL and fish-oil hyperlipidemia evidence around +2 mg/dL.
+  protocolProminence: focus
 -
   biomarkerKey: biomarker:non-hdl-cholesterol
-  description: Non-HDL-C may change when LDL-C or particles carrying triglycerides shift during the run.
+  description: Lower VLDL/remnant cholesterol can pull non-HDL-C down, while an LDL-C rise can offset it; the useful signal is the full lipid-panel direction.
+  expected: Could trend lower
+  estimatedChange:
+    kind: absolute
+    low: -15
+    high: 0
+    unit: mg/dL
+    window: 12 weeks
+    confidence: low
+    basis: Dose-response and hypertriglyceridemia reviews support non-HDL-C lowering, but LDL-C movement and statin/background-diet context make the consumer-supplement estimate less stable.
+  protocolProminence: context
+-
+  biomarkerKey: biomarker:omega-3-index
+  description: EPA and DHA replace other fatty acids in red-blood-cell membranes over weeks; same-method retesting shows whether the product and dose changed tissue status.
+  expected: Should rise
+  estimatedChange:
+    kind: absolute
+    low: 1.5
+    high: 3.5
+    unit: percentage points
+    window: 12 weeks
+    confidence: high
+    basis: Pooled participant modeling rose about 4.9% to 8.1%, and an 8-week 1 g/day RCT rose about 5.7% to 7.6%; baseline status, dose, formulation, and diet explain much of the spread.
+  protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -1315,11 +1355,11 @@ Can a stable oral preformed EPA/DHA supplement, taken daily and logged precisely
 
 ## Simple version
 
-Pick one EPA/DHA product, write down the actual EPA and DHA amounts, screen for safety boundaries, hold diet and other supplements as stable as possible, and retest with the same lab method after the intervention. The cleanest primary signal is omega-3 index or erythrocyte EPA+DHA. A fasting lipid panel can be useful context, especially triglycerides, but it is not a cardiovascular-event outcome.
+Pick one EPA/DHA product, write down the actual EPA and DHA amounts, screen for safety boundaries, hold diet and other supplements as stable as possible, and retest with the same lab method after the intervention. Fasting triglycerides are the clearest downstream lipid signal; omega-3 index or erythrocyte EPA+DHA is a status check that the product and dose changed tissue fatty-acid exposure.
 
 ## What to watch
 
-The most interpretable success signal is a before/after change in omega-3 index or RBC EPA+DHA. Triglycerides may move, especially when baseline triglycerides are elevated, but LDL-C and non-HDL-C should be watched rather than assumed to improve. Mood, cognition, dry-eye, recovery, soreness, and inflammation markers can be logged as exploratory context only.
+Prioritize a fasting lipid-panel comparison: triglycerides can fall when EPA/DHA reduces liver triglyceride output, while LDL-C and non-HDL-C show whether particle remodeling helped or offset the lipid-panel signal. Use omega-3 index or RBC EPA+DHA as a body-status readout, not as proof of cardiovascular, mood, cognition, dry-eye, recovery, soreness, or inflammation benefit.
 
 ## What not to claim
 
