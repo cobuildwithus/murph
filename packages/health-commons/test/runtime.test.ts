@@ -455,6 +455,57 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(Object.keys(resultsPublic ?? {})).not.toContain("safety");
   });
 
+  it("projects Consistent Wake Time expected signals in the edited order with metadata", () => {
+    const protocolTab = loadGeneratedHealthCommonsWebExperimentProtocolTab({
+      routeId: "consistent-wake-time",
+    });
+
+    expect(protocolTab).toEqual(expect.objectContaining({
+      id: "consistent-wake-time",
+      title: "Consistent Wake Time",
+    }));
+    expect(protocolTab?.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual([
+      "wake-time-variability",
+      "total-sleep-time",
+      "sleep-efficiency",
+      "resting-heart-rate",
+      "hrv-rmssd",
+      "sleep-onset-latency",
+      "daytime-sleepiness",
+    ]);
+    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
+      biomarkerRouteId: "wake-time-variability",
+      expected: "Wake times tighten",
+      estimatedChange: expect.objectContaining({
+        confidence: "moderate",
+        high: -15,
+        kind: "absolute",
+        low: -45,
+        unit: "minutes",
+        window: "2-4 weeks",
+      }),
+      protocolProminence: "focus",
+    }));
+    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
+      biomarkerRouteId: "sleep-efficiency",
+      expected: "Track as mixed context",
+      protocolProminence: "context",
+    }));
+    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
+      biomarkerRouteId: "resting-heart-rate",
+      expected: "May drop slightly",
+      estimatedChange: expect.objectContaining({
+        confidence: "low",
+        high: 0,
+        kind: "absolute",
+        low: -3,
+        unit: "bpm",
+        window: "2-4 weeks",
+      }),
+      protocolProminence: "context",
+    }));
+  });
+
   it("rejects route-index projection paths that do not match the route bundle id", async () => {
     const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
     const finnishRoute = routeIndex.routes.find((entry) =>
