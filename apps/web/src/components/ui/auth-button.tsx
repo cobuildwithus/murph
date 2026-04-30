@@ -30,6 +30,7 @@ function AuthButton({
   children,
   connectLabel,
   disabled,
+  nativeButton,
   onClick,
   onConnect,
   type = "button",
@@ -60,7 +61,8 @@ function AuthButton({
     <>
       <Button
         data-slot="auth-button"
-        type={type}
+        nativeButton={nativeButton}
+        type={nativeButton === false ? undefined : type}
         aria-busy={!ready}
         disabled={!ready || (isAuthenticated ? disabled : false)}
         onClick={handleButtonClick}

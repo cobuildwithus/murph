@@ -164,3 +164,41 @@ test("AuthButton blocks clicks without opening hosted auth while auth is not rea
   expect(container.textContent).not.toContain("Hosted auth panel");
   expect(container.textContent).not.toContain("Log in or sign up");
 });
+
+test("AuthButton can gate a rendered link without replacing its styling", async () => {
+  const onClick = vi.fn();
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(
+      "div",
+      null,
+      createElement(
+        AuthButton,
+        {
+          className: "custom-link-class",
+          nativeButton: false,
+          onClick,
+          render: createElement("a", { href: "/connect" }),
+          size: "unstyled",
+          variant: "unstyled",
+        },
+        "Connect devices",
+      ),
+      createElement("button", { type: "button" }, "test sentinel"),
+    ),
+  );
+  cleanupRender = cleanup;
+
+  const link = container.querySelector("a");
+  expect(link).toBeTruthy();
+  expect(link?.getAttribute("href")).toBe("/connect");
+  expect(link?.getAttribute("data-slot")).toBe("auth-button");
+  expect(link?.className).toContain("custom-link-class");
+
+  await act(async () => {
+    link?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(onClick).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Log in or sign up");
+  expect(container.textContent).toContain("Hosted auth panel");
+});

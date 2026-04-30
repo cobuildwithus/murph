@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
-import type { ReactNode } from "react";
+import {
+  cloneElement,
+  createElement,
+  isValidElement,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -16,6 +21,43 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/components/ui/auth-button", () => ({
+  AuthButton(props: {
+    "aria-label"?: string;
+    children?: ReactNode;
+    className?: string;
+    disabled?: boolean;
+    render?: ReactNode;
+  }) {
+    if (isValidElement<{
+      children?: ReactNode;
+      className?: string;
+      "data-slot"?: string;
+    }>(props.render)) {
+      return cloneElement(
+        props.render,
+        {
+          className: props.className,
+          "data-slot": "auth-button",
+        },
+        props.children,
+      );
+    }
+
+    return createElement(
+      "button",
+      {
+        "aria-label": props["aria-label"],
+        className: props.className,
+        "data-slot": "auth-button",
+        disabled: props.disabled,
+        type: "button",
+      },
+      props.children,
+    );
+  },
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
@@ -78,7 +120,7 @@ test("SidebarChatWithMurphAction prefers the member assigned Murph text number",
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /href="sms:\+15550100001"/);
+  assert.match(markup, /data-slot="auth-button"[^>]*href="sms:\+15550100001"/);
   assert.match(markup, /aria-label="Chat with Murph in Messages"/);
   assert.doesNotMatch(markup, /\+14045550123/);
   assert.doesNotMatch(markup, /member@example\.test/);
@@ -117,7 +159,7 @@ test("SidebarChatWithMurphAction stays disabled when no connected chat channel e
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /data-slot="auth-button"/);
   assert.doesNotMatch(markup, /href=/);
 });
 

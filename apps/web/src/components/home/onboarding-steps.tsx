@@ -3,6 +3,7 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
+import { AuthButton } from "@/src/components/ui/auth-button";
 import {
   ChartPulseIcon,
   FlaskSparkleIcon,
@@ -78,6 +79,29 @@ export function OnboardingSteps({
         const Icon = step.icon;
         const isPrimary = i === 0;
         const customAction = step.id === "labs" ? uploadLabsAction : null;
+        const defaultAction = step.id === "devices" ? (
+          <AuthButton
+            className={getOnboardingStepActionClass(isPrimary)}
+            nativeButton={false}
+            render={<Link href={step.href} />}
+            size="unstyled"
+            variant="unstyled"
+          >
+            {step.cta}
+            <ArrowRight
+              data-icon="inline-end"
+              className="transition-transform duration-200 group-hover:translate-x-0.5"
+            />
+          </AuthButton>
+        ) : (
+          <Link
+            href={step.href}
+            className={getOnboardingStepActionClass(isPrimary)}
+          >
+            {step.cta}
+            <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </Link>
+        );
 
         return (
           <div
@@ -102,15 +126,7 @@ export function OnboardingSteps({
             </div>
 
             <div>
-              {customAction ?? (
-                <Link
-                  href={step.href}
-                  className={getOnboardingStepActionClass(isPrimary)}
-                >
-                  {step.cta}
-                  <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-                </Link>
-              )}
+              {customAction ?? defaultAction}
             </div>
           </div>
         );

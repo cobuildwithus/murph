@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
-import { createElement, type ReactNode } from "react";
+import {
+  cloneElement,
+  createElement,
+  isValidElement,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -22,6 +27,43 @@ vi.mock("next/link", () => ({
     return createElement(
       "a",
       { className: props.className, href: props.href },
+      props.children,
+    );
+  },
+}));
+
+vi.mock("@/src/components/ui/auth-button", () => ({
+  AuthButton(props: {
+    "aria-label"?: string;
+    children?: ReactNode;
+    className?: string;
+    disabled?: boolean;
+    render?: ReactNode;
+  }) {
+    if (isValidElement<{
+      children?: ReactNode;
+      className?: string;
+      "data-slot"?: string;
+    }>(props.render)) {
+      return cloneElement(
+        props.render,
+        {
+          className: props.className,
+          "data-slot": "auth-button",
+        },
+        props.children,
+      );
+    }
+
+    return createElement(
+      "button",
+      {
+        "aria-label": props["aria-label"],
+        className: props.className,
+        "data-slot": "auth-button",
+        disabled: props.disabled,
+        type: "button",
+      },
       props.children,
     );
   },
@@ -90,7 +132,7 @@ test("UploadLabsMurphContactAction opens assigned SMS with the lab-report messag
 
   assert.match(
     markup,
-    /href="sms:\+15550100001\?body=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A"/,
+    /data-slot="auth-button"[^>]*href="sms:\+15550100001\?body=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A"/,
   );
   assert.match(markup, /aria-label="Upload labs to Murph in Messages"/);
   assert.doesNotMatch(markup, /\+14045550123/);
@@ -247,7 +289,7 @@ test("UploadLabsMurphContactAction stays disabled when no connected channel exis
   const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
 
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /data-slot="auth-button"/);
   assert.doesNotMatch(markup, /href=/);
 });
 
