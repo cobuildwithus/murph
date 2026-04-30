@@ -40,6 +40,12 @@ relations:
   type: primary_biomarker
   target: biomarker:postprandial-glucose-excursion
 -
+  type: secondary_biomarker
+  target: biomarker:morning-blood-pressure
+-
+  type: secondary_biomarker
+  target: biomarker:resting-heart-rate
+-
   type: cites
   target: source_artifact:pmid-23761134
 -
@@ -483,6 +489,9 @@ testPlans:
   baselineDays: 7
   interventionDays: 14
   primaryBiomarkerKey: biomarker:postprandial-glucose-excursion
+  secondaryBiomarkerKeys:
+  - biomarker:morning-blood-pressure
+  - biomarker:resting-heart-rate
   safetyOutcomeKeys:
   - biomarker:postprandial-glucose-excursion
   minimumAdherenceSessions: 28
@@ -492,6 +501,43 @@ testPlans:
   - Fingerstick testing can be a fallback for standardized meals, but it has higher burden and misses most of the glucose curve.
   - A full 14-day intervention contains up to 42 meal-walk opportunities; 36 is the pragmatic target adherence threshold for this Murph run and 28 is a lower-bound interpretation threshold, not a validated dose-response cutoff.
   - For users with diabetes medications, pregnancy/GDM, recurrent lows, falls, foot risk, or post-meal dizziness, clinician-guided setup is required before unsupervised testing.
+expectedSignalDescriptions:
+- biomarkerKey: biomarker:postprandial-glucose-excursion
+  expected: meal-window rise may shrink
+  protocolProminence: focus
+  description: Walking places gentle leg-muscle contractions into the same window when the meal is sending glucose into the blood. Working muscle can pull more glucose out of circulation, so matched CGM or fingerstick meal windows may show a smaller peak or iAUC.
+  estimatedChange:
+    kind: relative_percent
+    low: -25
+    high: -10
+    unit: "%"
+    window: 2-3 hour matched meal windows during the 14-day intervention vs baseline
+    confidence: moderate
+    basis: The clearest direct T2D advice trial reported a 3-hour post-meal glucose iAUC ratio of 0.88 overall and 0.78 at dinner; small 10-15 minute after-meal walking studies support the same meal-window direction, with weaker general-adult certainty.
+- biomarkerKey: biomarker:morning-blood-pressure
+  expected: should stay stable
+  protocolProminence: context
+  description: Post-meal walking can interact with meal-related blood-pressure dips, dizziness, and fall risk. Morning home-cuff averages are a safety and context read: a sustained rise, unusual drop, or symptom-linked reading matters more than claiming BP improvement.
+  estimatedChange:
+    kind: absolute
+    low: -3
+    high: 3
+    unit: mmHg systolic
+    window: 14-day morning home-cuff average vs baseline
+    confidence: low
+    basis: Direct BP efficacy evidence for this exact protocol is not established; postprandial-hypotension and safety sources support monitoring, so a near-baseline morning SBP range is the practical expectation.
+- biomarkerKey: biomarker:resting-heart-rate
+  expected: usually stable
+  protocolProminence: context
+  description: The walks add small repeated activity bouts, but the dose is meant to time muscle glucose uptake rather than train the cardiovascular system. Same-device resting heart rate helps catch recovery strain from extra walking, sleep disruption, illness, or underfueling.
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 2
+    unit: bpm
+    window: 14-day overnight or quiet-morning average vs baseline
+    confidence: low
+    basis: The target post-meal walking evidence centers on meal-window glucose, while resting-heart-rate movement is indirect walking/recovery context; meaningful drift should be interpreted as strain or confounding before benefit.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
