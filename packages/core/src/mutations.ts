@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   ContractSchema,
+  DeviceDataOrigin,
   DocumentEventRecord,
   EventAttachment,
   ExternalRef,
@@ -18,6 +19,7 @@ import type {
 } from "@murphai/contracts";
 import {
   assertContractId,
+  deviceDataOriginSchema,
   experimentFrontmatterSchema,
   journalDayFrontmatterSchema,
   eventRecordSchema,
@@ -215,6 +217,7 @@ interface DeviceEventInput extends LooseRecord {
   links?: unknown;
   rawArtifactRoles?: unknown;
   externalRef?: unknown;
+  dataOrigin?: unknown;
   fields?: unknown;
 }
 
@@ -227,6 +230,7 @@ interface DeviceSampleInput extends LooseRecord {
   quality?: string;
   unit?: string;
   externalRef?: unknown;
+  dataOrigin?: unknown;
   sample?: unknown;
 }
 
@@ -335,6 +339,7 @@ interface BuildEventRecordInput<K extends EventKind> {
   links?: unknown;
   rawRefs?: unknown;
   externalRef?: unknown;
+  dataOrigin?: unknown;
   fields?: LooseRecord;
   recordId?: string;
 }
@@ -356,6 +361,7 @@ interface BuildSampleRecordInput {
   unit: string;
   recordId?: string;
   externalRef?: unknown;
+  dataOrigin?: unknown;
 }
 
 interface NormalizedEventSeed<K extends EventKind> {
@@ -371,6 +377,7 @@ interface NormalizedEventSeed<K extends EventKind> {
   links?: EventLinkInput[];
   rawRefs?: string[];
   externalRef?: ExternalRef;
+  dataOrigin?: DeviceDataOrigin;
   fields: LooseRecord;
 }
 
@@ -395,6 +402,7 @@ interface NormalizedSampleSeed {
   source: SampleSource;
   quality: SampleQuality;
   externalRef?: ExternalRef;
+  dataOrigin?: DeviceDataOrigin;
   unit: string;
   measurement: NormalizedSampleMeasurement;
 }
@@ -468,6 +476,21 @@ function normalizeExternalRef(value: unknown): ExternalRef | undefined {
         ? candidate.facet.trim()
         : undefined,
   }) as ExternalRef;
+}
+
+function normalizeDeviceDataOrigin(value: unknown): DeviceDataOrigin | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  assertContractShape<DeviceDataOrigin>(
+    deviceDataOriginSchema,
+    value,
+    "VAULT_INVALID_DATA_ORIGIN",
+    "dataOrigin failed contract validation.",
+  );
+
+  return value;
 }
 
 function normalizeLooseRecord(value: unknown, code: string, message: string): LooseRecord | undefined {
@@ -712,6 +735,7 @@ function buildNormalizedEventSeed<K extends EventKind>({
   links,
   rawRefs,
   externalRef,
+  dataOrigin,
   fields = {},
 }: Omit<BuildEventRecordInput<K>, "recordId">): NormalizedEventSeed<K> {
   if (!EVENT_KIND_SET.has(kind)) {
@@ -753,6 +777,7 @@ function buildNormalizedEventSeed<K extends EventKind>({
     links: canonicalLinks,
     rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
+    dataOrigin: normalizeDeviceDataOrigin(dataOrigin),
     fields: normalizedFields,
   };
 
@@ -780,6 +805,7 @@ function buildEventContractInput<K extends EventKind>(
     links: seed.links?.length ? seed.links : undefined,
     rawRefs: seed.rawRefs,
     externalRef: seed.externalRef,
+    dataOrigin: seed.dataOrigin,
     ...seed.fields,
   });
 }
@@ -854,6 +880,7 @@ function buildNormalizedSampleSeed({
   sample,
   unit,
   externalRef,
+  dataOrigin,
 }: Omit<BuildSampleRecordInput, "recordId">): NormalizedSampleSeed {
   const recordedTimestamp = toIsoTimestamp(sample.recordedAt ?? recordedAt, "recordedAt");
   const normalizedUnit = normalizeNumericUnit(stream, unit);
@@ -869,6 +896,7 @@ function buildNormalizedSampleSeed({
     source: normalizeSource(source, SAMPLE_SOURCE_SET, "import"),
     quality: normalizeSource(quality, SAMPLE_QUALITY_SET, "raw"),
     externalRef: normalizeExternalRef(externalRef),
+    dataOrigin: normalizeDeviceDataOrigin(dataOrigin),
   };
 
   const seed: NormalizedSampleSeed = stream === "sleep_stage"
@@ -941,6 +969,7 @@ function materializeSampleRecord({
     source: seed.source,
     quality: seed.quality,
     externalRef: seed.externalRef,
+    dataOrigin: seed.dataOrigin,
     ...measurementFields,
   });
 }
@@ -1084,6 +1113,7 @@ function normalizeDeviceEventInputs(
       tags: eventInput.tags,
       links: eventInput.links,
       externalRef: eventInput.externalRef,
+      dataOrigin: eventInput.dataOrigin,
       fields,
     });
     const { rawRefs: _rawRefs, ...seedRecord } = buildEventContractInput(seed);
@@ -1135,6 +1165,7 @@ function normalizeDeviceSampleInputs(
       sample,
       unit: String(sampleInput.unit ?? ""),
       externalRef: sampleInput.externalRef,
+      dataOrigin: sampleInput.dataOrigin,
     });
     const record = materializeSampleRecord({ seed });
 

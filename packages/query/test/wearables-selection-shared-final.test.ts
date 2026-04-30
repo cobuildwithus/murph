@@ -40,6 +40,7 @@ function makeMetricCandidate(
 ): WearableMetricCandidate {
   return {
     candidateId: overrides.candidateId,
+    dataOrigin: overrides.dataOrigin ?? null,
     date: overrides.date,
     externalRef: overrides.externalRef ?? null,
     metric: overrides.metric,
@@ -64,6 +65,7 @@ function makeSleepWindowCandidate(
 ): WearableSleepWindowCandidate {
   return {
     candidateId: overrides.candidateId,
+    dataOrigin: overrides.dataOrigin ?? null,
     date: overrides.date,
     durationMinutes: overrides.durationMinutes,
     endAt: overrides.endAt ?? null,
@@ -738,4 +740,187 @@ test("selection helpers cover direct, fallback, agreement, conflict, and tie-bre
     }),
   ]);
   assert.equal(fallbackTimestampSleepSelection.selection?.title, "Alpha end-at sleep");
+});
+
+test("selection keeps Junction source policy separate from provider identity", () => {
+  const directOuraSteps = makeMetricCandidate({
+    candidateId: "oura:steps:direct",
+    dataOrigin: null,
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "oura-steps",
+      resourceType: "activity",
+      system: "oura",
+    }),
+    metric: "steps",
+    occurredAt: "2026-04-12T08:00:00Z",
+    provider: "oura",
+    recordedAt: "2026-04-12T08:01:00Z",
+    sourceFamily: "event",
+    sourceKind: "observation:daily-steps",
+    title: "Direct Oura steps",
+    unit: "count",
+    value: 8200,
+  });
+  const junctionOuraSteps = makeMetricCandidate({
+    candidateId: "junction:oura:steps",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+    },
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "junction-oura-steps",
+      resourceType: "junction-oura-activity",
+      system: "junction",
+    }),
+    metric: "steps",
+    occurredAt: "2026-04-12T08:05:00Z",
+    provider: "junction",
+    recordedAt: "2026-04-12T08:06:00Z",
+    sourceFamily: "event",
+    sourceKind: "observation:daily-steps",
+    title: "Junction Oura steps",
+    unit: "count",
+    value: 8200,
+  });
+
+  const directDuplicate = resolveMetric(
+    "steps",
+    [junctionOuraSteps, directOuraSteps],
+    { metricFamily: "activity" },
+  );
+  assert.equal(directDuplicate.selection.provider, "oura");
+  assert.equal(directDuplicate.selection.title, "Direct Oura steps");
+
+  const weakDirectOuraSteps = makeMetricCandidate({
+    candidateId: "oura:steps:weak-direct",
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "oura-weak-steps",
+      resourceType: null,
+      system: "oura",
+    }),
+    metric: "steps",
+    occurredAt: "2026-04-12T08:00:00Z",
+    provider: "oura",
+    recordedAt: "2026-04-12T08:00:30Z",
+    sourceFamily: "derived",
+    sourceKind: "legacy-steps",
+    title: "Weak direct Oura steps",
+    unit: "count",
+    value: 8200,
+  });
+  const strongJunctionOuraSteps = makeMetricCandidate({
+    candidateId: "junction:oura:steps:strong",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+    },
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "junction-oura-strong-steps",
+      resourceType: "junction-oura-activity",
+      system: "junction",
+    }),
+    metric: "steps",
+    occurredAt: "2026-04-12T08:10:00Z",
+    provider: "junction",
+    recordedAt: "2026-04-12T08:11:00Z",
+    sourceFamily: "sample",
+    sourceKind: "steps",
+    title: "Strong Junction Oura steps",
+    unit: "count",
+    value: 8200,
+  });
+  const adversarialDirectDuplicate = resolveMetric(
+    "steps",
+    [strongJunctionOuraSteps, weakDirectOuraSteps],
+    { metricFamily: "activity" },
+  );
+  assert.equal(adversarialDirectDuplicate.selection.provider, "oura");
+  assert.equal(adversarialDirectDuplicate.selection.title, "Weak direct Oura steps");
+
+  const junctionDexcomGlucoseProxy = makeMetricCandidate({
+    candidateId: "junction:dexcom:proxy",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "dexcom-v3",
+    },
+    date: "2026-04-12",
+    externalRef: makeExternalRef({
+      resourceId: "junction-dexcom-hrv",
+      resourceType: "junction-dexcom-v3-hrv",
+      system: "junction",
+    }),
+    metric: "hrv",
+    occurredAt: "2026-04-12T08:05:00Z",
+    provider: "junction",
+    recordedAt: "2026-04-12T08:06:00Z",
+    sourceFamily: "sample",
+    sourceKind: "hrv",
+    title: "Dexcom via Junction HRV",
+    unit: "ms",
+    value: 45,
+  });
+  const unknownHrv = makeMetricCandidate({
+    candidateId: "unknown:hrv",
+    date: "2026-04-12",
+    metric: "hrv",
+    occurredAt: "2026-04-12T08:00:00Z",
+    provider: "unknown",
+    recordedAt: "2026-04-12T08:00:30Z",
+    sourceFamily: "sample",
+    sourceKind: "hrv",
+    title: "Unknown HRV",
+    unit: "ms",
+    value: 45,
+  });
+  const unsupportedSource = resolveMetric(
+    "hrv",
+    [unknownHrv, junctionDexcomGlucoseProxy],
+    { metricFamily: "recovery" },
+  );
+  assert.equal(unsupportedSource.selection.provider, "junction");
+  assert.equal(unsupportedSource.selection.title, "Dexcom via Junction HRV");
+
+  const junctionOuraSleepWindow = makeSleepWindowCandidate({
+    candidateId: "junction:oura:sleep",
+    date: "2026-04-12",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+    },
+    durationMinutes: 470,
+    endAt: "2026-04-13T06:00:00Z",
+    nap: false,
+    occurredAt: "2026-04-12T22:00:00Z",
+    provider: "junction",
+    recordedAt: "2026-04-13T06:10:00Z",
+    sourceFamily: "event",
+    sourceKind: "sleep_session",
+    startAt: "2026-04-12T22:00:00Z",
+    title: "Junction Oura sleep",
+  });
+  const directOuraSleepWindow = makeSleepWindowCandidate({
+    candidateId: "oura:sleep:direct",
+    date: "2026-04-12",
+    durationMinutes: 470,
+    endAt: "2026-04-13T06:00:00Z",
+    nap: false,
+    occurredAt: "2026-04-12T22:00:00Z",
+    provider: "oura",
+    recordedAt: "2026-04-13T06:01:00Z",
+    sourceFamily: "event",
+    sourceKind: "sleep_session",
+    startAt: "2026-04-12T22:00:00Z",
+    title: "Direct Oura sleep",
+  });
+  const sleepWindow = resolveSleepWindowSelection([junctionOuraSleepWindow, directOuraSleepWindow]);
+  assert.equal(sleepWindow.selection?.provider, "oura");
+  assert.equal(sleepWindow.selection?.title, "Direct Oura sleep");
 });

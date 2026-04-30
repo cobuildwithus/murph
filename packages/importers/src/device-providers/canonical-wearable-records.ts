@@ -395,11 +395,8 @@ function normalizeDeviceDataOrigin(value: DeviceDataOrigin | undefined): DeviceD
     version: 1 as const,
     aggregatorProvider: normalizeOriginString(value.aggregatorProvider),
     sourceProviderSlug: normalizeOriginString(value.sourceProviderSlug),
-    sourceName: normalizeOriginString(value.sourceName),
     sourceType: normalizeOriginString(value.sourceType),
-    sourceDeviceId: normalizeNullableOriginString(value.sourceDeviceId),
-    sourceAppId: normalizeNullableOriginString(value.sourceAppId),
-    sourceWorkoutId: normalizeNullableOriginString(value.sourceWorkoutId),
+    sourceInstanceId: normalizeNullableOriginString(value.sourceInstanceId),
     observedAtRaw: normalizeOriginString(value.observedAtRaw),
     timeZoneOffsetMinutes: normalizeNullableFiniteNumber(value.timeZoneOffsetMinutes),
     timestampSemantics: normalizeTimestampSemantics(value.timestampSemantics),
@@ -422,8 +419,7 @@ function buildDataSourceOriginIdentity(origin: DeviceDataOrigin | undefined): Re
   const identity = stripUndefined({
     sourceProviderSlug: origin.sourceProviderSlug,
     sourceType: origin.sourceType,
-    sourceDeviceId: origin.sourceDeviceId,
-    sourceAppId: origin.sourceAppId,
+    sourceInstanceId: origin.sourceInstanceId,
   });
 
   return Object.keys(identity).length > 0 ? identity : undefined;

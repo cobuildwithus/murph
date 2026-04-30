@@ -148,8 +148,49 @@ function SourceMeta(props: { source: HostedDeviceSyncSettingsSource }) {
     <span className="flex flex-col gap-1">
       <span>{props.source.detail}</span>
       {timing}
+      <UpstreamSources source={props.source} />
     </span>
   );
+}
+
+function UpstreamSources(props: { source: HostedDeviceSyncSettingsSource }) {
+  if (props.source.upstreamSources.length === 0) {
+    return null;
+  }
+
+  return (
+    <span className="mt-1 flex flex-wrap gap-1.5">
+      {props.source.upstreamSources.map((source, index) => (
+        <span
+          key={`${source.providerLabel}:${source.status}:${source.resourceCount}:${index}`}
+          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground"
+        >
+          <span className="min-w-0 max-w-full truncate [overflow-wrap:anywhere]">{source.providerLabel}</span>
+          {source.resourceCount > 0 ? (
+            <span className="shrink-0">{formatResourceCount(source.resourceCount)}</span>
+          ) : null}
+          <span className="shrink-0 text-muted-foreground/80">{formatUpstreamSourceStatus(source.status)}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function formatResourceCount(count: number): string {
+  return `${count} ${count === 1 ? "resource" : "resources"}`;
+}
+
+function formatUpstreamSourceStatus(status: HostedDeviceSyncSettingsSource["upstreamSources"][number]["status"]): string {
+  switch (status) {
+    case "connected":
+      return "connected";
+    case "error":
+      return "needs attention";
+    case "unavailable":
+      return "unavailable";
+  }
+
+  return status;
 }
 
 export function HostedDeviceSyncDisconnectDialog(props: {

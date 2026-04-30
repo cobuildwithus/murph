@@ -74,6 +74,13 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "blood_oxygen",
   "weight",
 ] as const);
+const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
+  "glucose",
+] as const);
+const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
+  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+]);
 export const JUNCTION_DEFAULT_PROVIDER_FILTER = Object.freeze([
   "oura",
   "fitbit",
@@ -522,7 +529,7 @@ function normalizeResourceList(
   defaults: readonly string[],
   label: string,
 ): string[] {
-  const blockedResources = new Set(["glucose", "cgm", "blood_glucose"]);
+  const blockedResources = new Set(["cgm", "blood_glucose"]);
   const normalized = (value && value.length > 0 ? value : defaults)
     .map(normalizeProviderSlug)
     .filter((entry): entry is string => entry !== null && !blockedResources.has(entry));
@@ -726,9 +733,7 @@ function inferJunctionResourceCategory(
     return normalizedCategory;
   }
 
-  return JUNCTION_DEFAULT_TIMESERIES_RESOURCES.includes(
-    resource as (typeof JUNCTION_DEFAULT_TIMESERIES_RESOURCES)[number],
-  )
+  return JUNCTION_TIMESERIES_RESOURCE_NAMES.has(resource)
     ? "timeseries"
     : "summary";
 }
@@ -1052,7 +1057,7 @@ async function projectJunctionSources(
     await context.upsertConnectionSource({
       sourceInstanceKey: buildJunctionSourceInstanceKey(context.account.externalAccountId, provider.slug),
       sourceProviderSlug: provider.slug,
-      displayName: provider.name,
+      displayName: null,
       status: mapJunctionSourceStatus(provider.status),
       resourceAvailabilitySummary: sanitizeJunctionResourceAvailabilitySummary(provider.resourceAvailability),
       lastSeenAt: context.now,

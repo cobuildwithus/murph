@@ -350,6 +350,105 @@ test("importDeviceBatch preserves Garmin-style explicit day keys in non-UTC vaul
   );
 });
 
+test("importDeviceBatch preserves versioned device data origin on events and samples", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-data-origin");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "dexcom-v3",
+    sourceType: "cgm",
+    sourceInstanceId: "source-dexcom-v3-01",
+    observedAtRaw: "2026-03-16 07:30:00",
+    timeZoneOffsetMinutes: null,
+    timestampSemantics: "floating" as const,
+    originConfidence: "high" as const,
+    normalizerVersion: "junction-normalizer.v1",
+  };
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events: [{
+      kind: "observation",
+      occurredAt: "2026-03-16T07:30:00.000Z",
+      recordedAt: "2026-03-16T07:31:00.000Z",
+      title: "Junction glucose",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-dexcom-v3-glucose",
+        resourceId: "glucose-1",
+        facet: "glucose",
+      },
+      dataOrigin,
+      fields: {
+        metric: "glucose",
+        value: 101,
+        unit: "mg_dL",
+      },
+    }],
+    samples: [{
+      stream: "glucose",
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      unit: "mg_dL",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-dexcom-v3-glucose",
+        resourceId: "glucose-sample-1",
+        facet: "sample",
+      },
+      dataOrigin,
+      sample: {
+        value: 101,
+      },
+    }],
+  });
+
+  const eventRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  const sampleRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.sampleShardPaths[0] as string,
+  })) as SampleRecord[];
+
+  assert.deepEqual(eventRecords[0]?.dataOrigin, dataOrigin);
+  assert.deepEqual(sampleRecords[0]?.dataOrigin, dataOrigin);
+});
+
+test("importDeviceBatch rejects raw upstream identifiers in device data origin", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-data-origin-raw-id");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-03-16T07:30:00.000Z",
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "dexcom-v3",
+          sourceDeviceId: "raw-device-id",
+        },
+        fields: {
+          metric: "glucose",
+          value: 101,
+          unit: "mg_dL",
+        },
+      }],
+    }),
+    (error) => error instanceof VaultError && error.code === "VAULT_INVALID_DATA_ORIGIN",
+  );
+});
+
 test("importDeviceBatch keeps canonical manifest provenance authoritative over caller overrides", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-provenance");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

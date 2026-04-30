@@ -3,6 +3,7 @@ import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { buildActivitySessionAggregates, matchesDateFilters } from "./candidates.ts";
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
+import { wearableDataOriginKey } from "./origin.ts";
 import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "./selection.ts";
 import { buildCandidateId, latestIsoTimestamp, normalizeNullableString, uniqueStrings } from "./shared.ts";
 import type {
@@ -89,6 +90,7 @@ function buildCanonicalMetricCandidate(
   return {
     candidateId: buildCandidateId([
       provider,
+      wearableDataOriginKey(record.source.origin),
       date,
       "canonical",
       record.kind,
@@ -98,6 +100,7 @@ function buildCanonicalMetricCandidate(
       record.source.externalRef?.facet ?? "",
       record.occurredAt ?? record.recordedAt ?? record.observedAt,
     ]),
+    dataOrigin: record.source.origin ?? null,
     date,
     externalRef: normalizeExternalRef(record.source.externalRef),
     metric: record.metric,
@@ -125,7 +128,15 @@ function buildCanonicalActivitySessionCandidate(
   }
 
   return {
-    candidateId: buildCandidateId([provider, date, "canonical", "activity-session", record.id]),
+    candidateId: buildCandidateId([
+      provider,
+      wearableDataOriginKey(record.source.origin),
+      date,
+      "canonical",
+      "activity-session",
+      record.id,
+    ]),
+    dataOrigin: record.source.origin ?? null,
     date,
     externalRef: normalizeExternalRef(record.source.externalRef),
     metric: "sessionMinutes",
@@ -153,7 +164,15 @@ function buildCanonicalSleepWindowCandidate(
   }
 
   return {
-    candidateId: buildCandidateId([provider, date, "canonical", "sleep-window", record.id]),
+    candidateId: buildCandidateId([
+      provider,
+      wearableDataOriginKey(record.source.origin),
+      date,
+      "canonical",
+      "sleep-window",
+      record.id,
+    ]),
+    dataOrigin: record.source.origin ?? null,
     date,
     durationMinutes,
     endAt: normalizeNullableString(record.endAt),

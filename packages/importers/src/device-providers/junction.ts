@@ -45,6 +45,10 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "weight",
 ] as const);
 
+export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
+  "glucose",
+] as const);
+
 export interface JunctionSnapshotInput {
   accountId?: string | number;
   importedAt?: string | number | Date;
@@ -103,7 +107,10 @@ const junctionSnapshotSchema = z.object({
 }).catchall(z.unknown());
 
 const SUMMARY_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_DEFAULT_SUMMARY_RESOURCES);
-const TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>(JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
+const TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>([
+  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+]);
 
 const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
@@ -142,7 +149,11 @@ const TIMESERIES_STREAMS: Readonly<Record<string, SampleStreamDescriptor>> = Obj
     paths: ["value", "respiratoryRate", "respiratory_rate"],
   },
   blood_oxygen: { stream: "spo2", unit: "%", paths: ["value", "spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"] },
-  weight: { stream: "weight", unit: "kg", paths: ["value", "weightKg", "weight_kg", "weight"] },
+  glucose: { stream: "glucose", unit: "mg_dL", paths: ["value", "glucose", "bloodGlucose", "blood_glucose"] },
+});
+
+const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>> = Object.freeze({
+  weight: { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["value", "weightKg", "weight_kg", "weight"] },
 });
 
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
@@ -250,6 +261,7 @@ function normalizeTimeseries(
     const entries = resourceEntries(payload);
     const resourceSlug = slugify(resource, "timeseries");
     const streamDescriptor = TIMESERIES_STREAMS[resource];
+    const observationDescriptor = TIMESERIES_OBSERVATION_METRICS[resource];
     pushRawArtifact(
       context.rawArtifacts,
       createRawArtifact(
@@ -259,7 +271,7 @@ function normalizeTimeseries(
       ),
     );
 
-    if (!streamDescriptor) {
+    if (!streamDescriptor && !observationDescriptor) {
       continue;
     }
 
@@ -277,28 +289,51 @@ function normalizeTimeseries(
         return;
       }
 
-      const value = firstNumberFromPaths(entry, streamDescriptor.paths);
+      const value = firstNumberFromPaths(entry, streamDescriptor?.paths ?? observationDescriptor?.paths ?? []);
       const timestamp = resolveRecordTimestamp(entry, context);
 
       if (value === undefined || !timestamp.occurredAt) {
         return;
       }
 
-      context.samples.push(stripUndefined({
-        stream: streamDescriptor.stream,
-        recordedAt: timestamp.occurredAt,
-        dayKey: timestamp.dayKey,
-        timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
-        source: "device",
-        quality: "normalized",
-        unit: firstStringFromPaths(entry, ["unit"]) ?? streamDescriptor.unit,
-        externalRef: makeJunctionExternalRef(resourceContext, entry, "sample"),
-        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-        sample: {
+      if (streamDescriptor) {
+        context.samples.push(stripUndefined({
+          stream: streamDescriptor.stream,
           recordedAt: timestamp.occurredAt,
-          value,
-        },
-      }));
+          dayKey: timestamp.dayKey,
+          timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+          source: "device",
+          quality: "normalized",
+          unit: firstStringFromPaths(entry, ["unit"]) ?? streamDescriptor.unit,
+          externalRef: makeJunctionExternalRef(resourceContext, entry, "sample"),
+          dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+          sample: {
+            recordedAt: timestamp.occurredAt,
+            value,
+          },
+        }));
+        return;
+      }
+
+      if (observationDescriptor) {
+        context.events.push(stripUndefined({
+          kind: "observation",
+          occurredAt: timestamp.occurredAt,
+          recordedAt: timestamp.recordedAt,
+          dayKey: timestamp.dayKey,
+          timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+          source: "device",
+          title: observationDescriptor.title,
+          rawArtifactRoles: resourceContext.rawArtifactRoles,
+          externalRef: makeJunctionExternalRef(resourceContext, entry, observationDescriptor.metric),
+          dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+          fields: {
+            metric: observationDescriptor.metric,
+            unit: firstStringFromPaths(entry, ["unit"]) ?? observationDescriptor.unit,
+            value,
+          },
+        }));
+      }
     });
   }
 }
@@ -325,13 +360,8 @@ function sanitizeProfilePayload(payload: unknown): PlainObject | undefined {
   }
 
   const sanitized = stripUndefined({
-    connectionId: firstStringFromPaths(profile, ["connectionId", "connection_id"]),
-    sourceId: firstStringFromPaths(profile, ["sourceId", "source_id"]),
     sourceProviderSlug: normalizeSourceProviderSlug(firstStringFromPaths(profile, ["sourceProviderSlug", "source_provider_slug"])),
-    sourceName: firstStringFromPaths(profile, ["sourceName", "source_name", "providerName", "provider_name", "source.name"]),
     sourceType: firstStringFromPaths(profile, ["sourceType", "source_type", "source.type"]),
-    sourceDeviceId: firstStringFromPaths(profile, ["sourceDeviceId", "source_device_id", "deviceId", "device_id", "source.device_id", "source.deviceId"]),
-    sourceAppId: firstStringFromPaths(profile, ["sourceAppId", "source_app_id", "appId", "app_id", "source.app_id", "source.appId"]),
   });
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
@@ -494,21 +524,43 @@ function buildDataOrigin(
     version: 1 as const,
     aggregatorProvider: "junction",
     sourceProviderSlug: resourceContext.sourceProviderSlug,
-    sourceName: firstStringFromPaths(entry, ["sourceName", "source_name", "providerName", "provider_name", "source.name"])
-      ?? firstStringFromPaths(resourceContext.connection, ["sourceName", "source_name", "providerName", "provider_name", "source.name"]),
     sourceType: firstStringFromPaths(entry, ["sourceType", "source_type", "source.type"])
       ?? firstStringFromPaths(resourceContext.connection, ["sourceType", "source_type", "source.type"]),
-    sourceDeviceId: firstNullableStringFromPaths(entry, ["sourceDeviceId", "source_device_id", "deviceId", "device_id", "source.device_id", "source.deviceId"])
-      ?? firstNullableStringFromPaths(resourceContext.connection, ["sourceDeviceId", "source_device_id", "deviceId", "device_id", "source.device_id", "source.deviceId"]),
-    sourceAppId: firstNullableStringFromPaths(entry, ["sourceAppId", "source_app_id", "appId", "app_id", "source.app_id", "source.appId"])
-      ?? firstNullableStringFromPaths(resourceContext.connection, ["sourceAppId", "source_app_id", "appId", "app_id", "source.app_id", "source.appId"]),
-    sourceWorkoutId: firstNullableStringFromPaths(entry, ["sourceWorkoutId", "source_workout_id", "workoutId", "workout_id"]),
+    sourceInstanceId: buildSourceInstanceId(entry, resourceContext),
     observedAtRaw: timestamp.observedAtRaw,
     timeZoneOffsetMinutes: firstNullableNumberFromPaths(entry, ["timeZoneOffsetMinutes", "time_zone_offset_minutes", "utcOffsetMinutes", "utc_offset_minutes"]),
     timestampSemantics: timestamp.timestampSemantics,
     originConfidence: firstOriginConfidence(entry, resourceContext.connection),
     normalizerVersion: "junction-normalizer.v1",
   });
+}
+
+function buildSourceInstanceId(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+): string | undefined {
+  const values = [
+    firstStringFromPaths(entry, ["sourceId", "source_id", "connectionId", "connection_id"]),
+    firstStringFromPaths(resourceContext.connection, ["sourceId", "source_id", "id", "connectionId", "connection_id"]),
+    firstStringFromPaths(entry, ["sourceDeviceId", "source_device_id", "deviceId", "device_id", "source.device_id", "source.deviceId"]),
+    firstStringFromPaths(resourceContext.connection, ["sourceDeviceId", "source_device_id", "deviceId", "device_id", "source.device_id", "source.deviceId"]),
+    firstStringFromPaths(entry, ["sourceAppId", "source_app_id", "appId", "app_id", "source.app_id", "source.appId"]),
+    firstStringFromPaths(resourceContext.connection, ["sourceAppId", "source_app_id", "appId", "app_id", "source.app_id", "source.appId"]),
+  ].filter((value): value is string => Boolean(value));
+
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  const digest = createHash("sha256")
+    .update(JSON.stringify({
+      sourceProviderSlug: resourceContext.sourceProviderSlug,
+      values,
+    }))
+    .digest("hex")
+    .slice(0, 24);
+
+  return `source-${digest}`;
 }
 
 function makeJunctionExternalRef(

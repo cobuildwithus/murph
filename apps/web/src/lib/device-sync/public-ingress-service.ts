@@ -16,6 +16,7 @@ import {
   toHostedBrowserDeviceSyncConnection,
   type HostedBrowserDeviceSyncConnection,
 } from "./public-connection";
+import type { HostedDeviceConnectionSource } from "./prisma-store";
 import {
   disconnectHostedDeviceSyncConnection,
   handleHostedDeviceSyncConnectionEstablished,
@@ -68,12 +69,29 @@ export class HostedDeviceSyncPublicIngressService {
   async listConnections(userId: string): Promise<{
     providers: PublicProviderDescriptor[];
     connections: HostedBrowserDeviceSyncConnection[];
+    connectionSources: HostedBrowserDeviceSyncConnectionSource[];
   }> {
     const connections = await this.context.store.listConnectionsForUser(userId);
+    const connectionEntries = await Promise.all(
+      connections.map(async (connection) => {
+        const browserConnection = this.toBrowserConnection(connection);
+        const sources = await this.context.store.listConnectionSources(connection.id);
+        return {
+          browserConnection,
+          sources,
+        };
+      }),
+    );
 
     return {
       providers: this.describeProviders(),
-      connections: connections.map((connection) => this.toBrowserConnection(connection)),
+      connections: connectionEntries.map((entry) => entry.browserConnection),
+      connectionSources: connectionEntries.flatMap((entry) =>
+        entry.sources.map((source) => toHostedBrowserDeviceSyncConnectionSource(
+          source,
+          entry.browserConnection.id,
+        ))
+      ),
     };
   }
 
@@ -193,4 +211,35 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+}
+
+export interface HostedBrowserDeviceSyncConnectionSource {
+  connectionId: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resourceCount: number;
+  sourceProviderSlug: string;
+  status: HostedDeviceConnectionSource["status"];
+}
+
+function toHostedBrowserDeviceSyncConnectionSource(
+  source: HostedDeviceConnectionSource,
+  browserConnectionId: string,
+): HostedBrowserDeviceSyncConnectionSource {
+  return {
+    connectionId: browserConnectionId,
+    firstSeenAt: source.firstSeenAt,
+    lastSeenAt: source.lastSeenAt,
+    resourceCount: countSourceResources(source.resourceAvailabilitySummary),
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+  };
+}
+
+function countSourceResources(summary: HostedDeviceConnectionSource["resourceAvailabilitySummary"]): number {
+  if (!summary) {
+    return 0;
+  }
+
+  return Object.values(summary).filter((value) => value !== false && value !== null && value !== undefined).length;
 }

@@ -321,6 +321,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -693,6 +777,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -1062,6 +1230,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -1500,6 +1752,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -1866,6 +2202,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -2240,6 +2660,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -2608,6 +3112,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -3065,6 +3653,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -3438,6 +4110,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -3822,6 +4578,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -4195,6 +5035,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -4561,6 +5485,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -4942,6 +5950,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -5439,6 +6531,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -6025,6 +7201,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -6473,6 +7733,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -6842,6 +8186,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },
@@ -7303,6 +8731,90 @@
           ],
           "additionalProperties": false
         },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
         "lifecycle": {
           "type": "object",
           "properties": {
@@ -7686,6 +9198,90 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
           ],
           "additionalProperties": false
         },

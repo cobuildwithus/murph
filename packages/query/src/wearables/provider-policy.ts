@@ -87,6 +87,15 @@ export function compareWearableProviders(
   return left.localeCompare(right);
 }
 
+export function hasDirectWearableProviderForSource(sourceProviderSlug: string | null | undefined): boolean {
+  const normalized = normalizeLowercaseString(sourceProviderSlug)?.replace(/_/gu, "-");
+  if (!normalized || normalized === "junction") {
+    return false;
+  }
+
+  return Boolean(resolveDeviceProviderDescriptor(normalized));
+}
+
 export function inferDefaultMetricFamily(metric: WearableMetricKey): DeviceProviderMetricFamily | null {
   if (SLEEP_METRIC_KEYS.has(metric)) {
     return "sleep";

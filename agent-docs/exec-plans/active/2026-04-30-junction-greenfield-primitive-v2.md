@@ -204,11 +204,8 @@ export interface DeviceDataOrigin {
   version: 1;
   aggregatorProvider?: string;
   sourceProviderSlug?: string;
-  sourceName?: string;
   sourceType?: string;
-  sourceDeviceId?: string | null;
-  sourceAppId?: string | null;
-  sourceWorkoutId?: string | null;
+  sourceInstanceId?: string | null; // opaque derived id only, never a raw upstream device/app/workout id
   observedAtRaw?: string;
   timeZoneOffsetMinutes?: number | null;
   timestampSemantics?: "utc" | "offset" | "floating" | "unknown";
@@ -217,7 +214,7 @@ export interface DeviceDataOrigin {
 }
 ```
 
-For Junction-sourced records, keep `externalRef.system = "junction"` and put upstream attribution in `DeviceDataOrigin`. Use contract-safe resource types such as `junction-oura-sleep`, not colon-delimited values.
+For Junction-sourced records, keep `externalRef.system = "junction"` and put upstream attribution in `DeviceDataOrigin`. Use contract-safe resource types such as `junction-oura-sleep`, not colon-delimited values. Raw upstream source names, device ids, app ids, workout ids, or source identifiers may be read transiently to compute opaque hashes or resolve a provider/source, but they are not valid `DeviceDataOrigin` fields and must not be persisted in contracts, canonical wearable source identity, source projection summaries, hosted settings payloads, or web-visible projections.
 
 Canonical wearable source identity must include origin identity so `Oura via Junction`, `Dexcom via Junction`, and `Withings via Junction` do not collapse into one source.
 
@@ -365,7 +362,7 @@ blood_oxygen
 weight
 ```
 
-Do not default-enable every high-frequency or source-sensitive resource. Glucose/CGM, blood pressure, nutrition, ECG, body temperature deltas, stress, menstrual cycle, and workout streams are later slices.
+Do not default-enable every high-frequency or source-sensitive resource. Glucose is allowed only as an explicit opt-in Junction timeseries resource and must carry source/timestamp provenance; broader CGM policy, blood pressure, nutrition, ECG, body temperature deltas, stress, menstrual cycle, and workout streams remain later slices.
 
 ## Timestamp Interpretation
 
@@ -495,7 +492,7 @@ Webhooks start only after polling, parent account persistence, and source projec
 
 ## Current Implementation Status
 
-PR 1, the PR 2 foundation, and the PR 3 polling MVP are committed as `509fce23b`. PR 4 Junction webhooks are implemented in the active checkout as a follow-up slice.
+PR 1, the PR 2 foundation, and the PR 3 polling MVP are committed as `509fce23b`. PR 4 Junction webhooks are committed as `08b71ada1`. PR 5 source-aware query/resource/UI work is implemented in the active checkout with required audit fixes applied and verification passing, pending scoped commit.
 
 Current PR 3 landed slice:
 
@@ -506,7 +503,7 @@ Current PR 3 landed slice:
 - `beginConnection` creates/resolves the Junction user with HMAC `client_user_id`, generates Link, and returns an ingress-persisted parent `connectionSeed` before redirect.
 - `completeConnection` treats Link return as weak, uses the seeded external account as authority, rejects seeded/callback user-id mismatches, updates setup phase, and enqueues scalar polling jobs.
 - Polling jobs reconcile Junction source projection rows, fetch bounded summary/timeseries windows from config, and import one Junction snapshot through the importer.
-- Default resources remain conservative: profile/activity/sleep/workouts/body plus steps/heartrate/hrv/respiratory-rate/blood-oxygen/weight. Glucose/CGM remains deferred.
+- Default resources remain conservative: profile/activity/sleep/workouts/body plus steps/heartrate/hrv/respiratory-rate/blood-oxygen/weight. Glucose stays opt-in and broader CGM expansion remains deferred.
 - CLI provider validation now includes Junction in the supported provider list.
 
 PR 4 landed slice:
@@ -519,7 +516,18 @@ PR 4 landed slice:
 - Generic public ingress can complete verified unknown-account webhooks for providers that opt in, so Junction can avoid provider retries when the pre-Link parent is briefly not visible; hosted route returns `202` for that orphaned acceptance.
 - Webhooks remain freshness/fetch triggers only; no inline webhook normalization was added.
 
-PR 4 still intentionally excludes source-aware query policy, SDK-only Link sources, glucose/CGM, and richer source settings UI.
+PR 4 intentionally excluded source-aware query policy, SDK-only Link sources, glucose/CGM, and richer source settings UI. PR 5 now covers the source-aware query/resource/UI slice while still excluding SDK-only Link sources and broader CGM expansion.
+
+PR 5 implemented slice:
+
+- Contract-level `DeviceDataOrigin` is persisted on event and sample ledger records, generated schemas, core device import inputs, and query candidate construction.
+- Query candidate IDs and exact-dedupe keys include upstream origin identity when present, while preserving legacy keys for records without origin.
+- Junction data-origin fallback can infer upstream source from contract-safe Junction `externalRef.resourceType` values such as `junction-oura-activity` for older records that do not yet carry `dataOrigin`.
+- Query ranking adds source-aware Junction policy: direct provider records beat matching Junction-sourced duplicates when that direct provider exists, while unsupported upstream sources through Junction receive a bounded positive adjustment instead of being permanently treated as low-priority generic Junction data.
+- Canonical wearable records pass origin into semantic query candidates so canonical snapshots and ledger-derived records use the same source policy.
+- Junction timeseries `weight` is normalized as a body observation instead of an invalid sample stream.
+- Junction timeseries `glucose` is supported as an opt-in resource, not a default, and preserves timestamp semantics/source provenance for CGM-style data.
+- Hosted settings responses now include sanitized upstream source summaries keyed by browser-safe connection ids, and the settings card displays upstream source labels/status/resource counts without exposing raw source instance keys or account identifiers.
 
 The landed primitive/foundation slice includes:
 
@@ -546,23 +554,24 @@ The landed primitive/foundation slice includes:
 - Hosted Prisma `DeviceConnectionSource` / additive `2026050101_device_connection_sources` migration, aligned status vocabulary, deterministic listing, and same-provider multi-source coverage.
 - Source projection sanitation keeps account metadata shallow and strips raw identifier-shaped availability/source values from projection summaries.
 
-Pause here before starting PR 5. The next wave should focus on source-aware query policy and richer/high-risk resources on top of the now-present polling and webhook paths.
+PR 5 is ready for required security/privacy, coverage, simplification, task-finish, and frontend review passes before commit.
 
-Latest PR 3/PR 4 verification:
+Latest PR 5 focused verification:
 
 ```txt
+pnpm --dir packages/contracts generate
+pnpm --dir packages/contracts typecheck
+pnpm --dir packages/contracts test
+pnpm --dir packages/core typecheck
+pnpm --dir packages/core test -- device-import.test.ts import-device-batch-validation.test.ts
 pnpm --dir packages/importers typecheck
-pnpm --dir packages/importers test
+pnpm --dir packages/importers test -- device-providers-junction.test.ts
 pnpm --dir packages/device-syncd typecheck
-pnpm --dir packages/device-syncd test
-pnpm --dir packages/operator-config typecheck
-pnpm --dir packages/operator-config test
+pnpm --dir packages/device-syncd test -- junction-provider.test.ts provider-manifests.test.ts
 pnpm --dir packages/query typecheck
+pnpm --dir packages/query test -- query.test.ts wearables-selection-shared-final.test.ts wearables-candidates-final.test.ts wearables-coverage-branches.test.ts
 pnpm --dir apps/web typecheck
-pnpm exec vitest run apps/web/test/agent-route.test.ts apps/web/test/device-sync-hosted-wake.test.ts --config apps/web/vitest.config.ts --no-coverage
-pnpm --dir packages/cli typecheck
-pnpm --dir packages/cli test
-git diff --check -- packages/importers packages/device-syncd apps/web/app/api/device-sync/webhooks apps/web/test/agent-route.test.ts agent-docs/exec-plans/active/2026-04-30-junction-greenfield-primitive-v2.md
+pnpm exec vitest run apps/web/test/device-sync-settings-surface.test.ts apps/web/test/device-sync-hosted-wake.test.ts apps/web/test/dashboard-sidebar.test.ts --config apps/web/vitest.config.ts --no-coverage
 ```
 
 Known unrelated red hosted-web commands in the current dirty checkout:

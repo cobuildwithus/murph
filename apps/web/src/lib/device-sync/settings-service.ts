@@ -23,12 +23,13 @@ export async function buildHostedDeviceSyncSettingsResponse(input: {
   const controlPlane = createHostedDeviceSyncControlPlane(
     new Request(buildHostedDeviceSyncSyntheticRequestUrl()),
   );
-  const { connections, providers } = await controlPlane.listConnections(input.member.id);
+  const { connectionSources, connections, providers } = await controlPlane.listConnections(input.member.id);
 
   return {
     generatedAt: new Date().toISOString(),
     ok: true,
     sources: buildHostedDeviceSyncSettingsSources({
+      connectionSources,
       connections,
       providers,
     }),

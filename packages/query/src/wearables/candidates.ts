@@ -1,9 +1,10 @@
 import { normalizeWearableMetricValue } from "@murphai/importers/device-providers/metric-catalog";
-import { extractIsoDatePrefix } from "@murphai/contracts";
+import { deviceDataOriginSchema, extractIsoDatePrefix, type DeviceDataOrigin } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
+import { wearableDataOriginKey } from "./origin.ts";
 import { formatProviderName } from "./provider-policy.ts";
 import {
   buildCandidateId,
@@ -156,7 +157,7 @@ export function buildActivitySessionAggregates(
   const grouped = new Map<string, WearableActivitySessionAggregate>();
 
   for (const candidate of dedupeExactMetricCandidates(candidates).candidates) {
-    const key = `${candidate.date}:${candidate.provider}`;
+    const key = `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}`;
     const existing = grouped.get(key);
     if (existing) {
       existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
@@ -176,7 +177,13 @@ export function buildActivitySessionAggregates(
       activityTypes: normalizeActivityTypeFromTitle(candidate.title)
         ? [normalizeActivityTypeFromTitle(candidate.title)!]
         : [],
-      candidateId: buildCandidateId([candidate.provider, candidate.date, "activity-session-aggregate"]),
+      candidateId: buildCandidateId([
+        candidate.provider,
+        wearableDataOriginKey(candidate.dataOrigin),
+        candidate.date,
+        "activity-session-aggregate",
+      ]),
+      dataOrigin: candidate.dataOrigin ?? null,
       date: candidate.date,
       paths: [...candidate.paths],
       provider: candidate.provider,
@@ -196,7 +203,7 @@ export function buildSleepStageAggregateCandidates(
   const grouped = new Map<string, WearableMetricCandidate>();
 
   for (const candidate of dedupeExactMetricCandidates(candidates).candidates) {
-    const key = `${candidate.date}:${candidate.provider}:${candidate.metric}`;
+    const key = `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}:${candidate.metric}`;
     const existing = grouped.get(key);
 
     if (existing) {
@@ -209,7 +216,13 @@ export function buildSleepStageAggregateCandidates(
 
     grouped.set(key, {
       ...candidate,
-      candidateId: buildCandidateId([candidate.provider, candidate.date, candidate.metric, "sleep-stage-aggregate"]),
+      candidateId: buildCandidateId([
+        candidate.provider,
+        wearableDataOriginKey(candidate.dataOrigin),
+        candidate.date,
+        candidate.metric,
+        "sleep-stage-aggregate",
+      ]),
       externalRef: null,
       sourceFamily: "derived",
       sourceKind: "sleep-stage-aggregate",
@@ -239,6 +252,7 @@ export function createMetricCandidateBase(
   return {
     candidateId: buildCandidateId([
       provider,
+      wearableDataOriginKey(readWearableDataOrigin(entity.attributes.dataOrigin, externalRef)),
       date,
       sourceFamily,
       sourceKind,
@@ -247,6 +261,7 @@ export function createMetricCandidateBase(
       externalRef?.facet ?? "",
       normalizeNullableString(entity.occurredAt) ?? normalizeNullableString(entity.attributes.recordedAt) ?? "",
     ]),
+    dataOrigin: readWearableDataOrigin(entity.attributes.dataOrigin, externalRef),
     date,
     externalRef,
     occurredAt: entity.occurredAt ?? null,
@@ -266,6 +281,7 @@ export function buildActivitySessionMetricCandidate(
 ): WearableMetricCandidate {
   return {
     candidateId: `${aggregate.candidateId}:${metric}`,
+    dataOrigin: aggregate.dataOrigin ?? null,
     date: aggregate.date,
     externalRef: null,
     metric,
@@ -287,6 +303,7 @@ export function buildSleepWindowMetricCandidate(
 ): WearableMetricCandidate {
   return {
     candidateId: `${window.candidateId}:sessionMinutes`,
+    dataOrigin: window.dataOrigin ?? null,
     date: window.date,
     externalRef: null,
     metric: "sessionMinutes",
@@ -553,12 +570,14 @@ function buildSleepWindowCandidate(
   return {
     candidateId: buildCandidateId([
       provider,
+      wearableDataOriginKey(readWearableDataOrigin(entity.attributes.dataOrigin, externalRef)),
       date,
       "sleep-window",
       externalRef?.resourceType ?? "",
       externalRef?.resourceId ?? entity.entityId,
       normalizeNullableString(entity.attributes.startAt) ?? entity.occurredAt ?? "",
     ]),
+    dataOrigin: readWearableDataOrigin(entity.attributes.dataOrigin, externalRef),
     date,
     durationMinutes,
     endAt: normalizeNullableString(entity.attributes.endAt),
@@ -687,6 +706,68 @@ function readExternalRef(value: unknown): WearableExternalRef | null {
     facet,
   };
 }
+
+function readWearableDataOrigin(
+  value: unknown,
+  externalRef: WearableExternalRef | null,
+): DeviceDataOrigin | null {
+  const normalized = normalizeDeviceDataOrigin(value);
+  return normalized ?? inferJunctionDataOriginFromExternalRef(externalRef);
+}
+
+function normalizeDeviceDataOrigin(value: unknown): DeviceDataOrigin | null {
+  const parsed = deviceDataOriginSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function inferJunctionDataOriginFromExternalRef(
+  externalRef: WearableExternalRef | null,
+): DeviceDataOrigin | null {
+  if (normalizeLowercaseString(externalRef?.system) !== "junction") {
+    return null;
+  }
+
+  const resourceType = normalizeLowercaseString(externalRef?.resourceType);
+  if (!resourceType?.startsWith("junction-")) {
+    return null;
+  }
+
+  for (const suffix of JUNCTION_RESOURCE_TYPE_SUFFIXES) {
+    const token = `-${suffix}`;
+    if (!resourceType.endsWith(token)) {
+      continue;
+    }
+
+    const sourceProviderSlug = resourceType.slice("junction-".length, -token.length);
+    if (!sourceProviderSlug) {
+      return null;
+    }
+
+    return {
+      version: 1,
+      aggregatorProvider: "junction",
+      sourceProviderSlug,
+      originConfidence: "low",
+    };
+  }
+
+  return null;
+}
+
+const JUNCTION_RESOURCE_TYPE_SUFFIXES = [
+  "respiratory-rate",
+  "blood-oxygen",
+  "heartrate",
+  "workouts",
+  "activity",
+  "profile",
+  "glucose",
+  "weight",
+  "steps",
+  "sleep",
+  "body",
+  "hrv",
+] as const;
 
 function listMissingWearableProvenanceFields(
   externalRef: WearableExternalRef | null,

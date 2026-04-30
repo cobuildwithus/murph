@@ -587,3 +587,78 @@ test("Junction resource jobs fetch only the hinted resource window", async () =>
   assert.equal(importedSnapshots.length, 1);
   assert.match(JSON.stringify(importedSnapshots[0]), /"activity"/u);
 });
+
+test("Junction resource jobs infer opt-in glucose as timeseries", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "dexcom_v3",
+            name: "Dexcom",
+            status: "connected",
+            resource_availability: {
+              glucose: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/glucose")) {
+      return createJsonResponse({ data: [{ timestamp: "2026-04-02T00:00:00Z", value: 101 }] });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["glucose"],
+  });
+  const importedSnapshots: unknown[] = [];
+  const context: ProviderJobContext = {
+    account: createAccount(),
+    now: "2026-04-03T00:00:00.000Z",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    upsertConnectionSource: () => ({
+      id: "src-1",
+      connectionId: "acct-junction-1",
+      sourceInstanceKey: "src-key",
+      sourceProviderSlug: "dexcom_v3",
+      displayName: null,
+      status: "connected",
+      resourceAvailabilitySummary: {},
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      createdAt: "2026-04-03T00:00:00.000Z",
+      updatedAt: "2026-04-03T00:00:00.000Z",
+    }),
+    refreshAccountTokens: async () => createAccount(),
+    logger: {},
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("resource", {
+      eventType: "daily.data.glucose.created",
+      objectId: "glucose-1",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "glucose",
+      sourceProviderSlug: "dexcom_v3",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/glucose")).length, 2);
+  assert.equal(requests.some((url) => url.includes("/v2/summary/glucose/")), false);
+  assert.equal(importedSnapshots.length, 1);
+  assert.match(JSON.stringify(importedSnapshots[0]), /"glucose"/u);
+});
