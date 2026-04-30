@@ -28,21 +28,36 @@ export interface MurphContactOption {
   target?: string;
 }
 
+export interface MurphContactMessage {
+  body?: string | null;
+  subject?: string | null;
+}
+
 export const DEFAULT_MURPH_CONTACT_CHANNELS: MurphContactChannels = {
   email: false,
   telegram: false,
   text: false,
 };
 
-export function resolvePreferredMurphChatContactOption(input: {
+export function resolvePreferredMurphContactOption(input: {
   contactChannels?: Partial<MurphContactChannels> | null;
+  message?: MurphContactMessage | null;
   murphPhoneNumber?: string | null;
 }): MurphContactOption | null {
   const contactChannels = normalizeMurphContactChannels(input.contactChannels);
+  const message = normalizeMurphContactMessage(input.message);
+  const hasMessageDraft = message.body !== null || message.subject !== null;
   const murphPhoneNumber = normalizePhoneNumber(input.murphPhoneNumber);
 
   if (murphPhoneNumber && contactChannels.text) {
-    return buildMurphTextContactOption(murphPhoneNumber);
+    return buildMurphTextContactOption({
+      message,
+      murphPhoneNumber,
+    });
+  }
+
+  if (hasMessageDraft && contactChannels.email) {
+    return buildMurphEmailContactOption({ message });
   }
 
   if (contactChannels.telegram) {
@@ -50,10 +65,17 @@ export function resolvePreferredMurphChatContactOption(input: {
   }
 
   if (contactChannels.email) {
-    return buildMurphEmailContactOption();
+    return buildMurphEmailContactOption({ message });
   }
 
   return null;
+}
+
+export function resolvePreferredMurphChatContactOption(input: {
+  contactChannels?: Partial<MurphContactChannels> | null;
+  murphPhoneNumber?: string | null;
+}): MurphContactOption | null {
+  return resolvePreferredMurphContactOption(input);
 }
 
 export function resolveMurphContactChannels(input: {
@@ -121,10 +143,14 @@ export function normalizeMurphContactChannels(
   };
 }
 
-function buildMurphTextContactOption(murphPhoneNumber: string): MurphContactOption {
+function buildMurphTextContactOption(input: {
+  message: NormalizedMurphContactMessage;
+  murphPhoneNumber: string;
+}): MurphContactOption {
   return {
     href: buildMurphSmsHref({
-      murphPhoneNumber,
+      body: input.message.body,
+      murphPhoneNumber: input.murphPhoneNumber,
     }),
     kind: "text",
     label: "Messages",
@@ -141,13 +167,30 @@ function buildMurphTelegramContactOption(): MurphContactOption {
   };
 }
 
-function buildMurphEmailContactOption(): MurphContactOption {
+function buildMurphEmailContactOption(input: {
+  message: NormalizedMurphContactMessage;
+}): MurphContactOption {
   return {
     href: buildMurphEmailHref({
-      subject: "Chat with Murph",
+      body: input.message.body,
+      subject: input.message.subject ?? "Chat with Murph",
     }),
     kind: "email",
     label: "Email",
+  };
+}
+
+interface NormalizedMurphContactMessage {
+  body: string | null;
+  subject: string | null;
+}
+
+function normalizeMurphContactMessage(
+  message: MurphContactMessage | null | undefined,
+): NormalizedMurphContactMessage {
+  return {
+    body: normalizeOptionalString(message?.body),
+    subject: normalizeOptionalString(message?.subject),
   };
 }
 
