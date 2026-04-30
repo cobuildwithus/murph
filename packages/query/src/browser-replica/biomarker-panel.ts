@@ -143,8 +143,8 @@ export function selectBrowserVaultBiomarkerPanel(
     return {
       ...base,
       emptyState: {
-        body: "This biomarker is public, but it does not have a private browser-vault metric binding yet.",
-        title: "Private trend unavailable",
+        body: "Private tracking for this biomarker is not available yet.",
+        title: "Biomarker unavailable",
       },
       status: "unsupported",
     };
@@ -440,8 +440,8 @@ function emptyStateForStatus(
   status: BrowserVaultBiomarkerPanelStatus,
 ): BrowserVaultBiomarkerPanelEmptyState {
   return {
-    body: "Sync a browser-vault replica to see your own trend here. Nothing from this card is public.",
-    title: "Private trend unavailable",
+    body: "Connect a health device to see your personal trend here. Your data stays private.",
+    title: "Biomarker unavailable",
   };
 }
 

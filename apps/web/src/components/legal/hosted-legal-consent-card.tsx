@@ -142,23 +142,11 @@ export function HostedLegalConsentCard({
         aria-busy="true"
         aria-live="polite"
         role="status"
-        className={joinClassNames(cardClassName(mode), className)}
+        className={joinClassNames(cardClassName(mode), "py-4", className)}
       >
-        <div className="space-y-6">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 size-5 shrink-0 animate-pulse rounded-[4px] bg-muted" />
-            <div className="flex-1 space-y-2">
-              <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
-              <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
-            </div>
-          </div>
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 size-5 shrink-0 animate-pulse rounded-[4px] bg-muted" />
-            <div className="flex-1 space-y-2">
-              <div className="h-4 w-full animate-pulse rounded bg-muted" />
-              <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
-            </div>
-          </div>
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/60" />
+          <span>Loading...</span>
         </div>
       </div>
     );
