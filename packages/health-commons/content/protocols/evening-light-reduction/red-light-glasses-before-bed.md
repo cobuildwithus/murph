@@ -28,11 +28,11 @@ relations:
 - type: secondary_biomarker
   target: biomarker:sleep-efficiency
 - type: secondary_biomarker
-  target: biomarker:deep-sleep-minutes
+  target: biomarker:resting-heart-rate
 - type: secondary_biomarker
   target: biomarker:hrv-rmssd
 - type: secondary_biomarker
-  target: biomarker:resting-heart-rate
+  target: biomarker:deep-sleep-minutes
 lineage:
   relationship: root
   rationale: Murph canonical adult evening-light-reduction self-experiment; not a named external clinical protocol.
@@ -107,36 +107,73 @@ testPlans:
   primaryBiomarkerKey: biomarker:sleep-onset-latency
   secondaryBiomarkerKeys:
   - biomarker:sleep-efficiency
-  - biomarker:deep-sleep-minutes
-  - biomarker:hrv-rmssd
   - biomarker:resting-heart-rate
+  - biomarker:hrv-rmssd
+  - biomarker:deep-sleep-minutes
   minimumAdherenceSessions: 10
   targetAdherenceSessions: 12
   notes:
   - Compare the 14-night intervention window with the user’s own 7-night baseline rather than highlighting single-night changes.
-  - Make subjective sleep-onset ease plus pre-bed wiredness or sleepiness the first success read; wearable sleep-onset and sleep efficiency are context.
-  - Treat deep-sleep minutes, HRV, and resting heart rate as exploratory because direct eyewear evidence does not establish them as primary effects.
+  - Use sleep-onset latency and sleep efficiency as the main measurable read; subjective sleep-onset ease and pre-bed wiredness help interpret quiet-wakefulness errors.
+  - Treat resting heart rate, HRV, and deep-sleep minutes as exploratory downstream checks because direct eyewear evidence does not establish them as primary effects.
   - Mark attribution as weak if the user also changes screen curfew, room-light setup, melatonin, supplements, bedtime, or timed light therapy during the same test.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-onset-latency
-  description: High-filtering evening glasses may reduce the short-wavelength or melanopic cue that keeps alertness high before bed; if that cue is relevant for the user, sleep onset may feel easier [source_artifact:evening-light-reduction-pmid-16842544; source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797].
+  description: Filtering blue-green evening light lowers the retinal signal that suppresses melatonin and keeps the brain alert. When that late-light cue is driving the delay, time to fall asleep can shorten [source_artifact:evening-light-reduction-pmid-16842544; source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797].
   expected: down_or_stable
+  estimatedChange:
+    kind: absolute
+    low: -10
+    high: 0
+    unit: min
+    window: baseline vs 7-14 intervention nights
+    confidence: mixed
+    basis: Pooled actigraphy across three crossover RCTs estimated SOL MD -4.86 min with a wide CI crossing zero; a small adult device-use eyewear trial reported significantly better sleep latency, while healthy-adult evidence was null or subgroup-limited [source_artifact:evening-light-reduction-pmid-41341515; source_artifact:evening-light-reduction-pmid-26730983; source_artifact:pmid-33707105].
   protocolProminence: focus
 - biomarkerKey: biomarker:sleep-efficiency
-  description: Sleep efficiency is secondary; it may improve if sleep onset becomes easier, but pooled adult actigraphy evidence does not establish a reliable objective effect [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515].
+  description: The glasses do not deepen sleep directly; they aim to reduce the awake-in-bed part of the night. If sleep starts sooner without adding more time in bed, sleep efficiency can rise [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515].
   expected: up_or_stable
-  protocolProminence: context
-- biomarkerKey: biomarker:deep-sleep-minutes
-  description: Deep-sleep minutes are exploratory because consumer sleep-stage estimates are device-dependent and direct eyewear evidence does not center on sleep architecture [source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
-  expected: mixed_or_contextual
-  protocolProminence: context
-- biomarkerKey: biomarker:hrv-rmssd
-  description: HRV is exploratory and highly confounded by stress, alcohol, training load, illness, and bedtime timing; use it only as background context for this protocol [source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
-  expected: mixed_or_contextual
+  estimatedChange:
+    kind: absolute
+    low: -1
+    high: 2
+    unit: percentage points
+    window: baseline vs 7-14 intervention nights
+    confidence: mixed
+    basis: A small adult device-use eyewear trial reported significantly better sleep efficiency; pooled actigraphy across three crossover RCTs estimated SE MD -0.61 percentage points with a wide CI crossing zero [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515].
   protocolProminence: context
 - biomarkerKey: biomarker:resting-heart-rate
-  description: Resting heart rate is exploratory; use it only as a repeated trend signal after checking alcohol, illness, training, stress, and bedtime shifts [source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
+  description: Reducing late circadian alerting can make the sleep period less strained when it improves sleep onset or continuity. A wearable may show a small lower resting pulse; a rise usually points to alcohol, illness, stress, late training, short sleep, or schedule drift [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
+  expected: down_or_stable
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 0
+    unit: bpm
+    window: baseline vs 7-14 intervention nights
+    confidence: low
+    basis: Low-confidence downstream estimate from sleep-onset, sleep-efficiency, and total-sleep-time signals; the direct eyewear trials and actigraphy meta-analysis did not measure resting heart rate [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
+  protocolProminence: context
+- biomarkerKey: biomarker:hrv-rmssd
+  description: Less late-light signaling can lower pre-bed alertness; when that produces longer or less fragmented sleep, nocturnal RMSSD can edge up. Read it beside alcohol, illness, stress, hard training, bedtime shifts, and sensor quality [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
+  expected: up_or_stable
+  estimatedChange:
+    kind: relative_percent
+    low: 0
+    high: 5
+    unit: "%"
+    window: baseline vs 7-14 intervention nights
+    confidence: low
+    basis: Low-confidence downstream estimate from improved sleep continuity rather than direct eyewear HRV data; direct sources measured melatonin, sleep latency, sleep efficiency, insomnia ratings, total sleep time, and actigraphy outcomes, not RMSSD [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
+  protocolProminence: context
+- biomarkerKey: biomarker:deep-sleep-minutes
+  description: This protocol changes retinal light input and evening alertness, not sleep-stage machinery directly. Any deep-sleep change should come secondarily from longer or less fragmented sleep, so use same-device stage trends only as a weak cross-check [source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-40300398].
   expected: mixed_or_contextual
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: baseline vs 7-14 intervention nights
+    confidence: low
+    basis: Direct eyewear evidence centers on melatonin, sleep latency, sleep efficiency, insomnia ratings, and actigraphy total sleep time; it does not establish N3/deep-sleep effects, and consumer sleep-stage estimates are weaker than sleep/wake trends [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-40300398].
   protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
@@ -716,9 +753,9 @@ With a negative safety screen and a visually safe, task-free pre-bed wear window
 
 ## What counts as a signal
 
-The primary signal is repeated improvement in subjective sleep-onset latency, perceived ease of sleep onset, and pre-bed wiredness or sleepiness compared with the user's own baseline. Wearable sleep onset and sleep efficiency are useful context, but they should not override the subjective log because actigraphy and consumer sleep devices can misclassify quiet wakefulness and sleep stages [source_artifact:evening-light-reduction-pmid-12749556; source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
+Use wearable sleep-onset latency and sleep efficiency as the main measurable read, checked against perceived ease of sleep onset and pre-bed wiredness or sleepiness in the subjective log. The subjective log still matters because actigraphy and consumer sleep devices can misclassify quiet wakefulness and sleep stages [source_artifact:evening-light-reduction-pmid-12749556; source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
 
-Deep-sleep minutes, HRV, and resting heart rate are exploratory only. Treat them as context after checking alcohol, caffeine, illness, training load, travel, stress, bedtime changes, and medication or supplement changes [source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
+Resting heart rate, HRV, and deep-sleep minutes are exploratory only. Treat them as context after checking alcohol, caffeine, illness, training load, travel, stress, bedtime changes, and medication or supplement changes [source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
 
 ## Product and setup guardrails
 
