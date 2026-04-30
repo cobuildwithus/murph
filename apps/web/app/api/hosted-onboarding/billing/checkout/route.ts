@@ -10,6 +10,8 @@ import {
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import { requireHostedInviteCodeFromRequest } from "@/src/lib/hosted-onboarding/route-helpers";
+import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
+import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.billing-checkout");
@@ -28,6 +30,10 @@ export const POST = withJsonError(async (request: Request) => {
       identity: auth.identity,
       inviteCode,
       verifiedPrivyUser: auth.verifiedPrivyUser,
+    });
+    await assertHostedLaunchRequiredConsentGranted({
+      memberId: auth.member.id,
+      prisma: getPrisma(),
     });
 
     const checkout = await createHostedBillingCheckout({

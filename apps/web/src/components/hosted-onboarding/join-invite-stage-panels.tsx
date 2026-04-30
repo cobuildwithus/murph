@@ -163,6 +163,26 @@ export function JoinInviteVerificationPanel({
   );
 }
 
+export function JoinInviteLaunchLegalConsentPanel({
+  onLaunchLegalConsentSatisfied,
+}: {
+  onLaunchLegalConsentSatisfied: () => Promise<void>;
+}) {
+  return (
+    <HostedLegalConsentCard
+      mode="panel"
+      onAccepted={onLaunchLegalConsentSatisfied}
+      onRequirementChange={(required) => {
+        if (!required) {
+          void onLaunchLegalConsentSatisfied();
+        }
+      }}
+      preferredScope="launch.required"
+      source="join-invite-phone-verify"
+    />
+  );
+}
+
 export function JoinInviteMessagingSetupPanel({
   authenticated,
   initialLinkedAccounts,
@@ -225,7 +245,6 @@ const EDGE_FEATURES = [
 
 export function JoinInviteCheckoutPanel({
   billingReady,
-  billingPlanCode,
   billingPlans,
   onCheckout,
   onCheckoutSuccess,
@@ -233,7 +252,6 @@ export function JoinInviteCheckoutPanel({
   onSelectBillingPlan,
 }: {
   billingReady: boolean;
-  billingPlanCode: HostedBillingPlanCode | null;
   billingPlans: HostedInviteStatusPayload["billing"]["plans"];
   onCheckout: (billingPlanCode: HostedBillingPlanCode) => Promise<void>;
   onCheckoutSuccess: () => void;
@@ -527,14 +545,15 @@ function CheckoutTrustItem({
 }
 
 export function JoinInviteActivePanel({
+  launchLegalConsentSatisfied,
   murphPhoneNumber,
   stage,
 }: {
+  launchLegalConsentSatisfied: boolean;
   murphPhoneNumber: string | null;
   stage: HostedAccessibleOnboardingStage;
 }) {
   const activationPending = stage === "activating";
-  const [legalConsentRequired, setLegalConsentRequired] = useState(true);
 
   return (
     <div className="flex flex-col gap-8">
@@ -559,14 +578,7 @@ export function JoinInviteActivePanel({
         </div>
       )}
 
-      <HostedLegalConsentCard
-        mode="panel"
-        onRequirementChange={setLegalConsentRequired}
-        preferredScope="launch.required"
-        source="join-invite-active"
-      />
-
-      {!legalConsentRequired ? (
+      {launchLegalConsentSatisfied ? (
         <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
       ) : null}
 
