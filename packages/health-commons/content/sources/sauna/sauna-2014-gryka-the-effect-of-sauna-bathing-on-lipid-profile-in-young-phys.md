@@ -30,7 +30,7 @@ researchEvidence:
   designKind: "single_arm_trial"
   designLabel: "Young-men lipid intervention"
   participantCount: 16
-  participantCountKind: "approximate"
+  participantCountKind: "reported"
   populationLabel: "Young physically active men"
   durationLabel: "Repeated sauna sessions"
   aggregateRole: "primary"
