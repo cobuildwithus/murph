@@ -126,6 +126,14 @@
       "path": "fixtures/golden-outputs/samples-import-csv"
     },
     {
+      "id": "samples-csv-profile",
+      "path": "fixtures/golden-outputs/samples-csv-profile"
+    },
+    {
+      "id": "samples-summarize",
+      "path": "fixtures/golden-outputs/samples-summarize"
+    },
+    {
       "id": "experiment-create",
       "path": "fixtures/golden-outputs/experiment-create"
     },
