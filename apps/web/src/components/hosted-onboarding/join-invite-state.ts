@@ -45,7 +45,7 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
     case "verify":
       return "Confirm your number";
     case "checkout":
-      return "One last step";
+      return "Start your first experiment";
     case "activating":
       return "Finishing your setup";
     case "blocked":
@@ -67,7 +67,7 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "checkout":
       return status.messagingSetupRequired
         ? "Add a phone number or Telegram so Murph can reach you after payment."
-        : "Choose a plan, then finish payment to start using Murph.";
+        : "See what actually works for your body.";
     case "activating":
       return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;
     case "blocked":

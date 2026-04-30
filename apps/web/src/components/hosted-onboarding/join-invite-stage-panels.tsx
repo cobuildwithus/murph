@@ -6,24 +6,19 @@ import Link from "next/link";
 
 import {
   ArrowRightIcon,
-  CalendarIcon,
   CheckCircleIcon,
   CheckIcon,
-  Code2Icon,
+  DiamondIcon,
   LoaderCircleIcon,
+  SparkleIcon,
   LockIcon,
+  RefreshCwIcon,
   ShieldCheckIcon,
 } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import { CheckoutButton } from "@/src/components/ui/checkout-button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-} from "@/src/components/ui/card";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
@@ -40,6 +35,7 @@ import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
 import { HostedTelegramSettings } from "../settings/hosted-telegram-settings";
 
 const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
+const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 interface JoinInviteVerificationPanelProps {
   awaitingInviteSessionResolution: boolean;
@@ -201,6 +197,33 @@ export function JoinInviteMessagingSetupPanel({
   );
 }
 
+const FREE_FEATURES = [
+  "Full product — no paywall",
+  "Bring your own API keys",
+  "Self-host or run locally",
+  "Own your data, export anytime",
+  "Community-supported setup",
+];
+
+const PULSE_FEATURES = [
+  "Everything in Free and:",
+  "Access to frontier models",
+  "Wearable data sync",
+  "Before/after outcome cards",
+  "Chat via iMessage, Telegram, or email",
+  "Guided experiment setup",
+];
+
+const EDGE_FEATURES = [
+  "Everything in Pulse and:",
+  "3x AI usage across all models",
+  "Always the best model available",
+  "Deeper outcome analysis",
+  "Detailed biomarker deltas",
+  "Richer protocol recommendations",
+  "Early access to new features",
+];
+
 export function JoinInviteCheckoutPanel({
   billingReady,
   billingPlanCode,
@@ -218,136 +241,284 @@ export function JoinInviteCheckoutPanel({
   onCheckoutError: (error: unknown) => void;
   onSelectBillingPlan: (billingPlanCode: HostedBillingPlanCode) => void;
 }) {
-  const selectedBillingPlan =
-    billingPlans.find((plan) => plan.code === billingPlanCode) ?? null;
+  const monthlyPlan = billingPlans.find((p) => p.interval === "month");
 
   return (
-    <div className="space-y-4">
-      <Card className="gap-3 rounded-xl py-3 shadow-[0_24px_60px_-30px_rgba(26,31,22,0.18)] backdrop-blur-sm">
-        <CardContent className="px-6 pt-2 pb-1 sm:px-8 sm:pt-4">
-          <div className="space-y-2">
-            <p className="font-serif text-2xl font-normal tracking-tight text-foreground">
-              Choose your plan
-            </p>
-            <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-              Private vault, every experiment, full before/after analysis.
-            </p>
-          </div>
+    <div className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Free */}
+        <PricingTierCard
+          tier="free"
+          name="Free"
+          description="Full product, your keys, your data."
+          price="$0"
+          priceUnit="/ month"
+          features={FREE_FEATURES}
+          cta={
+            <Button
+              size="lg"
+              className="h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90"
+              render={
+                <Link
+                  href={MURPH_GITHUB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
+            >
+              <span className="flex-1 text-center">Open Source</span>
+              <ArrowRightIcon className="size-4 shrink-0" />
+            </Button>
+          }
+        />
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {billingPlans.map((plan) => {
-              const selected = plan.code === billingPlanCode;
-              const [priceAmount, priceUnit] = splitRecurringSummary(
-                plan.recurringSummary,
-              );
+        {/* Pulse */}
+        <PricingTierCard
+          tier="go"
+          name="Pulse"
+          description="Private experiments for one person."
+          price={monthlyPlan ? `$${Math.round(monthlyPlan.recurringAmountUsdCents / 100)}` : "$8"}
+          priceUnit="/ month"
+          features={PULSE_FEATURES}
+          cta={
+            <CheckoutButton
+              onCheckout={async () => {
+                if (monthlyPlan) onSelectBillingPlan(monthlyPlan.code);
+                await onCheckout();
+              }}
+              onSuccess={onCheckoutSuccess}
+              onError={onCheckoutError}
+              disabled={!billingReady}
+              size="lg"
+              className="h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90"
+              idleLabel="Get Pulse"
+              idleAdornment={<ArrowRightIcon className="size-4" />}
+            />
+          }
+        />
 
-              return (
-                <button
-                  key={plan.code}
-                  type="button"
-                  onClick={() => onSelectBillingPlan(plan.code)}
-                  className={[
-                    "rounded-2xl border px-5 py-5 text-left transition-all",
-                    selected
-                      ? "border-foreground/15 bg-olive-light/15 shadow-[0_2px_4px_rgba(26,31,22,0.05)]"
-                      : "border-border bg-card hover:border-olive-light/40",
-                  ].join(" ")}
-                  aria-pressed={selected}
-                >
-                  <div className="flex h-7 items-center justify-between gap-3">
-                    <p className="text-sm font-semibold leading-none text-foreground">
-                      {plan.displayName}
-                    </p>
-                    {selected ? (
-                      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-                        <CheckIcon className="size-3.5" strokeWidth={2.5} />
-                      </span>
-                    ) : plan.badge ? (
-                      <Badge
-                        variant="secondary"
-                        className="h-7 rounded-full bg-olive-light/20 px-2.5 font-mono text-[0.625rem] font-medium uppercase tracking-[0.14em] text-olive"
-                      >
-                        {plan.badge}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <div className="mt-3 flex items-baseline gap-0.5">
-                    <span className="font-serif text-4xl font-normal leading-none tracking-tight text-foreground">
-                      {priceAmount}
-                    </span>
-                    {priceUnit ? (
-                      <span className="font-serif text-lg font-normal text-muted-foreground">
-                        {priceUnit}
-                      </span>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+        {/* Edge */}
+        <PricingTierCard
+          tier="plus"
+          name="Edge"
+          description="More guidance and deeper research."
+          price="$20"
+          priceUnit="/ month"
+          features={EDGE_FEATURES}
+          cta={
+            <Button
+              size="lg"
+              className="h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90"
+              render={
+                <Link href="mailto:support@withmurph.ai?subject=Murph Plus" />
+              }
+            >
+              <span className="flex-1 text-center">Get Edge</span>
+              <ArrowRightIcon className="size-4 shrink-0" />
+            </Button>
+          }
+        />
+      </div>
 
-          <div className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="flex size-7 items-center justify-center rounded-full border border-border bg-card">
-              <CalendarIcon className="size-3.5" />
-            </span>
-            <span className="leading-relaxed">
-              {selectedBillingPlan
-                ? `You’ll start on the ${selectedBillingPlan.displayName.toLowerCase()} plan.`
-                : "Choose a plan to continue."}
-            </span>
-          </div>
-
-          <CheckoutButton
-            onCheckout={onCheckout}
-            onSuccess={onCheckoutSuccess}
-            onError={onCheckoutError}
-            disabled={!billingReady || !billingPlanCode}
-            size="lg"
-            className="mt-4 h-16 w-full justify-between rounded-2xl bg-foreground px-7 text-[1.0625rem] font-semibold text-background hover:bg-foreground/90"
-            idleLabel={billingReady ? "Continue to checkout" : "Billing is not configured yet"}
-            idleAdornment={<ArrowRightIcon className="size-5" />}
+      <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3">
+          <CheckoutTrustItem
+            icon={LockIcon}
+            label="Private by default"
+            sublabel="Your data stays yours."
           />
-        </CardContent>
-
-        <CardFooter className="border-t border-border bg-muted/40 px-6 py-4 sm:px-8">
-          <ul className="flex w-full flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-            <CheckoutTrustItem icon={LockIcon} label="Private by default" />
-            <CheckoutTrustItem icon={ShieldCheckIcon} label="No data sold, ever" />
-            <CheckoutTrustItem icon={Code2Icon} label="Fully open source" />
-          </ul>
-        </CardFooter>
-      </Card>
-      <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <LockIcon className="size-3.5" aria-hidden />
-        <span>Secure checkout powered by Stripe</span>
+          <CheckoutTrustItem
+            icon={ShieldCheckIcon}
+            label="No data sold"
+            sublabel="Ever. That’s our promise."
+            divider
+          />
+          <CheckoutTrustItem
+            icon={RefreshCwIcon}
+            label="Full data access"
+            sublabel="Export or delete anytime."
+            divider
+          />
+        </div>
       </div>
     </div>
+  );
+}
+
+function PricingTierCard({
+  name,
+  description,
+  price,
+  priceUnit,
+  features,
+  cta,
+  tier,
+}: {
+  name: string;
+  description: string;
+  price: string;
+  priceUnit: string;
+  features: readonly string[];
+  cta: React.ReactNode;
+  tier: "free" | "go" | "plus";
+}) {
+  return (
+    <div className="flex flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
+      <div className="flex items-center gap-3">
+        <PricingDots tier={tier} />
+        <p className="font-serif text-3xl font-normal tracking-tight text-foreground">
+          {name}
+        </p>
+      </div>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        {description}
+      </p>
+
+      <div className="mt-6 border-t border-border pt-6">
+        <div className="flex items-baseline gap-1">
+          <span className="font-serif text-5xl font-normal leading-none tracking-tight text-foreground">
+            {price}
+          </span>
+          <span className="text-sm text-muted-foreground">{priceUnit}</span>
+        </div>
+      </div>
+
+      <div className="mt-6">{cta}</div>
+
+      <ul className="mt-6 flex flex-col gap-3">
+        {features.map((feature, i) => (
+          <li key={feature} className="text-sm">
+            {i === 0 && feature.endsWith(":") ? (
+              <div className="flex flex-col gap-3">
+                <span className="flex items-center gap-2 font-semibold text-foreground">
+                  {tier === "plus" ? (
+                    <DiamondIcon className="size-4 text-olive" />
+                  ) : (
+                    <SparkleIcon className="size-4 text-olive" />
+                  )}
+                  {feature}
+                </span>
+                <hr className="border-border" />
+              </div>
+            ) : (
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-olive/15">
+                  <CheckIcon className="size-3 text-olive" strokeWidth={2.5} />
+                </span>
+                <span className="text-foreground">{feature}</span>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PricingDots({ tier }: { tier: "free" | "go" | "plus" }) {
+  if (tier === "free") {
+    return (
+      <svg width="28" height="28" viewBox="0 0 44 44" fill="none" aria-hidden>
+        <circle cx="7" cy="6" r="2" fill="#b5c4a1" fillOpacity={0.35} />
+        <circle cx="17" cy="6" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="27" cy="6" r="2" fill="#c4956a" fillOpacity={0.3} />
+        <circle cx="37" cy="6" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="7" cy="16" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="17" cy="16" r="2" fill="#c4956a" fillOpacity={0.4} />
+        <circle cx="27" cy="16" r="2.5" fill="#c4956a" fillOpacity={0.5} />
+        <circle cx="37" cy="16" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="7" cy="27" r="2" fill="#c4956a" fillOpacity={0.3} />
+        <circle cx="17" cy="27" r="2.5" fill="#c4956a" fillOpacity={0.45} />
+        <circle cx="27" cy="27" r="2" fill="#b5c4a1" fillOpacity={0.35} />
+        <circle cx="37" cy="27" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="7" cy="38" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="17" cy="38" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="27" cy="38" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="37" cy="38" r="2" fill="#b5c4a1" fillOpacity={0.35} />
+      </svg>
+    );
+  }
+
+  if (tier === "go") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 44 44" fill="none" aria-hidden>
+        <circle cx="7" cy="6" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="17" cy="6" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="27" cy="6" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="37" cy="6" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="7" cy="16" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="17" cy="16" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="27" cy="16" r="3" fill="#a07a4e" />
+        <circle cx="37" cy="16" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="7" cy="27" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="17" cy="27" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="27" cy="27" r="3.5" fill="#8b6840" />
+        <circle cx="37" cy="27" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="7" cy="38" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="17" cy="38" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="27" cy="38" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="37" cy="38" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      </svg>
+    );
+  }
+
+  return (
+    <svg width="28" height="28" viewBox="0 0 65 44" fill="none" aria-hidden>
+      <circle cx="6.5" cy="5.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="16.5" cy="5.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="27" cy="5.5" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+      <circle cx="38" cy="5.5" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+      <circle cx="48.5" cy="5.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="58.5" cy="5.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="4.5" cy="15.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="14.5" cy="15.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="26" cy="15.5" r="3.5" fill="#a07a4e" />
+      <circle cx="39" cy="15.5" r="3.5" fill="#a07a4e" />
+      <circle cx="50.5" cy="15.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="60.5" cy="15.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="2" cy="27.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="12.5" cy="27.5" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+      <circle cx="25" cy="27.5" r="4" fill="#8b6840" />
+      <circle cx="39.5" cy="27.5" r="4.5" fill="#8b6840" />
+      <circle cx="52.5" cy="27.5" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+      <circle cx="63" cy="27.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="6.5" cy="38.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="16.5" cy="38.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="27" cy="38.5" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+      <circle cx="38" cy="38.5" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+      <circle cx="48.5" cy="38.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+      <circle cx="58.5" cy="38.5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+    </svg>
   );
 }
 
 function CheckoutTrustItem({
   icon: Icon,
   label,
+  sublabel,
+  divider,
 }: {
   icon: typeof LockIcon;
   label: string;
+  sublabel: string;
+  divider?: boolean;
 }) {
   return (
-    <li className="flex items-center gap-2.5">
-      <span className="flex size-7 items-center justify-center rounded-full border border-border bg-card">
-        <Icon className="size-3.5 text-olive-light" />
+    <div
+      className={[
+        "flex items-center gap-3 py-1",
+        divider ? "sm:border-l sm:border-border sm:pl-6" : "",
+      ].join(" ")}
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40">
+        <Icon className="size-[18px] text-muted-foreground" />
       </span>
-      <span className="text-sm text-foreground">{label}</span>
-    </li>
+      <div>
+        <p className="text-sm font-semibold text-foreground">{label}</p>
+        <p className="text-xs text-muted-foreground">{sublabel}</p>
+      </div>
+    </div>
   );
-}
-
-function splitRecurringSummary(summary: string): [string, string | null] {
-  const match = summary.match(/^(.*?)(\/.+)$/);
-  if (!match) {
-    return [summary, null];
-  }
-  return [match[1].trim(), match[2]];
 }
 
 export function JoinInviteActivePanel({
