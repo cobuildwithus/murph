@@ -410,7 +410,7 @@ protocol:
   - This is not a blue-light-filter test. Do not count Night Shift, dimming, amber glasses, or screen-temperature tools as equivalent to no personal screens.
   keepInMind:
   - The best-fit direct evidence is promising for some high-phone-use or poor-sleeping users, but the overall direct evidence is small, mixed, and population-specific.
-  - The cleanest personal signal is usually behavior timing, less pre-bed wiredness, or easier sleep onset—not a guaranteed wearable sleep-stage, HRV, or resting-heart-rate change.
+  - Screen-stop timing verifies adherence and attribution, but the main outcome signals are easier sleep onset and better sleep efficiency, not a guaranteed wearable sleep-stage, HRV, or resting-heart-rate change.
   - If evening screens are not pushing bedtime later, increasing arousal, or causing in-bed pickups, the expected signal may be small or absent.
   - Necessary availability is not failure. Work, caregiving, medical, safety, and emergency exceptions should be planned and logged.
   logFields:
@@ -489,14 +489,35 @@ testPlans:
   - Compare intervention averages with the user’s own baseline rather than interpreting single nights.
   - Pair wearable sleep-onset and sleep-efficiency trends with a one-tap subjective sleep-onset and pre-sleep-wiredness log.
   - Treat HRV, resting heart rate, next-day mood, cognition, and any consumer sleep-stage output as optional exploratory context only; do not use them as pass/fail signals for Digital Sunset.
-  - A useful result should include adequate adherence, logged exceptions, stable sleep opportunity, and low burden.
+  - Treat screen-stop timing, phone placement, and target-window adherence as interpretation context, not as outcome wins.
+  - A useful result should include adequate adherence, logged exceptions, stable sleep opportunity, low burden, and repeated downstream sleep-onset or sleep-efficiency movement.
 expectedSignalDescriptions:
 -
   biomarkerKey: "biomarker:sleep-onset-latency"
-  description: "Stopping personal screens before bed may lower light exposure, late messages, and mental stimulation. If those were keeping the user wired, sleep onset can become easier."
+  expected: "Could shorten"
+  estimatedChange:
+    kind: "absolute"
+    low: -12
+    high: 0
+    unit: "minutes"
+    window: "baseline vs 14-28 intervention nights"
+    confidence: "low"
+    basis: "The closest adult-style 30-minute phone-curfew RCT reported about 12 minutes less sleep latency over 4 weeks; adolescent and screen-reduction studies support earlier sleep timing, while athlete/device-removal and active-control results were mixed or null [source_artifact:pmid-32040492; source_artifact:pmid-29313721; source_artifact:pmid-31260534; source_artifact:pmid-28081034; source_artifact:pmid-29073407; source_artifact:pmid-40081281]."
+  protocolProminence: "focus"
+  description: "Stopping personal screens removes late light, message loops, and stimulating content from the wind-down window. If those inputs were keeping the brain alert or delaying lights-out, time to fall asleep can shorten."
 -
   biomarkerKey: "biomarker:sleep-efficiency"
-  description: "If the curfew reduces in-bed pickups, delayed lights-out, or restless starts to the night, more time in bed may be spent asleep."
+  expected: "Could improve slightly"
+  estimatedChange:
+    kind: "absolute"
+    low: -1
+    high: 3
+    unit: "percentage points"
+    window: "baseline vs 14-28 intervention nights"
+    confidence: "low"
+    basis: "Direct Digital Sunset evidence is strongest for sleep-onset and duration signals; sleep-efficiency support is indirect or preliminary, including in-bed smartphone associations and underpowered screen-restriction findings [source_artifact:pmid-32040492; source_artifact:pmid-39432278; source_artifact:pmid-36405389; source_artifact:pmid-28081034; source_artifact:pmid-30741866]."
+  protocolProminence: "focus"
+  description: "The curfew does not deepen sleep directly. It can improve sleep efficiency when fewer in-bed pickups, delayed lights-out minutes, and restless starts leave more of the sleep window actually asleep."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -904,7 +925,7 @@ claims:
   claimId: primary-endpoints-sol-tst-quality-and-arousal
   type: mixed_evidence
   strength: moderate
-  text: "The most defensible home endpoints are screens-off timing, lights-out timing, sleep-onset latency, total sleep time or sleep duration, subjective sleep quality, and pre-sleep arousal; sleep efficiency and WASO are secondary, while next-day sleepiness, mood, HRV/RMSSD, resting heart rate, and any consumer sleep-stage output are optional exploratory context only."
+  text: "The most defensible home outcome endpoints are sleep-onset latency and sleep efficiency or WASO, supported by total sleep time or duration, subjective sleep quality, and pre-sleep arousal; screens-off timing and lights-out timing are adherence and attribution context, while next-day sleepiness, mood, HRV/RMSSD, resting heart rate, and any consumer sleep-stage output are optional exploratory context only."
   sourceKeys:
   - "source_artifact:pmid-32040492"
   - "source_artifact:pmid-29313721"
@@ -1113,7 +1134,7 @@ researchLandscape:
       id: "outcomes-measurement-guardrails"
       label: "Outcomes and measurement guardrails"
       stance: "mixed"
-      summary: "The strongest home endpoints are behavior timing, sleep-onset latency, total sleep time or sleep duration, sleep quality, and pre-sleep arousal. Sleep efficiency and WASO can be secondary, while next-day sleepiness, mood, HRV/RMSSD, resting heart rate, and consumer sleep-stage outputs should remain optional exploratory context; lab circadian markers should stay in the research-marker lane."
+      summary: "The strongest home outcome endpoints are sleep-onset latency and sleep efficiency or WASO, supported by total sleep time or duration, sleep quality, and pre-sleep arousal. Screen-stop and lights-out timing should stay as adherence and attribution context, while next-day sleepiness, mood, HRV/RMSSD, resting heart rate, and consumer sleep-stage outputs remain optional exploratory context; lab circadian markers should stay in the research-marker lane."
       sourceKeys:
         - "source_artifact:pmid-11438246"
         - "source_artifact:pmid-1798888"
@@ -1451,22 +1472,22 @@ Run a 21-day experiment:
 
 ## What counts as a signal
 
-Primary practical signals:
+Primary outcome signals:
+
+- subjective or wearable-estimated sleep-onset latency improves versus baseline;
+- wearable sleep efficiency improves, or WASO/time awake in bed decreases, without reducing sleep opportunity.
+
+Adherence and interpretation context:
 
 - actual screen-stop time becomes earlier and more consistent;
 - bedtime or lights-out does not drift later;
-- subjective or wearable-estimated sleep-onset latency improves versus baseline;
-- the last hour before bed feels less wired.
-
-Secondary or exploratory signals:
-
+- the last hour before bed feels less wired;
 - total sleep time or sleep duration;
 - subjective sleep quality;
 - next-day sleepiness;
-- sleep efficiency and WASO;
 - optional exploratory wearable trends such as HRV RMSSD or resting heart rate, interpreted only as supporting context and not as pass/fail outcomes.
 
-A useful signal should repeat across several adherent nights and still make sense after checking caffeine, alcohol, exercise, naps, illness, stress, work or social pressure, travel, room light, brightness/filter changes, and new supplements or medication changes.
+A useful outcome signal should repeat across several adherent nights and still make sense after checking caffeine, alcohol, exercise, naps, illness, stress, work or social pressure, travel, room light, brightness/filter changes, and new supplements or medication changes.
 
 ## Why this version
 
@@ -1476,7 +1497,7 @@ Boundary evidence should stay visible: athlete device-restriction/removal studie
 
 Registry-only and protocol-only sources should be tracked for future results, but not cited as outcome evidence.
 
-This protocol is intentionally narrower than total screen-time reduction or social-media detox. Adjacent total-screen-time and social-media-detox studies are cited only as exclusion context, not as direct Digital Sunset efficacy evidence. The Digital Sunset test itself stays focused on the sleep window: whether a bedtime personal-screen cutoff changes phone-stop time, lights-out timing, pre-sleep wiredness, sleep onset, notifications, or in-bed pickups enough to matter for you.
+This protocol is intentionally narrower than total screen-time reduction or social-media detox. Adjacent total-screen-time and social-media-detox studies are cited only as exclusion context, not as direct Digital Sunset efficacy evidence. The Digital Sunset test itself stays focused on the sleep window: whether a bedtime personal-screen cutoff improves sleep-onset latency or sleep efficiency enough to matter, with phone-stop time, lights-out timing, pre-sleep wiredness, notifications, and in-bed pickups used as adherence and mechanism context.
 
 ## Product and safety notes
 
