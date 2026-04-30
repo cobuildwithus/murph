@@ -54,17 +54,21 @@ describe("device provider descriptors", () => {
     );
   });
 
-  it("registers Junction as an external-link scheduled-poll provider without webhook or credential policy", () => {
+  it("registers Junction as an external-link polling and webhook provider without credential policy", () => {
     const descriptor = resolveDeviceProviderDescriptor("JUNCTION");
 
     expect(descriptor).toBe(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR);
-    expect(descriptor?.transportModes).toEqual(["external_link", "scheduled_poll"]);
+    expect(descriptor?.transportModes).toEqual(["external_link", "scheduled_poll", "webhook_push"]);
     expect(descriptor ? resolveDeviceProviderConnectionDescriptor(descriptor) : undefined).toEqual({
       kind: "external_link",
       callbackPath: "/connect/junction/callback",
     });
     expect(descriptor?.oauth).toBeUndefined();
-    expect(descriptor?.webhook).toBeUndefined();
+    expect(descriptor?.webhook).toEqual({
+      path: "/webhooks/junction",
+      deliveryMode: "resource",
+      supportsAdmin: false,
+    });
     expect(descriptor && "credentialPolicy" in descriptor).toBe(false);
     const junctionSleepPriority = resolveDeviceProviderSourcePriority(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR, {
       metric: "sleepScore",

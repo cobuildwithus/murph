@@ -1447,6 +1447,51 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
   assert.equal(store.lastRecordedWebhookTrace, null);
 });
 
+test("public ingress can complete verified unknown-account webhook traces without provider retries", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const unknownCalls: string[] = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-race",
+            eventType: "demo.updated",
+            traceId: "trace-orphan",
+            jobs: [],
+            unknownAccountAction: "accept",
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onUnknownWebhook({ provider, externalAccountId, traceId }) {
+        unknownCalls.push(`${provider.provider}:${externalAccountId}:${traceId}`);
+      },
+    },
+  });
+
+  const expectedScopedTraceId = scopeWebhookTraceId("demo", "demo-race", "trace-orphan");
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.deepEqual(result, {
+    accepted: true,
+    duplicate: false,
+    orphaned: true,
+    provider: "demo",
+    eventType: "demo.updated",
+    traceId: expectedScopedTraceId,
+  });
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.orphaned, undefined);
+  assert.deepEqual(unknownCalls, [`demo:demo-race:${expectedScopedTraceId}`]);
+  assert.equal(store.completedWebhookTraceCalls, 1);
+  assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
+});
+
 test("public ingress passes only a stripped webhook summary into accepted hooks", async () => {
   const store = new InMemoryPublicIngressStore();
   const acceptedCalls: Array<{ traceId: string; webhook: DeviceSyncIngressWebhook }> = [];

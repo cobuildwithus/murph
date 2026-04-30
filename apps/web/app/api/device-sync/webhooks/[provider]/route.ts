@@ -51,7 +51,8 @@ export const POST = withJsonError(async (
     return createWebhookPreflightResponse(preflight);
   }
 
-  return jsonOk(await controlPlane.handleWebhook(provider, rawBody), 200);
+  const result = await controlPlane.handleWebhook(provider, rawBody);
+  return jsonOk(result, result.orphaned ? 202 : 200);
 });
 
 function createWebhookPreflightResponse(preflight: DeviceSyncWebhookPreflightResponse): Response {

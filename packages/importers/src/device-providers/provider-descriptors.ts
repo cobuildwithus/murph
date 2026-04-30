@@ -579,10 +579,15 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
 export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "junction",
   displayName: "Junction",
-  transportModes: ["external_link", "scheduled_poll"],
+  transportModes: ["external_link", "scheduled_poll", "webhook_push"],
   connection: {
     kind: "external_link",
     callbackPath: "/connect/junction/callback",
+  },
+  webhook: {
+    path: "/webhooks/junction",
+    deliveryMode: "resource",
+    supportsAdmin: false,
   },
   sync: {
     windows: {
@@ -590,7 +595,7 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
       reconcileDays: 7,
       reconcileIntervalMs: 6 * 60 * 60_000,
     },
-    jobKinds: ["backfill", "reconcile"],
+    jobKinds: ["backfill", "reconcile", "resource"],
     supportsRemoteDisconnect: false,
     supportsTokenRefresh: false,
   },

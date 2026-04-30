@@ -60,6 +60,8 @@ import {
   JUNCTION_SUMMARY_RESOURCES_ENV_KEYS,
   JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS,
   JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS,
+  JUNCTION_WEBHOOK_SECRET_ENV_KEYS,
+  JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
   OURA_API_BASE_URL_ENV_KEYS,
   OURA_AUTH_BASE_URL_ENV_KEYS,
   OURA_BACKFILL_DAYS_ENV_KEYS,
@@ -311,8 +313,9 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
     const clientUserIdSecret = optionalEnv(env, JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS);
     const environment = optionalEnv(env, JUNCTION_ENV_ENV_KEYS);
     const region = optionalEnv(env, JUNCTION_REGION_ENV_KEYS);
+    const webhookSecret = optionalEnv(env, JUNCTION_WEBHOOK_SECRET_ENV_KEYS);
 
-    if (!apiKey && !clientUserIdSecret && !environment && !region) {
+    if (!apiKey && !clientUserIdSecret && !environment && !region && !webhookSecret) {
       return null;
     }
 
@@ -338,6 +341,8 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
       requestTimeoutMs: parseIntegerEnv(env, JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS),
       perAccountConcurrency: parseIntegerEnv(env, JUNCTION_PER_ACCOUNT_CONCURRENCY_ENV_KEYS),
       globalConcurrency: parseIntegerEnv(env, JUNCTION_GLOBAL_CONCURRENCY_ENV_KEYS),
+      webhookSecret,
+      webhookTimestampToleranceMs: parseIntegerEnv(env, JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
     };
 
     assertValidJunctionClientConfig(config);
@@ -360,8 +365,13 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
     summaryResources: "string[]",
     timeseriesBackfillDays: "number",
     timeseriesResources: "string[]",
+    webhookTimestampToleranceMs: "number",
   },
-  disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
+  disallowedSerializableFields: {
+    ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
+    webhookSecret:
+      "is a provider-owned webhook secret and is not supported in serialized runtime config.",
+  },
   jobs: {
     backfill: {
       payload: {
@@ -371,6 +381,18 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
     },
     reconcile: {
       payload: {
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
+    },
+    resource: {
+      payload: {
+        eventType: stringJobField({ includeInHostedHint: true }),
+        objectId: stringJobField({ includeInHostedHint: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        resource: stringJobField({ includeInHostedHint: true }),
+        resourceCategory: stringJobField({ includeInHostedHint: true }),
+        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
         windowEnd: stringJobField({ includeInHostedHint: true }),
         windowStart: stringJobField({ includeInHostedHint: true }),
       },

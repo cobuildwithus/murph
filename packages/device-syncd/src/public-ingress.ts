@@ -794,9 +794,25 @@ export class DeviceSyncPublicIngress {
           externalAccountId: parsed.externalAccountId,
           now,
         });
-      } finally {
+      } catch (error) {
         await this.store.releaseWebhookTrace(provider.provider, traceId);
+        throw error;
       }
+
+      if (parsed.unknownAccountAction === "accept") {
+        await this.store.completeWebhookTrace(provider.provider, traceId);
+
+        return {
+          accepted: true,
+          duplicate: false,
+          orphaned: true,
+          provider: provider.provider,
+          eventType: webhook.eventType,
+          traceId,
+        };
+      }
+
+      await this.store.releaseWebhookTrace(provider.provider, traceId);
 
       throw deviceSyncError({
         code: "WEBHOOK_ACCOUNT_NOT_READY",

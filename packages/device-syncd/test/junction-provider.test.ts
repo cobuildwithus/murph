@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test } from "vitest";
 
 import { DeviceSyncError } from "../src/errors.ts";
@@ -70,7 +71,10 @@ function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJo
   };
 }
 
-function createJunctionProvider(fetchImpl: typeof fetch) {
+function createJunctionProvider(
+  fetchImpl: typeof fetch,
+  overrides: Partial<Parameters<typeof createJunctionDeviceSyncProvider>[0]> = {},
+) {
   return createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -79,7 +83,33 @@ function createJunctionProvider(fetchImpl: typeof fetch) {
     summaryResources: ["activity"],
     timeseriesResources: ["heartrate"],
     fetchImpl,
+    ...overrides,
   });
+}
+
+function createJunctionSvixWebhook(input: {
+  body: Record<string, unknown>;
+  messageId?: string;
+  secret?: string;
+  timestamp?: string;
+}): { headers: Headers; rawBody: Buffer } {
+  const messageId = input.messageId ?? "msg_test_123";
+  const timestamp = input.timestamp ?? "1775155200";
+  const secret = input.secret ?? "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
+  const rawBody = Buffer.from(JSON.stringify(input.body));
+  const key = Buffer.from(secret.slice("whsec_".length), "base64");
+  const signature = createHmac("sha256", key)
+    .update(Buffer.concat([Buffer.from(`${messageId}.${timestamp}.`), rawBody]))
+    .digest("base64");
+
+  return {
+    headers: new Headers({
+      "svix-id": messageId,
+      "svix-timestamp": timestamp,
+      "svix-signature": `v1,${signature}`,
+    }),
+    rawBody,
+  };
 }
 
 test("Junction client_user_id is deterministic, bounded, and owner-blinded", () => {
@@ -301,6 +331,96 @@ test("Junction completeConnection rejects failed Link callbacks", async () => {
   );
 });
 
+test("Junction verifies Svix webhooks and maps data events to scalar resource jobs", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.activity.created",
+      user_id: "junction-user-1",
+      client_user_id: "murph_blinded",
+      data: {
+        id: "activity-1",
+        date: "2026-04-02",
+        resource: "activity",
+        source: {
+          slug: "oura",
+        },
+      },
+    },
+    messageId: "msg_activity_1",
+    timestamp: "1775174400",
+  });
+
+  const parsed = await requireValue(provider.verifyAndParseWebhook)({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.externalAccountId, "junction-user-1");
+  assert.equal(parsed.eventType, "daily.data.activity.created");
+  assert.equal(parsed.traceId, "msg_activity_1");
+  assert.equal(parsed.resourceCategory, "summary");
+  assert.equal(parsed.unknownAccountAction, "accept");
+  assert.deepEqual(parsed.jobs, [
+    {
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.activity.created",
+        objectId: "activity-1",
+        occurredAt: "2026-04-02T00:00:00.000Z",
+        resource: "activity",
+        resourceCategory: "summary",
+        sourceProviderSlug: "oura",
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 65,
+      dedupeKey: parsed.jobs[0]?.dedupeKey,
+    },
+  ]);
+  assert.equal(typeof parsed.jobs[0]?.dedupeKey, "string");
+});
+
+test("Junction rejects webhooks with invalid Svix signatures", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "provider.connection.created",
+      user_id: "junction-user-1",
+      data: {},
+    },
+    timestamp: "1775174400",
+  });
+
+  await assert.rejects(
+    requireValue(provider.verifyAndParseWebhook)({
+      headers: webhook.headers,
+      rawBody: Buffer.from(JSON.stringify({
+        event_type: "provider.connection.created",
+        user_id: "junction-user-2",
+        data: {},
+      })),
+      now: "2026-04-03T00:00:00.000Z",
+    }),
+    (error) => error instanceof DeviceSyncError && error.code === "JUNCTION_WEBHOOK_SIGNATURE_INVALID",
+  );
+});
+
 test("Junction polling updates source projection and imports bounded summary/timeseries snapshots", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -392,4 +512,78 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(requests.some((url) => url.includes("cursor=page-2")), true);
   assert.equal(requests.filter((url) => url.includes("/v2/timeseries/")).length, 2);
   assert.equal(requests.every((url) => !url.includes("glucose") && !url.includes("cgm")), true);
+});
+
+test("Junction resource jobs fetch only the hinted resource window", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [{ id: "activity-1", steps: 1200 }] });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const importedSnapshots: unknown[] = [];
+  const context: ProviderJobContext = {
+    account: createAccount(),
+    now: "2026-04-03T00:00:00.000Z",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    upsertConnectionSource: () => ({
+      id: "src-1",
+      connectionId: "acct-junction-1",
+      sourceInstanceKey: "src-key",
+      sourceProviderSlug: "oura",
+      displayName: "Oura Ring",
+      status: "connected",
+      resourceAvailabilitySummary: {},
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      createdAt: "2026-04-03T00:00:00.000Z",
+      updatedAt: "2026-04-03T00:00:00.000Z",
+    }),
+    refreshAccountTokens: async () => createAccount(),
+    logger: {},
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("resource", {
+      eventType: "daily.data.activity.created",
+      objectId: "activity-1",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "activity",
+      resourceCategory: "summary",
+      sourceProviderSlug: "oura",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.filter((url) => url.includes("/v2/summary/activity/")).length, 1);
+  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  assert.equal(importedSnapshots.length, 1);
+  assert.match(JSON.stringify(importedSnapshots[0]), /"activity"/u);
 });

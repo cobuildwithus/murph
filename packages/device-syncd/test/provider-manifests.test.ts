@@ -68,6 +68,12 @@ describe("deviceSyncProviderManifests", () => {
 
     expect(() =>
       junctionManifest.readConfig({
+        JUNCTION_WEBHOOK_SECRET: "<REDACTED_WEBHOOK_SECRET>",
+      }),
+    ).toThrow(/Junction configuration is incomplete/u);
+
+    expect(() =>
+      junctionManifest.readConfig({
         JUNCTION_API_KEY: "pk_us_test_manifest",
         JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
         JUNCTION_ENV: "sandbox",
@@ -191,6 +197,8 @@ describe("deviceSyncProviderManifests", () => {
         clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
         environment: "sandbox",
         region: "us",
+        webhookSecret: "<REDACTED_WEBHOOK_SECRET>",
+        webhookTimestampToleranceMs: 300_000,
         providerFilter: ["oura", "withings"],
         summaryResources: ["profile", "activity"],
         timeseriesResources: ["steps", "heartrate"],
@@ -242,6 +250,7 @@ describe("deviceSyncProviderManifests", () => {
 
     expect(cloned.oura).not.toHaveProperty("webhookVerificationToken");
     expect(cloned.strava).not.toHaveProperty("webhookVerifyToken");
+    expect(cloned.junction).not.toHaveProperty("webhookSecret");
     expect(cloned.junction).toMatchObject({
       environment: "sandbox",
       region: "us",
@@ -269,6 +278,16 @@ describe("deviceSyncProviderManifests", () => {
         "runtime.providerConfigs",
       ),
     ).toThrow(/provider-owned admin secret/);
+    expect(() =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          junction: {
+            webhookSecret: "<REDACTED_WEBHOOK_SECRET>",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    ).toThrow(/provider-owned webhook secret/);
   });
 
   it("shapes hosted hint payloads from the provider manifest", () => {
@@ -300,6 +319,32 @@ describe("deviceSyncProviderManifests", () => {
     ).toEqual({
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-01-22T00:00:00.000Z",
+    });
+
+    expect(
+      shapeHostedDeviceSyncJobHintPayload("junction", {
+        kind: "resource",
+        payload: {
+          eventType: "daily.data.activity.created",
+          ignored: "value",
+          objectId: "activity-1",
+          occurredAt: "2026-04-22T00:00:00.000Z",
+          resource: "activity",
+          resourceCategory: "summary",
+          sourceProviderSlug: "oura",
+          windowEnd: "2026-04-22T00:00:00.000Z",
+          windowStart: "2026-04-21T00:00:00.000Z",
+        },
+      }),
+    ).toEqual({
+      eventType: "daily.data.activity.created",
+      objectId: "activity-1",
+      occurredAt: "2026-04-22T00:00:00.000Z",
+      resource: "activity",
+      resourceCategory: "summary",
+      sourceProviderSlug: "oura",
+      windowEnd: "2026-04-22T00:00:00.000Z",
+      windowStart: "2026-04-21T00:00:00.000Z",
     });
 
     expect(
