@@ -10,9 +10,15 @@ import {
   type CsvSampleImportWriteResult,
   parseDelimitedRows,
   prepareCsvSampleImport,
+  profileCsvSampleFile,
 } from "./csv-sample-import-planner.ts";
 
 export type {
+  CsvSampleFileColumnProfile,
+  CsvSampleFileProfile,
+  CsvSampleFileProfileInput,
+  CsvSampleFileSeriesProfile,
+  CsvSampleFileSourceHint,
   CsvSampleImportBatchPlan,
   CsvSampleImportBatchResult,
   CsvSampleImportInput,
@@ -22,6 +28,16 @@ export type {
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,
 } from "./csv-sample-import-planner.ts";
+export type {
+  SampleSeriesInputRecord,
+  SampleSeriesSummaryInput,
+  SampleSummaryProfile,
+  SampleThresholdSummary,
+  SampleWindowGap,
+  SampleWindowScreen,
+  SampleWindowSummary,
+} from "./sample-series-summary.ts";
+export { summarizeSampleSeries } from "./sample-series-summary.ts";
 
 export interface CsvSampleImporterOptions {
   corePort?: unknown;
@@ -152,4 +168,4 @@ function normalizeWriteResult(value: unknown): CsvSampleImportWriteResult {
   };
 }
 
-export { parseDelimitedRows, prepareCsvSampleImport };
+export { parseDelimitedRows, prepareCsvSampleImport, profileCsvSampleFile };

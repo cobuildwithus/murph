@@ -234,10 +234,13 @@ declare module 'incur' {
       'samples add': { args: {}; options: { vault: string; requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string; endAt?: string; durationMinutes?: number } }
       'samples batch list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; limit: number } }
       'samples batch show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'samples csv import': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
+      'samples csv profile': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string; includeSummary?: boolean; summaryProfile?: "oxygen-night"; thresholdBelow?: number[]; gapSeconds?: number } }
       'samples import-csv': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
       'samples import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'samples list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'samples summarize': { args: {}; options: { vault: string; requestId?: string; stream: string; from?: string; to?: string; profile?: "oxygen-night"; thresholdBelow?: number[]; gapSeconds?: number } }
       'scheduled-log archive': { args: { lookup: string }; options: { vault: string; requestId?: string } }
       'scheduled-log import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'scheduled-log list': { args: {}; options: { vault: string; requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }

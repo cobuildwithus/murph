@@ -6,11 +6,15 @@ import {
 interface ImportCsvSamplesRuntimeInput {
   delimiter?: string
   filePath: string
+  gapSeconds?: number
+  includeSummary?: boolean
   metadataColumns?: string[]
   presetId?: string
   requestId?: string | null
   source?: string
   stream?: string
+  summaryProfile?: string
+  thresholdBelow?: number[]
   tsColumn?: string
   unit?: string
   valueColumn?: string
@@ -48,6 +52,9 @@ interface ImportCsvSamplesRuntimeResult {
 
 interface ImportersRuntimeModule {
   createImporters(): {
+    profileCsvSampleFile(
+      input: ImportCsvSamplesRuntimeInput,
+    ): Promise<unknown>
     importCsvSamples(
       input: ImportCsvSamplesRuntimeInput,
     ): Promise<ImportCsvSamplesRuntimeResult>
@@ -57,11 +64,15 @@ interface ImportersRuntimeModule {
 export interface ImportCsvSamplesOptions {
   delimiter?: string
   file: string
+  gapSeconds?: number
+  includeSummary?: boolean
   metadataColumns?: string[]
   presetId?: string
   requestId?: string | null
   source?: string
   stream?: string
+  summaryProfile?: string
+  thresholdBelow?: number[]
   tsColumn?: string
   unit?: string
   valueColumn?: string
@@ -121,17 +132,50 @@ export async function importCsvSamples(options: ImportCsvSamplesOptions) {
   }
 }
 
+export async function profileCsvSampleFile(
+  options: ImportCsvSamplesOptions,
+): Promise<Record<string, unknown> & {
+  file?: unknown
+  sourceFile: string
+  summaries?: unknown
+  vault: string
+}> {
+  const importers = await loadImportersRuntime()
+  const runtimeInput = createImportCsvSamplesRuntimeInput(options)
+  const runtime = importers.createImporters()
+
+  if (!runtime || typeof runtime.profileCsvSampleFile !== 'function') {
+    importersRuntimePromise = null
+    throw createRuntimeUnavailableError(
+      'samples csv profile',
+      new TypeError('Importer runtime package did not match the expected module shape.'),
+    )
+  }
+
+  const result = await runtime.profileCsvSampleFile(runtimeInput)
+
+  return {
+    vault: options.vault,
+    sourceFile: options.file,
+    ...(typeof result === 'object' && result !== null ? result : {}),
+  }
+}
+
 function createImportCsvSamplesRuntimeInput(
   options: ImportCsvSamplesOptions,
 ): ImportCsvSamplesRuntimeInput {
   return {
     delimiter: options.delimiter,
     filePath: options.file,
+    gapSeconds: options.gapSeconds,
+    includeSummary: options.includeSummary,
     metadataColumns: options.metadataColumns,
     presetId: options.presetId,
     requestId: options.requestId,
     source: options.source,
     stream: options.stream,
+    summaryProfile: options.summaryProfile,
+    thresholdBelow: options.thresholdBelow,
     tsColumn: options.tsColumn,
     unit: options.unit,
     valueColumn: options.valueColumn,

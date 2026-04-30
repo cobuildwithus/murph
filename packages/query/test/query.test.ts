@@ -39,6 +39,7 @@ import {
   searchVaultSafe,
   searchVaultRuntime,
   summarizeDailySamples,
+  summarizeSampleWindow,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
   summarizeWearableDay,
@@ -1575,6 +1576,55 @@ test("summarizeDailySamples honors filters and ignores incomplete sample records
   assert.equal(summaries[1]?.averageValue, 98);
   assert.equal(summaries[1]?.firstSampleAt, "2026-03-10T12:00:00Z");
   assert.equal(summaries[1]?.lastSampleAt, "2026-03-10T18:00:00Z");
+});
+
+test("summarizeSampleWindow summarizes stored sample windows with oxygen thresholds", () => {
+  const vault = createEmptyReadModel();
+  vault.samples = [
+    createSampleRecord({
+      id: "smp_spo2_01",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      stream: "spo2",
+      sourcePath: "ledger/samples/spo2/2026/2026-04.jsonl",
+      data: { value: 96, unit: "%" },
+    }),
+    createSampleRecord({
+      id: "smp_spo2_02",
+      occurredAt: "2026-04-17T00:00:01.000Z",
+      stream: "spo2",
+      sourcePath: "ledger/samples/spo2/2026/2026-04.jsonl",
+      data: { value: 89, unit: "%" },
+    }),
+    createSampleRecord({
+      id: "smp_spo2_03",
+      occurredAt: "2026-04-17T00:00:02.000Z",
+      stream: "spo2",
+      sourcePath: "ledger/samples/spo2/2026/2026-04.jsonl",
+      data: { value: 97, unit: "%" },
+    }),
+    createSampleRecord({
+      id: "smp_hr_01",
+      occurredAt: "2026-04-17T00:00:01.000Z",
+      stream: "heart_rate",
+      sourcePath: "ledger/samples/heart_rate/2026/2026-04.jsonl",
+      data: { value: 72, unit: "bpm" },
+    }),
+  ];
+  syncVaultDerivedFields(vault);
+
+  const summary = summarizeSampleWindow(vault, {
+    stream: "spo2",
+    from: "2026-04-17T00:00:00.000Z",
+    to: "2026-04-17T00:00:03.000Z",
+    profile: "oxygen-night",
+  });
+
+  assert.equal(summary.stream, "spo2");
+  assert.equal(summary.unit, "%");
+  assert.equal(summary.sampleCount, 3);
+  assert.equal(summary.averageValue, 94);
+  assert.equal(summary.thresholds.find((entry) => entry.below === 90)?.durationSeconds, 1);
+  assert.equal(summary.screen?.level, "normal_oxygen_trace");
 });
 
 test("buildExportPack omits optional sections when the scoped vault is empty", () => {

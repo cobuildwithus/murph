@@ -9,8 +9,15 @@ export {
   importCsvSamples,
   parseDelimitedRows,
   prepareCsvSampleImport,
+  profileCsvSampleFile,
+  summarizeSampleSeries,
 } from "./csv-sample-importer.ts";
 export type {
+  CsvSampleFileColumnProfile,
+  CsvSampleFileProfile,
+  CsvSampleFileProfileInput,
+  CsvSampleFileSeriesProfile,
+  CsvSampleFileSourceHint,
   CsvSampleImportBatchPlan,
   CsvSampleImportBatchResult,
   CsvSampleImportInput,
@@ -19,6 +26,13 @@ export type {
   CsvSampleImportSkipReasonCount,
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,
+  SampleSeriesInputRecord,
+  SampleSeriesSummaryInput,
+  SampleSummaryProfile,
+  SampleThresholdSummary,
+  SampleWindowGap,
+  SampleWindowScreen,
+  SampleWindowSummary,
 } from "./csv-sample-importer.ts";
 export {
   assertCanonicalWritePort,

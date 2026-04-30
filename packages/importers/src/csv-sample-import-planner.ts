@@ -14,6 +14,11 @@ import type {
 import type { SamplePresetRegistry } from "./preset-registry.ts";
 import { resolveSampleImportConfig } from "./preset-registry.ts";
 import {
+  summarizeSampleSeries,
+  type SampleSummaryProfile,
+  type SampleWindowSummary,
+} from "./sample-series-summary.ts";
+import {
   assertPlainObject,
   inspectFileAsset,
   normalizeOptionalString,
@@ -34,6 +39,13 @@ export interface CsvSampleImportInput {
   unit?: string;
   delimiter?: string;
   metadataColumns?: string[];
+}
+
+export interface CsvSampleFileProfileInput extends CsvSampleImportInput {
+  includeSummary?: boolean;
+  summaryProfile?: SampleSummaryProfile;
+  thresholdBelow?: number[];
+  gapSeconds?: number;
 }
 
 export interface CsvSampleImportSkipReasonCount {
@@ -59,11 +71,72 @@ export interface CsvSampleImportPlan {
   vaultRoot?: string;
   sourcePath: string;
   sourceFileName: string;
+  byteSize: number;
   delimiter: string;
   timeZone: string;
   tsColumn: string;
+  columns: string[];
+  rowCount: number;
+  dataRowCount: number;
+  blankRowCount: number;
   metadataColumns?: string[];
   imports: CsvSampleImportBatchPlan[];
+}
+
+export interface CsvSampleFileColumnProfile {
+  name: string;
+  index: number;
+  role: "timestamp" | "sample_value" | "metadata" | "ignored";
+  stream?: SampleStream;
+  unit?: string;
+}
+
+export interface CsvSampleFileSourceHint {
+  id: string;
+  label: string;
+  confidence: number;
+}
+
+export interface CsvSampleFileSeriesProfile {
+  stream: SampleStream;
+  unit: string;
+  valueColumn: string;
+  importableCount: number;
+  skippedCount: number;
+  skipReasons: CsvSampleImportSkipReasonCount[];
+  minValue: number | null;
+  maxValue: number | null;
+  averageValue: number | null;
+  confidence: number;
+}
+
+export interface CsvSampleFileProfile {
+  vaultRoot?: string;
+  sourcePath: string;
+  sourceFileName: string;
+  file: {
+    kind: "csv";
+    fileName: string;
+    byteSize: number;
+    delimiter: string;
+    rowCount: number;
+    dataRowCount: number;
+    blankRowCount: number;
+  };
+  columns: CsvSampleFileColumnProfile[];
+  time: {
+    timeZone: string;
+    timestampColumn: string;
+    firstRecordedAt: string | null;
+    lastRecordedAt: string | null;
+    sampleIntervalSeconds: number | null;
+    gapCount: number;
+    gaps: Array<{ from: string; to: string; durationSeconds: number }>;
+  };
+  series: CsvSampleFileSeriesProfile[];
+  sourceHints: CsvSampleFileSourceHint[];
+  warnings: string[];
+  summaries?: SampleWindowSummary[];
 }
 
 export interface CsvSampleImportWriteResult {
@@ -225,6 +298,7 @@ export async function prepareCsvSampleImport(
   const rawArtifact = await inspectFileAsset(request.filePath);
   const csvText = await readUtf8File(rawArtifact.sourcePath);
   const rows = parseDelimitedRows(csvText, delimiter);
+  const blankRowCount = countBlankDataRows(rows);
 
   if (rows.length < 2) {
     throw new Error("sample CSV must include a header row and at least one data row");
@@ -335,12 +409,207 @@ export async function prepareCsvSampleImport(
     vaultRoot,
     sourceFileName: rawArtifact.fileName,
     sourcePath: rawArtifact.sourcePath,
+    byteSize: rawArtifact.byteSize,
     delimiter,
     timeZone,
     tsColumn,
+    columns: header,
+    rowCount: rows.length,
+    dataRowCount: Math.max(0, rows.length - 1 - blankRowCount),
+    blankRowCount,
     metadataColumns: metadataColumns.length === 0 ? undefined : metadataColumns,
     imports,
   });
+}
+
+export async function profileCsvSampleFile(
+  input: unknown,
+  { presetRegistry }: { presetRegistry?: Pick<SamplePresetRegistry, "get"> } = {},
+): Promise<CsvSampleFileProfile> {
+  const request = assertPlainObject(input, "sample CSV profile input");
+  const includeSummary = Boolean(request.includeSummary);
+  const summaryProfile = normalizeSummaryProfile(request.summaryProfile);
+  const thresholdBelow = normalizeNumberList(request.thresholdBelow, "thresholdBelow");
+  const gapSeconds = normalizeOptionalFiniteNumber(request.gapSeconds, "gapSeconds");
+  const plan = await prepareCsvSampleImport(request, { presetRegistry });
+  const summaries = includeSummary
+    ? plan.imports.map((entry) =>
+      summarizeSampleSeries({
+        stream: entry.stream,
+        unit: entry.unit,
+        samples: entry.payload.samples,
+        profile: summaryProfile,
+        thresholdsBelow: thresholdBelow,
+        gapSeconds,
+      })
+    )
+    : undefined;
+  const firstSummary = summaries?.[0] ?? (plan.imports[0]
+    ? summarizeSampleSeries({
+      stream: plan.imports[0].stream,
+      unit: plan.imports[0].unit,
+      samples: plan.imports[0].payload.samples,
+      gapSeconds,
+    })
+    : undefined);
+
+  return stripUndefined({
+    vaultRoot: plan.vaultRoot,
+    sourcePath: plan.sourcePath,
+    sourceFileName: plan.sourceFileName,
+    file: {
+      kind: "csv" as const,
+      fileName: plan.sourceFileName,
+      byteSize: plan.byteSize,
+      delimiter: plan.delimiter,
+      rowCount: plan.rowCount,
+      dataRowCount: plan.dataRowCount,
+      blankRowCount: plan.blankRowCount,
+    },
+    columns: profileColumns(plan),
+    time: {
+      timeZone: plan.timeZone,
+      timestampColumn: plan.tsColumn,
+      firstRecordedAt: firstSummary?.firstSampleAt ?? null,
+      lastRecordedAt: firstSummary?.lastSampleAt ?? null,
+      sampleIntervalSeconds: firstSummary?.sampleIntervalSeconds ?? null,
+      gapCount: firstSummary?.gaps.length ?? 0,
+      gaps: firstSummary?.gaps ?? [],
+    },
+    series: plan.imports.map((entry) => profileSeries(entry)),
+    sourceHints: detectSourceHints(plan),
+    warnings: buildProfileWarnings(plan),
+    summaries,
+  });
+}
+
+function countBlankDataRows(rows: readonly (readonly string[])[]): number {
+  return rows.slice(1).filter((row) => row.every((cell) => cell.trim() === "")).length;
+}
+
+function profileColumns(plan: CsvSampleImportPlan): CsvSampleFileColumnProfile[] {
+  const metadataColumns = new Set(plan.metadataColumns ?? []);
+
+  return plan.columns.map((name, index) => {
+    if (name === plan.tsColumn) {
+      return { name, index, role: "timestamp" };
+    }
+
+    const series = plan.imports.find((entry) => entry.valueColumn === name);
+    if (series) {
+      return {
+        name,
+        index,
+        role: "sample_value",
+        stream: series.stream,
+        unit: series.unit,
+      };
+    }
+
+    if (metadataColumns.has(name)) {
+      return { name, index, role: "metadata" };
+    }
+
+    return { name, index, role: "ignored" };
+  });
+}
+
+function profileSeries(entry: CsvSampleImportBatchPlan): CsvSampleFileSeriesProfile {
+  const summary = summarizeSampleSeries({
+    stream: entry.stream,
+    unit: entry.unit,
+    samples: entry.payload.samples,
+  });
+
+  return {
+    stream: entry.stream,
+    unit: entry.unit,
+    valueColumn: entry.valueColumn,
+    importableCount: entry.importedCount,
+    skippedCount: entry.skippedCount,
+    skipReasons: entry.skipReasons,
+    minValue: summary.minValue,
+    maxValue: summary.maxValue,
+    averageValue: summary.averageValue,
+    confidence: entry.importedCount > 0 ? 0.98 : 0,
+  };
+}
+
+function detectSourceHints(plan: CsvSampleImportPlan): CsvSampleFileSourceHint[] {
+  const comparableColumns = new Set(plan.columns.map((column) => normalizeComparableText(column)));
+  const comparableFileName = normalizeComparableText(plan.sourceFileName);
+  const hasO2RingColumns =
+    comparableColumns.has("time") &&
+    comparableColumns.has("oxygenlevel") &&
+    comparableColumns.has("pulserate");
+
+  if (hasO2RingColumns || comparableFileName.includes("o2ring")) {
+    return [{
+      id: "wellue-o2ring-csv",
+      label: "O2Ring-style CSV",
+      confidence: hasO2RingColumns ? 0.86 : 0.65,
+    }];
+  }
+
+  return [];
+}
+
+function buildProfileWarnings(plan: CsvSampleImportPlan): string[] {
+  const warnings: string[] = [];
+
+  if (plan.blankRowCount > 0) {
+    warnings.push(`${plan.blankRowCount} blank data row(s) were skipped.`);
+  }
+
+  for (const entry of plan.imports) {
+    if (entry.skippedCount > 0) {
+      warnings.push(`${entry.skippedCount} ${entry.stream} row(s) were skipped.`);
+    }
+  }
+
+  return warnings;
+}
+
+function normalizeSummaryProfile(value: unknown): SampleSummaryProfile | undefined {
+  const normalized = normalizeOptionalString(value, "summaryProfile");
+  if (normalized === undefined) {
+    return undefined;
+  }
+
+  if (normalized !== "oxygen-night") {
+    throw new Error(`Unsupported sample summary profile "${normalized}"`);
+  }
+
+  return normalized;
+}
+
+function normalizeNumberList(value: unknown, label: string): number[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array of numbers when provided`);
+  }
+
+  return value.map((entry, index) => normalizeFiniteNumber(entry, `${label}[${index}]`));
+}
+
+function normalizeOptionalFiniteNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return normalizeFiniteNumber(value, label);
+}
+
+function normalizeFiniteNumber(value: unknown, label: string): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new TypeError(`${label} must be a finite number`);
+  }
+
+  return numeric;
 }
 
 function createImportCollector(input: {
