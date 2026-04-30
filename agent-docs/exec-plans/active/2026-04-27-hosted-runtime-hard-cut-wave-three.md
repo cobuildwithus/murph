@@ -149,7 +149,7 @@ Phase 8 is blocked by production imports in these remaining clusters:
   `src/lib/hosted-retention/cleanup.ts`, plus producer services that call
   `nudgeHostedRunBestEffort` still depend on cursor/run ownership. Producer
   call sites include device-sync wake, hosted onboarding wake/Stripe, hosted
-  share acceptance, vault-sync import, and settings sync routes.
+  share acceptance, and settings sync routes.
 - `packages/assistant-runtime`: `src/hosted-runtime.ts`,
   `src/hosted-runtime/execution.ts`, `src/hosted-runtime/models.ts`,
   `src/hosted-runtime/parsers.ts`, `src/hosted-runtime/turn-input.ts`,
