@@ -309,7 +309,7 @@ export function Sidebar({
       </SidebarHeader>
 
       <SidebarContent className="justify-center px-2">
-        <SidebarMenu className="gap-3 md:gap-3">
+        <SidebarMenu className="mb-12 gap-3 md:gap-3">
           {navItems.map((item) => {
             const activePrefix = item.matchPrefix ?? item.href;
             const isActive =
