@@ -60,13 +60,13 @@ biomarker:
       body: Deep sleep minutes are a device's estimate of time spent in N3 / slow-wave sleep, the EEG-defined non-REM stage dominated by slow waves.
     -
       title: Why people care
-      body: Slow-wave sleep is linked to sleep depth, memory and learning biology, cardiometabolic physiology, and emerging glymphatic-clearance hypotheses, but those links do not make a consumer stage estimate diagnostic.
+      body: "Reflects sleep depth and recovery biology; useful for trends, not diagnosis or guaranteed cognitive improvement."
     -
       title: How to read it
-      body: Compare your own repeated windows on the same device. A useful signal is a persistent 14-to-30-day shift that travels with better sleep continuity or subjective restoration.
+      body: "Compare 14-to-30-day same-device trends alongside total sleep, awakenings, and how restored you feel."
     -
       title: What moves it
-      body: Total sleep opportunity, earlier-night sleep, alcohol, illness, sleep apnea, fragmented sleep, late caffeine, late intense exercise, heat timing, stress, age, and device algorithms can all move the number.
+      body: "Sleep opportunity, alcohol, illness, apnea, fragmentation, caffeine, late hard exercise, heat, stress, age, and device algorithms."
   measurement:
     bestContext: Same-device overnight wearable data is best for self-tracking; polysomnography with EEG is the reference method when a clinical sleep question needs an answer.
     howToMeasure:

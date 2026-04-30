@@ -70,13 +70,13 @@ biomarker:
       body: HRV is variation in the timing between consecutive heartbeats. RMSSD is a time-domain HRV metric that emphasizes short-term beat-to-beat variation and is commonly used as a vagal or recovery-oriented signal.
     -
       title: Why people care
-      body: People track HRV because it can reflect autonomic regulation, recovery strain, sleep disruption, alcohol, stress, illness, and adaptation to training. Murph treats it as a contextual trend, not a medical diagnosis.
+      body: "Reflects autonomic regulation and recovery strain; useful for context around sleep, alcohol, stress, illness, and training."
     -
-      title: How to measure it
-      body: Use the same device, timing, and context. Overnight wearable HRV or a quiet morning resting reading is more useful than mixing devices, post-workout readings, or different posture and breathing conditions.
+      title: How to read it
+      body: "Compare same-device overnight or quiet-morning readings. Avoid mixing posture, breathing, devices, or post-workout values."
     -
       title: What moves it
-      body: Aerobic training can lift baseline HRV in some people, while poor sleep, alcohol, infection, psychological stress, dehydration, hard training, heat load, and device changes can all shift the signal.
+      body: "Aerobic training, sleep loss, alcohol, infection, stress, dehydration, hard training, heat, and device changes."
   measurement:
     bestContext: "Use overnight wearable HRV or a consistent quiet morning resting measurement, then compare 7-day medians against a prior 30-day same-device baseline."
     howToMeasure:

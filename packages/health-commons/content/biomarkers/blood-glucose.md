@@ -62,13 +62,13 @@ biomarker:
       body: Blood glucose is the amount of glucose in blood at a moment in time. Murph treats imported glucose values as a private trend signal, not as a diagnostic label.
     -
       title: Why people care
-      body: Can show fasting control, post-meal excursions, overnight stability, hypoglycemia risk, and how meals, exercise, sleep, stress, alcohol, and illness interact.
+      body: "Shows fasting control, post-meal spikes, overnight stability, hypoglycemia risk, and how lifestyle, illness, or medications affect metabolism."
     -
       title: How to read it
-      body: A fasting lab glucose should not be averaged with a post-dinner finger-stick or a CGM sensor value during exercise. Segment by timing and device before deciding what changed.
+      body: "Compare same-context readings: fasting with fasting, CGM with CGM, post-meal with post-meal. Avoid mixing devices or timing."
     -
       title: What moves it
-      body: Meal carbohydrate and timing, activity, diabetes medications, illness, stress, sleep loss, alcohol, dehydration, sensor placement, and calibration issues.
+      body: "Carbohydrates, meal timing, activity, medications, illness, stress, sleep loss, alcohol, dehydration, sensor placement, and calibration changes."
     -
       title: Safety first
       body: Hypoglycemia is an immediate safety issue. If readings are unexpectedly low, symptoms do not match the device, or insulin or sulfonylurea dosing is involved, follow the clinical plan and confirm with an approved meter or clinician-guided workflow.
