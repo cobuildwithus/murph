@@ -151,10 +151,10 @@ testPlans:
     interventionDays: 14
     primaryBiomarkerKey: biomarker:sleep-onset-latency
     secondaryBiomarkerKeys:
-      - biomarker:pre-sleep-arousal
       - biomarker:sleep-efficiency
-      - biomarker:hrv-rmssd
       - biomarker:resting-heart-rate
+      - biomarker:hrv-rmssd
+      - biomarker:pre-sleep-arousal
     safetyOutcomeKeys:
       - biomarker:pre-sleep-arousal
     minimumAdherenceSessions: 10
@@ -169,19 +169,69 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: A gentle breathing or meditation routine may lower pre-sleep arousal and make falling asleep feel less effortful.
-  -
-    biomarkerKey: biomarker:pre-sleep-arousal
-    description: Slow breathing or quiet attention may reduce feeling wired, keyed-up, or mentally active before bed.
+    expected: May fall asleep sooner
+    description: A timed low-stimulation routine replaces problem-solving, scrolling, and clock-watching with either slow breath pacing or a simple meditation anchor. Lower pre-bed arousal can shorten the wake-to-sleep transition.
+    estimatedChange:
+      kind: absolute
+      low: -10
+      high: -3
+      unit: minutes
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "Direct slow-breathing evidence includes a non-forced breathing-cycle study with sleep latency moving from 20.2 to 10.7 minutes and a small insomnia PSG study reporting lower sleep-onset latency; the healthy-adult PSG pilot was null, the 2026 review found objective sleep results inconclusive, and the meditation child evidence is mostly adjacent."
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: If the practice lowers arousal and shortens the restless start of the night, a larger share of time in bed may be spent asleep.
-  -
-    biomarkerKey: biomarker:hrv-rmssd
-    description: Gentle slow breathing can nudge the body toward a calmer state during practice. If that downshift carries into sleep, overnight HRV may rise or stabilize.
+    expected: Could improve
+    description: Shorter sleep onset and fewer restless awake periods convert more time in bed into sleep. This is the cleanest wearable sleep-continuity signal after sleep-onset latency.
+    estimatedChange:
+      kind: absolute
+      low: 1
+      high: 4
+      unit: percentage points
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "The paced-breathing insomnia study reported higher PSG sleep efficiency, and the non-forced breathing-cycle study lowered smartwatch/app awake time by 5.4 percentage points. Objective findings were inconclusive in the healthy-adult PSG pilot and 2026 systematic review, so the estimate is conservative."
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: A calmer pre-sleep state may lower overnight stress load. Resting heart rate might drift lower if the routine improves recovery.
+    expected: Could trend lower
+    description: Unforced slow breathing increases the vagal brake and can lower pre-bed pulse. If that lower arousal carries into sleep, same-device overnight resting heart rate can drop.
+    estimatedChange:
+      kind: absolute
+      low: -4
+      high: -1
+      unit: bpm
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "The non-forced breathing-cycle study lowered pre-sleep heart rate by 5.6 bpm and several sleep-stage heart-rate measures by about 4-7 bpm. This protocol is gentler and user-run, so the expected same-device resting-heart-rate shift is smaller."
+    protocolProminence: context
+  -
+    biomarkerKey: biomarker:hrv-rmssd
+    expected: Could improve
+    description: Breathing near resonance amplifies beat-to-breath variability during practice. If bedtime starts from a lower-arousal state, overnight RMSSD can rise or hold steadier.
+    estimatedChange:
+      kind: relative_percent
+      low: 0
+      high: 10
+      unit: "%"
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "Direct sources show total HRV power or immediate HRV increases during pre-sleep slow breathing, while the extracted evidence does not give a clean overnight RMSSD effect. Treat this as a small same-device relative shift, not a cross-device HRV target."
+    protocolProminence: context
+  -
+    biomarkerKey: biomarker:pre-sleep-arousal
+    expected: Could trend lower
+    description: Breath pacing and grounding meditation give attention a repeatable, low-threat task before lights-out. Fewer threat checks and less rumination can lower a nightly wiredness rating.
+    estimatedChange:
+      kind: absolute
+      low: -3
+      high: -1
+      unit: 0-10 rating points
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "The bedtime app-guided mindfulness pilot reported a PSAS change of -7.7 points, and structured mindfulness insomnia trials report lower pre-sleep arousal. Mapping those scales to a simple nightly 0-10 rating is approximate, and breathing-only arousal-scale estimates were not extracted."
+    protocolProminence: focus
 whyItWorks:
   - "Gentle slow breathing near 5-6 breaths per minute can increase cardiorespiratory coupling and vagal/HRV signals, which supports a plausible calming mechanism but not a guarantee of better sleep."
   - "Mindfulness and meditation interventions can reduce cognitive or emotional arousal in some insomnia-adjacent contexts, but the extracted evidence is mostly guided, structured, clinical, or bundled rather than silent unguided bedtime meditation."
