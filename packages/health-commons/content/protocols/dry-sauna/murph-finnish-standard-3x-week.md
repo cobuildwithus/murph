@@ -122,9 +122,9 @@ testPlans:
     durationDays: 21
     baselineDays: 7
     interventionDays: 14
-    primaryBiomarkerKey: "biomarker:resting-heart-rate"
+    primaryBiomarkerKey: "biomarker:morning-blood-pressure"
     secondaryBiomarkerKeys:
-      - "biomarker:morning-blood-pressure"
+      - "biomarker:resting-heart-rate"
       - "biomarker:hrv-rmssd"
       - "biomarker:sleep-efficiency"
       - "biomarker:deep-sleep-minutes"
@@ -138,58 +138,64 @@ testPlans:
 expectedSignalDescriptions:
 
   -
-    biomarkerKey: "biomarker:resting-heart-rate"
-    expected: "Possible change"
-    protocolProminence: "focus"
-    estimatedChange:
-      kind: "mixed_or_contextual"
-      window: "2-6 weeks"
-      confidence: "low"
-      basis: "Direct sauna physiology plus mixed repeated/passive-heat evidence; RCT-only passive-heating evidence did not consistently show lower resting heart rate."
-    description: "Sauna widens skin blood vessels, so the heart beats faster to move heat out and keep pressure up. Repeated heat exposure trains that cooling response, which can leave the heart doing less work at rest."
-  -
     biomarkerKey: "biomarker:morning-blood-pressure"
-    expected: "Could trend lower"
+    expected: "Small drop possible"
     protocolProminence: "focus"
     estimatedChange:
       kind: "absolute"
-      low: -4
+      low: -5
       high: 0
       unit: "mmHg"
       window: "2-6 weeks"
       confidence: "low"
-      basis: "Same-mechanism heat-therapy meta-analyses suggest small BP reductions, but evidence is heterogeneous and not the exact 3x/week Finnish-sauna protocol."
-    description: "Heat widens blood vessels and shifts blood toward the skin, reducing resistance against each heartbeat. Repeated exposure can keep vessel tone slightly more relaxed after the session."
+      basis: "Short-term sauna-treatment meta-analysis reported about -5 mmHg systolic and -4 mmHg diastolic BP over 2-4 weeks in mostly clinical or adjacent protocols; direct Finnish-sauna physiology shows acute BP movement, but the Murph dose is shorter and healthier-user oriented."
+    description: "Heat opens skin blood vessels and lowers the resistance each heartbeat pushes against. Repeated sessions can leave morning vessel tone more relaxed, so a home-cuff average may drift down."
+  -
+    biomarkerKey: "biomarker:resting-heart-rate"
+    expected: "Small change possible"
+    protocolProminence: "focus"
+    estimatedChange:
+      kind: "absolute"
+      low: -3
+      high: 1
+      unit: "bpm"
+      window: "2-6 weeks"
+      confidence: "low"
+      basis: "Acute sauna raises heart rate during heat exposure; repeated passive-heat evidence suggests small resting-pulse reductions, but direct dry-sauna RCT evidence for consumer RHR is mixed."
+    description: "Sauna makes the heart pump faster during the session to move heat to the skin. With repeat exposure, the same heat load can require less resting strain, showing up as a slightly lower overnight or morning pulse."
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    expected: "Worth watching"
-    protocolProminence: "focus"
+    expected: "May rise or fall"
+    protocolProminence: "context"
     estimatedChange:
       kind: "mixed_or_contextual"
       window: "2-6 weeks"
       confidence: "low"
-      basis: "Autonomic sauna evidence is plausible but indirect for consumer RMSSD; the closest 3x/week trial used frequency-domain HRV in allergic-rhinitis patients."
-    description: "Sauna first triggers heat stress, then a cooling rebound as the vagus nerve retakes beat-to-beat control of the heart."
+      basis: "Closest direct 3x/week dry-sauna trial used frequency-domain HRV in allergic-rhinitis patients, not RMSSD; passive-heating reviews show protocol-dependent sympathetic and vagal effects."
+    description: "Heat temporarily pulls the autonomic system toward higher sympathetic drive. A calm cooldown can restore vagal beat-to-beat control; dehydration, late timing, or stacked training can suppress next-morning RMSSD."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
-    expected: "Worth watching"
+    expected: "Could rise slightly"
     protocolProminence: "context"
     estimatedChange:
-      kind: "mixed_or_contextual"
+      kind: "absolute"
+      low: 0
+      high: 3
+      unit: "percentage points"
       window: "2-3 weeks"
       confidence: "low"
-      basis: "Sleep-supportive evidence comes from adjacent warm bath/shower passive heating, not direct Finnish dry-sauna trials."
-    description: "Some people sleep better after a warm-to-cool transition because cooling can make the body feel ready for sleep. Finnish sauna is a stronger heat exposure than the warm-bath evidence, so sleep efficiency could improve if the session feels calming, or worsen if the heat leaves the body too activated."
+      basis: "Adjacent warm bath/shower passive-heating meta-analysis supports better sleep efficiency from a warm-to-cool transition; extracted Finnish-sauna sources do not provide a direct estimate."
+    description: "A sauna session followed by enough cooldown creates a warm-to-cool drop before bed. That heat-dissipation signal can shorten settling time and reduce wake time, nudging sleep efficiency upward."
   -
     biomarkerKey: "biomarker:deep-sleep-minutes"
-    expected: "Can be noisy"
+    expected: "Algorithm-sensitive"
     protocolProminence: "context"
     estimatedChange:
       kind: "mixed_or_contextual"
       window: "2-3 weeks"
       confidence: "low"
-      basis: "No extracted direct Finnish-sauna finding supports deep-sleep improvement; keep deep sleep as background context rather than a promoted outcome."
-    description: "Deep-sleep minutes are not a strong sauna target. A calming warm-to-cool transition could make sleep feel more settled, but the extracted sauna evidence does not show that Finnish dry sauna reliably creates more deep sleep, so this should stay background-only."
+      basis: "No extracted direct Finnish-sauna finding supports a deep-sleep gain; consumer deep-sleep estimates depend on heart-rate, HRV, temperature, and movement proxies that sauna can perturb."
+    description: "Sauna changes overnight heart-rate, temperature, and movement patterns that wearables use to infer sleep stages. Deep-sleep minutes may move because the night is calmer, or because the algorithm reads the heat-recovery pattern differently."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -1158,7 +1164,7 @@ Use a traditional dry sauna, keep the routine repeatable, and compare averages f
 
 ## What to watch
 
-Resting heart rate is the main practical wearable signal to watch, not a guaranteed improvement target. Morning blood pressure is optional context when the user already has a reliable home-cuff routine. HRV, sleep efficiency, and deep-sleep estimates remain exploratory because they are sensitive to heat stress, timing, alcohol, illness, travel, hard training, and device noise.
+The clearest downstream signals are morning blood pressure, when the user already has a consistent home-cuff routine, and resting heart rate from the same wearable or quiet-morning method. A small BP drop or modest resting-pulse shift is more interpretable than session completion. HRV/RMSSD, sleep efficiency, and deep-sleep minutes can explain timing and recovery context, but heat load, cooldown, hydration, training, alcohol, and device algorithms can dominate those signals.
 
 ## What to log
 
