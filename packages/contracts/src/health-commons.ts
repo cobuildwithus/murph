@@ -228,6 +228,81 @@ export const HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS = [
 export type HealthCommonsBiomarkerMetricDomain =
   (typeof HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS)[number];
 
+export const HEALTH_COMMONS_BROWSER_VAULT_METRIC_BINDINGS = {
+  activity: [
+    "activeCalories",
+    "activityScore",
+    "altitudeChangeMeters",
+    "averageHeartRate",
+    "dayStrain",
+    "distanceKm",
+    "estimatedVo2Max",
+    "maxHeartRate",
+    "percentRecorded",
+    "sessionCount",
+    "sessionMinutes",
+    "steps",
+    "totalCalories",
+    "totalElevationGainMeters",
+    "workoutStrain",
+  ],
+  body_state: [
+    "alcoholFreeDay",
+    "alt",
+    "ast",
+    "bmi",
+    "bodyFatPercentage",
+    "craving",
+    "drinks",
+    "ggt",
+    "glucose",
+    "mood",
+    "stressLevel",
+    "temperature",
+    "temperatureDeviation",
+    "weightKg",
+    "withdrawalSymptoms",
+  ],
+  recovery: [
+    "hrv",
+    "lowestHeartRate",
+    "readinessScore",
+    "recoveryScore",
+    "respiratoryRate",
+    "restingHeartRate",
+    "spo2",
+    "temperatureDeviation",
+  ],
+  sleep: [
+    "awakeMinutes",
+    "deepMinutes",
+    "hrv",
+    "lightMinutes",
+    "remMinutes",
+    "respiratoryRate",
+    "sleepConsistency",
+    "sleepEfficiency",
+    "sleepPerformance",
+    "sleepScore",
+    "spo2",
+    "timeInBedMinutes",
+    "totalMinutes",
+    "totalSleepMinutes",
+    "wakeTime",
+  ],
+} as const satisfies Record<HealthCommonsBiomarkerMetricDomain, readonly string[]>;
+
+export type HealthCommonsBrowserVaultMetricBinding =
+  (typeof HEALTH_COMMONS_BROWSER_VAULT_METRIC_BINDINGS)[HealthCommonsBiomarkerMetricDomain][number];
+
+export function isKnownHealthCommonsBrowserVaultMetricBinding(
+  domain: HealthCommonsBiomarkerMetricDomain,
+  metric: string,
+): boolean {
+  const metrics: readonly string[] = HEALTH_COMMONS_BROWSER_VAULT_METRIC_BINDINGS[domain];
+  return metrics.includes(metric);
+}
+
 export const HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS = [
   "higher",
   "higher_or_stable",
@@ -1492,6 +1567,15 @@ export const healthCommonsBiomarkerPrivateMetricBindingSchema = z
         context.addIssue({
           code: z.ZodIssueCode.custom,
           message: "browser_vault_metric bindings must use canonical browser-vault metric keys, not provider field paths.",
+          path: ["metric"],
+        });
+      } else if (
+        binding.domain
+        && !isKnownHealthCommonsBrowserVaultMetricBinding(binding.domain, binding.metric)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "browser_vault_metric bindings must reference a known browser-vault domain/metric pair.",
           path: ["metric"],
         });
       }

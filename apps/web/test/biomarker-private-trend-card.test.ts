@@ -45,7 +45,8 @@ test("does not render mocked private biomarker values when browser-vault is unav
   );
 
   assert.match(markup, /Private trend unavailable/u);
-  assert.match(markup, /Sync a browser-vault replica/u);
+  assert.match(markup, /Connect a health device/u);
+  assert.match(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
   assert.doesNotMatch(markup, /Latest Demo/iu);
 });
@@ -125,6 +126,7 @@ test("renders the insufficient-data state from real browser-vault rows", () => {
 
   assert.match(markup, /Not enough private data yet/u);
   assert.match(markup, /Found 2 points/u);
+  assert.doesNotMatch(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
 });
 
@@ -146,7 +148,8 @@ test("renders a no-data state when the browser-vault replica has no matching row
   );
 
   assert.match(markup, /No private values yet/u);
-  assert.match(markup, /does not contain values for this biomarker yet/u);
+  assert.match(markup, /tracks this biomarker/u);
+  assert.match(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
 });
 
@@ -173,8 +176,8 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
   );
 
   assert.match(markup, /Private trend unavailable/u);
-  assert.match(markup, /does not have a private browser-vault metric binding yet/u);
-  assert.doesNotMatch(markup, /sync a browser-vault replica to see this module/iu);
+  assert.match(markup, /Private tracking for this biomarker is not available yet/u);
+  assert.doesNotMatch(markup, /Connect a device/u);
 });
 
 function restingHeartRateRows(rows: readonly (readonly [string, number])[]): BrowserVaultMetricRow[] {

@@ -642,6 +642,25 @@ describe("@murphai/contracts health commons schemas", () => {
     });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validBiomarkerPageWithRanking,
+        biomarker: {
+          ...validBiomarkerPageWithRanking.biomarker,
+          privateMetricBindings: [
+            {
+              source: "browser_vault_metric",
+              domain: "recovery",
+              metric: "sleepEfficiency",
+              unit: "%",
+              preferred: true,
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
         ...validMeasurementMethodPage,
         measurementMethod: undefined,
       }),
