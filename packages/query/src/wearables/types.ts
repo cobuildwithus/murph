@@ -84,6 +84,7 @@ export interface WearableActivityDay {
   sessionMinutes: WearableResolvedMetric;
   steps: WearableResolvedMetric;
   summaryConfidence: WearableSummaryConfidence;
+  totalCalories: WearableResolvedMetric;
   totalElevationGainMeters: WearableResolvedMetric;
   workoutStrain: WearableResolvedMetric;
 }
@@ -394,6 +395,7 @@ export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "sessionCount",
   "sessionMinutes",
   "steps",
+  "totalCalories",
   "totalElevationGainMeters",
   "workoutStrain",
 ]);

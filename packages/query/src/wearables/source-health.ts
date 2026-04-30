@@ -52,6 +52,7 @@ export function buildWearableSourceHealth(input: {
     ...input.activityDays.flatMap((day) => [
       day.steps,
       day.activeCalories,
+      day.totalCalories,
       day.distanceKm,
       day.totalElevationGainMeters,
       day.altitudeChangeMeters,
@@ -106,6 +107,7 @@ export function buildWearableSourceHealth(input: {
     ...input.activityDays.flatMap((day) => [
       day.steps,
       day.activeCalories,
+      day.totalCalories,
       day.distanceKm,
       day.totalElevationGainMeters,
       day.altitudeChangeMeters,

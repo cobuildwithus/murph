@@ -300,7 +300,7 @@ test("latest surface stays joined to the latest sleep-backed local day instead o
   );
 });
 
-test("activity surfaces keep WHOOP workout metrics and convert energy-burned into active calories", () => {
+test("activity surfaces keep WHOOP workout metrics and convert energy-burned into total calories", () => {
   const vault = makeVault([
     makeObservation({
       entityId: "evt_whoop_energy",
@@ -374,15 +374,16 @@ test("activity surfaces keep WHOOP workout metrics and convert energy-burned int
   const energy = summarizeWearableMetricLatest(vault, "energy-burned", { windowDays: 1 });
   const maxHeartRate = summarizeWearableMetricLatest(vault, "max-heart-rate", { windowDays: 1 });
 
-  assert.equal(latest?.activity?.activeCalories.selection.value, 100);
-  assert.equal(latest?.activity?.activeCalories.selection.unit, "kcal");
+  assert.equal(latest?.activity?.activeCalories.selection.value, null);
+  assert.equal(latest?.activity?.totalCalories.selection.value, 100);
+  assert.equal(latest?.activity?.totalCalories.selection.unit, "kcal");
   assert.equal(latest?.activity?.maxHeartRate.selection.value, 168);
   assert.equal(latest?.activity?.workoutStrain.selection.value, 11.1);
   assert.equal(latest?.activity?.percentRecorded.selection.value, 99);
   assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 42);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, 33);
 
-  assert.equal(energy?.metric, "activeCalories");
+  assert.equal(energy?.metric, "totalCalories");
   assert.equal(energy?.resolvedAlias, "energy-burned");
   assert.equal(energy?.summaryKind, "activity");
   assert.equal(energy?.unit, "kcal");

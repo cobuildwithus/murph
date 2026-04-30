@@ -11,6 +11,10 @@ import {
 } from '@murphai/runtime-state/node'
 
 import {
+  hasConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncProviderConfigs,
+} from '@murphai/device-syncd/config'
+import {
   DEVICE_SYNC_BASE_URL_ENV,
   resolveDeviceSyncBaseUrl,
   resolveDeviceSyncControlToken,
@@ -220,6 +224,10 @@ export async function startManagedDeviceSyncDaemon(input: {
     )
   }
 
+  if (!hasConfiguredDeviceSyncProviderConfigs(readConfiguredDeviceSyncProviderConfigs(env))) {
+    throw buildMissingProviderCredentialsError(baseUrl)
+  }
+
   const controlToken =
     explicitControlToken ?? generateDeviceSyncControlToken()
   const child = await dependencies.spawnProcess({
@@ -273,6 +281,9 @@ export async function startManagedDeviceSyncDaemon(input: {
         buildUnmanagedReachableDeviceDaemonMessage(baseUrl),
         { baseUrl, pid: child.pid },
       )
+    }
+    if (startupLogSnippet && isMissingProviderCredentialsStartupFailure(startupLogSnippet)) {
+      throw buildMissingProviderCredentialsError(baseUrl, child.pid)
     }
     throw new VaultCliError(
       'DEVICE_SYNC_DAEMON_START_FAILED',
@@ -468,6 +479,21 @@ async function isDeviceDaemonControlPlaneReachable(
 
 function isAddressInUseStartupFailure(message: string): boolean {
   return /\bEADDRINUSE\b|address already in use/iu.test(message)
+}
+
+function isMissingProviderCredentialsStartupFailure(message: string): boolean {
+  return /No device sync providers are configured|provider client credential pair/iu.test(message)
+}
+
+function buildMissingProviderCredentialsError(
+  baseUrl: string,
+  pid?: number,
+): VaultCliError {
+  return new VaultCliError(
+    'DEVICE_SYNC_PROVIDER_CONFIG_REQUIRED',
+    'No local device sync provider credentials are configured. Set at least one supported provider client credential pair, such as WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET, before starting the local device sync daemon.',
+    pid === undefined ? { baseUrl } : { baseUrl, pid },
+  )
 }
 
 function buildUnmanagedReachableDeviceDaemonMessage(baseUrl: string): string {
