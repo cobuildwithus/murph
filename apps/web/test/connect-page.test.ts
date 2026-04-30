@@ -47,7 +47,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "MapMyFitness",
     },
     {
-      assetPath: "/brand-logos/connect/ultrahuman.jpg",
+      assetPath: "/brand-logos/connect/ultrahuman.png",
       description: "Ring-based sleep, recovery, temperature, movement, and metabolic insight signals from Ultrahuman.",
       name: "Ultrahuman",
     },
@@ -57,12 +57,12 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Dexcom (G6 and older)",
     },
     {
-      assetPath: "/brand-logos/connect/renpho.png",
+      assetPath: "/brand-logos/connect/renpho.svg",
       description: "Smart-scale weight, body composition, and measurement trends from Renpho devices.",
       name: "Renpho",
     },
     {
-      assetPath: "/brand-logos/connect/runkeeper.png",
+      assetPath: "/brand-logos/connect/runkeeper.svg",
       description: "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
       name: "Runkeeper",
     },
@@ -72,7 +72,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Samsung Health",
     },
     {
-      assetPath: "/brand-logos/connect/tandem-source.png",
+      assetPath: "/brand-logos/connect/tandem-source.svg",
       description: "Insulin pump, CGM, therapy, and diabetes device records from Tandem.",
       name: "Tandem Source",
     },
@@ -97,7 +97,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Omron",
     },
     {
-      assetPath: "/brand-logos/connect/accuchek.png",
+      assetPath: "/brand-logos/connect/accuchek.svg",
       description: "Accu-Chek glucose readings, meter history, and diabetes tracking context records.",
       name: "Accu-Chek",
     },
@@ -142,7 +142,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Peloton",
     },
     {
-      assetPath: "/brand-logos/connect/wahoo.png",
+      assetPath: "/brand-logos/connect/wahoo.svg",
       description: "Wahoo cycling, running, heart rate, power, and trainer workout data.",
       name: "Wahoo",
     },
@@ -182,7 +182,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Dexcom",
     },
     {
-      assetPath: "/brand-logos/connect/kardia.png",
+      assetPath: "/brand-logos/connect/kardia.svg",
       description: "Kardia ECG recordings, rhythm summaries, and heart health observation history.",
       name: "Kardia",
     },
@@ -192,7 +192,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Cronometer",
     },
     {
-      assetPath: "/brand-logos/connect/polar.png",
+      assetPath: "/brand-logos/connect/polar.svg",
       description: "Polar training, sleep, heart rate, recovery, and cardio load data.",
       name: "Polar",
     },

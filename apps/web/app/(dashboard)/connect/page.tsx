@@ -39,7 +39,7 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Ring-based sleep, recovery, temperature, movement, and metabolic insight signals from Ultrahuman.",
     id: "ultrahuman",
-    logo: logoAsset("ultrahuman.jpg"),
+    logo: logoAsset("ultrahuman.png"),
     name: "Ultrahuman",
   },
   {
@@ -51,13 +51,13 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Smart-scale weight, body composition, and measurement trends from Renpho devices.",
     id: "renpho",
-    logo: logoAsset("renpho.png"),
+    logo: logoAsset("renpho.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 110, 22),
     name: "Renpho",
   },
   {
     description: "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
     id: "runkeeper",
-    logo: logoAsset("runkeeper.png"),
+    logo: logoAsset("runkeeper.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 132, 20),
     name: "Runkeeper",
   },
   {
@@ -69,7 +69,7 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Insulin pump, CGM, therapy, and diabetes device records from Tandem.",
     id: "tandem-source",
-    logo: logoAsset("tandem-source.png"),
+    logo: logoAsset("tandem-source.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 120, 25),
     name: "Tandem Source",
   },
   {
@@ -93,13 +93,13 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Blood pressure, pulse, weight, and connected home measurements from Omron.",
     id: "omron",
-    logo: logoAsset("omron.png"),
+    logo: logoAsset("omron.png", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 106, 40),
     name: "Omron",
   },
   {
     description: "Accu-Chek glucose readings, meter history, and diabetes tracking context records.",
     id: "accuchek",
-    logo: logoAsset("accuchek.png"),
+    logo: logoAsset("accuchek.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 14),
     name: "Accu-Chek",
   },
   {
@@ -153,7 +153,7 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Wahoo cycling, running, heart rate, power, and trainer workout data.",
     id: "wahoo",
-    logo: logoAsset("wahoo.png"),
+    logo: logoAsset("wahoo.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 108, 26),
     name: "Wahoo",
   },
   {
@@ -201,7 +201,7 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Kardia ECG recordings, rhythm summaries, and heart health observation history.",
     id: "kardia",
-    logo: logoAsset("kardia.png"),
+    logo: logoAsset("kardia.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 104, 20),
     name: "Kardia",
   },
   {
@@ -213,7 +213,7 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Polar training, sleep, heart rate, recovery, and cardio load data.",
     id: "polar",
-    logo: logoAsset("polar.png"),
+    logo: logoAsset("polar.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 20),
     name: "Polar",
   },
 ] as const;
