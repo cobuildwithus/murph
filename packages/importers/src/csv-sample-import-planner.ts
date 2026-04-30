@@ -9,7 +9,6 @@ import type {
   SampleImportBatchProvenance,
   SampleImportPayload,
   SampleImportRecord,
-  SampleImportRowProvenance,
 } from "./core-port.ts";
 import type { SamplePresetRegistry } from "./preset-registry.ts";
 import { resolveSampleImportConfig } from "./preset-registry.ts";
@@ -24,7 +23,6 @@ import {
   normalizeOptionalString,
   normalizeRequiredString,
   readUtf8File,
-  stripEmptyObject,
   stripUndefined,
 } from "./shared.ts";
 
@@ -284,6 +282,7 @@ interface PlannedImportColumn {
 interface ImportCollector extends PlannedImportColumn {
   payload: PreparedCsvSampleImportPayload;
   skipReasonCounts: Map<string, number>;
+  rowCount: number;
   valueIndex: number;
 }
 
@@ -317,10 +316,8 @@ export async function prepareCsvSampleImport(
   const metadataColumns = config.metadataColumns;
   const plannedImports = resolvePlannedImports(config, header, recognizedSampleColumns);
   const tsIndex = requireColumn(header, tsColumn);
-  const metadataColumnIndexes = new Map<string, number>();
-
   for (const column of metadataColumns) {
-    metadataColumnIndexes.set(column, requireColumn(header, column));
+    requireColumn(header, column);
   }
 
   const collectors = plannedImports.map((entry) => createImportCollector({
@@ -352,33 +349,17 @@ export async function prepareCsvSampleImport(
       continue;
     }
 
-    const rowNumber = index + 1;
-    const metadata = Object.fromEntries(
-      metadataColumns
-        .map((column) => [column, row[metadataColumnIndexes.get(column) ?? -1]?.trim() ?? ""] as const)
-        .filter(([, entry]) => entry.length > 0),
-    );
-    const strippedMetadata = stripEmptyObject(metadata);
     const rawRecordedAt = String(row[tsIndex] ?? "");
     const recordedAt = normalizeFlexibleTimestamp(rawRecordedAt, timeZone);
 
     for (const collector of collectors) {
+      collector.rowCount += 1;
       const rawValue = String(row[collector.valueIndex] ?? "");
       const value = normalizeOptionalNumber(rawValue, collector.stream);
 
       if (!recordedAt || value === undefined) {
         const skipReason = resolveSkipReason(recordedAt, value);
         collector.skipReasonCounts.set(skipReason, (collector.skipReasonCounts.get(skipReason) ?? 0) + 1);
-        collector.payload.batchProvenance?.rows?.push(
-          stripUndefined({
-            rowNumber,
-            rawRecordedAt,
-            rawValue,
-            metadata: strippedMetadata,
-            skipped: true,
-            skipReason,
-          }),
-        );
         continue;
       }
 
@@ -386,16 +367,6 @@ export async function prepareCsvSampleImport(
         recordedAt,
         value,
       });
-      collector.payload.batchProvenance?.rows?.push(
-        stripUndefined({
-          rowNumber,
-          recordedAt,
-          rawRecordedAt,
-          rawValue,
-          metadata: strippedMetadata,
-          value,
-        }),
-      );
     }
   }
 
@@ -642,10 +613,10 @@ function createImportCollector(input: {
       batchProvenance: {
         sourceFileName: payloadInput.batchProvenance.sourceFileName,
         importConfig: payloadInput.importConfig,
-        rows: [],
       },
     }),
     skipReasonCounts: new Map<string, number>(),
+    rowCount: 0,
     valueIndex: input.valueIndex,
   };
 }
@@ -654,13 +625,21 @@ function finalizeImportCollector(collector: ImportCollector): CsvSampleImportBat
   const skipReasons = [...collector.skipReasonCounts.entries()]
     .map(([reason, count]) => ({ reason, count }))
     .sort((left, right) => left.reason.localeCompare(right.reason));
+  const skippedCount = skipReasons.reduce((sum, entry) => sum + entry.count, 0);
+  const batchProvenance = collector.payload.batchProvenance;
+
+  if (batchProvenance) {
+    batchProvenance.rowCount = collector.rowCount;
+    batchProvenance.skippedCount = skippedCount;
+    batchProvenance.skipReasons = skipReasons;
+  }
 
   return {
     stream: collector.stream,
     unit: collector.unit,
     valueColumn: collector.valueColumn,
     importedCount: collector.payload.samples.length,
-    skippedCount: skipReasons.reduce((sum, entry) => sum + entry.count, 0),
+    skippedCount,
     skipReasons,
     payload: collector.payload,
   };

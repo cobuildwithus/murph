@@ -1548,9 +1548,7 @@ test("summarizeDailySamples honors filters and ignores incomplete sample records
   });
 
   assert.equal(summaries.length, 2);
-  assert.deepEqual(summaries[0]?.sampleIds, [
-    "smp_filter_03",
-  ]);
+  assert.equal(summaries[0]?.sampleCount, 1);
   assert.deepEqual(summaries[0]?.sourcePaths, [
     "ledger/samples/glucose/2026/2026-03.jsonl",
   ]);
@@ -1561,10 +1559,7 @@ test("summarizeDailySamples honors filters and ignores incomplete sample records
   assert.equal(summaries[0]?.averageValue, 92);
   assert.equal(summaries[0]?.firstSampleAt, "2026-03-10T08:00:00Z");
   assert.equal(summaries[0]?.lastSampleAt, "2026-03-10T08:00:00Z");
-  assert.deepEqual(summaries[1]?.sampleIds, [
-    "smp_filter_04",
-    "smp_filter_05",
-  ]);
+  assert.equal(summaries[1]?.sampleCount, 2);
   assert.deepEqual(summaries[1]?.sourcePaths, [
     "ledger/samples/glucose/2026/2026-03-b.jsonl",
     "ledger/samples/glucose/2026/2026-03.jsonl",
@@ -1925,7 +1920,7 @@ test("searchVault ranks body and structured matches while excluding raw samples 
   assert.deepEqual(result.hits[0]?.matchedTerms, ["afternoon", "crash", "pasta"]);
 });
 
-test("searchVault includes sample rows when the caller scopes by sample record type or stream", () => {
+test("searchVault includes sample summaries when the caller scopes by sample record type or stream", () => {
   const vault = createEmptyReadModel();
   const sample = createSampleRecord({
     id: "smp_glucose_01",
@@ -1943,14 +1938,21 @@ test("searchVault includes sample rows when the caller scopes by sample record t
   vault.entities = [sample];
   syncVaultDerivedFields(vault);
 
-  const result = searchVault(vault, "glucose spike", {
+  const result = searchVault(vault, "glucose", {
     streams: ["glucose"],
   });
 
   assert.equal(result.total, 1);
-  assert.equal(result.hits[0]?.recordId, "smp_glucose_01");
+  assert.equal(result.hits[0]?.recordId, "sample-summary:2026-03-12:glucose:mg_dL");
   assert.equal(result.hits[0]?.recordType, "sample");
+  assert.equal(result.hits[0]?.kind, "sample_summary");
   assert.equal(result.hits[0]?.stream, "glucose");
+
+  const kindOnlyResult = searchVault(vault, "glucose", {
+    kinds: ["sample_summary"],
+  });
+  assert.equal(kindOnlyResult.total, 1);
+  assert.equal(kindOnlyResult.hits[0]?.recordId, "sample-summary:2026-03-12:glucose:mg_dL");
 });
 
 test("overview selectors move cleanly onto the query read model", () => {
@@ -3343,8 +3345,11 @@ test("rebuildQueryProjection materializes the shared query projection and status
     assert.equal(rebuilt.exists, true);
     assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
     assert.equal(rebuilt.schemaVersion, "murph.query-projection.v1");
-    assert.equal(rebuilt.entityCount, vault.entities.length);
-    assert.equal(rebuilt.searchDocumentCount, vault.entities.length);
+    assert.equal(rebuilt.entityCount, vault.entities.filter((entity) => entity.family !== "sample").length);
+    assert.equal(
+      rebuilt.searchDocumentCount,
+      vault.entities.filter((entity) => entity.family !== "sample").length + summarizeDailySamples(vault).length,
+    );
     assert.equal(rebuilt.fresh, true);
     assert.equal(existsSync(runtimeDatabasePath), true);
 
@@ -3354,6 +3359,63 @@ test("rebuildQueryProjection materializes the shared query projection and status
     assert.equal(statusAfter.entityCount, rebuilt.entityCount);
     assert.equal(statusAfter.searchDocumentCount, rebuilt.searchDocumentCount);
     assert.equal(statusAfter.fresh, true);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("rebuildQueryProjection keeps dense sample points out of generic entities and search", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const heartRateLedgerPath = path.join(vaultRoot, "ledger/samples/heart_rate/2026/2026-03.jsonl");
+
+  try {
+    const existingLedger = await readFile(heartRateLedgerPath, "utf8");
+    const denseSamples = Array.from({ length: 128 }, (_, index) =>
+      JSON.stringify({
+        schemaVersion: "murph.sample.v1",
+        id: `smp_01JNV4HRDENSE${String(index).padStart(8, "0")}`,
+        stream: "heart_rate",
+        recordedAt: `2026-03-12T10:${String(index % 60).padStart(2, "0")}:00Z`,
+        dayKey: "2026-03-12",
+        source: "device",
+        quality: "raw",
+        value: 60 + (index % 20),
+        unit: "bpm",
+      }),
+    );
+    await writeFile(heartRateLedgerPath, `${existingLedger.trimEnd()}\n${denseSamples.join("\n")}\n`);
+
+    const vault = await readVault(vaultRoot);
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+
+    try {
+      const sampleEntityCount = database
+        .prepare("SELECT COUNT(*) AS count FROM query_entities WHERE family = 'sample'")
+        .get() as { count: number };
+      const samplePointCount = database
+        .prepare("SELECT COUNT(*) AS count FROM query_sample_points")
+        .get() as { count: number };
+      const sampleSearchDocumentCount = database
+        .prepare(`
+          SELECT COUNT(*) AS count
+          FROM query_search_document
+          WHERE record_type = 'sample' AND kind = 'sample_summary'
+        `)
+        .get() as { count: number };
+
+      assert.equal(sampleEntityCount.count, 0);
+      assert.equal(samplePointCount.count, vault.samples.length);
+      assert.equal(sampleSearchDocumentCount.count, summarizeDailySamples(vault).length);
+      assert.ok(samplePointCount.count > sampleSearchDocumentCount.count);
+    } finally {
+      database.close();
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -3592,7 +3654,17 @@ test("searchVaultRuntime rebuilds the projection automatically and only returns 
     });
     assert.equal(
       requestedSampleResult.hits.some(
-        (hit) => hit.recordType === "sample" && hit.stream === "heart_rate",
+        (hit) => hit.recordType === "sample" && hit.kind === "sample_summary" && hit.stream === "heart_rate",
+      ),
+      true,
+    );
+
+    const kindOnlySampleResult = await searchVaultRuntime(vaultRoot, "heart_rate", {
+      kinds: ["sample_summary"],
+    });
+    assert.equal(
+      kindOnlySampleResult.hits.some(
+        (hit) => hit.recordType === "sample" && hit.kind === "sample_summary" && hit.stream === "heart_rate",
       ),
       true,
     );

@@ -5,6 +5,7 @@ import {
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "./canonical-entities.ts";
+import type { DailySampleSummary } from "./summaries.ts";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;
@@ -102,6 +103,32 @@ export function materializeSafeSearchDocuments(
   return entities.map(materializeSafeSearchDocument);
 }
 
+export function materializeSampleSummarySearchDocument(summary: DailySampleSummary): SearchDocument {
+  return buildSampleSummarySearchDocument(summary, {
+    includeSourcePathTerms: true,
+    path: summary.sourcePaths[0] ?? "ledger/samples",
+  }) as SearchDocument;
+}
+
+export function materializeSafeSampleSummarySearchDocument(summary: DailySampleSummary): SearchableDocument {
+  return buildSampleSummarySearchDocument(summary, {
+    includeSourcePathTerms: false,
+    path: null,
+  });
+}
+
+export function materializeSampleSummarySearchDocuments(
+  summaries: readonly DailySampleSummary[],
+): SearchDocument[] {
+  return summaries.map(materializeSampleSummarySearchDocument);
+}
+
+export function materializeSafeSampleSummarySearchDocuments(
+  summaries: readonly DailySampleSummary[],
+): SearchableDocument[] {
+  return summaries.map(materializeSafeSampleSummarySearchDocument);
+}
+
 function entityRelationTargetIds(
   entity: Pick<CanonicalEntity, "links" | "relatedIds" | "lookupIds">,
 ): string[] {
@@ -162,6 +189,48 @@ function buildSearchDocument(
   };
 }
 
+function buildSampleSummarySearchDocument(
+  summary: DailySampleSummary,
+  options: {
+    includeSourcePathTerms: boolean;
+    path: string | null;
+  },
+): SearchableDocument {
+  const unit = summary.unit ?? "none";
+  const recordId = `sample-summary:${summary.date}:${summary.stream}:${unit}`;
+  const title = `${summary.stream} daily summary`;
+  const tags = ["sample_summary", summary.stream, unit];
+  const structuredText = compactStrings([
+    recordId,
+    summary.stream,
+    unit,
+    summary.date,
+    `sampleCount:${summary.sampleCount}`,
+    `numericSampleCount:${summary.numericSampleCount}`,
+    summary.firstSampleAt ? `firstSampleAt:${summary.firstSampleAt}` : null,
+    summary.lastSampleAt ? `lastSampleAt:${summary.lastSampleAt}` : null,
+    ...(options.includeSourcePathTerms ? summary.sourcePaths : []),
+  ]).join("\n");
+
+  return {
+    recordId,
+    aliasIds: [recordId],
+    recordType: "sample",
+    kind: "sample_summary",
+    stream: summary.stream,
+    title,
+    occurredAt: summary.lastSampleAt ?? `${summary.date}T23:59:59Z`,
+    date: summary.date,
+    experimentSlug: null,
+    tags,
+    path: options.path,
+    titleText: [title, summary.stream, unit].join(" · "),
+    bodyText: `${summary.sampleCount} ${summary.stream} sample(s) summarized for ${summary.date}.`,
+    tagsText: tags.join(" "),
+    structuredText,
+  };
+}
+
 export function filterSearchDocuments<TDocument extends SearchableDocument>(
   documents: readonly TDocument[],
   filters: SearchFilters,
@@ -172,8 +241,7 @@ export function filterSearchDocuments<TDocument extends SearchableDocument>(
   const kindSet = filters.kinds?.length ? new Set(filters.kinds) : null;
   const streamSet = filters.streams?.length ? new Set(filters.streams) : null;
   const tagSet = filters.tags?.length ? new Set(filters.tags) : null;
-  const includeSamples =
-    filters.includeSamples ?? Boolean(recordTypeSet?.has("sample") || streamSet);
+  const includeSamples = wantsSampleSearchDocuments(filters);
 
   return documents.filter((document) => {
     if (!includeSamples && document.recordType === "sample") {
@@ -212,6 +280,17 @@ export function filterSearchDocuments<TDocument extends SearchableDocument>(
 
     return true;
   });
+}
+
+export function wantsSampleSearchDocuments(filters: SearchFilters): boolean {
+  return (
+    filters.includeSamples ??
+    Boolean(
+      filters.recordTypes?.includes("sample") ||
+      filters.kinds?.includes("sample_summary") ||
+      (filters.streams && filters.streams.length > 0),
+    )
+  );
 }
 
 export function scoreSearchDocuments(

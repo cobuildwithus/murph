@@ -209,7 +209,7 @@ test('sample batch helpers handle missing roots, infer stream names, and enforce
         importConfig: {
           delimiter: ',',
         },
-        sampleIds: ['smp_rest_01', 'smp_rest_02'],
+        rowCount: 2,
       },
       artifacts: [
         {
@@ -228,7 +228,7 @@ test('sample batch helpers handle missing roots, infer stream names, and enforce
       rawDirectory: 'raw/samples/hrv/import-02',
       provenance: {
         importedCount: 1,
-        sampleIds: ['smp_hrv_01'],
+        rowCount: 1,
       },
     },
   )
@@ -247,7 +247,6 @@ test('sample batch helpers handle missing roots, infer stream names, and enforce
       importedAt: '2026-04-08T01:00:00.000Z',
       source: 'device',
       importedCount: 2,
-      sampleIds: ['smp_rest_01', 'smp_rest_02'],
       importConfig: {
         delimiter: ',',
       },
@@ -266,7 +265,7 @@ test('sample batch helpers handle missing roots, infer stream names, and enforce
           importConfig: {
             delimiter: ',',
           },
-          sampleIds: ['smp_rest_01', 'smp_rest_02'],
+          rowCount: 2,
         },
         artifacts: [
           {

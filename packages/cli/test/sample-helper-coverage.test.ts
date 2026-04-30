@@ -350,7 +350,7 @@ test('listSampleBatches sorts, filters, and infers sample streams from stored ma
       rawDirectory: 'raw/samples/heart-rate/import_alpha',
       provenance: {
         importedCount: 2,
-        sampleIds: ['smp_01', 'smp_02'],
+        rowCount: 2,
         importConfig: {
           delimiter: ',',
         },
@@ -366,7 +366,7 @@ test('listSampleBatches sorts, filters, and infers sample streams from stored ma
       source: null,
       provenance: {
         importedCount: 1,
-        sampleIds: ['smp_10'],
+        rowCount: 1,
         importConfig: {
           unit: 'ms',
         },
@@ -397,7 +397,7 @@ test('listSampleBatches sorts, filters, and infers sample streams from stored ma
   assert.equal(shown.stream, 'heart_rate')
   assert.equal(shown.importedCount, 2)
   assert.equal(shown.source, 'oura')
-  assert.deepEqual(shown.sampleIds, ['smp_01', 'smp_02'])
+  assert.equal('sampleIds' in shown, false)
   assert.deepEqual(shown.importConfig, {
     delimiter: ',',
   })

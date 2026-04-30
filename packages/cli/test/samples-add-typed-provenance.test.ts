@@ -172,19 +172,14 @@ test.sequential('samples add stores typed source and batch provenance in the sam
       }
       manifest: {
         provenance?: {
-          rows?: Array<{
-            rawRecordedAt?: string
-            rawValue?: string
-            recordedAt?: string
-            rowNumber?: number
-            value?: number
-          }>
+          rowCount?: number
+          skippedCount?: number
+          skipReasons?: Array<{ count: number; reason: string }>
           sourceFileName?: string
         }
       }
       manifestFile: string
       rawDirectory: string | null
-      sampleIds: string[]
       source: string | null
       stream: string | null
     }>([
@@ -201,7 +196,7 @@ test.sequential('samples add stores typed source and batch provenance in the sam
     assert.equal(requireData(shown).stream, 'heart_rate')
     assert.equal(requireData(shown).source, 'import')
     assert.notEqual(requireData(shown).rawDirectory, null)
-    assert.deepEqual(requireData(shown).sampleIds, requireData(added).lookupIds)
+    assert.equal('sampleIds' in requireData(shown), false)
     assert.deepEqual(requireData(shown).importConfig, {
       delimiter: ',',
       metadataColumns: ['device', 'context'],
@@ -210,15 +205,9 @@ test.sequential('samples add stores typed source and batch provenance in the sam
       valueColumn: 'bpm',
     })
     assert.equal(requireData(shown).manifest.provenance?.sourceFileName, 'watch-export.csv')
-    assert.deepEqual(requireData(shown).manifest.provenance?.rows, [
-      {
-        rawRecordedAt: '2026-03-12T08:00:00.000Z',
-        rawValue: '61',
-        recordedAt: '2026-03-12T08:00:00.000Z',
-        rowNumber: 1,
-        value: 61,
-      },
-    ])
+    assert.equal(requireData(shown).manifest.provenance?.rowCount, 1)
+    assert.equal(requireData(shown).manifest.provenance?.skippedCount, 0)
+    assert.deepEqual(requireData(shown).manifest.provenance?.skipReasons, [])
 
     type AuditRecord = {
       action?: unknown
@@ -237,7 +226,7 @@ test.sequential('samples add stores typed source and batch provenance in the sam
 
     assert.ok(sampleImportAudit)
     assert.equal(sampleImportAudit.commandName, 'core.importSamples')
-    assert.deepEqual(sampleImportAudit.targetIds, requireData(added).lookupIds)
+    assert.deepEqual(sampleImportAudit.targetIds, [batchId])
     assert.ok(Array.isArray(sampleImportAudit.changes))
     assert.equal(
       sampleImportAudit.changes.some(

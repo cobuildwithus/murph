@@ -707,9 +707,9 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
   assert.equal(payload.importedCount, 2);
   assert.equal(payload.payload.batchProvenance?.sourceFileName, "glucose.csv");
   assert.equal(payload.payload.batchProvenance?.importConfig?.valueColumn, "value");
-  assert.equal(payload.payload.batchProvenance?.rows?.length, 2);
-  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.rowNumber, 3);
-  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.metadata, undefined);
+  assert.equal(payload.payload.batchProvenance?.rowCount, 2);
+  assert.equal(payload.payload.batchProvenance?.skippedCount, 0);
+  assert.deepEqual(payload.payload.batchProvenance?.skipReasons, []);
   assert.equal(payload.payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
   assert.equal(payload.payload.samples[1]?.value, 95);
 });
@@ -742,9 +742,11 @@ test("prepareCsvSampleImport infers SpO2 sample columns and skips placeholder ro
   assert.equal(payload.valueColumn, "Oxygen Level");
   assert.equal(payload.importedCount, 2);
   assert.equal(payload.payload.samples[0]?.recordedAt, "2026-04-17T00:55:47.000Z");
-  assert.deepEqual(payload.payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
-  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipped, true);
-  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
+  assert.equal(payload.payload.batchProvenance?.rowCount, 3);
+  assert.equal(payload.payload.batchProvenance?.skippedCount, 1);
+  assert.deepEqual(payload.payload.batchProvenance?.skipReasons, [
+    { reason: "non-numeric value", count: 1 },
+  ]);
 });
 
 test("prepareCsvSampleImport rejects header-only files", async () => {

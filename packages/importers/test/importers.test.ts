@@ -177,12 +177,9 @@ test("importCsvSamples parses rows and emits recordedAt values for core", async 
   assert.equal(samplePayload.samples[1]?.recordedAt, "2026-03-11T08:05:00.000Z");
   assert.equal(samplePayload.batchProvenance?.sourceFileName, "heart-rate.csv");
   assert.equal(samplePayload.batchProvenance?.importConfig?.metadataColumns?.length, 2);
-  assert.deepEqual(samplePayload.batchProvenance?.rows?.[0]?.metadata, {
-    device: "watch",
-    context: "resting",
-  });
-  assert.equal(samplePayload.batchProvenance?.rows?.[1]?.rowNumber, 3);
-  assert.equal(samplePayload.batchProvenance?.rows?.[1]?.rawValue, "75");
+  assert.equal(samplePayload.batchProvenance?.rowCount, 2);
+  assert.equal(samplePayload.batchProvenance?.skippedCount, 0);
+  assert.deepEqual(samplePayload.batchProvenance?.skipReasons, []);
 });
 
 test("importCsvSamples auto-imports multiple recognizable sample columns and normalizes suffixed values", async () => {
@@ -575,9 +572,9 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
   assert.equal(payload.importedCount, 2);
   assert.equal(payload.payload.batchProvenance?.sourceFileName, "glucose.csv");
   assert.equal(payload.payload.batchProvenance?.importConfig?.valueColumn, "value");
-  assert.equal(payload.payload.batchProvenance?.rows?.length, 2);
-  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.rowNumber, 3);
-  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.metadata, undefined);
+  assert.equal(payload.payload.batchProvenance?.rowCount, 2);
+  assert.equal(payload.payload.batchProvenance?.skippedCount, 0);
+  assert.deepEqual(payload.payload.batchProvenance?.skipReasons, []);
   assert.equal(payload.payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
   assert.equal(payload.payload.samples[1]?.value, 95);
 });
@@ -618,11 +615,11 @@ test("prepareCsvSampleImport infers SpO2 imports from O2Ring-style CSV rows and 
   assert.equal(payload.importedCount, 2);
   assert.equal(payload.payload.samples[0]?.recordedAt, "2026-04-16T16:55:47.000Z");
   assert.equal(payload.payload.samples[0]?.value, 88);
-  assert.equal(payload.payload.batchProvenance?.rows?.length, 3);
-  assert.deepEqual(payload.payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
-  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipped, true);
-  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
-  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.rawValue, "--");
+  assert.equal(payload.payload.batchProvenance?.rowCount, 3);
+  assert.equal(payload.payload.batchProvenance?.skippedCount, 1);
+  assert.deepEqual(payload.payload.batchProvenance?.skipReasons, [
+    { reason: "non-numeric value", count: 1 },
+  ]);
 });
 
 test("prepareCsvSampleImport infers the stream from valueColumn when no stream is provided", async () => {
@@ -652,7 +649,8 @@ test("prepareCsvSampleImport infers the stream from valueColumn when no stream i
   assert.equal(payload.importedCount, 2);
   assert.equal(payload.payload.importConfig.valueColumn, "Pulse Rate");
   assert.equal(payload.payload.samples[0]?.recordedAt, "2026-04-17T00:55:47.000Z");
-  assert.deepEqual(payload.payload.batchProvenance?.rows?.[0]?.metadata, { Device: "watch" });
+  assert.equal(payload.payload.batchProvenance?.rowCount, 2);
+  assert.equal(payload.payload.batchProvenance?.skippedCount, 0);
 });
 
 test("prepareCsvSampleImport rejects header-only files", async () => {
@@ -772,26 +770,21 @@ test("importCsvSamples with the real core runtime writes a batch manifest with r
     provenance: {
       importedCount: number;
       rowCount: number;
+      skippedCount: number;
+      skipReasons: Array<{ reason: string; count: number }>;
       importConfig: {
         metadataColumns?: string[];
       };
-      rows: Array<{
-        rowNumber: number;
-        metadata?: Record<string, string>;
-      }>;
     };
   };
 
   assert.equal(manifest.importKind, "sample_batch");
   assert.equal(manifest.provenance.importedCount, 2);
   assert.equal(manifest.provenance.rowCount, 2);
+  assert.equal(manifest.provenance.skippedCount, 0);
+  assert.deepEqual(manifest.provenance.skipReasons, []);
   assert.deepEqual(manifest.provenance.importConfig.metadataColumns, [
     "device",
     "context",
   ]);
-  assert.equal(manifest.provenance.rows[0]?.rowNumber, 2);
-  assert.deepEqual(manifest.provenance.rows[0]?.metadata, {
-    device: "watch",
-    context: "resting",
-  });
 });

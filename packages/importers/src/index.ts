@@ -50,7 +50,7 @@ export {
   type SampleImportConfig,
   type SampleImportPayload,
   type SampleImportRecord,
-  type SampleImportRowProvenance,
+  type SampleImportSkipReasonCount,
 } from "./core-port.ts";
 export { createImporters } from "./create-importers.ts";
 export { importDocument, prepareDocumentImport } from "./document-importer.ts";

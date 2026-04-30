@@ -33,8 +33,6 @@ interface DeviceImportManifest {
     importedAt?: string;
     eventCount?: number;
     sampleCount?: number;
-    eventIds?: string[];
-    sampleIds?: string[];
     rawArtifacts?: Array<{
       role: string;
       relativePath: string;
@@ -252,14 +250,12 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     },
   ]);
   assert.equal(auditRecords.at(-1)?.action, "device_import");
+  assert.deepEqual(auditRecords.at(-1)?.targetIds, [result.importId]);
   assert.equal(manifest.importKind, "device_batch");
   assert.equal(manifest.artifacts.length, 2);
   assert.equal(path.posix.dirname(manifest.artifacts[0]?.relativePath ?? ""), manifest.rawDirectory);
-  assert.deepEqual(manifest.provenance.eventIds, [
-    "evt_KBKEHWQT2XXW0K5XZCS1T5X9KA",
-    "evt_S5K01TSPA86JJVS1DWVHT9RRZ1",
-  ]);
-  assert.deepEqual(manifest.provenance.sampleIds, ["smp_VJ3AZR2JBQVE89Z6B84EA60H0G"]);
+  assert.equal(manifest.provenance.eventCount, 2);
+  assert.equal(manifest.provenance.sampleCount, 1);
   assert.deepEqual(manifest.provenance.operatorMetadata, {
     syncMode: "test",
   });
@@ -430,8 +426,6 @@ test("importDeviceBatch keeps canonical manifest provenance authoritative over c
   assert.equal(manifest.provenance.importedAt, "2026-03-16T09:30:00.000Z");
   assert.equal(manifest.provenance.eventCount, result.events.length);
   assert.equal(manifest.provenance.sampleCount, result.samples.length);
-  assert.deepEqual(manifest.provenance.eventIds, result.events.map((record) => record.id));
-  assert.deepEqual(manifest.provenance.sampleIds, result.samples.map((record) => record.id));
   assert.equal(manifest.provenance.rawArtifacts?.length, 1);
   assert.equal(manifest.provenance.rawArtifacts?.[0]?.role, "recovery:sleep-1");
   assert.equal(
