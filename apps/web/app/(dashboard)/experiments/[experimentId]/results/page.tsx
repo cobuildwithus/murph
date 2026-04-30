@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
@@ -6,6 +7,10 @@ import {
   resolveHealthCommonsExperimentShell,
 } from "@/src/lib/health-commons/experiment-projections";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  ExperimentStartButtonFallback,
+  HostedExperimentStartButton,
+} from "../experiment-start-button-server";
 import { ResultsTabClient } from "./results-tab-client";
 
 export async function generateMetadata({
@@ -41,5 +46,26 @@ export default async function ExperimentResultsPage({
     notFound();
   }
 
-  return <ResultsTabClient protocol={protocol} />;
+  const protocolDays = Math.max(1, protocol.durationDays - protocol.baselineDays);
+
+  return (
+    <ResultsTabClient
+      protocol={protocol}
+      startAction={
+        <Suspense
+          fallback={(
+            <ExperimentStartButtonFallback
+              protocolDays={protocolDays}
+              protocolTitle={protocol.title}
+            />
+          )}
+        >
+          <HostedExperimentStartButton
+            protocolDays={protocolDays}
+            protocolTitle={protocol.title}
+          />
+        </Suspense>
+      }
+    />
+  );
 }

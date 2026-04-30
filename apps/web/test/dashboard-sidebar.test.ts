@@ -162,7 +162,7 @@ test("Sidebar does not render the Overview page as a navigation item", () => {
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(markup, /href="\/experiments"[^>]*>\s*<img[^>]*alt="Murph"/);
+  assert.match(markup, /href="\/home"[^>]*>\s*<img[^>]*alt="Murph"/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
 });
@@ -175,7 +175,7 @@ test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
   assert.match(markup, /href="\/biomarkers\/resting-heart-rate"/);
   assert.match(
     markup,
-    /data-active="true">\s*<a[^>]*href="\/biomarkers\/resting-heart-rate"[^>]*>Biomarkers<\/a>/,
+    /data-active="true">\s*<a[^>]*href="\/biomarkers\/resting-heart-rate"[^>]*>[\s\S]*Biomarkers<\/a>/,
   );
 });
 
@@ -186,7 +186,7 @@ test("Sidebar keeps the Biomarkers tab active across biomarker section routes", 
 
   assert.match(
     markup,
-    /data-active="true">\s*<a[^>]*href="\/biomarkers\/resting-heart-rate"[^>]*>Biomarkers<\/a>/,
+    /data-active="true">\s*<a[^>]*href="\/biomarkers\/resting-heart-rate"[^>]*>[\s\S]*Biomarkers<\/a>/,
   );
 });
 
@@ -216,6 +216,29 @@ test("Sidebar keeps Settings out of the primary navigation", () => {
     markup,
     /data-active="true">\s*<a[^>]*href="\/settings"[^>]*>Settings<\/a>/,
   );
+});
+
+test("Sidebar renders the supplied server chat action", () => {
+  mocks.usePathname.mockReturnValue("/experiments");
+
+  const markup = renderToStaticMarkup(
+    createElement(Sidebar, {
+      chatAction: createElement(
+        "li",
+        null,
+        createElement(
+          "a",
+          {
+            href: "sms:+15550100001",
+          },
+          "Chat with Murph",
+        ),
+      ),
+    }),
+  );
+
+  assert.match(markup, /href="sms:\+15550100001"[^>]*>Chat with Murph<\/a>/);
+  assert.doesNotMatch(markup, /href="\/chat"[^>]*>Chat with Murph<\/a>/);
 });
 
 test("Sidebar renders a login CTA card when signed out", () => {

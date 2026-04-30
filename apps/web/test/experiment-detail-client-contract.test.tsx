@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION } from "@/src/lib/experiments/experiment-detail";
@@ -33,6 +34,8 @@ const mocks = vi.hoisted(() => ({
     status: "ready",
   })),
 }));
+
+vi.mock("server-only", () => ({}));
 
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
@@ -156,18 +159,13 @@ test("refreshes instead of hydrating the new protocol UI against a stale contrac
   await view.cleanup();
 });
 
-test("passes minimized hosted contact routing state into the experiment header", async () => {
-  const initialContactChannels = {
-    email: true,
-    telegram: false,
-    text: true,
-  };
+test("passes the hosted start action slot into the experiment header", async () => {
+  const startAction = createElement("button", { type: "button" }, "server start action");
   const view = await renderClient(
     createElement(
       ExperimentLayoutClient,
       {
-        initialContactChannels,
-        murphPhoneNumber: "routing-phone-test-value",
+        headerStartAction: startAction,
         shell: createShell(),
       },
       createElement("div", null, "child content"),
@@ -177,49 +175,126 @@ test("passes minimized hosted contact routing state into the experiment header",
   expect(mocks.experimentHeader).toHaveBeenCalledTimes(1);
   const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
     | [{
-        initialContactChannels?: unknown;
-        murphPhoneNumber?: string | null;
+        startAction?: ReactNode;
       }]
     | undefined)?.[0];
-  expect(headerProps?.initialContactChannels).toBe(initialContactChannels);
-  expect(headerProps?.murphPhoneNumber).toBe("routing-phone-test-value");
+  expect(headerProps?.startAction).toBe(startAction);
 
   await view.cleanup();
 });
 
-test("passes hosted start contact context into the results empty-state CTA", async () => {
-  const initialContactChannels = {
-    email: false,
-    telegram: true,
-    text: true,
-  };
+test("passes the hosted start action slot into the results empty-state CTA", async () => {
   const protocol = createResultsPublicProjection();
+  const startAction = createElement("button", { type: "button" }, "server start action");
   const view = await renderClient(
     createElement(
       ExperimentLayoutClient,
       {
-        initialContactChannels,
-        murphPhoneNumber: "routing-phone-test-value",
         shell: createShell(),
       },
-      createElement(ResultsTabClient, { protocol }),
+      createElement(ResultsTabClient, { protocol, startAction }),
     ),
   );
 
   expect(mocks.resultsTab).toHaveBeenCalledTimes(1);
   const resultsProps = (mocks.resultsTab.mock.calls.at(-1) as
     | [{
-        initialContactChannels?: unknown;
-        murphPhoneNumber?: string | null;
+        startAction?: ReactNode;
       }]
     | undefined)?.[0];
-  expect(resultsProps?.initialContactChannels).toBe(initialContactChannels);
-  expect(resultsProps?.murphPhoneNumber).toBe("routing-phone-test-value");
+  expect(resultsProps?.startAction).toBe(startAction);
 
   await view.cleanup();
 });
 
-test("server layout stays static-first and avoids contact routing reads", async () => {
+test("hosted experiment start context resolves the assigned member phone", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      id: "member_123",
+    },
+    linkedAccounts: [
+      {
+        latest_verified_at: 1771977600,
+        phone_number: "+14045550123",
+        type: "phone",
+      },
+      {
+        address: "member@example.test",
+        latest_verified_at: 1771977600,
+        type: "email",
+      },
+    ],
+    memberLookup: null,
+    session: null,
+  });
+  const prisma = { prisma: true };
+  mocks.getPrisma.mockReturnValue(prisma);
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: "+15550100001",
+    memberId: "member_123",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+
+  const { readHostedExperimentStartContactContext } = await import(
+    "../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server"
+  );
+  const context = await readHostedExperimentStartContactContext();
+
+  expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
+  expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma,
+  });
+  expect(context.initialContactChannels).toEqual({
+    email: true,
+    telegram: false,
+    text: true,
+  });
+  expect(context.murphPhoneNumber).toBe("+15550100001");
+});
+
+test("hosted experiment start context avoids member routing reads for anonymous visitors", async () => {
+  const { readHostedExperimentStartContactContext } = await import(
+    "../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server"
+  );
+  const context = await readHostedExperimentStartContactContext();
+
+  expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+  expect(context.initialContactChannels).toEqual({
+    email: false,
+    telegram: false,
+    text: false,
+  });
+  expect(context.murphPhoneNumber).toBeNull();
+});
+
+test("experiment start fallback is not a live contact route", async () => {
+  const { ExperimentStartButtonFallback } = await import(
+    "../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server"
+  );
+  const markup = renderToStaticMarkup(
+    createElement(ExperimentStartButtonFallback, {
+      protocolDays: 14,
+      protocolTitle: "Finnish Dry Sauna",
+    }),
+  );
+
+  expect(markup).toContain("disabled");
+  expect(markup).toContain('aria-busy="true"');
+  expect(markup).not.toContain("href=");
+  expect(markup).not.toContain("https://t.me");
+});
+
+test("server layout keeps routing reads inside the deferred start action slot", async () => {
   const { default: ExperimentDetailLayout } = await import(
     "../app/(dashboard)/experiments/[experimentId]/layout"
   );
@@ -235,16 +310,10 @@ test("server layout stays static-first and avoids contact routing reads", async 
   expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
   const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
     | [{
-        initialContactChannels?: unknown;
-        murphPhoneNumber?: string | null;
+        startAction?: ReactNode;
       }]
     | undefined)?.[0];
-  expect(headerProps?.initialContactChannels).toEqual({
-    email: false,
-    telegram: false,
-    text: false,
-  });
-  expect(headerProps?.murphPhoneNumber).toBeNull();
+  expect(headerProps?.startAction).toBeTruthy();
 
   await view.cleanup();
 });

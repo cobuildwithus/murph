@@ -8,52 +8,37 @@ import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { ExperimentHero } from "@/src/components/experiments/experiment-detail/experiment-hero";
 import { ExperimentHeader } from "@/src/components/experiments/experiment-detail/experiment-header";
-import { ExperimentStartContactProvider } from "@/src/components/experiments/experiment-detail/start-experiment-contact-context";
 import { hasCurrentExperimentProtocolContract } from "@/src/lib/experiments/experiment-detail";
-import {
-  DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS,
-  type ExperimentStartContactChannels,
-} from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentShellProjection } from "@/src/lib/health-commons/experiment-projections";
 
 type ExperimentDetailTab = "protocol" | "research" | "results";
 
 export function ExperimentLayoutClient({
   children,
-  initialContactChannels = DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS,
-  murphPhoneNumber = null,
+  headerStartAction = null,
   shell,
 }: {
   children?: ReactNode;
-  initialContactChannels?: ExperimentStartContactChannels;
-  murphPhoneNumber?: string | null;
+  headerStartAction?: ReactNode;
   shell: ExperimentShellProjection;
 }) {
   return (
-    <ExperimentStartContactProvider
-      initialContactChannels={initialContactChannels}
-      murphPhoneNumber={murphPhoneNumber}
+    <ExperimentLayoutInner
+      headerStartAction={headerStartAction}
+      shell={shell}
     >
-      <ExperimentLayoutInner
-        initialContactChannels={initialContactChannels}
-        murphPhoneNumber={murphPhoneNumber}
-        shell={shell}
-      >
-        {children}
-      </ExperimentLayoutInner>
-    </ExperimentStartContactProvider>
+      {children}
+    </ExperimentLayoutInner>
   );
 }
 
 function ExperimentLayoutInner({
   children,
-  initialContactChannels,
-  murphPhoneNumber,
+  headerStartAction,
   shell,
 }: {
   children?: ReactNode;
-  initialContactChannels: ExperimentStartContactChannels;
-  murphPhoneNumber: string | null;
+  headerStartAction: ReactNode;
   shell: ExperimentShellProjection;
 }) {
   const router = useRouter();
@@ -120,9 +105,8 @@ function ExperimentLayoutInner({
         baselineDays={experiment.baselineDays}
         completionPercent={undefined}
         description={experiment.description}
-        initialContactChannels={initialContactChannels}
-        murphPhoneNumber={murphPhoneNumber}
         showStartAction={showHeaderStartAction}
+        startAction={headerStartAction}
       />
 
       <Tabs value={currentTab} className="w-full">

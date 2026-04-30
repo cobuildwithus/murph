@@ -1,7 +1,11 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import Image from "next/image";
 
 import { Sidebar } from "@/src/components/dashboard/sidebar";
+import {
+  SidebarChatWithMurphAction,
+  SidebarChatWithMurphFallback,
+} from "@/src/components/dashboard/sidebar-chat-action";
 import {
   SidebarInset,
   SidebarProvider,
@@ -23,7 +27,14 @@ export function DashboardShell({
     <>
       <style>{`#global-footer { display: none; }`}</style>
       <SidebarProvider>
-        <Sidebar initialAuth={sidebarAuth} />
+        <Sidebar
+          initialAuth={sidebarAuth}
+          chatAction={(
+            <Suspense fallback={<SidebarChatWithMurphFallback />}>
+              <SidebarChatWithMurphAction />
+            </Suspense>
+          )}
+        />
         <SidebarInset className="bg-background">
           <header className="grid md:hidden grid-cols-[auto_1fr_auto] items-center bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
             <SidebarTrigger className="text-white/80 hover:bg-white/5 hover:text-white" />

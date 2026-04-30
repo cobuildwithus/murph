@@ -1,25 +1,27 @@
 import {
-  extractHostedPrivyPhoneAccount,
-  extractHostedPrivyTelegramAccount,
-  extractHostedPrivyVerifiedEmailAccount,
   resolveHostedPrivyLinkedAccounts,
   type HostedPrivyLinkedAccountContainer,
   type PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
+import {
+  buildMurphEmailHref,
+  buildMurphSmsHref,
+  DEFAULT_MURPH_CONTACT_CHANNELS,
+  MURPH_CONTACT_EMAIL,
+  type MurphContactChannels,
+  MURPH_TELEGRAM_BOT_USERNAME,
+  MURPH_TELEGRAM_URL,
+  resolveMurphContactChannels,
+} from "@/src/lib/murph-contact-routing";
 
-export const MURPH_EXPERIMENT_CONTACT_EMAIL = "murph@mail.withmurph.ai";
-export const MURPH_EXPERIMENT_TELEGRAM_BOT_USERNAME = "withmurph_bot";
-export const MURPH_EXPERIMENT_TELEGRAM_URL =
-  `https://t.me/${MURPH_EXPERIMENT_TELEGRAM_BOT_USERNAME}`;
+export const MURPH_EXPERIMENT_CONTACT_EMAIL = MURPH_CONTACT_EMAIL;
+export const MURPH_EXPERIMENT_TELEGRAM_BOT_USERNAME = MURPH_TELEGRAM_BOT_USERNAME;
+export const MURPH_EXPERIMENT_TELEGRAM_URL = MURPH_TELEGRAM_URL;
 
 export type ExperimentStartContactKind = "text" | "telegram" | "email";
 
-export interface ExperimentStartContactChannels {
-  email: boolean;
-  telegram: boolean;
-  text: boolean;
-}
+export type ExperimentStartContactChannels = MurphContactChannels;
 
 export interface ExperimentStartContactOption {
   connected: boolean;
@@ -47,11 +49,7 @@ interface ExperimentStartContactOptionsInput {
   protocolTitle: string;
 }
 
-export const DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS: ExperimentStartContactChannels = {
-  email: false,
-  telegram: false,
-  text: false,
-};
+export const DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS = DEFAULT_MURPH_CONTACT_CHANNELS;
 
 export function resolveExperimentStartContactAction(
   input: ExperimentStartContactOptionsInput,
@@ -132,19 +130,7 @@ export function resolveExperimentStartContactChannels(input: {
   accountContainer?: HostedPrivyLinkedAccountContainer | null;
   linkedAccounts?: readonly PrivyLinkedAccountLike[];
 }): ExperimentStartContactChannels {
-  const linkedAccounts = input.linkedAccounts
-    ? [...input.linkedAccounts]
-    : resolveHostedPrivyLinkedAccounts(input.accountContainer ?? { linkedAccounts: [] });
-  const telegram = extractHostedPrivyTelegramAccount({
-    linkedAccounts,
-    telegram: input.accountContainer?.telegram,
-  });
-
-  return {
-    email: extractHostedPrivyVerifiedEmailAccount(linkedAccounts) !== null,
-    telegram: telegram !== null,
-    text: extractHostedPrivyPhoneAccount(linkedAccounts) !== null,
-  };
+  return resolveMurphContactChannels(input);
 }
 
 export function openExperimentStartContactOption(option: ExperimentStartContactOption): void {
@@ -236,14 +222,7 @@ function buildExperimentStartSmsHref(input: {
   body: string;
   murphPhoneNumber: string | null;
 }): string {
-  const target = normalizePhoneNumber(input.murphPhoneNumber) ?? "";
-  const body = normalizeOptionalString(input.body);
-
-  if (!body) {
-    return `sms:${target}`;
-  }
-
-  return `sms:${target}?body=${encodeURIComponent(body)}`;
+  return buildMurphSmsHref(input);
 }
 
 function buildExperimentStartEmailHref(input: {
@@ -251,9 +230,10 @@ function buildExperimentStartEmailHref(input: {
   protocolTitle: string;
 }): string {
   const subject = `Start experiment: ${normalizeOptionalString(input.protocolTitle) ?? "Murph protocol"}`;
-  return `mailto:${MURPH_EXPERIMENT_CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${
-    encodeURIComponent(input.body)
-  }`;
+  return buildMurphEmailHref({
+    body: input.body,
+    subject,
+  });
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
