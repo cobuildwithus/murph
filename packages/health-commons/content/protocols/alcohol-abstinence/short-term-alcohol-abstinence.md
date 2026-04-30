@@ -38,18 +38,6 @@ relations:
   target: experiment_family:alcohol-abstinence
 -
   type: primary_biomarker
-  target: biomarker:alcohol-free-days
--
-  type: secondary_biomarker
-  target: biomarker:alcohol-intake
--
-  type: safety_biomarker
-  target: biomarker:alcohol-withdrawal-symptoms
--
-  type: secondary_biomarker
-  target: biomarker:alcohol-craving
--
-  type: secondary_biomarker
   target: biomarker:resting-heart-rate
 -
   type: secondary_biomarker
@@ -66,6 +54,24 @@ relations:
 -
   type: secondary_biomarker
   target: biomarker:liver-enzyme-panel
+-
+  type: secondary_biomarker
+  target: biomarker:body-weight
+-
+  type: secondary_biomarker
+  target: biomarker:blood-glucose
+-
+  type: secondary_biomarker
+  target: biomarker:alcohol-free-days
+-
+  type: secondary_biomarker
+  target: biomarker:alcohol-intake
+-
+  type: safety_biomarker
+  target: biomarker:alcohol-withdrawal-symptoms
+-
+  type: secondary_biomarker
+  target: biomarker:alcohol-craving
 -
   type: cites
   target: source_artifact:pmid-39489405
@@ -949,86 +955,184 @@ protocol:
   - End or pause the experiment if tracking creates obsession, shame, relationship conflict, or unsafe substitution behaviors that outweigh the value of the data.
 testPlans:
 -
-  planId: alcohol-free-7d-starter
-  durationDays: 14
+  planId: alcohol-free-30d-full-challenge
+  durationDays: 37
   baselineDays: 7
-  interventionDays: 7
-  primaryBiomarkerKey: biomarker:alcohol-free-days
+  interventionDays: 30
+  primaryBiomarkerKey: biomarker:resting-heart-rate
   secondaryBiomarkerKeys:
-  - biomarker:alcohol-withdrawal-symptoms
-  - biomarker:alcohol-craving
-  - biomarker:resting-heart-rate
   - biomarker:hrv-rmssd
   - biomarker:sleep-efficiency
+  - biomarker:morning-blood-pressure
+  - biomarker:liver-enzyme-panel
+  - biomarker:body-weight
   - biomarker:sleep-onset-latency
-  minimumAdherenceSessions: 6
-  targetAdherenceSessions: 7
+  safetyOutcomeKeys:
+  - biomarker:alcohol-withdrawal-symptoms
+  - biomarker:alcohol-craving
+  minimumAdherenceSessions: 26
+  targetAdherenceSessions: 30
   notes:
-  - Use as a low-burden starter/readiness check, not as a claim-equivalent miniature 30-day test.
-  - Prioritize daily safety and craving logs during days 1–7.
-  - Optional fasting-glucose interpretation is exploratory only, based on a tiny selected 7-day male pilot, and should not be generalized or used to infer improved muscle insulin sensitivity.
+  - Best default full challenge because direct one-month evidence is richest; Dry January-style campaign evidence remains adjacent implementation and review context.
+  - Alcohol-free days, any drinks, and no/low-alcohol product use are exposure and interpretation context, not the outcome win.
+  - Optional labs are most defensible here if the user is already getting labs or can measure consistently.
+  - Include an end-of-challenge review and a next-week drinking or continued-abstinence plan.
 -
   planId: alcohol-free-14d-midpoint
   durationDays: 21
   baselineDays: 7
   interventionDays: 14
-  primaryBiomarkerKey: biomarker:alcohol-free-days
+  primaryBiomarkerKey: biomarker:resting-heart-rate
   secondaryBiomarkerKeys:
-  - biomarker:alcohol-withdrawal-symptoms
-  - biomarker:alcohol-craving
-  - biomarker:resting-heart-rate
   - biomarker:hrv-rmssd
   - biomarker:sleep-efficiency
   - biomarker:morning-blood-pressure
+  - biomarker:sleep-onset-latency
+  safetyOutcomeKeys:
+  - biomarker:alcohol-withdrawal-symptoms
+  - biomarker:alcohol-craving
   minimumAdherenceSessions: 12
   targetAdherenceSessions: 14
   notes:
   - Use as a pragmatic midpoint commitment and review checkpoint.
   - Do not present 14 days as having the same direct evidence depth as 30 days.
-  - Review social friction and replacement behaviors at day 7 and day 14.
+  - Alcohol-free days and any drinks remain exposure checks; review social friction and replacement behaviors at day 7 and day 14.
 -
-  planId: alcohol-free-30d-full-challenge
-  durationDays: 37
+  planId: alcohol-free-7d-starter
+  durationDays: 14
   baselineDays: 7
-  interventionDays: 30
-  primaryBiomarkerKey: biomarker:alcohol-free-days
+  interventionDays: 7
+  primaryBiomarkerKey: biomarker:resting-heart-rate
   secondaryBiomarkerKeys:
-  - biomarker:alcohol-intake
-  - biomarker:alcohol-withdrawal-symptoms
-  - biomarker:alcohol-craving
-  - biomarker:resting-heart-rate
   - biomarker:hrv-rmssd
   - biomarker:sleep-efficiency
-  - biomarker:morning-blood-pressure
-  - biomarker:liver-enzyme-panel
-  minimumAdherenceSessions: 26
-  targetAdherenceSessions: 30
+  - biomarker:sleep-onset-latency
+  - biomarker:blood-glucose
+  safetyOutcomeKeys:
+  - biomarker:alcohol-withdrawal-symptoms
+  - biomarker:alcohol-craving
+  minimumAdherenceSessions: 6
+  targetAdherenceSessions: 7
   notes:
-  - Best default full challenge because direct one-month evidence is richest; Dry January-style campaign evidence remains adjacent implementation and review context.
-  - Optional labs are most defensible here if the user is already getting labs or can measure consistently.
-  - Include an end-of-challenge review and a next-week drinking or continued-abstinence plan.
+  - Use as a low-burden starter/readiness check, not as a claim-equivalent miniature 30-day test.
+  - Alcohol-free days and any drinks are exposure checks; prioritize daily safety and craving logs during days 1-7.
+  - Optional fasting-glucose interpretation is exploratory only, based on a tiny selected 7-day male pilot, and should not be generalized or used to infer improved muscle insulin sensitivity.
 expectedSignalDescriptions:
 -
-  biomarkerKey: biomarker:alcohol-free-days
-  description: Each alcohol-free day removes that day's alcohol exposure and its overnight effects on sleep, pulse, and craving.
--
-  biomarkerKey: biomarker:alcohol-withdrawal-symptoms
-  description: Stopping alcohol can uncover withdrawal symptoms in people who drink heavily or are dependent. Safety comes before sleep or wearable changes.
--
-  biomarkerKey: biomarker:alcohol-craving
-  description: Removing alcohol changes cues, rewards, and social routines. Craving may rise early or settle as new coping patterns form.
--
   biomarkerKey: biomarker:resting-heart-rate
-  description: Alcohol can keep the body revved up overnight. Removing it may let resting pulse drift lower, especially if sleep and hydration improve.
+  expected: Could trend lower
+  protocolProminence: focus
+  estimatedChange:
+    kind: absolute
+    low: -4
+    high: 0
+    unit: bpm
+    window: 1-4 weeks
+    confidence: low
+    basis: One-month abstinence evidence in heavier-drinking cohorts reported lower ambulatory heart rate, while wearable RHR response in lower-risk users remains baseline- and device-dependent.
+  description: Removing alcohol cuts overnight sympathetic load, dehydration, and rebound arousal. If sleep and recovery settle, morning wearable pulse can drift lower.
 -
   biomarkerKey: biomarker:hrv-rmssd
-  description: Alcohol can make overnight recovery less steady. HRV may rise if the body has less alcohol-related stress.
+  expected: May rise if recovery improves
+  protocolProminence: focus
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: 1-4 weeks
+    confidence: low
+    basis: Autonomic support is strongest from acute alcohol, wearable, and adjacent restriction evidence; direct abstinence RMSSD effect sizes are not stable enough for a numeric forecast.
+  description: Alcohol can suppress overnight parasympathetic recovery. RMSSD may stabilize or rise when the alcohol stressor is removed, but withdrawal stress, poor sleep, illness, and training can push it down.
 -
   biomarkerKey: biomarker:sleep-efficiency
-  description: Alcohol can fragment sleep even when it feels sedating at first. Abstinence may improve sleep continuity after the early adjustment period.
+  expected: Could edge higher
+  protocolProminence: focus
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 3
+    unit: percentage points
+    window: 1-4 weeks
+    confidence: low
+    basis: Acute alcohol and wearable context support the direction, but direct abstinence sleep-efficiency effect sizes are not well extracted for this wellness protocol.
+  description: Alcohol may sedate early and then fragment later sleep. Abstinence removes rebound arousal and late-night awakenings, so same-device sleep continuity can improve after the first adjustment nights.
+-
+  biomarkerKey: biomarker:morning-blood-pressure
+  expected: Could trend lower
+  protocolProminence: focus
+  estimatedChange:
+    kind: absolute
+    low: -8
+    high: -3
+    unit: mmHg systolic
+    window: 3-4 weeks
+    confidence: low
+    basis: One-month moderate-to-heavy abstinence evidence reported about -6.6% systolic and -6.3% diastolic pressure, and a heavy-drinker ambulatory cohort reported lower BP and heart rate after abstinence.
+  description: Removing alcohol can reduce sympathetic and vascular load while improving sleep and fluid balance. Cuff readings are most likely to drop when baseline intake or baseline pressure was higher.
+-
+  biomarkerKey: biomarker:liver-enzyme-panel
+  expected: May improve in a 30-day lab panel
+  protocolProminence: context
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: about 1 month
+    confidence: low
+    basis: A small one-month moderate-consumer source reported a normal-range GGT decrease after abstinence and rebound after resumption, but analyte units and baseline liver context vary.
+  description: Alcohol-sensitive liver enzymes, especially GGT, can fall when alcohol exposure stops. Compare the same lab panel and reference ranges; this is lab context, not liver-disease treatment.
+-
+  biomarkerKey: biomarker:body-weight
+  expected: May drift lower
+  protocolProminence: context
+  estimatedChange:
+    kind: relative_percent
+    low: -1.5
+    high: 0
+    unit: "%"
+    window: about 1 month
+    confidence: low
+    basis: One-month moderate-to-heavy abstinence evidence reported about -1.5% weight, but replacement calories, diet, glycogen, and hydration can erase the signal.
+  description: Removing alcohol removes liquid calories and a late-snacking cue for some users. Scale weight only moves if total intake drops enough to outlast hydration and glycogen noise.
 -
   biomarkerKey: biomarker:sleep-onset-latency
-  description: If alcohol was a bedtime cue, removing it can make early nights harder to start until a new sleep routine takes over.
+  expected: Can move either way
+  protocolProminence: context
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: first nights to 4 weeks
+    confidence: low
+    basis: Bedtime alcohol can be both a sedating cue and a sleep-fragmenting exposure, so onset latency is useful context rather than a reliable benefit forecast.
+  description: If alcohol was a bedtime cue, removing it can make early nights harder to start. As rebound arousal settles and the routine changes, sleep onset may shorten.
+-
+  biomarkerKey: biomarker:blood-glucose
+  expected: Short-pilot only
+  protocolProminence: context
+  estimatedChange:
+    kind: absolute
+    low: -7
+    high: 0
+    unit: mg/dL fasting glucose
+    window: 7 days
+    confidence: low
+    basis: A tiny selected 7-day male pilot with elevated fasting glucose reported fasting plasma glucose falling from 105.5 to 98.2 mg/dL and lower hepatic glucose output; it did not show improved muscle insulin sensitivity.
+  description: In selected users with elevated fasting glucose, one alcohol-free week may reduce hepatic glucose output. Do not generalize this to normoglycemic users, CGM users, or a 30-day cardiometabolic promise.
+-
+  biomarkerKey: biomarker:alcohol-withdrawal-symptoms
+  expected: Should stay absent
+  protocolProminence: context
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: days 1-7
+    confidence: high
+    basis: Withdrawal symptoms are safety routing signals, not improvement endpoints; positive or uncertain symptoms should override biomarker interpretation.
+  description: Stopping alcohol can uncover withdrawal symptoms in people who drink heavily or are dependent. Safety comes before sleep, heart-rate, or lab changes.
+-
+  biomarkerKey: biomarker:alcohol-craving
+  expected: Track for support needs
+  protocolProminence: context
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: days 1-30
+    confidence: low
+    basis: Direct one-month subjective evidence supports tracking refusal self-efficacy while keeping craving relief cautious because craving did not consistently improve.
+  description: Removing alcohol changes cues, rewards, and social routines. Craving may rise early, stay flat, or settle as support and replacement routines become clearer.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
