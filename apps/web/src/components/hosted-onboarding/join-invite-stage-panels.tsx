@@ -55,7 +55,7 @@ export function JoinInviteSignedInMismatchAlert({
   onSignOut: () => Promise<void>;
 }) {
   return (
-    <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+    <Alert className="border-sienna/20 bg-sienna/5 text-sienna">
       <AlertTitle>
         This browser is signed in with a different Murph account.
       </AlertTitle>
@@ -138,7 +138,7 @@ export function JoinInviteVerificationPanel({
     }
 
     return (
-      <Alert className="border-[#c4a882]/20 bg-[#f5f0e8]/40">
+      <Alert className="border-amber/20 bg-cream/40">
         <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
         <AlertDescription>
@@ -149,7 +149,7 @@ export function JoinInviteVerificationPanel({
   }
 
   return (
-    <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+    <div className="rounded-2xl border border-amber/25 bg-card p-6">
       <HostedInvitePhoneAuth
         inviteCode={inviteCode}
         phoneAuthTarget={phoneAuthTarget}
@@ -174,7 +174,7 @@ export function JoinInviteMessagingSetupPanel({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+      <div className="rounded-2xl border border-amber/25 bg-card p-6">
         <HostedPhoneSettings
           authenticated={authenticated}
           autoOpen
@@ -184,7 +184,7 @@ export function JoinInviteMessagingSetupPanel({
           }}
         />
       </div>
-      <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+      <div className="rounded-2xl border border-amber/25 bg-card p-6">
         <HostedTelegramSettings
           authenticated={authenticated}
           initialLinkedAccounts={initialLinkedAccounts}
@@ -198,7 +198,6 @@ export function JoinInviteMessagingSetupPanel({
 }
 
 const FREE_FEATURES = [
-  "Full product — no paywall",
   "Bring your own API keys",
   "Self-host or run locally",
   "Own your data, export anytime",
@@ -216,8 +215,8 @@ const PULSE_FEATURES = [
 
 const EDGE_FEATURES = [
   "Everything in Pulse and:",
-  "3x AI usage across all models",
-  "Always the best model available",
+  "More usage on latest OpenAI, Claude, Gemini models",
+  "Longer experiment context",
   "Deeper outcome analysis",
   "Detailed biomarker deltas",
   "Richer protocol recommendations",
@@ -236,12 +235,13 @@ export function JoinInviteCheckoutPanel({
   billingReady: boolean;
   billingPlanCode: HostedBillingPlanCode | null;
   billingPlans: HostedInviteStatusPayload["billing"]["plans"];
-  onCheckout: () => Promise<void>;
+  onCheckout: (billingPlanCode: HostedBillingPlanCode) => Promise<void>;
   onCheckoutSuccess: () => void;
   onCheckoutError: (error: unknown) => void;
   onSelectBillingPlan: (billingPlanCode: HostedBillingPlanCode) => void;
 }) {
-  const monthlyPlan = billingPlans.find((p) => p.interval === "month");
+  const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly");
+  const edgePlan = billingPlans.find((p) => p.code === "launch_edge_monthly");
 
   return (
     <div className="space-y-6">
@@ -250,7 +250,7 @@ export function JoinInviteCheckoutPanel({
         <PricingTierCard
           tier="free"
           name="Free"
-          description="Full product, your keys, your data."
+          description="Open-source, self-hosted Murph."
           price="$0"
           priceUnit="/ month"
           features={FREE_FEATURES}
@@ -277,18 +277,19 @@ export function JoinInviteCheckoutPanel({
           tier="go"
           name="Pulse"
           description="Private experiments for one person."
-          price={monthlyPlan ? `$${Math.round(monthlyPlan.recurringAmountUsdCents / 100)}` : "$8"}
+          price={pulsePlan ? `$${Math.round(pulsePlan.recurringAmountUsdCents / 100)}` : "$8"}
           priceUnit="/ month"
           features={PULSE_FEATURES}
           cta={
             <CheckoutButton
               onCheckout={async () => {
-                if (monthlyPlan) onSelectBillingPlan(monthlyPlan.code);
-                await onCheckout();
+                if (!pulsePlan) return;
+                onSelectBillingPlan(pulsePlan.code);
+                await onCheckout(pulsePlan.code);
               }}
               onSuccess={onCheckoutSuccess}
               onError={onCheckoutError}
-              disabled={!billingReady}
+              disabled={!billingReady || !pulsePlan}
               size="lg"
               className="h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90"
               idleLabel="Get Pulse"
@@ -302,26 +303,30 @@ export function JoinInviteCheckoutPanel({
           tier="plus"
           name="Edge"
           description="More guidance and deeper research."
-          price="$20"
+          price={edgePlan ? `$${Math.round(edgePlan.recurringAmountUsdCents / 100)}` : "$20"}
           priceUnit="/ month"
           features={EDGE_FEATURES}
           cta={
-            <Button
+            <CheckoutButton
+              onCheckout={async () => {
+                if (!edgePlan) return;
+                onSelectBillingPlan(edgePlan.code);
+                await onCheckout(edgePlan.code);
+              }}
+              onSuccess={onCheckoutSuccess}
+              onError={onCheckoutError}
+              disabled={!billingReady || !edgePlan}
               size="lg"
               className="h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90"
-              render={
-                <Link href="mailto:support@withmurph.ai?subject=Murph Plus" />
-              }
-            >
-              <span className="flex-1 text-center">Get Edge</span>
-              <ArrowRightIcon className="size-4 shrink-0" />
-            </Button>
+              idleLabel={edgePlan ? "Get Edge" : "Coming soon"}
+              idleAdornment={<ArrowRightIcon className="size-4" />}
+            />
           }
         />
       </div>
 
       <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">
-        <div className="grid grid-cols-1 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-0">
           <CheckoutTrustItem
             icon={LockIcon}
             label="Private by default"
@@ -366,9 +371,9 @@ function PricingTierCard({
     <div className="flex flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
       <div className="flex items-center gap-3">
         <PricingDots tier={tier} />
-        <p className="font-serif text-3xl font-normal tracking-tight text-foreground">
+        <h3 className="font-serif text-3xl font-normal tracking-tight text-foreground">
           {name}
-        </p>
+        </h3>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
         {description}
@@ -402,7 +407,7 @@ function PricingTierCard({
               </div>
             ) : (
               <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-olive/15">
+                <span aria-hidden className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-olive/15">
                   <CheckIcon className="size-3 text-olive" strokeWidth={2.5} />
                 </span>
                 <span className="text-foreground">{feature}</span>
@@ -565,7 +570,7 @@ export function JoinInviteActivePanel({
         <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
       ) : null}
 
-      <div className="border-t border-[#c4a882]/25 pt-6">
+      <div className="border-t border-amber/25 pt-6">
         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
           What Murph can help with
         </p>
@@ -574,7 +579,7 @@ export function JoinInviteActivePanel({
             <div key={item.title} className="flex gap-3">
               <item.icon className="mt-0.5 size-4 shrink-0 text-olive-light" />
               <div>
-                <p className="text-sm font-semibold text-[#2d3436]">
+                <p className="text-sm font-semibold text-foreground">
                   {item.title}
                 </p>
                 <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
@@ -591,7 +596,7 @@ export function JoinInviteActivePanel({
         nativeButton={false}
         variant="link"
         size="sm"
-        className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-[#2d3436]"
+        className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
       >
         View experiments
       </Button>
