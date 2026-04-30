@@ -7,6 +7,8 @@ import { SectionLabel } from "@/src/components/ui/section-label";
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
 import { cn } from "@/src/lib/utils";
 
+import { BiomarkerEvidenceRow } from "./biomarker-evidence-row";
+
 type BiomarkerBodyBlock =
   | { text: string; type: "paragraph" }
   | { items: string[]; listStyle: "ordered" | "unordered"; type: "list" };
@@ -40,6 +42,7 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel
 
   return (
     <div className="flex flex-col gap-12 pb-12">
+      <BiomarkerEvidenceRow biomarker={biomarker} />
       {(hasClaims || hasSourceHighlights) && (
         <section className="flex flex-col gap-5">
           <div className="flex max-w-3xl flex-col gap-1.5">
