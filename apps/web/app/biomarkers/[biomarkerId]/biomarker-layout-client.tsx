@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -46,31 +47,27 @@ export function BiomarkerLayoutClient({
   return (
     <BrowserVaultProvider>
       <div className="flex flex-col gap-7">
-        <nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
+        <div className="flex items-start justify-between gap-6">
+          <div className="flex max-w-3xl flex-col gap-3.5">
+            {eyebrowParts.length > 0 && (
+              <span className="font-mono text-[11px]/3.5 uppercase tracking-[0.12em] text-chart-5">
+                {eyebrowParts.join(" · ")}
+              </span>
+            )}
+            <h1 className="max-w-[24ch] font-serif text-3xl font-semibold tracking-tight text-foreground text-balance sm:text-[38px]">
+              {biomarker.title}
+            </h1>
+            <p className="max-w-[56ch] text-[16px] text-muted-foreground text-pretty">
+              {biomarker.summary}
+            </p>
+          </div>
           <Link
             href="/experiments"
-            className="text-muted-foreground transition-colors hover:text-foreground"
+            className="mt-1 inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
-            Murph
+            <ArrowLeft className="size-3.5" strokeWidth={1.75} aria-hidden />
+            All biomarkers
           </Link>
-          <span className="text-muted-foreground/60">→</span>
-          <span className="text-muted-foreground">Biomarkers</span>
-          <span className="text-muted-foreground/60">→</span>
-          <span className="font-medium text-foreground">{biomarker.shortName}</span>
-        </nav>
-
-        <div className="flex max-w-3xl flex-col gap-3.5">
-          {eyebrowParts.length > 0 && (
-            <span className="font-mono text-[11px]/3.5 uppercase tracking-[0.12em] text-chart-5">
-              {eyebrowParts.join(" · ")}
-            </span>
-          )}
-          <h1 className="max-w-[24ch] font-serif text-3xl font-semibold tracking-tight text-foreground text-balance sm:text-[38px]">
-            {biomarker.title}
-          </h1>
-          <p className="max-w-[56ch] text-[16px] text-muted-foreground text-pretty">
-            {biomarker.summary}
-          </p>
         </div>
 
         <Tabs value={currentTab} className="w-full">
