@@ -139,7 +139,7 @@ describe("ProtocolTab", () => {
     expect(markup).not.toContain("Read these top to bottom");
   });
 
-  it("keeps the Bryan Johnson sauna hierarchy focused on tolerability signals", () => {
+  it("keeps the Bryan Johnson sauna hierarchy focused on tolerability and pressure signals", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
 
     expect(protocol).not.toBeNull();
@@ -151,10 +151,12 @@ describe("ProtocolTab", () => {
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
 
     expect(markup).toContain("What could change");
-    expect(countOccurrences(markup, "data-card=")).toBe(2);
+    expect(markup).toContain("Also worth watching");
+    expect(countOccurrences(markup, "data-card=")).toBe(3);
     expect(markup).toContain('data-card="HRV / RMSSD"');
     expect(markup).toContain('data-card="Resting Heart Rate"');
-    expect(markup).not.toContain("Also worth watching");
+    expect(markup).toContain('data-card="Morning Blood Pressure"');
+    expect(markup).toContain("VO₂ Max");
   });
 
   it("prioritizes aerobic adaptation signals for Norwegian 4x4 and leaves slower proxies in context", () => {
@@ -173,13 +175,14 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Also worth watching");
     expect(countOccurrences(markup, "data-card=")).toBe(3);
     expect(markup).toContain('data-card="VO₂ Max"');
-    expect(markup).toContain("0–10%");
+    expect(markup).toContain("+3–10%");
     expect(markup).not.toContain("−5–10%");
-    expect(markup).toContain('data-card="HRV / RMSSD"');
     expect(markup).toContain('data-card="Resting Heart Rate"');
-    expect(markup).not.toContain('data-card="Morning Blood Pressure"');
+    expect(markup).toContain('data-card="Morning Blood Pressure"');
+    expect(markup).not.toContain('data-card="HRV / RMSSD"');
     expect(markup).not.toContain('data-card="Sleep Efficiency"');
     expect(markup).toContain("Morning Blood Pressure");
+    expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("Sleep Efficiency");
     expect(researchMarkup).toContain("Bottom line");
     expect(researchMarkup).toContain("best-supported claim");

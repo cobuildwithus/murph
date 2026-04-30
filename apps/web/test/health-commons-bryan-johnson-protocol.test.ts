@@ -245,17 +245,17 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Self-Reported Mood")?.description,
     ).toBe(
-      "Use the same 0–10 or 1–5 scale before the session and again 30–180 minutes after. Acute mood is the most defensible first-run target, but it remains short-horizon and source-limited.",
+      "Cold water delivers a sharp arousal jolt, then relief and challenge-appraisal after exit. Log the same mood scale before the session and 30–180 minutes after; a useful signal is a repeatable post-session lift without stop conditions or heavy rewarming burden.",
     );
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "HRV / RMSSD")?.description,
     ).toBe(
-      "Track HRV as recovery/autonomic context only; acute cold and post-exercise CWI can shift autonomic signals, but HRV is not a direct wellness benefit verdict.",
+      "Cold acutely shifts the nervous system toward sympathetic drive, so RMSSD can dip around the session and should recover by overnight or morning. Use same-device RMSSD to catch recovery cost, not to score one dramatic session.",
     );
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Resting Heart Rate")?.description,
     ).toBe(
-      "Track resting heart rate for recovery strain and context. Direct repeated-CWI cardiovascular findings are small and unclear, so avoid calling a change a benefit without the full context.",
+      "Immersion raises cardiac load while you are in the water; next-morning resting heart rate shows whether that stress is resolving. Compare same-device overnight or morning averages; persistent upward drift means the protocol is adding strain.",
     );
   });
 
