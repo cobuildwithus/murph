@@ -79,7 +79,6 @@ const SETUP_ONBOARD_TIMEOUT_MS = 90_000
 
 type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]
 type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
-type InboxListInput = Parameters<InboxServices['list']>[0]
 type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
 type InboxSourceListInput = Parameters<InboxServices['sourceList']>[0]
 type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
@@ -88,20 +87,6 @@ function listAutoReplyChannels(
   state: Awaited<ReturnType<typeof readAssistantAutomationState>>,
 ): string[] {
   return state.autoReply.map((entry) => entry.channel)
-}
-
-function createEmptyInboxListResult(input: InboxListInput) {
-  return {
-    vault: input.vault,
-    filters: {
-      afterCaptureId: input.afterCaptureId ?? null,
-      afterOccurredAt: input.afterOccurredAt ?? null,
-      limit: input.limit ?? 20,
-      oldestFirst: input.oldestFirst ?? false,
-      sourceId: input.sourceId ?? null,
-    },
-    items: [],
-  }
 }
 
 function buildFakeJwt(payload: Record<string, unknown>): string {
@@ -2125,9 +2110,6 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
           parserToolchain: null,
         }
       },
-      async list(input: InboxListInput) {
-        return createEmptyInboxListResult(input)
-      },
       async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push(input)
         return {
@@ -3924,7 +3906,6 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
   await writeExecutable(whisperCommand)
   await saveAssistantAutomationState(vaultRoot, {
     version: 1,
-    inboxScanCursor: null,
     autoReply: [
       {
         channel: 'email',
@@ -3994,9 +3975,6 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
           connectors: [],
           parserToolchain: null,
         }
-      },
-      async list(input: InboxListInput) {
-        return createEmptyInboxListResult(input)
       },
       async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push({

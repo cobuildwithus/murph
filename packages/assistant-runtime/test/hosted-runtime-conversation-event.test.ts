@@ -654,7 +654,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     ]);
   });
 
-  it("does not create runtime-only inbox projection rows when canonical inbox persistence fails", async () => {
+  it("does not fall back to transient inbox projection when canonical inbox persistence fails", async () => {
     const runtimeStore = {
       close: vi.fn(),
     };
@@ -665,13 +665,13 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       actor: {
         isSelf: false,
       },
-      externalId: "linq:msg_runtime_only",
+      externalId: "linq:msg_projection_failed",
       occurredAt: "2026-04-08T00:00:00.000Z",
       raw: {},
       source: "linq",
       text: "hello after ledger failure",
       thread: {
-        id: "chat_runtime_only",
+        id: "chat_projection_failed",
       },
     };
     mocks.openInboxRuntime.mockResolvedValueOnce(runtimeStore);
@@ -692,12 +692,12 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         runtime: createRuntime(),
         vaultRoot: "/tmp/assistant-runtime-conversation",
         wake: buildHostedExecutionLinqConversationMessageWake({
-          eventId: "evt_linq_runtime_only",
+          eventId: "evt_linq_projection_failed",
           linqMessage: {
-            chatId: "chat_runtime_only",
+            chatId: "chat_projection_failed",
             from: "+15551234567",
             isFromMe: false,
-            messageId: "msg_runtime_only",
+            messageId: "msg_projection_failed",
             parts: [],
           },
           occurredAt: "2026-04-08T00:00:00.000Z",

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
+import type { AssistantInputCursor } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   hasAssistantAutoReplyChannel,
   normalizeAssistantAutoReplyChannels,
@@ -25,13 +26,36 @@ import { saveAssistantAutomationState } from '../src/assistant/store.js'
 
 function autoReplyState(
   channel: string,
-  eligibleAfter: { captureId: string; createdAt?: string | null; occurredAt: string } | null,
+  eligibleAfter:
+    | AssistantInputCursor
+    | { captureId: string; createdAt?: string | null; occurredAt: string }
+    | null,
   enabledAt = '2026-04-10T00:00:00.000Z',
 ) {
   return {
     channel,
     enabledAt,
-    eligibleAfter,
+    eligibleAfter: testAssistantInputCursor(eligibleAfter),
+  }
+}
+
+function testAssistantInputCursor(
+  cursor:
+    | AssistantInputCursor
+    | { captureId: string; createdAt?: string | null; occurredAt: string }
+    | null,
+): AssistantInputCursor | null {
+  if (!cursor) {
+    return null
+  }
+  if ('inputId' in cursor) {
+    return cursor
+  }
+  return {
+    createdAt: cursor.createdAt ?? null,
+    inputId: cursor.captureId,
+    occurredAt: cursor.occurredAt,
+    sourceKind: 'inbox-capture',
   }
 }
 
@@ -130,8 +154,10 @@ test('managed helper seeds only when a new managed channel is added', () => {
 
 test('managed helper preserves unmanaged entries and prunes disabled managed ones', () => {
   const latestCursor = {
-    captureId: 'cap-latest',
+    createdAt: null,
+    inputId: 'cap-latest',
     occurredAt: '2026-04-10T01:00:00.000Z',
+    sourceKind: 'inbox-capture' as const,
   }
   const current = [
     autoReplyState('custom', {
@@ -178,7 +204,6 @@ test('enableAssistantAutoReplyChannelLocal returns true when the channel is alre
   try {
     await saveAssistantAutomationState(vaultRoot, {
       version: 1,
-      inboxScanCursor: null,
       autoReply: [
         autoReplyState('telegram', {
             captureId: 'cap-telegram',
@@ -234,10 +259,50 @@ test('readLatestAssistantInputSourceCursor returns the latest staged input even 
     })
 
     assert.deepEqual(cursor, {
-      captureId: latest.inputId,
-      createdAt: '2026-04-10T03:00:01.000Z',
-      occurredAt: '2026-04-10T03:00:00.000Z',
+      ...latest.cursor,
     })
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('readLatestAssistantInputSourceCursor orders same-timestamp hosted inputs by source position before input id', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-input-source-position-'),
+  )
+
+  try {
+    const older = await stageHostedAssistantInput({
+      createdAt: '2026-04-10T03:00:01.000Z',
+      eventId: 'event_1',
+      laneSeq: '1',
+      occurredAt: '2026-04-10T03:00:00.000Z',
+      vault: vaultRoot,
+    })
+    const latest = await stageHostedAssistantInput({
+      createdAt: '2026-04-10T03:00:01.000Z',
+      eventId: 'event_2',
+      laneSeq: '2',
+      occurredAt: '2026-04-10T03:00:00.000Z',
+      vault: vaultRoot,
+    })
+
+    assert.ok(
+      older.inputId > latest.inputId,
+      'fixture must prove sourcePosition wins when input ids sort in the opposite order',
+    )
+
+    const cursor = await readLatestAssistantInputSourceCursor({
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(cursor, {
+      ...latest.cursor,
+    })
+    assert.equal(
+      cursor?.sourcePosition,
+      'hosted-mailbox:conversation:000000000000000000000000000000000000002:item_event_2',
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -267,7 +332,6 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal seeds from assistant input
   try {
     await saveAssistantAutomationState(vaultRoot, {
       version: 1,
-      inboxScanCursor: null,
       autoReply: [
         autoReplyState('custom', {
             captureId: 'cap-custom',
@@ -304,18 +368,16 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal seeds from assistant input
       {
         channel: 'custom',
         enabledAt: '2026-04-10T00:00:00.000Z',
-        eligibleAfter: {
+        eligibleAfter: testAssistantInputCursor({
           captureId: 'cap-custom',
           occurredAt: '2026-04-09T00:00:00.000Z',
-        },
+        }),
       },
       {
         channel: 'telegram',
         enabledAt: '2026-04-10T03:00:01.000Z',
         eligibleAfter: {
-          captureId: latest.inputId,
-          createdAt: '2026-04-10T03:00:01.000Z',
-          occurredAt: '2026-04-10T03:00:00.000Z',
+          ...latest.cursor,
         },
       },
     ])
@@ -332,7 +394,6 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cu
   try {
     await saveAssistantAutomationState(vaultRoot, {
       version: 1,
-      inboxScanCursor: null,
       autoReply: [],
       updatedAt: '2026-04-10T00:00:00.000Z',
     })
@@ -352,9 +413,11 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cu
       }),
     }
     const explicitCursor = {
-      captureId: 'ain_explicit',
       createdAt: '2026-04-10T04:00:01.000Z',
+      inputId: 'ain_explicit',
       occurredAt: '2026-04-10T04:00:00.000Z',
+      sourceKind: 'hosted-mailbox' as const,
+      sourcePosition: 'hosted-mailbox:conversation:000000000000000000000000000000000000004:item_explicit',
     }
 
     const result = await reconcileManagedAssistantAutoReplyChannelsLocal({
@@ -385,7 +448,6 @@ test('enableAssistantAutoReplyChannelLocal seeds a newly enabled channel and rep
   try {
     await saveAssistantAutomationState(vaultRoot, {
       version: 1,
-      inboxScanCursor: null,
       autoReply: [],
       updatedAt: '2026-04-10T00:00:00.000Z',
     })
@@ -393,8 +455,10 @@ test('enableAssistantAutoReplyChannelLocal seeds a newly enabled channel and rep
     const enabled = await enableAssistantAutoReplyChannelLocal({
       channel: 'email',
       latestInputCursor: {
-        captureId: 'ain_email',
+        createdAt: null,
+        inputId: 'ain_email',
         occurredAt: '2026-04-10T05:00:00.000Z',
+        sourceKind: 'hosted-mailbox',
       },
       vault: vaultRoot,
     })
@@ -407,8 +471,10 @@ test('enableAssistantAutoReplyChannelLocal seeds a newly enabled channel and rep
 
 test('reconcileAssistantAutoReplyState preserves existing cursors and seeds new channels', () => {
   const latestCursor = {
-    captureId: 'cap-latest',
+    createdAt: null,
+    inputId: 'cap-latest',
     occurredAt: '2026-04-10T00:00:00.000Z',
+    sourceKind: 'inbox-capture' as const,
   }
   const current = [
     autoReplyState('telegram', {

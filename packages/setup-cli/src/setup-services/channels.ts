@@ -42,7 +42,7 @@ type SetupChannelInboxServices = Pick<InboxServices, 'bootstrap'> &
   Partial<
     Pick<
       InboxServices,
-      'doctor' | 'list' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'
+      'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'
     >
   >
 
@@ -432,9 +432,7 @@ export async function configureSetupChannels(input: {
       autoReplyChannels: configured
         .filter((channel) => channel.autoReply)
         .map((channel) => channel.channel),
-      inboxServices: input.inboxServices,
       platform,
-      requestId: input.requestId,
       vault: input.vault,
     })
   }
@@ -699,9 +697,7 @@ async function probeSetupReadiness(input: {
 
 async function updateAssistantChannelState(input: {
   autoReplyChannels: readonly SetupChannel[]
-  inboxServices: SetupChannelInboxServices
   platform: NodeJS.Platform
-  requestId: string | null
   vault: string
 }): Promise<void> {
   await reconcileManagedAssistantAutoReplyChannelsLocal({

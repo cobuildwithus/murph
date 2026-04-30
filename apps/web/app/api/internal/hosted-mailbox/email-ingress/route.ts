@@ -25,9 +25,12 @@ export const POST = withJsonError(async (request: Request) => {
   const envelope = buildHostedExecutionEmailConversationMessageWake({
     eventId: body.eventId,
     identityId: body.identityId,
+    ...(body.messageId === undefined ? {} : { messageId: body.messageId }),
     occurredAt: body.occurredAt,
     rawMessageKey: body.rawMessageKey,
     ...(body.selfAddress === undefined ? {} : { selfAddress: body.selfAddress }),
+    ...(body.threadKey === undefined ? {} : { threadKey: body.threadKey }),
+    ...(body.threadTarget === undefined ? {} : { threadTarget: body.threadTarget }),
     userId,
   });
 

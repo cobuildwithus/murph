@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
-  assistantAutomationCursorSchema,
   assistantSessionIdSchema,
   assistantTurnIdSchema,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -34,7 +33,6 @@ export const assistantActiveTurnInputAdmissionStateValues = [
 export const assistantAcceptedTurnInputSourceValues = [
   'assistant-input',
   'initial',
-  'inbox',
   'manual',
   'system',
 ] as const
@@ -52,10 +50,6 @@ export const assistantAcceptedTurnInputPromptFallbackReasonValues = [
   'system-input',
 ] as const
 
-const hostedMailboxWatermarkSchema = z
-  .string()
-  .regex(/^(?:0|[1-9][0-9]*)$/u)
-
 const assistantAcceptedTurnInputTranscriptRefSchema = z
   .object({
     sessionId: assistantSessionIdSchema,
@@ -68,7 +62,6 @@ const assistantAcceptedTurnInputTranscriptRefSchema = z
 const assistantAcceptedTurnInputContentRefSchema = z
   .object({
     kind: z.enum([
-      'inbox-capture',
       'transcript-entry',
       'assistant-runtime-artifact',
       'assistant-input-event',
@@ -88,31 +81,6 @@ const assistantAcceptedTurnInputPromptFallbackSchema = z
   })
   .strict()
 
-const assistantAcceptedTurnInputCursorEffectSchema = z.discriminatedUnion(
-  'cursorKind',
-  [
-    z
-      .object({
-        source: z.string().min(1),
-        cursorKind: z.enum(['inbox-scan', 'auto-reply-channel', 'manual']),
-        from: assistantAutomationCursorSchema.nullable().default(null),
-        to: assistantAutomationCursorSchema.nullable().default(null),
-        captureIds: z.array(z.string().min(1)).default([]),
-      })
-      .strict(),
-    z
-      .object({
-        source: z.string().min(1),
-        cursorKind: z.literal('hosted-mailbox-import'),
-        lane: z.enum(['conversation', 'system']),
-        from: hostedMailboxWatermarkSchema,
-        to: hostedMailboxWatermarkSchema,
-        captureIds: z.array(z.string().min(1)).default([]),
-      })
-      .strict(),
-  ],
-)
-
 export const assistantAcceptedTurnInputItemSchema = z
   .object({
     id: z.string().min(1),
@@ -122,7 +90,6 @@ export const assistantAcceptedTurnInputItemSchema = z
     transcriptRef: assistantAcceptedTurnInputTranscriptRefSchema.nullable(),
     contentRef: assistantAcceptedTurnInputContentRefSchema.nullable(),
     promptFallback: assistantAcceptedTurnInputPromptFallbackSchema.nullable(),
-    cursorEffects: z.array(assistantAcceptedTurnInputCursorEffectSchema),
   })
   .strict()
 
@@ -275,9 +242,6 @@ export type AssistantAcceptedTurnInputProviderRequest = z.infer<
 export type AssistantProviderContinuation = z.infer<
   typeof assistantProviderContinuationSchema
 >
-export type AssistantAcceptedTurnInputCursorEffect = z.infer<
-  typeof assistantAcceptedTurnInputCursorEffectSchema
->
 export type AssistantAcceptedTurnInputPromptFallback = z.infer<
   typeof assistantAcceptedTurnInputPromptFallbackSchema
 >
@@ -292,7 +256,6 @@ export interface AssistantAcceptedTurnInputItemInput {
   acceptedAt?: string
   captureIds?: readonly string[]
   contentRef?: z.input<typeof assistantAcceptedTurnInputContentRefSchema> | null
-  cursorEffects?: readonly z.input<typeof assistantAcceptedTurnInputCursorEffectSchema>[]
   id: string
   promptFallback?: AssistantAcceptedTurnInputPromptFallback | null
   promptFallbackReason?: AssistantAcceptedTurnInputPromptFallback['reason']
@@ -733,7 +696,6 @@ function parseAssistantAcceptedTurnInputItemInput(input: {
         promptFallbackReason: input.input.promptFallbackReason,
         promptFallbackText: input.input.promptFallbackText,
     }),
-    cursorEffects: [...(input.input.cursorEffects ?? [])],
   })
 }
 

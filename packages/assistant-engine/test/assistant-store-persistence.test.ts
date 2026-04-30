@@ -638,23 +638,20 @@ describe('assistant store persistence seams', () => {
     const initial = await readAutomationState(writePaths)
     expect(initial).toMatchObject({
       version: 1,
-      inboxScanCursor: null,
       autoReply: [],
     })
 
     const updated = await writeAutomationState(writePaths, {
       version: 1,
-      inboxScanCursor: {
-        occurredAt: '2026-04-08T00:04:00.000Z',
-        captureId: 'capture-1',
-      },
       autoReply: [
         {
           channel: 'telegram',
           enabledAt: '2026-04-08T00:05:00.000Z',
           eligibleAfter: {
+            createdAt: null,
             occurredAt: '2026-04-08T00:05:00.000Z',
-            captureId: 'capture-2',
+            inputId: 'capture-2',
+            sourceKind: 'inbox-capture',
           },
         },
         {
@@ -668,17 +665,15 @@ describe('assistant store persistence seams', () => {
 
     expect(updated).toEqual({
       version: 1,
-      inboxScanCursor: {
-        occurredAt: '2026-04-08T00:04:00.000Z',
-        captureId: 'capture-1',
-      },
       autoReply: [
         {
           channel: 'telegram',
           enabledAt: '2026-04-08T00:05:00.000Z',
           eligibleAfter: {
+            createdAt: null,
             occurredAt: '2026-04-08T00:05:00.000Z',
-            captureId: 'capture-2',
+            inputId: 'capture-2',
+            sourceKind: 'inbox-capture',
           },
         },
         {
@@ -701,7 +696,6 @@ describe('assistant store persistence seams', () => {
     const rebuilt = await readAutomationState(corruptedPaths)
     expect(rebuilt).toMatchObject({
       version: 1,
-      inboxScanCursor: null,
       autoReply: [],
     })
 

@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => ({
       enabledAt: string
       eligibleAfter: null
     }>,
-    inboxScanCursor: null,
     updatedAt: '2026-04-23T00:00:00.000Z',
   })),
   getAssistantStatus: vi.fn(async (input) => ({ input })),
@@ -369,7 +368,6 @@ test('createAssistantLocalService rejects local Linq routes and drops legacy Lin
         eligibleAfter: null,
       },
     ],
-    inboxScanCursor: null,
     updatedAt: '2026-04-23T00:00:00.000Z',
   })
 
@@ -419,7 +417,6 @@ test('createAssistantLocalService rejects local Linq routes and drops legacy Lin
         eligibleAfter: null,
       },
     ],
-    inboxScanCursor: null,
     updatedAt: mocks.saveAssistantAutomationState.mock.calls[0]?.[1]?.updatedAt,
   })
 })

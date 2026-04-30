@@ -422,12 +422,13 @@ test('representative contract schemas stay wired to the owned setup/operator sea
           channel: 'telegram',
           enabledAt: '2026-04-08T12:05:00.000Z',
           eligibleAfter: {
-            captureId: 'capture-1',
+            createdAt: null,
+            inputId: 'input-1',
             occurredAt: '2026-04-08T12:05:00.000Z',
+            sourceKind: 'inbox-capture',
           },
         },
       ],
-      inboxScanCursor: null,
       updatedAt: '2026-04-08T12:10:00.000Z',
     }).autoReply,
     [
@@ -435,8 +436,10 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         channel: 'telegram',
         enabledAt: '2026-04-08T12:05:00.000Z',
         eligibleAfter: {
-          captureId: 'capture-1',
+          createdAt: null,
+          inputId: 'input-1',
           occurredAt: '2026-04-08T12:05:00.000Z',
+          sourceKind: 'inbox-capture',
         },
       },
     ],

@@ -1210,7 +1210,6 @@ test('readAssistantAutomationState quarantines and rebuilds legacy automation v1
     `${JSON.stringify(
       {
         version: 1,
-        inboxScanCursor: null,
         updatedAt: '2026-03-18T10:00:00.000Z',
       },
       null,

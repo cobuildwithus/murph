@@ -8,9 +8,12 @@ import {
 export interface HostedEmailIngressWakeAppendRequest {
   eventId: string;
   identityId: string | null;
+  messageId?: string | null;
   occurredAt: string;
   rawMessageKey: string;
   selfAddress?: string | null;
+  threadKey?: string | null;
+  threadTarget?: string | null;
 }
 
 export function parseHostedEmailIngressWakeAppendRequest(
@@ -24,6 +27,14 @@ export function parseHostedEmailIngressWakeAppendRequest(
       record.identityId,
       "Hosted email ingress wake append request identityId",
     ),
+    ...(record.messageId === undefined
+      ? {}
+      : {
+          messageId: readOptionalNullableString(
+            record.messageId,
+            "Hosted email ingress wake append request messageId",
+          ),
+        }),
     occurredAt: requireString(
       record.occurredAt,
       "Hosted email ingress wake append request occurredAt",
@@ -38,6 +49,22 @@ export function parseHostedEmailIngressWakeAppendRequest(
           selfAddress: readOptionalNullableString(
             record.selfAddress,
             "Hosted email ingress wake append request selfAddress",
+          ),
+        }),
+    ...(record.threadKey === undefined
+      ? {}
+      : {
+          threadKey: readOptionalNullableString(
+            record.threadKey,
+            "Hosted email ingress wake append request threadKey",
+          ),
+        }),
+    ...(record.threadTarget === undefined
+      ? {}
+      : {
+          threadTarget: readOptionalNullableString(
+            record.threadTarget,
+            "Hosted email ingress wake append request threadTarget",
           ),
         }),
   };

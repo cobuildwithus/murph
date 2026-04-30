@@ -750,7 +750,6 @@ function resolveAssistantIndexRebuildTimestamp(
 function createInitialAutomationState(): AssistantAutomationState {
   return assistantAutomationStateSchema.parse({
     version: ASSISTANT_AUTOMATION_STATE_VERSION,
-    inboxScanCursor: null,
     autoReply: [],
     updatedAt: new Date().toISOString(),
   })

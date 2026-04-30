@@ -4,6 +4,10 @@ import { test } from "vitest";
 
 import {
   HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
+  HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
+  HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH,
+  HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT,
+  HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH,
   appendHostedEmailReferenceChain,
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
@@ -86,12 +90,18 @@ test("hosted email thread targets serialize, normalize, and parse deterministica
 });
 
 test("hosted email reference chains and reply subjects normalize edge cases", () => {
-  const references = Array.from({ length: 25 }, (_, index) => ` <message-${index}@example.test> `);
+  const references = Array.from(
+    { length: 25 },
+    (_, index) => ` <message-${index}@example.test> `,
+  );
 
   assert.deepEqual(appendHostedEmailReferenceChain({
     lastMessageId: " <message-24@example.test> ",
     references,
-  }), Array.from({ length: 20 }, (_, index) => `<message-${index + 5}@example.test>`));
+  }), Array.from(
+    { length: HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT },
+    (_, index) => `<message-${index + 13}@example.test>`,
+  ));
   assert.equal(ensureHostedEmailReplySubject("Status update"), "Re: Status update");
   assert.equal(ensureHostedEmailReplySubject("Re: Existing thread"), "Re: Existing thread");
   assert.equal(ensureHostedEmailReplySubject("   ", "  "), "Murph update");
@@ -208,10 +218,51 @@ test("hosted email shared text normalization trims empty message ids and subject
   assert.equal(normalizeHostedEmailSubject("  Subject line  "), "Subject line");
   assert.equal(normalizeHostedEmailMessageId("   "), null);
   assert.equal(normalizeHostedEmailSubject(undefined), null);
+  assert.equal(
+    normalizeHostedEmailMessageId(
+      `<${"m".repeat(HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH)}@example.test>`,
+    ),
+    null,
+  );
+  assert.equal(
+    normalizeHostedEmailSubject(
+      ` ${"s".repeat(HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH + 25)} `,
+    ),
+    "s".repeat(HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH),
+  );
   assert.deepEqual(
     normalizeHostedEmailAddressList(["Owner <owner@example.test>", "owner@example.test", " ", null]),
     ["owner@example.test"],
   );
+});
+
+test("hosted email thread targets stay bounded when raw headers are oversized", () => {
+  const serialized = serializeHostedEmailThreadTarget({
+    cc: Array.from(
+      { length: 50 },
+      (_, index) => `CC ${index} <cc-${index}@example.test>`,
+    ),
+    lastMessageId:
+      `<${"m".repeat(HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH)}@example.test>`,
+    references: Array.from(
+      { length: 40 },
+      (_, index) =>
+        `<${"r".repeat(HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH)}-${index}@example.test>`,
+    ),
+    subject: "s".repeat(HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH + 100),
+    to: Array.from(
+      { length: 50 },
+      (_, index) => `To ${index} <to-${index}@example.test>`,
+    ),
+  });
+  const parsed = parseHostedEmailThreadTarget(serialized);
+
+  assert.ok(serialized.length <= HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH);
+  assert.equal(parsed?.lastMessageId, null);
+  assert.deepEqual(parsed?.references, []);
+  assert.equal(parsed?.subject?.length, HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH);
+  assert.equal(parsed?.to.length, 8);
+  assert.equal(parsed?.cc.length, 8);
 });
 
 test("hosted email shared normalization rejects header-break injection strings", () => {

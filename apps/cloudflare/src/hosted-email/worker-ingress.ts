@@ -4,6 +4,10 @@ import {
   parseRawEmailMessage,
   readRawEmailHeaderValue,
 } from "@murphai/inboxd/connectors/email/parsed";
+import {
+  buildParsedEmailThreadTarget,
+  resolveParsedEmailThreadKey,
+} from "@murphai/inboxd/connectors/email/normalize-parsed";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
@@ -144,6 +148,15 @@ export async function handleHostedEmailIngress(
   });
   const eventId = `email:${rawMessageKey}`;
   const occurredAt = new Date().toISOString();
+  const threadTarget = buildParsedEmailThreadTarget({
+    accountAddress: route.identityId,
+    message: parsedMessage,
+    selfAddresses: [route.routeAddress],
+  });
+  const threadKey = resolveParsedEmailThreadKey({
+    message: parsedMessage,
+    rawMessageKey,
+  });
 
   try {
     await appendHostedEmailIngressWakeInWeb({
@@ -151,9 +164,12 @@ export async function handleHostedEmailIngress(
       body: {
         eventId,
         identityId: route.identityId,
+        messageId: parsedMessage.messageId,
         occurredAt,
         rawMessageKey,
         selfAddress: route.routeAddress,
+        threadKey,
+        threadTarget,
       },
       boundUserId: route.userId,
       callbackSigning: environment.webCallbackSigning,

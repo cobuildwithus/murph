@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { assistantRunResultSchema, type AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices, InboxRunEvent } from '@murphai/inbox-services'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
@@ -59,8 +60,7 @@ import { recoverAssistantAutoReplies } from './startup-recovery.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
-  | 'autoReply'
-  | 'inboxScanCursor'
+  'autoReply'
 >
 
 export interface RunAssistantAutomationInput {
@@ -145,18 +145,21 @@ export async function runAssistantAutomation(
                 capture: event.capture,
                 persisted: event.persisted,
                 vault: input.vault,
-              }).catch((error) => {
-                warnAssistantBestEffortFailure({
-                  error,
-                  operation: 'assistant input event staging',
-                })
-              }).finally(() => {
+              }).then(() => {
                 wakeController.requestWake()
                 notifyImportedCaptureInputAvailable({
                   event,
                   signal: controller.signal,
                   vault: input.vault,
                 })
+              }).catch((error) => {
+                const detail = formatStructuredErrorMessage(error)
+                lastError = detail
+                input.onEvent?.({
+                  type: 'daemon.failed',
+                  details: detail,
+                })
+                controller.abort()
               })
             } else if (
               (event.type === 'capture.imported' &&
@@ -302,7 +305,9 @@ async function stageImportedCaptureAssistantInputEvent(input: {
       content: {
         attachmentDescriptors: (input.capture.attachments ?? []).map(
           (attachment, index) => ({
-            attachmentId: normalizeLocalAssistantInputToken(
+            attachmentId: hashLocalAssistantInputIdentifier(
+              input.vault,
+              input.capture.source,
               attachment.externalId,
               `attachment_${index}`,
             ),
@@ -328,11 +333,23 @@ async function stageImportedCaptureAssistantInputEvent(input: {
           : null,
       },
       conversation: {
-        accountId: input.capture.accountId ?? null,
-        actorId: input.capture.actor.id ?? null,
+        accountId: hashNullableLocalAssistantInputIdentifier(
+          input.vault,
+          input.capture.source,
+          input.capture.accountId,
+        ),
+        actorId: hashNullableLocalAssistantInputIdentifier(
+          input.vault,
+          input.capture.source,
+          input.capture.actor.id,
+        ),
         actorIsSelf: input.capture.actor.isSelf,
         source: input.capture.source,
-        threadId: input.capture.thread?.id ?? null,
+        threadId: hashNullableLocalAssistantInputIdentifier(
+          input.vault,
+          input.capture.source,
+          input.capture.thread?.id,
+        ),
         threadIsDirect: input.capture.thread?.isDirect ?? null,
       },
       occurredAt: input.capture.occurredAt,
@@ -452,6 +469,37 @@ function normalizeLocalAssistantInputToken(
   return fallback
 }
 
+function hashLocalAssistantInputIdentifier(
+  vault: string,
+  source: string,
+  value: unknown,
+  fallback: string,
+): string {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  const material = normalized || fallback
+  return `lid_${createHash('sha256')
+    .update('murph.local-assistant-input.identifier.v1')
+    .update('\0')
+    .update(vault)
+    .update('\0')
+    .update(source)
+    .update('\0')
+    .update(material)
+    .digest('hex')
+    .slice(0, 32)}`
+}
+
+function hashNullableLocalAssistantInputIdentifier(
+  vault: string,
+  source: string,
+  value: unknown,
+): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized
+    ? hashLocalAssistantInputIdentifier(vault, source, normalized, 'empty')
+    : null
+}
+
 function normalizeLocalAssistantInputContentType(value: unknown): string | null {
   const normalized = typeof value === 'string' ? value.trim() : ''
   return /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
@@ -558,7 +606,6 @@ export async function runAssistantAutomationPass(
     async onStateProgress(next) {
       state = await saveAssistantAutomationState(input.vault, {
         ...state,
-        inboxScanCursor: next.inboxScanCursor,
         autoReply: [...next.autoReply],
         updatedAt: new Date().toISOString(),
       })
@@ -647,7 +694,6 @@ function snapshotAssistantAutomationLoopState(
       eligibleAfter: entry.eligibleAfter,
       enabledAt: entry.enabledAt,
     })),
-    inboxScanCursor: state.inboxScanCursor,
   }
 }
 
@@ -655,22 +701,5 @@ function didAssistantAutomationStateProgress(
   before: AssistantAutomationLoopStateSnapshot,
   after: AssistantAutomationLoopStateSnapshot,
 ): boolean {
-  return (
-    !sameAssistantAutoReplyState(before.autoReply, after.autoReply) ||
-    !sameAssistantAutomationCursor(
-      before.inboxScanCursor,
-      after.inboxScanCursor,
-    )
-  )
-}
-
-function sameAssistantAutomationCursor(
-  left: AssistantAutomationLoopStateSnapshot['inboxScanCursor'],
-  right: AssistantAutomationLoopStateSnapshot['inboxScanCursor'],
-): boolean {
-  return (
-    left?.captureId === right?.captureId &&
-    (left?.createdAt ?? null) === (right?.createdAt ?? null) &&
-    left?.occurredAt === right?.occurredAt
-  )
+  return !sameAssistantAutoReplyState(before.autoReply, after.autoReply)
 }

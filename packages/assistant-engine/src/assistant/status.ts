@@ -92,7 +92,6 @@ export async function getAssistantStatusLocal(
     generatedAt: new Date().toISOString(),
     runLock,
     automation: {
-      inboxScanCursor: automation.inboxScanCursor,
       autoReply: automation.autoReply,
       updatedAt: automation.updatedAt,
     },

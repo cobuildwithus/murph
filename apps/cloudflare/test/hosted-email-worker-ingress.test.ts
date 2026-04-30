@@ -17,6 +17,9 @@ vi.mock("@murphai/hosted-execution", async () => {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  parseHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 
 const mocks = vi.hoisted(() => ({
   appendHostedEmailIngressWakeInWeb: vi.fn(),
@@ -319,6 +322,16 @@ describe("hosted email worker ingress", () => {
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
     expect(typeof rawMessageKey).toBe("string");
+    expect(appendInput?.body?.messageId).toBeNull();
+    expect(appendInput?.body?.threadKey).toBe(rawMessageKey);
+    const threadTarget = parseHostedEmailThreadTarget(
+      appendInput?.body?.threadTarget,
+    );
+    expect(threadTarget).toMatchObject({
+      lastMessageId: null,
+      subject: "hello",
+      to: ["owner@example.com"],
+    });
     await expect(readHostedEmailRawMessage({
       bucket,
       key: TEST_KEY,

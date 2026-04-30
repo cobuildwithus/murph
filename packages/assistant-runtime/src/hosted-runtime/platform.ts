@@ -9,10 +9,6 @@ import type {
   HostedMailboxPayloadFetchResponse,
   HostedRuntimeLogRequest,
   HostedRuntimeLogResponse,
-  HostedRuntimeVaultSyncImportRequest,
-  HostedRuntimeVaultSyncImportResponse,
-  HostedRuntimeVaultSyncPayloadFetchRequest,
-  HostedRuntimeVaultSyncPayloadFetchResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
@@ -122,15 +118,6 @@ export type HostedRuntimeActiveTurnInputCheckpoint = (
   input: HostedRuntimeActiveTurnInputCheckpointInput,
 ) => Promise<void>;
 
-export interface HostedRuntimeVaultSyncPort {
-  fetchPayload(
-    request: HostedRuntimeVaultSyncPayloadFetchRequest,
-  ): Promise<HostedRuntimeVaultSyncPayloadFetchResponse>;
-  recordImport(
-    request: HostedRuntimeVaultSyncImportRequest,
-  ): Promise<HostedRuntimeVaultSyncImportResponse>;
-}
-
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   billingPort?: HostedRuntimeBillingPort | null;
@@ -144,7 +131,6 @@ export interface HostedRuntimePlatform {
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
-  vaultSyncPort?: HostedRuntimeVaultSyncPort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
 }
 

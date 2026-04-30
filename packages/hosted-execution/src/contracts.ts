@@ -25,7 +25,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
-  "vault.sync.import",
 ] as const;
 
 export type HostedExecutionEventKind =
@@ -37,7 +36,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
-  "vault.sync.import",
 ] as const;
 
 export type HostedExecutionWakeKind =
@@ -163,31 +161,11 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
-export interface HostedExecutionVaultSyncImportReference {
-  localManifestHash: string;
-  sessionId: string;
-  sourceSchemaVersion?: string | null;
-  sourceVaultId?: string | null;
-  sourceVaultTitle?: string | null;
-}
-
-export interface HostedExecutionVaultSyncImportEvent extends HostedExecutionBaseEvent {
-  kind: "vault.sync.import";
-  vaultSync: HostedExecutionVaultSyncImportReference;
-}
-
-export interface HostedExecutionRunnerVaultSyncImport {
-  bundleBase64: string;
-  sessionId: string;
-  sourceSchemaVersion?: string | null;
-}
-
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
-  | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionVaultSyncImportEvent;
+  | HostedExecutionDeviceSyncWakeEvent;
 
 export interface HostedExecutionBaseWake {
   eventId: string;
@@ -245,8 +223,11 @@ export interface HostedExecutionTelegramConversationMessagePayload {
 export interface HostedExecutionEmailConversationMessagePayload {
   channel: "email";
   identityId: string | null;
+  messageId?: string | null;
   rawMessageKey: string;
   selfAddress?: string | null;
+  threadKey?: string | null;
+  threadTarget?: string | null;
 }
 
 export type HostedExecutionConversationMessagePayload =
@@ -284,11 +265,6 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
 }
 
-export interface HostedExecutionVaultSyncImportWake extends HostedExecutionBaseWake {
-  kind: "vault.sync.import";
-  vaultSync: HostedExecutionVaultSyncImportReference;
-}
-
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
   kind: "runtime.timer";
   triggerKind: HostedRuntimeTimerTriggerKind;
@@ -299,8 +275,7 @@ export type HostedExecutionWake =
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
-  | HostedExecutionDeviceSyncWake
-  | HostedExecutionVaultSyncImportWake;
+  | HostedExecutionDeviceSyncWake;
 
 export type HostedRuntimeEvent =
   | HostedExecutionWake

@@ -4,8 +4,10 @@ Status snapshot: 2026-04-30
 
 ## Purpose
 
-This document defines the target architecture and migration path for decoupling
-Codex from inbox capture.
+This document defines the greenfield hard-cut path for decoupling Codex from
+inbox capture. There is no old persisted data to preserve for this cut, so the
+implementation should delete vestigial capture-gated paths instead of adding
+compatibility shims.
 
 The goal is not to make Codex consume transient, uncheckpointed raw events. The
 goal is to move the durable input boundary earlier and simpler:
@@ -36,7 +38,7 @@ That makes the assistant path depend on projection work:
 - hosted raw email loading
 - attachment download or materialization
 - canonical inbox persistence
-- runtime-only capture fallback
+- transient capture fallback
 - parser drain and prompt enrichment
 - inbox list/show/search semantics
 
@@ -152,6 +154,8 @@ type AssistantInputEvent = {
   };
 
   replyTarget: {
+    channel: "linq" | "telegram" | "email";
+    threadId?: string | null; // private route authority; hosted email uses hostedmail:
     deliveryReplyToMessageId?: string | null;
     deliverySource?: Record<string, string> | null;
   } | null;
@@ -400,21 +404,21 @@ Fail open here means Codex can still see the durable assistant input. It does
 not mean provider delivery is allowed without accepted-input and reply-intent
 durability.
 
-## Runtime-Only Inbox Rows
+## Transient Inbox Rows
 
-Runtime-only inbox rows should not be part of the final architecture.
+Transient inbox rows are not part of the final architecture.
 
-They can be used as a short migration bridge if needed, but they should not
-influence reply eligibility in the clean model. The assistant input event is the
-durable fallback. A transient inbox row is at most a diagnostic or compatibility
-projection.
+In the greenfield hard cut, decoded hosted input goes directly to
+`AssistantInputEvent`. Inbox rows are canonical projection rows only; a
+transient inbox row must not influence reply eligibility, cursor advancement,
+terminal evidence, or active-turn admission.
 
 Removal target:
 
-- no assistant scanner candidate depends on `persistence: "runtime_only"`
-- no active-turn admission requires runtime-only rows
-- no terminal evidence is keyed only by runtime-only capture ids
-- no mailbox cursor advancement depends on runtime-only projection rows
+- no assistant scanner candidate depends on transient inbox persistence
+- no active-turn admission requires transient inbox rows
+- no terminal evidence is keyed only by transient capture ids
+- no mailbox cursor advancement depends on transient projection rows
 
 ## Source-Specific Adapters
 
@@ -458,8 +462,9 @@ Email is hardest because useful reply context often requires raw EML parsing.
 
 Greenfield rule:
 
-- If the hosted wake includes enough body/thread/identity/reply metadata, build
-  an email assistant input event directly.
+- If the hosted wake includes enough body/thread/identity/reply metadata,
+  including a serialized `hostedmail:` reply target, build an email assistant
+  input event directly.
 - If it only contains a raw-message pointer, ingest can record a pending input,
   but reply admission should wait for safe body/thread/reply extraction or
   produce a durable deferral.
@@ -633,42 +638,19 @@ Use this checklist before implementing each phase.
 
 ## Current Code Stress-Test Findings
 
-This guide was reviewed against the current hosted runtime and assistant engine
-code on 2026-04-30. The current implementation confirms the plan's main
-replacement seams:
+The final hard cut should leave these properties true:
 
-- Hosted workspace execution imports mailbox before assistant phase:
-  `packages/assistant-runtime/src/hosted-runtime/workspace-runner.ts:233`.
-- Retryable blocked mailbox import can summarize as `source_unavailable`:
-  `packages/assistant-runtime/src/hosted-runtime/workspace-runner.ts:860`.
-- Hosted conversation import decodes and matches the wake, then immediately
-  prepares local capture context and imports through the local inbox path:
-  `packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts:144`
-  and `:179`.
-- Runtime-only capture persistence is explicitly treated as retryable blocked
-  rather than durable import success:
-  `packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts:202`.
-- Active-turn input is shaped as `listNewConversationCaptures`, not source
-  agnostic inputs:
-  `packages/assistant-engine/src/assistant/turn-input.ts:51`.
-- The inbox-backed turn-input implementation directly lists inbox captures:
-  `packages/assistant-engine/src/assistant/turn-input.ts:222`.
-- Initial automation scanner directly lists inbox captures and checks terminal
-  evidence by capture id:
-  `packages/assistant-engine/src/assistant/automation/scanner.ts:269`.
-- Accepted input sources and content refs are capture-biased:
-  `packages/assistant-engine/src/assistant/active-turn-input-journal.ts:34`
-  and `:67`.
-- Hosted mailbox cursor effects already exist, but only carry capture ids:
-  `packages/assistant-engine/src/assistant/active-turn-input-journal.ts:102`.
-- Terminal evidence is capture-id keyed and rejects empty capture groups:
-  `packages/assistant-engine/src/assistant/automation/evidence.ts:52`
-  and `:244`.
-
-These findings support the greenfield target: add a durable assistant input
-event boundary, then refactor scanner, active-turn input, accepted-input
-journal, and terminal evidence to key on input/source refs instead of capture
-ids.
+- Hosted conversation import decodes and matches the wake, writes an
+  `AssistantInputEvent`, and only then attempts inbox projection.
+- Scanner and active-turn admission read `AssistantInputSource`, not an
+  inbox-capture-specific listing interface.
+- Accepted input journal entries use `source: "assistant-input"` and
+  `contentRef.kind: "assistant-input-event"`.
+- Terminal reply/deferred/suppression evidence is keyed by assistant input ids;
+  capture ids are optional projection metadata.
+- Setup/channel priming reads assistant automation state and defaults, not
+  `.runtime/operations/inbox/config.json`.
+- Runtime-only inbox rows are not part of assistant admission.
 
 ### Hosted Mailbox Import
 
@@ -834,9 +816,8 @@ When implementation starts, update these live docs alongside code:
 
 4. Should existing capture-keyed evidence be migrated?
 
-   Recommendation: support read compatibility while new evidence is keyed by
-   input id. Avoid a big one-shot migration unless old records must be rewritten
-   for correctness.
+   No. This cut is greenfield. New evidence is keyed by input id, and old
+   capture-keyed assistant admission state should not shape the new runtime.
 
 ## Long-Term Shape
 

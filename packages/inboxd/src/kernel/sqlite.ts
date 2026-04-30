@@ -128,12 +128,6 @@ function openInboxRuntimeDatabaseForPath(databasePath: string): DatabaseSync {
         },
       },
       {
-        version: 2,
-        migrate(candidateDatabase) {
-          ensureCapturePersistenceColumn(candidateDatabase);
-        },
-      },
-      {
         version: 3,
         migrate(candidateDatabase) {
           ensureCaptureMutationOnUpdateTrigger(candidateDatabase);
@@ -141,9 +135,7 @@ function openInboxRuntimeDatabaseForPath(databasePath: string): DatabaseSync {
       },
       {
         version: 4,
-        migrate(candidateDatabase) {
-          deleteNonCanonicalCaptureRows(candidateDatabase);
-        },
+        migrate() {},
       },
     ],
     schemaVersion: INBOX_RUNTIME_SQLITE_SCHEMA_VERSION,
@@ -178,7 +170,6 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
       received_at text,
       text_content text,
       raw_json text not null,
-      capture_persistence text not null default 'canonical',
       vault_event_id text not null,
       envelope_path text not null,
       created_at text not null,
@@ -346,16 +337,6 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
   `);
 }
 
-function ensureCapturePersistenceColumn(database: DatabaseSync): void {
-  const columns = database.prepare("pragma table_info(capture)").all() as Array<{
-    name?: unknown;
-  }>;
-  const hasPersistence = columns.some((column) => column.name === "capture_persistence");
-  if (!hasPersistence) {
-    database.exec("alter table capture add column capture_persistence text not null default 'canonical'");
-  }
-}
-
 function ensureCaptureMutationOnUpdateTrigger(database: DatabaseSync): void {
   database.exec(`
     drop trigger if exists capture_mutation_on_update;
@@ -375,7 +356,6 @@ function ensureCaptureMutationOnUpdateTrigger(database: DatabaseSync): void {
       received_at,
       text_content,
       raw_json,
-      capture_persistence,
       vault_event_id,
       envelope_path,
       created_at
@@ -388,28 +368,6 @@ function ensureCaptureMutationOnUpdateTrigger(database: DatabaseSync): void {
          set mutation_cursor = (select next_cursor from capture_mutation_counter where singleton = 1)
        where capture_id = new.capture_id;
     end;
-  `);
-}
-
-function deleteNonCanonicalCaptureRows(database: DatabaseSync): void {
-  database.exec(`
-    delete from attachment_parse_job
-    where capture_id in (
-      select capture_id from capture where capture_persistence <> 'canonical'
-    );
-
-    delete from capture_attachment
-    where capture_id in (
-      select capture_id from capture where capture_persistence <> 'canonical'
-    );
-
-    delete from capture_fts
-    where capture_id in (
-      select capture_id from capture where capture_persistence <> 'canonical'
-    );
-
-    delete from capture
-    where capture_persistence <> 'canonical';
   `);
 }
 
@@ -431,7 +389,6 @@ export async function listInboxCaptureMutations(input: {
               mutation_cursor as cursor
             from capture
             where mutation_cursor > ?
-              and capture_persistence = 'canonical'
             union all
             select
               capture_id as captureId,
@@ -470,7 +427,6 @@ export async function readInboxCaptureMutationHead(vaultRoot: string): Promise<n
           select max(cursor) as cursor
           from (
             select mutation_cursor as cursor from capture
-            where capture_persistence = 'canonical'
             union all
             select mutation_cursor as cursor from capture_mutation_tombstone
           )
@@ -487,8 +443,8 @@ function createInboxRuntimeStore(
   database: DatabaseSync,
   databasePath: string,
 ): InboxRuntimeStore & ProjectionReplacementStore {
-  const listCanonicalCaptureIdsStatement = database.prepare(
-    "select capture_id from capture where capture_persistence = 'canonical'",
+  const listCaptureIdsStatement = database.prepare(
+    "select capture_id from capture",
   );
   const selectCursorStatement = database.prepare(
     `
@@ -518,7 +474,6 @@ function createInboxRuntimeStore(
         created_at
       from capture
       where source = ? and account_id = ? and external_id = ?
-        and capture_persistence = 'canonical'
     `,
   );
   const findCaptureIdByExternalIdStatement = database.prepare(
@@ -678,8 +633,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where capture_persistence = 'canonical'
-        and (? is null or source = ?)
+      where (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
           ? is null
@@ -695,8 +649,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where capture_persistence = 'canonical'
-        and (? is null or source = ?)
+      where (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
           ? is null
@@ -712,8 +665,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where capture_persistence = 'canonical'
-        and (? is null or source = ?)
+      where (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
           ? is null
@@ -729,8 +681,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where capture_persistence = 'canonical'
-        and (? is null or source = ?)
+      where (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
           ? is null
@@ -759,7 +710,6 @@ function createInboxRuntimeStore(
       from capture_fts
       join capture on capture.capture_id = capture_fts.capture_id
       where capture_fts match ?
-        and capture.capture_persistence = 'canonical'
         and (? is null or capture.source = ?)
         and (? is null or capture.account_id = ?)
       order by bm25(capture_fts, 6.0, 2.0, 0.25), capture.occurred_at desc
@@ -767,7 +717,7 @@ function createInboxRuntimeStore(
     `,
   );
   const getCaptureStatement = database.prepare(
-    "select * from capture where capture_id = ? and capture_persistence = 'canonical'",
+    "select * from capture where capture_id = ?",
   );
   const parseJobs = createAttachmentParseJobStore({
     database,
@@ -1087,7 +1037,7 @@ function createInboxRuntimeStore(
         const previousNextCursor = readCurrentMutationCursor();
         const previousCaptureIds = new Set(
           (
-            listCanonicalCaptureIdsStatement.all() as Array<{
+            listCaptureIdsStatement.all() as Array<{
               capture_id?: string;
             }>
           )

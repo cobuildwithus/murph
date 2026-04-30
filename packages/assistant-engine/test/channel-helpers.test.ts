@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  serializeHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import type { ConversationRef } from '../src/assistant/conversation-ref.ts'
@@ -554,6 +557,39 @@ describe('channel helper seams', () => {
       sentAt: FIXED_NOW.toISOString(),
       target: 'delivered@example.com',
       targetKind: 'explicit',
+    })
+
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: '<message-hosted@example.test>',
+      references: [
+        '<message-root@example.test>',
+        '<message-hosted@example.test>',
+      ],
+      subject: 'Hosted email thread',
+      to: ['friend@example.com'],
+    })
+    await ASSISTANT_CHANNEL_ADAPTERS.email.send(
+      {
+        actorId: null,
+        bindingDelivery: null,
+        explicitTarget: hostedEmailThreadTarget,
+        idempotencyKey: null,
+        identityId: 'identity-email',
+        message: 'hosted thread hello',
+        replyToMessageId: '<message-hosted@example.test>',
+      },
+      {
+        sendEmail,
+      },
+    )
+    expect(sendEmail).toHaveBeenLastCalledWith({
+      idempotencyKey: null,
+      identityId: 'identity-email',
+      message: 'hosted thread hello',
+      replyToMessageId: '<message-hosted@example.test>',
+      subject: null,
+      target: hostedEmailThreadTarget,
+      targetKind: 'thread',
     })
 
     await expect(

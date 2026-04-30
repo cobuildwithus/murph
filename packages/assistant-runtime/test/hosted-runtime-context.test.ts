@@ -9,6 +9,9 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import type {
+  AssistantInputCursor,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
@@ -127,7 +130,7 @@ async function readAutomationState(vaultRoot: string) {
     autoReply: Array<{
       channel: string;
       enabledAt: string;
-      eligibleAfter: { captureId: string; occurredAt: string } | null;
+      eligibleAfter: AssistantInputCursor | null;
     }>;
   };
 }
@@ -138,9 +141,8 @@ async function writeAutomationState(
     autoReply: Array<{
       channel: string;
       enabledAt: string;
-      eligibleAfter: { captureId: string; occurredAt: string } | null;
+      eligibleAfter: AssistantInputCursor | null;
     }>;
-    inboxScanCursor: { captureId: string; occurredAt: string } | null;
     updatedAt: string;
     version: number;
   },
@@ -154,12 +156,24 @@ function summarizeAutoReply(
   state: Awaited<ReturnType<typeof readAutomationState>>,
 ): Array<{
   channel: string;
-  eligibleAfter: { captureId: string; occurredAt: string } | null;
+  eligibleAfter: AssistantInputCursor | null;
 }> {
   return state.autoReply.map((entry) => ({
     channel: entry.channel,
     eligibleAfter: entry.eligibleAfter,
   }));
+}
+
+function testAssistantInputCursor(input: {
+  inputId: string;
+  occurredAt: string;
+}): AssistantInputCursor {
+  return {
+    createdAt: null,
+    inputId: input.inputId,
+    occurredAt: input.occurredAt,
+    sourceKind: "inbox-capture",
+  };
 }
 
 function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
@@ -248,7 +262,7 @@ test("hosted channel state reconciliation enables linked hosted auto-reply chann
       linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
-    assert.equal(mocks.inboxList.mock.calls.length, 1);
+    assert.equal(mocks.inboxList.mock.calls.length, 0);
   } finally {
     await cleanup();
   }
@@ -260,31 +274,30 @@ test("hosted channel state reconciliation preserves unmanaged entries while prun
   try {
     await writeAutomationState(vaultRoot, {
       version: 1,
-      inboxScanCursor: null,
       autoReply: [
         {
           channel: "email",
           enabledAt: "2026-03-28T09:03:00.000Z",
-          eligibleAfter: {
-            captureId: "cap_email",
+          eligibleAfter: testAssistantInputCursor({
+            inputId: "ain_000000000000000000000000000000a1",
             occurredAt: "2026-03-28T09:00:00.000Z",
-          },
+          }),
         },
         {
           channel: "linq",
           enabledAt: "2026-03-28T09:03:00.000Z",
-          eligibleAfter: {
-            captureId: "cap_linq",
+          eligibleAfter: testAssistantInputCursor({
+            inputId: "ain_000000000000000000000000000000a2",
             occurredAt: "2026-03-28T09:01:00.000Z",
-          },
+          }),
         },
         {
           channel: "telegram",
           enabledAt: "2026-03-28T09:03:00.000Z",
-          eligibleAfter: {
-            captureId: "cap_telegram",
+          eligibleAfter: testAssistantInputCursor({
+            inputId: "ain_000000000000000000000000000000a3",
             occurredAt: "2026-03-28T09:02:00.000Z",
-          },
+          }),
         },
       ],
       updatedAt: "2026-03-28T09:03:00.000Z",
@@ -312,17 +325,17 @@ test("hosted channel state reconciliation preserves unmanaged entries while prun
     assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
       {
         channel: "linq",
-        eligibleAfter: {
-          captureId: "cap_linq",
+        eligibleAfter: testAssistantInputCursor({
+          inputId: "ain_000000000000000000000000000000a2",
           occurredAt: "2026-03-28T09:01:00.000Z",
-        },
+        }),
       },
       {
         channel: "telegram",
-        eligibleAfter: {
-          captureId: "cap_telegram",
+        eligibleAfter: testAssistantInputCursor({
+          inputId: "ain_000000000000000000000000000000a3",
           occurredAt: "2026-03-28T09:02:00.000Z",
-        },
+        }),
       },
     ]);
     assert.equal(mocks.inboxList.mock.calls.length, 0);

@@ -20,6 +20,9 @@ import {
 import {
   listAssistantInputEvents,
 } from "@murphai/assistant-engine";
+import {
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 
 import {
   createHostedConversationMailboxImportItem,
@@ -218,7 +221,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
   });
 
-  test("keeps email conversation metadata hashed without treating raw message keys as delivery targets", async () => {
+  test("keeps email conversation metadata hashed while replyTarget uses private thread authority", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-email-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -227,8 +230,16 @@ describe("hosted mailbox conversation import adapter", () => {
       message: {
         channel: "email",
         identityId: "agentmail_inbox_synthetic",
+        messageId: "email_message_synthetic_001",
         rawMessageKey: "raw_email_thread_authority",
         selfAddress: "assistant@example.test",
+        threadKey: "email_thread_root_synthetic",
+        threadTarget: serializeHostedEmailThreadTarget({
+          lastMessageId: "email_message_synthetic_001",
+          references: ["email_thread_root_synthetic"],
+          subject: "Synthetic email",
+          to: ["sender@example.test"],
+        }),
       },
     });
 
@@ -263,12 +274,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
     const replyTarget = event.replyTarget;
-    assert.deepEqual(replyTarget, {
-      channel: "email",
-      messageId: null,
-      threadId: null,
-    });
     assert.ok(replyTarget);
+    assert.equal(replyTarget.channel, "email");
+    assert.equal(replyTarget.messageId, "email_message_synthetic_001");
+    assert.ok(replyTarget.threadId?.startsWith("hostedmail:"));
     assert.equal(JSON.stringify(event).includes("raw_email_thread_authority"), false);
     assert.equal(JSON.stringify(event).includes("agentmail_inbox_synthetic"), false);
     assert.equal(JSON.stringify(event).includes("assistant@example.test"), false);
@@ -401,25 +410,39 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(stageCalls, 0);
   });
 
-  test("does not convert unknown local import failures into acknowledged projection failures", async () => {
+  test("treats local inbox import failures as projection failures after staging input", async () => {
     const projectionUpdates: unknown[] = [];
 
-    await expect(
-      importHostedConversationMailboxItem({
-        decodePayload: createDecodedPayloadDecoder(createConversationWake()),
-        async importConversationWake() {
-          throw new TypeError("unexpected projection adapter failure");
-        },
-        async prepareWakeContext() {},
-        item: createResolvedConversationMailboxItem(),
-        runtime: createRuntime(),
-        stageAssistantInputEvent: createAssistantInputEventStager({
-          projectionUpdates,
-        }),
-        vaultRoot: "synthetic-vault-root",
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake() {
+        throw new TypeError("unexpected projection adapter failure");
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager({
+        projectionUpdates,
       }),
-    ).rejects.toThrow("unexpected projection adapter failure");
-    assert.deepEqual(projectionUpdates, []);
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    assert.deepEqual(outcome, {
+      captureId: null,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
+      reasonCode: "conversation-import.projection-failed",
+      status: "imported",
+    });
+    assert.deepEqual(projectionUpdates, [
+      {
+        captureId: null,
+        reasonCode: "conversation-import.projection-failed",
+        status: "failed",
+      },
+    ]);
   });
 
   test("does not record Linq provider cleanup during mailbox import", async () => {
@@ -543,26 +566,17 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(serialized.includes("source_cursor"), false);
   });
 
-  test("keeps staged mailbox input imported when inbox projection only created transient runtime state", async () => {
+  test("keeps staged mailbox input imported when projection preparation fails", async () => {
     const item = createResolvedConversationMailboxItem();
-    const preparedWakeIds: string[] = [];
     const projectionUpdates: unknown[] = [];
 
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(createConversationWake()),
       async importConversationWake() {
-        return {
-          captureId: "cap_synthetic_runtime_only",
-          deduped: false,
-          durable: false,
-          metrics: {
-            nextWakeAt: null,
-            parserProcessed: 0,
-          },
-        };
+        throw new Error("import should not run after preparation failure");
       },
-      async prepareWakeContext(input) {
-        preparedWakeIds.push(input.wake.eventId);
+      async prepareWakeContext() {
+        throw new Error("inbox projection init unavailable");
       },
       item,
       runtime: createRuntime(),
@@ -572,20 +586,19 @@ describe("hosted mailbox conversation import adapter", () => {
       vaultRoot: "synthetic-vault-root",
     });
 
-    assert.deepEqual(preparedWakeIds, ["evt_synthetic_conversation_001"]);
     assert.deepEqual(outcome, {
-      captureId: "cap_synthetic_runtime_only",
+      captureId: null,
       metrics: {
         nextWakeAt: null,
         parserProcessed: 0,
       },
-      reasonCode: "conversation-import.capture-persist-failed",
+      reasonCode: "conversation-import.projection-failed",
       status: "imported",
     });
     assert.deepEqual(projectionUpdates, [
       {
         captureId: null,
-        reasonCode: "conversation-import.capture-persist-failed",
+        reasonCode: "conversation-import.projection-failed",
         status: "failed",
       },
     ]);
@@ -688,7 +701,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(importCalls, 0);
   });
 
-  test("blocks missing raw email bytes without advancing import when the mailbox event has no assistant-ready content", async () => {
+  test("stages missing raw email events as assistant input without waiting on inbox projection", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-raw-missing-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -717,14 +730,26 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.deepEqual(outcome, {
+      captureId: null,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
       reasonCode: "conversation-import.raw-email-missing",
-      retryable: true,
-      status: "blocked",
+      status: "imported",
     });
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
-    assert.equal(listed.events.length, 0);
+    assert.equal(listed.events.length, 1);
+    assert.equal(listed.events[0]?.content.text, "Received an email message.");
+    assert.equal(listed.events[0]?.projection.captureId, null);
+    assert.equal(
+      listed.events[0]?.projection.reasonCode,
+      "conversation-import.raw-email-missing",
+    );
+    assert.equal(listed.events[0]?.projection.status, "failed");
+    assert.ok(listed.events[0]?.projection.lastAttemptedAt);
   });
 
   test("makes five rapid staged mailbox conversation messages available without capture projection", async () => {

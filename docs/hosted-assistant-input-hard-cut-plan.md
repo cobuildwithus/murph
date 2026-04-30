@@ -31,11 +31,14 @@ existing path is deleted in the same batch.
   identity.
 - Projection retry state lives on the input event. Do not add a separate
   projection queue unless the input store proves insufficient.
-- Hosted input does not use runtime-only inbox rows. Delete that bridge after
-  the hard switch.
+- Hosted input does not use runtime-only inbox rows. In greenfield, that bridge
+  should be removed instead of quarantined behind another flag.
 - Hosted execution is only a thin runner over the local runtime. Once a hosted
   mailbox item is decoded and matched, it must enter the same
   `AssistantInputEvent` spine used by local runtime input.
+- Hosted workspace startup must not initialize inbox projection before mailbox
+  import or assistant automation. Inbox initialization belongs only inside the
+  best-effort projection path after `AssistantInputEvent` staging.
 - Greenfield means no permanent compatibility shims and no capture-first
   fallback path kept for comfort.
 
@@ -57,7 +60,7 @@ both paths
   -> accepted-input journal
   -> Codex
 
-  -> best-effort inbox projection
+  -> best-effort inbox projection after admission staging
   -> parser/search/attachment enrichment
 ```
 
@@ -205,6 +208,15 @@ The content section is stable prompt-ready input. Projection status can change.
 Raw email bodies, attachment text extraction, filenames, local paths, signed
 URLs, provider payloads, and attachment bytes are not part of this record.
 
+`replyTarget` is the one narrow exception to the no-provider-id rule. It may
+carry the private provider thread/message id needed to send a reply, but it is
+not a conversation identity, scanner key, prompt identity, search field, or
+projection cursor. If `replyTarget` is absent or minimized, Codex still admits
+the input; only delivery routing may be deferred.
+For hosted email, `replyTarget.threadId` is the serialized private
+`hostedmail:` thread authority. The hashed conversation thread remains the
+only grouping key.
+
 Attachment descriptors must be minimized. Store kind, MIME type, count, and
 size. Store a display name only after it is sanitized, bounded, and needed for
 the user-visible prompt.
@@ -309,7 +321,7 @@ payload needs enough safe minimized metadata to create an `AssistantInputEvent`
 before raw email fetch:
 
 - inbox identity
-- message id or opaque thread ref
+- message id or serialized private thread reply target
 - sender/recipient summary
 - subject when safe and bounded
 - bounded preview/body text if already available from ingress
@@ -470,28 +482,25 @@ Required tests:
 
 Purpose: remove the old abstractions rather than carrying both architectures.
 
-Delete or retire:
+Delete or verify absent:
 
 - capture-only `AssistantTurnInputPort`
 - `createInboxBackedAssistantTurnInputPort`
 - `listNewConversationCaptures`
 - direct scanner use of `inboxServices.list`
-- hosted `stageRuntimeOnlyCapture`
-- hosted `includeRuntimeOnly` wrappers
+- hosted transient capture staging
+- hosted hidden-row inbox wrappers
 - hosted `createHostedTurnInputInboxServices`
-- hosted `createHostedAutomationInboxServices` runtime-only behavior
-- accepted-journal `hosted-mailbox-import` cursor effect
-- tests whose only purpose is proving runtime-only hosted capture admission
-
-If no non-hosted caller remains, delete `stageRuntimeOnlyCapture` from
-`packages/inboxd` too.
+- hosted automation inbox identity wrappers
+- accepted-journal cursor effects for mailbox/import/capture cursors
+- tests whose only purpose is proving transient hosted capture admission
 
 Required residue scans:
 
 ```sh
 rg "listNewConversationCaptures|AssistantTurnInputPort" packages apps
-rg "stageRuntimeOnlyCapture|includeRuntimeOnly" packages apps
-rg "hosted-mailbox-import" packages apps
+rg "stageRuntimeOnlyCapture|includeRuntimeOnly|capture_persistence|runtime_only" packages apps
+rg "cursorEffects|auto-reply-channel|inbox-scan" packages apps
 rg "inboxServices\\.list" packages/assistant-engine/src/assistant/automation
 ```
 
@@ -521,7 +530,7 @@ Suggested worker split after Batch 1:
   input events.
 - Do not add a hosted-runtime-input journal beside `AssistantInputEvent`.
 - Do not add a projection queue beside the input store.
-- Do not advance assistant state because a runtime-only inbox row exists.
+- Do not reintroduce runtime-only inbox rows as assistant state.
 - Do not keep parallel capture-first and input-first architectures long term.
 
 ## Privacy And Data Minimization Rules
@@ -586,9 +595,9 @@ This hard cut is complete when:
 - active-turn hosted input steers Codex without a runtime-only inbox row
 - accepted-input journal records assistant input ids directly
 - terminal evidence dedupes by assistant input id or input group id
-- hosted code has no dependency on `stageRuntimeOnlyCapture`
+- hosted code has no transient inbox staging dependency
 - production code has no dependency on `listNewConversationCaptures`
-- no mailbox staged watermark advances because of runtime-only projection
+- no mailbox or assistant cursor advances because of runtime-only projection
 - inbox capture remains usable as enrichment when projection succeeds
 
 ## Final Stress Checklist
@@ -605,6 +614,6 @@ Use this checklist before landing implementation:
 - Are attachment descriptors minimized and filename-safe?
 - Can one permanent malformed mailbox item avoid blocking the lane forever
   without becoming assistant input?
-- Are runtime-only inbox rows gone from hosted Codex admission?
+- Are runtime-only inbox rows gone from assistant admission code?
 - Did the implementation delete the old capture-first path instead of keeping
   it as a fallback?

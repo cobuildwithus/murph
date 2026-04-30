@@ -207,7 +207,6 @@ export function assistantInputCandidateFromStoredEvent(
         refId: event.inputId,
         version: event.schema,
       },
-      cursorEffects: [],
     },
     event: {
       attachmentCount: event.content.attachmentDescriptors.length,

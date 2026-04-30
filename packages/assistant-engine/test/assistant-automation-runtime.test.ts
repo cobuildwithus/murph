@@ -2,7 +2,7 @@ import { rm } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
-  AssistantAutomationCursor,
+  AssistantInputCursor,
   AssistantAutomationState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -13,6 +13,9 @@ import {
 } from '@murphai/operator-config/inbox-cli-contracts'
 import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
+import {
+  serializeHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
 import {
   AssistantActiveTurnInputBudgetExceededError,
   AssistantActiveTurnInputCheckpointRejectedError,
@@ -27,6 +30,7 @@ import {
 } from '../src/assistant/input-source.ts'
 import {
   createAssistantInputEventId,
+  compareAssistantInputCursors,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -437,10 +441,8 @@ function createTerminalEvidence(input: {
 }
 
 type LegacyAutomationStateOverrides = Partial<AssistantAutomationState> & {
-  autoReplyBacklogChannels?: readonly string[]
   autoReplyChannels?: readonly string[]
-  autoReplyPrimed?: boolean
-  autoReplyScanCursor?: AssistantAutomationCursor | null
+  autoReplyEligibleAfter?: AssistantInputCursor | null
 }
 
 function createAutomationState(
@@ -448,22 +450,19 @@ function createAutomationState(
 ): AssistantAutomationState {
   const {
     autoReply: explicitAutoReply,
-    autoReplyBacklogChannels: _legacyBacklogChannels,
     autoReplyChannels: legacyAutoReplyChannels,
-    autoReplyPrimed: _legacyAutoReplyPrimed,
-    autoReplyScanCursor: legacyAutoReplyScanCursor,
+    autoReplyEligibleAfter,
     ...stateOverrides
   } = overrides
   const autoReply =
     explicitAutoReply ??
     [...new Set(legacyAutoReplyChannels ?? [])].map((channel) => ({
       channel,
-      eligibleAfter: legacyAutoReplyScanCursor ?? null,
+      eligibleAfter: autoReplyEligibleAfter ?? null,
       enabledAt: '2026-04-08T00:00:00.000Z',
     }))
   return {
     version: 1,
-    inboxScanCursor: null,
     autoReply,
     updatedAt: '2026-04-08T00:00:00.000Z',
     ...stateOverrides,
@@ -472,7 +471,7 @@ function createAutomationState(
 
 function createAutoReplyEntries(
   channels: readonly string[],
-  cursor: AssistantAutomationCursor | null = null,
+  cursor: AssistantInputCursor | null = null,
 ): AssistantAutomationState['autoReply'] {
   return [...new Set(channels)].map((channel) => ({
     channel,
@@ -481,10 +480,28 @@ function createAutoReplyEntries(
   }))
 }
 
+function createAssistantInputCursor(input: {
+  createdAt?: string | null
+  inputId: string
+  occurredAt: string
+  sourceKind?: 'inbox-capture' | 'hosted-mailbox'
+  sourcePosition?: string | null
+}): AssistantInputCursor {
+  return {
+    createdAt: input.createdAt ?? null,
+    inputId: input.inputId,
+    occurredAt: input.occurredAt,
+    sourceKind: input.sourceKind ?? 'inbox-capture',
+    ...(input.sourcePosition !== undefined
+      ? { sourcePosition: input.sourcePosition }
+      : {}),
+  }
+}
+
 function readAutoReplyCursor(
   state: Pick<AssistantAutomationState, 'autoReply'>,
   channel: string,
-): AssistantAutomationCursor | null {
+): AssistantInputCursor | null {
   return state.autoReply.find((entry) => entry.channel === channel)?.eligibleAfter ?? null
 }
 
@@ -543,11 +560,7 @@ function createAssistantInputSourceForCaptures(
         )
         .filter((candidate) =>
           input.afterCursor
-            ? candidate.event.cursor.occurredAt > input.afterCursor.occurredAt ||
-              (
-                candidate.event.cursor.occurredAt === input.afterCursor.occurredAt &&
-                candidate.event.inputId > input.afterCursor.inputId
-              )
+            ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
             : true,
         )
         .slice(0, input.limit ?? captures.length),
@@ -583,7 +596,6 @@ function assistantInputCandidateFromInboxCapture(
         refId: inputId,
         version: 'murph.assistant-input-event.v1',
       },
-      cursorEffects: [],
       id: inputId,
       source: 'assistant-input',
     },
@@ -602,6 +614,7 @@ function assistantInputCandidateFromInboxCapture(
         inputId,
         occurredAt: capture.occurredAt,
         sourceKind: 'inbox-capture',
+        sourcePosition: `inbox-capture:${capture.source}:${capture.captureId}`,
       },
       inputId,
       occurredAt: capture.occurredAt,
@@ -639,7 +652,6 @@ function createCapturelessAssistantInputCandidate(input: {
         refId: input.inputId,
         version: 'murph.assistant-input-event.v1',
       },
-      cursorEffects: [],
       id: input.inputId,
       promptFallbackReason: 'system-input',
       promptFallbackText: input.text,
@@ -758,18 +770,12 @@ function createAutoReplyContextForTest(
     firstItem,
     inputIds: items.map((item) => item.inputCandidate!.event.inputId),
     items,
-    lastCursor: {
-      captureId: lastItem.summary.captureId,
-      occurredAt: lastItem.summary.occurredAt,
-    },
     lastInputCursor: lastItem.inputCandidate!.event.cursor,
   }
 }
 
 function applyAutoReplyProcessResultForTest(input: {
-  context: { lastCursor: AssistantAutomationCursor }
   result: {
-    advanceCursor: boolean
     checkpointRequired?: true
     failed: number
     replied: number
@@ -777,7 +783,6 @@ function applyAutoReplyProcessResultForTest(input: {
     stopScanning: boolean
   }
   summary: { checkpointRequired?: true; failed: number; replied: number; skipped: number }
-  updateCursor: (cursor: AssistantAutomationCursor) => void
 }) {
   if (input.result.checkpointRequired) {
     input.summary.checkpointRequired = true
@@ -785,9 +790,6 @@ function applyAutoReplyProcessResultForTest(input: {
   input.summary.failed += input.result.failed
   input.summary.replied += input.result.replied
   input.summary.skipped += input.result.skipped
-  if (input.result.advanceCursor) {
-    input.updateCursor(input.context.lastCursor)
-  }
 
   return input.result.stopScanning
 }
@@ -1054,13 +1056,7 @@ describe('assistant automation shared helpers', () => {
       occurredAt: '2026-04-08T00:00:00.000Z',
     }
 
-    expect(shared.cursorFromCapture(later)).toEqual(later)
-    expect(shared.compareAssistantAutomationCursor(earlier, later)).toBeLessThan(0)
-    expect(shared.compareAssistantAutomationCursor(later, later)).toBe(0)
     expect(shared.compareAssistantCaptureOrder(later, earlier)).toBeGreaterThan(0)
-    expect(shared.isAssistantCaptureAfterCursor(later, earlier)).toBe(true)
-    expect(shared.isAssistantCaptureAfterCursor(earlier, later)).toBe(false)
-    expect(shared.isAssistantCaptureAfterCursor(earlier, null)).toBe(true)
     expect(
       shared.compareAssistantCaptureOrder(
         {
@@ -1218,7 +1214,6 @@ describe('assistant automation scanner', () => {
         stateUpdates.push({
           ...createAutomationState(),
           autoReply: [...next.autoReply],
-          inboxScanCursor: next.inboxScanCursor,
         })
       },
       state: createAutomationState({
@@ -1234,12 +1229,67 @@ describe('assistant automation scanner', () => {
       replied: 0,
       skipped: 1,
     })
-    expect(readAutoReplyCursor(stateUpdates[0] ?? createAutomationState(), 'telegram')).toBeNull()
+    expect(readAutoReplyCursor(
+      stateUpdates[0] ?? createAutomationState(),
+      'telegram',
+    )).toEqual(assistantInputCandidateFromInboxCapture(latest).event.cursor)
     expect(events).not.toContainEqual(
       expect.objectContaining({
         type: 'reply.scan.primed',
       }),
     )
+  })
+
+  it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
+    const first = createCaptureSummary({
+      captureId: 'capture-1',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    })
+    const second = createCaptureSummary({
+      captureId: 'capture-2',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+    })
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementationOnce(
+      async () => ({
+        endIndex: 1,
+        items: [
+          createReplyGroupItem(first),
+          createReplyGroupItem(second),
+        ],
+      }),
+    )
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValueOnce({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    const stateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([first, second]),
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    const cursor = readAutoReplyCursor(
+      stateUpdates[stateUpdates.length - 1] ?? createAutomationState(),
+      'telegram',
+    )
+    expect(cursor).toEqual(createReplyGroupItem(second).inputCandidate.event.cursor)
   })
 
   it('clears reply backlog state once the backlog is drained', async () => {
@@ -1256,7 +1306,6 @@ describe('assistant automation scanner', () => {
         stateUpdates.push({
           ...createAutomationState(),
           autoReply: [...next.autoReply],
-          inboxScanCursor: next.inboxScanCursor,
         })
       },
       state: createAutomationState({
@@ -1381,7 +1430,6 @@ describe('assistant automation scanner', () => {
           refId: 'ain_raw_initial',
           version: 'murph.assistant-input-event.v1',
         },
-        cursorEffects: [],
         id: 'ain_raw_initial',
         source: 'assistant-input',
       },
@@ -1608,7 +1656,6 @@ describe('assistant automation scanner', () => {
       },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
-        autoReplyPrimed: true,
       }),
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1662,13 +1709,11 @@ describe('assistant automation scanner', () => {
       inputSource: createAssistantInputSourceForCaptures([capture]),
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
-        autoReplyPrimed: true,
       }),
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
           autoReply: [...next.autoReply],
-          inboxScanCursor: next.inboxScanCursor,
         })
       },
       vault: '/tmp/assistant-automation-vault',
@@ -1707,7 +1752,6 @@ describe('assistant automation scanner', () => {
         stateUpdates.push({
           ...createAutomationState(),
           autoReply: [...next.autoReply],
-          inboxScanCursor: next.inboxScanCursor,
         })
       },
       state: createAutomationState(),
@@ -1754,7 +1798,6 @@ describe('assistant automation scanner', () => {
       maxPerScan: 1,
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
-        autoReplyPrimed: true,
       }),
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1799,21 +1842,17 @@ describe('assistant auto-reply runtime', () => {
         second.inputCandidate.event.inputId,
       ],
       items: [first, second],
-      lastCursor: {
-        captureId: 'capture-2',
-        createdAt: '2026-04-08T00:00:01.000Z',
-        occurredAt: '2026-04-08T00:02:00.000Z',
-      },
       lastInputCursor: {
         createdAt: '2026-04-08T00:00:01.000Z',
         inputId: second.inputCandidate.event.inputId,
         occurredAt: '2026-04-08T00:02:00.000Z',
         sourceKind: 'inbox-capture',
+        sourcePosition: 'inbox-capture:telegram:capture-2',
       },
     })
   })
 
-  it('applies reply processing results to the scan summary and cursor', async () => {
+  it('applies reply processing results to the scan summary', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
@@ -1837,26 +1876,18 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 0,
     }
-    let nextCursor: AssistantAutomationCursor | null = null
     const stopScanning = reply.applyAssistantAutoReplyProcessResult({
       context,
       result: {
         advanceCursor: true,
-        cursor: {
-          captureId: 'capture-1',
-          createdAt: '2026-04-08T00:00:01.000Z',
-          occurredAt: '2026-04-08T00:01:00.000Z',
-        },
         failed: 1,
+        lastInputCursor: context.lastInputCursor,
         nextWakeAt: null,
         replied: 2,
         skipped: 3,
         stopScanning: true,
       },
       summary,
-      updateCursor: (cursor) => {
-        nextCursor = cursor
-      },
     })
 
     expect(summary).toEqual({
@@ -1866,15 +1897,10 @@ describe('assistant auto-reply runtime', () => {
       replied: 2,
       skipped: 3,
     })
-    expect(nextCursor).toEqual({
-      captureId: 'capture-1',
-      createdAt: '2026-04-08T00:00:01.000Z',
-      occurredAt: '2026-04-08T00:01:00.000Z',
-    })
     expect(stopScanning).toBe(true)
   })
 
-  it('does not move the reply cursor when process results stay on the current group', async () => {
+  it('leaves reply scan running when process results stay on the current group', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
@@ -1893,24 +1919,18 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 0,
     }
-    const updateCursor = vi.fn()
     const stopScanning = reply.applyAssistantAutoReplyProcessResult({
       context,
       result: {
         advanceCursor: false,
-        cursor: {
-          captureId: 'capture-1',
-          createdAt: '2026-04-08T00:00:01.000Z',
-          occurredAt: '2026-04-08T00:01:00.000Z',
-        },
         failed: 1,
+        lastInputCursor: context.lastInputCursor,
         nextWakeAt: null,
         replied: 0,
         skipped: 0,
         stopScanning: false,
       },
       summary,
-      updateCursor,
     })
 
     expect(summary).toEqual({
@@ -1920,7 +1940,6 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 0,
     })
-    expect(updateCursor).not.toHaveBeenCalled()
     expect(stopScanning).toBe(false)
   })
 
@@ -2858,21 +2877,6 @@ describe('assistant auto-reply runtime', () => {
         expect(admitted.acceptedInputs).toEqual([
           expect.objectContaining({
             captureIds: ['capture-late'],
-            cursorEffects: [
-              expect.objectContaining({
-                captureIds: ['capture-late'],
-                from: {
-                  captureId: 'capture-1',
-                  createdAt: '2026-04-08T00:00:01.000Z',
-                  occurredAt: '2026-04-08T00:02:00.000Z',
-                },
-                to: {
-                  captureId: 'capture-late',
-                  createdAt: '2026-04-08T00:00:01.000Z',
-                  occurredAt: '2026-04-08T00:03:00.000Z',
-                },
-              }),
-            ],
             id: lateInput.event.inputId,
           }),
         ])
@@ -2960,13 +2964,14 @@ describe('assistant auto-reply runtime', () => {
       providerKind: 'status',
       providerState: 'running',
     })
-    expect(events).toContainEqual({
-      type: 'capture.reply-progress',
-      captureId: 'capture-1',
-      details: 'new input committed to active turn with 1 additional input(s)',
-      providerKind: 'status',
-      providerState: 'running',
-    })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capture.reply-progress',
+        details: 'new input committed to active turn with 1 additional input(s)',
+        providerKind: 'status',
+        providerState: 'running',
+      }),
+    )
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
       1,
       [expect.objectContaining({
@@ -3025,7 +3030,6 @@ describe('assistant auto-reply runtime', () => {
           refId: 'ain_0123456789abcdef0123456789abcdef',
           version: 'murph.assistant-input-event.v1',
         },
-        cursorEffects: [],
         id: 'ain_0123456789abcdef0123456789abcdef',
         promptFallbackReason: 'system-input',
         promptFallbackText: 'late hosted text',
@@ -3172,7 +3176,10 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
-        inputIds: [context.inputIds[0], hostedInput.event.inputId],
+        inputIds: expect.arrayContaining([
+          context.inputIds[0],
+          hostedInput.event.inputId,
+        ]),
       }),
     )
   })
@@ -3465,6 +3472,235 @@ describe('assistant auto-reply runtime', () => {
       replied: 1,
       skipped: 0,
     })
+  })
+
+  it('merges multiple pending captureless active-turn admissions before one checkpoint', async () => {
+    const initialInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_rapid',
+      inputId: 'ain_cccccccccccccccccccccccccccccccc',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_initial',
+        threadId: 'real_thread_initial',
+      },
+      source: 'linq',
+      text: 'initial captureless text',
+    })
+    const firstLateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_rapid',
+      inputId: 'ain_dddddddddddddddddddddddddddddddd',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_first',
+        threadId: 'real_thread_first',
+      },
+      source: 'linq',
+      text: 'first rapid text',
+    })
+    const secondLateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_rapid',
+      inputId: 'ain_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_second',
+        threadId: 'real_thread_second',
+      },
+      source: 'linq',
+      text: 'second rapid text',
+    })
+    const thirdLateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_rapid',
+      inputId: 'ain_ffffffffffffffffffffffffffffffff',
+      occurredAt: '2026-04-08T00:06:00.000Z',
+      receivedAt: '2026-04-08T00:06:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_third',
+        threadId: 'real_thread_third',
+      },
+      source: 'linq',
+      text: 'third rapid text',
+    })
+    const fourthLateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_rapid',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      occurredAt: '2026-04-08T00:07:00.000Z',
+      receivedAt: '2026-04-08T00:07:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_fourth',
+        threadId: 'real_thread_fourth',
+      },
+      source: 'linq',
+      text: 'fourth rapid text',
+    })
+    const fifthLateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_rapid',
+      inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      occurredAt: '2026-04-08T00:08:00.000Z',
+      receivedAt: '2026-04-08T00:08:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_fifth',
+        threadId: 'real_thread_fifth',
+      },
+      source: 'linq',
+      text: 'fifth rapid text',
+    })
+    const lateInputs = [
+      firstLateInput,
+      secondLateInput,
+      thirdLateInput,
+      fourthLateInput,
+      fifthLateInput,
+    ]
+    const listNewConversationInputs = vi.fn(
+      async (input: AssistantTurnConversationInputQuery) => {
+        expect(input.conversation).toMatchObject({
+          source: 'linq',
+          threadId: 'hid_thread_rapid',
+        })
+        expect(input.knownInputIds).toContain(initialInput.event.inputId)
+        const nextInput = lateInputs.find(
+          (candidate) => !input.knownInputIds?.includes(candidate.event.inputId),
+        )
+        if (nextInput) {
+          return {
+            inputs: [nextInput],
+            nextCursor: nextInput.event.cursor,
+          }
+        }
+
+        return {
+          inputs: [],
+          nextCursor: input.afterCursor ?? null,
+        }
+      },
+    )
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      listNewConversationInputs,
+    }
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      const phases = [
+        'input_available',
+        'request_boundary',
+        'request_boundary',
+        'request_boundary',
+        'commit_barrier',
+      ] as const
+      for (const [index, lateInput] of lateInputs.entries()) {
+        const admission = await input.activeTurnInput?.({
+          phase: phases[index] ?? 'request_boundary',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          vault: '/tmp/assistant-automation-vault',
+        })
+        expect(admission).toMatchObject({
+          acceptedInputs: [
+            expect.objectContaining({
+              captureIds: [],
+              id: lateInput.event.inputId,
+            }),
+          ],
+          deliveryReplyToMessageId: lateInput.event.replyTarget?.messageId,
+          kind: 'accepted',
+          prompt: expect.stringContaining(lateInput.event.text ?? ''),
+        })
+      }
+
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: lateInputs.map((candidate) => candidate.event.inputId),
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_thread_initial',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'revised response',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(5)
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: lateInputs.map((candidate) => candidate.event.inputId),
+      }),
+    )
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputIds: [
+          initialInput.event.inputId,
+          ...lateInputs.map((candidate) => candidate.event.inputId),
+        ],
+        outcome: 'result',
+      }),
+    )
   })
 
   it('defers delivery when the active-turn input budget is exhausted', async () => {
@@ -4145,7 +4381,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('ignores groups whose captures can no longer be loaded', async () => {
+  it('uses the staged assistant input when projected captures can no longer be loaded', async () => {
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue({
         capture: undefined,
@@ -4173,13 +4409,14 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toMatchObject({
-      advanceCursor: false,
+      advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
-      replied: 0,
+      replied: 1,
       skipped: 0,
       stopScanning: false,
     })
+    expect(inboxServices.show).not.toHaveBeenCalled()
   })
 
   it('sends rich content when any configured route supports multimodal input', async () => {
@@ -4267,7 +4504,7 @@ describe('assistant auto-reply runtime', () => {
 
   it('uses the captureless assistant input reply target for the initial auto-reply route', async () => {
     const hostedInput = createCapturelessAssistantInputCandidate({
-      conversationThreadId: 'safe_thread_initial',
+      conversationThreadId: 'hid_thread_initial',
       inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       occurredAt: '2026-04-08T00:04:00.000Z',
       receivedAt: '2026-04-08T00:04:01.000Z',
@@ -4283,7 +4520,7 @@ describe('assistant auto-reply runtime', () => {
       async (input: AssistantTurnConversationInputQuery) => {
         expect(input.conversation).toMatchObject({
           source: 'linq',
-          threadId: 'real_thread_initial',
+          threadId: 'hid_thread_initial',
         })
         return {
           inputs: [],
@@ -4363,17 +4600,188 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         conversation: expect.objectContaining({
-          threadId: 'real_thread_initial',
+          threadId: 'hid_thread_initial',
         }),
         deliveryTarget: 'real_thread_initial',
         deliveryReplyToMessageId: 'real_msg_initial',
-        threadId: 'real_thread_initial',
       }),
     )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]).not.toHaveProperty('threadId')
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(
         expect.objectContaining({
           linqMessageIds: ['real_msg_initial'],
+          outcome: 'result',
+        }),
+      )
+  })
+
+  it('admits captureless active-turn input by delivery route when projection uses a different conversation id', async () => {
+    const initialCapture = createCaptureSummary({
+      captureId: 'capture-projected-initial',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      source: 'linq',
+      text: 'projected initial text',
+      threadId: 'real_thread_initial',
+    })
+    const projectedInitialCandidate = assistantInputCandidateFromInboxCapture(
+      initialCapture,
+    )
+    const initialInput: AssistantInputCandidate = {
+      ...projectedInitialCandidate,
+      event: {
+        ...projectedInitialCandidate.event,
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_initial',
+          threadId: 'real_thread_initial',
+        },
+      },
+    }
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_late',
+      inputId: 'ain_abababababababababababababababab',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_late',
+        threadId: 'real_thread_initial',
+      },
+      source: 'linq',
+      text: 'late captureless route text',
+    })
+    const listNewConversationInputs = vi.fn(
+      async (input: AssistantTurnConversationInputQuery) => {
+        expect(input.conversation).toMatchObject({
+          source: 'linq',
+          threadId: 'real_thread_initial',
+        })
+        return {
+          inputs: [],
+          nextCursor: input.afterCursor ?? null,
+        }
+      },
+    )
+    const listInputCandidates = vi.fn(async (input: {
+      sourceId?: string | null
+    }) => {
+      expect(input.sourceId).toBe('linq')
+      return {
+        inputs: [hostedInput],
+        nextCursor: hostedInput.event.cursor,
+      }
+    })
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidates,
+      listNewConversationInputs,
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      const admitted = await input.activeTurnInput?.({
+        phase: 'request_boundary',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            captureIds: [],
+            id: hostedInput.event.inputId,
+          }),
+        ],
+        deliveryReplyToMessageId: 'real_msg_late',
+        kind: 'accepted',
+        prompt: expect.stringContaining('late captureless route text'),
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [hostedInput.event.inputId],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_thread_initial',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'response text',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      {
+        inputCandidate: initialInput,
+        summary: initialCapture,
+        telegramMetadata: null,
+      },
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
+    expect(listInputCandidates).toHaveBeenCalledTimes(1)
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: [hostedInput.event.inputId],
+      }),
+    )
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputIds: [initialInput.event.inputId, hostedInput.event.inputId],
+          linqMessageIds: ['real_msg_initial', 'real_msg_late'],
           outcome: 'result',
         }),
       )
@@ -4427,7 +4835,115 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('defers captureless email until inbox projection supplies delivery authority', async () => {
+  it.each([
+    [
+      'assistant input id',
+      'ain_0123456789abcdef0123456789abcdef',
+      'ain_11111111111111111111111111111111',
+    ],
+    [
+      'hashed identity id',
+      'hid_0123456789abcdef',
+      'ain_22222222222222222222222222222222',
+    ],
+    [
+      'hashed blind id',
+      'hbid:linq.message:v1:opaque',
+      'ain_33333333333333333333333333333333',
+    ],
+    [
+      'hashed blind index id',
+      'hbidx:linq.message:v1:opaque',
+      'ain_44444444444444444444444444444444',
+    ],
+    [
+      'provider-prefixed assistant input id',
+      'linq:ain_0123456789abcdef0123456789abcdef',
+      'ain_55555555555555555555555555555555',
+    ],
+    [
+      'provider-prefixed hashed identity id',
+      'linq:hid_0123456789abcdef',
+      'ain_66666666666666666666666666666666',
+    ],
+    [
+      'provider-prefixed hashed blind id',
+      'linq:hbid:linq.message:v1:opaque',
+      'ain_77777777777777777777777777777777',
+    ],
+    [
+      'provider-prefixed hashed blind index id',
+      'linq:hbidx:linq.message:v1:opaque',
+      'ain_78787878787878787878787878787878',
+    ],
+  ])('ignores %s captureless replyTarget values for delivery', async (
+    _label,
+    routeValue,
+    inputId,
+  ) => {
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_minimized',
+      inputId,
+      occurredAt: '2026-04-08T00:06:00.000Z',
+      receivedAt: '2026-04-08T00:06:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: routeValue,
+        threadId: routeValue,
+      },
+      source: 'linq',
+      text: 'captureless minimized target text',
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    const messageInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(result.replied).toBe(1)
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(messageInput).toEqual(
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          threadId: 'safe_thread_minimized',
+        }),
+        deliveryReplyToMessageId: null,
+        deliveryTarget: null,
+      }),
+    )
+    expect(messageInput).not.toEqual(
+      expect.objectContaining({
+        threadId: routeValue,
+      }),
+    )
+  })
+
+  it('uses captureless email replyTarget thread authority without inbox projection', async () => {
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: '<real-email-msg-initial@example.test>',
+      references: ['<real-email-msg-root@example.test>'],
+      subject: 'Captureless email',
+      to: ['sender@example.test'],
+    })
     const hostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_email_thread_initial',
       inputId: 'ain_88888888888888888888888888888888',
@@ -4435,8 +4951,8 @@ describe('assistant auto-reply runtime', () => {
       receivedAt: '2026-04-08T00:06:01.000Z',
       replyTarget: {
         channel: 'email',
-        messageId: 'real_email_msg_initial',
-        threadId: 'real_email_thread_initial',
+        messageId: '<real-email-msg-initial@example.test>',
+        threadId: hostedEmailThreadTarget,
       },
       source: 'email',
       text: 'captureless email initial text',
@@ -4466,17 +4982,26 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toMatchObject({
-      advanceCursor: false,
+      advanceCursor: true,
       failed: 0,
-      replied: 0,
-      skipped: 1,
-      stopScanning: true,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
     })
-    expect(result.nextWakeAt).toEqual(expect.any(String))
     expect(inboxServices.show).not.toHaveBeenCalled()
-    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryReplyToMessageId: '<real-email-msg-initial@example.test>',
+        deliveryTarget: hostedEmailThreadTarget,
+      }),
+    )
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
-      .not.toHaveBeenCalled()
+      .toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputIds: [hostedInput.event.inputId],
+          outcome: 'result',
+        }),
+      )
   })
 
   it('uses Linq external ids as the outbound reply target when replying in-thread', async () => {
@@ -4747,10 +5272,10 @@ describe('assistant auto-reply receipt recovery', () => {
     const events: Array<Record<string, unknown>> = []
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], {
-        captureId: 'capture-1',
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: 'capture-1',
         occurredAt: '2026-04-08T00:00:00.000Z',
-      }),
+      })),
       inboxServices,
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
@@ -4842,10 +5367,12 @@ describe('assistant auto-reply receipt recovery', () => {
 
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['linq'], {
-        captureId: stored.inputId,
+      autoReply: createAutoReplyEntries(['linq'], createAssistantInputCursor({
+        inputId: stored.inputId,
         occurredAt: '2026-04-08T00:00:00.000Z',
-      }),
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: stored.cursor.sourcePosition ?? null,
+      })),
       inboxServices,
       vault,
     })
@@ -4910,10 +5437,10 @@ describe('assistant auto-reply receipt recovery', () => {
 
       const result = await recovery.recoverAssistantAutoReplies({
         allowSelfAuthored: false,
-        autoReply: createAutoReplyEntries(['telegram'], {
-          captureId: 'capture-1',
+        autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+          inputId: 'capture-1',
           occurredAt: '2026-04-08T00:00:00.000Z',
-        }),
+        })),
         inboxServices: createInboxServices(),
         vault: '/tmp/assistant-automation-vault',
       })
@@ -4976,10 +5503,10 @@ describe('assistant auto-reply receipt recovery', () => {
 
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], {
-        captureId: 'capture-invalid-previous-response',
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: 'capture-invalid-previous-response',
         occurredAt: '2026-04-08T00:00:00.000Z',
-      }),
+      })),
       inboxServices: createInboxServices(),
       vault: '/tmp/assistant-automation-vault',
     })
@@ -5070,10 +5597,10 @@ describe('assistant auto-reply receipt recovery', () => {
 
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], {
-        captureId: 'capture-5',
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: 'capture-5',
         occurredAt: '2026-04-08T00:00:02.000Z',
-      }),
+      })),
       inboxServices,
       vault: context.vaultRoot,
     })
@@ -5117,10 +5644,10 @@ describe('assistant auto-reply receipt recovery', () => {
 
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], {
-        captureId: 'capture-1',
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: 'capture-1',
         occurredAt: '2026-04-08T00:00:00.000Z',
-      }),
+      })),
       inboxServices,
       vault: context.vaultRoot,
     })
@@ -5164,10 +5691,10 @@ describe('assistant auto-reply receipt recovery', () => {
 
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], {
-        captureId: 'capture-later',
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: 'capture-later',
         occurredAt: '2026-04-08T00:00:01.000Z',
-      }),
+      })),
       inboxServices,
       vault: '/tmp/assistant-automation-vault',
     })
@@ -5273,10 +5800,10 @@ describe('assistant auto-reply receipt recovery', () => {
 
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], {
-        captureId: 'capture-later',
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: 'capture-later',
         occurredAt: '2026-04-08T00:00:01.000Z',
-      }),
+      })),
       inboxServices,
       maxPerScan: 1,
       vault: context.vaultRoot,
@@ -5934,10 +6461,10 @@ describe('assistant automation run loop', () => {
     runLoopMocks.readAssistantAutomationState.mockResolvedValue(
       createAutomationState({
         autoReplyChannels: ['telegram'],
-        autoReplyScanCursor: {
-          captureId: 'capture-1',
+        autoReplyEligibleAfter: createAssistantInputCursor({
+          inputId: 'capture-1',
           occurredAt: '2026-04-08T00:00:00.000Z',
-        },
+        }),
       }),
     )
     runLoopMocks.recoverAssistantAutoReplies.mockResolvedValue({
@@ -6020,17 +6547,15 @@ describe('assistant automation run loop', () => {
       async (input: {
         onStateProgress: (next: {
           autoReply: AssistantAutomationState['autoReply']
-          inboxScanCursor: AssistantAutomationCursor | null
         }) => Promise<void>
       }) => {
         scanStartedAt.push(Date.now())
         if (scanStartedAt.length === 1) {
           await input.onStateProgress({
-            autoReply: createAutoReplyEntries(['telegram'], {
-              captureId: 'capture-auto-reply',
+            autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+              inputId: 'capture-auto-reply',
               occurredAt: '2026-04-09T00:00:00.000Z',
-            }),
-            inboxScanCursor: null,
+            })),
           })
         } else {
           externalAbort.abort()
@@ -6091,10 +6616,10 @@ describe('assistant automation run loop', () => {
     runLoopMocks.readAssistantAutomationState.mockResolvedValue(
       createAutomationState({
         autoReplyChannels: ['telegram'],
-        autoReplyScanCursor: {
-          captureId: 'capture-1',
+        autoReplyEligibleAfter: createAssistantInputCursor({
+          inputId: 'capture-1',
           occurredAt: '2026-04-08T00:00:00.000Z',
-        },
+        }),
       }),
     )
     runLoopMocks.recoverAssistantAutoReplies
@@ -6158,10 +6683,10 @@ describe('assistant automation run loop', () => {
     runLoopMocks.readAssistantAutomationState.mockResolvedValue(
       createAutomationState({
         autoReplyChannels: ['telegram'],
-        autoReplyScanCursor: {
-          captureId: 'capture-1',
+        autoReplyEligibleAfter: createAssistantInputCursor({
+          inputId: 'capture-1',
           occurredAt: '2026-04-08T00:00:00.000Z',
-        },
+        }),
       }),
     )
     runLoopMocks.recoverAssistantAutoReplies.mockResolvedValue({
@@ -6288,18 +6813,13 @@ describe('assistant automation run loop', () => {
       async (input: {
         onStateProgress: (next: {
           autoReply: AssistantAutomationState['autoReply']
-          inboxScanCursor: AssistantAutomationCursor | null
         }) => Promise<void>
       }) => {
         await input.onStateProgress({
-          autoReply: createAutoReplyEntries(['telegram'], {
-            captureId: 'capture-auto-reply',
+          autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+            inputId: 'capture-auto-reply',
             occurredAt: '2026-04-08T00:01:00.000Z',
-          }),
-          inboxScanCursor: {
-            captureId: 'capture-routing',
-            occurredAt: '2026-04-08T00:02:00.000Z',
-          },
+          })),
         })
         queueMicrotask(() => {
           externalAbort.abort()
@@ -6340,14 +6860,10 @@ describe('assistant automation run loop', () => {
     expect(runLoopMocks.saveAssistantAutomationState).toHaveBeenCalledWith(
       '/tmp/assistant-automation-vault',
       expect.objectContaining({
-        autoReply: createAutoReplyEntries(['telegram'], {
-          captureId: 'capture-auto-reply',
+        autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+          inputId: 'capture-auto-reply',
           occurredAt: '2026-04-08T00:01:00.000Z',
-        }),
-        inboxScanCursor: {
-          captureId: 'capture-routing',
-          occurredAt: '2026-04-08T00:02:00.000Z',
-        },
+        })),
       }),
     )
     expect(runLoopMocks.warnAssistantBestEffortFailure).toHaveBeenCalledWith({

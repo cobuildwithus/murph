@@ -7,9 +7,10 @@ import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import {
   assistantInputIdFromInboxCaptureId,
   type AssistantInputCandidate,
-  type AssistantInputCursor,
   type AssistantInputSource,
 } from '../input-source.js'
+import { compareAssistantInputCursors } from '../input-store.js'
+import { sameAssistantAutoReplyState } from '../automation-state.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
   readAssistantAutoReplyTerminalEvidence,
@@ -21,10 +22,8 @@ import {
   processAssistantAutoReplyGroup,
 } from './reply.js'
 import {
-  compareAssistantCaptureOrder,
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
-  cursorFromCapture,
   normalizeScanLimit,
   type AssistantAutomationScanResult,
   type AssistantAutomationScanStateProgress,
@@ -61,7 +60,7 @@ export async function scanAssistantAutomationOnce(input: {
   requestId?: string | null
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
-  state: Pick<AssistantAutomationState, 'autoReply' | 'inboxScanCursor'>
+  state: Pick<AssistantAutomationState, 'autoReply'>
   inputSource: AssistantInputSource
   vault: string
   vaultServices?: VaultServices
@@ -217,8 +216,14 @@ export async function scanAssistantAutomationOnce(input: {
       context,
       result: replyResult,
       summary: replies,
-      updateCursor: () => undefined,
     })
+    if (replyResult.advanceCursor) {
+      advanceAssistantAutoReplyChannelCursor({
+        autoReply: scanState.autoReply,
+        channel: context.firstItem.summary.source,
+        cursor: replyResult.lastInputCursor ?? context.lastInputCursor,
+      })
+    }
 
     await persistScanState()
 
@@ -300,9 +305,7 @@ async function listAssistantReplyCandidates(input: {
   const candidates = await Promise.all(
     input.autoReply.map(async (channelState) => {
       const channelCandidates: AssistantAutomationCandidate[] = []
-      let cursor = assistantInputCursorFromAutomationCursor(
-        channelState.eligibleAfter,
-      )
+      let cursor = channelState.eligibleAfter
 
       while (channelCandidates.length < input.limit) {
         const listed = await input.inputSource.listInputCandidates({
@@ -338,8 +341,35 @@ async function listAssistantReplyCandidates(input: {
 
   return candidates
     .flat()
-    .sort((left, right) => compareAssistantCaptureOrder(left.summary, right.summary))
+    .sort((left, right) =>
+      compareAssistantInputCursors(
+        left.inputCandidate.event.cursor,
+        right.inputCandidate.event.cursor,
+      ))
     .slice(0, input.limit)
+}
+
+function advanceAssistantAutoReplyChannelCursor(input: {
+  autoReply: AssistantAutomationScanStateProgress['autoReply']
+  channel: string | null
+  cursor: AssistantInputCandidate['event']['cursor']
+}): void {
+  if (!input.channel) {
+    return
+  }
+
+  for (const entry of input.autoReply) {
+    if (entry.channel !== input.channel) {
+      continue
+    }
+    if (
+      !entry.eligibleAfter ||
+      compareAssistantInputCursors(input.cursor, entry.eligibleAfter) > 0
+    ) {
+      entry.eligibleAfter = input.cursor
+    }
+    return
+  }
 }
 
 function assistantAutomationCandidateFromInput(
@@ -378,30 +408,6 @@ function assistantInboxSummaryFromInputCandidate(
   }
 }
 
-function assistantInputCursorFromAutomationCursor(
-  cursor: ReturnType<typeof cursorFromCapture> | null,
-): AssistantInputCursor | null {
-  if (!cursor) {
-    return null
-  }
-  return {
-    createdAt: cursor.createdAt ?? null,
-    inputId: assistantInputCursorInputIdFromAutomationCursor(cursor),
-    occurredAt: cursor.occurredAt,
-    sourceKind: cursor.captureId.startsWith('ain_')
-      ? 'hosted-mailbox'
-      : 'inbox-capture',
-  }
-}
-
-function assistantInputCursorInputIdFromAutomationCursor(
-  cursor: ReturnType<typeof cursorFromCapture>,
-): string {
-  return cursor.captureId.startsWith('ain_')
-    ? cursor.captureId
-    : assistantInputIdFromInboxCaptureId(cursor.captureId)
-}
-
 async function persistAssistantAutomationScanState(input: {
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
@@ -420,7 +426,7 @@ async function persistAssistantAutomationScanState(input: {
 }
 
 function cloneAutomationScanState(
-  state: Pick<AssistantAutomationScanStateProgress, 'autoReply' | 'inboxScanCursor'>,
+  state: Pick<AssistantAutomationScanStateProgress, 'autoReply'>,
 ): AssistantAutomationScanStateProgress {
   return {
     autoReply: state.autoReply.map((entry) => ({
@@ -428,7 +434,6 @@ function cloneAutomationScanState(
       eligibleAfter: entry.eligibleAfter,
       enabledAt: entry.enabledAt,
     })),
-    inboxScanCursor: state.inboxScanCursor,
   }
 }
 
@@ -436,35 +441,5 @@ function assistantAutomationScanStateEqual(
   left: AssistantAutomationScanStateProgress,
   right: AssistantAutomationScanStateProgress,
 ): boolean {
-  return (
-    sameAutoReplyState(left.autoReply, right.autoReply) &&
-    sameCursor(left.inboxScanCursor, right.inboxScanCursor)
-  )
-}
-
-function sameAutoReplyState(
-  left: AssistantAutomationScanStateProgress['autoReply'],
-  right: AssistantAutomationScanStateProgress['autoReply'],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((entry, index) => {
-      const other = right[index]
-      return (
-        other?.channel === entry.channel &&
-        other.enabledAt === entry.enabledAt &&
-        sameCursor(other.eligibleAfter, entry.eligibleAfter)
-      )
-    })
-  )
-}
-
-function sameCursor(
-  left: ReturnType<typeof cursorFromCapture> | null,
-  right: ReturnType<typeof cursorFromCapture> | null,
-): boolean {
-  return (
-    left?.captureId === right?.captureId &&
-    left?.occurredAt === right?.occurredAt
-  )
+  return sameAssistantAutoReplyState(left.autoReply, right.autoReply)
 }

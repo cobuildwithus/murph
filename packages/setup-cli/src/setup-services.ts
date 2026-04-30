@@ -91,7 +91,7 @@ interface SetupServicesDependencies {
     Partial<
       Pick<
         InboxServices,
-        'doctor' | 'list' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'
+        'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'
       >
     >
   resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver

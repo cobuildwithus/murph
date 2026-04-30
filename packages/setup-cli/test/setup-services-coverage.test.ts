@@ -345,7 +345,6 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     automationStatePath,
     JSON.stringify({
       version: 1,
-      inboxScanCursor: null,
       autoReply: [
         { channel: 'email', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
       ],
@@ -395,39 +394,6 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
               source: 'email',
             }),
           ])
-        },
-        async list() {
-          return {
-            filters: {
-              afterCaptureId: null,
-              afterOccurredAt: null,
-              limit: 1,
-              oldestFirst: false,
-              sourceId: null,
-            },
-            items: [
-              {
-                accountId: null,
-                actorId: 'contact_1',
-                actorIsSelf: false,
-                actorName: 'Sender',
-                attachmentCount: 0,
-                captureId: 'capture-latest',
-                envelopePath: '/tmp/latest-envelope.json',
-                eventId: 'evt_latest',
-                externalId: 'external_latest',
-                occurredAt: '2026-04-08T00:05:00.000Z',
-                promotions: [],
-                receivedAt: '2026-04-08T00:05:01.000Z',
-                source: 'telegram',
-                text: 'latest message',
-                threadId: 'thread-latest',
-                threadIsDirect: true,
-                threadTitle: null,
-              },
-            ],
-            vault: vaultRoot,
-          }
         },
         async sourceAdd() {
           throw new Error('sourceAdd should not run when telegram already exists')
@@ -480,7 +446,12 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
       autoReply: Array<{
         channel: string
         enabledAt: string
-        eligibleAfter: { captureId: string; createdAt: string | null; occurredAt: string } | null
+        eligibleAfter: {
+          createdAt: string | null
+          inputId: string
+          occurredAt: string
+          sourceKind: string
+        } | null
       }>
     }
 
@@ -540,7 +511,6 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
     automationStatePath,
     JSON.stringify({
       version: 1,
-      inboxScanCursor: null,
       autoReply: [{ channel: 'custom', enabledAt: TEST_TIMESTAMP, eligibleAfter: null }],
       updatedAt: TEST_TIMESTAMP,
     }),
@@ -583,39 +553,6 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
         async sourceAdd() {
           throw new Error('sourceAdd should not run when telegram already exists')
         },
-        async list() {
-          return {
-            filters: {
-              afterCaptureId: null,
-              afterOccurredAt: null,
-              limit: 1,
-              oldestFirst: false,
-              sourceId: null,
-            },
-            items: [
-              {
-                accountId: null,
-                actorId: 'contact_1',
-                actorIsSelf: false,
-                actorName: 'Sender',
-                attachmentCount: 0,
-                captureId: 'capture-latest',
-                envelopePath: '/tmp/latest-envelope.json',
-                eventId: 'evt_latest',
-                externalId: 'external_latest',
-                occurredAt: '2026-04-08T00:05:00.000Z',
-                promotions: [],
-                receivedAt: '2026-04-08T00:05:01.000Z',
-                source: 'telegram',
-                text: 'latest message',
-                threadId: 'thread-latest',
-                threadIsDirect: true,
-                threadTitle: null,
-              },
-            ],
-            vault: vaultRoot,
-          }
-        },
       },
       platform: 'linux',
       requestId: 'req-preserve-unmanaged',
@@ -629,7 +566,7 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
       autoReply: Array<{
         channel: string
         enabledAt: string
-        eligibleAfter: { captureId: string; createdAt: string | null; occurredAt: string } | null
+        eligibleAfter: { inputId: string; createdAt: string | null; occurredAt: string } | null
       }>
     }
 
@@ -749,14 +686,16 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
   await mkdir(path.dirname(automationStatePath), { recursive: true })
   const unchangedState = JSON.stringify({
     version: 1,
-    inboxScanCursor: null,
     autoReply: [
       {
         channel: 'email',
         enabledAt: TEST_TIMESTAMP,
         eligibleAfter: {
-          captureId: 'capture-email',
+          createdAt: null,
+          inputId: 'ain_000000000000000000000000000000e0',
           occurredAt: '2026-04-08T00:00:00.000Z',
+          sourceKind: 'inbox-capture',
+          sourcePosition: null,
         },
       },
     ],
@@ -841,7 +780,13 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
       autoReply: Array<{
         channel: string
         enabledAt: string
-        eligibleAfter: { captureId: string; occurredAt: string } | null
+        eligibleAfter: {
+          createdAt: string | null
+          inputId: string
+          occurredAt: string
+          sourceKind: string
+          sourcePosition: string | null
+        } | null
       }>
     }
     assert.equal(savedEmailState.autoReply.length, 1)
@@ -851,8 +796,11 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
         channel: 'email',
         enabledAt: savedEmailState.autoReply[0]?.enabledAt,
         eligibleAfter: {
-          captureId: 'capture-email',
+          createdAt: null,
+          inputId: 'ain_000000000000000000000000000000e0',
           occurredAt: '2026-04-08T00:00:00.000Z',
+          sourceKind: 'inbox-capture',
+          sourcePosition: null,
         },
       },
     ])
@@ -914,7 +862,6 @@ test('configureSetupChannels leaves empty automation state untouched when nothin
   const emptyState = `${JSON.stringify(
     {
       version: 1,
-      inboxScanCursor: null,
       autoReply: [],
       updatedAt: TEST_TIMESTAMP,
     },
@@ -1114,7 +1061,6 @@ test('configureSetupChannels preserves matching email backlog timestamps', async
   try {
     await saveAssistantAutomationState(vaultRoot, {
       version: 1,
-      inboxScanCursor: null,
       autoReply: [{ channel: 'email', enabledAt: TEST_TIMESTAMP, eligibleAfter: null }],
       updatedAt: TEST_TIMESTAMP,
     })

@@ -93,7 +93,7 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
-  test("bootstraps empty local mailbox state and checkpoints before the assistant phase", async () => {
+  test("imports mailbox and checkpoints before the assistant phase without inbox bootstrap", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -135,7 +135,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async importItem(item) {
           assert.equal(
             existsSync(path.join(vaultRoot, ".runtime/operations/inbox/config.json")),
-            true,
+            false,
           );
           events.push(`import:${item.item.laneSeq}`);
           return {

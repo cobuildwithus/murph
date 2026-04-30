@@ -66,9 +66,12 @@ describe("hosted email mailbox ingress route", () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       eventId: "evt_email",
       identityId: "assistant@example.test",
+      messageId: "<message-123@example.test>",
       occurredAt: "2026-04-17T00:00:00.000Z",
       rawMessageKey: "raw_123",
       selfAddress: "reply@example.test",
+      threadKey: "<thread-root@example.test>",
+      threadTarget: "hostedmail:opaque-thread-target",
     });
 
     const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
@@ -92,8 +95,11 @@ describe("hosted email mailbox ingress route", () => {
         message: {
           channel: "email",
           identityId: "assistant@example.test",
+          messageId: "<message-123@example.test>",
           rawMessageKey: "raw_123",
           selfAddress: "reply@example.test",
+          threadKey: "<thread-root@example.test>",
+          threadTarget: "hostedmail:opaque-thread-target",
         },
         occurredAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",

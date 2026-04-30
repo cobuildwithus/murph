@@ -649,13 +649,12 @@ export const assistantStatusRunLockSchema = z
 
 export const assistantStatusAutomationSchema = z
   .object({
-    inboxScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
     autoReply: z.array(
       z
         .object({
           channel: z.string().min(1),
           enabledAt: isoTimestampSchema,
-          eligibleAfter: z.lazy(() => assistantAutomationCursorSchema).nullable(),
+          eligibleAfter: z.lazy(() => assistantInputCursorSchema).nullable(),
         })
         .strict(),
     ),
@@ -1049,24 +1048,27 @@ export const assistantStopResultSchema = z.object({
   message: z.string().min(1),
 })
 
-export const assistantAutomationCursorSchema = z.object({
-  createdAt: isoTimestampSchema.nullable().optional(),
-  occurredAt: isoTimestampSchema,
-  captureId: z.string().min(1),
-})
+export const assistantInputCursorSchema = z
+  .object({
+    createdAt: isoTimestampSchema.nullable(),
+    inputId: z.string().min(1),
+    occurredAt: isoTimestampSchema,
+    sourceKind: z.enum(['inbox-capture', 'hosted-mailbox']),
+    sourcePosition: z.string().min(1).nullable().optional(),
+  })
+  .strict()
 
 export const assistantAutoReplyChannelStateSchema = z
   .object({
     channel: z.string().min(1),
     enabledAt: isoTimestampSchema,
-    eligibleAfter: assistantAutomationCursorSchema.nullable(),
+    eligibleAfter: assistantInputCursorSchema.nullable(),
   })
   .strict()
 
 export const assistantAutomationStateSchema = z
   .object({
     version: z.literal(1),
-    inboxScanCursor: assistantAutomationCursorSchema.nullable(),
     autoReply: z.array(assistantAutoReplyChannelStateSchema),
     updatedAt: isoTimestampSchema,
   })
@@ -1251,9 +1253,7 @@ export type AssistantDoctorResult = z.infer<
   typeof assistantDoctorResultSchema
 >
 export type AssistantSessionSecrets = z.infer<typeof assistantSessionSecretsSchema>
-export type AssistantAutomationCursor = z.infer<
-  typeof assistantAutomationCursorSchema
->
+export type AssistantInputCursor = z.infer<typeof assistantInputCursorSchema>
 export type AssistantAutomationState = z.infer<
   typeof assistantAutomationStateSchema
 >

@@ -101,7 +101,6 @@ const tempRoots: string[] = []
 beforeEach(() => {
   statusMocks.readAutomationState.mockReset().mockResolvedValue(
     assistantStatusAutomationSchema.parse({
-      inboxScanCursor: null,
       autoReply: [],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
@@ -575,7 +574,6 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
       reason: null,
     }),
     automation: assistantStatusAutomationSchema.parse({
-      inboxScanCursor: null,
       autoReply: [
         {
           channel: 'telegram',
