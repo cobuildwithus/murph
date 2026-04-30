@@ -40,7 +40,7 @@ export function BiomarkerLayoutClient({
 
   return (
     <BrowserVaultProvider>
-      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 pt-8 pb-10 md:px-12 lg:px-16 lg:pt-10">
+      <div className="flex flex-col gap-6">
         <nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
           <Link
             href="/experiments"
@@ -56,7 +56,7 @@ export function BiomarkerLayoutClient({
 
         <Tabs value={currentTab} className="w-full">
           <div ref={sentinelRef} aria-hidden="true" className="h-px" />
-          <div className="sticky top-0 z-20 -mx-6 flex items-center gap-4 bg-background/95 px-6 py-2 backdrop-blur-md md:-mx-12 md:px-12 lg:-mx-16 lg:px-16">
+          <div className="sticky top-0 z-20 -mx-6 flex items-center gap-4 bg-background/95 px-6 py-2 backdrop-blur-md md:-mx-14 md:px-14">
             <TabsList>
               <TabsTrigger
                 value="overview"
