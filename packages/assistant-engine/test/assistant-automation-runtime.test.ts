@@ -621,6 +621,81 @@ function assistantInputCandidateFromInboxCapture(
   }
 }
 
+function createCapturelessAssistantInputCandidate(input: {
+  conversationThreadId?: string | null
+  inputId: string
+  occurredAt: string
+  receivedAt?: string | null
+  replyTarget?: AssistantInputCandidate['event']['replyTarget']
+  source?: string
+  text: string
+}): AssistantInputCandidate {
+  const source = input.source ?? 'linq'
+  return {
+    acceptedInput: {
+      captureIds: [],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: input.inputId,
+        version: 'murph.assistant-input-event.v1',
+      },
+      cursorEffects: [],
+      id: input.inputId,
+      promptFallbackReason: 'system-input',
+      promptFallbackText: input.text,
+      source: 'assistant-input',
+    },
+    event: {
+      attachmentCount: 0,
+      conversation: {
+        accountId: 'safe_acct_1',
+        actorId: 'safe_actor_1',
+        actorIsSelf: false,
+        source,
+        threadId: input.conversationThreadId ?? 'safe_thread_1',
+        threadIsDirect: true,
+      },
+      cursor: {
+        createdAt: input.receivedAt ?? input.occurredAt,
+        inputId: input.inputId,
+        occurredAt: input.occurredAt,
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: `hosted-mailbox:conversation:${input.inputId}`,
+      },
+      inputId: input.inputId,
+      occurredAt: input.occurredAt,
+      receivedAt: input.receivedAt ?? null,
+      replyTarget: input.replyTarget ?? null,
+      source,
+      sourceRef: {
+        dedupeKey: `dedupe_${input.inputId}`,
+        eventId: `event_${input.inputId}`,
+        itemId: `item_${input.inputId}`,
+        kind: 'hosted-mailbox',
+        lane: 'conversation',
+        laneSeq: '42',
+        payloadSchema: 'murph.hosted-mailbox-payload.v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-execution-wake.v1',
+      },
+      text: input.text,
+      transcriptText: input.text,
+      userMessageContent: [
+        {
+          text: input.text,
+          type: 'text',
+        },
+      ],
+    },
+    projection: {
+      captureId: null,
+      reasonCode: 'conversation-import.projection-failed',
+      status: 'failed',
+    },
+  }
+}
+
 async function stageInboxCaptureAssistantInputEvent(input: {
   capture: InboxShowResult['capture'] | ReturnType<typeof createCaptureSummary>
   vault: string
@@ -725,6 +800,32 @@ function createReplyGroupItem(
     inputCandidate: assistantInputCandidateFromInboxCapture(summary),
     summary,
     telegramMetadata,
+  }
+}
+
+function createCapturelessReplyGroupItem(
+  candidate: AssistantInputCandidate,
+) {
+  const conversation = candidate.event.conversation
+  return {
+    inputCandidate: candidate,
+    summary: createCaptureSummary({
+      accountId: conversation?.accountId ?? null,
+      actorId: conversation?.actorId ?? null,
+      actorIsSelf: conversation?.actorIsSelf ?? false,
+      attachmentCount: candidate.event.attachmentCount,
+      captureId: candidate.event.inputId,
+      createdAt: candidate.event.receivedAt ?? candidate.event.occurredAt,
+      eventId: candidate.event.inputId,
+      externalId: candidate.event.inputId,
+      occurredAt: candidate.event.occurredAt,
+      receivedAt: candidate.event.receivedAt,
+      source: candidate.event.source,
+      text: candidate.event.transcriptText ?? candidate.event.text,
+      threadId: conversation?.threadId ?? candidate.event.inputId,
+      threadIsDirect: conversation?.threadIsDirect ?? false,
+    }),
+    telegramMetadata: null,
   }
 }
 
@@ -2127,9 +2228,9 @@ describe('assistant auto-reply runtime', () => {
     expect(events).toContainEqual({
       type: 'capture.replied',
       captureId: 'capture-1',
-      details: 'telegram -> target-1',
+      details: 'delivery confirmed',
       errorCode: undefined,
-      safeDetails: undefined,
+      safeDetails: 'delivery confirmed',
     })
   })
 
@@ -2944,11 +3045,11 @@ describe('assistant auto-reply runtime', () => {
         occurredAt: '2026-04-08T00:04:00.000Z',
         receivedAt: '2026-04-08T00:04:01.000Z',
         replyTarget: {
-          channel: 'linq',
+          channel: 'telegram',
           messageId: 'msg_4',
           threadId: 'thread_4',
         },
-        source: 'linq',
+        source: 'telegram',
         sourceRef: {
           dedupeKey: 'dedupe-4',
           eventId: 'event-4',
@@ -2999,6 +3100,7 @@ describe('assistant auto-reply runtime', () => {
       },
     }
 
+    let admittedTurnInput: unknown = null
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
@@ -3014,17 +3116,7 @@ describe('assistant auto-reply runtime', () => {
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
       })
-      expect(admitted).toMatchObject({
-        acceptedInputs: [
-          expect.objectContaining({
-            captureIds: [],
-            id: hostedInput.event.inputId,
-          }),
-        ],
-        kind: 'accepted',
-        prompt: expect.stringContaining('late hosted text'),
-        transcriptText: 'late hosted text',
-      })
+      admittedTurnInput = admitted
       await input.activeTurnCheckpoint?.({
         acceptedInputIds: [hostedInput.event.inputId],
         providerRequestOrdinal: 0,
@@ -3066,11 +3158,313 @@ describe('assistant auto-reply runtime', () => {
       replied: 1,
       skipped: 0,
     })
+    expect(admittedTurnInput).toMatchObject({
+      acceptedInputs: [
+        expect.objectContaining({
+          captureIds: [],
+          id: hostedInput.event.inputId,
+        }),
+      ],
+      deliveryReplyToMessageId: 'msg_4',
+      kind: 'accepted',
+      prompt: expect.stringContaining('late hosted text'),
+      transcriptText: 'late hosted text',
+    })
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
         inputIds: [context.inputIds[0], hostedInput.event.inputId],
       }),
     )
+  })
+
+  it('does not clear the prior reply target when captureless late input has no message id', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            captureId: 'capture-1',
+            occurredAt: '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+        {
+          mediaGroupId: null,
+          messageId: 'initial_msg_1',
+          replyContext: null,
+        },
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-1',
+      inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: null,
+        threadId: 'thread-1',
+      },
+      source: 'telegram',
+      text: 'late text without message id',
+    })
+    const inputSource = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
+        if (input.knownInputIds?.includes(hostedInput.event.inputId)) {
+          return {
+            inputs: [],
+            nextCursor: input.afterCursor ?? null,
+          }
+        }
+        return {
+          inputs: [hostedInput],
+          nextCursor: hostedInput.event.cursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+      deliveryReplyToMessageId?: string | null
+    }) => {
+      expect(input.deliveryReplyToMessageId).toBe('initial_msg_1')
+      const admitted = await input.activeTurnInput?.({
+        phase: 'request_boundary',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toMatchObject({
+        kind: 'accepted',
+        prompt: expect.stringContaining('late text without message id'),
+      })
+      expect(
+        Object.prototype.hasOwnProperty.call(
+          admitted as Record<string, unknown>,
+          'deliveryReplyToMessageId',
+        ),
+      ).toBe(false)
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [hostedInput.event.inputId],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'telegram',
+          target: 'target-1',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'revised response',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+  })
+
+  it('uses the latest captureless assistant input reply target during active-turn admission', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            captureId: 'capture-1',
+            occurredAt: '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+        {
+          mediaGroupId: null,
+          messageId: 'initial_msg_1',
+          replyContext: null,
+        },
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const olderInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-1',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'older_msg',
+        threadId: 'thread-1',
+      },
+      source: 'telegram',
+      text: 'older late text',
+    })
+    const newerInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-1',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa02',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'newer_msg',
+        threadId: 'thread-1',
+      },
+      source: 'telegram',
+      text: 'newer late text',
+    })
+    const inputSource = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
+        if (
+          input.knownInputIds?.includes(olderInput.event.inputId) &&
+          input.knownInputIds?.includes(newerInput.event.inputId)
+        ) {
+          return {
+            inputs: [],
+            nextCursor: input.afterCursor ?? null,
+          }
+        }
+        return {
+          inputs: [olderInput, newerInput],
+          nextCursor: newerInput.event.cursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      const admitted = await input.activeTurnInput?.({
+        phase: 'request_boundary',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            captureIds: [],
+            id: olderInput.event.inputId,
+          }),
+          expect.objectContaining({
+            captureIds: [],
+            id: newerInput.event.inputId,
+          }),
+        ],
+        deliveryReplyToMessageId: 'newer_msg',
+        kind: 'accepted',
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [olderInput.event.inputId, newerInput.event.inputId],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'telegram',
+          target: 'target-1',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'revised response',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
   })
 
   it('defers delivery when the active-turn input budget is exhausted', async () => {
@@ -3869,6 +4263,220 @@ describe('assistant auto-reply runtime', () => {
         ],
       }),
     )
+  })
+
+  it('uses the captureless assistant input reply target for the initial auto-reply route', async () => {
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_initial',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_initial',
+        threadId: 'real_thread_initial',
+      },
+      source: 'linq',
+      text: 'captureless initial text',
+    })
+    const listNewConversationInputs = vi.fn(
+      async (input: AssistantTurnConversationInputQuery) => {
+        expect(input.conversation).toMatchObject({
+          source: 'linq',
+          threadId: 'real_thread_initial',
+        })
+        return {
+          inputs: [],
+          nextCursor: input.afterCursor ?? null,
+        }
+      },
+    )
+    const inputSource = {
+      async refresh() {
+        return {
+          progressed: false,
+          reason: 'no_new_input' as const,
+        }
+      },
+      listNewConversationInputs,
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      const admitted = await input.activeTurnInput?.({
+        phase: 'request_boundary',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toEqual({
+        kind: 'no-new-input',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_thread_initial',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'response text',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          threadId: 'real_thread_initial',
+        }),
+        deliveryTarget: 'real_thread_initial',
+        deliveryReplyToMessageId: 'real_msg_initial',
+        threadId: 'real_thread_initial',
+      }),
+    )
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(
+        expect.objectContaining({
+          linqMessageIds: ['real_msg_initial'],
+          outcome: 'result',
+        }),
+      )
+  })
+
+  it('ignores captureless assistant input reply targets from another channel', async () => {
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_mismatch',
+      inputId: 'ain_99999999999999999999999999999999',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'wrong_msg_initial',
+        threadId: 'wrong_thread_initial',
+      },
+      source: 'linq',
+      text: 'captureless mismatched target text',
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryTarget: null,
+        deliveryReplyToMessageId: null,
+      }),
+    )
+  })
+
+  it('defers captureless email until inbox projection supplies delivery authority', async () => {
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_email_thread_initial',
+      inputId: 'ain_88888888888888888888888888888888',
+      occurredAt: '2026-04-08T00:06:00.000Z',
+      receivedAt: '2026-04-08T00:06:01.000Z',
+      replyTarget: {
+        channel: 'email',
+        messageId: 'real_email_msg_initial',
+        threadId: 'real_email_thread_initial',
+      },
+      source: 'email',
+      text: 'captureless email initial text',
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['email'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(result.nextWakeAt).toEqual(expect.any(String))
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalled()
   })
 
   it('uses Linq external ids as the outbound reply target when replying in-thread', async () => {

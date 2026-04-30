@@ -893,6 +893,66 @@ describe('assistant input event store', () => {
     ).rejects.toThrow(/opaque token|paths or URLs/iu)
   })
 
+  it('allows bounded private reply route authority without exposing it as conversation identity', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-reply-route-',
+    )
+
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'reply to the user',
+        },
+        conversation: {
+          accountId: 'acct_safe',
+          actorId: 'actor_safe',
+          actorIsSelf: false,
+          source: 'email',
+          threadId: 'thread_safe',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        replyTarget: {
+          channel: 'email',
+          messageId: 'raw_message_authority',
+          threadId: 'person@example.test',
+        },
+        sourceRef: createHostedMailboxSourceRef({
+          eventId: 'evt_reply_route',
+          laneSeq: '47',
+        }),
+      },
+    })
+
+    expect(stored.replyTarget).toEqual({
+      channel: 'email',
+      messageId: 'raw_message_authority',
+      threadId: 'person@example.test',
+    })
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'unsafe route',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          replyTarget: {
+            channel: 'email',
+            messageId: 'msg_1',
+            threadId: 'https://example.invalid/thread',
+          },
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_reply_route_url',
+            laneSeq: '48',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/route authority|path|URL/iu)
+  })
+
   it('restricts projection reason codes to compact machine-readable values', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-reason-code-',

@@ -5,6 +5,9 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import {
+  HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+} from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution/contracts";
@@ -44,6 +47,7 @@ import type {
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_conversation_import";
+const HASHED_IDENTIFIER_PATTERN = /^hid_[0-9a-f]{32}$/u;
 const tempRoots: string[] = [];
 
 afterEach(async () => {
@@ -121,18 +125,25 @@ describe("hosted mailbox conversation import adapter", () => {
     const event = listed.events[0]!;
     assert.equal(event.sourceRef.kind, "hosted-mailbox");
     assert.equal(event.content.text, "hello [link omitted]");
-    assert.match(event.sourceRef.dedupeKey ?? "", /^hid_[0-9a-f]{32}$/u);
-    assert.match(event.sourceRef.eventId ?? "", /^hid_[0-9a-f]{32}$/u);
-    assert.match(event.sourceRef.itemId ?? "", /^hid_[0-9a-f]{32}$/u);
-    assert.match(event.conversation?.accountId ?? "", /^hid_[0-9a-f]{32}$/u);
-    assert.match(event.conversation?.actorId ?? "", /^hid_[0-9a-f]{32}$/u);
-    assert.match(event.conversation?.threadId ?? "", /^hid_[0-9a-f]{32}$/u);
-    assert.match(event.replyTarget?.messageId ?? "", /^hid_[0-9a-f]{32}$/u);
-    assert.match(event.replyTarget?.threadId ?? "", /^hid_[0-9a-f]{32}$/u);
+    assert.match(event.sourceRef.dedupeKey ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.sourceRef.eventId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.sourceRef.itemId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
+    const replyTarget = event.replyTarget;
+    assert.deepEqual(replyTarget, {
+      channel: "linq",
+      messageId: "msg_synthetic_projection_failure",
+      threadId: "chat_synthetic",
+    });
+    assert.ok(replyTarget);
+    assert.equal(replyTarget.messageId?.startsWith("hid_"), false);
+    assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
     assert.equal(event.content.attachmentDescriptors.length, 1);
     assert.match(
       event.content.attachmentDescriptors[0]?.attachmentId ?? "",
-      /^hid_[0-9a-f]{32}$/u,
+      HASHED_IDENTIFIER_PATTERN,
     );
     assert.deepEqual(event.content.attachmentDescriptors[0], {
       attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
@@ -152,6 +163,115 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(event).includes("https://signed.example.invalid"), false);
     assert.equal(JSON.stringify(event).includes("voice.m4a"), false);
     assert.equal(JSON.stringify(event).includes("+15550100000"), false);
+  });
+
+  test("keeps Telegram conversation metadata hashed while replyTarget uses real thread and message ids", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_001",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          messageId: "777",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "telegram hello",
+          threadId: "123456789",
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_telegram_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    const event = listed.events[0]!;
+    assert.equal(event.conversation?.source, "telegram");
+    assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
+    const replyTarget = event.replyTarget;
+    assert.deepEqual(replyTarget, {
+      channel: "telegram",
+      messageId: "777",
+      threadId: "123456789",
+    });
+    assert.ok(replyTarget);
+    assert.equal(replyTarget.messageId?.startsWith("hid_"), false);
+    assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
+  });
+
+  test("keeps email conversation metadata hashed without treating raw message keys as delivery targets", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-email-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_email_001",
+      message: {
+        channel: "email",
+        identityId: "agentmail_inbox_synthetic",
+        rawMessageKey: "raw_email_thread_authority",
+        selfAddress: "assistant@example.test",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_email_001",
+          deduped: false,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_email_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    const event = listed.events[0]!;
+    assert.equal(event.conversation?.source, "email");
+    assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
+    const replyTarget = event.replyTarget;
+    assert.deepEqual(replyTarget, {
+      channel: "email",
+      messageId: null,
+      threadId: null,
+    });
+    assert.ok(replyTarget);
+    assert.equal(JSON.stringify(event).includes("raw_email_thread_authority"), false);
+    assert.equal(JSON.stringify(event).includes("agentmail_inbox_synthetic"), false);
+    assert.equal(JSON.stringify(event).includes("assistant@example.test"), false);
   });
 
   test("decodes conversation.message through the injected seam and imports it through the local inbox path", async () => {
@@ -705,6 +825,43 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(
       scannerInputs.inputs.map((input) => input.projection.status),
       ["failed", "failed", "failed", "failed", "failed"],
+    );
+    assert.deepEqual(
+      scannerInputs.inputs.map((input) => input.event.replyTarget),
+      [
+        {
+          channel: "linq",
+          messageId: "msg_synthetic_rapid_001",
+          threadId: "chat_synthetic_rapid",
+        },
+        {
+          channel: "linq",
+          messageId: "msg_synthetic_rapid_002",
+          threadId: "chat_synthetic_rapid",
+        },
+        {
+          channel: "linq",
+          messageId: "msg_synthetic_rapid_003",
+          threadId: "chat_synthetic_rapid",
+        },
+        {
+          channel: "linq",
+          messageId: "msg_synthetic_rapid_004",
+          threadId: "chat_synthetic_rapid",
+        },
+        {
+          channel: "linq",
+          messageId: "msg_synthetic_rapid_005",
+          threadId: "chat_synthetic_rapid",
+        },
+      ],
+    );
+    assert.equal(
+      scannerInputs.inputs.some((input) =>
+        input.event.replyTarget?.messageId?.startsWith("hid_")
+        || input.event.replyTarget?.threadId?.startsWith("hid_")
+      ),
+      false,
     );
 
     const conversation = scannerInputs.inputs[0]?.event.conversation;

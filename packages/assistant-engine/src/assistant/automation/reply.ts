@@ -7,6 +7,8 @@ import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
   conversationCaptureRefFromCapture,
   conversationRefFromCapture,
+  type AssistantConversationCaptureRef,
+  type ConversationRef,
 } from '../conversation-ref.js'
 import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
@@ -97,11 +99,13 @@ export interface AssistantAutoReplyGroupContext {
 }
 
 interface AssistantAutoReplyReplyDecision {
+  deliveryTarget: string | null
   deliveryReplyToMessageId: string | null
   kind: 'reply'
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
+  replyTargetThreadId: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
 
@@ -380,6 +384,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     }),
     captureIds: input.context.captureIds,
     deliveryDispatchMode: input.deliveryDispatchMode,
+    deliveryTarget: decision.deliveryTarget,
     deliveryReplyToMessageId: decision.deliveryReplyToMessageId,
     executionContext: input.executionContext,
     providerHeartbeatMs: input.providerHeartbeatMs,
@@ -394,6 +399,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     primaryCapture: decision.primaryCapture,
     prompt: decision.prompt,
     replyCaptureId: input.context.firstCaptureId,
+    replyTargetThreadId: decision.replyTargetThreadId,
     activeTurnInput: activeTurnHooks?.admit,
     activeTurnCheckpoint: activeTurnHooks?.checkpoint,
     userMessageContent: decision.userMessageContent,
@@ -619,6 +625,7 @@ function createDeferredDeliveryGroupOutcome(
       details: result.deliveryIntentId
         ? `delivery queued for retry as ${result.deliveryIntentId}`
         : 'delivery queued for retry',
+      safeDetails: 'delivery queued for retry',
       type: 'capture.replied',
     },
     kind: 'deferred',
@@ -648,7 +655,8 @@ function createSuccessfulReplyGroupOutcome(
       result,
     },
     event: {
-      details: `${delivery.channel} -> ${delivery.target}`,
+      details: 'delivery confirmed',
+      safeDetails: 'delivery confirmed',
       type: 'capture.replied',
     },
     kind: 'replied',
@@ -782,6 +790,11 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (!primaryCapture) {
     return { kind: 'ignore' }
   }
+  if (isCapturelessOnlyEmailAutoReplyGroup(input.group)) {
+    return createDeferredSkipDecision(
+      'email auto-reply is waiting for inbox projection delivery authority',
+    )
+  }
 
   const handledReceipt = await resolveAssistantAutoReplyHandledTurnReceipt(
     input.vault,
@@ -830,11 +843,16 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
 
   return {
-    deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId(shownGroup),
+    deliveryTarget: readAutoReplyDeliveryTarget(input.group),
+    deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
+      captures: shownGroup,
+      context: input.group,
+    }),
     kind: 'reply',
     operatorAuthority: 'direct-operator',
     primaryCapture,
     prompt: preparedInput.prompt,
+    replyTargetThreadId: readAutoReplyReplyTargetThreadId(input.group),
     userMessageContent: preparedInput.userMessageContent,
   }
 }
@@ -895,6 +913,7 @@ async function executeAssistantAutoReply(input: {
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
   captureIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  deliveryTarget: string | null
   deliveryReplyToMessageId: string | null
   executionContext?: AssistantExecutionContext | null
   providerHeartbeatMs?: number | null
@@ -908,10 +927,15 @@ async function executeAssistantAutoReply(input: {
   primaryCapture: InboxShowResult['capture']
   prompt: string
   replyCaptureId: string
+  replyTargetThreadId: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
   const watchdog = createAssistantProviderWatchdog(input)
+  const conversation = applyReplyTargetThreadToConversationRef({
+    conversation: conversationRefFromCapture(input.primaryCapture),
+    threadId: input.replyTargetThreadId,
+  })
 
   try {
     const result = await sendAssistantMessage({
@@ -919,7 +943,8 @@ async function executeAssistantAutoReply(input: {
       acceptedTurnInput: {
         initialInputs: input.acceptedTurnInputInitialInputs ?? null,
       },
-      conversation: conversationRefFromCapture(input.primaryCapture),
+      conversation,
+      ...(input.replyTargetThreadId ? { threadId: input.replyTargetThreadId } : {}),
       abortSignal: watchdog.signal,
       activeTurnCheckpoint: input.activeTurnCheckpoint,
       activeTurnInput: input.activeTurnInput,
@@ -931,6 +956,7 @@ async function executeAssistantAutoReply(input: {
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
       deliveryDispatchMode: input.deliveryDispatchMode,
+      deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
         [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]: input.replyCaptureId,
@@ -972,6 +998,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
   checkpoint?: AssistantActiveTurnInputCheckpointHook
 } {
   let context = input.context
+  let conversation = readAutoReplyConversationCaptureRef(context)
   const pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[] = []
 
   const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
@@ -987,7 +1014,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 
     const lateInputs = await input.inputSource.listNewConversationInputs({
       afterCursor: context.lastInputCursor,
-      conversation: conversationCaptureRefFromCapture(context.firstItem.summary),
+      conversation,
       knownCaptureIds: [
         ...context.captureIds,
         ...pendingAcceptances.flatMap((pending) => pending.captureIds),
@@ -1020,6 +1047,13 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         onAcceptedContext(nextContext) {
           context = nextContext
           input.onAcceptedContext(nextContext)
+        },
+        onAcceptedInputCandidates(acceptedCandidates) {
+          conversation = applyLatestAssistantInputReplyTargetThread({
+            candidates: acceptedCandidates,
+            conversation,
+            expectedChannel: context.firstItem.summary.source,
+          })
         },
         onEvent: input.onEvent,
         pendingAcceptances,
@@ -1105,6 +1139,11 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ...captureAcceptedInputs,
       ...capturelessAcceptedInputs,
     ]
+    const acceptedInputReplyToMessageId =
+      readLatestAssistantInputReplyTargetMessageId({
+        candidates: lateInputs.inputs,
+        expectedChannel: context.firstItem.summary.source,
+      })
     input.onEvent?.({
       type: 'capture.reply-progress',
       captureId: context.firstCaptureId,
@@ -1124,6 +1163,11 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
           ])],
           lastInputCursor: lateInputs.nextCursor ?? nextContext.lastInputCursor,
         }
+        conversation = applyLatestAssistantInputReplyTargetThread({
+          candidates: lateInputs.inputs,
+          conversation: readAutoReplyConversationCaptureRef(context),
+          expectedChannel: context.firstItem.summary.source,
+        })
         input.onAcceptedContext(context)
         input.onEvent?.({
           type: 'capture.reply-progress',
@@ -1137,7 +1181,12 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 
     const result: AssistantActiveTurnInputAdmissionResult = {
       acceptedInputs,
-      deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId(shownFinalGroup),
+      deliveryReplyToMessageId:
+        acceptedInputReplyToMessageId ??
+        readAutoReplyDeliveryReplyToMessageId({
+          captures: shownFinalGroup,
+          context: nextContext,
+        }),
       kind: 'accepted',
       prompt: appendCapturelessAssistantInputPrompt({
         capturePrompt: preparedInput.prompt,
@@ -1197,6 +1246,7 @@ function admitCapturelessAssistantInputs(input: {
   inputSourceCursor: AssistantInputCandidate['event']['cursor'] | null
   lateInputs: readonly AssistantInputCandidate[]
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
+  onAcceptedInputCandidates(candidates: readonly AssistantInputCandidate[]): void
   onEvent?: (event: AssistantRunEvent) => void
   pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[]
 }): AssistantActiveTurnInputAdmissionResult {
@@ -1226,6 +1276,7 @@ function admitCapturelessAssistantInputs(input: {
         lastInputCursor: input.inputSourceCursor ?? input.context.lastInputCursor,
       }
       input.onAcceptedContext(nextContext)
+      input.onAcceptedInputCandidates(input.lateInputs)
       input.onEvent?.({
         type: 'capture.reply-progress',
         captureId: input.context.firstCaptureId,
@@ -1241,9 +1292,16 @@ function admitCapturelessAssistantInputs(input: {
     .filter((text): text is string => text !== null)
     .join('\n\n')
 
+  const deliveryReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
+    candidates: input.lateInputs,
+    expectedChannel: input.context.firstItem.summary.source,
+  })
+
   return {
     acceptedInputs,
-    deliveryReplyToMessageId: null,
+    ...(deliveryReplyToMessageId !== undefined
+      ? { deliveryReplyToMessageId }
+      : {}),
     kind: 'accepted',
     prompt,
     receiptMetadata: {
@@ -1494,17 +1552,26 @@ async function createAssistantAutoReplyContextForCaptures(input: {
   return createAssistantAutoReplyGroupContext(items)
 }
 
-function readAutoReplyDeliveryReplyToMessageId(
-  captures: readonly AssistantAutoReplyPromptCapture[],
-): string | null {
-  const primaryCapture = captures[0]?.capture
+function readAutoReplyDeliveryReplyToMessageId(input: {
+  captures: readonly AssistantAutoReplyPromptCapture[]
+  context: AssistantAutoReplyGroupContext
+}): string | null {
+  const inputReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
+    candidates: autoReplyInputCandidatesFromContext(input.context),
+    expectedChannel: input.context.firstItem.summary.source,
+  })
+  if (inputReplyToMessageId !== undefined) {
+    return inputReplyToMessageId
+  }
+
+  const primaryCapture = input.captures[0]?.capture
   if (!primaryCapture) {
     return null
   }
 
   if (primaryCapture.source === 'linq') {
-    for (let index = captures.length - 1; index >= 0; index -= 1) {
-      const messageId = readLinqReplyToMessageId(captures[index]?.capture)
+    for (let index = input.captures.length - 1; index >= 0; index -= 1) {
+      const messageId = readLinqReplyToMessageId(input.captures[index]?.capture)
       if (messageId) {
         return messageId
       }
@@ -1516,9 +1583,9 @@ function readAutoReplyDeliveryReplyToMessageId(
     return null
   }
 
-  for (let index = captures.length - 1; index >= 0; index -= 1) {
+  for (let index = input.captures.length - 1; index >= 0; index -= 1) {
     const messageId = normalizeNullableString(
-      captures[index]?.telegramMetadata?.messageId,
+      input.captures[index]?.telegramMetadata?.messageId,
     )
     if (messageId) {
       return messageId
@@ -1526,6 +1593,146 @@ function readAutoReplyDeliveryReplyToMessageId(
   }
 
   return null
+}
+
+function readAutoReplyDeliveryTarget(
+  context: AssistantAutoReplyGroupContext,
+): string | null {
+  const replyTarget = readLatestAssistantInputReplyTarget({
+    candidates: autoReplyInputCandidatesFromContext(context),
+    expectedChannel: context.firstItem.summary.source,
+  })
+  if (!replyTargetUsesThreadAsExplicitDeliveryTarget(replyTarget)) {
+    return null
+  }
+  return normalizeNullableString(replyTarget?.threadId)
+}
+
+function readAutoReplyReplyTargetThreadId(
+  context: AssistantAutoReplyGroupContext,
+): string | null {
+  return readLatestAssistantInputReplyTargetThreadId({
+    candidates: autoReplyInputCandidatesFromContext(context),
+    expectedChannel: context.firstItem.summary.source,
+  })
+}
+
+function readAutoReplyConversationCaptureRef(
+  context: AssistantAutoReplyGroupContext,
+): AssistantConversationCaptureRef {
+  return applyLatestAssistantInputReplyTargetThread({
+    candidates: autoReplyInputCandidatesFromContext(context),
+    conversation: conversationCaptureRefFromCapture(context.firstItem.summary),
+    expectedChannel: context.firstItem.summary.source,
+  })
+}
+
+function applyLatestAssistantInputReplyTargetThread(input: {
+  candidates: readonly AssistantInputCandidate[]
+  conversation: AssistantConversationCaptureRef
+  expectedChannel: string | null
+}): AssistantConversationCaptureRef {
+  return applyReplyTargetThreadToConversationCaptureRef({
+    conversation: input.conversation,
+    threadId: readLatestAssistantInputReplyTargetThreadId(input),
+  })
+}
+
+function applyReplyTargetThreadToConversationRef(input: {
+  conversation: ConversationRef
+  threadId: string | null
+}): ConversationRef {
+  const threadId = normalizeNullableString(input.threadId)
+  if (!threadId) {
+    return input.conversation
+  }
+  return {
+    ...input.conversation,
+    threadId,
+  }
+}
+
+function applyReplyTargetThreadToConversationCaptureRef(input: {
+  conversation: AssistantConversationCaptureRef
+  threadId: string | null
+}): AssistantConversationCaptureRef {
+  const threadId = normalizeNullableString(input.threadId)
+  if (!threadId) {
+    return input.conversation
+  }
+  return {
+    ...input.conversation,
+    threadId,
+  }
+}
+
+function replyTargetUsesThreadAsExplicitDeliveryTarget(
+  replyTarget: AssistantInputCandidate['event']['replyTarget'],
+): boolean {
+  const channel = normalizeNullableString(replyTarget?.channel)
+  return channel === 'linq' || channel === 'telegram'
+}
+
+function autoReplyInputCandidatesFromContext(
+  context: AssistantAutoReplyGroupContext,
+): AssistantInputCandidate[] {
+  return context.items
+    .map((item) => item.inputCandidate ?? null)
+    .filter((candidate): candidate is AssistantInputCandidate => candidate !== null)
+}
+
+function readLatestAssistantInputReplyTarget(input: {
+  candidates: readonly AssistantInputCandidate[]
+  expectedChannel: string | null
+}): AssistantInputCandidate['event']['replyTarget'] | null {
+  const expectedChannel = normalizeNullableString(input.expectedChannel)
+  for (let index = input.candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = input.candidates[index]
+    if (!candidate) {
+      continue
+    }
+    const replyTarget = candidate.event.replyTarget
+    const replyTargetChannel = normalizeNullableString(replyTarget?.channel)
+    if (
+      replyTarget &&
+      replyTargetChannel &&
+      replyTargetChannel === expectedChannel &&
+      replyTargetChannel === readAssistantInputCandidateChannel(candidate) &&
+      (
+        normalizeNullableString(replyTarget.threadId) ||
+        normalizeNullableString(replyTarget.messageId)
+      )
+    ) {
+      return replyTarget
+    }
+  }
+
+  return null
+}
+
+function readLatestAssistantInputReplyTargetMessageId(input: {
+  candidates: readonly AssistantInputCandidate[]
+  expectedChannel: string | null
+}): string | undefined {
+  const replyTarget = readLatestAssistantInputReplyTarget(input)
+  return normalizeNullableString(replyTarget?.messageId) ?? undefined
+}
+
+function readLatestAssistantInputReplyTargetThreadId(input: {
+  candidates: readonly AssistantInputCandidate[]
+  expectedChannel: string | null
+}): string | null {
+  const replyTarget = readLatestAssistantInputReplyTarget(input)
+  return normalizeNullableString(replyTarget?.threadId)
+}
+
+function readAssistantInputCandidateChannel(
+  candidate: AssistantInputCandidate,
+): string | null {
+  return (
+    normalizeNullableString(candidate.event.conversation?.source) ??
+    normalizeNullableString(candidate.event.source)
+  )
 }
 
 function readLinqReplyToMessageId(capture: InboxShowResult['capture']): string | null {
@@ -1673,17 +1880,48 @@ function resolveAutoReplyLinqProviderMessageIdsFromContext(
     if (item.summary.source !== 'linq') {
       continue
     }
+    const replyTargetMessageId = readLinqProviderMessageId(
+      item.inputCandidate?.event.replyTarget?.channel === 'linq'
+        ? item.inputCandidate.event.replyTarget.messageId
+        : null,
+    )
+    if (replyTargetMessageId) {
+      messageIds.push(replyTargetMessageId)
+    }
     const externalId = normalizeNullableString(item.summary.externalId)
     if (!externalId?.startsWith('linq:')) {
       continue
     }
-    const messageId = normalizeNullableString(externalId.slice('linq:'.length))
-    if (!messageId || messageId.startsWith('hbid:linq.message:')) {
+    const messageId = readLinqProviderMessageId(externalId.slice('linq:'.length))
+    if (!messageId) {
       continue
     }
     messageIds.push(messageId)
   }
   return [...new Set(messageIds)]
+}
+
+function readLinqProviderMessageId(value: string | null | undefined): string | null {
+  const messageId = normalizeNullableString(value)
+  if (
+    !messageId ||
+    messageId.startsWith('ain_') ||
+    messageId.startsWith('hbid:linq.message:') ||
+    messageId.startsWith('hid_')
+  ) {
+    return null
+  }
+
+  return messageId
+}
+
+function isCapturelessOnlyEmailAutoReplyGroup(
+  context: AssistantAutoReplyGroupContext,
+): boolean {
+  return (
+    context.firstItem.summary.source === 'email' &&
+    context.items.every((item) => item.inputCandidate?.projection.captureId === null)
+  )
 }
 
 function findRepairableTerminalEvidenceForGroup(

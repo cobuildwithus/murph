@@ -2,14 +2,22 @@ import type {
   AssistantAutomationCursor,
   AssistantAutomationState,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { createIntegratedInboxServices, type InboxServices } from '@murphai/inbox-services'
 import { readAssistantAutomationState, saveAssistantAutomationState } from './store.js'
 import {
   normalizeAssistantAutoReplyChannels,
   sameAssistantAutoReplyState,
 } from './automation-state.js'
+import {
+  type AssistantInputCandidate,
+  type AssistantInputSource,
+} from './input-source.js'
+import {
+  readLatestAssistantInputCursor,
+  type AssistantInputCursor,
+} from './input-store.js'
 
 type AssistantAutoReplyEntry = AssistantAutomationState['autoReply'][number]
+const LATEST_ASSISTANT_INPUT_PAGE_LIMIT = 100
 
 function defaultManagedChannelPredicate(): boolean {
   return true
@@ -66,37 +74,65 @@ export function reconcileManagedAssistantAutoReplyChannels(input: {
   return [...preservedEntries, ...managedEntries].sort(compareAssistantAutoReplyEntry)
 }
 
-export async function readLatestPersistedInboxCaptureCursor(
-  vault: string,
-  inboxServices: Pick<InboxServices, 'list'> = createIntegratedInboxServices(),
-): Promise<AssistantAutomationCursor | null> {
-  const latestCapture = (
-    await inboxServices.list({
-      afterCaptureId: null,
-      afterCreatedAt: null,
-      afterOccurredAt: null,
-      limit: 1,
-      oldestFirst: false,
-      requestId: null,
-      sourceId: null,
-      vault,
+export async function readLatestAssistantInputSourceCursor(input: {
+  inputSource?: AssistantInputSource
+  signal?: AbortSignal
+  vault: string
+}): Promise<AssistantAutomationCursor | null> {
+  if (!input.inputSource) {
+    const cursor = await readLatestAssistantInputCursor({
+      vault: input.vault,
     })
-  ).items[0]
+    return cursor ? assistantInputCursorToAutomationCursor(cursor) : null
+  }
 
-  return latestCapture
-    ? {
-        captureId: latestCapture.captureId,
-        createdAt: latestCapture.createdAt ?? null,
-        occurredAt: latestCapture.occurredAt,
-      }
+  const inputSource = input.inputSource
+  let afterCursor: AssistantInputCandidate['event']['cursor'] | null = null
+  let latestCandidate: AssistantInputCandidate | null = null
+
+  for (;;) {
+    const listed = await inputSource.listInputCandidates({
+      afterCursor,
+      limit: LATEST_ASSISTANT_INPUT_PAGE_LIMIT,
+      signal: input.signal,
+    })
+    const latest = listed.inputs.at(-1)
+    if (latest) {
+      latestCandidate = latest
+    }
+    if (!listed.nextCursor || listed.inputs.length === 0) {
+      break
+    }
+    afterCursor = listed.nextCursor
+  }
+
+  return latestCandidate
+    ? assistantInputCandidateToAutomationCursor(latestCandidate)
     : null
+}
+
+function assistantInputCandidateToAutomationCursor(
+  candidate: AssistantInputCandidate,
+): AssistantAutomationCursor {
+  return assistantInputCursorToAutomationCursor(candidate.event.cursor)
+}
+
+function assistantInputCursorToAutomationCursor(
+  cursor: AssistantInputCursor,
+): AssistantAutomationCursor {
+  return {
+    captureId: cursor.inputId,
+    createdAt: cursor.createdAt ?? null,
+    occurredAt: cursor.occurredAt,
+  }
 }
 
 export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
   desiredChannels: readonly string[]
-  inboxServices?: Pick<InboxServices, 'list'>
+  inputSource?: AssistantInputSource
   isManagedChannel?: (channel: string) => boolean
-  latestCaptureCursor?: AssistantAutomationCursor | null
+  latestInputCursor?: AssistantAutomationCursor | null
+  signal?: AbortSignal
   vault: string
 }): Promise<{
   changed: boolean
@@ -104,21 +140,22 @@ export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
 }> {
   const state = await readAssistantAutomationState(input.vault)
   const currentAutoReply = 'autoReply' in state ? state.autoReply : []
-  const hasExplicitLatestCaptureCursor = Object.prototype.hasOwnProperty.call(
+  const hasExplicitLatestInputCursor = Object.prototype.hasOwnProperty.call(
     input,
-    'latestCaptureCursor',
+    'latestInputCursor',
   )
   const nextReplyCursor = managedAssistantAutoReplyChannelsNeedCursorSeed({
     current: currentAutoReply,
     desiredChannels: input.desiredChannels,
     isManagedChannel: input.isManagedChannel,
   })
-    ? hasExplicitLatestCaptureCursor
-      ? (input.latestCaptureCursor ?? null)
-      : await readLatestPersistedInboxCaptureCursor(
-        input.vault,
-        input.inboxServices,
-      )
+    ? hasExplicitLatestInputCursor
+      ? (input.latestInputCursor ?? null)
+      : await readLatestAssistantInputSourceCursor({
+        inputSource: input.inputSource,
+        signal: input.signal,
+        vault: input.vault,
+      })
     : null
   const enabledAt =
     nextReplyCursor?.createdAt ??
@@ -151,9 +188,10 @@ export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
 
 export async function enableAssistantAutoReplyChannelLocal(input: {
   channel: string
-  inboxServices?: Pick<InboxServices, 'list'>
+  inputSource?: AssistantInputSource
   isManagedChannel?: (channel: string) => boolean
-  latestCaptureCursor?: AssistantAutomationCursor | null
+  latestInputCursor?: AssistantAutomationCursor | null
+  signal?: AbortSignal
   vault: string
 }): Promise<boolean> {
   const state = await readAssistantAutomationState(input.vault)
@@ -166,9 +204,12 @@ export async function enableAssistantAutoReplyChannelLocal(input: {
         .map((entry) => entry.channel),
       input.channel,
     ]),
-    inboxServices: input.inboxServices,
+    inputSource: input.inputSource,
     isManagedChannel,
-    latestCaptureCursor: input.latestCaptureCursor,
+    ...(Object.prototype.hasOwnProperty.call(input, 'latestInputCursor')
+      ? { latestInputCursor: input.latestInputCursor ?? null }
+      : {}),
+    signal: input.signal,
     vault: input.vault,
   })
 
