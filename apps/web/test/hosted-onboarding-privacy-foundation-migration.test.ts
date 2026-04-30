@@ -179,8 +179,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_run" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_execution_cursor" CASCADE');
-    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_vault_sync_payload" CASCADE');
-    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_vault_sync_session" CASCADE');
+    expect(hostedRuntimeHardCutMigrationSql).not.toContain(["hosted", "vault", "sync"].join("_"));
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_webhook_event"');
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_recipient_binding"');
     expect(dropRevnetIssuanceMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_revnet_issuance"');

@@ -398,9 +398,6 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
     throw new TypeError("hosted system mailbox pending item must be an object.");
   }
   const record = value as Record<string, unknown>;
-  if (isLegacySharePendingRecord(record)) {
-    throw new TypeError("hosted system mailbox legacy share-import pending state is unsupported.");
-  }
   const wake = parseHostedExecutionWake(record.wake);
   if (wake.kind === "conversation.message") {
     throw new TypeError("hosted system mailbox wake must be a system wake.");
@@ -442,24 +439,6 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       : parseHostedSystemMailboxStatus(record.status),
     wake,
   };
-}
-
-function isLegacySharePendingRecord(record: Record<string, unknown>): boolean {
-  const wake = record.wake;
-  const postCheckpointRecord = record.postCheckpointRecord;
-  return record.routeAction === "import-vault-share"
-    || (
-      !!wake
-      && typeof wake === "object"
-      && !Array.isArray(wake)
-      && (wake as { kind?: unknown }).kind === "vault.share.accepted"
-    )
-    || (
-      !!postCheckpointRecord
-      && typeof postCheckpointRecord === "object"
-      && !Array.isArray(postCheckpointRecord)
-      && (postCheckpointRecord as { kind?: unknown }).kind === "share-import"
-    );
 }
 
 function readHostedSystemMailboxRouteAction(
@@ -516,10 +495,6 @@ function parseHostedSystemMailboxRecordRequest(value: unknown): never {
     throw new TypeError("hosted system mailbox postCheckpointRecord must be an object.");
   }
   const record = value as Record<string, unknown>;
-
-  if (record.kind === "share-import") {
-    throw new TypeError("hosted system mailbox legacy share-import pending state is unsupported.");
-  }
 
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
 }
