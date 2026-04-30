@@ -34,7 +34,7 @@ interpretationFrame:
   caveat: "SpO₂ is vulnerable to device class, skin pigmentation, perfusion, temperature, movement, nail polish, tobacco or carbon-monoxide exposure, altitude, illness, and sleep-disordered breathing. Compare same-device same-context trends and treat low or symptom-matched readings as medical context."
 biomarker:
   shortName: "SpO₂"
-  displayName: "SpO₂"
+  displayName: "Blood Oxygen Saturation (SpO₂)"
   unit: "%"
   valuePrecision: 1
   direction:

@@ -1,8 +1,6 @@
-import { BookOpenIcon, ExternalLinkIcon, FileTextIcon, InfoIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import { type ReactNode } from "react";
 
-import { Badge } from "@/src/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { SectionLabel } from "@/src/components/ui/section-label";
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
 import { cn } from "@/src/lib/utils";
@@ -43,8 +41,9 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel
   return (
     <div className="flex flex-col gap-12 pb-12">
       <BiomarkerEvidenceRow biomarker={biomarker} />
+
       {(hasClaims || hasSourceHighlights) && (
-        <section className="flex flex-col gap-5">
+        <section className="flex flex-col gap-6">
           <div className="flex max-w-3xl flex-col gap-1.5">
             <SectionLabel>Evidence</SectionLabel>
             <p className="text-sm/6 text-muted-foreground">
@@ -52,34 +51,35 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel
               community outcomes.
             </p>
           </div>
+
           <div
             className={cn(
-              "grid gap-4",
+              "grid gap-8",
               hasClaims && hasSourceHighlights ? "lg:grid-cols-[minmax(0,1fr)_400px]" : null,
             )}
           >
             {hasClaims ? (
-              <Card className="border border-border/60">
-                <CardHeader className="gap-3">
-                  <SectionKicker
-                    icon={<BookOpenIcon className="size-4" aria-hidden />}
-                    label="Claim boundaries"
-                  />
-                  <CardTitle>Evidence-backed interpretation</CardTitle>
-                  <CardDescription>
+              <div className="flex flex-col gap-5">
+                <div>
+                  <SectionLabel>Claim boundaries</SectionLabel>
+                  <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+                    Evidence-backed interpretation
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     These claims are attached to source artifacts in Health Commons so the page can
                     stay useful without overreaching.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-3">
+                  </p>
+                </div>
+                <div className="flex flex-col gap-4">
                   {biomarker.claims.map((claim) => (
                     <div
                       key={claim.claimId}
-                      className="rounded-xl border border-border/60 bg-muted/30 p-4"
+                      className="border-t border-border/40 pt-4"
                     >
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary">{formatChipLabel(claim.strength)} evidence</Badge>
-                        <Badge variant="outline">{formatChipLabel(claim.type)}</Badge>
+                      <div className="mb-2 flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <span>{formatChipLabel(claim.strength)} evidence</span>
+                        <span className="text-border">·</span>
+                        <span>{formatChipLabel(claim.type)}</span>
                       </div>
                       <p className="text-sm leading-6 text-foreground">{claim.text}</p>
                       {claim.caveats.length > 0 ? (
@@ -102,28 +102,27 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel
                       ) : null}
                     </div>
                   ))}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             ) : null}
 
             {hasSourceHighlights ? (
-              <Card className="border border-border/60">
-                <CardHeader>
-                  <SectionKicker
-                    icon={<FileTextIcon className="size-4" aria-hidden />}
-                    label="Source artifacts"
-                  />
-                  <CardTitle>Research highlights</CardTitle>
-                  <CardDescription>
+              <div className="flex flex-col gap-5">
+                <div>
+                  <SectionLabel>Source artifacts</SectionLabel>
+                  <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+                    Research highlights
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     A compact source list for the claims and measurement guardrails on this page.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-3">
-                  {biomarker.sourceHighlights.slice(0, 8).map((source) => (
-                    <SourceHighlightCard key={source.key} source={source} />
+                  </p>
+                </div>
+                <div className="flex flex-col">
+                  {biomarker.sourceHighlights.slice(0, 8).map((source, i) => (
+                    <SourceHighlightRow key={source.key} source={source} first={i === 0} />
                   ))}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             ) : null}
           </div>
         </section>
@@ -134,111 +133,90 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel
           <div className="flex max-w-3xl flex-col gap-1.5">
             <SectionLabel>Commons memo</SectionLabel>
             <p className="text-sm/6 text-muted-foreground">
-              Longer biomarker notes from Health Commons, organized as a single appendix.
+              Extended notes on measurement, interpretation, and context.
             </p>
           </div>
-          <Card className="border border-border/60">
-            <CardHeader>
-              <SectionKicker
-                icon={<InfoIcon className="size-4" aria-hidden />}
-                label="Commons memo"
-              />
-              <CardTitle>{biomarker.shortName} evidence notes</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {memoSections.map((section, sectionIndex) => (
-                <div
-                  key={section.heading}
-                  className={cn(
-                    "space-y-4",
-                    sectionIndex > 0 ? "border-t border-border/60 pt-6" : null,
-                  )}
-                >
-                  <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
-                    {section.heading}
-                  </h3>
-                  <div className="space-y-4 text-sm leading-6 text-muted-foreground">
-                    {section.blocks.map((block, index) => {
-                      if (block.type === "list") {
-                        const ListTag = block.listStyle === "ordered" ? "ol" : "ul";
 
-                        return (
-                          <ListTag
-                            key={`list:${index}`}
-                            className={
-                              block.listStyle === "ordered"
-                                ? "list-decimal space-y-2 pl-5"
-                                : "list-disc space-y-2 pl-5"
-                            }
-                          >
-                            {block.items.map((item) => (
-                              <li key={`${index}:${item}`}>{renderInlineMarkdown(item)}</li>
-                            ))}
-                          </ListTag>
-                        );
-                      }
+          <div className="max-w-3xl space-y-8">
+            {memoSections.map((section, sectionIndex) => (
+              <div
+                key={section.heading}
+                className={cn(
+                  "space-y-4",
+                  sectionIndex > 0 ? "border-t border-border/40 pt-8" : null,
+                )}
+              >
+                <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+                  {section.heading}
+                </h3>
+                <div className="space-y-4 text-sm leading-6 text-muted-foreground">
+                  {section.blocks.map((block, index) => {
+                    if (block.type === "list") {
+                      const ListTag = block.listStyle === "ordered" ? "ol" : "ul";
 
-                      return <p key={`paragraph:${index}`}>{renderInlineMarkdown(block.text)}</p>;
-                    })}
-                  </div>
+                      return (
+                        <ListTag
+                          key={`list:${index}`}
+                          className={
+                            block.listStyle === "ordered"
+                              ? "list-decimal space-y-2 pl-5"
+                              : "list-disc space-y-2 pl-5"
+                          }
+                        >
+                          {block.items.map((item) => (
+                            <li key={`${index}:${item}`}>{renderInlineMarkdown(item)}</li>
+                          ))}
+                        </ListTag>
+                      );
+                    }
+
+                    return <p key={`paragraph:${index}`}>{renderInlineMarkdown(block.text)}</p>;
+                  })}
                 </div>
-              ))}
-            </CardContent>
-          </Card>
+              </div>
+            ))}
+          </div>
         </section>
       )}
     </div>
   );
 }
 
-function SourceHighlightCard({
+function SourceHighlightRow({
   source,
+  first,
 }: {
   source: BiomarkerPageModel["sourceHighlights"][number];
+  first: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+    <div className={cn("py-4", first ? "" : "border-t border-border/40")}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-medium leading-5 text-foreground">{source.title}</p>
-          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+          <p className="text-sm font-medium leading-5 text-foreground">{source.title}</p>
+          <p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             {source.typeLabel}
             {source.year ? ` · ${source.year}` : ""}
           </p>
         </div>
         {source.externalUrl ? (
-          <ExternalLinkIcon
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden
-          />
-        ) : null}
-      </div>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">{source.summary}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Badge variant="outline">{source.evidenceLabel}</Badge>
-        {source.externalUrl ? (
           <a
             href={source.externalUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground underline-offset-4 hover:underline"
+            className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+            aria-label={`Open original source: ${source.title}`}
           >
-            Open original source
             <ExternalLinkIcon className="size-3.5" aria-hidden />
           </a>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function SectionKicker({ icon, label }: { icon: ReactNode; label: string }) {
-  return (
-    <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-      <span className="flex size-7 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        {icon}
-      </span>
-      {label}
+      {source.summary ? (
+        <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{source.summary}</p>
+      ) : null}
+      <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <span>{source.evidenceLabel}</span>
+      </div>
     </div>
   );
 }
