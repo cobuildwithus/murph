@@ -150,7 +150,7 @@ describe('assistant inbox input candidate adapter', () => {
       projection: {
         captureId: 'cap_stable',
         reasonCode: null,
-        status: 'canonical',
+        status: 'succeeded',
       },
     })
   })
@@ -482,7 +482,7 @@ describe('assistant inbox input candidate adapter', () => {
     })
   })
 
-  it('does not treat a runtime-event cursor as an inbox capture cursor', async () => {
+  it('does not treat a hosted mailbox cursor as an inbox capture cursor', async () => {
     const firstCapture = createCaptureSummary({
       captureId: 'cap_first',
       externalId: 'ext_first',
@@ -522,9 +522,9 @@ describe('assistant inbox input candidate adapter', () => {
     const result = await source.listInputCandidates({
       afterCursor: {
         createdAt: null,
-        inputId: 'runtime-event:conversation:42',
+        inputId: 'ain_00000000000000000000000000000000',
         occurredAt: '2026-04-22T09:59:00.000Z',
-        sourceKind: 'runtime-event',
+        sourceKind: 'hosted-mailbox-item',
       },
     })
 

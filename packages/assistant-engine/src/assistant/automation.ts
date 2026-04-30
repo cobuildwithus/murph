@@ -21,6 +21,20 @@ export {
   markAssistantAutoReplyLinqCleanupQueued,
 } from './automation/evidence.js'
 export {
+  createAssistantInputEventId,
+  listAssistantInputEvents,
+  readAssistantInputEvent,
+  updateAssistantInputProjection,
+  upsertAssistantInputEvent,
+  type AssistantInputAttachmentDescriptor,
+  type AssistantInputContent,
+  type AssistantInputEventRecord,
+  type AssistantInputEventRecordParseFailure,
+  type AssistantInputEventProjection,
+  type AssistantInputReplyTarget,
+  type UpsertAssistantInputEventInput,
+} from './input-store.js'
+export {
   assistantInputIdFromInboxCaptureId,
   createInboxBackedAssistantInputSource,
   createNoopAssistantInputSource,
