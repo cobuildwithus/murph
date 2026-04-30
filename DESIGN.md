@@ -193,6 +193,14 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### Library List Pattern (Hero / Standard / Table)
+For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker, recipes, protocols), break the rhythm into three tiers instead of an identical-card grid:
+1. **Hero rows (top 1–2)** — full-width row, image on the left (320px on desktop, 16:9 above on mobile), content on the right. Category eyebrow + serif h3 title + match% top-right + mechanism prose + 4-stat band (`Exp. change` · `Duration` · `Burden` · `Evidence`). Optional small mono pill over the image (`RECOMMENDED FOR YOU`). The whole card is the link — no diagonal up-right arrow (it reads as "external" and is misleading); no "Open the experiment" CTA strip — the card surface itself is the affordance.
+2. **Standard cards (next 3)** — `lg:grid-cols-3` grid. Image-on-top (16:9), content stacked below. Category eyebrow + serif title + match% on a row, mechanism `line-clamp-3`, divided 3-stat footer with smaller `text-sm` values so longer ranges (`↓ −3 to −5%`) fit on one line.
+3. **Dense table (the rest)** — single rounded card surface with a mono uppercase header row (`EXPERIMENT · EXP. CHANGE · DURATION · BURDEN · EVIDENCE · MATCH`). Each row: 40px square thumbnail (rounded-md, `object-cover`, fallback to a 3-letter category chip) + serif title + category subline + tabular columns + chevron. Hover = `bg-muted/30`.
+
+The shape compresses gracefully: at `md:` only title + match% + chevron stay; at `lg:` the full grid expands. This is the standard answer to "we have 14+ items to show on one page" — an identical card grid is the lazy alternative and is banned.
+
 ### Progress Bar (Experiment Phases)
 Three phases: **Baseline · 7d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
 
@@ -209,7 +217,11 @@ Vertical dot timeline. Upcoming events at top with faded opacity; history below 
 - **End** — sage green filled dot
 
 ### Trend Charts
-SVG sparklines. **Baseline phase:** dashed line in sand (`#d4c4a8`) with a shaded baseline region underneath. **Active phase:** solid line in sage (`#7a8c6e`). Two phases on one chart. No filled-area gradients, no axes busy work, no tooltips that explain what HRV means.
+Two distinct chart types live in the system:
+
+**Experiment trend (dual-phase).** SVG sparklines. **Baseline phase:** dashed line in sand (`#d4c4a8`) with a shaded baseline region underneath. **Active phase:** solid line in sage (`#7a8c6e`). Two phases on one chart. No filled-area gradients, no axes busy work, no tooltips that explain what HRV means.
+
+**Biomarker trend + tile pair (single-phase).** Used on the biomarker overview tab. Recharts AreaChart paired with two stacked stat tiles in a `md:grid-cols-[minmax(0,1fr)_300px] md:items-stretch` grid (chart fills, tiles each `flex-1`, heights match). Anchor the visible Y-domain on the typical band, not the data — `extraPad = bandSpan × 0.5` above and below, so the user sees headroom. Hide the Y-axis (`<YAxis hide />`) — the dashed `Typical {min}` / `Typical {max}` reference lines (sage at 50% opacity, 4-4 dash, mono labels via `insideBottomLeft` / `insideTopLeft`) carry the context. Range band is an Area at `fillOpacity={0.14}`. Series fill gradient runs `0.32 → 0.04` opacity; stroke is solid sage `2.5px`. First/last date footer in `text-[10px] text-muted-foreground` below the chart. Timeframe selector (30D / 90D / 1Y) sits top-right as a rounded pill group, active = primary fill. The two tiles: **Average tile** (mono uppercase label that adapts to timeframe — `30-DAY AVERAGE` / `90-DAY AVERAGE` / `1-YEAR AVERAGE` — Fraunces value, sans unit, sentence sub-line that reads as a finding: `"Down 4 bpm from where you started the past month."`, primary color when direction matches `goodDirection`) and **Range tile** (`55–75 bpm` Fraunces + `healthy adults` sub + right-aligned `In range` / `Out of range` pill with bg-primary/15 or bg-destructive/15 — never with an explanatory tooltip).
 
 ### Conclusions Block (Finished State Only)
 Four stacked cards, vertical:
@@ -221,6 +233,9 @@ Four stacked cards, vertical:
 ### Research / Evidence Section
 Summary stats row (studies count · participants · years · evidence level rendered as "5/5"). Below: study cards, each with a round badge — `OBS` / `RCT` / `MA` — using DM Mono in a sand-filled circle.
 
+### Compact Evidence Band
+A tighter form of the evidence section, used as a header on the biomarker research tab and anywhere a single strong claim should anchor a page section. Two stacked rows: (1) a mono uppercase metadata strip — `{N} STUDIES · {N} PARTICIPANTS · {STUDY TYPE} · 5-dot rating` (foreground for the numerals, muted for the unit words, sage filled dots for the rating, border dots for the empty); (2) a serif italic blockquote up to ~3 lines, smart-quoted, with a mono `— ATTRIBUTION, YEAR` footer below. No card surface, no shadow — the blockquote sits directly on cream paper. One quote per band; if you have multiple claims, pick the strongest and link the rest.
+
 ### Expert Cards
 Avatar circle filled sand (`#d4c4a8`) with initials in slate + name (Body 500) + field (Body muted) + quote (Body italic). No photos.
 
@@ -231,13 +246,26 @@ Caution-rating dots (1–5 filled sand dots) + "Who should avoid" list + "Precau
 240px fixed width, wood gradient (`#2d3436 → #3a2e24 → #2a1f16`). White-at-85% text. Active item gets sage dark (`#5a6e32`) background block. Hairline border-right uses `rgba(255, 255, 255, 0.1)`.
 
 ### Inputs / Fields
-Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside.
+Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside. Category and library filters use the `Select` dropdown, not a horizontal toggle pill row — toggle rows look broken in the active state when one pill has primary fill and the rest sit on transparent muted-surface, and they don't compress at small widths. Search inputs only appear when there are enough rows to need them (>~15 entries); below that, the dropdown alone is enough.
 
 ### Chips / Labels
 DM Mono uppercase with 0.11em tracking. Muted-surface background (`rgba(196, 168, 130, 0.15)`), slate-muted text, rounded-sm, 4px 8px padding. Used for phase names, units, and filing-card metadata.
 
+### About Intro Grid
+A 3-column intro band that sits **above** the route tabs on biomarker (and similar concept) pages. Each column: small Quiver-style icon on the left at `size-8 text-primary/85` (icon style follows "Concept Icon Sets" below), mono uppercase eyebrow above a sans body paragraph on the right. Three slots that map to "Why it matters / How it's measured / What moves it" for biomarkers; the same pattern works for any concept-introduction surface. Body text is `text-muted-foreground`, not foreground — it should match the page summary band's tone, not compete with the H1.
+
+### Tab Bar with Sticky Title
+For long pages with route-driven tabs (Overview / Research / etc.), use a sticky bar that pins to `top-0` once the user scrolls past the page header. Track this with an `IntersectionObserver` on a 1px sentinel placed above the bar; when the sentinel exits the viewport, fade in the page title on the right side of the bar so users keep their orientation when they're 2,000px down the page. The tabs themselves use the shared `RouteTabs` component (sliding olive primary indicator under the active tab, view-transition-name for the indicator). The sticky bar background is `bg-background/95 backdrop-blur-md` with a single `border-b border-border` baseline — never a dropshadow.
+
 ### Icons
 Lucide React (`lucide-react`) is the default. Lucide Animated (`https://lucide-animated.com`) is reserved for icons that specifically need motion — loaders, hover affordances. Install animated icons via `pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`. Icons serve comprehension; they never decorate.
+
+### Concept Icon Sets
+Bespoke iconography lives on its own track from Lucide. Two registers coexist:
+- **Quiver-authored filled paths** (e.g. `public/icons/biomarker-about/*.svg` — the heartbeat, watch face, and bidirectional arrow used in the About Intro Grid). `fill="currentColor"`, complex multi-path, hand-lettered feel. Inline the markup with `dangerouslySetInnerHTML` so callers can drive color via the surrounding text class (`text-primary/85`).
+- **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/biomarkers/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
+
+When in doubt, prefer authoring a bespoke glyph over a generic Lucide pick. The "lucide-heart for resting heart rate, lucide-droplet for glucose" reflex is the SaaS-cliché tell — Murph's whole point is that the metaphor is hand-drawn.
 
 ### Transitions
 View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Motion, no React Motion. Page transitions, tab switches, list reorders — all native. Subtle and fast; easing is exponential ease-out (quart/quint/expo). No bounce, no elastic.
@@ -289,3 +317,6 @@ Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room 
 - **Don't** import from `@radix-ui/*`. This project is shadcn on base UI (`@base-ui/react`).
 - **Don't** nest cards. Always wrong.
 - **Don't** explain what HRV means in a tooltip. Respect the user's intelligence.
+- **Don't** add explanation tooltips to UI labels the user already understands. If a badge says `In range` next to `55–75 bpm`, a tooltip restating the band is redundant. Either the label is clear without help, or the label needs to be clearer; tooltips are not the fix.
+- **Don't** use a diagonal up-right arrow (`ArrowUpRight`) on internal links. It reads as "opens in new tab / external" and misleads users on cards that navigate within the app. Use `ArrowRight` for forward navigation; for clickable cards, the surface itself is the affordance and no arrow is needed.
+- **Don't** mix filled and stroked glyphs inside a single concept icon set. Pick one (line-art for biomarker identifiers, filled for the hand-drawn About Quiver register) and hold it across every member.

@@ -36,7 +36,7 @@ The voice of a careful researcher writing up results — direct, specific, unafr
 
 ## Design Principles
 
-1. **Respect intelligence.** No tooltips explaining what HRV means. No gamification. No "great job!" messages. The user is a scientist running experiments on themselves.
+1. **Respect intelligence.** No tooltips explaining what HRV means. No gamification. No "great job!" messages. The user is a scientist running experiments on themselves. The same rule extends to UI labels — a tooltip on `In range` next to `55–75 bpm` restates what's already on screen. If a label needs a tooltip to be understood, the label needs rewriting; the tooltip is not the fix.
 2. **Space is content.** Whitespace is not wasted space — it creates focus. Every element earns its pixels. When in doubt, remove.
 3. **Data as poetry, not dashboards.** Present metrics like equations on a chalkboard — structured, beautiful, meaningful. Not pie charts in gray boxes.
 4. **Warm precision.** Scientific rigor with human warmth. The interface should feel like a well-lit research library, not a hospital or a server room.

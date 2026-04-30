@@ -16,7 +16,7 @@ import {
 } from "@/src/lib/health-commons/biomarker-detail";
 
 const mocks = vi.hoisted(() => ({
-  biomarkerPageClient: vi.fn(),
+  biomarkerLayoutClient: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -30,13 +30,14 @@ vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
 }));
 
-vi.mock("../app/biomarkers/[biomarkerId]/biomarker-page-client", () => ({
-  BiomarkerPageClient({
+vi.mock("../app/biomarkers/[biomarkerId]/biomarker-layout-client", () => ({
+  BiomarkerLayoutClient({
     biomarker,
   }: {
     biomarker: BiomarkerPageModel;
+    children?: unknown;
   }) {
-    mocks.biomarkerPageClient({ biomarker });
+    mocks.biomarkerLayoutClient({ biomarker });
 
     return createElement(
       "div",
@@ -49,10 +50,10 @@ vi.mock("../app/biomarkers/[biomarkerId]/biomarker-page-client", () => ({
   },
 }));
 
-import BiomarkerPage, {
-  generateMetadata,
+import BiomarkerDetailLayout, {
   generateStaticParams,
-} from "../app/biomarkers/[biomarkerId]/page";
+} from "../app/biomarkers/[biomarkerId]/layout";
+import { generateMetadata } from "../app/biomarkers/[biomarkerId]/page";
 import { createHealthCommonsCatalogReader } from "../src/lib/health-commons/catalog";
 
 function createFixtureCatalog(): HealthCommonsCatalog {
@@ -69,7 +70,7 @@ const changesPath = path.join(repoRoot, "packages/health-commons/content/changes
 
 describe("BiomarkerPage", () => {
   beforeEach(() => {
-    mocks.biomarkerPageClient.mockClear();
+    mocks.biomarkerLayoutClient.mockClear();
     mocks.notFound.mockClear();
     mocks.redirect.mockClear();
   });
@@ -96,15 +97,16 @@ describe("BiomarkerPage", () => {
   });
 
   it("resolves the VO₂ max biomarker page model", async () => {
-    const element = await BiomarkerPage({
+    const element = await BiomarkerDetailLayout({
+      children: createElement("div", null),
       params: Promise.resolve({
         biomarkerId: "estimated-vo2max",
       }),
     });
     const markup = renderToStaticMarkup(element);
 
-    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
-    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
+    expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
+    const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
       ?.biomarker as BiomarkerPageModel;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
@@ -163,15 +165,16 @@ describe("BiomarkerPage", () => {
   });
 
   it("resolves the SpO₂ biomarker page model", async () => {
-    const element = await BiomarkerPage({
+    const element = await BiomarkerDetailLayout({
+      children: createElement("div", null),
       params: Promise.resolve({
         biomarkerId: "blood-oxygen-spo2",
       }),
     });
     const markup = renderToStaticMarkup(element);
 
-    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
-    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
+    expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
+    const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
       ?.biomarker as BiomarkerPageModel;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
@@ -243,19 +246,36 @@ describe("BiomarkerPage", () => {
     expect(markup).toContain("Blood Oxygen Saturation (SpO₂)");
   });
 
-  it("redirects the short SpO₂ route to the canonical biomarker page", async () => {
-    await expect(BiomarkerPage({
+  it("redirects the short SpO₂ overview route to the canonical biomarker page", async () => {
+    const { default: BiomarkerOverviewPage } = await import(
+      "../app/biomarkers/[biomarkerId]/page"
+    );
+
+    await expect(BiomarkerOverviewPage({
       params: Promise.resolve({
         biomarkerId: "spo2",
       }),
     })).rejects.toThrow("NEXT_REDIRECT:/biomarkers/blood-oxygen-spo2");
 
     expect(mocks.redirect).toHaveBeenCalledWith("/biomarkers/blood-oxygen-spo2");
-    expect(mocks.biomarkerPageClient).not.toHaveBeenCalled();
     expect(resolveHealthCommonsBiomarkerDetail("spo2")).toEqual(expect.objectContaining({
       key: "biomarker:blood-oxygen-spo2",
       routeId: "blood-oxygen-spo2",
     }));
+  });
+
+  it("redirects the short SpO₂ research route to the canonical research subpath, preserving the tab", async () => {
+    const { default: BiomarkerResearchPage } = await import(
+      "../app/biomarkers/[biomarkerId]/research/page"
+    );
+
+    await expect(BiomarkerResearchPage({
+      params: Promise.resolve({
+        biomarkerId: "spo2",
+      }),
+    })).rejects.toThrow("NEXT_REDIRECT:/biomarkers/blood-oxygen-spo2/research");
+
+    expect(mocks.redirect).toHaveBeenCalledWith("/biomarkers/blood-oxygen-spo2/research");
   });
 
   it("keeps the authored SpO₂ evidence claims and follow-up change note in repo content", () => {
@@ -276,15 +296,16 @@ describe("BiomarkerPage", () => {
   });
 
   it("resolves the REM sleep biomarker page model", async () => {
-    const element = await BiomarkerPage({
+    const element = await BiomarkerDetailLayout({
+      children: createElement("div", null),
       params: Promise.resolve({
         biomarkerId: "rem-sleep-minutes",
       }),
     });
     const markup = renderToStaticMarkup(element);
 
-    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
-    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
+    expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
+    const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
       ?.biomarker as BiomarkerPageModel;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
@@ -321,15 +342,16 @@ describe("BiomarkerPage", () => {
   });
 
   it("resolves the deep sleep biomarker page model", async () => {
-    const element = await BiomarkerPage({
+    const element = await BiomarkerDetailLayout({
+      children: createElement("div", null),
       params: Promise.resolve({
         biomarkerId: "deep-sleep-minutes",
       }),
     });
     const markup = renderToStaticMarkup(element);
 
-    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
-    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
+    expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
+    const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
       ?.biomarker as BiomarkerPageModel;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
@@ -394,15 +416,16 @@ describe("BiomarkerPage", () => {
   });
 
   it("resolves the HRV biomarker page model", async () => {
-    const element = await BiomarkerPage({
+    const element = await BiomarkerDetailLayout({
+      children: createElement("div", null),
       params: Promise.resolve({
         biomarkerId: "hrv-rmssd",
       }),
     });
     const markup = renderToStaticMarkup(element);
 
-    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
-    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
+    expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
+    const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
       ?.biomarker as BiomarkerPageModel;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
@@ -468,15 +491,16 @@ describe("BiomarkerPage", () => {
   });
 
   it("resolves the resting-heart-rate biomarker page model", async () => {
-    const element = await BiomarkerPage({
+    const element = await BiomarkerDetailLayout({
+      children: createElement("div", null),
       params: Promise.resolve({
         biomarkerId: "resting-heart-rate",
       }),
     });
     const markup = renderToStaticMarkup(element);
 
-    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
-    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
+    expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
+    const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
       ?.biomarker as BiomarkerPageModel;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
@@ -554,7 +578,8 @@ describe("BiomarkerPage", () => {
   });
 
   it("returns notFound for unsupported biomarker pages", async () => {
-    await expect(BiomarkerPage({
+    await expect(BiomarkerDetailLayout({
+      children: createElement("div", null),
       params: Promise.resolve({
         biomarkerId: "unknown-biomarker",
       }),
