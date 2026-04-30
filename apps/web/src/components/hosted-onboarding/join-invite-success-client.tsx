@@ -16,6 +16,7 @@ import { useHostedInviteStatusRefresh } from "./invite-status-client";
 
 const HOSTED_CHECKOUT_SUCCESS_SUPPORT_DELAY_MS = 60_000;
 const HOSTED_CHECKOUT_SUCCESS_SUPPORT_EMAIL = "support@withmurph.ai";
+const HOSTED_CHECKOUT_SUCCESS_HOME_PATH = "/home";
 
 interface JoinInviteSuccessClientProps {
   initialStatus: HostedInviteStatusPayload;
@@ -43,8 +44,12 @@ export function JoinInviteSuccessClient({
   const [delayedSetupSupportStage, setDelayedSetupSupportStage] = useState<
     HostedInviteStatusPayload["stage"] | null
   >(null);
+  const [successSyncCompletionCount, setSuccessSyncCompletionCount] = useState(0);
+  const mountedRef = useRef(true);
   const successSyncStartedRef = useRef(false);
+  const successSyncInFlightRef = useRef(false);
   const shouldPoll = isHostedOnboardingPendingStage(status.stage);
+  const shouldRedirectToHome = shouldRedirectHostedInviteSuccessToHome(status);
 
   useHostedInviteStatusRefresh({
     inviteCode,
@@ -60,6 +65,12 @@ export function JoinInviteSuccessClient({
   });
 
   useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (
       preview ||
       successSyncStartedRef.current ||
@@ -72,6 +83,7 @@ export function JoinInviteSuccessClient({
 
     let cancelled = false;
     successSyncStartedRef.current = true;
+    successSyncInFlightRef.current = true;
 
     void requestHostedBillingSuccess({
       inviteCode,
@@ -91,6 +103,12 @@ export function JoinInviteSuccessClient({
         }
 
         setErrorMessage(error instanceof Error ? error.message : "Unable to refresh setup status.");
+      })
+      .finally(() => {
+        successSyncInFlightRef.current = false;
+        if (mountedRef.current) {
+          setSuccessSyncCompletionCount((count) => count + 1);
+        }
       });
 
     return () => {
@@ -112,6 +130,18 @@ export function JoinInviteSuccessClient({
       window.clearTimeout(timeoutId);
     };
   }, [preview, sessionId, shouldPoll, status.stage]);
+
+  useEffect(() => {
+    if (
+      preview ||
+      successSyncInFlightRef.current ||
+      !shouldRedirectToHome
+    ) {
+      return;
+    }
+
+    window.location.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
+  }, [preview, shouldRedirectToHome, successSyncCompletionCount]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}`;
   const successState = resolveHostedInviteSuccessState(status);
@@ -190,7 +220,23 @@ export function JoinInviteSuccessClient({
         </Alert>
       ) : null}
 
-      <Button type="button" onClick={() => window.location.assign(href)} size="lg" className="w-fit">
+      <Button
+        type="button"
+        onClick={() => {
+          if (!preview && shouldRedirectToHome) {
+            if (successSyncInFlightRef.current) {
+              return;
+            }
+
+            window.location.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
+            return;
+          }
+
+          window.location.assign(href);
+        }}
+        size="lg"
+        className="w-fit"
+      >
         {successState.buttonLabel}
       </Button>
     </div>
@@ -199,6 +245,12 @@ export function JoinInviteSuccessClient({
 
 function shouldRequestHostedBillingSuccess(stage: HostedInviteStatusPayload["stage"]): boolean {
   return stage === "checkout" || stage === "activating" || stage === "active";
+}
+
+function shouldRedirectHostedInviteSuccessToHome(status: HostedInviteStatusPayload): boolean {
+  return status.stage === "active"
+    && status.session.authenticated
+    && status.session.matchesInvite;
 }
 
 function buildHostedCheckoutSuccessSupportMailto(input: {
@@ -224,8 +276,8 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
   switch (status.stage) {
     case "active":
       return {
-        buttonLabel: "Continue",
-        description: "Head back to your invite to start.",
+        buttonLabel: "Open home",
+        description: "Opening your home page.",
         pending: false,
         title: "You’re all set",
         variant: "active",
