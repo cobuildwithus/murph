@@ -123,9 +123,64 @@ describe("health commons catalog", () => {
       },
       revision: {
         runSpecRevisionId:
-          "sha256:dd6fa6e801290483298ef7232664108eeef7172c8c361d9e049428c08e1cd485",
+          "sha256:d48e21a05712d585bf52482c8f56ddb0676cf1c369bda3bd631c6788ed6061ad",
       },
     });
+    expect(redLightProtocol?.expectedSignalDescriptions?.map((signal) => signal.biomarkerKey)).toEqual([
+      "biomarker:sleep-onset-latency",
+      "biomarker:sleep-efficiency",
+      "biomarker:resting-heart-rate",
+      "biomarker:hrv-rmssd",
+      "biomarker:deep-sleep-minutes",
+    ]);
+    expect(redLightProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:sleep-onset-latency",
+      estimatedChange: expect.objectContaining({
+        confidence: "mixed",
+        high: 0,
+        kind: "absolute",
+        low: -10,
+        unit: "min",
+      }),
+      protocolProminence: "focus",
+    }));
+    expect(redLightProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:sleep-efficiency",
+      estimatedChange: expect.objectContaining({
+        confidence: "mixed",
+        high: 2,
+        kind: "absolute",
+        low: -1,
+        unit: "percentage points",
+      }),
+    }));
+    expect(redLightProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:resting-heart-rate",
+      estimatedChange: expect.objectContaining({
+        confidence: "low",
+        high: 0,
+        kind: "absolute",
+        low: -2,
+        unit: "bpm",
+      }),
+    }));
+    expect(redLightProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:hrv-rmssd",
+      estimatedChange: expect.objectContaining({
+        confidence: "low",
+        high: 5,
+        kind: "relative_percent",
+        low: 0,
+        unit: "%",
+      }),
+    }));
+    expect(redLightProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
+      biomarkerKey: "biomarker:deep-sleep-minutes",
+      estimatedChange: expect.objectContaining({
+        confidence: "low",
+        kind: "mixed_or_contextual",
+      }),
+    }));
 
     expect(catalog.redirects).toContainEqual(
       expect.objectContaining({
