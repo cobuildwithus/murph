@@ -36,13 +36,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     privyVerificationKey: "privy-verification-key",
     publicBaseUrl: "https://join.example.test",
     stripePriceIdsByPlan: {
-      launch_annual: "price_annual_123",
+      launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
     },
     stripeSecretKey: "sk_test_123",
     stripeUsageMeterEventName: "murph_ai_tokens",
     stripeUsagePriceIdsByPlan: {
-      launch_annual: "price_usage_annual_123",
+      launch_edge_monthly: "price_usage_edge_monthly_123",
       launch_monthly: "price_usage_monthly_123",
     },
     stripeWebhookSecret: "whsec_123",

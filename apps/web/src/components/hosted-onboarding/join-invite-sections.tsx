@@ -18,7 +18,9 @@ interface JoinInviteStageContentProps {
   status: HostedInviteStatusPayload;
   statusRefreshErrorMessage: string | null;
   statusRefreshRetryPending: boolean;
-  onCheckout: () => Promise<void>;
+  onCheckout: (
+    billingPlanCode?: HostedInviteStatusPayload["billing"]["defaultPlanCode"],
+  ) => Promise<void>;
   onCheckoutSuccess: () => void;
   onCheckoutError: (error: unknown) => void;
   onSelectBillingPlan: (

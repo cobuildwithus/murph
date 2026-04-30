@@ -34,13 +34,13 @@ function createHostedOnboardingEnvironment(
     privyVerificationKey: null,
     publicBaseUrl: "https://join.example.test",
     stripePriceIdsByPlan: {
-      launch_annual: "price_annual_123",
+      launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
     },
     stripeSecretKey: "sk_test_123",
     stripeUsageMeterEventName: null,
     stripeUsagePriceIdsByPlan: {
-      launch_annual: null,
+      launch_edge_monthly: null,
       launch_monthly: null,
     },
     stripeWebhookSecret: null,
@@ -75,7 +75,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         aiUsageBillingMode: "stripe_meter",
         stripeUsageMeterEventName: null,
         stripeUsagePriceIdsByPlan: {
-          launch_annual: "price_usage_annual_123",
+          launch_edge_monthly: "price_usage_edge_monthly_123",
           launch_monthly: "price_usage_monthly_123",
         },
       });
@@ -98,7 +98,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         aiUsageBillingMode: "stripe_meter",
         stripeUsageMeterEventName: "ai_total_tokens",
         stripeUsagePriceIdsByPlan: {
-          launch_annual: "price_usage_annual_123",
+          launch_edge_monthly: "price_usage_edge_monthly_123",
           launch_monthly: null,
         },
       });

@@ -2,11 +2,11 @@ import type { HostedAiUsageBillingMode } from "@murphai/hosted-execution";
 
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
-  "launch_annual",
+  "launch_edge_monthly",
 ] as const;
 
 export type HostedBillingPlanCode = (typeof HOSTED_BILLING_PLAN_CODES)[number];
-export type HostedBillingPlanInterval = "month" | "year";
+export type HostedBillingPlanInterval = "month";
 
 export interface HostedBillingPlanDefinition {
   readonly badge: string | null;
@@ -29,23 +29,23 @@ export interface HostedBillingPlanPresentation {
 }
 
 const HOSTED_BILLING_PLAN_DEFINITIONS = {
-  launch_annual: {
-    badge: "2 months free",
-    code: "launch_annual",
-    displayName: "Annual",
-    interval: "year",
-    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
-    recurringAmountUsdCents: 8_000,
-    usagePriceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL",
-  },
   launch_monthly: {
     badge: null,
     code: "launch_monthly",
-    displayName: "Monthly",
+    displayName: "Pulse",
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
     recurringAmountUsdCents: 800,
     usagePriceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY",
+  },
+  launch_edge_monthly: {
+    badge: null,
+    code: "launch_edge_monthly",
+    displayName: "Edge",
+    interval: "month",
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+    recurringAmountUsdCents: 2_000,
+    usagePriceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
@@ -121,14 +121,6 @@ export function formatHostedLandingPricingLongSummary(): string {
   )}/month`;
 }
 
-export function formatHostedLandingAnnualEquivalentSummary(): string {
-  const annualAmountUsdCents =
-    getHostedBillingPlanDefinition("launch_annual").recurringAmountUsdCents;
-  return `${formatUsdMonthlyEquivalent(
-    annualAmountUsdCents
-  )}/month billed yearly`;
-}
-
 function buildHostedBillingPlanPresentation(
   code: HostedBillingPlanCode
 ): HostedBillingPlanPresentation {
@@ -141,10 +133,7 @@ function buildHostedBillingPlanPresentation(
     interval: definition.interval,
     recurringAmountUsdCents: definition.recurringAmountUsdCents,
     recurringAmountLabel: formatUsdLong(definition.recurringAmountUsdCents),
-    recurringSummary:
-      definition.interval === "month"
-        ? `${formatUsdCompact(definition.recurringAmountUsdCents)}/mo`
-        : `${formatUsdCompact(definition.recurringAmountUsdCents)}/yr`,
+    recurringSummary: `${formatUsdCompact(definition.recurringAmountUsdCents)}/mo`,
   };
 }
 
@@ -177,12 +166,4 @@ function formatUsdCompact(amountUsdCents: number): string {
 
 function formatUsdLong(amountUsdCents: number): string {
   return `$${(amountUsdCents / 100).toFixed(0)}`;
-}
-
-function formatUsdMonthlyEquivalent(amountUsdCents: number): string {
-  const monthlyAmount = amountUsdCents / 1200;
-  const rounded = Number.isInteger(monthlyAmount)
-    ? monthlyAmount.toFixed(0)
-    : monthlyAmount.toFixed(2);
-  return `$${rounded}`;
 }

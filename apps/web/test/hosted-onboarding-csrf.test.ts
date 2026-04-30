@@ -156,13 +156,13 @@ function createHostedOnboardingEnvironment(
     privyVerificationKey: null,
     publicBaseUrl: null,
     stripePriceIdsByPlan: {
-      launch_annual: null,
+      launch_edge_monthly: null,
       launch_monthly: null,
     },
     stripeSecretKey: null,
     stripeUsageMeterEventName: null,
     stripeUsagePriceIdsByPlan: {
-      launch_annual: null,
+      launch_edge_monthly: null,
       launch_monthly: null,
     },
     stripeWebhookSecret: null,

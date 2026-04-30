@@ -52,13 +52,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     privyVerificationKey: "privy-key",
     publicBaseUrl: "https://join.example.test",
     stripePriceIdsByPlan: {
-      launch_annual: "price_annual_123",
+      launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
     },
     stripeSecretKey: "sk_test_123",
     stripeUsageMeterEventName: "murph_ai_tokens",
     stripeUsagePriceIdsByPlan: {
-      launch_annual: "price_usage_annual_123",
+      launch_edge_monthly: "price_usage_edge_monthly_123",
       launch_monthly: "price_usage_monthly_123",
     },
     stripeWebhookSecret: "whsec_123",
@@ -239,6 +239,56 @@ describe("createHostedBillingCheckout", () => {
         outcome: "completed",
         step: "hosted-onboarding.billing.create-checkout",
       }),
+    );
+  });
+
+  it("creates checkout for the selected Edge monthly plan", async () => {
+    mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
+      billingPlanCode: "launch_edge_monthly",
+      priceId: "price_edge_monthly_123",
+      stripe: mocks.stripe,
+      usagePriceId: null,
+    });
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(
+      createHostedBillingCheckout({
+        billingPlanCode: "launch_edge_monthly",
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+
+    expect(mocks.requireHostedStripeCheckoutConfig).toHaveBeenCalledWith({
+      billingPlanCode: "launch_edge_monthly",
+    });
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        line_items: [
+          {
+            price: "price_edge_monthly_123",
+            quantity: 1,
+          },
+        ],
+        metadata: {
+          billingPlanCode: "launch_edge_monthly",
+          memberId: "member_123",
+        },
+        subscription_data: {
+          metadata: {
+            billingPlanCode: "launch_edge_monthly",
+            memberId: "member_123",
+          },
+        },
+      }),
+      {
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_edge_monthly:items:738ec8b511de:customer:none",
+      },
     );
   });
 

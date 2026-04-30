@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => {
       publicBaseUrl: "https://join.example.test",
       stripeBillingMode: "payment" as const,
       stripePriceIdsByPlan: {
-        launch_annual: "price_annual_123",
+        launch_edge_monthly: "price_edge_monthly_123",
         launch_monthly: "price_monthly_123",
       },
       stripeSecretKey: "sk_test_123",
