@@ -21,6 +21,22 @@ export {
   markAssistantAutoReplyLinqCleanupQueued,
 } from './automation/evidence.js'
 export {
+  assistantInputIdFromInboxCaptureId,
+  createInboxBackedAssistantInputSource,
+  createNoopAssistantInputSource,
+  inboxCaptureIdFromAssistantInputId,
+  type AssistantInputCandidate,
+  type AssistantInputCandidateBatch,
+  type AssistantInputCandidateQuery,
+  type AssistantInputCursor,
+  type AssistantInputEvent,
+  type AssistantInputProjection,
+  type AssistantInputProjectionStatus,
+  type AssistantInputSource,
+  type AssistantInputSourceRef,
+  type AssistantTurnConversationInputQuery,
+} from './input-source.js'
+export {
   createInboxBackedAssistantTurnInputPort,
   createNoopAssistantTurnInputPort,
   AssistantActiveTurnInputCheckpointRejectedError,
