@@ -33,11 +33,11 @@ relations:
 - type: secondary_biomarker
   target: biomarker:deep-sleep-minutes
 - type: secondary_biomarker
-  target: biomarker:hrv-rmssd
-- type: secondary_biomarker
   target: biomarker:resting-heart-rate
 - type: secondary_biomarker
   target: biomarker:morning-blood-pressure
+- type: secondary_biomarker
+  target: biomarker:hrv-rmssd
 - type: cites
   target: source_artifact:caffeine-timing-bibliography
 lineage:
@@ -85,6 +85,10 @@ protocol:
   - sleep onset latency
   - sleep efficiency
   - total sleep time
+  - wake after sleep onset if available
+  - deep sleep minutes
+  - resting heart rate
+  - HRV RMSSD
   - sleep quality
   - withdrawal symptoms
   - headache or migraine symptoms
@@ -110,16 +114,86 @@ testPlans:
   secondaryBiomarkerKeys:
   - biomarker:sleep-efficiency
   - biomarker:deep-sleep-minutes
-  - biomarker:hrv-rmssd
   - biomarker:resting-heart-rate
   - biomarker:morning-blood-pressure
+  - biomarker:hrv-rmssd
   minimumAdherenceSessions: 10
   targetAdherenceSessions: 12
   notes:
   - Use a 7-day baseline when available; otherwise, treat the first run as weaker attribution.
   - Score only days where all caffeine was logged and the cutoff was met or clearly marked as missed.
   - Pair wearable sleep metrics with subjective sleep onset, sleep quality, withdrawal symptoms, and curfew adherence.
-  - Treat HRV, resting heart rate, deep sleep, and blood pressure as exploratory or safety-context signals, not proof that a sleep disorder was treated.
+  - Anchor interpretation in sleep onset and sleep continuity; use deep-sleep staging, resting heart rate, blood pressure, and HRV as supporting same-device trends.
+expectedSignalDescriptions:
+- biomarkerKey: biomarker:sleep-onset-latency
+  description: Moving caffeine earlier lowers residual adenosine blockade and stimulant arousal near bedtime, so sleep pressure can show up sooner instead of being pushed later.
+  expected: May shorten
+  estimatedChange:
+    kind: absolute
+    low: -15
+    high: -5
+    unit: minutes
+    window: 14 intervention days
+    confidence: moderate
+    basis: Caffeine sleep meta-analyses and 400 mg timing trials report roughly 8-9 minutes longer sleep-onset latency with caffeine challenges; this protocol estimates the regain for users whose baseline included late or high-dose caffeine.
+  protocolProminence: focus
+- biomarkerKey: biomarker:sleep-efficiency
+  description: Less residual caffeine can reduce quiet wakefulness and overnight fragmentation, so more time in bed becomes actual sleep.
+  expected: Could improve
+  estimatedChange:
+    kind: absolute
+    low: 2
+    high: 7
+    unit: percentage points
+    window: 14 intervention days
+    confidence: moderate
+    basis: Quantitative caffeine sleep syntheses report about 5-7 percentage-point lower sleep efficiency after caffeine challenges; athlete late-caffeine synthesis reported about 4.9 points lower with sensitivity limitations.
+  protocolProminence: focus
+- biomarkerKey: biomarker:deep-sleep-minutes
+  description: Caffeine can keep sleep lighter and reduce slow-wave/N3 sleep; shifting dose earlier or lower may let deeper NREM sleep reappear on nights that were previously caffeine-affected.
+  expected: Could increase
+  estimatedChange:
+    kind: absolute
+    low: 5
+    high: 12
+    unit: minutes
+    window: 14 intervention days
+    confidence: low
+    basis: A caffeine sleep meta-analysis reported about 11.4 fewer deep-sleep minutes after caffeine; consumer wearables estimate stages indirectly, so use same-device trends beside duration and efficiency.
+  protocolProminence: focus
+- biomarkerKey: biomarker:resting-heart-rate
+  description: If the curfew reduces nighttime stimulation and sleep fragmentation, sympathetic load can drop and same-device overnight resting heart rate may settle lower.
+  expected: Could trend lower
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 0
+    unit: bpm
+    window: 14 intervention days
+    confidence: low
+    basis: Direct caffeine-curfew resting-heart-rate trials were not extracted; this is an indirect autonomic and sleep-continuity estimate for users whose late caffeine was causing nighttime arousal.
+  protocolProminence: context
+- biomarkerKey: biomarker:morning-blood-pressure
+  description: Caffeine can acutely raise vascular tone in sensitive users; avoiding late doses and large boluses may leave less residual stimulation at the next morning's home-cuff reading.
+  expected: Could trend lower
+  estimatedChange:
+    kind: absolute
+    low: -4
+    high: 0
+    unit: mmHg systolic
+    window: 14 intervention days
+    confidence: low
+    basis: Blood-pressure effects are acute and user-specific; no direct 14-day curfew blood-pressure trial was extracted, so this range is a safety-context estimate for sensitive or late-dosing users.
+  protocolProminence: context
+- biomarkerKey: biomarker:hrv-rmssd
+  description: Smoother sleep can support parasympathetic recovery, but caffeine and withdrawal can move RMSSD in different directions; use HRV to judge recoverability, not as the win condition.
+  expected: Could stabilize
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: 14 intervention days
+    confidence: low
+    basis: Caffeine-HRV evidence is heterogeneous, and overnight RMSSD depends on sleep stage, illness, alcohol, stress, and device window.
+  protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -134,7 +208,7 @@ experimentOnboarding:
       - experiment list --status active
     - id: sleep_baseline
       label: Sleep baseline
-      reason: Check whether sleep-onset, sleep-efficiency, total sleep, HRV, resting-heart-rate, or blood-pressure trends are available before intervention.
+      reason: Check whether sleep-onset, sleep-efficiency, total sleep, deep-sleep, resting-heart-rate, HRV, or blood-pressure trends are available before intervention.
       freshnessDays: 14
       readHints:
       - wearables sources list
@@ -828,6 +902,10 @@ nightlyLoggingFields:
 - sleep_onset_latency_minutes
 - sleep_efficiency
 - total_sleep_time
+- wake_after_sleep_onset_minutes
+- deep_sleep_minutes
+- resting_heart_rate
+- hrv_rmssd
 - sleep_quality_rating
 - withdrawal_symptoms
 - headache_or_migraine
@@ -885,28 +963,24 @@ Do not use caffeine pills, pure caffeine powder, liquid caffeine concentrate, en
 
 Stop the experiment and seek urgent guidance for chest pain, fainting, rapid or erratic heartbeat, severe palpitations, seizure, severe vomiting or diarrhea, confusion, disorientation, thunderclap headache, neurologic symptoms, or suspected caffeine overdose. Do not drive, operate machinery, or do safety-critical work when withdrawal or sleepiness is impairing alertness.
 
-## What counts as a signal
+## What could change
 
 Primary signal:
 
-- sleep-onset latency improves compared with the user’s baseline on adherent days
+- **Sleep-onset latency:** less residual caffeine near bedtime means adenosine pressure is less blocked; affected users may fall asleep about **5-15 minutes faster** on adherent nights.
 
-Useful secondary signals:
+Useful objective signals:
 
-- sleep efficiency
-- total sleep time or wake after sleep onset, when available
-- subjective sleep quality
-- next-morning energy or recovery notes
+- **Sleep efficiency:** less stimulant arousal can turn more time in bed into sleep; same-device or diary efficiency may rise about **2-7 percentage points**.
+- **Total sleep time or wake after sleep onset:** less fragmentation can add about **20-45 minutes** of sleep or cut overnight wake time by about **5-12 minutes** when late or high-dose caffeine was the driver.
+- **Deep sleep minutes:** caffeine can keep sleep lighter and suppress slow-wave sleep; same-device deep sleep may rise roughly **5-12 minutes** when late or high-dose caffeine was the driver.
+- **Resting heart rate:** smoother, less stimulated nights can lower overnight strain; wearable RHR may be **stable to 2 bpm lower**.
+- **Morning blood pressure, when relevant:** less residual stimulation can trim sensitive users' home-cuff readings by about **0-4 mmHg systolic**.
+- **HRV/RMSSD:** smoother sleep can support parasympathetic recovery, but caffeine and withdrawal move RMSSD inconsistently; use same-device HRV as recoverability context.
 
-Exploratory or safety-context signals:
+Subjective sleep quality, next-morning energy, headache, anxiety, palpitations, and withdrawal notes explain the objective pattern and safety burden. They are not the outcome win by themselves.
 
-- HRV RMSSD
-- resting heart rate
-- morning blood pressure when relevant
-- withdrawal symptoms
-- anxiety, palpitations, headache, or migraine symptoms
-
-A result is interesting only when it repeats across multiple adherent days and is not better explained by alcohol, illness, travel, stress, a bedtime shift, hard late training, a new supplement or medication, or a new screen/light routine.
+Call it a signal when the pattern repeats across adherent nights and the same nights are not dominated by alcohol, illness, travel, stress, large bedtime shifts, hard late training, a new supplement or medicine, or a new screen/light routine.
 
 ## Implementation notes
 
