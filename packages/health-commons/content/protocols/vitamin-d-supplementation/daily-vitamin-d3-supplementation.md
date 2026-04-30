@@ -115,7 +115,17 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:serum-25-hydroxyvitamin-d
-    description: Daily D3 gives the body vitamin D it can convert into the blood marker 25(OH)D over weeks.
+    description: Daily D3 adds cholecalciferol for liver conversion into 25(OH)D, so the follow-up lab should rise when absorption and total intake are stable.
+    expected: Likely rises
+    estimatedChange:
+      kind: absolute
+      low: 8
+      high: 14
+      unit: ng/mL
+      window: 8–12 weeks
+      confidence: moderate
+      basis: Direct 800–1000 IU/day D3 trials show roughly +20–35 nmol/L by 8–12 weeks, equivalent to about +8–14 ng/mL; response shifts with baseline level, body size, season, sun exposure, diet, adherence, and assay.
+    protocolProminence: focus
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
