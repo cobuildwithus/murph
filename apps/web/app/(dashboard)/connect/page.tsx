@@ -31,12 +31,6 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
     name: "Whoop",
   },
   {
-    description: "Flexible hand-entered measurements, notes, workouts, and observations when no device fits.",
-    id: "manual",
-    logo: logoAsset("manual.svg"),
-    name: "Manual",
-  },
-  {
     description: "Logged workouts, routes, pace, distance, and activity history from MapMyFitness.",
     id: "mapmyfitness",
     logo: logoAsset("mapmyfitness.png"),
@@ -69,13 +63,13 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
     id: "runkeeper",
-    logo: logoAsset("runkeeper.svg"),
+    logo: logoAsset("runkeeper.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 128, 28),
     name: "Runkeeper",
   },
   {
     description: "Samsung phone and watch activity, sleep, heart, and wellness metrics.",
     id: "samsung-health",
-    logo: logoAsset("samsung-health.svg", "h-auto max-h-9 w-auto max-w-[8rem] object-contain", 112, 16),
+    logo: logoAsset("samsung-health.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 128, 24),
     name: "Samsung Health",
   },
   {
@@ -135,7 +129,7 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
     id: "garmin",
-    logo: logoAsset("garmin.svg"),
+    logo: logoAsset("garmin.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 128, 28),
     name: "Garmin",
   },
   {
