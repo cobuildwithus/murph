@@ -337,6 +337,7 @@ async function stageImportedCaptureAssistantInputEvent(input: {
       },
       occurredAt: input.capture.occurredAt,
       receivedAt: input.persisted.createdAt,
+      replyTarget: createLocalCaptureAssistantInputReplyTarget(input.capture),
       sourceRef: {
         captureId: input.persisted.captureId,
         kind: 'inbox-capture',
@@ -353,6 +354,57 @@ async function stageImportedCaptureAssistantInputEvent(input: {
     },
     vault: input.vault,
   })
+}
+
+function createLocalCaptureAssistantInputReplyTarget(
+  capture: NonNullable<InboxRunEvent['capture']>,
+) {
+  const channel = normalizeLocalAssistantInputToken(capture.source, 'capture')
+  const threadId = normalizeLocalAssistantInputReplyTargetIdentifier(
+    capture.thread?.id ?? capture.actor.id,
+  )
+  const messageId = normalizeLocalAssistantInputReplyTargetIdentifier(
+    readLocalCaptureReplyToMessageId(capture),
+  )
+
+  if (!threadId && !messageId) {
+    return {
+      channel,
+      messageId: null,
+      threadId: null,
+    }
+  }
+
+  return {
+    channel,
+    messageId,
+    threadId,
+  }
+}
+
+function readLocalCaptureReplyToMessageId(
+  capture: NonNullable<InboxRunEvent['capture']>,
+): string | null {
+  const externalId = normalizeLocalAssistantInputReplyTargetIdentifier(
+    capture.externalId,
+  )
+  if (capture.source !== 'linq' || !externalId?.startsWith('linq:')) {
+    return null
+  }
+  const messageId = normalizeLocalAssistantInputReplyTargetIdentifier(
+    externalId.slice('linq:'.length),
+  )
+  if (!messageId || messageId.startsWith('hbid:linq.message:')) {
+    return null
+  }
+  return messageId
+}
+
+function normalizeLocalAssistantInputReplyTargetIdentifier(
+  value: unknown,
+): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized.length > 0 ? normalized : null
 }
 
 function notifyImportedCaptureInputAvailable(input: {

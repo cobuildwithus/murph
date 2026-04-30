@@ -263,14 +263,12 @@ describe("runHostedAssistantAutomation", () => {
         inputSource: expect.any(Object),
       }),
     );
-    expect(mocks.initInboxRuntime).toHaveBeenCalledWith({
-      rebuild: false,
-      requestId: "req_turn_input",
-      vault: "/tmp/vault-root",
-    });
+    expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("ensures the inbox runtime exists before hosted automation runs", async () => {
+  it("runs hosted automation even when inbox init would fail", async () => {
+    mocks.initInboxRuntime.mockRejectedValueOnce(new Error("inbox init failed"));
+
     await expect(
       runHostedAssistantAutomation(
         "/tmp/vault-root",
@@ -297,11 +295,7 @@ describe("runHostedAssistantAutomation", () => {
       redactedLogEntries: expect.any(Array),
     });
 
-    expect(mocks.initInboxRuntime).toHaveBeenCalledWith({
-      rebuild: false,
-      requestId: "req_bootstrap",
-      vault: "/tmp/vault-root",
-    });
+    expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
   });
 
@@ -463,7 +457,8 @@ describe("runHostedAssistantAutomation", () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onEvent?.({
         captureId: "capture_123",
-        details: "reply sent",
+        details: "telegram -> real_thread_id",
+        safeDetails: "reply_sent",
         type: "capture.replied",
       });
       return {
@@ -472,27 +467,27 @@ describe("runHostedAssistantAutomation", () => {
       };
     });
 
-    await expect(
-      runHostedAssistantAutomation(
-        "/tmp/vault-root",
-        "req_123",
-        {
-          hosted: {
-            issueDeviceConnectLink: vi.fn(),
-            memberId: "member_123",
-            userEnvKeys: [],
-          },
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_123",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
         },
-        {
-          eventId: "evt_automation_event",
-          kind: "runtime.timer",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        createHostedAutomationRuntime(),
-      ),
-    ).resolves.toEqual({
+      },
+      {
+        eventId: "evt_automation_event",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      createHostedAutomationRuntime(),
+    );
+
+    expect(result).toEqual({
       nextWakeAt: "2026-04-08T01:15:00.000Z",
       progressed: true,
       redactedLogEntries: [
@@ -503,7 +498,7 @@ describe("runHostedAssistantAutomation", () => {
           message: "Hosted assistant automation event: capture.replied.",
           redacted: expect.objectContaining({
             captureIdPresent: true,
-            details: "reply sent",
+            safeDetails: "reply_sent",
             type: "capture.replied",
           }),
         }),
@@ -519,6 +514,9 @@ describe("runHostedAssistantAutomation", () => {
         }),
       ],
     });
+    expect(JSON.stringify(result.redactedLogEntries)).not.toContain(
+      "real_thread_id",
+    );
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -534,12 +532,15 @@ describe("runHostedAssistantAutomation", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           captureIdPresent: true,
-          details: "reply sent",
+          safeDetails: "reply_sent",
           type: "capture.replied",
         }),
         message: "Hosted assistant automation event: capture.replied.",
       }),
     );
+    expect(
+      JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
+    ).not.toContain("real_thread_id");
   });
 
   it("treats missing inbox runtime state as a non-fatal bootstrap gap", async () => {

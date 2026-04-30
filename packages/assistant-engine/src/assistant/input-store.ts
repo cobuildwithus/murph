@@ -23,6 +23,7 @@ export const ASSISTANT_INPUT_EVENT_SCHEMA = 'murph.assistant-input-event.v1'
 export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
 export const ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH = 20_000
 export const ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT = 32
+const ASSISTANT_INPUT_EVENT_REPLY_TARGET_MAX_LENGTH = 512
 
 export type AssistantInputConversationRef = AssistantConversationCaptureRef
 export type AssistantInputProjectionStatus =
@@ -170,8 +171,8 @@ const assistantInputProjectionSchema = z
 const assistantInputReplyTargetSchema = z
   .object({
     channel: safeNullableAssistantInputTokenSchema('channel'),
-    messageId: safeNullableAssistantInputTokenSchema('messageId'),
-    threadId: safeNullableAssistantInputTokenSchema('threadId'),
+    messageId: privateNullableAssistantInputRouteScalarSchema('messageId'),
+    threadId: privateNullableAssistantInputRouteScalarSchema('threadId'),
   })
   .strict()
 
@@ -410,6 +411,23 @@ export async function listAssistantInputEvents(input: {
     }
     throw error
   }
+}
+
+export async function readLatestAssistantInputCursor(input: {
+  onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
+  paths?: AssistantStatePaths
+  skipInvalidRecords?: boolean
+  vault?: string
+}): Promise<AssistantInputCursor | null> {
+  const listed = await listAssistantInputEvents({
+    limit: Number.MAX_SAFE_INTEGER,
+    onInvalidRecord: input.onInvalidRecord,
+    paths: input.paths,
+    skipInvalidRecords: input.skipInvalidRecords,
+    vault: input.vault,
+  })
+
+  return listed.events.at(-1)?.cursor ?? null
 }
 
 export async function listAssistantInputProjectionAttempts(input: {
@@ -878,6 +896,33 @@ function safeNullableAssistantInputTokenSchema(
   return safeAssistantInputTokenSchema(fieldName).nullable().default(null)
 }
 
+function privateAssistantInputRouteScalarSchema(fieldName: string) {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .max(ASSISTANT_INPUT_EVENT_REPLY_TARGET_MAX_LENGTH)
+    .superRefine((value, context) => {
+      if (hasControlCharacters(value)) {
+        context.addIssue({
+          code: 'custom',
+          message: `${fieldName} must not contain control characters.`,
+        })
+        return
+      }
+      if (isUnsafeAssistantInputRouteScalar(value)) {
+        context.addIssue({
+          code: 'custom',
+          message: `${fieldName} must be bounded route authority, not a path, URL, raw payload, or secret.`,
+        })
+      }
+    })
+}
+
+function privateNullableAssistantInputRouteScalarSchema(fieldName: string) {
+  return privateAssistantInputRouteScalarSchema(fieldName).nullable().default(null)
+}
+
 function safeAssistantInputTimestampSchema(
   fieldName: string,
 ) {
@@ -1119,6 +1164,23 @@ function isUnsafeAssistantInputScalar(value: string): boolean {
     value.includes('"') ||
     value.toLowerCase().includes('authorization')
   )
+}
+
+function isUnsafeAssistantInputRouteScalar(value: string): boolean {
+  const lowerValue = value.toLowerCase()
+  return (
+    isPathOrUrlLike(value) ||
+    value.includes('{') ||
+    value.includes('}') ||
+    value.includes('"') ||
+    lowerValue.includes('authorization') ||
+    lowerValue.includes('set-cookie') ||
+    lowerValue.includes('x-api-key')
+  )
+}
+
+function hasControlCharacters(value: string): boolean {
+  return /[\u0000-\u001f\u007f]/u.test(value)
 }
 
 function isPathOrUrlLike(value: string): boolean {

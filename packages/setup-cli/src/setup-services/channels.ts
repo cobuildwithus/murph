@@ -57,9 +57,6 @@ type SetupAddedEmailConnectorResult = SetupAddedConnectorResult & {
 type SetupChannelAddedResult =
   | SetupAddedConnectorResult
   | SetupAddedEmailConnectorResult
-type SetupInboxListResult = Awaited<
-  ReturnType<NonNullable<SetupChannelInboxServices['list']>>
->
 type SetupReadiness = Awaited<ReturnType<typeof probeSetupReadiness>>
 
 type SetupChannelMessages = {
@@ -168,42 +165,6 @@ function isSetupManagedAutoReplyChannel(
   platform: NodeJS.Platform,
 ): channel is SetupChannel {
   return isSetupChannel(channel) && isSetupChannelSupportedOnPlatform(channel, platform)
-}
-
-function createEmptySetupInboxListResult(vault: string): SetupInboxListResult {
-  return {
-    vault,
-    filters: {
-      afterCaptureId: null,
-      afterOccurredAt: null,
-      limit: 1,
-      oldestFirst: false,
-      sourceId: null,
-    },
-    items: [],
-  }
-}
-
-function createSetupAutoReplyInboxServices(input: {
-  inboxServices: SetupChannelInboxServices
-  requestId: string | null
-  vault: string
-}): Pick<InboxServices, 'list'> {
-  const list = input.inboxServices.list
-
-  return {
-    async list(listInput) {
-      if (!list) {
-        return createEmptySetupInboxListResult(input.vault)
-      }
-
-      return list({
-        ...listInput,
-        requestId: input.requestId,
-        vault: input.vault,
-      })
-    },
-  }
 }
 
 function isTelegramSetupConnector(connector: SetupListedConnector): boolean {
@@ -747,11 +708,6 @@ async function updateAssistantChannelState(input: {
     desiredChannels: normalizeSetupChannels(input.autoReplyChannels).filter((channel) =>
       isSetupChannelSupportedOnPlatform(channel, input.platform),
     ),
-    inboxServices: createSetupAutoReplyInboxServices({
-      inboxServices: input.inboxServices,
-      requestId: input.requestId,
-      vault: input.vault,
-    }),
     isManagedChannel: (channel) =>
       isSetupManagedAutoReplyChannel(channel, input.platform),
     vault: input.vault,

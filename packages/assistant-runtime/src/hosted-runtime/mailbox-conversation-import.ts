@@ -406,7 +406,6 @@ function createHostedConversationAssistantInputEvent(input: {
     receivedAt: input.item.item.createdAt,
     replyTarget: createHostedConversationAssistantInputReplyTarget(
       input.wake,
-      identifierBlind,
     ),
     sourceRef: {
       dedupeKey: hashNullableHostedAssistantInputIdentifier(
@@ -551,17 +550,14 @@ function createHostedConversationAssistantInputConversation(
 
 function createHostedConversationAssistantInputReplyTarget(
   wake: HostedExecutionConversationMessageWake,
-  identifierBlind: HostedAssistantInputIdentifierBlind,
 ): UpsertAssistantInputEventInput["replyTarget"] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
       channel: "linq",
-      messageId: hashNullableHostedAssistantInputIdentifier(
-        identifierBlind,
+      messageId: normalizeHostedAssistantInputReplyTargetIdentifier(
         wake.message.linqMessage.messageId,
       ),
-      threadId: hashNullableHostedAssistantInputIdentifier(
-        identifierBlind,
+      threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
         wake.message.linqMessage.chatId,
       ),
     };
@@ -570,12 +566,10 @@ function createHostedConversationAssistantInputReplyTarget(
   if (isHostedTelegramConversationMessageWake(wake)) {
     return {
       channel: "telegram",
-      messageId: hashNullableHostedAssistantInputIdentifier(
-        identifierBlind,
+      messageId: normalizeHostedAssistantInputReplyTargetIdentifier(
         wake.message.telegramMessage.messageId,
       ),
-      threadId: hashNullableHostedAssistantInputIdentifier(
-        identifierBlind,
+      threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
         wake.message.telegramMessage.threadId,
       ),
     };
@@ -584,18 +578,19 @@ function createHostedConversationAssistantInputReplyTarget(
   if (isHostedEmailConversationMessageWake(wake)) {
     return {
       channel: "email",
-      messageId: hashNullableHostedAssistantInputIdentifier(
-        identifierBlind,
-        wake.eventId,
-      ),
-      threadId: hashNullableHostedAssistantInputIdentifier(
-        identifierBlind,
-        wake.message.rawMessageKey,
-      ),
+      messageId: null,
+      threadId: null,
     };
   }
 
   return null;
+}
+
+function normalizeHostedAssistantInputReplyTargetIdentifier(
+  value: string | null | undefined,
+): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function createHostedConversationAssistantInputAttachmentDescriptors(

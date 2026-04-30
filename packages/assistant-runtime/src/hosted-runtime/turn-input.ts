@@ -9,7 +9,6 @@ import {
   emitHostedExecutionStructuredLog,
   type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
-import type { InboxServices } from "@murphai/inbox-services";
 
 import type {
   NormalizedHostedAssistantRuntimeConfig,
@@ -18,14 +17,6 @@ import {
   HostedMailboxImportCheckpointConflictError,
   HostedMailboxImportCheckpointUserMismatchError,
 } from "./mailbox-checkpoint.ts";
-
-type HostedTurnInputInboxServices = InboxServices;
-
-export function createHostedAutomationInboxServices(
-  inboxServices: HostedTurnInputInboxServices,
-): HostedTurnInputInboxServices {
-  return inboxServices;
-}
 
 export function createHostedAssistantInputSource(input: {
   requestId: string;

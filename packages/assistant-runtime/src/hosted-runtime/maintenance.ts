@@ -32,7 +32,6 @@ import type {
 } from "./platform.ts";
 import {
   createHostedAssistantInputSource,
-  createHostedAutomationInboxServices,
 } from "./turn-input.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { emitHostedAssistantProviderTraceLog } from "./events.ts";
@@ -164,7 +163,6 @@ export async function runHostedAssistantAutomation(
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
 }> {
   const inboxServices = createIntegratedInboxServices();
-  const automationInboxServices = createHostedAutomationInboxServices(inboxServices);
   const vaultServices = createIntegratedVaultServices();
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
@@ -190,18 +188,12 @@ export async function runHostedAssistantAutomation(
     message: "Hosted assistant automation pass starting.",
     phase: "wake.running",
   }));
-  await inboxServices.init({
-    rebuild: false,
-    requestId,
-    vault: vaultRoot,
-  });
-
   try {
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
-      inboxServices: automationInboxServices,
+      inboxServices,
       onEvent: (event) => {
         automationEventCounts.set(
           event.type,
@@ -371,7 +363,6 @@ function buildHostedAssistantAutomationEventLogDetails(
 ): Record<string, boolean | number | string | null> {
   return {
     captureIdPresent: "captureId" in event ? event.captureId != null : false,
-    details: event.details ?? null,
     errorCode: event.errorCode ?? null,
     providerKind: event.providerKind ?? null,
     providerState: event.providerState ?? null,

@@ -4,10 +4,6 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import {
-  inboxListResultSchema,
-  type InboxListResult,
-} from '@murphai/operator-config/inbox-cli-contracts'
-import {
   hasAssistantAutoReplyChannel,
   normalizeAssistantAutoReplyChannels,
   reconcileAssistantAutoReplyState,
@@ -16,68 +12,16 @@ import {
 import {
   enableAssistantAutoReplyChannelLocal,
   managedAssistantAutoReplyChannelsNeedCursorSeed as managedChannelsNeedCursorSeed,
-  readLatestPersistedInboxCaptureCursor,
+  readLatestAssistantInputSourceCursor,
   reconcileManagedAssistantAutoReplyChannels as reconcileManagedChannels,
   reconcileManagedAssistantAutoReplyChannelsLocal,
 } from '../src/assistant/auto-reply-channels.js'
+import {
+  updateAssistantInputProjection,
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.js'
+import type { AssistantInputSource } from '../src/assistant/input-source.js'
 import { saveAssistantAutomationState } from '../src/assistant/store.js'
-
-function createInboxListResult(
-  overrides: Partial<InboxListResult> = {},
-): InboxListResult {
-  return inboxListResultSchema.parse({
-    vault: 'vault-test',
-    filters: {
-      sourceId: null,
-      limit: 1,
-      afterCreatedAt: null,
-      afterOccurredAt: null,
-      afterCaptureId: null,
-      oldestFirst: false,
-    },
-    items: [],
-    ...overrides,
-  })
-}
-
-function createListCapture(
-  overrides: Partial<InboxListResult['items'][number]> = {},
-): InboxListResult['items'][number] {
-  return inboxListResultSchema.parse({
-    vault: 'vault-test',
-    filters: {
-      sourceId: null,
-      limit: 1,
-      afterCreatedAt: null,
-      afterOccurredAt: null,
-      afterCaptureId: null,
-      oldestFirst: false,
-    },
-    items: [
-      {
-        captureId: 'cap-latest',
-        source: 'telegram',
-        accountId: 'account-1',
-        externalId: 'external-1',
-        threadId: 'thread-1',
-        threadTitle: 'Thread',
-        threadIsDirect: true,
-        actorId: 'actor-1',
-        actorName: 'Taylor',
-        actorIsSelf: false,
-        createdAt: '2026-04-10T02:00:01.000Z',
-        occurredAt: '2026-04-10T02:00:00.000Z',
-        receivedAt: null,
-        text: 'hello',
-        attachmentCount: 0,
-        envelopePath: 'inbox/telegram/cap-latest.json',
-        eventId: 'event-1',
-        promotions: [],
-        ...overrides,
-      },
-    ],
-  }).items[0]
-}
 
 function autoReplyState(
   channel: string,
@@ -90,6 +34,57 @@ function autoReplyState(
     eligibleAfter,
   }
 }
+
+async function stageHostedAssistantInput(input: {
+  createdAt: string
+  eventId: string
+  laneSeq: string
+  occurredAt: string
+  source?: string
+  text?: string
+  vault: string
+}) {
+  const source = input.source ?? 'telegram'
+  return upsertAssistantInputEvent({
+    now: new Date(input.createdAt),
+    vault: input.vault,
+    event: {
+      content: {
+        text: input.text ?? 'hello',
+        transcriptText: input.text ?? 'hello',
+        userMessageContent: [
+          {
+            text: input.text ?? 'hello',
+            type: 'text',
+          },
+        ],
+      },
+      conversation: {
+        accountId: 'account_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source,
+        threadId: 'thread_1',
+        threadIsDirect: true,
+      },
+      occurredAt: input.occurredAt,
+      receivedAt: input.createdAt,
+      sourceRef: {
+        dedupeKey: `dedupe_${input.eventId}`,
+        eventId: input.eventId,
+        itemId: `item_${input.eventId}`,
+        kind: 'hosted-mailbox',
+        lane: 'conversation',
+        laneSeq: input.laneSeq,
+        payloadSchema: 'murph.hosted-mailbox-payload.v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-execution-wake.v1',
+      },
+    },
+  })
+}
+
 test('normalizeAssistantAutoReplyChannels trims, dedupes, and sorts channels', () => {
   assert.deepEqual(
     normalizeAssistantAutoReplyChannels([
@@ -204,65 +199,67 @@ test('enableAssistantAutoReplyChannelLocal returns true when the channel is alre
   }
 })
 
-test('readLatestPersistedInboxCaptureCursor returns the latest stored cursor when available', async () => {
-  const calls: unknown[] = []
-  const cursor = await readLatestPersistedInboxCaptureCursor('vault-test', {
-    list: async (input) => {
-      calls.push(input)
-      return createInboxListResult({
-        vault: input.vault,
-        filters: {
-          sourceId: input.sourceId ?? null,
-          limit: input.limit ?? 1,
-          afterCreatedAt: input.afterCreatedAt ?? null,
-          afterOccurredAt: input.afterOccurredAt ?? null,
-          afterCaptureId: input.afterCaptureId ?? null,
-          oldestFirst: input.oldestFirst ?? false,
-        },
-        items: [createListCapture()],
-      })
-    },
-  })
+test('readLatestAssistantInputSourceCursor returns the latest staged input even when projection failed', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-input-cursor-'),
+  )
 
-  assert.deepEqual(calls, [
-    {
-      afterCaptureId: null,
-      afterCreatedAt: null,
-      afterOccurredAt: null,
-      limit: 1,
-      oldestFirst: false,
-      requestId: null,
-      sourceId: null,
-      vault: 'vault-test',
-    },
-  ])
-  assert.deepEqual(cursor, {
-    captureId: 'cap-latest',
-    createdAt: '2026-04-10T02:00:01.000Z',
-    occurredAt: '2026-04-10T02:00:00.000Z',
-  })
+  try {
+    await stageHostedAssistantInput({
+      createdAt: '2026-04-10T02:00:01.000Z',
+      eventId: 'event_earlier',
+      laneSeq: '1',
+      occurredAt: '2026-04-10T02:00:00.000Z',
+      vault: vaultRoot,
+    })
+    const latest = await stageHostedAssistantInput({
+      createdAt: '2026-04-10T03:00:01.000Z',
+      eventId: 'event_failed_projection',
+      laneSeq: '2',
+      occurredAt: '2026-04-10T03:00:00.000Z',
+      vault: vaultRoot,
+    })
+    await updateAssistantInputProjection({
+      inputId: latest.inputId,
+      projection: {
+        lastAttemptedAt: '2026-04-10T03:00:02.000Z',
+        reasonCode: 'projection.failed',
+        status: 'failed',
+      },
+      vault: vaultRoot,
+    })
+
+    const cursor = await readLatestAssistantInputSourceCursor({
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(cursor, {
+      captureId: latest.inputId,
+      createdAt: '2026-04-10T03:00:01.000Z',
+      occurredAt: '2026-04-10T03:00:00.000Z',
+    })
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
-test('readLatestPersistedInboxCaptureCursor returns null when no captures exist', async () => {
-  const cursor = await readLatestPersistedInboxCaptureCursor('vault-empty', {
-    list: async (input) =>
-      createInboxListResult({
-        vault: input.vault,
-        filters: {
-          sourceId: input.sourceId ?? null,
-          limit: input.limit ?? 1,
-          afterCreatedAt: input.afterCreatedAt ?? null,
-          afterOccurredAt: input.afterOccurredAt ?? null,
-          afterCaptureId: input.afterCaptureId ?? null,
-          oldestFirst: input.oldestFirst ?? false,
-        },
-      }),
-  })
+test('readLatestAssistantInputSourceCursor returns null when no input exists', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-input-empty-'),
+  )
 
-  assert.equal(cursor, null)
+  try {
+    const cursor = await readLatestAssistantInputSourceCursor({
+      vault: vaultRoot,
+    })
+
+    assert.equal(cursor, null)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
-test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when enabling a new managed channel', async () => {
+test('reconcileManagedAssistantAutoReplyChannelsLocal seeds from assistant input when enabling a new managed channel', async () => {
   const vaultRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-auto-reply-reconcile-'),
   )
@@ -279,30 +276,25 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
       ],
       updatedAt: '2026-04-10T00:00:00.000Z',
     })
+    const latest = await stageHostedAssistantInput({
+      createdAt: '2026-04-10T03:00:01.000Z',
+      eventId: 'event_seed_failed_projection',
+      laneSeq: '3',
+      occurredAt: '2026-04-10T03:00:00.000Z',
+      vault: vaultRoot,
+    })
+    await updateAssistantInputProjection({
+      inputId: latest.inputId,
+      projection: {
+        lastAttemptedAt: '2026-04-10T03:00:02.000Z',
+        reasonCode: 'projection.failed',
+        status: 'failed',
+      },
+      vault: vaultRoot,
+    })
 
     const result = await reconcileManagedAssistantAutoReplyChannelsLocal({
       desiredChannels: ['telegram'],
-      inboxServices: {
-        list: async (input) =>
-          createInboxListResult({
-            vault: input.vault,
-            filters: {
-              sourceId: input.sourceId ?? null,
-              limit: input.limit ?? 1,
-              afterCreatedAt: input.afterCreatedAt ?? null,
-              afterOccurredAt: input.afterOccurredAt ?? null,
-              afterCaptureId: input.afterCaptureId ?? null,
-              oldestFirst: input.oldestFirst ?? false,
-            },
-            items: [
-              createListCapture({
-                captureId: 'cap-latest',
-                createdAt: '2026-04-10T03:00:01.000Z',
-                occurredAt: '2026-04-10T03:00:00.000Z',
-              }),
-            ],
-          }),
-      },
       isManagedChannel: (channel) => channel !== 'custom',
       vault: vaultRoot,
     })
@@ -321,7 +313,7 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
         channel: 'telegram',
         enabledAt: '2026-04-10T03:00:01.000Z',
         eligibleAfter: {
-          captureId: 'cap-latest',
+          captureId: latest.inputId,
           createdAt: '2026-04-10T03:00:01.000Z',
           occurredAt: '2026-04-10T03:00:00.000Z',
         },
@@ -332,7 +324,7 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
   }
 })
 
-test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cursor without reading inbox state', async () => {
+test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cursor without reading input state', async () => {
   const vaultRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-auto-reply-explicit-cursor-'),
   )
@@ -345,19 +337,30 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cu
       updatedAt: '2026-04-10T00:00:00.000Z',
     })
 
-    const list = async () => {
-      throw new Error('expected explicit cursor seeding to skip inbox lookup')
+    const inputSource: AssistantInputSource = {
+      checkpointAcceptedInput: async () => undefined,
+      listInputCandidates: async () => {
+        throw new Error('expected explicit cursor seeding to skip input lookup')
+      },
+      listNewConversationInputs: async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      }),
+      refresh: async () => ({
+        progressed: false,
+        reason: 'no_new_input',
+      }),
     }
     const explicitCursor = {
-      captureId: 'cap-explicit',
+      captureId: 'ain_explicit',
       createdAt: '2026-04-10T04:00:01.000Z',
       occurredAt: '2026-04-10T04:00:00.000Z',
     }
 
     const result = await reconcileManagedAssistantAutoReplyChannelsLocal({
       desiredChannels: ['linq'],
-      inboxServices: { list },
-      latestCaptureCursor: explicitCursor,
+      inputSource,
+      latestInputCursor: explicitCursor,
       vault: vaultRoot,
     })
 
@@ -389,8 +392,8 @@ test('enableAssistantAutoReplyChannelLocal seeds a newly enabled channel and rep
 
     const enabled = await enableAssistantAutoReplyChannelLocal({
       channel: 'email',
-      latestCaptureCursor: {
-        captureId: 'cap-email',
+      latestInputCursor: {
+        captureId: 'ain_email',
         occurredAt: '2026-04-10T05:00:00.000Z',
       },
       vault: vaultRoot,

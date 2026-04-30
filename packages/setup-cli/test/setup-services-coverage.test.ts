@@ -490,11 +490,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
       {
         channel: 'telegram',
         enabledAt: savedAutomationState.autoReply[0]?.enabledAt,
-        eligibleAfter: {
-          captureId: 'capture-latest',
-          createdAt: null,
-          occurredAt: '2026-04-08T00:05:00.000Z',
-        },
+        eligibleAfter: null,
       },
     ])
 
@@ -642,11 +638,7 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
       {
         channel: 'telegram',
         enabledAt: savedAutomationState.autoReply[1]?.enabledAt,
-        eligibleAfter: {
-          captureId: 'capture-latest',
-          createdAt: null,
-          occurredAt: '2026-04-08T00:05:00.000Z',
-        },
+        eligibleAfter: null,
       },
     ])
   } finally {
