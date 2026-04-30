@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
-import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
+import { RouteTabs } from "@/src/components/ui/route-tabs";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
 
@@ -70,40 +70,32 @@ export function BiomarkerLayoutClient({
           </Link>
         </div>
 
-        <Tabs value={currentTab} className="w-full">
+        <div className="w-full">
           <div ref={sentinelRef} aria-hidden="true" className="h-px" />
-          <div className="sticky top-0 z-20 -mx-6 flex items-center gap-4 bg-background/95 px-6 py-2 backdrop-blur-md md:-mx-14 md:px-14">
-            <TabsList>
-              <TabsTrigger
-                value="overview"
-                className="px-3 sm:px-5"
-                nativeButton={false}
-                render={<Link href={basePath} />}
+          <div className="sticky top-0 z-20 -mx-6 border-b border-border bg-background/95 px-6 py-2 backdrop-blur-md md:-mx-14 md:px-14">
+            <div className="flex items-center gap-4">
+              <RouteTabs
+                ariaLabel="Biomarker tabs"
+                currentValue={currentTab}
+                tabs={[
+                  { value: "overview", label: "Overview", href: basePath },
+                  { value: "research", label: "Research", href: `${basePath}/research` },
+                ]}
+              />
+              <span
+                aria-hidden={!isTabsSticky}
+                className="ml-auto hidden min-w-0 truncate font-serif text-sm/5 font-semibold text-foreground transition-opacity duration-150 md:block md:text-base/6"
+                style={{
+                  opacity: isTabsSticky ? 1 : 0,
+                  pointerEvents: isTabsSticky ? "auto" : "none",
+                }}
               >
-                Overview
-              </TabsTrigger>
-              <TabsTrigger
-                value="research"
-                className="px-3 sm:px-5"
-                nativeButton={false}
-                render={<Link href={`${basePath}/research`} />}
-              >
-                Research
-              </TabsTrigger>
-            </TabsList>
-            <span
-              aria-hidden={!isTabsSticky}
-              className="ml-auto hidden min-w-0 truncate font-serif text-sm/5 font-semibold text-foreground transition-opacity duration-150 md:block md:text-base/6"
-              style={{
-                opacity: isTabsSticky ? 1 : 0,
-                pointerEvents: isTabsSticky ? "auto" : "none",
-              }}
-            >
-              {biomarker.title}
-            </span>
+                {biomarker.title}
+              </span>
+            </div>
           </div>
           <div className="pt-6">{children}</div>
-        </Tabs>
+        </div>
       </div>
     </BrowserVaultProvider>
   );
