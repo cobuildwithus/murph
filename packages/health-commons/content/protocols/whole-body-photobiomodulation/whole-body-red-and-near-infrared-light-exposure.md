@@ -40,10 +40,10 @@ relations:
     target: biomarker:resting-heart-rate
   -
     type: secondary_biomarker
-    target: biomarker:sleep-efficiency
+    target: biomarker:hrv-rmssd
   -
     type: secondary_biomarker
-    target: biomarker:hrv-rmssd
+    target: biomarker:sleep-efficiency
   -
     type: secondary_biomarker
     target: biomarker:deep-sleep-minutes
@@ -265,6 +265,7 @@ protocol:
     - acute symptoms
     - mood irritability agitation or lowered mood
     - next-morning resting heart rate
+    - next-morning HRV or RMSSD
     - sleep quality
     - daytime sleepiness
     - recovery or energy
@@ -287,30 +288,70 @@ testPlans:
     interventionDays: 28
     primaryBiomarkerKey: biomarker:resting-heart-rate
     secondaryBiomarkerKeys:
-      - biomarker:sleep-efficiency
       - biomarker:hrv-rmssd
+      - biomarker:sleep-efficiency
       - biomarker:deep-sleep-minutes
     minimumAdherenceSessions: 10
     targetAdherenceSessions: 12
     notes:
-      - The main practical question is whether a stable whole-body red/NIR routine shifts your own baseline for sleep quality, next-day sleepiness, recovery, or resting heart rate.
+      - The main practical question is whether a stable whole-body red/NIR routine lowers overnight resting pulse or lifts RMSSD without shortening sleep.
       - Use wearable metrics as repeated signals, not as single-night verdicts.
       - Keep session timing and exposure setup consistent enough that you can interpret either a positive or null result.
-      - Because the direct literature is thin, subjective sleep quality and daytime sleepiness should be logged alongside wearable signals.
+      - Log subjective sleep quality and daytime sleepiness as interpretation context beside RHR, RMSSD, and sleep-continuity trends.
 expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: If sessions reduce soreness, inflammation, or late-day arousal enough to lower overnight recovery demand, resting pulse may drift lower.
-  -
-    biomarkerKey: biomarker:sleep-efficiency
-    description: If sessions reduce discomfort or late-day arousal, sleep may be less fragmented and more time in bed may be spent asleep.
+    expected: Could trend lower
+    estimatedChange:
+      kind: absolute
+      low: -5
+      high: 0
+      unit: bpm
+      window: 4 weeks
+      confidence: low
+      basis: "Adjacent partial-body 850 nm RCT data showed -4.60 +/- 1.90 bpm in winter at 6.5 J/cm^2; whole-body athlete implementation data also showed lower nocturnal heart rate, while direct general whole-body registries have no posted outcomes."
+    protocolProminence: focus
+    description: Red/NIR exposure can increase nitric-oxide signaling and shift inflammatory/autonomic tone; if overnight recovery demand drops, the same wearable may show a lower resting pulse.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: HRV may rise if the exposure lowers overnight strain through better comfort, less soreness, or easier recovery.
+    expected: Could rise or stay stable
+    estimatedChange:
+      kind: relative_percent
+      low: 0
+      high: 10
+      unit: "%"
+      window: next morning to 4 weeks
+      confidence: low
+      basis: "An acute whole-body pre-exercise crossover trial found higher next-morning rMSSD versus placebo, and athlete implementation data showed a numerical HRV increase; neither source proves a durable general-wellness shift."
+    protocolProminence: focus
+    description: Lower recovery load gives the vagal system more room to rebound during sleep; RMSSD is the wearable signal most likely to show that autonomic shift.
+  -
+    biomarkerKey: biomarker:sleep-efficiency
+    expected: Small or no clear change
+    estimatedChange:
+      kind: absolute
+      low: -1
+      high: 2
+      unit: "%"
+      window: 4 weeks
+      confidence: low
+      basis: "The closest controlled 850 nm wellness trial did not show significant sleep or circadian effects; direct whole-body sleep registries selected Oura and sleep-quality endpoints but do not yet provide outcome data."
+    protocolProminence: context
+    description: A calmer, less uncomfortable night leaves fewer quiet-wake minutes in bed, so sleep efficiency is the cleanest sleep-continuity readout.
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: Deep-sleep minutes may rise only if the routine reduces early-night arousal or discomfort enough to keep the first sleep cycles steadier.
+    expected: Background signal
+    estimatedChange:
+      kind: absolute
+      low: -10
+      high: 10
+      unit: minutes
+      window: 4 weeks
+      confidence: low
+      basis: "No extracted study directly anchors N3 or wearable deep-sleep minutes for this protocol; the range reflects a noisy same-device context signal around otherwise null or mixed sleep findings."
+    protocolProminence: context
+    description: Early-night deep sleep can rise when the first cycles are less fragmented; use the same-device trend as a background check beside total sleep and RHR.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -592,6 +633,7 @@ experimentOnboarding:
       - daytime_sleepiness_next_day
       - recovery_or_energy_next_day
       - next_morning_resting_heart_rate
+      - next_morning_hrv_rmssd
       - missed_session_reason
     confounders:
       - bedtime_or_wake_time_change
