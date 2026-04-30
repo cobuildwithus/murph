@@ -144,12 +144,12 @@ testPlans:
   primaryBiomarkerKey: biomarker:fasting-tolerance-symptom-log
   secondaryBiomarkerKeys:
   - biomarker:refeed-tolerance-symptom-log
-  - biomarker:continuous-glucose
   - biomarker:blood-ketones-beta-hydroxybutyrate
+  - biomarker:continuous-glucose
   - biomarker:body-weight
-  - biomarker:morning-blood-pressure
   - biomarker:resting-heart-rate
   - biomarker:hrv-rmssd
+  - biomarker:morning-blood-pressure
   safetyOutcomeKeys:
   - biomarker:fasting-tolerance-symptom-log
   - biomarker:refeed-tolerance-symptom-log
@@ -158,8 +158,99 @@ testPlans:
   notes:
   - Use 7 days of baseline context where practical, then one selected fasting run and a post-refeed observation window.
   - The primary read is safe completion and refeed tolerance, not durable metabolic improvement.
-  - CGM, ketones, blood pressure, and body weight are optional or risk-driven context, not required for every user.
+  - Ketones, CGM/glucose, body weight, HR/HRV, and blood pressure are optional or risk-driven context, not required for every user.
   - Do not compare a 24-hour run directly with a 72-hour run as if they were the same dose.
+expectedSignalDescriptions:
+- biomarkerKey: biomarker:fasting-tolerance-symptom-log
+  expected: Safety signal
+  protocolProminence: focus
+  description: "Fasting pulls on glucose availability, fluid balance, caffeine routine, and stress hormones; hunger, headache, dizziness, palpitations, severe weakness, confusion, or chest symptoms show whether the selected dose is tolerable."
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: During the fast through the planned end
+    confidence: low
+    basis: "Direct 24–72 h sources support tracking hunger, dizziness, presyncope, palpitations, stress, and performance, but symptom scores are safety triggers rather than an expected improvement target."
+- biomarkerKey: biomarker:refeed-tolerance-symptom-log
+  expected: Safety signal after first meal
+  protocolProminence: focus
+  description: "Refeeding switches insulin, glucose handling, gut load, and fluid-electrolyte shifts back on. Severe weakness, confusion, ataxia, swelling, breathlessness, chest symptoms, or palpitations after the first meal are stop-and-seek-care signals."
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: First hours after the planned refeed
+    confidence: low
+    basis: "Refeeding-risk sources support symptom watch and routing for severe neurologic, cardiovascular, respiratory, swelling, or weakness symptoms, but not a home score-change estimate for low-risk 24–72 h fasts."
+- biomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
+  expected: Fuel-switch marker
+  protocolProminence: focus
+  description: "As liver glycogen falls, the liver turns fatty acids into beta-hydroxybutyrate. A higher BHB reading confirms deeper fuel switching; it is not a target to chase or a reason to extend the fast."
+  estimatedChange:
+    kind: absolute
+    low: 0.5
+    high: 4.0
+    unit: mmol/L
+    window: During or near the end of the selected 24–72 h fast
+    confidence: moderate
+    basis: "Best estimate for rise above usual overnight baseline across 24–72 h fasts. Anchored by source_artifact:pmid-29931424, source_artifact:pmid-37862821, and 24 h timing/macronutrient sources; start time, pre-fast carbohydrate load, exercise, adiposity, and fast length can move BHB substantially."
+- biomarkerKey: biomarker:continuous-glucose
+  expected: Lower during fast; watch lows and refeed rise
+  protocolProminence: focus
+  description: "With no incoming carbohydrate, the liver holds glucose up with glycogen release and gluconeogenesis while tissues shift toward fat and ketones. Glucose often drifts lower during the fast; symptomatic lows or high refeed excursions matter more than a lower average."
+  estimatedChange:
+    kind: absolute
+    low: -30
+    high: -5
+    unit: mg/dL
+    window: During the fast versus usual fed or overnight baseline
+    confidence: low
+    basis: "Anchored by source_artifact:pmid-10837292, source_artifact:pmid-29931424, source_artifact:pmid-11133906, and source_artifact:pmid-41650389. Fasted glucose often falls, while refeeding and phenotype differences can reverse the direction after the first meal."
+- biomarkerKey: biomarker:body-weight
+  expected: Acute scale drop
+  protocolProminence: context
+  description: "No food intake, falling glycogen, natriuresis, and gut-content loss can lower scale weight quickly. Most of that early drop is water, sodium, glycogen, and food mass, so the signal should not be read as durable fat loss."
+  estimatedChange:
+    kind: absolute
+    low: -3.0
+    high: -0.5
+    unit: kg
+    window: End of fast versus same-condition baseline
+    confidence: low
+    basis: "Approximate short-window scale movement anchored by source_artifact:pmid-23220077 and upper-window fasting physiology. Hydration, sodium, bowel contents, baseline body size, and refeed timing dominate the estimate."
+- biomarkerKey: biomarker:resting-heart-rate
+  expected: Can fall early or rise late
+  protocolProminence: focus
+  description: "A 24-hour fast can lower ambulatory pulse when rest and vagal tone rise, while 60–72 hours can feel more adrenergic as catecholamines and sleep disruption increase. Resting pulse is a strain-and-tolerance read, not a benefit target."
+  estimatedChange:
+    kind: absolute
+    low: -4
+    high: 8
+    unit: bpm
+    window: During or morning after the fast versus baseline
+    confidence: low
+    basis: "Anchored by source_artifact:pmid-35380473, which reported about 4 bpm lower ambulatory heart rate after 24 h, and source_artifact:pmid-17201801, which reported higher heart rate and sympathetic activation after 72 h. Duration, hydration, sleep, caffeine withdrawal, and illness can flip the direction."
+- biomarkerKey: biomarker:hrv-rmssd
+  expected: Can rise early or dip late
+  protocolProminence: context
+  description: "Shorter fasting can increase vagal modulation in some settings, but longer fasting can pull the autonomic system toward sympathetic activation and lower vagal tone. RMSSD helps show whether the fast is recoverable."
+  estimatedChange:
+    kind: relative_percent
+    low: -35
+    high: 15
+    unit: '%'
+    window: Overnight or quiet-morning reading during/after the fast versus baseline
+    confidence: low
+    basis: "Anchored by source_artifact:pmid-35380473, source_artifact:pmid-23403876, and source_artifact:pmid-17201801. Same-mechanism 24 h data show increased vagal-cardiac modulation, while 48–72 h sources support HRV/vagal-modulation monitoring; wearable RMSSD is noisy and device-specific."
+- biomarkerKey: biomarker:morning-blood-pressure
+  expected: May drift lower or stay stable
+  protocolProminence: context
+  description: "Lower insulin and sodium/water handling can reduce vascular load, but the same fluid shift can reduce orthostatic reserve. Home BP is useful context when dizziness, dehydration, medications, or low-pressure symptoms are in play."
+  estimatedChange:
+    kind: absolute
+    low: -5
+    high: 0
+    unit: mmHg
+    window: Morning or ambulatory BP during/after a 24–72 h fast versus baseline
+    confidence: low
+    basis: "Anchored by source_artifact:pmid-35380473, which found about 3 mmHg lower ambulatory mean arterial pressure after 24 h, and source_artifact:pmid-38126086, which emphasized reduced central-hypovolemia tolerance."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -450,12 +541,12 @@ experimentOnboarding:
       - biomarker:fasting-tolerance-symptom-log
       - biomarker:refeed-tolerance-symptom-log
       optionalSignals:
-      - biomarker:continuous-glucose
       - biomarker:blood-ketones-beta-hydroxybutyrate
+      - biomarker:continuous-glucose
       - biomarker:body-weight
-      - biomarker:morning-blood-pressure
       - biomarker:resting-heart-rate
       - biomarker:hrv-rmssd
+      - biomarker:morning-blood-pressure
       notes:
       - Primary measurement is safety and tolerability through refeed.
       - Optional metabolic signals should not override symptoms or clinician guidance.
