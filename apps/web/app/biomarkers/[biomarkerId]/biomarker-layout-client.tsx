@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail/biomarker-about-grid";
+import { PageHeader } from "@/src/components/ui/page-header";
 import { RouteTabs } from "@/src/components/ui/route-tabs";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
@@ -47,21 +48,19 @@ export function BiomarkerLayoutClient({
 
   return (
     <BrowserVaultProvider>
-      <div className="flex flex-col gap-7">
+      <div className="flex flex-col gap-10">
         <div className="flex items-start justify-between gap-6">
-          <div className="flex max-w-3xl flex-col gap-3.5">
-            {eyebrowParts.length > 0 && (
-              <span className="font-mono text-[11px]/3.5 uppercase tracking-[0.12em] text-chart-5">
-                {eyebrowParts.join(" · ")}
-              </span>
-            )}
-            <h1 className="max-w-[24ch] font-serif text-3xl font-semibold tracking-tight text-foreground text-balance sm:text-[38px]">
-              {biomarker.title}
-            </h1>
-            <p className="max-w-[56ch] text-[16px] text-muted-foreground text-pretty">
-              {biomarker.summary}
-            </p>
-          </div>
+          <PageHeader
+            eyebrow={
+              eyebrowParts.length > 0 ? (
+                <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chart-5">
+                  {eyebrowParts.join(" · ")}
+                </span>
+              ) : undefined
+            }
+            title={biomarker.title}
+            description={biomarker.summary}
+          />
           <Link
             href="/biomarkers"
             className="mt-1 inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
