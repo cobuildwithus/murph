@@ -178,7 +178,7 @@ function buildMurphEmailContactOption(input: {
   return {
     href: buildMurphEmailHref({
       body: input.message.body,
-      subject: input.message.subject ?? "Chat with Murph",
+      subject: input.message.subject ?? "Hey Murph",
     }),
     kind: "email",
     label: "Email",
