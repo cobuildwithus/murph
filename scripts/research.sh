@@ -447,11 +447,14 @@ CONTENT REQUIREMENTS:
    - stop conditions
    - contraindications / ask-clinician-first notes
    - confounders to log
-   - expected signal and latency
+   - expected signal and latency, with concise mechanism-first descriptions
+   - objective downstream markers that people can reasonably check with wearables, sensors, home devices, or standard labs when the evidence supports them
+   - best-effort `estimatedChange` ranges in marker-specific units when defensible
    - claim list with sourceKeys
    - caveats and non-claims
    - keep `sourceKeys` in structured claim lists only; do not append raw `source_artifact:*` keys or `Source keys:` labels to drafted user-facing Health Commons prose, including protocol, family, biomarker, and bibliography prose
    - write the protocol frontmatter `summary` as `/experiments` card copy: describe the action/outcome/safety posture without repeating duration, frequency, session count, or dose timing already shown in protocol metadata
+   - do not treat exposure or adherence fields such as step count, protein intake, sauna sessions, supplement adherence, alcohol-free days, or dose completion as primary outcome wins unless the protocol is explicitly an adherence experiment
 3. Separate causal intervention evidence, observational context, mechanistic plausibility, and safety evidence.
 4. Draft source pages for the highest-priority records using the repo's Health Commons source_artifact style.
 5. Draft a bibliography page and artifact-manifest plan.
