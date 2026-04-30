@@ -42,12 +42,11 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerPageModel
             </p>
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
-            {biomarker.protocolRankings.map((protocol, index) => (
+            {biomarker.protocolRankings.map((protocol) => (
               <BiomarkerExperimentCard
                 key={protocol.key}
                 biomarker={biomarker}
                 protocol={protocol}
-                rank={index + 1}
               />
             ))}
           </div>
