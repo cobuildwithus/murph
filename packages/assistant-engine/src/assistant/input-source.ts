@@ -2,9 +2,16 @@ import type { InboxServices } from '@murphai/inbox-services'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import {
+  listAssistantInputEvents,
+  type AssistantInputConversationRef,
+  type AssistantInputCursor,
+  type AssistantInputEventRecord,
+  type AssistantInputProjectionStatus,
+  type AssistantInputSourceRef,
+} from './input-store.js'
+import {
   conversationCaptureRefFromCapture,
   isSameAssistantConversationCapture,
-  type AssistantConversationCaptureRef,
 } from './conversation-ref.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import {
@@ -18,42 +25,12 @@ const INBOX_ASSISTANT_INPUT_ID_PREFIX = 'inbox:'
 
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
 
-export type AssistantInputConversationRef = AssistantConversationCaptureRef
-
-export type AssistantInputProjectionStatus =
-  | 'not_attempted'
-  | 'pending'
-  | 'succeeded'
-  | 'failed'
-  | 'quarantined'
-
-export interface AssistantInputCursor {
-  createdAt: string | null
-  inputId: string
-  sourceKind: AssistantInputSourceRef['kind']
-  sourcePosition?: string | null
-  occurredAt: string
+export type {
+  AssistantInputConversationRef,
+  AssistantInputCursor,
+  AssistantInputProjectionStatus,
+  AssistantInputSourceRef,
 }
-
-export type AssistantInputSourceRef =
-  | {
-      captureId: string
-      kind: 'inbox-capture'
-      source: string
-      version: string | null
-    }
-  | {
-      dedupeKey: string | null
-      eventId: string
-      itemId: string
-      kind: 'hosted-mailbox-item'
-      lane: 'conversation' | 'system'
-      laneSeq: string
-      payloadSchema: string
-      payloadSource: 'inline' | 'sidecar'
-      source: 'hosted-mailbox'
-      wakeSchema: string
-    }
 
 export interface AssistantInputProjection {
   captureId: string | null
@@ -68,8 +45,11 @@ export interface AssistantInputEvent {
   inputId: string
   occurredAt: string
   receivedAt: string | null
+  replyTarget: AssistantInputEventRecord['replyTarget']
   source: string
   sourceRef: AssistantInputSourceRef
+  text: string | null
+  transcriptText: string | null
   userMessageContent: readonly AssistantUserMessageContentPart[] | null
 }
 
@@ -188,6 +168,145 @@ export function createInboxBackedAssistantInputSource(input: {
         sourceId: null,
         vault: input.vault,
       })
+    },
+  }
+}
+
+export function createStoreBackedAssistantInputSource(input: {
+  vault: string
+}): AssistantInputSource {
+  return {
+    async refresh() {
+      return {
+        progressed: false,
+        reason: 'no_new_input',
+      }
+    },
+    async listInputCandidates(query) {
+      return listStoredAssistantInputCandidates({
+        afterCursor: query.afterCursor ?? null,
+        knownInputIds: query.knownInputIds,
+        limit: query.limit,
+        signal: query.signal,
+        sourceId: query.sourceId ?? null,
+        vault: input.vault,
+      })
+    },
+    async listNewConversationInputs(query) {
+      return listStoredAssistantInputCandidates({
+        afterCursor: query.afterCursor ?? null,
+        conversation: query.conversation,
+        knownCaptureIds: query.knownCaptureIds,
+        knownInputIds: query.knownInputIds,
+        limit: query.limit,
+        signal: query.signal,
+        sourceId: null,
+        vault: input.vault,
+      })
+    },
+  }
+}
+
+async function listStoredAssistantInputCandidates(input: {
+  afterCursor: AssistantInputCursor | null
+  conversation?: AssistantInputConversationRef
+  knownCaptureIds?: readonly string[]
+  knownInputIds?: readonly string[]
+  limit?: number
+  signal?: AbortSignal
+  sourceId: string | null
+  vault: string
+}): Promise<AssistantInputCandidateBatch> {
+  assertAssistantInputSignalNotAborted(input.signal)
+  const knownInputIds = new Set(input.knownInputIds ?? [])
+  const knownCaptureIds = new Set(input.knownCaptureIds ?? [])
+  const candidateLimit = normalizeAssistantInputQueryLimit(input.limit)
+  const scanLimit = Math.max(candidateLimit, DEFAULT_ASSISTANT_INPUT_QUERY_LIMIT)
+  const selected: AssistantInputEventRecord[] = []
+  let cursor = input.afterCursor
+  let nextCursor = input.afterCursor
+
+  while (selected.length < candidateLimit) {
+    const listed = await listAssistantInputEvents({
+      afterCursor: cursor,
+      conversation: input.conversation,
+      limit: scanLimit,
+      source: null,
+      vault: input.vault,
+    })
+    assertAssistantInputSignalNotAborted(input.signal)
+    if (listed.events.length === 0) {
+      nextCursor = listed.nextCursor
+      break
+    }
+
+    for (const event of listed.events
+        .filter((candidate) => !knownInputIds.has(candidate.inputId))
+        .filter((event) =>
+          event.projection.captureId
+            ? !knownCaptureIds.has(event.projection.captureId)
+            : true,
+        )
+        .filter((event) =>
+          input.sourceId
+            ? (event.conversation?.source ?? event.sourceRef.source) === input.sourceId
+            : true,
+        )) {
+      selected.push(event)
+      if (selected.length >= candidateLimit) {
+        nextCursor = event.cursor
+        break
+      }
+    }
+    cursor = listed.nextCursor
+    if (selected.length < candidateLimit) {
+      nextCursor = listed.nextCursor
+    }
+    if (!cursor || listed.events.length < scanLimit) {
+      break
+    }
+  }
+
+  return {
+    inputs: selected.map(assistantInputCandidateFromStoredEvent),
+    nextCursor,
+  }
+}
+
+export function assistantInputCandidateFromStoredEvent(
+  event: AssistantInputEventRecord,
+): AssistantInputCandidate {
+  const captureIds = event.projection.captureId ? [event.projection.captureId] : []
+  return {
+    acceptedInput: {
+      id: event.inputId,
+      source: 'assistant-input',
+      captureIds,
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: event.inputId,
+        version: event.schema,
+      },
+      cursorEffects: [],
+    },
+    event: {
+      attachmentCount: event.content.attachmentDescriptors.length,
+      conversation: event.conversation,
+      cursor: event.cursor,
+      inputId: event.inputId,
+      occurredAt: event.occurredAt,
+      receivedAt: event.receivedAt,
+      replyTarget: event.replyTarget,
+      source: event.conversation?.source ?? event.sourceRef.source,
+      sourceRef: event.sourceRef,
+      text: event.content.text,
+      transcriptText: event.content.transcriptText ?? event.content.text,
+      userMessageContent: event.content.userMessageContent,
+    },
+    projection: {
+      captureId: event.projection.captureId,
+      reasonCode: event.projection.reasonCode,
+      status: event.projection.status,
     },
   }
 }
@@ -311,6 +430,7 @@ export function assistantInputCandidateFromInboxCapture(
       inputId,
       occurredAt: capture.occurredAt,
       receivedAt: capture.receivedAt,
+      replyTarget: null,
       source: capture.source,
       sourceRef: {
         captureId: capture.captureId,
@@ -318,6 +438,8 @@ export function assistantInputCandidateFromInboxCapture(
         source: capture.source,
         version: null,
       },
+      text: capture.text,
+      transcriptText: capture.text,
       userMessageContent: null,
     },
     projection: {

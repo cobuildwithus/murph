@@ -53,7 +53,7 @@ type AssistantSessionOptionsPatch = Pick<
 
 export type AssistantDaemonAutomationInput = Omit<
   RunAssistantAutomationInput,
-  'inboxServices' | 'onEvent' | 'onInboxEvent' | 'signal' | 'turnInputPort' | 'vaultServices'
+  'inboxServices' | 'inputSource' | 'onEvent' | 'onInboxEvent' | 'signal' | 'vaultServices'
 >
 
 export function canUseAssistantDaemonForMessage(

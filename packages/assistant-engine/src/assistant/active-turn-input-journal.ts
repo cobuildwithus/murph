@@ -32,6 +32,7 @@ export const assistantActiveTurnInputAdmissionStateValues = [
 ] as const
 
 export const assistantAcceptedTurnInputSourceValues = [
+  'assistant-input',
   'initial',
   'inbox',
   'manual',
@@ -70,6 +71,7 @@ const assistantAcceptedTurnInputContentRefSchema = z
       'inbox-capture',
       'transcript-entry',
       'assistant-runtime-artifact',
+      'assistant-input-event',
       'provider-output',
       'manual',
       'system',

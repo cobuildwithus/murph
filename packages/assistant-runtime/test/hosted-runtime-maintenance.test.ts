@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   closeHostedRuntimeDeviceSyncService: vi.fn(),
-  createInboxBackedAssistantTurnInputPort: vi.fn(),
+  createStoreBackedAssistantInputSource: vi.fn(),
   createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
   createHostedRuntimeDeviceSyncService: vi.fn(),
@@ -38,7 +38,7 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
-  createInboxBackedAssistantTurnInputPort: mocks.createInboxBackedAssistantTurnInputPort,
+  createStoreBackedAssistantInputSource: mocks.createStoreBackedAssistantInputSource,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
@@ -115,10 +115,14 @@ beforeEach(() => {
   mocks.createIntegratedInboxServices.mockReturnValue({
     init: mocks.initInboxRuntime,
   });
-  mocks.createInboxBackedAssistantTurnInputPort.mockReturnValue({
-    listNewConversationCaptures: vi.fn(async (query) => ({
-      captures: [],
-      nextCursor: query.afterCursor,
+  mocks.createStoreBackedAssistantInputSource.mockReturnValue({
+    listInputCandidates: vi.fn(async (query) => ({
+      inputs: [],
+      nextCursor: query.afterCursor ?? null,
+    })),
+    listNewConversationInputs: vi.fn(async (query) => ({
+      inputs: [],
+      nextCursor: query.afterCursor ?? null,
     })),
     refresh: vi.fn(async () => ({
       progressed: false,
@@ -167,17 +171,17 @@ beforeEach(() => {
 });
 
 describe("runHostedAssistantAutomation", () => {
-  it("wraps hosted mailbox refreshes through the local inbox-backed port", async () => {
+  it("wraps hosted mailbox refreshes through the assistant input source", async () => {
     const checkpointActiveTurnInput = vi.fn(async () => undefined);
     const refreshMailboxForActiveTurnInput = vi.fn(async () => ({
       progressed: true,
       reason: "ingested_input" as const,
     }));
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      await input.turnInputPort?.refresh({
+      await input.inputSource?.refresh({
         phase: "request_boundary",
       });
-      await input.turnInputPort?.checkpointAcceptedInput?.({
+      await input.inputSource?.checkpointAcceptedInput?.({
         acceptedInputIds: ["request-1"],
         providerRequestOrdinal: 0,
         sessionId: "session_123",
@@ -244,7 +248,7 @@ describe("runHostedAssistantAutomation", () => {
     });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({
-        turnInputPort: expect.any(Object),
+        inputSource: expect.any(Object),
       }),
     );
     expect(mocks.initInboxRuntime).toHaveBeenCalledWith({
@@ -288,7 +292,7 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
   });
 
-  it("uses transient-aware hosted show reads without exposing runtime-only rows to automation scans", async () => {
+  it("uses normal hosted inbox reads without exposing runtime-only rows to automation scans", async () => {
     const list = vi.fn<InboxServices["list"]>(async (input) => ({
       vault: input.vault,
       filters: {
@@ -400,9 +404,9 @@ describe("runHostedAssistantAutomation", () => {
     expect(show).toHaveBeenCalledWith(
       expect.objectContaining({
         captureId: "cap_runtime_only",
-        includeRuntimeOnly: true,
       }),
     );
+    expect(show.mock.calls[0]?.[0]).not.toHaveProperty("includeRuntimeOnly");
   });
 
   it("logs automation events emitted during the hosted pass", async () => {

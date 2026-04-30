@@ -154,7 +154,6 @@ export type {
 export {
   createInboxPipeline,
   processCapture,
-  stageRuntimeOnlyCapture,
 } from "./kernel/pipeline.ts";
 export type {
   CreateInboxPipelineInput,

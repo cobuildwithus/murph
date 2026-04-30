@@ -23,7 +23,10 @@ export interface AssistantAutoReplyTerminalEvidence {
   captureId: string
   groupCaptureIds: string[]
   groupId: string
+  groupInputIds: string[]
+  inputId: string
   primaryCaptureId: string
+  primaryInputId: string
   providerCleanup: {
     linqMessageIds: string[]
     queuedAt: string | null
@@ -66,6 +69,7 @@ export async function readAssistantAutoReplyTerminalEvidence(
 
 export async function writeAssistantAutoReplyReplyIntentEvidence(input: {
   captureIds: readonly string[]
+  inputIds?: readonly string[]
   linqMessageIds?: readonly string[]
   outcome: 'deferred' | 'result'
   recordedAt: string
@@ -78,6 +82,7 @@ export async function writeAssistantAutoReplyReplyIntentEvidence(input: {
       : null
   await writeAssistantAutoReplyReplyTerminalEvidence({
     captureIds: input.captureIds,
+    inputIds: input.inputIds,
     deliveryIntentId: input.result.deliveryIntentId,
     linqMessageIds: input.linqMessageIds,
     outcome: input.outcome,
@@ -91,6 +96,7 @@ export async function writeAssistantAutoReplyReplyIntentEvidence(input: {
 export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
   captureIds: readonly string[]
   deliveryIntentId: string | null
+  inputIds?: readonly string[]
   linqMessageIds?: readonly string[]
   outcome: 'deferred' | 'result'
   recordedAt: string
@@ -98,18 +104,24 @@ export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
   terminalKind?: 'deferred' | 'replied' | 'reply_intent_committed'
   vault: string
 }): Promise<void> {
-  const group = normalizeEvidenceGroup(input.captureIds)
+  const group = normalizeEvidenceGroup({
+    captureIds: input.captureIds,
+    inputIds: input.inputIds,
+  })
   const providerCleanup = createProviderCleanupState(input.linqMessageIds ?? [])
   const terminalKind = input.terminalKind ??
     (input.outcome === 'deferred' ? 'deferred' : 'replied')
 
   await Promise.all(
-    group.captureIds.map((captureId) =>
-      writeAssistantAutoReplyTerminalEvidence(input.vault, captureId, {
-        captureId,
+    group.evidenceIds.map((evidenceId) =>
+      writeAssistantAutoReplyTerminalEvidence(input.vault, evidenceId, {
+        captureId: evidenceId,
         groupCaptureIds: group.captureIds,
         groupId: group.groupId,
+        groupInputIds: group.inputIds,
+        inputId: evidenceId,
         primaryCaptureId: group.primaryCaptureId,
+        primaryInputId: group.primaryInputId,
         providerCleanup,
         recordedAt: input.recordedAt,
         schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,
@@ -125,21 +137,28 @@ export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
 
 export async function writeAssistantAutoReplySuppressionEvidence(input: {
   captureIds: readonly string[]
+  inputIds?: readonly string[]
   linqMessageIds?: readonly string[]
   reason: string
   recordedAt?: string
   vault: string
 }): Promise<void> {
-  const group = normalizeEvidenceGroup(input.captureIds)
+  const group = normalizeEvidenceGroup({
+    captureIds: input.captureIds,
+    inputIds: input.inputIds,
+  })
   const providerCleanup = createProviderCleanupState(input.linqMessageIds ?? [])
 
   await Promise.all(
-    group.captureIds.map((captureId) =>
-      writeAssistantAutoReplyTerminalEvidence(input.vault, captureId, {
-        captureId,
+    group.evidenceIds.map((evidenceId) =>
+      writeAssistantAutoReplyTerminalEvidence(input.vault, evidenceId, {
+        captureId: evidenceId,
         groupCaptureIds: group.captureIds,
         groupId: group.groupId,
+        groupInputIds: group.inputIds,
+        inputId: evidenceId,
         primaryCaptureId: group.primaryCaptureId,
+        primaryInputId: group.primaryInputId,
         providerCleanup,
         recordedAt: input.recordedAt ?? new Date().toISOString(),
         schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,
@@ -241,21 +260,37 @@ export async function markAssistantAutoReplyLinqCleanupQueued(input: {
   )
 }
 
-function normalizeEvidenceGroup(captureIds: readonly string[]): {
+function normalizeEvidenceGroup(input: {
+  captureIds: readonly string[]
+  inputIds?: readonly string[]
+}): {
   captureIds: string[]
+  evidenceIds: string[]
   groupId: string
+  inputIds: string[]
   primaryCaptureId: string
+  primaryInputId: string
 } {
-  const normalized = [...new Set(captureIds.map((captureId) => captureId.trim()).filter(Boolean))]
-  const primaryCaptureId = normalized[0]
-  if (!primaryCaptureId) {
-    throw new Error('assistant auto-reply terminal evidence requires at least one capture id')
+  const captureIds = [
+    ...new Set(input.captureIds.map((captureId) => captureId.trim()).filter(Boolean)),
+  ]
+  const inputIds = [
+    ...new Set((input.inputIds ?? []).map((inputId) => inputId.trim()).filter(Boolean)),
+  ]
+  const evidenceIds = inputIds.length > 0 ? inputIds : captureIds
+  const primaryInputId = evidenceIds[0]
+  if (!primaryInputId) {
+    throw new Error('assistant auto-reply terminal evidence requires at least one input id or capture id')
   }
+  const primaryCaptureId = captureIds[0] ?? primaryInputId
 
   return {
-    captureIds: normalized,
-    groupId: `group_${normalized.join('__')}`,
+    captureIds,
+    evidenceIds,
+    groupId: `group_${evidenceIds.join('__')}`,
+    inputIds,
     primaryCaptureId,
+    primaryInputId,
   }
 }
 
@@ -299,7 +334,10 @@ function parseAssistantAutoReplyTerminalEvidence(value: unknown): AssistantAutoR
     captureId?: unknown
     groupCaptureIds?: unknown
     groupId?: unknown
+    groupInputIds?: unknown
+    inputId?: unknown
     primaryCaptureId?: unknown
+    primaryInputId?: unknown
     providerCleanup?: unknown
     recordedAt?: unknown
     schema?: unknown
@@ -311,8 +349,11 @@ function parseAssistantAutoReplyTerminalEvidence(value: unknown): AssistantAutoR
   const captureId = normalizeUnknownNullableString(record.captureId)
   const groupId = normalizeUnknownNullableString(record.groupId)
   const primaryCaptureId = normalizeUnknownNullableString(record.primaryCaptureId)
+  const inputId = normalizeUnknownNullableString(record.inputId) ?? captureId
+  const primaryInputId =
+    normalizeUnknownNullableString(record.primaryInputId) ?? inputId
   const recordedAt = normalizeUnknownNullableString(record.recordedAt)
-  if (!captureId || !groupId || !primaryCaptureId || !recordedAt) {
+  if (!captureId || !groupId || !primaryCaptureId || !inputId || !primaryInputId || !recordedAt) {
     return null
   }
   const terminal = parseTerminalEvidence(record.terminal)
@@ -326,8 +367,15 @@ function parseAssistantAutoReplyTerminalEvidence(value: unknown): AssistantAutoR
           .map((item) => normalizeUnknownNullableString(item))
           .filter((item): item is string => item !== null)
       : [captureId],
+    groupInputIds: Array.isArray(record.groupInputIds)
+      ? record.groupInputIds
+          .map((item) => normalizeUnknownNullableString(item))
+          .filter((item): item is string => item !== null)
+      : [inputId],
     groupId,
+    inputId,
     primaryCaptureId,
+    primaryInputId,
     providerCleanup: parseProviderCleanup(record.providerCleanup),
     recordedAt,
     schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,

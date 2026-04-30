@@ -30,9 +30,9 @@ import {
 } from '../store.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
 import {
-  createInboxBackedAssistantTurnInputPort,
-  type AssistantTurnInputPort,
-} from '../turn-input.js'
+  createInboxBackedAssistantInputSource,
+  type AssistantInputSource,
+} from '../input-source.js'
 import { notifyAssistantActiveTurnInputAvailable } from '../active-turn-input-controller.js'
 import {
   errorMessage,
@@ -75,7 +75,7 @@ export interface RunAssistantAutomationInput {
   signal?: AbortSignal
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
-  turnInputPort?: AssistantTurnInputPort
+  inputSource?: AssistantInputSource
   vault: string
   vaultServices?: VaultServices | null
 }
@@ -285,11 +285,11 @@ export async function runAssistantAutomationPass(
   const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
-  const turnInputPort =
-    input.turnInputPort ??
+  const inputSource =
+    input.inputSource ??
     (executionContext.hosted
       ? undefined
-      : createInboxBackedAssistantTurnInputPort({
+      : createInboxBackedAssistantInputSource({
           inboxServices,
           requestId: input.requestId ?? null,
           vault: input.vault,
@@ -348,7 +348,7 @@ export async function runAssistantAutomationPass(
         requestId: input.requestId,
         signal: input.signal,
         sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-        turnInputPort,
+        inputSource,
         vault: input.vault,
       })
     : {
@@ -369,7 +369,7 @@ export async function runAssistantAutomationPass(
     signal: input.signal,
     sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
     state,
-    turnInputPort,
+    inputSource,
     vault: input.vault,
     vaultServices,
     async onStateProgress(next) {

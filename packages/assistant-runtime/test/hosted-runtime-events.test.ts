@@ -4,11 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
-  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -18,7 +16,6 @@ import {
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
-  ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
   sendAssistantNotification: vi.fn(),
 }));
@@ -50,9 +47,6 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
-  ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
-}));
 
 import {
   executeHostedMailboxEvent,
@@ -92,10 +86,6 @@ afterEach(() => {
   mocks.emitHostedExecutionStructuredLog.mockReset();
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
-  mocks.ingestHostedConversationMessageWake.mockResolvedValue({
-    nextWakeAt: null,
-    parserProcessed: 0,
-  });
 });
 
 describe("executeHostedMailboxEvent", () => {
@@ -697,12 +687,7 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("routes Linq, Telegram, and email events to their hosted ingestion helpers", async () => {
-    const runtime = createRuntime({
-      HOSTED_EMAIL_DOMAIN: "mail.example.test",
-    });
-    const vaultRoot = "/tmp/assistant-runtime-events";
-
+  it("rejects direct conversation wakes so mailbox staging owns assistant input", async () => {
     const linqWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
       linqMessage: {
@@ -716,93 +701,20 @@ describe("executeHostedMailboxEvent", () => {
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    const linqResult = await executeHostedMailboxEvent({
-      wake: linqWake,
-      executionContext,
-      runtime,
-      runtimeEnv: {},
-      vaultRoot,
-    });
 
-    const telegramWake = buildHostedExecutionTelegramConversationMessageWake({
-      eventId: "evt_telegram",
-      occurredAt: "2026-04-08T00:01:00.000Z",
-      telegramMessage: {
-        messageId: "tg_message_123",
-        schema: "murph.hosted-telegram-message.v1",
-        text: "hello",
-        threadId: "chat_123",
-      },
-      userId: "member_123",
-    });
-    await executeHostedMailboxEvent({
-      wake: telegramWake,
-      executionContext,
-      runtime,
-      runtimeEnv: {},
-      vaultRoot,
-    });
-
-    const emailWake = buildHostedExecutionEmailConversationMessageWake({
-      eventId: "evt_email",
-      identityId: "assistant@mail.example.test",
-      occurredAt: "2026-04-08T00:02:00.000Z",
-      rawMessageKey: "raw_123",
-      selfAddress: "user@example.com",
-      userId: "member_123",
-    });
-    await executeHostedMailboxEvent({
-      wake: emailWake,
-      executionContext,
-      runtime,
-      runtimeEnv: {
-        HOSTED_EMAIL_DOMAIN: "mail.example.test",
-      },
-      vaultRoot,
-    });
-
-    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(1, {
-      runtime,
-      vaultRoot,
-      wake: linqWake,
-    });
-    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(2, {
-      runtime,
-      vaultRoot,
-      wake: telegramWake,
-    });
-    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(3, {
-      runtime,
-      vaultRoot,
-      wake: emailWake,
-    });
-    expect(linqResult).toEqual({
-      bootstrapResult: null,
-      conversationMetrics: {
-        nextWakeAt: null,
-        parserProcessed: 0,
-      },
-      mailboxLane: "conversation-message",
-      redactedLogEntries: [
-        {
-          component: "runtime.context",
-          eventId: "evt_linq",
-          level: "info",
-          message: "Hosted Linq conversation context fingerprints captured.",
-          phase: "wake.running",
-          redacted: expect.objectContaining({
-            actorPresent: true,
-            channel: "linq",
-            contextSource: "linq-conversation-message",
-            identityPresent: true,
-            primaryConversationScope: "thread",
-            threadIsDirect: true,
-            threadPresent: true,
-          }),
-        },
-      ],
-      vaultSyncImportResult: null,
-    });
+    await expect(
+      executeHostedMailboxEvent({
+        wake: linqWake,
+        executionContext,
+        runtime: createRuntime(),
+        runtimeEnv: {},
+        vaultRoot: "/tmp/assistant-runtime-events",
+      }),
+    ).rejects.toThrow(
+      "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.",
+    );
+    expect(mocks.prepareHostedWakeContext).not.toHaveBeenCalled();
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
   });
 
   it("treats explicit member channel sync events as no-op wake handlers", async () => {

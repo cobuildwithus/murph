@@ -1,14 +1,15 @@
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
-  createInboxBackedAssistantTurnInputPort,
+  createStoreBackedAssistantInputSource,
+  type AssistantInputSource,
   type AssistantTurnInputRefreshResult,
-  type AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
 import {
   emitHostedExecutionStructuredLog,
   type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import type { InboxServices } from "@murphai/inbox-services";
 
 import type {
   NormalizedHostedAssistantRuntimeConfig,
@@ -18,46 +19,20 @@ import {
   HostedMailboxImportCheckpointUserMismatchError,
 } from "./mailbox-checkpoint.ts";
 
-type HostedTurnInputInboxServices =
-  Parameters<typeof createInboxBackedAssistantTurnInputPort>[0]["inboxServices"];
-
-export function createHostedTurnInputInboxServices(
-  inboxServices: HostedTurnInputInboxServices,
-): HostedTurnInputInboxServices {
-  const showRuntimeOnlyInboxServices = createHostedAutomationInboxServices(inboxServices);
-
-  return {
-    ...showRuntimeOnlyInboxServices,
-    list(input) {
-      return inboxServices.list({
-        ...input,
-        includeRuntimeOnly: true,
-      });
-    },
-  };
-}
+type HostedTurnInputInboxServices = InboxServices;
 
 export function createHostedAutomationInboxServices(
   inboxServices: HostedTurnInputInboxServices,
 ): HostedTurnInputInboxServices {
-  return {
-    ...inboxServices,
-    show(input) {
-      return inboxServices.show({
-        ...input,
-        includeRuntimeOnly: true,
-      });
-    },
-  };
+  return inboxServices;
 }
 
-export function createHostedAssistantTurnInputPort(input: {
-  inboxServices: HostedTurnInputInboxServices;
+export function createHostedAssistantInputSource(input: {
   requestId: string;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
-}): AssistantTurnInputPort | undefined {
+}): AssistantInputSource | undefined {
   const refreshMailboxForActiveTurnInput =
     input.runtime.platform.refreshMailboxForActiveTurnInput ?? null;
   const checkpointActiveTurnInput =
@@ -71,9 +46,7 @@ export function createHostedAssistantTurnInputPort(input: {
     );
   }
 
-  const basePort = createInboxBackedAssistantTurnInputPort({
-    inboxServices: createHostedTurnInputInboxServices(input.inboxServices),
-    requestId: input.requestId,
+  const baseSource = createStoreBackedAssistantInputSource({
     vault: input.vaultRoot,
   });
 
@@ -116,14 +89,17 @@ export function createHostedAssistantTurnInputPort(input: {
         }
       }
 
-      const baseResult = await basePort.refresh(refreshInput);
+      const baseResult = await baseSource.refresh(refreshInput);
       return mergeHostedTurnInputRefreshResult({
         baseResult,
         mailboxRefresh,
       });
     },
-    listNewConversationCaptures(query) {
-      return basePort.listNewConversationCaptures(query);
+    listInputCandidates(query) {
+      return baseSource.listInputCandidates(query);
+    },
+    listNewConversationInputs(query) {
+      return baseSource.listNewConversationInputs(query);
     },
   };
 }

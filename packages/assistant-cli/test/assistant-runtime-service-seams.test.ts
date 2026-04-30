@@ -614,11 +614,17 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
   assert.deepEqual(
     await runAssistantAutomation({
       once: true,
-      turnInputPort: {
-        async listNewConversationCaptures(input) {
+      inputSource: {
+        async listInputCandidates(input) {
           return {
-            captures: [],
-            nextCursor: input.afterCursor,
+            inputs: [],
+            nextCursor: input.afterCursor ?? null,
+          }
+        },
+        async listNewConversationInputs(input) {
+          return {
+            inputs: [],
+            nextCursor: input.afterCursor ?? null,
           }
         },
         async refresh() {
