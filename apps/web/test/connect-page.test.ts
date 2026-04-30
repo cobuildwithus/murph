@@ -67,12 +67,12 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Renpho",
     },
     {
-      assetPath: "/brand-logos/connect/runkeeper.svg",
+      assetPath: "/brand-logos/connect/runkeeper.png",
       description: "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
       name: "Runkeeper",
     },
     {
-      assetPath: "/brand-logos/connect/samsung-health.svg",
+      assetPath: "/brand-logos/connect/samsung-health.png",
       description: "Samsung phone and watch activity, sleep, heart, and wellness metrics.",
       name: "Samsung Health",
     },
@@ -122,7 +122,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Freestyle Libre",
     },
     {
-      assetPath: "/brand-logos/connect/garmin.svg",
+      assetPath: "/brand-logos/connect/garmin.png",
       description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
       name: "Garmin",
     },

@@ -63,13 +63,13 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
     id: "runkeeper",
-    logo: logoAsset("runkeeper.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 128, 28),
+    logo: logoAsset("runkeeper.png"),
     name: "Runkeeper",
   },
   {
     description: "Samsung phone and watch activity, sleep, heart, and wellness metrics.",
     id: "samsung-health",
-    logo: logoAsset("samsung-health.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 128, 24),
+    logo: logoAsset("samsung-health.png"),
     name: "Samsung Health",
   },
   {
@@ -129,7 +129,7 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
     description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
     id: "garmin",
-    logo: logoAsset("garmin.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 128, 28),
+    logo: logoAsset("garmin.png"),
     name: "Garmin",
   },
   {
