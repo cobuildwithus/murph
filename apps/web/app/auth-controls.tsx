@@ -36,16 +36,18 @@ function LandingAuthDialogButton({
   buttonClassName,
   buttonLabel,
   description,
+  requireLaunchConsentOnCompletion = false,
   showArrow = false,
-  showLegalNotice = false,
+  showPassiveLegalNotice = false,
   title,
 }: {
   authMode: LandingAuthMode;
   buttonClassName: string;
   buttonLabel: string;
   description?: string;
+  requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
-  showLegalNotice?: boolean;
+  showPassiveLegalNotice?: boolean;
   title?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -69,7 +71,7 @@ function LandingAuthDialogButton({
         ) : null}
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md p-6 md:p-7">
+        <DialogContent className="max-w-md gap-6 p-6 md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
               {title ?? defaultCopy.title}
@@ -82,7 +84,9 @@ function LandingAuthDialogButton({
             <HostedAuthPanel
               authMode={authMode}
               methods={["phone", "telegram", "email"]}
-              showLegalNotice={showLegalNotice}
+              requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
+              showPassiveLegalNotice={showPassiveLegalNotice}
+              size="compact"
             />
           ) : null}
         </DialogContent>
@@ -165,8 +169,8 @@ export function LandingAuthActions({
           )}
           buttonLabel={authLabel}
           description="Discover what actually makes you healthier."
+          requireLaunchConsentOnCompletion
           showArrow={context !== "nav"}
-          showLegalNotice
           title="Log in or sign up"
         />
       </div>
@@ -182,12 +186,13 @@ export function LandingAuthActions({
           "shrink-0"
         )}
         buttonLabel={loginLabel}
+        requireLaunchConsentOnCompletion
       />
       <LandingAuthDialogButton
         authMode="signup"
         buttonClassName={cn(styles.signup, "shrink-0")}
         buttonLabel={signupLabel}
-        showLegalNotice
+        requireLaunchConsentOnCompletion
       />
     </div>
   );

@@ -14,7 +14,6 @@ import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { cn } from "@/src/lib/utils";
 
-import { HostedAuthLegalNotice } from "./hosted-auth-shared";
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 import type {
@@ -42,11 +41,11 @@ export function HostedInviteMaskedPhoneStep({
       <Button
         type="button"
         disabled={disabled}
-        size="lg"
+        size="xl"
         className="w-full"
         onClick={onSendCode}
       >
-        {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
+        {pendingAction === "send-code" ? "Sending code..." : "Send verification code"}
       </Button>
       <HostedUseDifferentNumberButton
         disabled={disabled}
@@ -54,7 +53,6 @@ export function HostedInviteMaskedPhoneStep({
         size="sm"
         onClick={onUseDifferentNumber}
       />
-      <HostedAuthLegalNotice />
     </div>
   );
 }
@@ -69,10 +67,10 @@ export function HostedInviteMaskedPhoneLoadingStep({
   return (
     <div className="flex flex-col gap-4">
       <HostedInviteMaskedPhoneSummary phoneHint={phoneHint} />
-      <div className="flex items-start gap-3 rounded-xl border border-[#d9cdbb] bg-[#f7f4ee] px-4 py-3 text-sm text-stone-600">
+      <div className="flex items-start gap-3 rounded-xl border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
         <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
         <div>
-          <p className="font-medium text-[#2d3436]">
+          <p className="font-medium text-foreground">
             Preparing phone verification...
           </p>
           <p>Keep this tab open for a moment.</p>
@@ -84,7 +82,6 @@ export function HostedInviteMaskedPhoneLoadingStep({
         size="sm"
         onClick={onUseDifferentNumber}
       />
-      <HostedAuthLegalNotice />
     </div>
   );
 }
@@ -96,13 +93,13 @@ function HostedInviteMaskedPhoneSummary({
 }) {
   return (
     <div className="space-y-2">
-      <p className="text-sm font-medium leading-none text-[#2d3436]">
+      <p className="text-sm font-medium leading-none text-foreground">
         Phone number
       </p>
-      <div className="rounded-xl border border-[#d9cdbb] bg-[#f7f4ee] px-4 py-3">
-        <p className="text-lg font-semibold text-[#2d3436]">{phoneHint}</p>
+      <div className="rounded-xl border border-border bg-muted px-4 py-3">
+        <p className="text-lg font-semibold text-foreground">{phoneHint}</p>
       </div>
-      <p className="text-sm text-stone-500">
+      <p className="text-sm text-muted-foreground">
         We will text a verification code to this number.
       </p>
     </div>
@@ -119,7 +116,6 @@ export function HostedPhoneEntryStep({
   phoneNumber,
   sendCodeDisabled,
   selectedPhoneCountry,
-  showPassiveConsentNotice = true,
   onPhoneCountryChange,
   onPhoneNumberChange,
   onSubmitPhoneEntry,
@@ -133,7 +129,6 @@ export function HostedPhoneEntryStep({
   phoneNumber: string;
   sendCodeDisabled: boolean;
   selectedPhoneCountry: HostedPhoneCountryOption;
-  showPassiveConsentNotice?: boolean;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
@@ -147,7 +142,7 @@ export function HostedPhoneEntryStep({
           {phoneFieldLabel ??
             (intent === "link" ? "Phone number" : "Your phone")}
         </Label>
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex gap-3">
           <Combobox
             items={phoneCountryOptions}
             value={selectedPhoneCountry}
@@ -164,7 +159,7 @@ export function HostedPhoneEntryStep({
               aria-label={`Country or region, ${selectedPhoneCountry.label} ${selectedPhoneCountry.dialCode}`}
               className={cn(
                 buttonVariants({ variant: "outline", size: "lg" }),
-                "w-auto shrink-0 justify-between px-4 text-left font-medium sm:min-w-28"
+                "h-14 w-auto shrink-0 justify-between rounded-2xl px-5 text-left text-base font-medium md:text-base sm:min-w-28"
               )}
             >
               {selectedPhoneCountry.dialCode}
@@ -176,7 +171,7 @@ export function HostedPhoneEntryStep({
                   <ComboboxItem key={option.code} value={option}>
                     <span className="flex min-w-0 items-center justify-between gap-3">
                       <span>{option.label}</span>
-                      <span className="text-xs text-stone-500">
+                      <span className="text-xs text-muted-foreground">
                         {option.dialCode}
                       </span>
                     </span>
@@ -192,33 +187,28 @@ export function HostedPhoneEntryStep({
             inputMode="tel"
             name="phone-number"
             placeholder={selectedPhoneCountry.placeholder}
-            inputSize="lg"
+            inputSize="xl"
             value={phoneNumber}
             onChange={(event) => onPhoneNumberChange(event.currentTarget.value)}
-            className="sm:flex-1"
+            className="flex-1"
           />
         </div>
         {phoneFieldDescription ? (
-          <p className="text-sm text-stone-500">{phoneFieldDescription}</p>
+          <p className="text-sm text-muted-foreground">{phoneFieldDescription}</p>
         ) : null}
       </div>
       <div className="flex flex-wrap gap-3">
         <Button
           type="submit"
           disabled={sendCodeDisabled}
-          size="lg"
+          size="xl"
           className="w-full"
         >
           {pendingAction === "send-code"
             ? "Sending code..."
-            : intent === "link"
-            ? "Send verification code"
-            : "Text me a code"}
+            : "Send verification code"}
         </Button>
       </div>
-      {intent === "auth" && showPassiveConsentNotice ? (
-        <HostedAuthLegalNotice />
-      ) : null}
     </form>
   );
 }
@@ -231,6 +221,7 @@ export function HostedCodeEntryStep({
   intent,
   pendingAction,
   secondaryActionSize,
+  size,
   onCodeChange,
   onResendCode,
   onUseDifferentNumber,
@@ -243,6 +234,7 @@ export function HostedCodeEntryStep({
   intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
   secondaryActionSize: "sm" | "lg";
+  size?: "default" | "compact";
   onCodeChange: (value: string) => void;
   onResendCode: () => void;
   onUseDifferentNumber: () => void;
@@ -251,6 +243,7 @@ export function HostedCodeEntryStep({
   return (
     <HostedVerificationCodeStep
       code={code}
+      size={size}
       description={resolveHostedPhoneCodeEntryDescription({
         disableSignup,
         intent,

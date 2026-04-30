@@ -27,8 +27,8 @@ export function HostedInlineAuthButton({
       variant="outline"
       disabled={disabled}
       className={cn(
-        "h-11 w-full justify-center gap-2 border-stone-200 bg-white font-semibold text-stone-700 hover:bg-stone-50",
-        active ? "border-stone-300 bg-stone-50" : null,
+        "h-11 w-full justify-center gap-2 border-border bg-card font-semibold text-foreground hover:bg-muted",
+        active ? "border-border bg-muted" : null,
         className,
       )}
       onClick={onClick}
