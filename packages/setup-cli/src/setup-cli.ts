@@ -2,7 +2,6 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Cli, z } from 'incur'
 import { assistantAutomationStateSchema } from '@murphai/operator-config/assistant-cli-contracts'
-import { inboxRuntimeConfigSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   normalizeVaultForConfig,
   readOperatorConfig,
@@ -71,16 +70,6 @@ import { configureSetupChannels } from './setup-services/channels.js'
 import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
 import { redactHomePath } from './setup-services/shell.js'
 import { incurErrorBridge } from './incur-error-bridge.js'
-
-const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
-const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION = 1
-const initialSetupWizardInboxConfigEnvelopeSchema = z
-  .object({
-    schema: z.literal(INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA),
-    schemaVersion: z.literal(INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION),
-    value: inboxRuntimeConfigSchema,
-  })
-  .strict()
 
 export {
   buildSetupWizardPublicUrlReview,
@@ -413,8 +402,7 @@ export async function resolveInitialSetupWizardChannels(
     )
   }
 
-  const configuredChannels = await readInitialSetupWizardInboxChannels(vault)
-  return configuredChannels ?? getDefaultSetupWizardChannels(platform)
+  return getDefaultSetupWizardChannels(platform)
 }
 
 export async function resolveInitialSetupWizardScheduledUpdates(
@@ -451,49 +439,6 @@ async function readInitialSetupWizardAutomationState(vault: string) {
 
     throw error
   }
-}
-
-async function readInitialSetupWizardInboxChannels(
-  vault: string,
-): Promise<SetupChannel[] | null> {
-  const inboxConfigPath = resolveInitialSetupWizardInboxConfigPath(vault)
-
-  try {
-    const raw = await readFile(inboxConfigPath, 'utf8')
-    const config = parseInitialSetupWizardInboxConfig(raw)
-    return setupChannelValues.filter((channel) =>
-      config.connectors.some(
-        (connector) => connector.enabled && connector.source === channel,
-      ),
-    )
-  } catch (error) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
-      return null
-    }
-
-    throw error
-  }
-}
-
-function resolveInitialSetupWizardInboxConfigPath(vault: string): string {
-  return path.join(
-    resolveAssistantStatePaths(vault).absoluteVaultRoot,
-    '.runtime',
-    'operations',
-    'inbox',
-    'config.json',
-  )
-}
-
-function parseInitialSetupWizardInboxConfig(raw: string) {
-  return initialSetupWizardInboxConfigEnvelopeSchema.parse(
-    JSON.parse(raw),
-  ).value
 }
 
 function buildSetupCtaCommands(result: SetupResult): Array<{

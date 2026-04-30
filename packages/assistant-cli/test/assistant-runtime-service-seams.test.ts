@@ -549,7 +549,6 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
         eligibleAfter: null,
       },
     ],
-    inboxScanCursor: null,
     updatedAt: '2026-04-23T00:00:00.000Z',
   })
   storeLocalMocks.saveAssistantAutomationStateLocal.mockImplementation(
@@ -605,7 +604,6 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
         eligibleAfter: null,
       },
     ],
-    inboxScanCursor: null,
     updatedAt: storeLocalMocks.saveAssistantAutomationStateLocal.mock.calls[0]?.[1]?.updatedAt,
   })
 

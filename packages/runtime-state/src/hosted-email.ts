@@ -1,5 +1,11 @@
 export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "murph.hosted-email-thread-target.v1";
 export const HOSTED_EMAIL_THREAD_TARGET_PREFIX = "hostedmail:";
+export const HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH = 8_192;
+export const HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH = 256;
+export const HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT = 12;
+export const HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT = 8;
+export const HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH = 256;
+export const HOSTED_EMAIL_ADDRESS_MAX_LENGTH = 254;
 
 export interface HostedEmailThreadTarget {
   cc: string[];
@@ -33,21 +39,27 @@ export function createHostedEmailThreadTarget(input: {
   });
 
   return {
-    cc: normalizeHostedEmailAddressList(input.cc ?? []),
+    cc: normalizeHostedEmailAddressList(input.cc ?? []).slice(
+      0,
+      HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT,
+    ),
     lastMessageId,
     references,
     schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
     subject: normalizeHostedEmailSubject(input.subject),
-    to: normalizeHostedEmailAddressList(input.to ?? []),
+    to: normalizeHostedEmailAddressList(input.to ?? []).slice(
+      0,
+      HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT,
+    ),
   };
 }
 
 export function serializeHostedEmailThreadTarget(
   input: HostedEmailThreadTarget | Parameters<typeof createHostedEmailThreadTarget>[0],
 ): string {
-  return `${HOSTED_EMAIL_THREAD_TARGET_PREFIX}${encodeHostedEmailTargetPayload(
-    JSON.stringify(createHostedEmailThreadTarget(input)),
-  )}`;
+  return serializeHostedEmailThreadTargetRecord(
+    compactHostedEmailThreadTarget(createHostedEmailThreadTarget(input)),
+  );
 }
 
 export function parseHostedEmailThreadTarget(
@@ -79,6 +91,56 @@ export function parseHostedEmailThreadTarget(
   } catch {
     return null;
   }
+}
+
+function compactHostedEmailThreadTarget(
+  target: HostedEmailThreadTarget,
+): HostedEmailThreadTarget {
+  if (
+    serializeHostedEmailThreadTargetRecord(target).length <=
+      HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH
+  ) {
+    return target;
+  }
+
+  const withoutBulkCc: HostedEmailThreadTarget = {
+    ...target,
+    cc: [],
+    references: target.references.slice(-4),
+    subject: null,
+  };
+  if (
+    serializeHostedEmailThreadTargetRecord(withoutBulkCc).length <=
+      HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH
+  ) {
+    return withoutBulkCc;
+  }
+
+  const primaryOnly: HostedEmailThreadTarget = {
+    ...withoutBulkCc,
+    references: target.lastMessageId ? [target.lastMessageId] : [],
+    to: target.to.slice(0, 1),
+  };
+  if (
+    serializeHostedEmailThreadTargetRecord(primaryOnly).length <=
+      HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH
+  ) {
+    return primaryOnly;
+  }
+
+  return {
+    ...primaryOnly,
+    lastMessageId: null,
+    references: [],
+  };
+}
+
+function serializeHostedEmailThreadTargetRecord(
+  target: HostedEmailThreadTarget,
+): string {
+  return `${HOSTED_EMAIL_THREAD_TARGET_PREFIX}${encodeHostedEmailTargetPayload(
+    JSON.stringify(target),
+  )}`;
 }
 
 function readHostedEmailThreadTargetPayload(value: unknown): HostedEmailThreadTargetPayload | null {
@@ -127,7 +189,7 @@ export function appendHostedEmailReferenceChain(input: {
     references.add(lastMessageId);
   }
 
-  return [...references].slice(-20);
+  return [...references].slice(-HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT);
 }
 
 export function ensureHostedEmailReplySubject(
@@ -150,7 +212,11 @@ export function normalizeHostedEmailAddress(value: string | null | undefined): s
 
   const angleMatch = normalized.match(/<([^>]+)>/u);
   const candidate = normalizeHostedEmailOptionalText(angleMatch?.[1] ?? normalized);
-  return candidate ? candidate.toLowerCase() : null;
+  if (!candidate || candidate.length > HOSTED_EMAIL_ADDRESS_MAX_LENGTH) {
+    return null;
+  }
+
+  return candidate.toLowerCase();
 }
 
 export function normalizeHostedEmailAddressList(
@@ -273,16 +339,40 @@ function resolveHostedEmailHeaderSenderAddress(value: string | null | undefined)
 }
 
 export function normalizeHostedEmailMessageId(value: string | null | undefined): string | null {
-  return normalizeHostedEmailOptionalText(value);
+  return normalizeHostedEmailOptionalText(value, {
+    maxLength: HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH,
+    overLimit: "drop",
+  });
 }
 
 export function normalizeHostedEmailSubject(value: string | null | undefined): string | null {
-  return normalizeHostedEmailOptionalText(value);
+  return normalizeHostedEmailOptionalText(value, {
+    maxLength: HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH,
+    overLimit: "truncate",
+  });
 }
 
-function normalizeHostedEmailOptionalText(value: string | null | undefined): string | null {
+function normalizeHostedEmailOptionalText(
+  value: string | null | undefined,
+  options: {
+    maxLength?: number;
+    overLimit?: "drop" | "truncate";
+  } = {},
+): string | null {
   const normalized = value?.trim() ?? "";
-  return normalized.length > 0 && !/[\r\n]/u.test(normalized) ? normalized : null;
+  if (normalized.length === 0 || /[\r\n]/u.test(normalized)) {
+    return null;
+  }
+  if (
+    typeof options.maxLength === "number" &&
+    normalized.length > options.maxLength
+  ) {
+    return options.overLimit === "truncate"
+      ? normalized.slice(0, options.maxLength)
+      : null;
+  }
+
+  return normalized;
 }
 
 function collectHostedEmailHeaderSenderCandidates(

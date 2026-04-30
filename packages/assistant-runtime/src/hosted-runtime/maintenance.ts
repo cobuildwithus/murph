@@ -179,9 +179,8 @@ export async function runHostedAssistantAutomation(
     details: {
       autoReplyChannels: beforeState.autoReply.map((entry) => entry.channel).join(","),
       autoReplyEligibleAfterSummary: beforeState.autoReply.map((entry) =>
-        `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
+        `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
       ).join(","),
-      inboxScanCursor: beforeState.inboxScanCursor?.captureId ?? null,
       requestId,
     },
     wake,
@@ -259,10 +258,9 @@ export async function runHostedAssistantAutomation(
         ...buildHostedAssistantAutomationEventCountLogDetails(automationEventCounts),
         autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
         autoReplyEligibleAfterSummary: afterState.autoReply.map((entry) =>
-          `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
+          `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
         ).join(","),
         cronProcessed: result.cronProcessed,
-        inboxScanCursor: afterState.inboxScanCursor?.captureId ?? null,
         nextWakeAt: result.nextWakeAt,
         outboxAttempted: result.outboxAttempted,
         progressed: result.progressed,

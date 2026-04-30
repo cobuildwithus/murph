@@ -1,7 +1,6 @@
 import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionRedactedLogEntry,
-  HostedExecutionRunnerVaultSyncImport,
   HostedExecutionLogLevel,
   HostedExecutionSystemWake,
   HostedExecutionWake,
@@ -24,7 +23,6 @@ import {
   prepareHostedWakeContext,
 } from "./context.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
-import { handleHostedVaultSyncImportWake } from "./events/vault-sync.ts";
 import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
 import type {
   HostedMailboxEffect,
@@ -52,7 +50,6 @@ export async function executeHostedMailboxEvent(input: {
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
-  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxExecutionMetrics> {
   if (isHostedConversationMessageWake(input.wake)) {
     throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
@@ -73,7 +70,6 @@ export async function executeHostedMailboxEvent(input: {
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     runtime: input.runtime,
     vaultRoot: input.vaultRoot,
-    vaultSyncImport: input.vaultSyncImport ?? null,
   });
 
   return {
@@ -81,7 +77,6 @@ export async function executeHostedMailboxEvent(input: {
     conversationMetrics: mailboxEffect.conversationMetrics,
     mailboxLane: mailboxEffect.mailboxLane,
     redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
-    vaultSyncImportResult: mailboxEffect.vaultSyncImportResult,
   };
 }
 
@@ -94,7 +89,6 @@ async function handleHostedMailboxEvent(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   vaultRoot: string;
-  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
     throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
@@ -106,7 +100,6 @@ async function handleHostedMailboxEvent(input: {
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     runtime: input.runtime,
     vaultRoot: input.vaultRoot,
-    vaultSyncImport: input.vaultSyncImport ?? null,
   });
 }
 
@@ -119,7 +112,6 @@ async function executeHostedSystemWake(input: {
     "commitTimeoutMs" | "platform" | "resolvedConfig"
   >;
   vaultRoot: string;
-  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.kind) {
     case "member.activated":
@@ -151,19 +143,6 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "device-sync",
       });
-    case "vault.sync.import":
-      if (!input.vaultSyncImport) {
-        throw new TypeError("Hosted vault sync import wake requires a hydrated runner vaultSyncImport.");
-      }
-      return {
-        ...(await handleHostedVaultSyncImportWake({
-          wake: input.wake,
-          vaultRoot: input.vaultRoot,
-          vaultSyncImport: input.vaultSyncImport,
-        })),
-        redactedLogEntries: [],
-        mailboxLane: "vault-sync-import",
-      };
   }
 
   const exhaustiveWake: never = input.wake;
@@ -289,7 +268,6 @@ function createNoopMailboxEffect(input: {
     conversationMetrics: input.conversationMetrics,
     mailboxLane: input.mailboxLane,
     redactedLogEntries: input.redactedLogEntries ?? [],
-    vaultSyncImportResult: null,
   };
 }
 

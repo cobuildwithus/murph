@@ -1,5 +1,4 @@
 import type {
-  AssistantAutomationCursor,
   AssistantAutomationState,
   AssistantTurnReceipt,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -57,7 +56,6 @@ export interface RecoverAssistantAutoRepliesInput {
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   requestId?: string | null
-  scanCursor?: AssistantAutomationCursor | null
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
   inputSource?: AssistantInputSource
@@ -81,7 +79,7 @@ export async function recoverAssistantAutoReplies(
     input.autoReply ??
     normalizeEnabledChannels(input.enabledChannels ?? []).map((channel) => ({
       channel,
-      eligibleAfter: input.scanCursor ?? null,
+      eligibleAfter: null,
       enabledAt: new Date().toISOString(),
     }))
   const enabledChannels = normalizeEnabledChannels(

@@ -25,11 +25,10 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
-  HostedConversationInboxProjectionError,
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "./events/conversation.ts";
 import {
-  prepareHostedLocalRuntimeForConversationImport,
+  prepareHostedInboxProjectionRuntime,
   requireHostedBootstrapForWake,
 } from "./context.ts";
 import {
@@ -75,7 +74,6 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 export interface HostedConversationMailboxLocalImportResult {
   captureId: string | null;
   deduped: boolean;
-  durable?: boolean;
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -223,26 +221,19 @@ export async function importHostedConversationMailboxItem(input: {
     await requireHostedBootstrapForWake(input.vaultRoot, decoded.wake);
   }
 
-  const hasAssistantReadyContent = hostedMailboxWakeHasAssistantReadyContent(decoded.wake);
-  const stageBeforeProjection =
-    hasAssistantReadyContent || !isHostedEmailConversationMessageWake(decoded.wake);
-  let stagedInput: HostedConversationMailboxAssistantInputStageResult | null =
-    stageBeforeProjection
-      ? await stageAssistantInputEvent({
-          item: input.item,
-          vaultRoot: input.vaultRoot,
-          wake: decoded.wake,
-        })
-      : null;
-
-  await prepareWakeContext({
-    runtime: input.runtime,
+  const stagedInput = await stageAssistantInputEvent({
+    item: input.item,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
 
   let imported: HostedConversationMailboxLocalImportResult;
   try {
+    await prepareWakeContext({
+      runtime: input.runtime,
+      vaultRoot: input.vaultRoot,
+      wake: decoded.wake,
+    });
     imported = await importConversationWake({
       runtime: input.runtime,
       vaultRoot: input.vaultRoot,
@@ -251,26 +242,7 @@ export async function importHostedConversationMailboxItem(input: {
   } catch (error) {
     const projectionFailureReason =
       readHostedConversationProjectionFailureReason(error);
-    if (!projectionFailureReason) {
-      throw error;
-    }
 
-    if (
-      projectionFailureReason === CONVERSATION_RAW_EMAIL_MISSING_REASON
-      && !hasAssistantReadyContent
-    ) {
-      return {
-        reasonCode: projectionFailureReason,
-        retryable: true,
-        status: "blocked",
-      };
-    }
-
-    stagedInput ??= await stageAssistantInputEvent({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake: decoded.wake,
-    });
     await recordHostedConversationProjectionBestEffort(stagedInput, {
       captureId: null,
       reasonCode: projectionFailureReason,
@@ -281,24 +253,6 @@ export async function importHostedConversationMailboxItem(input: {
       captureId: null,
       metrics: createEmptyHostedConversationWakeMetrics(),
       reasonCode: projectionFailureReason,
-      status: "imported",
-    };
-  }
-  stagedInput ??= await stageAssistantInputEvent({
-    item: input.item,
-    vaultRoot: input.vaultRoot,
-    wake: decoded.wake,
-  });
-  if (imported.durable === false) {
-    await recordHostedConversationProjectionBestEffort(stagedInput, {
-      captureId: null,
-      reasonCode: CONVERSATION_CAPTURE_PERSIST_FAILED_REASON,
-      status: "failed",
-    });
-    return {
-      captureId: imported.captureId,
-      metrics: imported.metrics,
-      reasonCode: CONVERSATION_CAPTURE_PERSIST_FAILED_REASON,
       status: "imported",
     };
   }
@@ -337,7 +291,6 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   return {
     captureId: result.capture.captureId,
     deduped: result.capture.deduped,
-    durable: result.capturePersistence === "canonical",
     metrics: result.metrics,
   };
 }
@@ -374,16 +327,12 @@ async function stageHostedConversationAssistantInputEvent(input: {
 
 function readHostedConversationProjectionFailureReason(
   error: unknown,
-): string | null {
+): string {
   if (error instanceof HostedRawEmailMessageMissingError) {
     return CONVERSATION_RAW_EMAIL_MISSING_REASON;
   }
 
-  if (error instanceof HostedConversationInboxProjectionError) {
-    return CONVERSATION_PROJECTION_FAILED_REASON;
-  }
-
-  return null;
+  return CONVERSATION_PROJECTION_FAILED_REASON;
 }
 
 function createHostedConversationAssistantInputEvent(input: {
@@ -529,6 +478,8 @@ function createHostedConversationAssistantInputConversation(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
+    const threadIdentity =
+      wake.message.threadKey ?? wake.message.threadTarget ?? wake.message.rawMessageKey;
     return {
       accountId: hashNullableHostedAssistantInputIdentifier(
         identifierBlind,
@@ -539,7 +490,7 @@ function createHostedConversationAssistantInputConversation(
       source: "email",
       threadId: hashNullableHostedAssistantInputIdentifier(
         identifierBlind,
-        wake.message.rawMessageKey,
+        threadIdentity,
       ),
       threadIsDirect: true,
     };
@@ -578,8 +529,12 @@ function createHostedConversationAssistantInputReplyTarget(
   if (isHostedEmailConversationMessageWake(wake)) {
     return {
       channel: "email",
-      messageId: null,
-      threadId: null,
+      messageId: normalizeHostedAssistantInputReplyTargetIdentifier(
+        wake.message.messageId,
+      ),
+      threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
+        wake.message.threadTarget,
+      ),
     };
   }
 
@@ -736,31 +691,6 @@ function sanitizeHostedAssistantInputText(value: string): string | null {
   return sanitized.length > 20_000 ? sanitized.slice(0, 20_000) : sanitized;
 }
 
-function hostedMailboxWakeHasAssistantReadyContent(
-  wake: HostedExecutionConversationMessageWake,
-): boolean {
-  if (isHostedLinqConversationMessageWake(wake)) {
-    return wake.message.linqMessage.parts.some((part) => {
-      if (part.type === "text") {
-        return sanitizeHostedAssistantInputText(part.value) !== null;
-      }
-
-      return part.type === "media" || part.type === "voice_memo";
-    });
-  }
-
-  if (isHostedTelegramConversationMessageWake(wake)) {
-    return sanitizeHostedAssistantInputText(wake.message.telegramMessage.text ?? "") !== null
-      || (wake.message.telegramMessage.attachments?.length ?? 0) > 0;
-  }
-
-  if (isHostedEmailConversationMessageWake(wake)) {
-    return false;
-  }
-
-  return false;
-}
-
 function normalizeHostedAssistantInputMimeType(value: string | null | undefined): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
@@ -794,7 +724,7 @@ async function prepareHostedConversationMailboxWakeContext(input: {
   wake: HostedExecutionConversationMessageWake;
 }): Promise<void> {
   void input.runtime;
-  await prepareHostedLocalRuntimeForConversationImport(
+  await prepareHostedInboxProjectionRuntime(
     input.vaultRoot,
     input.wake.eventId,
   );

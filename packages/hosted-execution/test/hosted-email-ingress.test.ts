@@ -7,15 +7,21 @@ describe("hosted email ingress contract", () => {
     expect(parseHostedEmailIngressWakeAppendRequest({
       eventId: "evt_email",
       identityId: "assistant@example.com",
+      messageId: "<message-123@example.test>",
       occurredAt: "2026-04-17T00:00:00.000Z",
       rawMessageKey: "raw_123",
       selfAddress: "reply@example.com",
+      threadKey: "<thread-root@example.test>",
+      threadTarget: "hostedmail:opaque-thread-target",
     })).toEqual({
       eventId: "evt_email",
       identityId: "assistant@example.com",
+      messageId: "<message-123@example.test>",
       occurredAt: "2026-04-17T00:00:00.000Z",
       rawMessageKey: "raw_123",
       selfAddress: "reply@example.com",
+      threadKey: "<thread-root@example.test>",
+      threadTarget: "hostedmail:opaque-thread-target",
     });
   });
 

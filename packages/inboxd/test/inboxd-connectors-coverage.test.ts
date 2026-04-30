@@ -4,6 +4,10 @@ import {
   parseHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 import { normalizeHostedTelegramMessage } from "../src/connectors/telegram/normalize.ts";
+import {
+  buildParsedEmailThreadTarget,
+  resolveParsedEmailThreadKey,
+} from "../src/connectors/email/normalize-parsed.ts";
 
 import type {
   ChatPollDriver,
@@ -435,6 +439,48 @@ test("normalizeParsedEmailMessage builds fallback thread targets, dedupes reply-
     schema: "murph.email-parsed-capture.v1",
     to_count: 2,
   });
+});
+
+test("parsed email thread metadata exposes stable input keys and private reply targets", () => {
+  const message: ParsedEmailMessage = {
+    attachments: [],
+    bcc: [],
+    cc: ["team@example.test"],
+    from: "Sender <sender@example.test>",
+    headers: {},
+    html: null,
+    inReplyTo: "<prior@example.test>",
+    messageId: "<current@example.test>",
+    occurredAt: null,
+    rawHash: "0".repeat(64),
+    rawSize: 256,
+    receivedAt: null,
+    references: ["<root@example.test>", "<prior@example.test>"],
+    replyTo: [],
+    subject: "Threaded update",
+    text: "hello",
+    to: ["assistant@example.test"],
+  };
+  const threadTarget = parseHostedEmailThreadTarget(
+    buildParsedEmailThreadTarget({
+      accountAddress: "assistant@example.test",
+      message,
+    }),
+  );
+
+  assert.equal(
+    resolveParsedEmailThreadKey({ message, rawMessageKey: "raw_123" }),
+    "<root@example.test>",
+  );
+  assert.deepEqual(threadTarget?.to, ["sender@example.test"]);
+  assert.deepEqual(threadTarget?.cc, ["team@example.test"]);
+  assert.deepEqual(threadTarget?.references, [
+    "<root@example.test>",
+    "<prior@example.test>",
+    "<current@example.test>",
+  ]);
+  assert.equal(threadTarget?.lastMessageId, "<current@example.test>");
+  assert.equal(threadTarget?.subject, "Threaded update");
 });
 
 test("createAgentmailApiPollDriver validates inputs, normalizes empty download URLs, and createEmailPollConnector rejects tiny poll intervals", async () => {

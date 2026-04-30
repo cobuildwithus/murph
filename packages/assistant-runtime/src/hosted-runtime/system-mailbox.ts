@@ -1,16 +1,11 @@
 import path from "node:path";
 
 import {
-  type HostedExecutionRunnerVaultSyncImport,
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRuntimeVaultSyncImportRequest,
-  HostedRuntimeVaultSyncImportSummary,
-} from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
@@ -37,10 +32,6 @@ import type {
   HostedMailboxExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
-import {
-  createHostedVaultSyncImportSummary,
-  resolveHostedVaultSyncImportStatus,
-} from "./vault-sync-import-summary.ts";
 
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA = "murph.hosted-system-mailbox-state.v1";
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION = 1;
@@ -50,27 +41,7 @@ type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
   | "dispatch-assistant-notification"
-  | "import-vault-sync"
   | "run-device-sync-wake";
-
-type HostedSystemMailboxRecordRequest =
-  {
-      kind: "vault-sync-import";
-      request: HostedRuntimeVaultSyncImportRequest;
-    };
-
-class HostedSystemMailboxTerminalRecordError extends Error {
-  readonly recordRequest: HostedSystemMailboxRecordRequest;
-
-  constructor(input: {
-    message: string;
-    recordRequest: HostedSystemMailboxRecordRequest;
-  }) {
-    super(input.message);
-    this.name = "HostedSystemMailboxTerminalRecordError";
-    this.recordRequest = input.recordRequest;
-  }
-}
 
 export interface HostedSystemMailboxPendingItem {
   attemptCount: number;
@@ -81,7 +52,7 @@ export interface HostedSystemMailboxPendingItem {
   mailboxDedupeKey: string;
   nextAttemptAt: string | null;
   occurredAt: string;
-  postCheckpointRecord: HostedSystemMailboxRecordRequest | null;
+  postCheckpointRecord: null;
   requestId: string | null;
   routeAction: HostedSystemMailboxRouteAction;
   status: "pending" | "recording" | "sending";
@@ -207,26 +178,15 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       runtimeEnv: input.runtimeEnv,
       vaultRoot: input.vaultRoot,
     });
-    const recordRequest = buildHostedSystemMailboxRecordRequest({
-      item: prepared,
-      metrics,
-    });
     const processedItem: HostedSystemMailboxPendingItem = {
       ...prepared,
-      postCheckpointRecord: recordRequest,
-      status: recordRequest ? "recording" : "sending",
+      postCheckpointRecord: null,
+      status: "sending",
     };
-    if (recordRequest) {
-      await updateHostedSystemMailboxPendingItem({
-        item: processedItem,
-        vaultRoot: input.vaultRoot,
-      });
-    } else {
-      await removeHostedSystemMailboxPendingItem({
-        itemId: prepared.itemId,
-        vaultRoot: input.vaultRoot,
-      });
-    }
+    await removeHostedSystemMailboxPendingItem({
+      itemId: prepared.itemId,
+      vaultRoot: input.vaultRoot,
+    });
     return {
       item: processedItem,
       itemId: prepared.itemId,
@@ -235,26 +195,6 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
     };
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
-    if (error instanceof HostedSystemMailboxTerminalRecordError) {
-      const terminalItem: HostedSystemMailboxPendingItem = {
-        ...prepared,
-        lastErrorCode: normalized.code,
-        lastErrorMessage: normalized.message,
-        nextAttemptAt: null,
-        postCheckpointRecord: error.recordRequest,
-        status: "recording",
-      };
-      await updateHostedSystemMailboxPendingItem({
-        item: terminalItem,
-        vaultRoot: input.vaultRoot,
-      });
-      return {
-        item: terminalItem,
-        itemId: prepared.itemId,
-        status: "recording",
-      };
-    }
-
     const nextWakeAt = new Date(Date.parse(startedAt) + 60_000).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
@@ -307,64 +247,11 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     };
   }
 
-  try {
-    if (input.item.postCheckpointRecord.kind === "vault-sync-import") {
-      const vaultSyncPort = input.runtime.platform.vaultSyncPort ?? null;
-      if (!vaultSyncPort) {
-        throw new TypeError("Hosted vault sync import receipt requires a vault sync port.");
-      }
-      const response = await vaultSyncPort.recordImport(input.item.postCheckpointRecord.request);
-      await removeHostedSystemMailboxPendingItem({
-        itemId: input.item.itemId,
-        vaultRoot: input.vaultRoot,
-      });
-      return {
-        failed: 0,
-        nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
-        recorded: response.recorded ? 1 : 0,
-      };
-    }
-
-    return {
-      failed: 0,
-      nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
-      recorded: 0,
-    };
-  } catch (error) {
-    const normalized = normalizeHostedSystemMailboxError(error);
-    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
-    await updateHostedSystemMailboxPendingItem({
-      item: {
-        ...input.item,
-        lastErrorCode: normalized.code,
-        lastErrorMessage: normalized.message,
-        nextAttemptAt: nextWakeAt,
-        status: "recording",
-      },
-      vaultRoot: input.vaultRoot,
-    });
-    return { failed: 1, nextWakeAt, recorded: 0 };
-  }
-}
-
-function buildHostedSystemMailboxRecordRequest(input: {
-  item: HostedSystemMailboxPendingItem;
-  metrics: HostedMailboxExecutionMetrics;
-}): HostedSystemMailboxRecordRequest | null {
-  const importedAt = input.item.lastAttemptAt ?? new Date().toISOString();
-  if (input.item.wake.kind === "vault.sync.import" && input.metrics.vaultSyncImportResult) {
-    return {
-      kind: "vault-sync-import",
-      request: {
-        importedAt,
-        sessionId: input.item.wake.vaultSync.sessionId,
-        status: resolveHostedVaultSyncImportStatus(input.metrics.vaultSyncImportResult),
-        summary: createHostedVaultSyncImportSummary(input.metrics.vaultSyncImportResult),
-      },
-    };
-  }
-
-  return null;
+  return {
+    failed: 0,
+    nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+    recorded: 0,
+  };
 }
 
 export async function readHostedSystemMailboxCheckpointRollbackState(input: {
@@ -394,17 +281,6 @@ async function executePendingHostedSystemMailboxItem(input: {
       wake: input.pendingItem.wake,
     });
 
-  if (input.pendingItem.wake.kind === "vault.sync.import") {
-    return executePendingHostedVaultSyncImport({
-      ...input,
-      executionContext,
-      pendingItem: {
-        ...input.pendingItem,
-        wake: input.pendingItem.wake,
-      },
-    });
-  }
-
   return executeHostedMailboxEvent({
     executionContext,
     forceQueueOnlyAssistantNotification: true,
@@ -413,71 +289,6 @@ async function executePendingHostedSystemMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: input.pendingItem.wake,
   });
-}
-
-async function executePendingHostedVaultSyncImport(input: {
-  executionContext: AssistantExecutionContext;
-  pendingItem: HostedSystemMailboxPendingItem & {
-    wake: Extract<HostedExecutionSystemWake, { kind: "vault.sync.import" }>;
-  };
-  runtime: HostedSystemMailboxRuntime;
-  runtimeEnv: Readonly<Record<string, string>>;
-  vaultRoot: string;
-}): Promise<HostedMailboxExecutionMetrics> {
-  const vaultSyncPort = input.runtime.platform.vaultSyncPort ?? null;
-  if (!vaultSyncPort) {
-    throw new TypeError("Hosted vault sync import wake requires a vault sync port.");
-  }
-
-  const fetched = await vaultSyncPort.fetchPayload({
-    requestId: `${input.pendingItem.itemId}:vault-sync-payload`,
-    sessionId: input.pendingItem.wake.vaultSync.sessionId,
-  });
-  if (!fetched.payload) {
-    const unavailable = fetched.unavailable ?? null;
-    if (unavailable?.retryable === false) {
-      throw new HostedSystemMailboxTerminalRecordError({
-        message: `Hosted vault sync payload unavailable: ${unavailable.code}.`,
-        recordRequest: {
-          kind: "vault-sync-import",
-          request: {
-            errorCode: `vault_sync_payload.${unavailable.code}`,
-            importedAt: input.pendingItem.lastAttemptAt ?? new Date().toISOString(),
-            sessionId: input.pendingItem.wake.vaultSync.sessionId,
-            status: "failed",
-            summary: createEmptyHostedVaultSyncImportSummary(),
-          },
-        },
-      });
-    }
-    throw new TypeError(
-      unavailable
-        ? `Hosted vault sync payload unavailable: ${unavailable.code}.`
-        : "Hosted vault sync payload is missing.",
-    );
-  }
-
-  const vaultSyncImport: HostedExecutionRunnerVaultSyncImport = {
-    bundleBase64: fetched.payload.bundleBase64,
-    sessionId: fetched.payload.sessionId,
-    ...(fetched.payload.sourceSchemaVersion === undefined
-      ? {}
-      : { sourceSchemaVersion: fetched.payload.sourceSchemaVersion }),
-  };
-  const metrics = await executeHostedMailboxEvent({
-    executionContext: input.executionContext,
-    forceQueueOnlyAssistantNotification: true,
-    runtime: input.runtime,
-    runtimeEnv: input.runtimeEnv,
-    vaultRoot: input.vaultRoot,
-    vaultSyncImport,
-    wake: input.pendingItem.wake,
-  });
-  if (!metrics.vaultSyncImportResult) {
-    throw new TypeError("Hosted vault sync mailbox import did not return merge metrics.");
-  }
-
-  return metrics;
 }
 
 function buildHostedSystemMailboxExecutionContext(input: {
@@ -658,7 +469,6 @@ function readHostedSystemMailboxRouteAction(
     item.route.action === "apply-member-activation"
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "dispatch-assistant-notification"
-    || item.route.action === "import-vault-sync"
     || item.route.action === "run-device-sync-wake"
   ) {
     return item.route.action;
@@ -672,7 +482,6 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     value === "apply-member-activation"
     || value === "apply-member-channels-update"
     || value === "dispatch-assistant-notification"
-    || value === "import-vault-sync"
     || value === "run-device-sync-wake"
   ) {
     return value;
@@ -686,13 +495,6 @@ function readRequiredString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
   return value;
-}
-
-function readOptionalString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  return readRequiredString(value, label);
 }
 
 function readNonNegativeInteger(value: unknown, label: string): number {
@@ -709,87 +511,17 @@ function parseHostedSystemMailboxStatus(value: unknown): "pending" | "recording"
   throw new TypeError("hosted system mailbox status is invalid.");
 }
 
-function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMailboxRecordRequest {
+function parseHostedSystemMailboxRecordRequest(value: unknown): never {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("hosted system mailbox postCheckpointRecord must be an object.");
   }
   const record = value as Record<string, unknown>;
-  const request = record.request;
-  if (!request || typeof request !== "object" || Array.isArray(request)) {
-    throw new TypeError("hosted system mailbox postCheckpointRecord.request must be an object.");
-  }
-  const requestRecord = request as Record<string, unknown>;
 
   if (record.kind === "share-import") {
     throw new TypeError("hosted system mailbox legacy share-import pending state is unsupported.");
   }
 
-  if (record.kind === "vault-sync-import") {
-    const status = requestRecord.status;
-    if (
-      status !== "imported"
-      && status !== "imported_with_conflicts"
-      && status !== "failed"
-    ) {
-      throw new TypeError("hosted system mailbox vault sync import status is invalid.");
-    }
-    return {
-      kind: "vault-sync-import",
-      request: {
-        errorCode: readOptionalString(
-          requestRecord.errorCode,
-          "hosted system mailbox vault sync errorCode",
-        ),
-        importedAt: readRequiredString(
-          requestRecord.importedAt,
-          "hosted system mailbox vault sync importedAt",
-        ),
-        sessionId: readRequiredString(
-          requestRecord.sessionId,
-          "hosted system mailbox vault sync sessionId",
-        ),
-        status,
-        summary: parseHostedSystemMailboxVaultSyncImportSummary(requestRecord.summary),
-      },
-    };
-  }
-
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
-}
-
-function parseHostedSystemMailboxVaultSyncImportSummary(
-  value: unknown,
-): HostedRuntimeVaultSyncImportSummary {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("hosted system mailbox vault sync summary must be an object.");
-  }
-  const record = value as Record<string, unknown>;
-  return {
-    conflictCount: readNonNegativeInteger(
-      record.conflictCount,
-      "hosted system mailbox vault sync conflictCount",
-    ),
-    importedJsonlRecords: readNonNegativeInteger(
-      record.importedJsonlRecords,
-      "hosted system mailbox vault sync importedJsonlRecords",
-    ),
-    importedRawFiles: readNonNegativeInteger(
-      record.importedRawFiles,
-      "hosted system mailbox vault sync importedRawFiles",
-    ),
-    importedTextFiles: readNonNegativeInteger(
-      record.importedTextFiles,
-      "hosted system mailbox vault sync importedTextFiles",
-    ),
-    skippedDuplicates: readNonNegativeInteger(
-      record.skippedDuplicates,
-      "hosted system mailbox vault sync skippedDuplicates",
-    ),
-    skippedExcludedFiles: readNonNegativeInteger(
-      record.skippedExcludedFiles,
-      "hosted system mailbox vault sync skippedExcludedFiles",
-    ),
-  };
 }
 
 function systemMailboxItemIsDue(
@@ -824,14 +556,6 @@ function normalizeHostedSystemMailboxError(error: unknown): {
   code: string;
   message: string;
 } {
-  if (error instanceof HostedSystemMailboxTerminalRecordError) {
-    const request = error.recordRequest.request;
-    return {
-      code: request.errorCode ?? "HOSTED_SYSTEM_MAILBOX_TERMINAL",
-      message: error.message,
-    };
-  }
-
   if (error instanceof Error) {
     const codedError: Error & { code?: unknown } = error;
     const code = typeof codedError.code === "string"
@@ -846,17 +570,6 @@ function normalizeHostedSystemMailboxError(error: unknown): {
   return {
     code: "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS",
     message: "Hosted system mailbox effect failed after checkpoint.",
-  };
-}
-
-function createEmptyHostedVaultSyncImportSummary(): HostedRuntimeVaultSyncImportSummary {
-  return {
-    conflictCount: 0,
-    importedJsonlRecords: 0,
-    importedRawFiles: 0,
-    importedTextFiles: 0,
-    skippedDuplicates: 0,
-    skippedExcludedFiles: 0,
   };
 }
 

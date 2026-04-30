@@ -1,7 +1,4 @@
-import type {
-  AssistantAutomationCursor,
-  AssistantAutomationState,
-} from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 import { readAssistantAutomationState, saveAssistantAutomationState } from './store.js'
 import {
   normalizeAssistantAutoReplyChannels,
@@ -50,7 +47,7 @@ export function managedAssistantAutoReplyChannelsNeedCursorSeed(input: {
 export function reconcileManagedAssistantAutoReplyChannels(input: {
   current: readonly AssistantAutoReplyEntry[]
   desiredChannels: readonly string[]
-  eligibleAfter: AssistantAutomationCursor | null
+  eligibleAfter: AssistantInputCursor | null
   enabledAt: string
   isManagedChannel?: (channel: string) => boolean
 }): AssistantAutoReplyEntry[] {
@@ -78,12 +75,11 @@ export async function readLatestAssistantInputSourceCursor(input: {
   inputSource?: AssistantInputSource
   signal?: AbortSignal
   vault: string
-}): Promise<AssistantAutomationCursor | null> {
+}): Promise<AssistantInputCursor | null> {
   if (!input.inputSource) {
-    const cursor = await readLatestAssistantInputCursor({
+    return await readLatestAssistantInputCursor({
       vault: input.vault,
     })
-    return cursor ? assistantInputCursorToAutomationCursor(cursor) : null
   }
 
   const inputSource = input.inputSource
@@ -107,31 +103,15 @@ export async function readLatestAssistantInputSourceCursor(input: {
   }
 
   return latestCandidate
-    ? assistantInputCandidateToAutomationCursor(latestCandidate)
+    ? latestCandidate.event.cursor
     : null
-}
-
-function assistantInputCandidateToAutomationCursor(
-  candidate: AssistantInputCandidate,
-): AssistantAutomationCursor {
-  return assistantInputCursorToAutomationCursor(candidate.event.cursor)
-}
-
-function assistantInputCursorToAutomationCursor(
-  cursor: AssistantInputCursor,
-): AssistantAutomationCursor {
-  return {
-    captureId: cursor.inputId,
-    createdAt: cursor.createdAt ?? null,
-    occurredAt: cursor.occurredAt,
-  }
 }
 
 export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
   desiredChannels: readonly string[]
   inputSource?: AssistantInputSource
   isManagedChannel?: (channel: string) => boolean
-  latestInputCursor?: AssistantAutomationCursor | null
+  latestInputCursor?: AssistantInputCursor | null
   signal?: AbortSignal
   vault: string
 }): Promise<{
@@ -190,7 +170,7 @@ export async function enableAssistantAutoReplyChannelLocal(input: {
   channel: string
   inputSource?: AssistantInputSource
   isManagedChannel?: (channel: string) => boolean
-  latestInputCursor?: AssistantAutomationCursor | null
+  latestInputCursor?: AssistantInputCursor | null
   signal?: AbortSignal
   vault: string
 }): Promise<boolean> {

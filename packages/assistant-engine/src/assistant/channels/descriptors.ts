@@ -2,6 +2,9 @@ import {
   resolveAgentmailApiKey,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  parseHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
+import {
   type LinqFetch,
   probeLinqApi,
   resolveLinqApiToken,
@@ -178,11 +181,15 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         'Email delivery requires a configured email sender identity. Pass --identity or resume a session already bound to email.',
       )
     }
+    const targetKind =
+      candidate.kind === 'explicit' && parseHostedEmailThreadTarget(candidate.target)
+        ? 'thread'
+        : candidate.kind
     const delivered = await send({
       idempotencyKey: idempotencyKey ?? null,
       identityId: identityId!,
       target: candidate.target,
-      targetKind: candidate.kind,
+      targetKind,
       replyToMessageId: replyToMessageId ?? null,
       subject: subject ?? null,
       message,

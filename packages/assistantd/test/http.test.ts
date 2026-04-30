@@ -275,7 +275,6 @@ const TEST_ASSISTANT_STATUS: AssistantStatus = {
     reason: null,
   },
   automation: {
-    inboxScanCursor: null,
     autoReply: [],
     updatedAt: '2026-03-28T00:00:00.000Z',
   },

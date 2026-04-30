@@ -23,7 +23,7 @@ export const ASSISTANT_INPUT_EVENT_SCHEMA = 'murph.assistant-input-event.v1'
 export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
 export const ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH = 20_000
 export const ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT = 32
-const ASSISTANT_INPUT_EVENT_REPLY_TARGET_MAX_LENGTH = 512
+const ASSISTANT_INPUT_EVENT_REPLY_TARGET_MAX_LENGTH = 8_192
 
 export type AssistantInputConversationRef = AssistantConversationCaptureRef
 export type AssistantInputProjectionStatus =
@@ -742,8 +742,12 @@ function assistantInputSourceRefIdentity(
 function assistantInputSourcePosition(
   sourceRef: AssistantInputSourceRef,
 ): string | null {
-  if (sourceRef.kind !== 'hosted-mailbox') {
-    return null
+  if (sourceRef.kind === 'inbox-capture') {
+    return [
+      'inbox-capture',
+      sourceRef.source,
+      sourceRef.captureId,
+    ].join(':')
   }
   return [
     'hosted-mailbox',
@@ -1197,17 +1201,27 @@ function isPathOrUrlLike(value: string): boolean {
   )
 }
 
-function compareAssistantInputCursors(
+export function compareAssistantInputCursors(
   left: AssistantInputCursor,
   right: AssistantInputCursor,
 ): number {
+  const leftSourceLane = left.sourcePosition
+    ? assistantInputCursorSourceLane(left.sourcePosition)
+    : null
+  const rightSourceLane = right.sourcePosition
+    ? assistantInputCursorSourceLane(right.sourcePosition)
+    : null
   if (
     left.sourcePosition &&
     right.sourcePosition &&
-    assistantInputCursorSourceLane(left) === assistantInputCursorSourceLane(right)
+    leftSourceLane &&
+    leftSourceLane === rightSourceLane
   ) {
     const positionOrder = left.sourcePosition.localeCompare(right.sourcePosition)
-    if (positionOrder !== 0) {
+    if (
+      positionOrder !== 0 &&
+      leftSourceLane.startsWith('hosted-mailbox:')
+    ) {
       return positionOrder
     }
   }
@@ -1220,16 +1234,28 @@ function compareAssistantInputCursors(
     return leftTimestamp.localeCompare(rightTimestamp)
   }
 
+  if (
+    left.sourcePosition &&
+    right.sourcePosition &&
+    leftSourceLane &&
+    leftSourceLane === rightSourceLane
+  ) {
+    const positionOrder = left.sourcePosition.localeCompare(right.sourcePosition)
+    if (positionOrder !== 0) {
+      return positionOrder
+    }
+  }
+
+  if (left.sourceKind !== right.sourceKind) {
+    return left.sourceKind.localeCompare(right.sourceKind)
+  }
+
   return left.inputId.localeCompare(right.inputId)
 }
 
-function assistantInputCursorSourceLane(
-  cursor: AssistantInputCursor,
-): 'conversation' | 'system' | null {
-  const match = /^hosted-mailbox:(conversation|system):/u.exec(
-    cursor.sourcePosition ?? '',
-  )
-  return match ? match[1] as 'conversation' | 'system' : null
+function assistantInputCursorSourceLane(sourcePosition: string): string | null {
+  const [source, lane] = sourcePosition.split(':', 3)
+  return source && lane ? `${source}:${lane}` : null
 }
 
 function sha256Hex(value: string): string {

@@ -151,7 +151,6 @@ function createAssistantServiceMock(): AssistantLocalService {
     getStatus: async () => ({
       automation: {
         autoReply: [],
-        inboxScanCursor: null,
         updatedAt: '2026-04-09T00:00:00.000Z',
       },
       diagnostics: {

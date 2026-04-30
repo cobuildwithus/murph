@@ -8,6 +8,13 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import type {
+  AssistantInputCursor,
+} from "@murphai/operator-config/assistant-cli-contracts";
+import {
+  updateAssistantInputProjection,
+  upsertAssistantInputEvent,
+} from "@murphai/assistant-engine";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
@@ -157,9 +164,8 @@ async function readAutomationState(vaultRoot: string) {
     autoReply: Array<{
       channel: string;
       enabledAt: string;
-      eligibleAfter: { captureId: string; occurredAt: string } | null;
+      eligibleAfter: AssistantInputCursor | null;
     }>;
-    inboxScanCursor: { captureId: string; occurredAt: string } | null;
     updatedAt: string;
     version: number;
   };
@@ -171,9 +177,8 @@ async function writeAutomationState(
     autoReply: Array<{
       channel: string;
       enabledAt: string;
-      eligibleAfter: { captureId: string; occurredAt: string } | null;
+      eligibleAfter: AssistantInputCursor | null;
     }>;
-    inboxScanCursor: { captureId: string; occurredAt: string } | null;
     updatedAt: string;
     version: number;
   },
@@ -189,12 +194,77 @@ function summarizeAutoReply(
   state: Awaited<ReturnType<typeof readAutomationState>>,
 ): Array<{
   channel: string;
-  eligibleAfter: { captureId: string; occurredAt: string } | null;
+  eligibleAfter: AssistantInputCursor | null;
 }> {
   return state.autoReply.map((entry) => ({
     channel: entry.channel,
     eligibleAfter: entry.eligibleAfter,
   }));
+}
+
+function testAssistantInputCursor(input: {
+  createdAt?: string | null;
+  inputId: string;
+  occurredAt: string;
+  sourceKind?: AssistantInputCursor["sourceKind"];
+  sourcePosition?: string | null;
+}): AssistantInputCursor {
+  return {
+    createdAt: input.createdAt ?? null,
+    inputId: input.inputId,
+    occurredAt: input.occurredAt,
+    sourceKind: input.sourceKind ?? "inbox-capture",
+    ...(input.sourcePosition !== undefined
+      ? { sourcePosition: input.sourcePosition }
+      : {}),
+  };
+}
+
+async function stageHostedAssistantInput(input: {
+  createdAt: string;
+  eventId: string;
+  laneSeq: string;
+  occurredAt: string;
+  vault: string;
+}) {
+  return upsertAssistantInputEvent({
+    now: new Date(input.createdAt),
+    vault: input.vault,
+    event: {
+      content: {
+        text: "latest hosted message",
+        transcriptText: "latest hosted message",
+        userMessageContent: [
+          {
+            text: "latest hosted message",
+            type: "text",
+          },
+        ],
+      },
+      conversation: {
+        accountId: "account_1",
+        actorId: "actor_1",
+        actorIsSelf: false,
+        source: "email",
+        threadId: "thread_1",
+        threadIsDirect: true,
+      },
+      occurredAt: input.occurredAt,
+      receivedAt: input.createdAt,
+      sourceRef: {
+        dedupeKey: `dedupe_${input.eventId}`,
+        eventId: input.eventId,
+        itemId: `item_${input.eventId}`,
+        kind: "hosted-mailbox",
+        lane: "conversation",
+        laneSeq: input.laneSeq,
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        payloadSource: "inline",
+        source: "hosted-mailbox",
+        wakeSchema: "murph.hosted-execution-wake.v1",
+      },
+    },
+  });
 }
 
 describe("hosted runtime context coverage", () => {
@@ -235,11 +305,7 @@ describe("hosted runtime context coverage", () => {
       assert.equal(result, null);
       expect(mocks.inboxList).not.toHaveBeenCalled();
       expect(mocks.vaultInit).not.toHaveBeenCalled();
-      expect(mocks.inboxInit).toHaveBeenCalledWith({
-        rebuild: true,
-        requestId: "evt_tick",
-        vault: vaultRoot,
-      });
+      expect(mocks.inboxInit).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }
@@ -305,7 +371,6 @@ describe("hosted runtime context coverage", () => {
       });
       await expect(readAutomationState(vaultRoot)).resolves.toMatchObject({
         autoReply: [],
-        inboxScanCursor: null,
         version: 1,
       });
     } finally {
@@ -399,15 +464,14 @@ describe("hosted runtime context coverage", () => {
     try {
       await writeAutomationState(vaultRoot, {
         version: 1,
-        inboxScanCursor: null,
         autoReply: [
           {
             channel: "email",
             enabledAt: "2026-04-08T00:05:00.000Z",
-            eligibleAfter: {
-              captureId: "cap_email",
+            eligibleAfter: testAssistantInputCursor({
+              inputId: "ain_000000000000000000000000000000e1",
               occurredAt: "2026-04-08T00:00:00.000Z",
-            },
+            }),
           },
           {
             channel: "linq",
@@ -417,10 +481,10 @@ describe("hosted runtime context coverage", () => {
           {
             channel: "telegram",
             enabledAt: "2026-04-08T00:05:00.000Z",
-            eligibleAfter: {
-              captureId: "cap_telegram",
+            eligibleAfter: testAssistantInputCursor({
+              inputId: "ain_000000000000000000000000000000e2",
               occurredAt: "2026-04-08T00:01:00.000Z",
-            },
+            }),
           },
         ],
         updatedAt: "2026-04-08T00:05:00.000Z",
@@ -445,15 +509,14 @@ describe("hosted runtime context coverage", () => {
       const state = await readAutomationState(vaultRoot);
       assert.deepEqual(state, {
         version: 1,
-        inboxScanCursor: null,
         autoReply: [
           {
             channel: "email",
             enabledAt: "2026-04-08T00:05:00.000Z",
-            eligibleAfter: {
-              captureId: "cap_email",
+            eligibleAfter: testAssistantInputCursor({
+              inputId: "ain_000000000000000000000000000000e1",
               occurredAt: "2026-04-08T00:00:00.000Z",
-            },
+            }),
           },
           {
             channel: "linq",
@@ -463,10 +526,10 @@ describe("hosted runtime context coverage", () => {
           {
             channel: "telegram",
             enabledAt: "2026-04-08T00:05:00.000Z",
-            eligibleAfter: {
-              captureId: "cap_telegram",
+            eligibleAfter: testAssistantInputCursor({
+              inputId: "ain_000000000000000000000000000000e2",
               occurredAt: "2026-04-08T00:01:00.000Z",
-            },
+            }),
           },
         ],
         updatedAt: "2026-04-08T00:05:00.000Z",
@@ -477,35 +540,39 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("seeds the latest persisted inbox capture when re-enabling a hosted channel", async () => {
+  it("does not seed past staged assistant input when enabling a hosted channel", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
       await writeAutomationState(vaultRoot, {
         version: 1,
-        inboxScanCursor: {
-          captureId: "cap_route",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
         autoReply: [
           {
             channel: "linq",
             enabledAt: "2026-04-08T00:05:00.000Z",
-            eligibleAfter: {
-              captureId: "cap_linq",
+            eligibleAfter: testAssistantInputCursor({
+              inputId: "ain_000000000000000000000000000000f1",
               occurredAt: "2026-04-08T00:00:00.000Z",
-            },
+            }),
           },
         ],
         updatedAt: "2026-04-08T00:05:00.000Z",
       });
-      mocks.inboxList.mockResolvedValue({
-        items: [
-          {
-            captureId: "cap_latest",
-            occurredAt: "2026-04-08T00:09:00.000Z",
-          },
-        ],
+      const latest = await stageHostedAssistantInput({
+        createdAt: "2026-04-08T00:09:01.000Z",
+        eventId: "event_latest_projection_failed",
+        laneSeq: "9",
+        occurredAt: "2026-04-08T00:09:00.000Z",
+        vault: vaultRoot,
+      });
+      await updateAssistantInputProjection({
+        inputId: latest.inputId,
+        projection: {
+          lastAttemptedAt: "2026-04-08T00:09:02.000Z",
+          reasonCode: "projection.failed",
+          status: "failed",
+        },
+        vault: vaultRoot,
       });
 
       await expect(
@@ -529,29 +596,21 @@ describe("hosted runtime context coverage", () => {
       });
 
       const state = await readAutomationState(vaultRoot);
-      assert.deepEqual(state.inboxScanCursor, {
-        captureId: "cap_route",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      });
       assert.deepEqual(summarizeAutoReply(state), [
         {
           channel: "email",
-          eligibleAfter: {
-            captureId: "cap_latest",
-            createdAt: null,
-            occurredAt: "2026-04-08T00:09:00.000Z",
-          },
+          eligibleAfter: null,
         },
         {
           channel: "linq",
-          eligibleAfter: {
-            captureId: "cap_linq",
+          eligibleAfter: testAssistantInputCursor({
+            inputId: "ain_000000000000000000000000000000f1",
             occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          }),
         },
       ]);
       assert.equal(state.version, 1);
-      expect(mocks.inboxList).toHaveBeenCalledTimes(1);
+      expect(mocks.inboxList).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }

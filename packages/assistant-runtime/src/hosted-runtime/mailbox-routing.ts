@@ -15,7 +15,6 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "apply-member-channels-update",
   "dispatch-assistant-notification",
   "run-device-sync-wake",
-  "import-vault-sync",
 ] as const;
 
 export type HostedMailboxImportAction =
@@ -61,7 +60,6 @@ const ACTION_BY_KIND = {
   "device-sync.wake": "run-device-sync-wake",
   "member.activated": "apply-member-activation",
   "member.channels.updated": "apply-member-channels-update",
-  "vault.sync.import": "import-vault-sync",
 } satisfies Record<HostedMailboxKind, HostedMailboxImportAction>;
 
 export function createHostedMailboxRoutingPlan(

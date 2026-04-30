@@ -1,7 +1,4 @@
 import type {
-  VaultSyncImportMergeResult,
-} from "@murphai/core";
-import type {
   ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import type {
@@ -105,12 +102,9 @@ export interface HostedAssistantDeliveryOutcome {
   targetKind: string | null;
 }
 
-export type HostedVaultSyncImportResult = VaultSyncImportMergeResult;
-
 export interface HostedMailboxEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
-  vaultSyncImportResult: HostedVaultSyncImportResult | null;
 }
 
 export interface HostedConversationWakeMetrics {
@@ -123,8 +117,7 @@ export type HostedMailboxLane =
   | "conversation-message"
   | "device-sync"
   | "member-activated"
-  | "member-channels-updated"
-  | "vault-sync-import";
+  | "member-channels-updated";
 
 export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
   bootstrapResult: HostedBootstrapResult | null;

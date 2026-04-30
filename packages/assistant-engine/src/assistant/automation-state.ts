@@ -1,5 +1,5 @@
 import type {
-  AssistantAutomationCursor,
+  AssistantInputCursor,
   AssistantAutomationState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
@@ -17,7 +17,7 @@ export function reconcileAssistantAutoReplyState(input: {
   current: readonly AssistantAutoReplyChannelState[]
   enabledAt: string
   enabledChannels: readonly string[]
-  eligibleAfter: AssistantAutomationCursor | null
+  eligibleAfter: AssistantInputCursor | null
 }): AssistantAutoReplyChannelState[] {
   const currentByChannel = new Map(
     input.current.map((entry) => [entry.channel, entry] as const),
@@ -55,10 +55,21 @@ export function sameAssistantAutoReplyState(
       return (
         other?.channel === entry.channel &&
         other.enabledAt === entry.enabledAt &&
-        other.eligibleAfter?.captureId === entry.eligibleAfter?.captureId &&
-        (other.eligibleAfter?.createdAt ?? null) === (entry.eligibleAfter?.createdAt ?? null) &&
-        other.eligibleAfter?.occurredAt === entry.eligibleAfter?.occurredAt
+        sameAssistantInputCursor(other.eligibleAfter, entry.eligibleAfter)
       )
     })
+  )
+}
+
+function sameAssistantInputCursor(
+  left: AssistantInputCursor | null | undefined,
+  right: AssistantInputCursor | null | undefined,
+): boolean {
+  return (
+    left?.inputId === right?.inputId &&
+    (left?.createdAt ?? null) === (right?.createdAt ?? null) &&
+    left?.occurredAt === right?.occurredAt &&
+    left?.sourceKind === right?.sourceKind &&
+    (left?.sourcePosition ?? null) === (right?.sourcePosition ?? null)
   )
 }

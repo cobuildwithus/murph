@@ -271,7 +271,6 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
   )
   await writeJson(paths.automationStatePath, {
     version: 1,
-    inboxScanCursor: null,
     autoReply: [],
     updatedAt: testNow,
   })
@@ -356,7 +355,6 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
         reason: null,
       },
       automation: {
-        inboxScanCursor: null,
         autoReply: [],
         updatedAt: null,
       },

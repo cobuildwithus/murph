@@ -226,7 +226,7 @@ describe("hosted execution wake builders", () => {
     expect(wake.message.telegramMessage.attachments?.[0]).not.toBe(attachments[0]);
   });
 
-  it("distinguishes omitted versus explicit nullable email self addresses", () => {
+  it("distinguishes omitted versus explicit nullable email routing metadata", () => {
     const omitted = buildHostedExecutionEmailConversationMessageWake({
       eventId: "email-omitted",
       identityId: "identity_123",
@@ -237,9 +237,12 @@ describe("hosted execution wake builders", () => {
     const explicitNull = buildHostedExecutionEmailConversationMessageWake({
       eventId: "email-null",
       identityId: "identity_123",
+      messageId: null,
       occurredAt,
       rawMessageKey: "raw_123",
       selfAddress: null,
+      threadKey: null,
+      threadTarget: null,
       userId: "user_123",
     });
 
@@ -248,7 +251,13 @@ describe("hosted execution wake builders", () => {
     }
 
     expect("selfAddress" in omitted.message).toBe(false);
+    expect("messageId" in omitted.message).toBe(false);
+    expect("threadKey" in omitted.message).toBe(false);
+    expect("threadTarget" in omitted.message).toBe(false);
+    expect(explicitNull.message.messageId).toBeNull();
     expect(explicitNull.message.selfAddress).toBeNull();
+    expect(explicitNull.message.threadKey).toBeNull();
+    expect(explicitNull.message.threadTarget).toBeNull();
   });
 
   it("builds direct system wakes", () => {

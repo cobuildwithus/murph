@@ -12,7 +12,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
-type InboxListInput = Parameters<InboxServices['list']>[0]
 type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
 type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
 
@@ -20,20 +19,6 @@ function listAutoReplyChannels(
   state: Awaited<ReturnType<typeof readAssistantAutomationState>>,
 ): string[] {
   return state.autoReply.map((entry) => entry.channel)
-}
-
-function createEmptyInboxListResult(input: InboxListInput) {
-  return {
-    vault: input.vault,
-    filters: {
-      afterCaptureId: input.afterCaptureId ?? null,
-      afterOccurredAt: input.afterOccurredAt ?? null,
-      limit: input.limit ?? 20,
-      oldestFirst: input.oldestFirst ?? false,
-      sourceId: input.sourceId ?? null,
-    },
-    items: [],
-  }
 }
 
 test('configureSetupChannels enables Telegram auto-reply only after the doctor probe passes', async () => {
@@ -142,9 +127,6 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
             target: 'telegram:bot',
           }
         },
-        async list(input: InboxListInput) {
-          return createEmptyInboxListResult(input)
-        },
         async sourceAdd() {
           return {
             vault,
@@ -221,9 +203,6 @@ test('configureSetupChannels reuses a disabled Telegram connector and re-enables
             parserToolchain: null,
             target: input.sourceId ?? null,
           }
-        },
-        async list(input: InboxListInput) {
-          return createEmptyInboxListResult(input)
         },
         async sourceAdd() {
           throw new Error('sourceAdd should not be called when a Telegram connector exists')
@@ -323,9 +302,6 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
             target: 'email:agentmail',
           }
         },
-        async list(input: InboxListInput) {
-          return createEmptyInboxListResult(input)
-        },
         async sourceAdd() {
           return {
             vault,
@@ -412,9 +388,6 @@ test('configureSetupChannels keeps email selected in onboarding preferences even
             parserToolchain: null,
             target: 'email:agentmail',
           }
-        },
-        async list(input: InboxListInput) {
-          return createEmptyInboxListResult(input)
         },
         async sourceAdd() {
           return {
@@ -592,9 +565,6 @@ test('configureSetupChannels disables stale setup connectors that were not selec
             target: 'email:agentmail',
           }
         },
-        async list(input: InboxListInput) {
-          return createEmptyInboxListResult(input)
-        },
         async sourceList() {
           return {
             vault,
@@ -710,9 +680,6 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
             parserToolchain: null,
             target: 'email:agentmail',
           }
-        },
-        async list(input: InboxListInput) {
-          return createEmptyInboxListResult(input)
         },
         async sourceAdd(input: InboxSourceAddInput) {
           sourceAddCalls.push(input)

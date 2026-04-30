@@ -45,7 +45,6 @@ import type {
 
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture;
-  capturePersistence: "canonical";
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -94,7 +93,6 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     };
     return {
       capture: persistedCapture,
-      capturePersistence: "canonical",
       metrics,
     };
   } finally {
@@ -262,7 +260,7 @@ async function normalizeHostedConversationMessageWake(input: {
         senderIdentity: input.wake.message.identityId,
       }),
       source: "email",
-      threadTarget: null,
+      threadTarget: input.wake.message.threadTarget ?? null,
     });
   }
 

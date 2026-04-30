@@ -20,7 +20,6 @@ import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
-  HostedExecutionVaultSyncImportEvent,
 } from "./contracts.ts";
 import type {
   HostedExecutionLogLevel,
@@ -37,7 +36,6 @@ import {
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionTelegramConversationMessageWake,
-  buildHostedExecutionVaultSyncImportWake,
 } from "./builders.ts";
 import {
   rejectLegacyAliases,
@@ -90,12 +88,6 @@ export {
   parseHostedRuntimeUsageExportRequest,
   parseHostedRuntimeUsageExportResponse,
   parseHostedRuntimeWebStatusResponse,
-  parseHostedRuntimeVaultSyncImportPayload,
-  parseHostedRuntimeVaultSyncImportRequest,
-  parseHostedRuntimeVaultSyncImportResponse,
-  parseHostedRuntimeVaultSyncImportSummary,
-  parseHostedRuntimeVaultSyncPayloadFetchRequest,
-  parseHostedRuntimeVaultSyncPayloadFetchResponse,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
@@ -179,13 +171,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId: wireUserId,
       });
-    case "vault.sync.import":
-      return buildHostedExecutionVaultSyncImportWake({
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
-        vaultSync: parseHostedExecutionVaultSyncImportReference(record.vaultSync),
-      });
     default:
       throw new TypeError(`Unsupported hosted execution wake kind: ${kind}`);
   }
@@ -225,6 +210,14 @@ export function parseHostedExecutionConversationMessagePayload(
           record.identityId,
           "Hosted execution conversation.message wake payload identityId",
         ),
+        ...(record.messageId === undefined
+          ? {}
+          : {
+              messageId: readOptionalNullableString(
+                record.messageId,
+                "Hosted execution conversation.message wake payload messageId",
+              ),
+            }),
         rawMessageKey: requireString(
           record.rawMessageKey,
           "Hosted execution conversation.message wake payload rawMessageKey",
@@ -235,6 +228,22 @@ export function parseHostedExecutionConversationMessagePayload(
               selfAddress: readOptionalNullableString(
                 record.selfAddress,
                 "Hosted execution conversation.message wake payload selfAddress",
+              ),
+            }),
+        ...(record.threadKey === undefined
+          ? {}
+          : {
+              threadKey: readOptionalNullableString(
+                record.threadKey,
+                "Hosted execution conversation.message wake payload threadKey",
+              ),
+            }),
+        ...(record.threadTarget === undefined
+          ? {}
+          : {
+              threadTarget: readOptionalNullableString(
+                record.threadTarget,
+                "Hosted execution conversation.message wake payload threadTarget",
               ),
             }),
       };
@@ -451,12 +460,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
-    case "vault.sync.import":
-      return {
-        kind,
-        userId,
-        vaultSync: parseHostedExecutionVaultSyncImportReference(record.vaultSync),
-      } satisfies HostedExecutionVaultSyncImportEvent;
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
@@ -644,47 +647,6 @@ function parseHostedExecutionMemberChannels(
     email: requireBoolean(record.email, `${label}.email`),
     linq: requireBoolean(record.linq, `${label}.linq`),
     telegram: requireBoolean(record.telegram, `${label}.telegram`),
-  };
-}
-
-export function parseHostedExecutionVaultSyncImportReference(
-  value: unknown,
-): HostedExecutionVaultSyncImportEvent["vaultSync"] {
-  const record = requireObject(value, "Hosted execution vault sync import reference");
-
-  return {
-    localManifestHash: requireString(
-      record.localManifestHash,
-      "Hosted execution vault sync import reference localManifestHash",
-    ),
-    sessionId: requireString(
-      record.sessionId,
-      "Hosted execution vault sync import reference sessionId",
-    ),
-    ...(record.sourceSchemaVersion === undefined
-      ? {}
-      : {
-          sourceSchemaVersion: readOptionalNullableString(
-            record.sourceSchemaVersion,
-            "Hosted execution vault sync import reference sourceSchemaVersion",
-          ),
-        }),
-    ...(record.sourceVaultId === undefined
-      ? {}
-      : {
-          sourceVaultId: readOptionalNullableString(
-            record.sourceVaultId,
-            "Hosted execution vault sync import reference sourceVaultId",
-          ),
-        }),
-    ...(record.sourceVaultTitle === undefined
-      ? {}
-      : {
-          sourceVaultTitle: readOptionalNullableString(
-            record.sourceVaultTitle,
-            "Hosted execution vault sync import reference sourceVaultTitle",
-          ),
-        }),
   };
 }
 

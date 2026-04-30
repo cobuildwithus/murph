@@ -1,5 +1,4 @@
 import type {
-  AssistantAutomationCursor,
   AssistantAutomationState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
@@ -54,14 +53,8 @@ export interface AssistantAutoReplyScanResult {
   skipped: number
 }
 
-export interface AssistantAutomationStateProgress {
-  autoReply: AssistantAutomationState['autoReply']
-  cursor?: AssistantAutomationCursor | null
-}
-
 export interface AssistantAutomationScanStateProgress {
   autoReply: AssistantAutomationState['autoReply']
-  inboxScanCursor: AssistantAutomationCursor | null
 }
 
 export interface AssistantAutomationScanResult {
@@ -78,21 +71,9 @@ export interface AssistantAutomationPassResult {
   routing: AssistantInboxScanResult
 }
 
-export function cursorFromCapture(capture: {
-  captureId: string
-  createdAt?: string | null
-  occurredAt: string
-}): AssistantAutomationCursor {
-  return {
-    createdAt: capture.createdAt ?? null,
-    occurredAt: capture.occurredAt,
-    captureId: capture.captureId,
-  }
-}
-
-export function compareAssistantAutomationCursor(
-  left: AssistantAutomationCursor,
-  right: AssistantAutomationCursor,
+export function compareAssistantCaptureOrder(
+  left: { captureId: string; createdAt?: string | null; occurredAt: string },
+  right: { captureId: string; createdAt?: string | null; occurredAt: string },
 ): number {
   const leftTimestamp =
     left.createdAt && right.createdAt ? left.createdAt : left.occurredAt
@@ -102,27 +83,6 @@ export function compareAssistantAutomationCursor(
   return leftTimestamp === rightTimestamp
     ? left.captureId.localeCompare(right.captureId)
     : leftTimestamp.localeCompare(rightTimestamp)
-}
-
-export function compareAssistantCaptureOrder(
-  left: { captureId: string; createdAt?: string | null; occurredAt: string },
-  right: { captureId: string; createdAt?: string | null; occurredAt: string },
-): number {
-  return compareAssistantAutomationCursor(
-    cursorFromCapture(left),
-    cursorFromCapture(right),
-  )
-}
-
-export function isAssistantCaptureAfterCursor(
-  capture: { captureId: string; createdAt?: string | null; occurredAt: string },
-  cursor?: AssistantAutomationCursor | null,
-): boolean {
-  if (!cursor) {
-    return true
-  }
-
-  return compareAssistantCaptureOrder(capture, cursor) > 0
 }
 
 export function normalizeEnabledChannels(channels: readonly string[]): string[] {

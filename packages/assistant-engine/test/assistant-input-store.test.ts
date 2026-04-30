@@ -2,6 +2,9 @@ import { rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  serializeHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
+import {
   createAssistantInputEventId,
   listAssistantInputEvents,
   listAssistantInputProjectionAttempts,
@@ -170,6 +173,7 @@ describe('assistant input event store', () => {
     expect(stored.cursor).toMatchObject({
       inputId: stored.inputId,
       sourceKind: 'inbox-capture',
+      sourcePosition: 'inbox-capture:linq:cap_1',
     })
   })
 
@@ -535,7 +539,7 @@ describe('assistant input event store', () => {
     expect(cleared.projection.nextAttemptAfter).toBeNull()
   })
 
-  it('orders hosted mailbox inputs by source position before timestamps', async () => {
+  it('uses source position to order same-timestamp hosted mailbox inputs', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-source-position-',
     )
@@ -545,7 +549,7 @@ describe('assistant input event store', () => {
       now: new Date('2026-04-22T10:00:10.000Z'),
       event: createHostedMailboxEventInput({
         eventId: 'evt_later_position',
-        occurredAt: '2026-04-22T10:01:00.000Z',
+        occurredAt: '2026-04-22T10:00:00.000Z',
         laneSeq: '2',
         text: 'later position',
         threadId: 'chat_1',
@@ -580,13 +584,70 @@ describe('assistant input event store', () => {
       earlierSourcePosition.inputId,
     ])
     expect(listed.events.map((event) => event.occurredAt)).toEqual([
-      '2026-04-22T10:01:00.000Z',
+      '2026-04-22T10:00:00.000Z',
       '2026-04-22T10:00:00.000Z',
     ])
     expect(listed.events.map((event) => event.cursor.sourcePosition)).toEqual([
       `hosted-mailbox:conversation:${laneSeqPosition('2')}:evt_later_position_item`,
       `hosted-mailbox:conversation:${laneSeqPosition('10')}:evt_earlier_position_item`,
     ])
+  })
+
+  it('uses hosted mailbox lane position before timestamps within the same lane', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-hosted-lane-position-',
+    )
+    const laneSeqPosition = (laneSeq: string) => laneSeq.padStart(39, '0')
+    const laneSeqTen = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:01.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_lane_seq_ten',
+        occurredAt: '2026-04-22T10:00:01.000Z',
+        laneSeq: '10',
+        text: 'sequence ten',
+        threadId: 'chat_1',
+      }),
+    })
+    const laneSeqTwo = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:20.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_lane_seq_two',
+        occurredAt: '2026-04-22T10:00:20.000Z',
+        laneSeq: '2',
+        text: 'sequence two',
+        threadId: 'chat_1',
+      }),
+    })
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'chat_1',
+        threadIsDirect: true,
+      },
+    })
+    const afterLaneSeqTwo = await listAssistantInputEvents({
+      afterCursor: laneSeqTwo.cursor,
+      vault: vaultRoot,
+    })
+
+    expect(listed.events.map((event) => event.inputId)).toEqual([
+      laneSeqTwo.inputId,
+      laneSeqTen.inputId,
+    ])
+    expect(listed.events.map((event) => event.cursor.sourcePosition)).toEqual([
+      `hosted-mailbox:conversation:${laneSeqPosition('2')}:evt_lane_seq_two_item`,
+      `hosted-mailbox:conversation:${laneSeqPosition('10')}:evt_lane_seq_ten_item`,
+    ])
+    expect(afterLaneSeqTwo.events.map((event) => event.inputId)).toContain(
+      laneSeqTen.inputId,
+    )
   })
 
   it('uses source position ordering only within the same hosted mailbox lane', async () => {
@@ -625,6 +686,199 @@ describe('assistant input event store', () => {
 
     expect(afterSystem.events.map((event) => event.inputId)).toEqual([
       conversationEvent.inputId,
+    ])
+  })
+
+  it('uses timestamps before source kind when comparing hosted and inbox cursors', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-mixed-source-cursor-',
+    )
+    const inboxEvent = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: {
+        content: {
+          text: 'inbox first',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:10.000Z',
+        sourceRef: {
+          captureId: 'cap_mixed_source_first',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+    const hostedEvent = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:01:10.000Z'),
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_hosted_later',
+        lane: 'conversation',
+        occurredAt: '2026-04-22T10:01:00.000Z',
+        laneSeq: '1',
+        text: 'hosted later',
+        threadId: 'chat_1',
+      }),
+    })
+
+    const afterInbox = await listAssistantInputEvents({
+      vault: vaultRoot,
+      afterCursor: inboxEvent.cursor,
+    })
+
+    expect(afterInbox.events.map((event) => event.inputId)).toEqual([
+      hostedEvent.inputId,
+    ])
+  })
+
+  it('uses inbox source position to avoid skipping same-timestamp captures', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-inbox-same-timestamp-',
+    )
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: {
+        content: {
+          text: 'first same timestamp capture',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: {
+          captureId: 'cap_a',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: {
+        content: {
+          text: 'second same timestamp capture',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: {
+          captureId: 'cap_b',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    })
+    const afterFirst = await listAssistantInputEvents({
+      afterCursor: first.cursor,
+      vault: vaultRoot,
+    })
+
+    expect(listed.events.map((event) => event.inputId)).toEqual([
+      first.inputId,
+      second.inputId,
+    ])
+    expect(listed.events.map((event) => event.cursor.sourcePosition)).toEqual([
+      'inbox-capture:linq:cap_a',
+      'inbox-capture:linq:cap_b',
+    ])
+    expect(afterFirst.events.map((event) => event.inputId)).toEqual([
+      second.inputId,
+    ])
+  })
+
+  it('uses timestamps before inbox capture ids when listing after a cursor', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-inbox-hash-cursor-',
+    )
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:10.000Z'),
+      event: {
+        content: {
+          text: 'first capture',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'telegram',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: '2026-04-22T10:00:10.000Z',
+        sourceRef: {
+          captureId: 'cap_71cca0bc171dc05ce6b6c9a5a9',
+          kind: 'inbox-capture',
+          source: 'telegram',
+          version: null,
+        },
+      },
+    })
+    const laterHashBeforeFirst = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:00:20.000Z'),
+      event: {
+        content: {
+          text: 'later capture',
+        },
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'telegram',
+          threadId: 'chat_1',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-22T10:00:20.000Z',
+        receivedAt: '2026-04-22T10:00:20.000Z',
+        sourceRef: {
+          captureId: 'cap_39b5f2e5167ce4dcbb445e7831',
+          kind: 'inbox-capture',
+          source: 'telegram',
+          version: null,
+        },
+      },
+    })
+
+    const afterFirst = await listAssistantInputEvents({
+      afterCursor: first.cursor,
+      vault: vaultRoot,
+    })
+
+    expect(afterFirst.events.map((event) => event.inputId)).toEqual([
+      laterHashBeforeFirst.inputId,
     ])
   })
 
@@ -897,6 +1151,17 @@ describe('assistant input event store', () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-reply-route-',
     )
+    const threadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: '<message-24@example.test>',
+      references: Array.from(
+        { length: 25 },
+        (_, index) => `<message-${index}@example.test>`,
+      ),
+      subject: 'Serialized hosted email reply target',
+      to: ['person@example.test'],
+    })
+
+    expect(threadTarget.length).toBeGreaterThan(512)
 
     const stored = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -916,7 +1181,7 @@ describe('assistant input event store', () => {
         replyTarget: {
           channel: 'email',
           messageId: 'raw_message_authority',
-          threadId: 'person@example.test',
+          threadId: threadTarget,
         },
         sourceRef: createHostedMailboxSourceRef({
           eventId: 'evt_reply_route',
@@ -928,7 +1193,7 @@ describe('assistant input event store', () => {
     expect(stored.replyTarget).toEqual({
       channel: 'email',
       messageId: 'raw_message_authority',
-      threadId: 'person@example.test',
+      threadId: threadTarget,
     })
 
     await expect(

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
 import { initializeVault } from "@murphai/core";
@@ -320,46 +319,6 @@ test("sqlite runtime replay replaces stale external-id rows with the canonical c
     );
   } finally {
     runtime.close();
-  }
-});
-
-test("sqlite runtime drops legacy non-canonical capture rows on open", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-legacy-noncanonical");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  const runtime = await runtimeSurface.openInboxRuntime({ vaultRoot });
-  const databasePath = runtime.databasePath;
-  try {
-    runtime.upsertCaptureIndex(createIndexedCaptureFixture({
-      captureId: "cap-legacy-noncanonical",
-      source: "telegram",
-      accountId: "bot",
-      externalId: "update:legacy-noncanonical",
-      occurredAt: "2026-03-13T09:20:00.000Z",
-      text: "legacy hidden projection text",
-    }));
-    assert.equal(runtime.searchCaptures({ text: "legacy", limit: 10 }).length, 1);
-  } finally {
-    runtime.close();
-  }
-
-  const legacyDatabase = new DatabaseSync(databasePath);
-  try {
-    legacyDatabase
-      .prepare("update capture set capture_persistence = 'runtime_only' where capture_id = ?")
-      .run("cap-legacy-noncanonical");
-    legacyDatabase.exec("pragma user_version = 3");
-  } finally {
-    legacyDatabase.close();
-  }
-
-  const reopened = await runtimeSurface.openInboxRuntime({ vaultRoot });
-  try {
-    assert.equal(reopened.getCapture("cap-legacy-noncanonical"), null);
-    assert.deepEqual(reopened.listCaptures({ limit: 10 }), []);
-    assert.deepEqual(reopened.searchCaptures({ text: "legacy", limit: 10 }), []);
-  } finally {
-    reopened.close();
   }
 });
 

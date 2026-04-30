@@ -9,6 +9,7 @@ import {
   buildHostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
+import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -631,14 +632,20 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("routes hosted email thread deliveries through the shared effects port", async () => {
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: "<message_parent_123@example.test>",
+      references: ["<message_root_123@example.test>"],
+      subject: "Hosted subject",
+      to: ["sender@example.test"],
+    });
     const effect = createEffect({
       bindingDeliveryKind: "thread",
-      bindingDeliveryTarget: "thread_123",
+      bindingDeliveryTarget: hostedEmailThreadTarget,
       channel: "email",
-      explicitTarget: "thread_123",
+      explicitTarget: hostedEmailThreadTarget,
       idempotencyKey: "assistant-outbox:intent_123",
       identityId: "assistant@example.com",
-      replyToMessageId: "message_parent_123",
+      replyToMessageId: "<message_parent_123@example.test>",
       subject: "Hosted subject",
     });
     const sendEmail = vi.fn(async (request: HostedEmailSendRequest) =>
@@ -652,9 +659,9 @@ describe("hosted runtime callbacks", () => {
         idempotencyKey: "assistant-outbox:intent_123",
         identityId: "assistant@example.com",
         message: "hello from hosted",
-        replyToMessageId: "message_parent_123",
+        replyToMessageId: "<message_parent_123@example.test>",
         subject: "Hosted subject",
-        target: "thread_123",
+        target: hostedEmailThreadTarget,
         targetKind: "thread",
       });
       return createDispatchResult({
@@ -676,9 +683,9 @@ describe("hosted runtime callbacks", () => {
       idempotencyKey: "assistant-outbox:intent_123",
       identityId: "assistant@example.com",
       message: "hello from hosted",
-      replyToMessageId: "message_parent_123",
+      replyToMessageId: "<message_parent_123@example.test>",
       subject: "Hosted subject",
-      target: "thread_123",
+      target: hostedEmailThreadTarget,
       targetKind: "thread",
     });
     expect(outcomes).toEqual([

@@ -98,6 +98,38 @@ export async function toParsedEmailChatMessage(input: {
   };
 }
 
+export function buildParsedEmailThreadTarget(input: {
+  accountAddress?: string | null;
+  message: ParsedEmailMessage;
+  selfAddresses?: ReadonlyArray<string | null | undefined> | null;
+  threadTarget?: string | null;
+}): string {
+  const normalizedAccountAddress = resolveEmailAddress(input.accountAddress ?? null);
+  const normalizedSelfAddresses = resolveParsedEmailSelfAddresses([
+    normalizedAccountAddress,
+    ...(input.selfAddresses ?? []),
+  ]);
+  return serializeHostedEmailThreadTarget(
+    resolveParsedEmailThreadTarget({
+      message: input.message,
+      selfAddresses: normalizedSelfAddresses,
+      threadTarget: input.threadTarget ?? null,
+    }),
+  );
+}
+
+export function resolveParsedEmailThreadKey(input: {
+  message: ParsedEmailMessage;
+  rawMessageKey: string;
+}): string {
+  return (
+    input.message.references[0] ??
+    input.message.inReplyTo ??
+    input.message.messageId ??
+    input.rawMessageKey
+  );
+}
+
 function resolveParsedEmailThreadTarget(input: {
   message: ParsedEmailMessage;
   selfAddresses: ReadonlyArray<string>;

@@ -16,8 +16,6 @@ import type {
   HostedExecutionTelegramMessage,
   HostedExecutionTelegramConversationMessagePayload,
   HostedRuntimeTimerTriggerKind,
-  HostedExecutionVaultSyncImportEvent,
-  HostedExecutionVaultSyncImportWake,
 } from "./contracts.ts";
 
 function cloneLinqMessagePart(
@@ -72,8 +70,7 @@ function cloneConversationMessagePayload(
 type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
-  | HostedExecutionMemberChannelsUpdatedWake
-  | HostedExecutionVaultSyncImportWake;
+  | HostedExecutionMemberChannelsUpdatedWake;
 
 function buildHostedExecutionMemberOwnedWakeBase<
   TKind extends HostedExecutionMemberOwnedWake["kind"],
@@ -156,9 +153,12 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
 export function buildHostedExecutionEmailConversationMessageWake(input: {
   eventId: string;
   identityId: string | null;
+  messageId?: string | null;
   occurredAt: string;
   rawMessageKey: string;
   selfAddress?: string | null;
+  threadKey?: string | null;
+  threadTarget?: string | null;
   userId: string;
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionEmailConversationMessagePayload;
@@ -169,8 +169,11 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     message: {
       channel: "email",
       identityId: input.identityId,
+      ...(input.messageId === undefined ? {} : { messageId: input.messageId }),
       rawMessageKey: input.rawMessageKey,
       ...(input.selfAddress === undefined ? {} : { selfAddress: input.selfAddress }),
+      ...(input.threadKey === undefined ? {} : { threadKey: input.threadKey }),
+      ...(input.threadTarget === undefined ? {} : { threadTarget: input.threadTarget }),
     },
     occurredAt: input.occurredAt,
     userId: input.userId,
@@ -305,34 +308,5 @@ export function buildHostedExecutionDeviceSyncWake(input: {
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     reason: input.reason,
     userId: input.userId,
-  };
-}
-
-export function buildHostedExecutionVaultSyncImportWake(input: {
-  eventId: string;
-  memberId: string;
-  occurredAt: string;
-  vaultSync: HostedExecutionVaultSyncImportEvent["vaultSync"];
-}): HostedExecutionVaultSyncImportWake {
-  return {
-    ...buildHostedExecutionMemberOwnedWakeBase({
-      eventId: input.eventId,
-      kind: "vault.sync.import",
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
-    }),
-    vaultSync: {
-      localManifestHash: input.vaultSync.localManifestHash,
-      sessionId: input.vaultSync.sessionId,
-      ...(input.vaultSync.sourceSchemaVersion === undefined
-        ? {}
-        : { sourceSchemaVersion: input.vaultSync.sourceSchemaVersion }),
-      ...(input.vaultSync.sourceVaultId === undefined
-        ? {}
-        : { sourceVaultId: input.vaultSync.sourceVaultId }),
-      ...(input.vaultSync.sourceVaultTitle === undefined
-        ? {}
-        : { sourceVaultTitle: input.vaultSync.sourceVaultTitle }),
-    },
   };
 }

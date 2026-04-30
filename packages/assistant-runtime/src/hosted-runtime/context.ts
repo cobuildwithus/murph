@@ -7,9 +7,7 @@ import {
   type HostedExecutionMemberChannels,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
-import {
-  type AssistantExecutionContext,
-} from "@murphai/assistant-engine";
+import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 import type { AssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import {
@@ -88,7 +86,6 @@ export async function prepareHostedWakeContext(
     : null;
 
   await requireHostedBootstrapForWake(vaultRoot, wake);
-  await prepareHostedLocalRuntime(vaultRoot, wake.eventId);
 
   const assistantRuntimeState = await bootstrapHostedAssistantRuntimeState(
     vaultRoot,
@@ -252,6 +249,7 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
     await enableAssistantAutoReplyChannelLocal({
       channel: target.channel,
       isManagedChannel,
+      latestInputCursor: null,
       vault: vaultRoot,
     });
   }
@@ -266,7 +264,7 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
       autoReplyChanged: beforeEnabled !== afterEnabled,
       autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
       autoReplyEligibleAfterSummary: afterState.autoReply.map((entry) =>
-        `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
+        `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
       ).join(","),
       capabilityReady: target.capabilityReady,
       channel: target.channel,
@@ -375,6 +373,7 @@ export async function reconcileHostedAssistantChannelState(
   const reconciliation = await reconcileManagedAssistantAutoReplyChannelsLocal({
     desiredChannels,
     isManagedChannel: createHostedManagedAutoReplyChannelPredicate(managedAutoReplyChannels),
+    latestInputCursor: null,
     vault: vaultRoot,
   });
   if (options?.wake) {
@@ -385,7 +384,7 @@ export async function reconcileHostedAssistantChannelState(
         autoReplyChanged: reconciliation.changed,
         autoReplyChannels: reconciliation.state.autoReply.map((entry) => entry.channel).join(","),
         autoReplyEligibleAfterSummary: reconciliation.state.autoReply.map((entry) =>
-          `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
+          `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
         ).join(","),
         desiredAutoReplyChannels: desiredChannels.join(","),
       },
@@ -516,19 +515,7 @@ export async function requireHostedBootstrapForWake(
   );
 }
 
-export async function prepareHostedLocalRuntime(
-  vaultRoot: string,
-  requestId: string,
-): Promise<void> {
-  const inboxServices = createIntegratedInboxServices();
-  await inboxServices.init({
-    rebuild: true,
-    requestId,
-    vault: vaultRoot,
-  });
-}
-
-export async function prepareHostedLocalRuntimeForConversationImport(
+export async function prepareHostedInboxProjectionRuntime(
   vaultRoot: string,
   requestId: string,
 ): Promise<void> {

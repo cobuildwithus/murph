@@ -485,7 +485,6 @@ describe('assistant store seam', () => {
 
     await expect(store.readAssistantAutomationState(vaultRoot)).resolves.toMatchObject({
       autoReply: [],
-      inboxScanCursor: null,
       version: 1,
     })
 
@@ -495,15 +494,13 @@ describe('assistant store seam', () => {
           channel: 'telegram',
           enabledAt: '2026-04-08T00:11:00.000Z',
           eligibleAfter: {
-            captureId: 'capture-auto-reply',
+            createdAt: null,
+            inputId: 'capture-auto-reply',
             occurredAt: '2026-04-08T00:11:00.000Z',
+            sourceKind: 'inbox-capture',
           },
         },
       ],
-      inboxScanCursor: {
-        captureId: 'capture-inbox',
-        occurredAt: '2026-04-08T00:10:00.000Z',
-      },
       updatedAt: '2026-04-08T00:11:00.000Z',
       version: 1,
     }

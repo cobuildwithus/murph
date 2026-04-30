@@ -211,7 +211,6 @@ const TEST_STATUS_RESULT = {
     reason: null,
   },
   automation: {
-    inboxScanCursor: null,
     autoReply: [],
     updatedAt: null,
   },

@@ -158,7 +158,6 @@ beforeEach(() => {
   });
   mocks.readAssistantAutomationState.mockResolvedValue({
     autoReply: [],
-    inboxScanCursor: null,
     updatedAt: "2026-04-08T00:00:00.000Z",
     version: 1,
   });
@@ -299,7 +298,7 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
   });
 
-  it("uses normal hosted inbox reads without exposing runtime-only rows to automation scans", async () => {
+  it("passes normal hosted inbox projection services to automation", async () => {
     const list = vi.fn<InboxServices["list"]>(async (input) => ({
       vault: input.vault,
       filters: {
@@ -323,14 +322,14 @@ describe("runHostedAssistantAutomation", () => {
         attachments: [],
         captureId: input.captureId,
         createdAt: "2026-04-29T00:00:03.000Z",
-        envelopePath: "raw/inbox/linq/acct_1/2026/04/cap_runtime_only/envelope.json",
-        eventId: "evt_runtime_only",
-        externalId: "linq:msg_runtime_only",
+        envelopePath: "raw/inbox/linq/acct_1/2026/04/cap_projection/envelope.json",
+        eventId: "evt_projection",
+        externalId: "linq:msg_projection",
         occurredAt: "2026-04-29T00:00:02.000Z",
         promotions: [],
         receivedAt: "2026-04-29T00:00:02.500Z",
         source: "linq",
-        text: "runtime-only hosted input",
+        text: "projected hosted input",
         threadId: "thread_1",
         threadIsDirect: true,
         threadTitle: null,
@@ -351,13 +350,13 @@ describe("runHostedAssistantAutomation", () => {
 
         await passInboxServices.list({
           limit: 1,
-          requestId: "req_runtime_only_show",
+          requestId: "req_projection_show",
           sourceId: null,
           vault: "/tmp/vault-root",
         });
         await passInboxServices.show({
-          captureId: "cap_runtime_only",
-          requestId: "req_runtime_only_show",
+          captureId: "cap_projection",
+          requestId: "req_projection_show",
           vault: "/tmp/vault-root",
         });
 
@@ -371,7 +370,7 @@ describe("runHostedAssistantAutomation", () => {
     await expect(
       runHostedAssistantAutomation(
         "/tmp/vault-root",
-        "req_runtime_only_show",
+        "req_projection_show",
         {
           hosted: {
             issueDeviceConnectLink: vi.fn(),
@@ -380,7 +379,7 @@ describe("runHostedAssistantAutomation", () => {
           },
         },
         {
-          eventId: "evt_runtime_only_show",
+          eventId: "evt_projection_show",
           kind: "runtime.timer",
           occurredAt: "2026-04-29T00:00:00.000Z",
           triggerKind: "runtime_timer",
@@ -407,13 +406,11 @@ describe("runHostedAssistantAutomation", () => {
       redactedLogEntries: expect.any(Array),
     });
 
-    expect(list.mock.calls[0]?.[0]).not.toHaveProperty("includeRuntimeOnly");
     expect(show).toHaveBeenCalledWith(
       expect.objectContaining({
-        captureId: "cap_runtime_only",
+        captureId: "cap_projection",
       }),
     );
-    expect(show.mock.calls[0]?.[0]).not.toHaveProperty("includeRuntimeOnly");
   });
 
   it("logs automation events emitted during the hosted pass", async () => {
@@ -424,15 +421,14 @@ describe("runHostedAssistantAutomation", () => {
             channel: "telegram",
             enabledAt: "2026-04-08T00:00:00.000Z",
             eligibleAfter: {
-              captureId: "capture_122",
+              createdAt: null,
+              inputId: "ain_00000000000000000000000000000122",
               occurredAt: "2026-04-08T00:05:00.000Z",
+              sourceKind: "inbox-capture",
+              sourcePosition: null,
             },
           },
         ],
-        inboxScanCursor: {
-          captureId: "capture_122",
-          importedAt: "2026-04-08T00:05:00.000Z",
-        },
         updatedAt: "2026-04-08T00:00:00.000Z",
         version: 1,
       })
@@ -442,15 +438,14 @@ describe("runHostedAssistantAutomation", () => {
             channel: "telegram",
             enabledAt: "2026-04-08T00:00:00.000Z",
             eligibleAfter: {
-              captureId: "capture_123",
+              createdAt: null,
+              inputId: "ain_00000000000000000000000000000123",
               occurredAt: "2026-04-08T00:10:00.000Z",
+              sourceKind: "inbox-capture",
+              sourcePosition: null,
             },
           },
         ],
-        inboxScanCursor: {
-          captureId: "capture_123",
-          importedAt: "2026-04-08T00:10:00.000Z",
-        },
         updatedAt: "2026-04-08T00:10:00.000Z",
         version: 2,
       });
@@ -522,8 +517,7 @@ describe("runHostedAssistantAutomation", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           autoReplyChannels: "telegram",
-          autoReplyEligibleAfterSummary: "telegram:capture_122",
-          inboxScanCursor: "capture_122",
+          autoReplyEligibleAfterSummary: "telegram:ain_00000000000000000000000000000122",
         }),
         message: "Hosted assistant automation pass starting.",
       }),
