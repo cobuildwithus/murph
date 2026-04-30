@@ -504,17 +504,17 @@ describe("BiomarkerPage", () => {
     expect(clientBiomarker).toEqual(expect.objectContaining({
       about: [
         {
-          body: "It can reflect aerobic fitness, recovery load, sleep disruption, stress, illness, alcohol, and whether an experiment is adding too much strain.",
+          body: "Reflects aerobic fitness, recovery load, stress, illness, alcohol, sleep disruption, and whether an experiment adds strain.",
           iconKey: "whyPeopleCare",
           title: "Why people care",
         },
         {
-          body: "Use the same wearable or the same quiet morning resting method. Compare like-with-like windows rather than mixing devices or time-of-day contexts.",
+          body: "Compare same-device overnight or quiet-morning trends. Use multi-day medians, not one-off readings.",
           iconKey: "howToMeasure",
-          title: "How to measure it",
+          title: "How to read it",
         },
         {
-          body: "Cardio training, sleep, alcohol, heat exposure, illness, hard training, travel, dehydration, medications, and stress can all move RHR.",
+          body: "Cardio training, sleep, alcohol, heat, illness, hard training, travel, dehydration, medications, stress, and device changes.",
           iconKey: "whatMovesIt",
           title: "What moves it",
         },
@@ -575,16 +575,16 @@ describe("BiomarkerPage", () => {
     }));
 
     expect(markup).toContain("Why people care");
-    expect(markup).toContain("How to measure it");
+    expect(markup).toContain("How to read it");
     expect(markup).toContain("What moves it");
     expect(markup).toContain(
-      "It can reflect aerobic fitness, recovery load, sleep disruption, stress, illness, alcohol, and whether an experiment is adding too much strain.",
+      "Reflects aerobic fitness, recovery load, stress, illness, alcohol, sleep disruption, and whether an experiment adds strain.",
     );
     expect(markup).toContain(
-      "Use the same wearable or the same quiet morning resting method. Compare like-with-like windows rather than mixing devices or time-of-day contexts.",
+      "Compare same-device overnight or quiet-morning trends. Use multi-day medians, not one-off readings.",
     );
     expect(markup).toContain(
-      "Cardio training, sleep, alcohol, heat exposure, illness, hard training, travel, dehydration, medications, and stress can all move RHR.",
+      "Cardio training, sleep, alcohol, heat, illness, hard training, travel, dehydration, medications, stress, and device changes.",
     );
   });
 
@@ -608,7 +608,7 @@ describe("BiomarkerPage", () => {
       }),
       expect.objectContaining({
         iconKey: "whatMovesIt",
-        title: "What can fool it",
+        title: "What moves it",
       }),
     ]);
   });
