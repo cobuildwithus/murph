@@ -41,10 +41,10 @@ export function BiomarkerExperimentCard({
   return (
     <Link
       href={protocol.href}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border"
+      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border"
     >
       <div className="flex flex-col gap-4 p-5 sm:flex-row">
-        <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg sm:h-[90px] sm:w-[160px]">
+        <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg sm:aspect-auto sm:h-auto sm:w-[160px] sm:self-stretch">
           {imageSrc ? (
             <Image
               src={imageSrc}
@@ -84,7 +84,7 @@ export function BiomarkerExperimentCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 divide-x divide-border/60 border-t border-border/60 bg-muted/30">
+      <div className="mt-auto grid grid-cols-3 divide-x divide-border/60 border-t border-border/60 bg-muted/30">
         <StatCell
           label="Expected change"
           value={expectedHighlight}
