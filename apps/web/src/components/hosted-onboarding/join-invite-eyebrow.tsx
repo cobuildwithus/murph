@@ -14,15 +14,13 @@ export function JoinInviteEyebrow({
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-2.5 text-[11px] font-medium uppercase tracking-[0.22em]",
-        tone === "danger" ? "text-destructive" : "text-olive-light",
+        "inline-flex items-center gap-2.5 font-mono text-[10px] uppercase tracking-widest",
+        tone === "danger" ? "text-destructive" : "text-muted-foreground",
       )}
     >
       {tone === "danger" ? (
         <AlertCircleIcon className="size-3.5" />
-      ) : (
-        <span className="size-1.5 rounded-full bg-olive-light/80" />
-      )}
+      ) : null}
       <span>{label}</span>
     </div>
   );

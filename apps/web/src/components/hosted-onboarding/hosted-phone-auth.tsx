@@ -1,6 +1,7 @@
 "use client";
 
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
 
 import {
   HostedPhoneAuthFlow,
@@ -13,27 +14,37 @@ import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-pho
 interface HostedPhoneAuthProps {
   disableSignup?: boolean;
   intent?: HostedPhoneAuthIntent;
+  onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
+  onCodeSent?: () => void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  phoneInputAutoFocus?: boolean;
   renderCaptcha?: boolean;
-  showPassiveConsentNotice?: boolean;
+  sendCodeGated?: boolean;
+  size?: "default" | "compact";
   suppressAuthenticatedSessionIssue?: boolean;
 }
 
 export function HostedPhoneAuth({
   disableSignup = false,
   intent = "auth",
+  onAuthCompleted,
+  onCodeSent,
   onCompleted,
   onLinked,
   onSignOut,
+  phoneInputAutoFocus = false,
   renderCaptcha = true,
-  showPassiveConsentNotice = true,
+  sendCodeGated = false,
+  size,
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
     disableSignup,
     intent,
+    onAuthCompleted,
+    onCodeSent,
     onCompleted,
     onLinked,
     onSignOut,
@@ -56,7 +67,9 @@ export function HostedPhoneAuth({
       {renderCaptcha ? <HostedPrivyCaptcha /> : null}
       <HostedPhoneAuthFlow
         {...controller.sharedFlowProps}
-        showPassiveConsentNotice={showPassiveConsentNotice}
+        phoneInputAutoFocus={phoneInputAutoFocus}
+        sendCodeDisabled={controller.sharedFlowProps.sendCodeDisabled || sendCodeGated}
+        size={size}
       />
     </HostedPhoneAuthScaffold>
   );
