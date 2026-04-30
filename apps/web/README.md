@@ -161,9 +161,9 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
-- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY`
-- `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL`
+- `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
 - `HOSTED_AI_USAGE_BILLING_MODE`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -238,7 +238,7 @@ the flow without moving real money:
    `apps/web/.env.local`, or shell env:
    - `STRIPE_SECRET_KEY=sk_test_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
-   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY=price_...`
 2. Leave `HOSTED_AI_USAGE_BILLING_MODE=disabled` locally unless you are also
    testing the legacy Stripe meter fallback with matching usage-price ids.
 3. Install and log in to the Stripe CLI once with `stripe login`.
@@ -502,7 +502,7 @@ The onboarding lane is intentionally thin:
 Current hosted billing assumptions:
 
 - Hosted checkout is always Stripe subscription mode.
-- The launch tier is sold as one Stripe product with separate monthly and annual recurring prices.
+- The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
 - `invoice.paid` is the only positive activation source.
 - `checkout.session.completed` and `customer.subscription.*` do not grant access.
 - Chargebacks, disputes, and refunds suspend hosted access pending manual review.

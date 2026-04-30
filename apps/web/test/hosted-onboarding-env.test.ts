@@ -10,9 +10,9 @@ describe("readHostedOnboardingEnvironment", () => {
   it("reads hosted onboarding defaults and surfaces Privy config", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
-      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_annual_123",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_monthly_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
-      HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL: "price_usage_annual_123",
+      HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_usage_edge_monthly_123",
       HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY: "price_usage_monthly_123",
       HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME: "murph_ai_tokens",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
@@ -27,12 +27,12 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
     expect(environment.stripePriceIdsByPlan).toEqual({
-      launch_annual: "price_annual_123",
+      launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
     });
     expect(environment.stripeUsageMeterEventName).toBe("murph_ai_tokens");
     expect(environment.stripeUsagePriceIdsByPlan).toEqual({
-      launch_annual: "price_usage_annual_123",
+      launch_edge_monthly: "price_usage_edge_monthly_123",
       launch_monthly: "price_usage_monthly_123",
     });
   });

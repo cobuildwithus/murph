@@ -213,8 +213,8 @@ test("phone verification returns to the checkout plan picker without auto-launch
   expect(mocks.fetchHostedInviteStatus).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(view.locationAssign).not.toHaveBeenCalled();
-  assert.match(view.container.textContent ?? "", /Choose your plan/);
-  assert.match(view.container.textContent ?? "", /Continue to checkout/);
+  assert.match(view.container.textContent ?? "", /Start your first experiment/);
+  assert.match(view.container.textContent ?? "", /Get Pulse/);
 
   await view.cleanup();
 });
@@ -244,7 +244,7 @@ test("phone verification keeps checkout hidden until the server confirms invite 
   expect(mocks.fetchHostedInviteStatus).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(view.locationAssign).not.toHaveBeenCalled();
-  assert.doesNotMatch(view.container.textContent ?? "", /Continue to checkout/);
+  assert.doesNotMatch(view.container.textContent ?? "", /Get Pulse/);
   assert.match(view.container.textContent ?? "", /Confirm your number/);
   assert.match(view.container.textContent ?? "", /Hosted invite phone auth/);
 
@@ -283,8 +283,8 @@ test("stale invite status refreshes preserve the checkout plan picker", async ()
 
   expect(fetchMock).not.toHaveBeenCalled();
   expect(view.locationAssign).not.toHaveBeenCalled();
-  assert.match(view.container.textContent ?? "", /Choose your plan/);
-  assert.match(view.container.textContent ?? "", /Continue to checkout/);
+  assert.match(view.container.textContent ?? "", /Start your first experiment/);
+  assert.match(view.container.textContent ?? "", /Get Pulse/);
 
   await view.cleanup();
 });
@@ -320,7 +320,7 @@ test("manual checkout surfaces API errors and can retry", async () => {
       stage: "checkout",
     }),
   });
-  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
+  const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
   expect(fetchMock).toHaveBeenCalledTimes(0);
   expect(view.locationAssign).not.toHaveBeenCalled();
@@ -348,6 +348,51 @@ test("manual checkout surfaces API errors and can retry", async () => {
 
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/retry");
+
+  await view.cleanup();
+});
+
+test("edge checkout sends the clicked monthly plan code without waiting for state", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({
+      alreadyActive: false,
+      url: "https://stripe.example.test/edge",
+    }), {
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      capabilities: {
+        billingReady: true,
+        phoneAuthReady: true,
+      },
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
+  });
+  const edgeCheckoutButton = findButtonByText(view.container, /Get Edge/);
+
+  await act(async () => {
+    edgeCheckoutButton.click();
+  });
+  await waitForCheckoutSuccessHold();
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/checkout", expect.objectContaining({
+    body: JSON.stringify({
+      billingPlanCode: "launch_edge_monthly",
+      inviteCode: "invite-code",
+    }),
+    method: "POST",
+  }));
+  expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/edge");
 
   await view.cleanup();
 });
@@ -380,7 +425,7 @@ test("stale verify refreshes still leave the manual checkout fallback available 
     }),
   });
   const onStatus = readHostedInviteStatusRefreshOnStatus();
-  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
+  const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
   await act(async () => {
     checkoutButton.click();
@@ -399,7 +444,7 @@ test("stale verify refreshes still leave the manual checkout fallback available 
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(view.locationAssign).not.toHaveBeenCalled();
-  assert.match(checkoutButton.textContent ?? "", /Continue to checkout/);
+  assert.match(checkoutButton.textContent ?? "", /Get Pulse/);
 
   await act(async () => {
     checkoutButton.click();
@@ -448,7 +493,7 @@ test("already-active checkout refreshes preserve the current stage when the retu
       stage: "checkout",
     }),
   });
-  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
+  const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
   await act(async () => {
     checkoutButton.click();
@@ -457,8 +502,8 @@ test("already-active checkout refreshes preserve the current stage when the retu
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
-  assert.match(view.container.textContent ?? "", /One last step/);
-  assert.match(view.container.textContent ?? "", /Choose your plan/);
+  assert.match(view.container.textContent ?? "", /Start your first experiment/);
+  assert.match(view.container.textContent ?? "", /Get Pulse/);
 
   await view.cleanup();
 });
@@ -499,7 +544,7 @@ test("already-active checkout refreshes return to verify when the invite session
       stage: "checkout",
     }),
   });
-  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
+  const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
   await act(async () => {
     checkoutButton.click();
