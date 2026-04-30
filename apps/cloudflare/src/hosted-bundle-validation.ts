@@ -629,5 +629,5 @@ function isBase64DataCharacterForValidation(charCode: number): boolean {
 }
 
 function isHostedExecutionBundleKind(value: unknown): value is HostedExecutionBundleKind {
-  return value === "vault" || value === "vault-sync-import";
+  return value === "vault";
 }

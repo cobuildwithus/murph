@@ -95,7 +95,7 @@ describe("appendHostedMailboxItemTx", () => {
 
     const result = await appendHostedMailboxItemTx({
       dedupeKey: "dedupe_ref_1",
-      kind: "vault.sync.import",
+      kind: "assistant.notification.requested",
       lane: "system",
       occurredAt: FIXED_NOW,
       payloadBytes: 128_000,

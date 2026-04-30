@@ -199,8 +199,6 @@ model HostedMember {
   hostedRuntimeLogs          HostedRuntimeLog[]
   consentEvents              HostedConsentEvent[]
   consentGrants              HostedConsentGrant[]
-  vaultSyncSessions  HostedVaultSyncSession[]
-  vaultSyncPayloads  HostedVaultSyncPayload[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -412,46 +410,6 @@ model HostedStripeEvent {
   @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
   @@index([claimExpiresAt])
   @@map("hosted_stripe_event")
-}
-
-model HostedVaultSyncSession {
-  id                   String    @id
-  memberId             String    @map("member_id")
-  direction            String    @default("local_to_hosted")
-  status               String    @default("pending")
-  pairingCodeHash      String?   @unique @map("pairing_code_hash")
-  agentTokenHash       String?   @unique @map("agent_token_hash")
-  sourceVaultId        String?   @map("source_vault_id")
-  sourceVaultTitle     String?   @map("source_vault_title")
-  sourceSchemaVersion  String?   @map("source_schema_version")
-  localManifestHash    String?   @map("local_manifest_hash")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
-  expiresAt            DateTime  @map("expires_at")
-  uploadedAt           DateTime? @map("uploaded_at")
-  queuedAt             DateTime? @map("queued_at")
-  revokedAt            DateTime? @map("revoked_at")
-  member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  payload              HostedVaultSyncPayload?
-
-  @@index([memberId, createdAt])
-  @@index([memberId, status, createdAt])
-  @@index([expiresAt])
-  @@map("hosted_vault_sync_session")
-}
-
-model HostedVaultSyncPayload {
-  sessionId        String    @id @map("session_id")
-  memberId         String    @map("member_id")
-  payloadSchema    String    @default("murph.hosted-vault-sync-payload.v1") @map("payload_schema")
-  payloadEncrypted String    @map("payload_encrypted")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  member           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  session          HostedVaultSyncSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@index([memberId, createdAt])
-  @@map("hosted_vault_sync_payload")
 }
 
 model HostedConsentEvent {

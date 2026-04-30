@@ -10,7 +10,6 @@ import type {
   HostedMailboxPayload,
   HostedMailboxPayloadFetchRequest,
   HostedRuntimeLogRequest,
-  HostedRuntimeVaultSyncPayloadFetchRequest,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -19,7 +18,6 @@ import type {
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
-  HostedRuntimeVaultSyncPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
 import {
@@ -33,7 +31,6 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 type HostedRuntimePlatformWithGreenfieldPorts = HostedRuntimePlatform & {
   logPort: HostedRuntimeLogPort;
   mailboxPort: HostedRuntimeMailboxPort;
-  vaultSyncPort: HostedRuntimeVaultSyncPort;
   workspacePort: HostedRuntimeWorkspacePort;
 };
 
@@ -173,49 +170,6 @@ test("hosted runtime platform can write structured logs through an injected fake
   });
 });
 
-test("hosted runtime platform can fetch and record vault-sync side inputs through an injected fake port", async () => {
-  const { platform, vaultSyncFetchRequests, vaultSyncImportRequests } =
-    createFakeHostedRuntimePlatform();
-  const fetchRequest = {
-    requestId: "request_synthetic_vault_sync_001",
-    sessionId: "vault_sync_session_synthetic_001",
-  } satisfies HostedRuntimeVaultSyncPayloadFetchRequest;
-
-  const fetchResponse = await platform.vaultSyncPort.fetchPayload(fetchRequest);
-
-  assert.deepEqual(vaultSyncFetchRequests, [fetchRequest]);
-  assert.deepEqual(fetchResponse, {
-    fetchedAt: TEST_NOW,
-    payload: null,
-    unavailable: {
-      code: "not_found",
-      retryable: false,
-    },
-  });
-
-  const importRequest = {
-    importedAt: TEST_NOW,
-    sessionId: "vault_sync_session_synthetic_001",
-    status: "failed",
-    summary: {
-      conflictCount: 0,
-      importedJsonlRecords: 0,
-      importedRawFiles: 0,
-      importedTextFiles: 0,
-      skippedDuplicates: 0,
-      skippedExcludedFiles: 0,
-    },
-  } as const;
-  const importResponse = await platform.vaultSyncPort.recordImport(importRequest);
-
-  assert.deepEqual(vaultSyncImportRequests, [importRequest]);
-  assert.deepEqual(importResponse, {
-    recorded: true,
-    sessionId: "vault_sync_session_synthetic_001",
-    status: "failed",
-  });
-});
-
 function createFakeHostedRuntimePlatform(input: {
   mailboxItems?: readonly HostedMailboxItem[];
   mailboxPayloads?: readonly HostedMailboxPayload[];
@@ -226,8 +180,6 @@ function createFakeHostedRuntimePlatform(input: {
   mailboxFetchRequests: HostedMailboxFetchRequest[];
   mailboxPayloadFetchRequests: HostedMailboxPayloadFetchRequest[];
   platform: HostedRuntimePlatformWithGreenfieldPorts;
-  vaultSyncFetchRequests: HostedRuntimeVaultSyncPayloadFetchRequest[];
-  vaultSyncImportRequests: Parameters<HostedRuntimeVaultSyncPort["recordImport"]>[0][];
 } {
   const artifactStore = createHostedRuntimeArtifactStoreStub().artifactStore;
   const mailboxItems = [...(input.mailboxItems ?? [])];
@@ -236,8 +188,6 @@ function createFakeHostedRuntimePlatform(input: {
   const mailboxPayloadFetchRequests: HostedMailboxPayloadFetchRequest[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const logRequests: HostedRuntimeLogRequest[] = [];
-  const vaultSyncFetchRequests: HostedRuntimeVaultSyncPayloadFetchRequest[] = [];
-  const vaultSyncImportRequests: Parameters<HostedRuntimeVaultSyncPort["recordImport"]>[0][] = [];
   let workspace = input.workspace ?? createWorkspaceState();
 
   const platform: HostedRuntimePlatformWithGreenfieldPorts = {
@@ -284,27 +234,6 @@ function createFakeHostedRuntimePlatform(input: {
         };
       },
     },
-    vaultSyncPort: {
-      async fetchPayload(request) {
-        vaultSyncFetchRequests.push(request);
-        return {
-          fetchedAt: TEST_NOW,
-          payload: null,
-          unavailable: {
-            code: "not_found",
-            retryable: false,
-          },
-        };
-      },
-      async recordImport(request) {
-        vaultSyncImportRequests.push(request);
-        return {
-          recorded: true,
-          sessionId: request.sessionId,
-          status: request.status,
-        };
-      },
-    },
     workspacePort: {
       async checkpoint(request) {
         checkpointRequests.push(request);
@@ -341,8 +270,6 @@ function createFakeHostedRuntimePlatform(input: {
     mailboxFetchRequests,
     mailboxPayloadFetchRequests,
     platform,
-    vaultSyncFetchRequests,
-    vaultSyncImportRequests,
   };
 }
 

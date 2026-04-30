@@ -38,8 +38,6 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
-  "prisma.hosted_vault_sync_session",
-  "prisma.hosted_vault_sync_payload",
   "prisma.hosted_workspace",
   "prisma.hosted_runtime_log",
   "prisma.hosted_ai_usage",
@@ -203,7 +201,6 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
     expect(bySlug.get("prisma.hosted_mailbox_item")?.export).toBe("metadata-and-counts");
     expect(bySlug.get("prisma.hosted_mailbox_payload")?.export).toBe("not-exported-secret");
-    expect(bySlug.get("prisma.hosted_vault_sync_payload")?.export).toBe("not-exported-secret");
     expect(bySlug.get("cloudflare.runner_durable_object")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("cloudflare.r2_user_artifacts")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("providers.stripe_privy")?.deletion).toBe("documented-retention");
@@ -246,7 +243,6 @@ describe("buildHostedDataExport", () => {
       },
       counts: {
         "prisma.hosted_mailbox_payload": 1,
-        "prisma.hosted_vault_sync_payload": 1,
       },
       limits: {
         maxRowsPerStore: 250,
@@ -303,17 +299,6 @@ describe("buildHostedDataExport", () => {
           browserVaultReplicaRefPresent: true,
           snapshotRefPresent: true,
         },
-        vaultSyncSessions: [
-          {
-            idPresent: true,
-            localManifestHashPresent: true,
-            payload: {
-              payloadOmitted: true,
-              payloadSchema: "murph.hosted-vault-sync-payload.v1",
-            },
-            sourceVaultIdPresent: true,
-          },
-        ],
       },
       wearables: {
         deviceConnections: [
@@ -397,7 +382,6 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("secret-agent-token-hash");
     expect(serialized).not.toContain("SECRET_API_KEY_ENV");
     expect(serialized).not.toContain("invite-code-raw");
-    expect(serialized).not.toContain("encrypted-vault-payload");
     expect(serialized).not.toContain("oauth-state");
     expect(serialized).not.toContain("secret-privy");
     expect(serialized).not.toContain("secret-wallet");
@@ -422,8 +406,6 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("gatewayTagsJson");
     expect(serialized).not.toContain("secret-stripe-meter-error");
     expect(serialized).not.toContain("secret-stripe-meter-id");
-    expect(serialized).not.toContain("manifest-hash");
-    expect(serialized).not.toContain("vault-secret");
     expect(serialized).not.toContain("shallow");
     expect(serialized).not.toContain("secret-runtime-diagnostic");
     expect(serialized).not.toContain("secret-outbox-intent-ref");
@@ -436,7 +418,6 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("mailbox-1");
     expect(serialized).not.toContain("invite-1");
     expect(serialized).not.toContain("consent-event-1");
-    expect(serialized).not.toContain("vault-sync-1");
     expect(serialized).not.toContain("trace-1");
     expect(serialized).not.toContain("secret-consent-metadata");
   });
@@ -997,35 +978,6 @@ function createHostedAccountDataExportPrisma(input: {
           redactedJson: { message: "secret-runtime-diagnostic" },
           userId: memberId,
           workspaceVersion: 9n,
-        },
-      ],
-    },
-    hostedVaultSyncPayload: { count },
-    hostedVaultSyncSession: {
-      count,
-      findMany: async () => [
-        {
-          createdAt: new Date("2026-04-27T00:10:00.000Z"),
-          direction: "import",
-          expiresAt: new Date("2026-04-27T01:10:00.000Z"),
-          id: "vault-sync-1",
-          localManifestHash: "manifest-hash",
-          memberId,
-          payload: {
-            createdAt: new Date("2026-04-27T00:10:30.000Z"),
-            payloadEncrypted: "encrypted-vault-payload",
-            payloadSchema: "murph.hosted-vault-sync-payload.v1",
-            sessionId: "payload-secret",
-            updatedAt: new Date("2026-04-27T00:10:45.000Z"),
-          },
-          queuedAt: new Date("2026-04-27T00:10:45.000Z"),
-          revokedAt: null,
-          sourceSchemaVersion: "3",
-          sourceVaultId: "vault-secret",
-          sourceVaultTitle: "Source Vault",
-          status: "ready",
-          updatedAt: new Date("2026-04-27T00:11:00.000Z"),
-          uploadedAt: new Date("2026-04-27T00:10:40.000Z"),
         },
       ],
     },

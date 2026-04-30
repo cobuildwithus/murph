@@ -1,5 +1,7 @@
 # Murph Architecture
 
+Last verified: 2026-04-30
+
 ## Purpose
 
 Murph stores durable health records in a file-native vault and pairs them with a public Health Commons of protocol, biomarker, source, and aggregate outcome pages. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
@@ -118,6 +120,21 @@ repo/
   - `apps/cloudflare`
   - `packages/assistant-runtime`
 
+## Assistant Input Spine
+
+Codex admission uses one local-runtime input spine for manual, channel, and
+hosted conversation input:
+
+```text
+source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active turn -> accepted-input journal -> Codex
+```
+
+Inbox remains a projection and enrichment surface for search, display,
+attachment parsing, and debugging context. Source adapters may update inbox
+projection after staging assistant input, but hosted callers must not use hidden
+runtime-only inbox rows as the path that makes a conversation message visible
+to Codex.
+
 ## Hosted Ownership
 
 - `apps/web` and hosted Postgres own hosted control-plane truth: hosted member
@@ -132,11 +149,16 @@ repo/
   Objects keep only runner-local lease, alarm, and bundle/addressing
   coordination state; web-owned mailbox/workspace checkpoints are the durable
   progress truth.
+- Hosted execution is a thin containerized runner over the same local runtime
+  input spine. It restores the encrypted workspace, imports hosted mailbox rows,
+  stages `AssistantInputEvent` records, runs the local scanner/active-turn
+  machinery, checkpoints accepted input, drains outbox effects, and writes the
+  updated workspace checkpoint.
 - Mailbox import progress is not assistant handling progress. If a deploy,
   Durable Object reset, or runner restart lands after mailbox import has
   checkpointed, the next hosted invocation must still replay assistant handling
-  from raw capture evidence until per-capture terminal auto-reply evidence
-  exists.
+  from assistant input plus any available raw capture evidence until terminal
+  auto-reply evidence exists.
 - Cloudflare is not the canonical owner of device-sync control-plane state,
   hosted legal consent, hosted usage ledgers, gateway product truth, or any
   second mailbox/recovery queue.
@@ -146,8 +168,7 @@ repo/
   seam.
 - Narrow Cloudflare-to-web signed callbacks remain only where the execution
   runtime still needs them, such as execution-time device-sync runtime
-  snapshot/apply, device connect-link starts, hosted vault-sync import payload
-  reads, and direct hosted usage recording.
+  snapshot/apply, device connect-link starts, and direct hosted usage recording.
 
 ## Explicit Non-Goals
 

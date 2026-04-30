@@ -10,8 +10,6 @@ import {
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
-  HOSTED_RUNTIME_VAULT_SYNC_IMPORT_STATUSES,
-  HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
@@ -55,13 +53,6 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageExportRequest,
   type HostedRuntimeUsageExportResponse,
-  type HostedRuntimeVaultSyncImportPayload,
-  type HostedRuntimeVaultSyncImportRequest,
-  type HostedRuntimeVaultSyncImportResponse,
-  type HostedRuntimeVaultSyncImportStatus,
-  type HostedRuntimeVaultSyncImportSummary,
-  type HostedRuntimeVaultSyncPayloadFetchRequest,
-  type HostedRuntimeVaultSyncPayloadFetchResponse,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
@@ -291,164 +282,6 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
-  };
-}
-
-export function parseHostedRuntimeVaultSyncImportPayload(
-  value: unknown,
-): HostedRuntimeVaultSyncImportPayload {
-  const record = requireObject(value, "Hosted runtime vault-sync import payload");
-  const payloadSchema = requireString(
-    record.payloadSchema,
-    "Hosted runtime vault-sync import payload payloadSchema",
-  );
-
-  if (payloadSchema !== HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA) {
-    throw new TypeError(
-      `Hosted runtime vault-sync import payload payloadSchema must be ${HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA}.`,
-    );
-  }
-
-  return {
-    bundleBase64: requireString(
-      record.bundleBase64,
-      "Hosted runtime vault-sync import payload bundleBase64",
-    ),
-    ...(record.localManifestHash === undefined
-      ? {}
-      : {
-          localManifestHash: readNullableString(
-            record.localManifestHash,
-            "Hosted runtime vault-sync import payload localManifestHash",
-          ),
-        }),
-    payloadSchema,
-    sessionId: requireString(
-      record.sessionId,
-      "Hosted runtime vault-sync import payload sessionId",
-    ),
-    ...(record.sourceSchemaVersion === undefined
-      ? {}
-      : {
-          sourceSchemaVersion: readNullableString(
-            record.sourceSchemaVersion,
-            "Hosted runtime vault-sync import payload sourceSchemaVersion",
-          ),
-        }),
-  };
-}
-
-export function parseHostedRuntimeVaultSyncPayloadFetchRequest(
-  value: unknown,
-): HostedRuntimeVaultSyncPayloadFetchRequest {
-  const record = requireObject(value, "Hosted runtime vault-sync payload fetch request");
-
-  return {
-    requestId: requireString(
-      record.requestId,
-      "Hosted runtime vault-sync payload fetch request requestId",
-    ),
-    sessionId: requireString(
-      record.sessionId,
-      "Hosted runtime vault-sync payload fetch request sessionId",
-    ),
-  };
-}
-
-export function parseHostedRuntimeVaultSyncPayloadFetchResponse(
-  value: unknown,
-): HostedRuntimeVaultSyncPayloadFetchResponse {
-  const record = requireObject(value, "Hosted runtime vault-sync payload fetch response");
-  const payload = record.payload === null
-    ? null
-    : parseHostedRuntimeVaultSyncImportPayload(record.payload);
-  const unavailable = parseOptionalHostedRuntimeSideInputUnavailable(
-    record.unavailable,
-    "Hosted runtime vault-sync payload fetch response unavailable",
-  );
-
-  assertPayloadOrUnavailable(
-    payload,
-    unavailable,
-    "Hosted runtime vault-sync payload fetch response",
-  );
-
-  return {
-    fetchedAt: requireString(
-      record.fetchedAt,
-      "Hosted runtime vault-sync payload fetch response fetchedAt",
-    ),
-    payload,
-    ...(record.unavailable === undefined ? {} : { unavailable }),
-  };
-}
-
-export function parseHostedRuntimeVaultSyncImportSummary(
-  value: unknown,
-): HostedRuntimeVaultSyncImportSummary {
-  const record = requireObject(value, "Hosted runtime vault-sync import summary");
-
-  return {
-    conflictCount: requireNonNegativeInteger(
-      record.conflictCount,
-      "Hosted runtime vault-sync import summary conflictCount",
-    ),
-    importedJsonlRecords: requireNonNegativeInteger(
-      record.importedJsonlRecords,
-      "Hosted runtime vault-sync import summary importedJsonlRecords",
-    ),
-    importedRawFiles: requireNonNegativeInteger(
-      record.importedRawFiles,
-      "Hosted runtime vault-sync import summary importedRawFiles",
-    ),
-    importedTextFiles: requireNonNegativeInteger(
-      record.importedTextFiles,
-      "Hosted runtime vault-sync import summary importedTextFiles",
-    ),
-    skippedDuplicates: requireNonNegativeInteger(
-      record.skippedDuplicates,
-      "Hosted runtime vault-sync import summary skippedDuplicates",
-    ),
-    skippedExcludedFiles: requireNonNegativeInteger(
-      record.skippedExcludedFiles,
-      "Hosted runtime vault-sync import summary skippedExcludedFiles",
-    ),
-  };
-}
-
-export function parseHostedRuntimeVaultSyncImportRequest(
-  value: unknown,
-): HostedRuntimeVaultSyncImportRequest {
-  const record = requireObject(value, "Hosted runtime vault-sync import request");
-
-  return {
-    ...(record.errorCode === undefined
-      ? {}
-      : {
-          errorCode: readNullableString(
-            record.errorCode,
-            "Hosted runtime vault-sync import request errorCode",
-          ),
-        }),
-    importedAt: requireString(
-      record.importedAt,
-      "Hosted runtime vault-sync import request importedAt",
-    ),
-    sessionId: requireString(record.sessionId, "Hosted runtime vault-sync import request sessionId"),
-    status: parseHostedRuntimeVaultSyncImportStatus(record.status),
-    summary: parseHostedRuntimeVaultSyncImportSummary(record.summary),
-  };
-}
-
-export function parseHostedRuntimeVaultSyncImportResponse(
-  value: unknown,
-): HostedRuntimeVaultSyncImportResponse {
-  const record = requireObject(value, "Hosted runtime vault-sync import response");
-
-  return {
-    recorded: requireBoolean(record.recorded, "Hosted runtime vault-sync import response recorded"),
-    sessionId: requireString(record.sessionId, "Hosted runtime vault-sync import response sessionId"),
-    status: parseHostedRuntimeVaultSyncImportStatus(record.status),
   };
 }
 
@@ -1063,16 +896,6 @@ function parseHostedRuntimeSideInputUnavailableCode(
     value,
     "Hosted runtime side-input unavailable code",
     HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
-  );
-}
-
-function parseHostedRuntimeVaultSyncImportStatus(
-  value: unknown,
-): HostedRuntimeVaultSyncImportStatus {
-  return parseAllowedString(
-    value,
-    "Hosted runtime vault-sync import status",
-    HOSTED_RUNTIME_VAULT_SYNC_IMPORT_STATUSES,
   );
 }
 

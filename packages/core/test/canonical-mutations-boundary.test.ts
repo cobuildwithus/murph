@@ -70,6 +70,24 @@ test("public core exports include the high-level canonical mutation ports", () =
   assert.equal(typeof upsertProvider, "function");
 });
 
+test("public core exports do not expose removed local import ports", async () => {
+  const coreExports = await import("../src/index.ts");
+  const removedPrefix = ["VAULT", "SYNC"].join("_");
+  const removedPascalName = ["Vault", "Sync"].join("");
+
+  for (const exportName of [
+    [removedPrefix, "CONFLICT_MANIFEST_SCHEMA"].join("_"),
+    [removedPrefix, "IMPORT_BUNDLE_KIND"].join("_"),
+    [removedPrefix, "IMPORT_MANIFEST_SCHEMA"].join("_"),
+    `build${removedPascalName}ImportPack`,
+    `merge${removedPascalName}ImportIntoVault`,
+    `read${removedPascalName}ImportManifest`,
+    `restore${removedPascalName}ImportPack`,
+  ]) {
+    assert.equal(exportName in coreExports, false, `${exportName} should stay removed`);
+  }
+});
+
 test("high-level core experiment and journal mutation ports preserve canonical behavior", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });

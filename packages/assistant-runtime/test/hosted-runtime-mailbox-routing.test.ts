@@ -47,11 +47,6 @@ describe("hosted mailbox routing", () => {
         kind: "device-sync.wake",
         lane: "system",
       },
-      {
-        action: "import-vault-sync",
-        kind: "vault.sync.import",
-        lane: "system",
-      },
     ];
 
     for (const entry of cases) {
@@ -80,7 +75,6 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
-    assert.equal(resolveExpectedLaneForHostedMailboxKind("vault.sync.import"), "system");
   });
 
   test("quarantines lane and sequence inconsistencies before progress can advance", () => {

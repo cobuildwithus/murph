@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -41,18 +40,14 @@ export default async function SecurityPage() {
   ]);
 
   return (
-    <>
-      <style>{`#global-footer { display: none; }`}</style>
-      <main className="isolate min-h-dvh bg-[#f5f0e8] antialiased">
-        <StickyNav authenticated={authenticated} githubStarCount={githubStarCount} />
-        <HeroSection />
-        <PromisesSection />
-        <HostedOverviewSection />
-        <EncryptionSection />
-        <LocalSection />
-        <SiteFooter authenticated={authenticated} />
-      </main>
-    </>
+    <main className="isolate min-h-dvh bg-[#f5f0e8] antialiased">
+      <StickyNav authenticated={authenticated} githubStarCount={githubStarCount} />
+      <HeroSection />
+      <PromisesSection />
+      <HostedOverviewSection />
+      <EncryptionSection />
+      <LocalSection />
+    </main>
   );
 }
 
@@ -73,12 +68,10 @@ function HeroSection() {
             health data.
           </h1>
           <p className="mt-8 max-w-[50ch] text-[1rem] leading-[1.7] text-pretty text-[#f5f0e8]/65 sm:text-[1.0625rem]">
-            Hosted Murph runs on our servers so you don&apos;t have to
-            install anything. Hosted Murph is encrypted at rest, but not
-            zero-knowledge. The hosted service can decrypt data when it needs
-            to run requested tasks or maintain the service. Task workers write
-            encrypted results back and discard the workspace when the job is
-            done.
+            Murph runs on our servers so you don&apos;t have to install
+            anything. Your data is encrypted at rest. When you ask Murph
+            to do something, a short-lived worker decrypts what it needs,
+            does the job, writes the result back encrypted, and shuts down.
           </p>
           <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[10px] tracking-[0.14em] text-[#f5f0e8]/55 uppercase">
             <span>Open source</span>
@@ -101,14 +94,14 @@ function HeroSection() {
   );
 }
 
-const PROMISES = [
+const PROMISES: readonly { body: React.ReactNode; Glyph: typeof PromiseNoSellGlyph; title: string }[] = [
   {
     body: "Advertisers, insurers, and data brokers get the same answer: no. You pay us, so we work for you, not them.",
     Glyph: PromiseNoSellGlyph,
     title: "We don't sell your data.",
   },
   {
-    body: "Hosted Murph is encrypted at rest, but not zero-knowledge. The hosted service can decrypt data when it needs to run requested tasks or maintain the service. Task workers write encrypted results back and discard the workspace when the job is done.",
+    body: "Your data is encrypted at rest. When you ask Murph to do something, a short-lived worker decrypts what it needs, does the job, writes the result back encrypted, and shuts down.",
     Glyph: PromiseEphemeralKeyGlyph,
     title: "We limit readable processing.",
   },
@@ -118,11 +111,11 @@ const PROMISES = [
     title: "Take it out or delete it, any time.",
   },
   {
-    body: "Murph's product and runtime code is public at github.com/cobuildwithus/murph. Read it yourself, or hand it to a developer you trust.",
+    body: (<>Murph&#39;s product and runtime code is public. <a className="underline underline-offset-4 decoration-[#c4a882]/60 transition-colors hover:text-[#2d3436]" href="https://github.com/cobuildwithus/murph" rel="noopener noreferrer" target="_blank">Read it yourself</a>, or hand it to a developer you trust.</>),
     Glyph: PromiseOpenSourceGlyph,
     title: "Open source. See for yourself.",
   },
-] as const;
+];
 
 function PromisesSection() {
   return (
@@ -368,7 +361,7 @@ function HeroVaultGlyph({ className }: { className?: string }) {
 
       <line stroke="currentColor" strokeOpacity="0.3" strokeWidth="0.6" x1="80" x2="300" y1="326" y2="326" />
       <text className="font-mono" fill="currentColor" fillOpacity="0.6" fontSize="9" letterSpacing="0.24em" textAnchor="middle" x="190" y="344">
-        ENCRYPTED &middot; TASK WORK
+        ENCRYPTED &middot; SHORT-LIVED
       </text>
     </svg>
   );
@@ -386,7 +379,7 @@ const HOSTED_LEGEND = [
     title: "The runner",
   },
   {
-    body: "Your health records, stored encrypted at rest. Task workers decrypt workspace data for requested work, then write encrypted results back.",
+    body: "Your health records, encrypted at rest. A worker decrypts what it needs for a task, then writes the result back encrypted.",
     kind: "box-neutral",
     title: "Your files",
   },
@@ -438,15 +431,15 @@ function HostedOverviewSection() {
     <section aria-labelledby="security-hosted-title" className="px-6 pt-12 pb-20 sm:px-10 sm:pt-16 sm:pb-24 lg:px-16 lg:pt-20 lg:pb-28" id="hosted">
       <div className="mx-auto max-w-[1080px]">
         <p className="font-mono text-[10px] font-medium tracking-[0.12em] text-[#5a6e32] uppercase">
-          Hosted Murph
+          How it works
         </p>
         <h2 className="mt-6 max-w-[22ch] font-serif text-[clamp(1.75rem,4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]" id="security-hosted-title">
-          Hosted data is encrypted and separated by purpose.
+          Your data is encrypted and separated by purpose.
         </h2>
         <p className="mt-6 max-w-[58ch] font-serif text-[1rem] leading-[1.65] text-pretty text-[#4d4533] italic">
-          Hosted Murph separates account records, encrypted task data, and
-          runtime workspaces. Each system handles what it needs for sign-in,
-          billing, syncing, task execution, or service maintenance.
+          Murph separates account records, encrypted data, and short-lived
+          workspaces. Each piece handles what it needs for sign-in, billing,
+          syncing, or running a task.
         </p>
 
         <div className="relative mt-10">
@@ -535,11 +528,10 @@ function EncryptionSection() {
               What we encrypt.
             </h2>
             <p className="mt-5 max-w-[44ch] text-[0.9375rem] leading-[1.65] text-pretty text-[#635a48] sm:text-[1rem]">
-              Hosted Murph is encrypted at rest, but not zero-knowledge. The
-              hosted service can decrypt data when it needs to run requested
-              tasks or maintain the service. During task work, the worker can
-              handle readable files for the job, then discards that workspace.
-              The crypto card below is for technical readers.
+              Your data is encrypted at rest. When you ask Murph to do
+              something, a short-lived worker decrypts what it needs, does
+              the job, and discards the workspace. The crypto card below
+              is for technical readers.
             </p>
             <div className="mt-8 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-5">
               <p className="font-mono text-[10px] font-medium tracking-[0.12em] text-[#5a6e32] uppercase">

@@ -46,7 +46,6 @@ beforeEach(() => {
     conversationMetrics: null,
     mailboxLane: "assistant-notification",
     redactedLogEntries: [],
-    vaultSyncImportResult: null,
   });
 });
 

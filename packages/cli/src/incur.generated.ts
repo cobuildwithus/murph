@@ -259,7 +259,6 @@ declare module 'incur' {
       'supplement save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; group?: string; substance?: string; dose?: number; doseUnit?: string; brand?: string; manufacturer?: string; servingSize?: string; compound?: string; ingredientLabel?: string; amount?: number; unit?: string; ingredientActive?: boolean; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'supplement show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'supplement stop': { args: { id: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
-      'sync push': { args: {}; options: { vault: string; requestId?: string; session: string; host: string; dryRun: boolean } }
       'timeline': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId?: string } }
       'vault repair': { args: {}; options: { vault: string; requestId?: string } }

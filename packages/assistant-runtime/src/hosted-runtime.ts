@@ -93,7 +93,6 @@ export type {
   HostedRuntimePlatform,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeUsageExportPort,
-  HostedRuntimeVaultSyncPort,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
 export type {
@@ -523,14 +522,6 @@ function createLivenessGuardedHostedRuntimePlatform(
       ? {
           usageExportPort: {
             recordUsage: (usage) => guard(() => platform.usageExportPort!.recordUsage(usage)),
-          },
-        }
-      : {}),
-    ...(platform.vaultSyncPort
-      ? {
-          vaultSyncPort: {
-            fetchPayload: platform.vaultSyncPort.fetchPayload,
-            recordImport: (request) => guard(() => platform.vaultSyncPort!.recordImport(request)),
           },
         }
       : {}),

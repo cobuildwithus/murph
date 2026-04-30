@@ -13,9 +13,6 @@ import {
   readHostedExecutionSignatureHeaders,
 } from "../src/auth.ts";
 import {
-  buildHostedExecutionVaultSyncImportWake,
-} from "../src/builders.ts";
-import {
   parseHostedBrowserVaultReplicaRef,
 } from "../src/browser-vault.ts";
 import {
@@ -34,7 +31,6 @@ import {
   normalizeHostedExecutionString,
 } from "../src/env.ts";
 import {
-  parseHostedExecutionWake,
   parseHostedExecutionSnapshotRef,
 } from "../src/parsers.ts";
 
@@ -187,7 +183,6 @@ describe("hosted execution coverage gaps", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
-      "vault.sync.import",
     ]);
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
       "Hosted execution wake handling is not configured.",
@@ -279,10 +274,8 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
-      "HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
-      "buildHostedRuntimeVaultSyncPayloadPath",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
       "/api/internal/hosted-mailbox/payload/fetch",
@@ -293,52 +286,7 @@ describe("hosted execution coverage gaps", () => {
     expect(routeModule.HOSTED_RUNTIME_ISSUE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/issues/record",
     );
-    expect(routeModule.HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH).toBe(
-      "/api/internal/hosted-execution/vault-sync/import",
-    );
     expect("HOSTED_RUNTIME_SHARE_IMPORT_PATH" in routeModule).toBe(false);
     expect("buildHostedRuntimeSharePayloadPath" in routeModule).toBe(false);
-    expect(
-      (routeModule.buildHostedRuntimeVaultSyncPayloadPath as (sessionId: string) => string)(
-        "vsi/1",
-      ),
-    ).toBe("/api/internal/hosted-execution/vault-sync/vsi%2F1/payload");
-  });
-
-  it("builds and parses hosted vault sync import side-input contracts", () => {
-    const wake = buildHostedExecutionVaultSyncImportWake({
-      eventId: "evt_vault_sync",
-      memberId: "member_vault_sync",
-      occurredAt: "2026-04-21T00:00:00.000Z",
-      vaultSync: {
-        localManifestHash: "sha256:local",
-        sessionId: "vsi_contract",
-        sourceSchemaVersion: "murph.vault.v1",
-        sourceVaultId: "vault_local",
-        sourceVaultTitle: "Local Vault",
-      },
-    });
-
-    expect(parseHostedExecutionWake(wake)).toEqual(wake);
-    expect(
-      buildHostedExecutionVaultSyncImportWake({
-        eventId: "evt_vault_sync_minimal",
-        memberId: "member_vault_sync",
-        occurredAt: "2026-04-21T00:00:00.000Z",
-        vaultSync: {
-          localManifestHash: "sha256:minimal",
-          sessionId: "vsi_minimal",
-        },
-      }),
-    ).toEqual({
-      eventId: "evt_vault_sync_minimal",
-      kind: "vault.sync.import",
-      occurredAt: "2026-04-21T00:00:00.000Z",
-      userId: "member_vault_sync",
-      vaultSync: {
-        localManifestHash: "sha256:minimal",
-        sessionId: "vsi_minimal",
-      },
-    });
   });
 });

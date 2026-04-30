@@ -11,7 +11,6 @@ import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
 } from "../hosted-runner/control";
-import { normalizeHostedVaultSyncSessionStatus } from "../vault-sync/shared";
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -95,20 +94,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     deletion: "live-delete",
     export: "metadata-and-counts",
     note: "Deletes per-lane sequence counters so deleted users cannot resume mailbox lanes.",
-  },
-  {
-    slug: "prisma.hosted_vault_sync_session",
-    label: "Hosted vault sync sessions and tokens",
-    deletion: "live-delete",
-    export: "metadata-and-counts",
-    note: "Deletes pairing-code hashes, agent-token hashes, status, and source-vault metadata.",
-  },
-  {
-    slug: "prisma.hosted_vault_sync_payload",
-    label: "Hosted vault sync encrypted payloads",
-    deletion: "live-delete",
-    export: "not-exported-secret",
-    note: "Deletes encrypted local-vault import payloads. Export reports counts without returning ciphertext.",
   },
   {
     slug: "prisma.hosted_workspace",
@@ -324,7 +309,6 @@ const HOSTED_DATA_EXPORT_REDACTIONS = [
   "CSRF, browser assertion, internal request, and OAuth state nonces",
   "active invite codes and recovery-style codes",
   "arbitrary decoded mailbox payload bodies",
-  "vault sync pairing codes, agent tokens, and encrypted payload blobs",
   "hosted workspace snapshot and browser-replica object keys and bundle hashes",
   "encrypted private columns already represented as decrypted user-facing fields",
   "API key environment variable names",
@@ -340,7 +324,7 @@ const HOSTED_DATA_EXPORT_OMITTED_INTERNAL_TABLES = [
 const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
-  "Live Prisma, hosted mailbox, vault sync, device, runtime, and workspace rows are deleted immediately by this workflow.",
+  "Live Prisma, hosted mailbox, device, runtime, and workspace rows are deleted immediately by this workflow.",
   "Cloudflare Durable Object/R2 cleanup is best effort and reported in the deletion result when hosted execution control is configured.",
   "Provider-side data deletion is limited to revocation hooks and external provider retention controls.",
   "Stripe, Privy, carrier/email/Telegram/Linq provider records, and infrastructure backups follow their documented retention/legal processes.",
@@ -439,7 +423,6 @@ export async function buildHostedDataExport(input: {
     invites,
     consentEvents,
     consentGrants,
-    vaultSyncSessions,
     aiUsage,
     linqDailyStates,
   ] = await Promise.all([
@@ -641,33 +624,6 @@ export async function buildHostedDataExport(input: {
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
-    prisma.hostedVaultSyncSession.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        createdAt: true,
-        direction: true,
-        expiresAt: true,
-        localManifestHash: true,
-        memberId: true,
-        payload: {
-          select: {
-            createdAt: true,
-            payloadSchema: true,
-            updatedAt: true,
-          },
-        },
-        queuedAt: true,
-        revokedAt: true,
-        sourceSchemaVersion: true,
-        sourceVaultId: true,
-        sourceVaultTitle: true,
-        status: true,
-        updatedAt: true,
-        uploadedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
     prisma.hostedAiUsage.findMany({
       orderBy: { occurredAt: "desc" },
       select: {
@@ -746,7 +702,6 @@ export async function buildHostedDataExport(input: {
   const limitedInvites = limitRowsForExport(invites);
   const limitedConsentEvents = limitRowsForExport(consentEvents);
   const limitedConsentGrants = limitRowsForExport(consentGrants);
-  const limitedVaultSyncSessions = limitRowsForExport(vaultSyncSessions);
   const limitedAiUsage = limitRowsForExport(aiUsage);
   const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
 
@@ -769,7 +724,6 @@ export async function buildHostedDataExport(input: {
         mailboxItems: limitedMailboxItems.meta,
         mailboxLaneCounters: limitedMailboxLaneCounters.meta,
         runtimeLogs: limitedRuntimeLogs.meta,
-        vaultSyncSessions: limitedVaultSyncSessions.meta,
         aiUsage: limitedAiUsage.meta,
       },
     },
@@ -839,31 +793,6 @@ export async function buildHostedDataExport(input: {
     },
     vault: {
       workspace: projectHostedWorkspaceForExport(workspace),
-      vaultSyncSessions: limitedVaultSyncSessions.rows.map((session) => ({
-        createdAt: session.createdAt,
-        direction: session.direction,
-        expiresAt: session.expiresAt,
-        idPresent: true,
-        localManifestHashPresent: Boolean(session.localManifestHash),
-        memberId: session.memberId,
-        normalizedStatus: normalizeHostedVaultSyncSessionStatus(session),
-        payload: session.payload
-          ? {
-              createdAt: session.payload.createdAt,
-              payloadOmitted: true,
-              payloadSchema: session.payload.payloadSchema,
-              updatedAt: session.payload.updatedAt,
-            }
-          : null,
-        queuedAt: session.queuedAt,
-        revokedAt: session.revokedAt,
-        sourceSchemaVersion: session.sourceSchemaVersion,
-        sourceVaultIdPresent: Boolean(session.sourceVaultId),
-        sourceVaultTitle: session.sourceVaultTitle,
-        status: session.status,
-        updatedAt: session.updatedAt,
-        uploadedAt: session.uploadedAt,
-      })),
     },
     wearables: {
       deviceAgentSessions: limitedDeviceAgentSessions.rows.map((session) => ({
@@ -1237,8 +1166,6 @@ async function countHostedAccountData(input: {
     hostedInvite,
     hostedConsentEvent,
     hostedConsentGrant,
-    hostedVaultSyncSession,
-    hostedVaultSyncPayload,
     hostedAiUsage,
     hostedLinqDailyState,
     deviceConnection,
@@ -1262,8 +1189,6 @@ async function countHostedAccountData(input: {
     input.prisma.hostedInvite.count({ where: { memberId } }),
     input.prisma.hostedConsentEvent.count({ where: { memberId } }),
     input.prisma.hostedConsentGrant.count({ where: { memberId } }),
-    input.prisma.hostedVaultSyncSession.count({ where: { memberId } }),
-    input.prisma.hostedVaultSyncPayload.count({ where: { memberId } }),
     input.prisma.hostedAiUsage.count({ where: { memberId } }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId } }),
     input.prisma.deviceConnection.count({ where: { userId: memberId } }),
@@ -1296,8 +1221,6 @@ async function countHostedAccountData(input: {
     "prisma.hosted_member_identity": hostedMemberIdentity,
     "prisma.hosted_member_routing": hostedMemberRouting,
     "prisma.hosted_runtime_log": hostedRuntimeLog,
-    "prisma.hosted_vault_sync_payload": hostedVaultSyncPayload,
-    "prisma.hosted_vault_sync_session": hostedVaultSyncSession,
     "prisma.hosted_web_internal_request_nonce": hostedWebInternalRequestNonce,
     "prisma.hosted_workspace": hostedWorkspace,
   };
@@ -1317,8 +1240,6 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_mailbox_payload", await input.prisma.hostedMailboxPayload.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_mailbox_item", await input.prisma.hostedMailboxItem.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_mailbox_lane_counter", await input.prisma.hostedMailboxLaneCounter.deleteMany({ where: { userId: memberId } }));
-  record("prisma.hosted_vault_sync_payload", await input.prisma.hostedVaultSyncPayload.deleteMany({ where: { memberId } }));
-  record("prisma.hosted_vault_sync_session", await input.prisma.hostedVaultSyncSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_runtime_log", await input.prisma.hostedRuntimeLog.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId } }));

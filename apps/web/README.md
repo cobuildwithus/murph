@@ -462,10 +462,10 @@ Internal hosted maintenance and Cloudflare callback routes:
 
 The old staged-payload and deleted import completion/release callback routes
 are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
-deleted sharing CRUD, or an outbox drain route. It still uses narrow signed
-hosted-web callbacks for execution-time device-sync runtime snapshot/apply,
-device connect-link starts, hosted vault-sync import payload reads, direct
-hosted usage recording, and mailbox/workspace runtime status plus log callbacks.
+deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
+still uses narrow signed hosted-web callbacks for execution-time device-sync
+runtime snapshot/apply, device connect-link starts, direct hosted usage
+recording, and mailbox/workspace runtime status plus log callbacks.
 
 ## Hosted onboarding routes
 
@@ -493,9 +493,8 @@ The onboarding lane is intentionally thin:
   positive entitlement source.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
-- Cloudflare-bound execution from onboarding, hosted vault-sync imports, and
-  hosted device-sync trigger paths always appends canonical hosted mailbox
-  input first.
+- Cloudflare-bound execution from onboarding and hosted device-sync trigger
+  paths always appends canonical hosted mailbox input first.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 

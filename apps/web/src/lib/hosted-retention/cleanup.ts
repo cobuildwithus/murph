@@ -1,27 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import {
-  HOSTED_VAULT_SYNC_PAYLOAD_TERMINAL_STATUSES,
-} from "../vault-sync/shared";
 
 const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
 export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
-export const HOSTED_EXPIRED_VAULT_SYNC_SESSION_RETENTION_MS = 7 * DAY_MS;
-
-const EXPIRABLE_VAULT_SYNC_SESSION_STATUSES = [
-  "pending",
-  "exchanged",
-  "uploaded",
-] as const;
 
 export interface HostedRetentionCleanupResult {
-  completedVaultSyncPayloadsDeleted: number;
-  expiredVaultSyncPayloadsDeleted: number;
-  expiredVaultSyncSessionsDeleted: number;
-  expiredVaultSyncSessionsMarked: number;
   expiredMailboxItemsDeleted: number;
   oldRuntimeLogsDeleted: number;
 }
@@ -32,21 +18,6 @@ export async function runHostedRetentionCleanup(input: {
 } = {}): Promise<HostedRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeRetentionDate(input.now ?? new Date());
-  const expiredVaultSyncSessionsMarked = await markExpiredVaultSyncSessions({
-    now,
-    prisma,
-  });
-  const expiredVaultSyncPayloadsDeleted = await deleteExpiredVaultSyncPayloads({
-    now,
-    prisma,
-  });
-  const completedVaultSyncPayloadsDeleted = await deleteCompletedVaultSyncPayloads({
-    prisma,
-  });
-  const expiredVaultSyncSessionsDeleted = await deleteOldExpiredVaultSyncSessions({
-    now,
-    prisma,
-  });
   const expiredMailboxItemsDeleted = await deleteExpiredMailboxItems({
     now,
     prisma,
@@ -57,95 +28,9 @@ export async function runHostedRetentionCleanup(input: {
   });
 
   return {
-    completedVaultSyncPayloadsDeleted,
-    expiredVaultSyncPayloadsDeleted,
-    expiredVaultSyncSessionsDeleted,
-    expiredVaultSyncSessionsMarked,
     expiredMailboxItemsDeleted,
     oldRuntimeLogsDeleted,
   };
-}
-
-async function markExpiredVaultSyncSessions(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const result = await input.prisma.hostedVaultSyncSession.updateMany({
-    where: {
-      expiresAt: {
-        lte: input.now,
-      },
-      status: {
-        in: [...EXPIRABLE_VAULT_SYNC_SESSION_STATUSES],
-      },
-    },
-    data: {
-      agentTokenHash: null,
-      pairingCodeHash: null,
-      status: "expired",
-    },
-  });
-
-  return result.count;
-}
-
-async function deleteExpiredVaultSyncPayloads(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const result = await input.prisma.hostedVaultSyncPayload.deleteMany({
-    where: {
-      session: {
-        is: {
-          expiresAt: {
-            lte: input.now,
-          },
-          status: {
-            in: [...EXPIRABLE_VAULT_SYNC_SESSION_STATUSES],
-          },
-        },
-      },
-    },
-  });
-
-  return result.count;
-}
-
-async function deleteCompletedVaultSyncPayloads(input: {
-  prisma: PrismaClient;
-}): Promise<number> {
-  const result = await input.prisma.hostedVaultSyncPayload.deleteMany({
-    where: {
-      session: {
-        is: {
-          status: {
-            in: [...HOSTED_VAULT_SYNC_PAYLOAD_TERMINAL_STATUSES],
-          },
-        },
-      },
-    },
-  });
-
-  return result.count;
-}
-
-async function deleteOldExpiredVaultSyncSessions(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const cutoff = new Date(input.now.getTime() - HOSTED_EXPIRED_VAULT_SYNC_SESSION_RETENTION_MS);
-  const result = await input.prisma.hostedVaultSyncSession.deleteMany({
-    where: {
-      status: {
-        in: ["expired", "revoked"],
-      },
-      updatedAt: {
-        lt: cutoff,
-      },
-    },
-  });
-
-  return result.count;
 }
 
 async function deleteExpiredMailboxItems(input: {

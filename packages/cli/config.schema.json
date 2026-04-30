@@ -1069,57 +1069,6 @@
             }
           }
         },
-        "sync": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "push": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "session": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "One-time pairing code from hosted Settings."
-                        },
-                        "host": {
-                          "default": "https://app.murph.ai",
-                          "description": "Hosted Murph app base URL.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "dryRun": {
-                          "default": false,
-                          "description": "Build and summarize the import pack without uploading it.",
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
         "automation": {
           "type": "object",
           "additionalProperties": false,
