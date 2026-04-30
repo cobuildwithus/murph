@@ -76,6 +76,14 @@ export interface BiomarkerMeasurementModel {
   howToMeasure: string[];
 }
 
+export type BiomarkerAboutIconKey = "howToMeasure" | "whatMovesIt" | "whyPeopleCare";
+
+export interface BiomarkerAboutItemModel {
+  body: string;
+  iconKey: BiomarkerAboutIconKey;
+  title: string;
+}
+
 export interface BiomarkerSourceModel {
   citation: string | null;
   evidenceLabel: string;
@@ -117,6 +125,7 @@ export interface BiomarkerProtocolRankingModel {
 
 export interface BiomarkerPageModel {
   aliases: string[];
+  about: BiomarkerAboutItemModel[];
   body: string;
   catalogHash: string;
   categories: string[];
@@ -210,6 +219,7 @@ function toBiomarkerPageModel(
 
   return {
     aliases: biomarker.aliases ?? [],
+    about: buildBiomarkerAbout(biomarkerSpec?.explainerCards ?? []),
     body: cleanHealthCommonsUserFacingCopy(biomarker.body),
     catalogHash: catalog.catalogHash,
     categories: biomarker.categories ?? [],
@@ -518,6 +528,55 @@ function cleanExplainerCards(
     body: cleanHealthCommonsUserFacingCopy(card.body),
     title: cleanHealthCommonsUserFacingCopy(card.title),
   }));
+}
+
+const BIOMARKER_ABOUT_SLOTS: Array<{
+  iconKey: BiomarkerAboutIconKey;
+  normalizedTitles: readonly string[];
+}> = [
+  {
+    iconKey: "whyPeopleCare",
+    normalizedTitles: ["why people care", "why it matters"],
+  },
+  {
+    iconKey: "howToMeasure",
+    normalizedTitles: [
+      "how to measure it",
+      "how it's measured",
+      "how its measured",
+      "how to read it",
+      "how to read a trend",
+      "lab vs wearable",
+    ],
+  },
+  {
+    iconKey: "whatMovesIt",
+    normalizedTitles: ["what can fool it", "what moves it"],
+  },
+];
+
+function buildBiomarkerAbout(
+  cards: readonly HealthCommonsBiomarkerExplainerCard[],
+): BiomarkerAboutItemModel[] {
+  return BIOMARKER_ABOUT_SLOTS.flatMap((slot) => {
+    const card = cards.find((candidate) =>
+      slot.normalizedTitles.includes(normalizeAboutTitle(candidate.title))
+    );
+
+    if (!card) {
+      return [];
+    }
+
+    return [{
+      body: cleanHealthCommonsUserFacingCopy(card.body),
+      iconKey: slot.iconKey,
+      title: cleanHealthCommonsUserFacingCopy(card.title),
+    }];
+  });
+}
+
+function normalizeAboutTitle(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, " ");
 }
 
 function cleanInterpretationFrame(
