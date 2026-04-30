@@ -20,6 +20,9 @@ const outboundMocks = vi.hoisted(() => ({
         : binding.delivery,
   })),
   normalizeAssistantDeliveryError: vi.fn(),
+  normalizeNullableString: vi.fn((value: string | null | undefined) =>
+    typeof value === 'string' && value.trim() ? value.trim() : null,
+  ),
   normalizeAssistantDeliverySubject: vi.fn((input: { subject?: string | null }) =>
     input.subject?.trim() ? input.subject.trim() : null,
   ),
@@ -81,6 +84,7 @@ vi.mock('../src/assistant/redaction.js', () => ({
 }))
 
 vi.mock('../src/assistant/shared.js', () => ({
+  normalizeNullableString: outboundMocks.normalizeNullableString,
   normalizeRequiredText: outboundMocks.normalizeRequiredText,
   warnAssistantBestEffortFailure: outboundMocks.warnAssistantBestEffortFailure,
 }))
@@ -309,6 +313,109 @@ describe('outbound channel runtime', () => {
         channel: 'telegram',
         deliveryKind: 'participant',
         deliveryTarget: 'participant-2',
+      },
+    )
+  })
+
+  it('keeps materialized hosted participant delivery on the actor conversation key', async () => {
+    outboundMocks.resolveAssistantSession.mockResolvedValue({
+      session: createSession({
+        binding: {
+          actorId: 'hid_linq_actor_1',
+          channel: 'linq',
+          delivery: {
+            kind: 'participant',
+            target: '+15550100001',
+          },
+          identityId: 'hid_linq_identity_1',
+          threadId: null,
+          threadIsDirect: true,
+        },
+      }),
+    })
+    outboundMocks.deliverAssistantOutboxMessage.mockResolvedValue({
+      delivery: createDelivery({
+        channel: 'linq',
+        target: 'linq-chat-created',
+        targetKind: 'thread',
+      }),
+      intent: {
+        intentId: 'intent-linq-hosted',
+      },
+      kind: 'sent',
+      session: null,
+    })
+
+    await deliverAssistantMessage({
+      message: 'hosted participant materialized',
+      vault: 'vault-linq-hosted',
+    })
+
+    expect(outboundMocks.mergeAssistantBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: 'hid_linq_actor_1',
+        delivery: {
+          kind: 'participant',
+          target: '+15550100001',
+        },
+        threadId: null,
+      }),
+      {
+        channel: 'linq',
+        deliveryKind: 'thread',
+        deliveryTarget: 'linq-chat-created',
+        threadIsDirect: true,
+      },
+    )
+  })
+
+  it('keeps already-materialized hosted Linq thread delivery off the assistant thread id', async () => {
+    outboundMocks.resolveAssistantSession.mockResolvedValue({
+      session: createSession({
+        binding: {
+          actorId: 'hid_linq_actor_2',
+          channel: 'linq',
+          delivery: {
+            kind: 'thread',
+            target: 'linq-chat-created',
+          },
+          identityId: 'hid_linq_identity_2',
+          threadId: null,
+          threadIsDirect: true,
+        },
+      }),
+    })
+    outboundMocks.deliverAssistantOutboxMessage.mockResolvedValue({
+      delivery: createDelivery({
+        channel: 'linq',
+        target: 'linq-chat-created',
+        targetKind: 'thread',
+      }),
+      intent: {
+        intentId: 'intent-linq-hosted-thread',
+      },
+      kind: 'sent',
+      session: null,
+    })
+
+    await deliverAssistantMessage({
+      message: 'hosted materialized thread',
+      vault: 'vault-linq-hosted-thread',
+    })
+
+    expect(outboundMocks.mergeAssistantBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: 'hid_linq_actor_2',
+        delivery: {
+          kind: 'thread',
+          target: 'linq-chat-created',
+        },
+        threadId: null,
+      }),
+      {
+        channel: 'linq',
+        deliveryKind: 'thread',
+        deliveryTarget: 'linq-chat-created',
       },
     )
   })

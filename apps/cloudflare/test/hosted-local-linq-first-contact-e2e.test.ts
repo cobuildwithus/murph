@@ -34,6 +34,8 @@ const duplicateWelcomeUserId = `member_local_linq_duplicate_welcome_${Date.now()
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
 const postAssistantReplyUserId = `member_local_linq_post_assistant_reply_${Date.now()}`;
 const linqWebhookSecret = "linq-local-webhook-secret";
+const signupFollowupQuestionText =
+  "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -236,7 +238,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("reproduces the duplicate welcome after signup and the first inbound Linq greeting", async () => {
+  it("does not repeat the signup welcome after the first inbound Linq greeting", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(duplicateWelcomeUserId),
       memberId: duplicateWelcomeUserId,
@@ -281,7 +283,7 @@ describe("hosted local Linq first-contact e2e", () => {
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const assistantProviderResponseCountBefore =
       countAssistantProviderResponsesApiRequests();
-    requireScenario().queueAssistantResponses([MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE]);
+    requireScenario().queueAssistantResponses([signupFollowupQuestionText]);
 
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       duplicateWelcomeUserId,
@@ -301,14 +303,14 @@ describe("hosted local Linq first-contact e2e", () => {
     await requireScenario().waitForLatestPendingWake(duplicateWelcomeUserId);
     const completionPromise = requireScenario()
       .waitForHostedCompletion(duplicateWelcomeUserId);
-    const duplicateWelcomeSend = await requireLinqStub().waitForAdditionalSend({
+    const followupQuestionSend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: duplicateWelcomeUserId,
     });
-    expect(requireLinqStub().readObservedMessageText(duplicateWelcomeSend)).toBe(
-      MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    expect(requireLinqStub().readObservedMessageText(followupQuestionSend)).toBe(
+      signupFollowupQuestionText,
     );
 
     const finalStatus = await completionPromise;
@@ -327,9 +329,11 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(firstInboundPromptText).toContain(
       "If the user's opener is a greeting or vague request",
     );
+    expect(firstInboundPromptText).toContain(
+      `Conversation so far:\nAssistant:\n${MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE}`,
+    );
     expect(firstInboundPromptText).toContain("User message:\nSource: linq");
     expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
-    expect(firstInboundPromptText).not.toContain("Conversation so far:\nAssistant:\n");
   }, 300_000);
 
   it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {
@@ -720,6 +724,8 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      MURPH_DEV_CODEX_BRIDGE: "0",
+      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
       ...additionalEnv,
     },

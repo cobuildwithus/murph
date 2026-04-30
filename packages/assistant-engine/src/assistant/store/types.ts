@@ -13,6 +13,7 @@ import type { ConversationRef } from '../conversation-ref.js'
 export interface AssistantSessionLocator {
   actorId?: string | null
   alias?: string | null
+  bindingDeliveryTarget?: string | null
   channel?: string | null
   conversation?: ConversationRef | null
   deliveryKind?: AssistantBindingDeliveryKind | null

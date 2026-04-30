@@ -280,7 +280,7 @@ describe('Codex assistant registry helpers', () => {
         'actor: actor-9',
         'thread: chat-9',
         'thread is direct: false',
-        'delivery: thread -> chat-9',
+        'delivery: thread route available',
         'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
         '',
         'Prefer the latest delivery target.',
@@ -289,6 +289,31 @@ describe('Codex assistant registry helpers', () => {
         'Latest question.',
       ].join('\n'),
     )
+  })
+
+  it('keeps raw Linq delivery targets out of Codex prompt context', () => {
+    const prompt = resolveAssistantProviderPrompt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      sessionContext: {
+        binding: createAssistantBinding({
+          actorId: 'hid_linq_actor',
+          channel: 'linq',
+          deliveryKind: 'participant',
+          deliveryTarget: '+15550100001',
+          identityId: 'hid_linq_identity',
+          threadIsDirect: true,
+        }),
+      },
+      systemPrompt: 'You are Murph.',
+      userPrompt: 'Say hi.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(prompt).toContain('actor: hid_linq_actor')
+    expect(prompt).toContain('delivery: participant route available')
+    expect(prompt).not.toContain('+15550100001')
   })
 
   it('clones catalog capabilities', () => {

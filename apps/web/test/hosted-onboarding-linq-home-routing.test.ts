@@ -1,3 +1,7 @@
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -53,14 +57,14 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       }),
     ).resolves.toEqual({
       welcomeRoute: {
-        actorId: "+15551234567",
+        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
         channel: "linq",
         delivery: {
           kind: "thread",
           target: "chat_home",
         },
-        identityId: "hbidx:phone:v1:test",
-        threadId: "chat_home",
+        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
+        threadId: hashHostedLinqRouteIdentifier("chat_home"),
         threadIsDirect: true,
       },
     });
@@ -97,14 +101,14 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       }),
     ).resolves.toEqual({
       welcomeRoute: {
-        actorId: "+15551234567",
+        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
         channel: "linq",
         delivery: {
           kind: "thread",
           target: "chat_pending",
         },
-        identityId: "hbidx:phone:v1:test",
-        threadId: "chat_pending",
+        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
+        threadId: hashHostedLinqRouteIdentifier("chat_pending"),
         threadIsDirect: true,
       },
     });
@@ -141,7 +145,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       }),
     ).resolves.toEqual({
       welcomeRoute: {
-        actorId: "+15551234567",
+        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
         channel: "linq",
         delivery: {
           kind: "participant",
@@ -151,7 +155,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
           },
           target: "+15551234567",
         },
-        identityId: "hbidx:phone:v1:test",
+        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
         threadId: null,
         threadIsDirect: true,
       },
@@ -184,6 +188,16 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
   });
 });
+
+function hashHostedLinqRouteIdentifier(value: string): string {
+  return hashHostedAssistantConversationIdentifier(
+    createHostedAssistantConversationIdentifierBlind({
+      secret: "hbidx:phone:v1:test",
+      userId: "member_123",
+    }),
+    value,
+  );
+}
 
 function buildMember(
   overrides: Partial<HostedMemberSnapshot["routing"]> = {},

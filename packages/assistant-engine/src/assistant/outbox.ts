@@ -750,6 +750,11 @@ async function materializeAssistantOutboxDeliveredSession(input: {
 
   const currentSession = await getAssistantSession(input.vault, input.payload.sessionId)
   const threadIsDirect = currentSession.binding.threadIsDirect ?? input.payload.threadIsDirect ?? true
+  const promoteThreadToAssistantIdentity =
+    shouldPromoteMaterializedThreadToAssistantIdentity({
+      bindingDeliveryTarget: input.payload.bindingDelivery.target,
+      currentActorId: currentSession.binding.actorId,
+    })
   return {
     ...input.delivered,
     session: {
@@ -758,12 +763,21 @@ async function materializeAssistantOutboxDeliveredSession(input: {
         channel: delivery.channel,
         deliveryKind: 'thread',
         deliveryTarget: delivery.target,
-        threadId: delivery.target,
+        ...(promoteThreadToAssistantIdentity ? { threadId: delivery.target } : {}),
         threadIsDirect,
       }),
       updatedAt: delivery.sentAt,
     },
   }
+}
+
+function shouldPromoteMaterializedThreadToAssistantIdentity(input: {
+  bindingDeliveryTarget: string | null | undefined
+  currentActorId: string | null | undefined
+}): boolean {
+  const actorId = normalizeNullableString(input.currentActorId)
+  const deliveryTarget = normalizeNullableString(input.bindingDeliveryTarget)
+  return actorId !== null && actorId === deliveryTarget
 }
 
 export async function drainAssistantOutbox(input: {

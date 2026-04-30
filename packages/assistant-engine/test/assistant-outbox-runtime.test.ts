@@ -20,6 +20,9 @@ import {
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
 import {
+  getAssistantBindingContextLines,
+} from '../src/assistant/bindings.ts'
+import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
   createAssistantOutboxIntent,
@@ -683,6 +686,107 @@ describe('assistant outbox runtime', () => {
         threadId: 'linq-chat-created',
       },
     })
+  })
+
+  it('keeps hosted-blinded Linq first-contact sessions on the actor identity after chat creation', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-hosted-first-contact-',
+    )
+    await useActualOutboundDeliveryImplementation()
+
+    await saveAssistantSession(
+      vaultRoot,
+      createAssistantSession({
+        binding: {
+          actorId: 'hid_linq_actor_1',
+          channel: 'linq',
+          conversationKey: 'channel:linq|identity:hid_linq_identity_1|actor:hid_linq_actor_1',
+          delivery: {
+            kind: 'participant',
+            target: '+15550100001',
+          },
+          identityId: 'hid_linq_identity_1',
+          threadId: null,
+          threadIsDirect: true,
+        },
+        sessionId: 'session-linq-hosted-first-contact',
+      }),
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'welcome',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-linq-hosted-first-contact',
+      turnId: 'turn-linq-hosted-first-contact',
+      vault: vaultRoot,
+    })
+    const queued = await createAssistantOutboxIntent({
+      actorId: 'hid_linq_actor_1',
+      bindingDelivery: {
+        kind: 'participant',
+        target: '+15550100001',
+      },
+      channel: 'linq',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
+      deliveryIdempotencyKey: 'idem-linq-hosted-first-contact',
+      identityId: 'hid_linq_identity_1',
+      message: 'welcome',
+      sessionId: 'session-linq-hosted-first-contact',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-linq-hosted-first-contact',
+      vault: vaultRoot,
+    })
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-hosted-created',
+      providerThreadId: 'linq-chat-hosted-created',
+      target: 'linq-chat-hosted-created',
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq,
+      },
+      force: true,
+      intentId: queued.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent).toMatchObject({
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'linq-chat-hosted-created',
+      },
+      threadId: null,
+    })
+    expect(dispatched.session?.binding).toMatchObject({
+      actorId: 'hid_linq_actor_1',
+      conversationKey: 'channel:linq|identity:hid_linq_identity_1|actor:hid_linq_actor_1',
+      delivery: {
+        kind: 'thread',
+        target: 'linq-chat-hosted-created',
+      },
+      identityId: 'hid_linq_identity_1',
+      threadId: null,
+      threadIsDirect: true,
+    })
+    await expect(
+      getAssistantSession(vaultRoot, 'session-linq-hosted-first-contact'),
+    ).resolves.toMatchObject({
+      binding: {
+        conversationKey: 'channel:linq|identity:hid_linq_identity_1|actor:hid_linq_actor_1',
+        delivery: {
+          kind: 'thread',
+          target: 'linq-chat-hosted-created',
+        },
+        threadId: null,
+      },
+    })
+    expect(
+      getAssistantBindingContextLines(dispatched.session!.binding),
+    ).not.toContain('thread: linq-chat-hosted-created')
   })
 
   it('keeps materialized Linq first-contact intents retryable without forgetting the resolved chat binding', async () => {

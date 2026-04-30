@@ -90,6 +90,30 @@ test('binding locator helpers merge conversation defaults with explicit override
   )
 })
 
+test('binding patch preserves blinded Linq thread ids while binding raw delivery routes', () => {
+  assert.deepEqual(
+    bindingPatchFromLocator({
+      bindingDeliveryTarget: 'linq-chat-real',
+      conversation: {
+        channel: 'linq',
+        directness: 'direct',
+        identityId: 'hid_linq_identity',
+        participantId: 'hid_linq_actor',
+        threadId: 'hid_linq_thread',
+      },
+    }),
+    {
+      actorId: 'hid_linq_actor',
+      channel: 'linq',
+      deliveryKind: 'thread',
+      deliveryTarget: 'linq-chat-real',
+      identityId: 'hid_linq_identity',
+      threadId: 'hid_linq_thread',
+      threadIsDirect: true,
+    },
+  )
+})
+
 test('redactAssistantDisplayPath leaves sibling prefixes alone and falls back to absolute paths when HOME is unset', () => {
   const originalHome = process.env.HOME
   const homeRoot = path.join('/tmp', 'murph-home')

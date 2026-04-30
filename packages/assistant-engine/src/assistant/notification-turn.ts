@@ -472,6 +472,7 @@ function buildAssistantNotificationMessageInput(
     alias: input.alias,
     allowBindingRebind: input.allowBindingRebind,
     approvalPolicy: input.approvalPolicy,
+    bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
     codexCommand: input.codexCommand,
     codexHome: input.codexHome,

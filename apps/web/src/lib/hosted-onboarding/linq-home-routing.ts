@@ -44,6 +44,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: routing.linqChatId,
+        memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,
       }),
@@ -73,6 +74,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: routing.pendingLinqChatId,
+        memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,
       }),
@@ -106,6 +108,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
       linqChatId: null,
       linqRecipientPhone: targetRecipientPhone,
+      memberId: input.member.core.id,
       memberPhoneNumber,
       messaging,
     }),

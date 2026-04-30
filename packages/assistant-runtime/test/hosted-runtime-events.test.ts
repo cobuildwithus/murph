@@ -206,14 +206,14 @@ describe("executeHostedMailboxEvent", () => {
           text: "Welcome to Murph, your personal health assistant.",
         },
         route: {
-          actorId: "+15550002222",
+          actorId: "hid_linq_actor_123",
           channel: "linq",
           delivery: {
             kind: "thread",
             target: "thread_123",
           },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "thread_123",
+          identityId: "hid_linq_identity_123",
+          threadId: "hid_linq_thread_123",
           threadIsDirect: true,
         },
       },
@@ -240,7 +240,8 @@ describe("executeHostedMailboxEvent", () => {
       runtime.resolvedConfig,
     );
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
-      actorId: "+15550002222",
+      actorId: "hid_linq_actor_123",
+      bindingDeliveryTarget: "thread_123",
       channel: "linq",
       deliveryDedupeToken: "signup-welcome:member_123",
       deliveryDispatchMode: "queue-only",
@@ -252,14 +253,14 @@ describe("executeHostedMailboxEvent", () => {
       firstContactPolicy: {
         markSeenOnDeliveryAccepted: true,
       },
-      identityId: "hbidx:phone:v1:test",
+      identityId: "hid_linq_identity_123",
       instructions: "Send exactly the signup welcome.",
       onTraceEvent: expect.any(Function),
       responsePolicy: {
         kind: "require_send_exact_text",
         text: "Welcome to Murph, your personal health assistant.",
       },
-      threadId: "thread_123",
+      threadId: "hid_linq_thread_123",
       threadIsDirect: true,
       turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
@@ -409,14 +410,14 @@ describe("executeHostedMailboxEvent", () => {
       notification: {
         instructions: "Send exactly the signup welcome.",
         route: {
-          actorId: "+15550002222",
+          actorId: "hid_linq_actor_123",
           channel: "linq",
           delivery: {
             kind: "thread",
             target: "thread_123",
           },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "thread_123",
+          identityId: "hid_linq_identity_123",
+          threadId: "hid_linq_thread_123",
           threadIsDirect: true,
         },
       },
@@ -435,7 +436,8 @@ describe("executeHostedMailboxEvent", () => {
       executionContext,
     );
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
-      actorId: "+15550002222",
+      actorId: "hid_linq_actor_123",
+      bindingDeliveryTarget: "thread_123",
       channel: "linq",
       deliveryDedupeToken: null,
       deliveryDispatchMode: undefined,
@@ -445,11 +447,11 @@ describe("executeHostedMailboxEvent", () => {
       deliveryTarget: null,
       executionContext: hydratedExecutionContext,
       firstContactPolicy: null,
-      identityId: "hbidx:phone:v1:test",
+      identityId: "hid_linq_identity_123",
       instructions: "Send exactly the signup welcome.",
       onTraceEvent: expect.any(Function),
       responsePolicy: null,
-      threadId: "thread_123",
+      threadId: "hid_linq_thread_123",
       threadIsDirect: true,
       turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
@@ -634,7 +636,7 @@ describe("executeHostedMailboxEvent", () => {
         deliveryIdempotencyKey: "signup-welcome:member_123",
         instructions: "Send exactly the signup welcome.",
         route: {
-          actorId: "+15550002222",
+          actorId: "hid_linq_actor_participant",
           channel: "linq",
           delivery: {
             kind: "participant",
@@ -644,7 +646,7 @@ describe("executeHostedMailboxEvent", () => {
             },
             target: "+15550002222",
           },
-          identityId: "hbidx:phone:v1:test",
+          identityId: "hid_linq_identity_participant",
           threadId: null,
           threadIsDirect: true,
         },
@@ -661,7 +663,8 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
-      actorId: "+15550002222",
+      actorId: "hid_linq_actor_participant",
+      bindingDeliveryTarget: "+15550002222",
       channel: "linq",
       deliveryDedupeToken: null,
       deliveryDispatchMode: undefined,
@@ -674,7 +677,7 @@ describe("executeHostedMailboxEvent", () => {
       deliveryTarget: null,
       executionContext,
       firstContactPolicy: null,
-      identityId: "hbidx:phone:v1:test",
+      identityId: "hid_linq_identity_participant",
       instructions: "Send exactly the signup welcome.",
       onTraceEvent: expect.any(Function),
       responsePolicy: null,

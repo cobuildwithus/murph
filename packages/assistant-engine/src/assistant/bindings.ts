@@ -237,9 +237,7 @@ export function getAssistantBindingContextLines(
     binding.threadIsDirect !== null
       ? `thread is direct: ${String(binding.threadIsDirect)}`
       : null,
-    binding.delivery
-      ? `delivery: ${binding.delivery.kind} -> ${binding.delivery.target}`
-      : null,
+    getAssistantBindingDeliveryContextLine(binding),
     getAssistantBindingRouteContextNote(binding),
   ].filter((line): line is string => Boolean(line))
 }
@@ -274,6 +272,20 @@ function getAssistantBindingChannelContextLine(channel: string | null): string |
   return channel === 'linq'
     ? 'channel: linq (user-facing: iMessage)'
     : `channel: ${channel}`
+}
+
+function getAssistantBindingDeliveryContextLine(
+  binding: AssistantSessionBinding,
+): string | null {
+  if (!binding.delivery) {
+    return null
+  }
+
+  if (binding.channel === 'linq') {
+    return `delivery: ${binding.delivery.kind} route available`
+  }
+
+  return `delivery: ${binding.delivery.kind} -> ${binding.delivery.target}`
 }
 
 function getAssistantBindingRouteContextNote(
