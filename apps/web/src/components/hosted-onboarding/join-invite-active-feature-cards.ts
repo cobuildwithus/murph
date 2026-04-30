@@ -7,7 +7,7 @@ import {
 
 export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
   {
-    body: "Pick a protocol from the library — sauna, zone 2, creatine — and run it for a set period.",
+    body: "Pick a protocol from the library, such as sauna, zone 2, or creatine, and run it for a set period.",
     icon: FlaskConicalIcon,
     title: "Run an experiment",
   },
