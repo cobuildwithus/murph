@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
-import { BiomarkerOverview } from "@/src/components/biomarkers/biomarker-detail/biomarker-overview";
+import { BiomarkerResearch } from "@/src/components/biomarkers/biomarker-detail/biomarker-research";
 import { resolveHealthCommonsBiomarkerDetail } from "@/src/lib/health-commons/biomarker-detail";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -18,15 +18,15 @@ export async function generateMetadata({
   }
 
   return createMurphPageMetadata({
-    description: biomarker.summary,
+    description: `Evidence and Commons memo for ${biomarker.title}.`,
     openGraph: {
       type: "article",
     },
-    title: `${biomarker.title} | Murph Biomarkers`,
+    title: `${biomarker.title} research | Murph Biomarkers`,
   });
 }
 
-export default async function BiomarkerOverviewPage({
+export default async function BiomarkerResearchPage({
   params,
 }: {
   params: Promise<{ biomarkerId: string }>;
@@ -39,8 +39,8 @@ export default async function BiomarkerOverviewPage({
   }
 
   if (biomarker.routeId !== biomarkerId) {
-    redirect(`/biomarkers/${biomarker.routeId}`);
+    redirect(`/biomarkers/${biomarker.routeId}/research`);
   }
 
-  return <BiomarkerOverview biomarker={biomarker} />;
+  return <BiomarkerResearch biomarker={biomarker} />;
 }

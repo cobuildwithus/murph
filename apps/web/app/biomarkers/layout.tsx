@@ -10,9 +10,5 @@ export default async function BiomarkersLayout({
 }) {
   const sidebarAuth = await getHostedSidebarAuthSnapshot();
 
-  return (
-    <DashboardShell padded={false} sidebarAuth={sidebarAuth}>
-      {children}
-    </DashboardShell>
-  );
+  return <DashboardShell sidebarAuth={sidebarAuth}>{children}</DashboardShell>;
 }

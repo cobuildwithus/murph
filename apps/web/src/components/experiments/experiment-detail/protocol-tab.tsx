@@ -10,6 +10,7 @@ import {
   Timer,
 } from "lucide-react";
 
+import { SectionLabel } from "@/src/components/ui/section-label";
 import type {
   Expert,
   ExperimentMeasurementPath,
@@ -829,14 +830,6 @@ function parseSessionCounts(detail: string): Array<{ label: string; value: strin
     }
   }
   return entries;
-}
-
-function SectionLabel({ children }: { children: ReactNode }) {
-  return (
-    <span className="font-mono text-[11px]/3.5 uppercase tracking-[0.12em] text-chart-5">
-      {children}
-    </span>
-  );
 }
 
 type SegmentKind = "primary" | "secondary" | "muted";
