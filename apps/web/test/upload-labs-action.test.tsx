@@ -134,10 +134,10 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
   const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
 
   assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai\?/);
-  assert.match(markup, /subject=Lab\+reports\+for\+Murph/);
+  assert.match(markup, /subject=Lab%20reports%20for%20Murph/);
   assert.match(
     markup,
-    /body=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A/,
+    /body=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A/,
   );
   assert.doesNotMatch(markup, /href="sms:\+15550100001/);
   assert.doesNotMatch(markup, /member@example\.test/);

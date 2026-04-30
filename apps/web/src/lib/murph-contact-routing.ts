@@ -110,19 +110,19 @@ export function buildMurphEmailHref(input: {
   body?: string | null;
   subject?: string | null;
 } = {}): string {
-  const query = new URLSearchParams();
+  const query: string[] = [];
   const subject = normalizeOptionalString(input.subject);
   const body = normalizeOptionalString(input.body);
 
   if (subject) {
-    query.set("subject", subject);
+    query.push(`subject=${encodeURIComponent(subject)}`);
   }
 
   if (body) {
-    query.set("body", body);
+    query.push(`body=${encodeURIComponent(body)}`);
   }
 
-  const queryString = query.toString();
+  const queryString = query.join("&");
   return queryString
     ? `mailto:${MURPH_CONTACT_EMAIL}?${queryString}`
     : `mailto:${MURPH_CONTACT_EMAIL}`;
