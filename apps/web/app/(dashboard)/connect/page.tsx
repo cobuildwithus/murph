@@ -16,6 +16,7 @@ type LogoAsset = {
 };
 
 type ConnectSource = {
+  connected?: boolean;
   description: string;
   id: string;
   logo: LogoAsset;
@@ -272,13 +273,27 @@ export default function ConnectPage() {
               </p>
             </div>
 
-            <div className="box-border w-full max-w-full rounded-xl border border-border/60 bg-background px-6 py-3 text-center text-sm font-medium text-muted-foreground">
-              Coming soon
+            <div className="mt-auto flex justify-end">
+              <SourceStatusDot connected={source.connected} />
             </div>
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+function SourceStatusDot({ connected = false }: { connected?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-connection-state={connected ? "connected" : "idle"}
+      className={
+        connected
+          ? "size-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]"
+          : "size-2.5 rounded-full bg-stone-300 shadow-[0_0_0_3px_rgba(120,113,108,0.12)]"
+      }
+    />
   );
 }
 

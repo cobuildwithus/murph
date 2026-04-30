@@ -214,7 +214,10 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
   ];
 
   assert.equal(sources.length, 35);
-  assert.equal(markup.match(/>Coming soon<\/div>/gu)?.length, sources.length);
+  assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
+  assert.doesNotMatch(markup, /Coming soon/u);
+  assert.doesNotMatch(markup, /Not connected/u);
+  assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Connect<\/button>/u);
   assert.doesNotMatch(markup, /Whoop V2/u);
 
