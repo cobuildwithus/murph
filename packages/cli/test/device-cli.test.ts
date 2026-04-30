@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 
 import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 
@@ -153,6 +153,309 @@ test('device provider inputs reject unsupported provider keys before daemon rout
   }
 })
 
+test('device provider and account list do not start the managed daemon when local credentials are absent', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-catalog-'))
+
+  try {
+    const env = {
+      DEVICE_SYNC_BASE_URL: '',
+      GARMIN_CLIENT_ID: '',
+      GARMIN_CLIENT_SECRET: '',
+      MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+      OURA_CLIENT_ID: '',
+      OURA_CLIENT_SECRET: '',
+      STRAVA_CLIENT_ID: '',
+      STRAVA_CLIENT_SECRET: '',
+      WHOOP_CLIENT_ID: '',
+      WHOOP_CLIENT_SECRET: '',
+    }
+    const providers = requireData(
+      await runCli<{
+        local?: {
+          baseUrl: string
+          status: string
+          configuredProviders: string[]
+        }
+        baseUrl?: string
+        providers: Array<{
+          provider: string
+          source?: string
+          callbackUrl: string | null
+          localConfigured?: boolean
+        }>
+      }>(['device', 'provider', 'list', '--vault', vaultRoot], { env }),
+    )
+
+    assert.match(providers.local?.status ?? '', /^(not_configured|conflict)$/u)
+    assert.equal(providers.baseUrl, undefined)
+    assert.equal(providers.local?.baseUrl, 'http://localhost:8788')
+    assert.deepEqual(providers.local?.configuredProviders, [])
+    assert.equal(providers.providers.some((provider) => provider.provider === 'whoop'), true)
+    assert.equal(
+      providers.providers.every((provider) => provider.callbackUrl === null),
+      true,
+    )
+    assert.equal(
+      providers.providers.every((provider) => provider.source === 'catalog'),
+      true,
+    )
+    assert.equal(
+      providers.providers.every((provider) => provider.localConfigured === false),
+      true,
+    )
+
+    const accounts = requireData(
+      await runCli<{
+        baseUrl?: string
+        local?: {
+          status: string
+          configuredProviders: string[]
+        }
+        provider: string | null
+        accounts: Array<{ id: string }>
+      }>(['device', 'account', 'list', '--vault', vaultRoot], { env }),
+    )
+
+    assert.match(accounts.local?.status ?? '', /^(not_configured|conflict)$/u)
+    assert.deepEqual(accounts.local?.configuredProviders, [])
+    assert.equal(accounts.provider, null)
+    assert.deepEqual(accounts.accounts, [])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('device provider and account list tolerate partial local provider credentials', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-partial-config-'))
+
+  try {
+    const env = {
+      DEVICE_SYNC_BASE_URL: '',
+      GARMIN_CLIENT_ID: '',
+      GARMIN_CLIENT_SECRET: '',
+      MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+      OURA_CLIENT_ID: '',
+      OURA_CLIENT_SECRET: '',
+      STRAVA_CLIENT_ID: '',
+      STRAVA_CLIENT_SECRET: '',
+      WHOOP_CLIENT_ID: 'whoop-client-id-only',
+      WHOOP_CLIENT_SECRET: '',
+    }
+    const providers = requireData(
+      await runCli<{
+        local?: {
+          status: string
+          configuredProviders: string[]
+          message: string | null
+        }
+        providers: Array<{ provider: string }>
+      }>(['device', 'provider', 'list', '--vault', vaultRoot], { env }),
+    )
+
+    assert.match(providers.local?.status ?? '', /^(not_configured|conflict)$/u)
+    assert.deepEqual(providers.local?.configuredProviders, [])
+    if (providers.local?.status === 'not_configured') {
+      assert.match(providers.local?.message ?? '', /WHOOP configuration is incomplete/u)
+    }
+    assert.equal(providers.providers.some((provider) => provider.provider === 'whoop'), true)
+
+    const accounts = requireData(
+      await runCli<{
+        local?: {
+          status: string
+          message: string | null
+        }
+        accounts: Array<{ id: string }>
+      }>(['device', 'account', 'list', '--vault', vaultRoot], { env }),
+    )
+
+    assert.match(accounts.local?.status ?? '', /^(not_configured|conflict)$/u)
+    if (accounts.local?.status === 'not_configured') {
+      assert.match(accounts.local?.message ?? '', /WHOOP configuration is incomplete/u)
+    }
+    assert.deepEqual(accounts.accounts, [])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('device provider and account list reuse a healthy managed daemon without an explicit base URL', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-managed-local-'))
+  const baseUrl = 'http://localhost:8788'
+  const provider = 'whoop'
+
+  const managedDaemonStatus = {
+    baseUrl,
+    statePath: '.runtime/operations/device-sync/launcher.json',
+    stdoutLogPath: '.runtime/operations/device-sync/stdout.log',
+    stderrLogPath: '.runtime/operations/device-sync/stderr.log',
+    managed: true,
+    running: true,
+    healthy: true,
+    pid: 12_345,
+    startedAt: '2026-04-30T00:00:00.000Z',
+    message: 'Murph is already managing the local device sync daemon.',
+  } as const
+  const managedControlPlane = {
+    baseUrl,
+    controlToken: 'managed-token',
+    managed: true as const,
+  }
+  const liveProviderList = [
+    {
+      provider,
+      callbackPath: '/oauth/whoop/callback',
+      callbackUrl: `${baseUrl}/oauth/whoop/callback`,
+      webhookPath: '/webhooks/whoop',
+      webhookUrl: `${baseUrl}/webhooks/whoop`,
+      supportsWebhooks: true,
+      defaultScopes: ['offline', 'read:profile'],
+    },
+  ]
+  const liveAccountList = [
+    {
+      id: 'acct_whoop_01',
+      provider,
+      externalAccountId: 'whoop-user-1',
+      displayName: 'WHOOP Tester',
+      status: 'active',
+      scopes: ['offline', 'read:profile'],
+      accessTokenExpiresAt: null,
+      metadata: {
+        source: 'managed-daemon',
+      },
+      connectedAt: '2026-04-30T00:00:00.000Z',
+      lastWebhookAt: null,
+      lastSyncStartedAt: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      nextReconcileAt: null,
+      createdAt: '2026-04-30T00:00:00.000Z',
+      updatedAt: '2026-04-30T00:00:00.000Z',
+    },
+  ]
+
+  const getManagedDeviceSyncDaemonStatusMock = vi.fn(
+    async (_input: { vault: string; baseUrl?: string }) => managedDaemonStatus,
+  )
+  const resolveExistingManagedDeviceSyncControlPlaneMock = vi.fn(
+    async (_input: { vault: string; baseUrl?: string }) => managedControlPlane,
+  )
+  const startManagedDeviceSyncDaemonMock = vi.fn(async () => {
+    throw new Error('startManagedDeviceSyncDaemon should not be called for list commands.')
+  })
+  const listProvidersMock = vi.fn(async () => ({ providers: liveProviderList }))
+  const listAccountsMock = vi.fn(async () => ({ accounts: liveAccountList }))
+  const createDeviceSyncClientMock = vi.fn(() => ({
+    baseUrl,
+    beginConnection: vi.fn(),
+    disconnectAccount: vi.fn(),
+    listAccounts: listAccountsMock,
+    listProviders: listProvidersMock,
+    reconcileAccount: vi.fn(),
+    showAccount: vi.fn(),
+  }))
+  const readConfiguredDeviceSyncProviderConfigsMock = vi.fn(() => ({}))
+  const listConfiguredDeviceSyncProviderNamesMock = vi.fn(() => [])
+
+  try {
+    vi.resetModules()
+    vi.doMock('@murphai/operator-config/device-daemon', async () => {
+      const actual = await vi.importActual<typeof import('@murphai/operator-config/device-daemon')>(
+        '@murphai/operator-config/device-daemon',
+      )
+
+      return {
+        ...actual,
+        getManagedDeviceSyncDaemonStatus: getManagedDeviceSyncDaemonStatusMock,
+        resolveExistingManagedDeviceSyncControlPlane:
+          resolveExistingManagedDeviceSyncControlPlaneMock,
+        startManagedDeviceSyncDaemon: startManagedDeviceSyncDaemonMock,
+      }
+    })
+    vi.doMock('@murphai/operator-config/device-sync-client', async () => {
+      const actual = await vi.importActual<
+        typeof import('@murphai/operator-config/device-sync-client')
+      >('@murphai/operator-config/device-sync-client')
+
+      return {
+        ...actual,
+        createDeviceSyncClient: createDeviceSyncClientMock,
+      }
+    })
+    vi.doMock('@murphai/device-syncd/config', async () => {
+      const actual = await vi.importActual<typeof import('@murphai/device-syncd/config')>(
+        '@murphai/device-syncd/config',
+      )
+
+      return {
+        ...actual,
+        listConfiguredDeviceSyncProviderNames:
+          listConfiguredDeviceSyncProviderNamesMock,
+        readConfiguredDeviceSyncProviderConfigs:
+          readConfiguredDeviceSyncProviderConfigsMock,
+      }
+    })
+
+    const { createIntegratedDeviceSyncServices } = await import('../src/device-services.ts')
+    const services = createIntegratedDeviceSyncServices()
+
+    const providers = await services.listProviders({ vault: vaultRoot })
+    assert.equal(providers.baseUrl, baseUrl)
+    assert.equal(providers.local?.status, 'healthy')
+    assert.equal(providers.local?.message, managedDaemonStatus.message)
+    assert.deepEqual(providers.local?.configuredProviders, [])
+    assert.equal(providers.providers[0]?.provider, provider)
+    assert.equal(providers.providers[0]?.source, 'local_control_plane')
+    assert.equal(providers.providers[0]?.callbackUrl, `${baseUrl}/oauth/whoop/callback`)
+
+    const accounts = await services.listAccounts({ vault: vaultRoot })
+    assert.equal(accounts.baseUrl, baseUrl)
+    assert.equal(accounts.local?.status, 'healthy')
+    assert.equal(accounts.local?.message, managedDaemonStatus.message)
+    assert.deepEqual(accounts.local?.configuredProviders, [])
+    assert.equal(accounts.provider, null)
+    assert.equal(accounts.accounts[0]?.id, 'acct_whoop_01')
+    assert.equal(accounts.accounts[0]?.provider, provider)
+
+    assert.equal(getManagedDeviceSyncDaemonStatusMock.mock.calls.length >= 2, true)
+    assert.deepEqual(getManagedDeviceSyncDaemonStatusMock.mock.calls[0]?.[0], {
+      vault: vaultRoot,
+      baseUrl: undefined,
+    })
+    assert.deepEqual(getManagedDeviceSyncDaemonStatusMock.mock.calls[1]?.[0], {
+      vault: vaultRoot,
+      baseUrl: undefined,
+    })
+    assert.equal(
+      resolveExistingManagedDeviceSyncControlPlaneMock.mock.calls.length >= 2,
+      true,
+    )
+    assert.deepEqual(resolveExistingManagedDeviceSyncControlPlaneMock.mock.calls[0]?.[0], {
+      vault: vaultRoot,
+      baseUrl: undefined,
+    })
+    assert.deepEqual(
+      resolveExistingManagedDeviceSyncControlPlaneMock.mock.calls[1]?.[0],
+      {
+        vault: vaultRoot,
+        baseUrl: undefined,
+      },
+    )
+    assert.equal(startManagedDeviceSyncDaemonMock.mock.calls.length, 0)
+    assert.equal(listProvidersMock.mock.calls.length, 1)
+    assert.equal(listAccountsMock.mock.calls.length, 1)
+  } finally {
+    vi.doUnmock('@murphai/operator-config/device-daemon')
+    vi.doUnmock('@murphai/operator-config/device-sync-client')
+    vi.doUnmock('@murphai/device-syncd/config')
+    vi.resetModules()
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 const deviceControlPlaneTest = supportsLoopbackListen ? test.sequential : test.skip
 
 deviceControlPlaneTest(
@@ -290,7 +593,7 @@ deviceControlPlaneTest(
       const providers = requireData(
         await runCli<{
           baseUrl: string
-          providers: Array<{ provider: string }>
+          providers: Array<{ provider: string; source?: string }>
         }>(['device', 'provider', 'list', '--vault', vaultRoot], { env }),
       )
       assert.equal(providers.baseUrl, baseUrl)
@@ -298,6 +601,7 @@ deviceControlPlaneTest(
         providers.providers.map((provider) => provider.provider),
         ['whoop'],
       )
+      assert.equal(providers.providers[0]?.source, undefined)
 
       const connect = requireData(
         await runCli<{

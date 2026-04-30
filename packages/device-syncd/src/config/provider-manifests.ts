@@ -111,6 +111,15 @@ export interface ConfiguredDeviceSyncProviderCapabilities {
   webhookPush: boolean;
 }
 
+export interface DeviceSyncProviderCatalogEntry {
+  provider: ConfiguredDeviceSyncProviderKey;
+  displayName: string;
+  callbackPath: string | null;
+  webhookPath: string | null;
+  supportsWebhooks: boolean;
+  defaultScopes: string[];
+}
+
 export interface DeviceSyncConfiguredProviderManifest<
   TProvider extends ConfiguredDeviceSyncProviderKey = ConfiguredDeviceSyncProviderKey,
   TConfig extends ConfiguredDeviceSyncProviderConfigByKey[TProvider] = ConfiguredDeviceSyncProviderConfigByKey[TProvider],
@@ -581,6 +590,17 @@ export function listConfiguredDeviceSyncProviderManifests(
   return listConfiguredDeviceSyncProviderNames(configs).map(
     (provider) => deviceSyncProviderManifestByKey[provider],
   );
+}
+
+export function listDeviceSyncProviderCatalog(): DeviceSyncProviderCatalogEntry[] {
+  return deviceSyncProviderManifests.map((manifest) => ({
+    provider: manifest.provider,
+    displayName: manifest.descriptor.displayName,
+    callbackPath: manifest.descriptor.oauth?.callbackPath ?? null,
+    webhookPath: manifest.descriptor.webhook?.path ?? null,
+    supportsWebhooks: manifest.capabilities.webhookPush,
+    defaultScopes: [...(manifest.descriptor.oauth?.defaultScopes ?? [])],
+  }));
 }
 
 export function getConfiguredDeviceSyncProviderJobDefinition(

@@ -103,6 +103,46 @@ export async function ensureManagedDeviceSyncControlPlane(input: {
   }
 }
 
+export async function resolveExistingManagedDeviceSyncControlPlane(input: {
+  vault: string
+  baseUrl?: string | null
+  env?: NodeJS.ProcessEnv
+  dependencies?: DeviceDaemonDependencyOverrides
+}): Promise<{
+  baseUrl: string
+  controlToken: string
+  managed: true
+} | null> {
+  const dependencies = createDeviceDaemonDependencies(input.dependencies)
+  const vault = requireManagedVault(input.vault)
+  const paths = resolveDeviceDaemonPaths(vault)
+  const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
+  const state = await readDeviceDaemonState(paths, dependencies)
+
+  if (state === null || state.baseUrl !== baseUrl) {
+    return null
+  }
+
+  const controlToken = readManagedControlToken(vault)
+  if (!controlToken || !dependencies.isProcessAlive(state.pid)) {
+    return null
+  }
+
+  const healthy = await isDeviceDaemonHealthy(
+    baseUrl,
+    dependencies.fetchImpl,
+    controlToken,
+  )
+
+  return healthy
+    ? {
+        baseUrl,
+        controlToken,
+        managed: true,
+      }
+    : null
+}
+
 export async function getManagedDeviceSyncDaemonStatus(input: {
   vault: string
   baseUrl?: string | null
