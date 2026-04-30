@@ -3,9 +3,8 @@
 import type { ReactNode } from "react";
 import { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import Link from "next/link";
 
-import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
+import { RouteTabs } from "@/src/components/ui/route-tabs";
 import { ExperimentHero } from "@/src/components/experiments/experiment-detail/experiment-hero";
 import { ExperimentHeader } from "@/src/components/experiments/experiment-detail/experiment-header";
 import { hasCurrentExperimentProtocolContract } from "@/src/lib/experiments/experiment-detail";
@@ -109,48 +108,33 @@ function ExperimentLayoutInner({
         startAction={headerStartAction}
       />
 
-      <Tabs value={currentTab} className="w-full">
+      <div className="w-full">
         <div ref={sentinelRef} aria-hidden="true" className="h-px" />
-        <div className="sticky top-0 z-20 -mx-6 flex items-center gap-4 bg-background/95 px-6 py-2 backdrop-blur-md md:-mx-14 md:px-14">
-          <TabsList>
-            <TabsTrigger
-              value="protocol"
-              className="px-3 sm:px-5"
-              nativeButton={false}
-              render={<Link href={basePath} />}
+        <div className="sticky top-0 z-20 -mx-6 bg-background/95 px-6 backdrop-blur-md md:-mx-14 md:px-14">
+          <div className="flex items-center gap-4 border-b border-border">
+            <RouteTabs
+              ariaLabel="Experiment tabs"
+              currentValue={currentTab}
+              tabs={[
+                { value: "protocol", label: "Protocol", href: basePath },
+                { value: "research", label: "Research", href: `${basePath}/research` },
+                { value: "results", label: "Your Results", href: `${basePath}/results` },
+              ]}
+            />
+            <span
+              aria-hidden={!isTabsSticky}
+              className="ml-auto hidden min-w-0 truncate font-serif text-sm/5 font-semibold text-foreground transition-opacity duration-150 md:block md:text-base/6"
+              style={{
+                opacity: isTabsSticky ? 1 : 0,
+                pointerEvents: isTabsSticky ? "auto" : "none",
+              }}
             >
-              Protocol
-            </TabsTrigger>
-            <TabsTrigger
-              value="research"
-              className="px-3 sm:px-5"
-              nativeButton={false}
-              render={<Link href={`${basePath}/research`} />}
-            >
-              Research
-            </TabsTrigger>
-            <TabsTrigger
-              value="results"
-              className="px-3 sm:px-5"
-              nativeButton={false}
-              render={<Link href={`${basePath}/results`} />}
-            >
-              Your Results
-            </TabsTrigger>
-          </TabsList>
-          <span
-            aria-hidden={!isTabsSticky}
-            className="ml-auto hidden min-w-0 truncate font-serif text-sm/5 font-semibold text-foreground transition-opacity duration-150 md:block md:text-base/6"
-            style={{
-              opacity: isTabsSticky ? 1 : 0,
-              pointerEvents: isTabsSticky ? "auto" : "none",
-            }}
-          >
-            {experiment.title}
-          </span>
+              {experiment.title}
+            </span>
+          </div>
         </div>
-        <div className="pt-4">{children}</div>
-      </Tabs>
+        <div className="pt-6">{children}</div>
+      </div>
     </div>
   );
 }

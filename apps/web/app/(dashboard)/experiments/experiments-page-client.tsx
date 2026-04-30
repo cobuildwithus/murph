@@ -81,6 +81,8 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
     () => selectFeaturedCards(filteredCards),
     [filteredCards],
   );
+  const showFeatured =
+    category === "All" && search.trim().length === 0 && featuredCards.length > 0;
   const nonAuthError = status === "error" && !isAuthRequiredBrowserVaultError(error);
 
   return (
@@ -125,20 +127,22 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
         </Alert>
       ) : null}
 
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              Featured
-            </span>
+      {showFeatured ? (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Featured
+              </span>
+            </div>
           </div>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          {featuredCards.map((card) => (
-            <ExperimentHeroCard key={`featured:${card.id}`} {...card} preload />
-          ))}
-        </div>
-      </section>
+          <div className="grid gap-4 md:grid-cols-2">
+            {featuredCards.map((card) => (
+              <ExperimentHeroCard key={`featured:${card.id}`} {...card} preload />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
