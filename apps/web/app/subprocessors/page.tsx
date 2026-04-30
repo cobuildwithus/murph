@@ -166,29 +166,29 @@ const providerRows = [
 
 export default function SubprocessorsPage() {
   return (
-    <main className="min-h-screen bg-[#f5f0e8] px-6 py-14 text-[#2d3436] sm:px-10 lg:px-16">
+    <main className="min-h-screen bg-background px-6 py-12 antialiased sm:px-10 lg:px-16">
       <div className="mx-auto max-w-6xl">
-        <header className="max-w-3xl">
-          <p className="font-mono text-[0.68rem] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+        <header className="max-w-2xl">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
             Legal
           </p>
-          <h1 className="mt-4 font-serif text-[clamp(2.25rem,5vw,4rem)] font-semibold leading-[1.05]">
+          <h1 className="mt-4 font-serif text-3xl font-semibold leading-tight tracking-tight text-foreground">
             Subprocessors and model providers
           </h1>
-          <p className="mt-5 text-base leading-relaxed text-[#736a58]">
+          <p className="mt-5 text-[15px] leading-relaxed text-muted-foreground">
             This page lists providers that may process personal information or
             health data for Murph when a hosted feature, integration, or
             user-directed workflow uses that provider. Some providers apply only
             when you enable the related feature.
           </p>
-          <p className="mt-3 text-sm leading-relaxed text-[#736a58]">
+          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
             Last updated: April 29, 2026. Material changes to providers that
             process health data will be reflected here and, where required by
             law or contract, notified to users.
           </p>
           <a
             href="/legal/subprocessors.pdf"
-            className="mt-4 inline-flex text-sm font-semibold text-[#5a6e32] underline-offset-4 transition-colors hover:text-[#2d3436] hover:underline"
+            className="mt-4 inline-flex font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary transition-colors hover:text-foreground"
           >
             Download PDF
           </a>
@@ -196,83 +196,48 @@ export default function SubprocessorsPage() {
 
         <div
           aria-label="Subprocessor provider table"
-          className="mt-10 overflow-x-auto border border-[rgba(196,168,130,0.35)] bg-[rgba(255,252,246,0.84)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6f7e4f] focus-visible:ring-offset-4 focus-visible:ring-offset-[#f5f0e8]"
+          className="mt-10 overflow-x-auto rounded-md border border-border focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
           role="region"
           tabIndex={0}
         >
-          <table className="min-w-[1120px] border-collapse text-left text-sm">
+          <table className="min-w-[1120px] border-collapse text-left text-[13px]">
             <caption className="sr-only">
               Subprocessors and third-party providers that may process Murph
               personal information or health data.
             </caption>
-            <thead className="bg-[rgba(196,168,130,0.16)] font-mono text-[0.65rem] uppercase tracking-[0.1em] text-[#736a58]">
+            <thead className="bg-muted font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
               <tr>
-                <th
-                  className="border-b border-[rgba(196,168,130,0.35)] px-4 py-3 font-medium"
-                  scope="col"
-                >
-                  Provider
-                </th>
-                <th
-                  className="border-b border-[rgba(196,168,130,0.35)] px-4 py-3 font-medium"
-                  scope="col"
-                >
-                  Service
-                </th>
-                <th
-                  className="border-b border-[rgba(196,168,130,0.35)] px-4 py-3 font-medium"
-                  scope="col"
-                >
-                  Data categories
-                </th>
-                <th
-                  className="border-b border-[rgba(196,168,130,0.35)] px-4 py-3 font-medium"
-                  scope="col"
-                >
-                  Country/region
-                </th>
-                <th
-                  className="border-b border-[rgba(196,168,130,0.35)] px-4 py-3 font-medium"
-                  scope="col"
-                >
-                  Trains on Murph data?
-                </th>
-                <th
-                  className="border-b border-[rgba(196,168,130,0.35)] px-4 py-3 font-medium"
-                  scope="col"
-                >
-                  Retention
-                </th>
-                <th
-                  className="border-b border-[rgba(196,168,130,0.35)] px-4 py-3 font-medium"
-                  scope="col"
-                >
-                  Role
-                </th>
+                <th className="border-b border-border px-4 py-3 font-medium" scope="col">Provider</th>
+                <th className="border-b border-border px-4 py-3 font-medium" scope="col">Service</th>
+                <th className="border-b border-border px-4 py-3 font-medium" scope="col">Data categories</th>
+                <th className="border-b border-border px-4 py-3 font-medium" scope="col">Country/region</th>
+                <th className="border-b border-border px-4 py-3 font-medium" scope="col">Trains on Murph data?</th>
+                <th className="border-b border-border px-4 py-3 font-medium" scope="col">Retention</th>
+                <th className="border-b border-border px-4 py-3 font-medium" scope="col">Role</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[rgba(196,168,130,0.24)]">
+            <tbody className="divide-y divide-border">
               {providerRows.map((row) => (
                 <tr key={row.provider} className="align-top">
-                  <th className="w-[180px] px-4 py-4 font-semibold text-[#2d3436]" scope="row">
+                  <th className="w-[180px] px-4 py-4 font-semibold text-foreground" scope="row">
                     {row.provider}
                   </th>
-                  <td className="w-[220px] px-4 py-4 leading-relaxed text-[#2d3436]">
+                  <td className="w-[220px] px-4 py-4 leading-relaxed text-foreground">
                     {row.service}
                   </td>
-                  <td className="w-[260px] px-4 py-4 leading-relaxed text-[#736a58]">
+                  <td className="w-[260px] px-4 py-4 leading-relaxed text-muted-foreground">
                     {row.dataCategories}
                   </td>
-                  <td className="w-[150px] px-4 py-4 leading-relaxed text-[#736a58]">
+                  <td className="w-[150px] px-4 py-4 leading-relaxed text-muted-foreground">
                     {row.region}
                   </td>
-                  <td className="w-[150px] px-4 py-4 leading-relaxed text-[#2d3436]">
+                  <td className="w-[150px] px-4 py-4 leading-relaxed text-foreground">
                     {row.training}
                   </td>
-                  <td className="w-[230px] px-4 py-4 leading-relaxed text-[#736a58]">
+                  <td className="w-[230px] px-4 py-4 leading-relaxed text-muted-foreground">
                     {row.retention}
                   </td>
-                  <td className="w-[160px] px-4 py-4 leading-relaxed text-[#736a58]">
+                  <td className="w-[160px] px-4 py-4 leading-relaxed text-muted-foreground">
                     {row.role}
                   </td>
                 </tr>
@@ -281,14 +246,12 @@ export default function SubprocessorsPage() {
           </table>
         </div>
 
-        <section className="mt-8 max-w-3xl text-sm leading-relaxed text-[#736a58]">
-          <p>
-            Connected services may also process data as independent providers
-            under their own privacy policies when you choose to connect or share
-            data with them. The Murph Privacy Policy explains those boundaries
-            and how to exercise privacy rights.
-          </p>
-        </section>
+        <p className="mt-8 max-w-2xl text-[15px] leading-relaxed text-muted-foreground">
+          Connected services may also process data as independent providers
+          under their own privacy policies when you choose to connect or share
+          data with them. The Murph Privacy Policy explains those boundaries
+          and how to exercise privacy rights.
+        </p>
       </div>
     </main>
   );

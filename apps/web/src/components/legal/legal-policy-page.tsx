@@ -42,18 +42,18 @@ export async function LegalPolicyPage({
   const blocks = parseLegalPolicyMarkdown(markdown);
 
   return (
-    <main className="min-h-screen bg-[#f5f0e8] px-6 py-10 text-[#2d3436] antialiased sm:px-10 lg:px-16">
-      <article className="mx-auto max-w-3xl rounded-lg border border-[#c4a882]/25 bg-[#fffcf6]/90 px-6 py-8 sm:px-10 sm:py-12">
-        <div className="mb-8 flex flex-col gap-3 border-b border-[#c4a882]/25 pb-6 sm:flex-row sm:items-center sm:justify-between">
+    <main className="min-h-screen bg-background px-6 py-12 antialiased sm:px-10 lg:px-16">
+      <article className="mx-auto max-w-2xl">
+        <div className="mb-10 flex items-center justify-between border-b border-border pb-5">
           <Link
             href="/"
-            className="text-[0.75rem] font-semibold uppercase text-[#736a58] transition-colors hover:text-[#2d3436]"
+            className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground transition-colors hover:text-foreground"
           >
             Murph
           </Link>
           <a
             href={pdfHref}
-            className="text-[0.75rem] font-semibold uppercase text-[#5a6e32] transition-colors hover:text-[#2d3436]"
+            className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary transition-colors hover:text-foreground"
           >
             Download PDF
           </a>
@@ -235,7 +235,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
       return (
         <h1
           key={`${block.type}-${index}`}
-          className="font-serif text-4xl leading-tight text-[#2d3436] sm:text-5xl"
+          className="font-serif text-3xl font-semibold leading-tight tracking-tight text-foreground"
         >
           {renderInline(block.text)}
         </h1>
@@ -246,7 +246,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
       return (
         <h2
           key={`${block.type}-${index}`}
-          className="pt-5 font-serif text-2xl leading-tight text-[#2d3436]"
+          className="pt-6 font-serif text-xl font-semibold leading-snug tracking-tight text-foreground"
         >
           {renderInline(block.text)}
         </h2>
@@ -256,7 +256,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
     return (
       <h3
         key={`${block.type}-${index}`}
-        className="pt-2 text-base font-semibold text-[#2d3436]"
+        className="pt-2 text-[15px] font-semibold text-foreground"
       >
         {renderInline(block.text)}
       </h3>
@@ -265,7 +265,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
 
   if (block.type === "list") {
     const listClassName =
-      "ml-5 space-y-2 text-[0.9375rem] leading-7 text-[#4d4533]";
+      "ml-5 space-y-1.5 text-[15px] leading-relaxed text-muted-foreground";
 
     if (block.ordered) {
       return (
@@ -297,16 +297,16 @@ function renderBlock(block: MarkdownBlock, index: number) {
     return (
       <div
         key={`${block.type}-${index}`}
-        className="overflow-x-auto border border-[#c4a882]/25"
+        className="overflow-x-auto rounded-md border border-border"
       >
-        <table className="min-w-full border-collapse text-left text-[0.8125rem]">
+        <table className="min-w-full border-collapse text-left text-[13px]">
           {block.header.length > 0 ? (
-            <thead className="bg-[#c4a882]/10 text-[#2d3436]">
+            <thead className="bg-muted text-foreground">
               <tr>
                 {block.header.map((cell, cellIndex) => (
                   <th
                     key={`${index}-header-${cellIndex}`}
-                    className="border-b border-[#c4a882]/25 px-3 py-2 font-semibold"
+                    className="border-b border-border px-3 py-2 font-mono text-[10px] font-medium uppercase tracking-[0.11em]"
                     scope="col"
                   >
                     {renderInline(cell)}
@@ -315,13 +315,13 @@ function renderBlock(block: MarkdownBlock, index: number) {
               </tr>
             </thead>
           ) : null}
-          <tbody className="divide-y divide-[#c4a882]/20">
+          <tbody className="divide-y divide-border">
             {block.rows.map((row, rowIndex) => (
               <tr key={`${index}-row-${rowIndex}`} className="align-top">
                 {row.map((cell, cellIndex) => (
                   <td
                     key={`${index}-row-${rowIndex}-${cellIndex}`}
-                    className="px-3 py-2 leading-relaxed text-[#4d4533]"
+                    className="px-3 py-2 leading-relaxed text-muted-foreground"
                   >
                     {renderInline(cell)}
                   </td>
@@ -337,7 +337,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
   return (
     <p
       key={`${block.type}-${index}`}
-      className="text-[0.9375rem] leading-7 text-[#4d4533]"
+      className="text-[15px] leading-relaxed text-muted-foreground"
     >
       {renderInline(block.text)}
     </p>
@@ -354,7 +354,7 @@ function renderInline(text: string) {
         <a
           key={`${segment}-${index}`}
           href={linkMatch[2]}
-          className="font-semibold text-[#5a6e32] underline-offset-4 transition-colors hover:text-[#2d3436] hover:underline"
+          className="text-primary underline underline-offset-4 transition-colors hover:text-foreground"
         >
           {linkMatch[1]}
         </a>
@@ -364,7 +364,7 @@ function renderInline(text: string) {
     const strongMatch = segment.match(/^\*\*([^*]+)\*\*$/);
     if (strongMatch) {
       return (
-        <strong key={`${segment}-${index}`} className="font-semibold text-[#2d3436]">
+        <strong key={`${segment}-${index}`} className="font-semibold text-foreground">
           {strongMatch[1]}
         </strong>
       );
@@ -375,7 +375,7 @@ function renderInline(text: string) {
       return (
         <code
           key={`${segment}-${index}`}
-          className="rounded bg-[#c4a882]/15 px-1 py-0.5 font-mono text-[0.85em]"
+          className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]"
         >
           {codeMatch[1]}
         </code>
