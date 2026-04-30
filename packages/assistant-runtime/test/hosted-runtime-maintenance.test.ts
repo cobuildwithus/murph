@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   initInboxRuntime: vi.fn(),
-  ingestHostedConversationMessageWake: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
@@ -61,10 +60,6 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
   readHostedAssistantRuntimeState: mocks.readHostedAssistantRuntimeState,
 }));
 
-vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
-  ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
-}));
-
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
     "@murphai/hosted-execution",
@@ -87,6 +82,7 @@ type InboxServices = import("@murphai/inbox-services").InboxServices;
 type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
 >[0];
+type HostedAutomationRuntime = Parameters<typeof runHostedAssistantAutomation>[4];
 
 const DEVICE_SYNC_CONFIG = {
   providerConfigs: {
@@ -98,6 +94,26 @@ const DEVICE_SYNC_CONFIG = {
   publicBaseUrl: "https://device-sync.example.test",
   secret: "secret_123",
 } as const;
+
+function createHostedAutomationRuntime(input: {
+  platform?: Partial<HostedAutomationRuntime["platform"]>;
+} = {}): HostedAutomationRuntime {
+  return {
+    forwardedEnv: {},
+    platform: {
+      artifactStore: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => undefined),
+      },
+      effectsPort: {
+        readRawEmailMessage: vi.fn(async () => null),
+        sendEmail: vi.fn(async () => undefined),
+      },
+      ...input.platform,
+    },
+    platformEnv: {},
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -149,10 +165,6 @@ beforeEach(() => {
   mocks.runAssistantAutomationPass.mockResolvedValue({
     nextWakeAt: "2026-04-08T01:00:00.000Z",
     progressed: false,
-  });
-  mocks.ingestHostedConversationMessageWake.mockResolvedValue({
-    nextWakeAt: null,
-    parserProcessed: 0,
   });
   mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["oura"]);
   mocks.createDeviceSyncRegistry.mockReturnValue({
@@ -277,6 +289,7 @@ describe("runHostedAssistantAutomation", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
+        createHostedAutomationRuntime(),
       ),
     ).resolves.toEqual({
       nextWakeAt: "2026-04-08T01:00:00.000Z",
@@ -477,6 +490,7 @@ describe("runHostedAssistantAutomation", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
+        createHostedAutomationRuntime(),
       ),
     ).resolves.toEqual({
       nextWakeAt: "2026-04-08T01:15:00.000Z",
@@ -551,6 +565,7 @@ describe("runHostedAssistantAutomation", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
+        createHostedAutomationRuntime(),
       ),
     ).resolves.toEqual({
       nextWakeAt: expect.any(String),
@@ -587,6 +602,7 @@ describe("runHostedAssistantAutomation", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
+        createHostedAutomationRuntime(),
       ),
     ).rejects.toThrow("automation failed");
   });
@@ -882,6 +898,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       },
       requestId: "req_123",
+      runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -921,6 +938,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       },
       inboxServices: expect.anything(),
+      inputSource: expect.any(Object),
       onEvent: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
@@ -956,6 +974,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
           },
         },
         requestId: "req_123",
+        runtime: createHostedAutomationRuntime(),
         vaultRoot: "/tmp/vault-root",
       });
 
@@ -996,6 +1015,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       },
       requestId: "req_123",
+      runtime: createHostedAutomationRuntime(),
       skipAssistantAutomation: true,
       vaultRoot: "/tmp/vault-root",
     });
@@ -1033,6 +1053,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       },
       requestId: "req_123",
+      runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -1086,6 +1107,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       },
       requestId: "req_123",
+      runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -1126,6 +1148,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       },
       requestId: "req_123",
+      runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
     });
 

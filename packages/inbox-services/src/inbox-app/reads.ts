@@ -99,24 +99,7 @@ export function createInboxReadOps(
   const requireInboxCaptureMatch = (
     runtime: RuntimeStore,
     captureId: string,
-    options?: { includeRuntimeOnly?: boolean },
-  ) => {
-    if (options?.includeRuntimeOnly !== true) {
-      return requireCapture(runtime, captureId)
-    }
-
-    const capture = runtime.getCapture(captureId, {
-      includeRuntimeOnly: true,
-    })
-    if (!capture) {
-      throw new VaultCliError(
-        'INBOX_CAPTURE_NOT_FOUND',
-        `Inbox capture "${captureId}" was not found.`,
-      )
-    }
-
-    return capture
-  }
+  ) => requireCapture(runtime, captureId)
 
   const requireParseableInboxAttachmentMatch = (
     runtime: RuntimeStore,
@@ -165,7 +148,6 @@ export function createInboxReadOps(
             afterCreatedAt,
             afterOccurredAt,
             afterCaptureId,
-            includeRuntimeOnly: input.includeRuntimeOnly === true,
             oldestFirst,
           })
 
@@ -317,9 +299,7 @@ export function createInboxReadOps(
       return withInboxRuntimePromotions(
         input,
         async ({ paths, runtime, promotionsByCapture }) => {
-          const capture = requireInboxCaptureMatch(runtime, input.captureId, {
-            includeRuntimeOnly: input.includeRuntimeOnly,
-          })
+          const capture = requireInboxCaptureMatch(runtime, input.captureId)
           return {
             vault: paths.absoluteVaultRoot,
             capture: detailCapture(

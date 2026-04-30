@@ -30,6 +30,12 @@ const publishedSubpaths = [
     packageImport: "@murphai/inboxd/connectors/telegram/normalize",
     sourceFile: "src/connectors/telegram/normalize.ts",
   },
+  {
+    exportKey: "./connectors/hosted-conversation",
+    label: "hosted conversation connector",
+    packageImport: "@murphai/inboxd/connectors/hosted-conversation",
+    sourceFile: "src/connectors/hosted-conversation.ts",
+  },
 ] as const;
 
 type InboxdPackageManifest = {

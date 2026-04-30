@@ -74,7 +74,6 @@ export type {
 export {
   runAssistantAutomation,
   scanAssistantAutomationOnce,
-  scanAssistantAutoReplyOnce,
 } from './assistant/automation.js'
 export type {
   AssistantOutboxDispatchHooks,

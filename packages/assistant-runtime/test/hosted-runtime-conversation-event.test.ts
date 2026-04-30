@@ -65,7 +65,6 @@ vi.mock("@murphai/hosted-execution/hosted-email", () => ({
 
 import {
   importHostedConversationMessageWakeIntoLocalInbox,
-  ingestHostedConversationMessageWake,
 } from "../src/hosted-runtime/events/conversation.ts";
 
 function createRuntime() {
@@ -118,7 +117,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("ingestHostedConversationMessageWake", () => {
+describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
   it("normalizes each hosted conversation wake directly before parsed inbox persistence", async () => {
     const runtime = {
       ...createRuntime(),
@@ -190,7 +189,7 @@ describe("ingestHostedConversationMessageWake", () => {
     };
     mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValueOnce(linqDriver);
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce(linqCapture);
-    const linqMetrics = await ingestHostedConversationMessageWake({
+    const linqImport = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime,
       vaultRoot,
       wake: linqWake,
@@ -215,7 +214,7 @@ describe("ingestHostedConversationMessageWake", () => {
     const telegramCapture = { source: "telegram" };
     mocks.createHostedTelegramAttachmentDownloadDriver.mockReturnValueOnce(telegramDriver);
     mocks.normalizeHostedTelegramConversationCapture.mockResolvedValueOnce(telegramCapture);
-    await ingestHostedConversationMessageWake({
+    await importHostedConversationMessageWakeIntoLocalInbox({
       runtime,
       vaultRoot,
       wake: telegramWake,
@@ -238,7 +237,7 @@ describe("ingestHostedConversationMessageWake", () => {
     mocks.readHostedRawEmailMessage.mockResolvedValueOnce(rawEmailMessage);
     mocks.resolveHostedEmailSelfAddresses.mockReturnValueOnce(selfAddresses);
     mocks.normalizeHostedEmailConversationCapture.mockResolvedValueOnce(emailCapture);
-    await ingestHostedConversationMessageWake({
+    await importHostedConversationMessageWakeIntoLocalInbox({
       runtime,
       vaultRoot,
       wake: emailWake,
@@ -289,7 +288,7 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
     expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
     expect(pipelineClose).toHaveBeenCalledTimes(3);
-    expect(linqMetrics).toEqual({
+    expect(linqImport.metrics).toEqual({
       nextWakeAt: null,
       parserProcessed: 2,
     });
@@ -306,7 +305,7 @@ describe("ingestHostedConversationMessageWake", () => {
     });
 
     await expect(
-      ingestHostedConversationMessageWake({
+      importHostedConversationMessageWakeIntoLocalInbox({
         runtime: createRuntime(),
         vaultRoot: "/tmp/assistant-runtime-conversation",
         wake: buildHostedExecutionLinqConversationMessageWake({
@@ -512,7 +511,7 @@ describe("ingestHostedConversationMessageWake", () => {
       source: "linq",
     });
 
-    await ingestHostedConversationMessageWake({
+    await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: createRuntime(),
       vaultRoot: "/tmp/assistant-runtime-conversation",
       wake: buildHostedExecutionLinqConversationMessageWake({
@@ -535,7 +534,7 @@ describe("ingestHostedConversationMessageWake", () => {
 
   it("fails closed on unsupported conversation wake kinds before opening the inbox runtime", async () => {
     await expect(
-      ingestHostedConversationMessageWake({
+      importHostedConversationMessageWakeIntoLocalInbox({
         runtime: createRuntime(),
         vaultRoot: "/tmp/assistant-runtime-conversation",
         wake: {

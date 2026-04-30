@@ -36,15 +36,6 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
-export async function ingestHostedConversationMessageWake(input: {
-  wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
-  vaultRoot: string;
-}): Promise<HostedConversationWakeMetrics> {
-  const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
-  return result.metrics;
-}
-
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture;
   capturePersistence: "canonical";

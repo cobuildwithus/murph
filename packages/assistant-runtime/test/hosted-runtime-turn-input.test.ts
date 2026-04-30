@@ -61,15 +61,23 @@ afterEach(async () => {
 });
 
 describe("createHostedAssistantInputSource", () => {
-  it("returns undefined when the hosted platform has no active-turn input ports", () => {
-    expect(
-      createHostedAssistantInputSource({
-        requestId: "req_no_port",
-        runtime: createRuntime(),
-        vaultRoot: "/tmp/vault-root",
-        wake: TIMER_WAKE,
-      }),
-    ).toBeUndefined();
+  it("returns a store-backed source when the hosted platform has no active-turn input ports", async () => {
+    const vaultRoot = await createTempVault();
+    const source = createHostedAssistantInputSource({
+      requestId: "req_no_port",
+      runtime: createRuntime(),
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    await expect(source.refresh({ phase: "request_boundary" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    await expect(source.listInputCandidates({ sourceId: "linq" })).resolves.toEqual({
+      inputs: [],
+      nextCursor: null,
+    });
   });
 
   it("fails closed when only one hosted active-turn input hook is configured", () => {

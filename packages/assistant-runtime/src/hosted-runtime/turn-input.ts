@@ -32,23 +32,23 @@ export function createHostedAssistantInputSource(input: {
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
-}): AssistantInputSource | undefined {
+}): AssistantInputSource {
   const refreshMailboxForActiveTurnInput =
     input.runtime.platform.refreshMailboxForActiveTurnInput ?? null;
   const checkpointActiveTurnInput =
     input.runtime.platform.checkpointActiveTurnInput ?? null;
+  const baseSource = createStoreBackedAssistantInputSource({
+    vault: input.vaultRoot,
+  });
+
   if (!refreshMailboxForActiveTurnInput && !checkpointActiveTurnInput) {
-    return undefined;
+    return baseSource;
   }
   if (!refreshMailboxForActiveTurnInput || !checkpointActiveTurnInput) {
     throw new TypeError(
       "Hosted active-turn input requires both mailbox refresh and acceptance checkpoint ports.",
     );
   }
-
-  const baseSource = createStoreBackedAssistantInputSource({
-    vault: input.vaultRoot,
-  });
 
   return {
     async checkpointAcceptedInput(checkpointInput) {

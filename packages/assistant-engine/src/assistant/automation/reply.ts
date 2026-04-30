@@ -31,10 +31,9 @@ import {
   type AssistantActiveTurnInputAdmissionResult,
   type AssistantActiveTurnInputAdmissionHook,
 } from '../turn-input.js'
-import {
-  assistantInputCandidateFromInboxCapture,
-  type AssistantInputCandidate,
-  type AssistantInputSource,
+import type {
+  AssistantInputCandidate,
+  AssistantInputSource,
 } from '../input-source.js'
 import {
   listAssistantTranscriptEntries,
@@ -75,13 +74,9 @@ import {
 import {
   computeAssistantAutomationRetryAt,
   compareAssistantCaptureOrder,
-  createEmptyAutoReplyScanResult,
   cursorFromCapture,
   earliestAssistantAutomationWakeAt,
-  normalizeEnabledChannels,
-  normalizeScanLimit,
   type AssistantAutoReplyScanResult,
-  type AssistantAutomationStateProgress,
   type AssistantRunEvent,
 } from './shared.js'
 
@@ -195,103 +190,6 @@ export interface AssistantAutoReplyProcessResult {
   stopScanning: boolean
 }
 
-export async function scanAssistantAutoReplyOnce(input: {
-  afterCursor?: AssistantAutomationCursor | null
-  allowSelfAuthored?: boolean
-  deliveryDispatchMode?: AssistantOutboxDispatchMode
-  enabledChannels: readonly string[]
-  inboxServices: InboxServices
-  maxPerScan?: number
-  onEvent?: (event: AssistantRunEvent) => void
-  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  onStateProgress?: (
-    state: AssistantAutomationStateProgress,
-  ) => Promise<void> | void
-  providerHeartbeatMs?: number | null
-  providerLongRunningCommandStallTimeoutMs?: number | null
-  providerStallTimeoutMs?: number | null
-  requestId?: string | null
-  signal?: AbortSignal
-  sessionMaxAgeMs?: number | null
-  inputSource?: AssistantActiveTurnInputSource
-  vault: string
-}): Promise<AssistantAutoReplyScanResult> {
-  const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
-  if (enabledChannels.length === 0) {
-    return createEmptyAutoReplyScanResult()
-  }
-
-  const listed = await input.inboxServices.list({
-    vault: input.vault,
-    requestId: input.requestId ?? null,
-    limit: normalizeScanLimit(input.maxPerScan),
-    sourceId: null,
-    afterOccurredAt: input.afterCursor?.occurredAt ?? null,
-    afterCaptureId: input.afterCursor?.captureId ?? null,
-    oldestFirst: true,
-  })
-  const captures = [...listed.items].sort((left, right) =>
-    left.occurredAt === right.occurredAt
-      ? left.captureId.localeCompare(right.captureId)
-      : left.occurredAt.localeCompare(right.occurredAt),
-  )
-  input.onEvent?.({
-    type: 'reply.scan.started',
-    details: `${captures.length} capture(s)`,
-  })
-
-  const summary = createEmptyAutoReplyScanResult()
-
-  for (let index = 0; index < captures.length; index += 1) {
-    if (input.signal?.aborted) {
-      break
-    }
-
-    const group = await collectAssistantAutoReplyGroup({
-      captures,
-      startIndex: index,
-      vault: input.vault,
-    })
-    index = group.endIndex
-    summary.considered += group.items.length
-
-    const context = createAssistantAutoReplyGroupContext(group.items)
-    if (!context) {
-      continue
-    }
-
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: input.allowSelfAuthored ?? false,
-      context,
-      deliveryDispatchMode: input.deliveryDispatchMode,
-      enabledChannels,
-      inboxServices: input.inboxServices,
-      onEvent: input.onEvent,
-      onTraceEvent: input.onTraceEvent,
-      providerHeartbeatMs: input.providerHeartbeatMs,
-      providerLongRunningCommandStallTimeoutMs:
-        input.providerLongRunningCommandStallTimeoutMs,
-      providerStallTimeoutMs: input.providerStallTimeoutMs,
-      requestId: input.requestId ?? null,
-      signal: input.signal,
-      sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-      inputSource: input.inputSource,
-      vault: input.vault,
-    })
-    if (
-      applyAssistantAutoReplyProcessResult({
-        context,
-        result,
-        summary,
-      })
-    ) {
-      break
-    }
-  }
-
-  return summary
-}
-
 export function applyAssistantAutoReplyProcessResult(input: {
   context: AssistantAutoReplyGroupContext
   result: AssistantAutoReplyProcessResult
@@ -323,19 +221,19 @@ export function createAssistantAutoReplyGroupContext(
   if (!firstItem || !lastItem) {
     return null
   }
+  if (items.some((item) => !item.inputCandidate)) {
+    return null
+  }
 
   return {
     captureCount: items.length,
     captureIds: items.map((item) => item.summary.captureId),
     firstCaptureId: firstItem.summary.captureId,
     firstItem,
-    inputIds: items.map((item) => item.inputCandidate?.event.inputId ??
-      assistantInputCandidateFromInboxCapture(item.summary).event.inputId),
+    inputIds: items.map((item) => item.inputCandidate!.event.inputId),
     items,
     lastCursor: cursorFromCapture(lastItem.summary),
-    lastInputCursor:
-      lastItem.inputCandidate?.event.cursor ??
-      assistantInputCandidateFromInboxCapture(lastItem.summary).event.cursor,
+    lastInputCursor: lastItem.inputCandidate!.event.cursor,
   }
 }
 
@@ -987,14 +885,7 @@ function createAssistantAutoReplyPromptCaptureFromInput(
         candidate?.event.text ??
         item.summary.text,
     },
-    telegramMetadata:
-      item.summary.source === 'telegram' && candidate?.event.replyTarget?.messageId
-        ? {
-            mediaGroupId: null,
-            messageId: candidate.event.replyTarget.messageId,
-            replyContext: null,
-          }
-        : item.telegramMetadata,
+    telegramMetadata: item.telegramMetadata,
   }
 }
 
@@ -1141,8 +1032,16 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       requestId: input.requestId,
       vault: input.vault,
     })
+    const lateInputCandidatesByCaptureId = new Map(
+      lateCaptureCandidates.flatMap((candidate) =>
+        candidate.projection.captureId
+          ? [[candidate.projection.captureId, candidate] as const]
+          : [],
+      ),
+    )
     const nextContext = await mergeAssistantAutoReplyGroupContext({
       context,
+      inputCandidatesByCaptureId: lateInputCandidatesByCaptureId,
       lateCaptures,
       vault: input.vault,
     })
@@ -1159,6 +1058,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 
     const acceptedInputContext = await createAssistantAutoReplyContextForCaptures({
       captures: lateCaptures,
+      inputCandidatesByCaptureId: lateInputCandidatesByCaptureId,
       vault: input.vault,
     })
     if (!acceptedInputContext) {
@@ -1237,9 +1137,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 
     const result: AssistantActiveTurnInputAdmissionResult = {
       acceptedInputs,
-      deliveryReplyToMessageId:
-        readAssistantInputReplyTargetMessageId(lateInputs.inputs) ??
-        readAutoReplyDeliveryReplyToMessageId(shownFinalGroup),
+      deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId(shownFinalGroup),
       kind: 'accepted',
       prompt: appendCapturelessAssistantInputPrompt({
         capturePrompt: preparedInput.prompt,
@@ -1345,8 +1243,7 @@ function admitCapturelessAssistantInputs(input: {
 
   return {
     acceptedInputs,
-    deliveryReplyToMessageId:
-      readAssistantInputReplyTargetMessageId(input.lateInputs),
+    deliveryReplyToMessageId: null,
     kind: 'accepted',
     prompt,
     receiptMetadata: {
@@ -1404,20 +1301,6 @@ function appendCapturelessAssistantInputPrompt(input: {
   return capturelessPrompt
     ? `${input.capturePrompt}\n\nAdditional same-conversation input:\n${capturelessPrompt}`
     : input.capturePrompt
-}
-
-function readAssistantInputReplyTargetMessageId(
-  candidates: readonly AssistantInputCandidate[],
-): string | null {
-  for (let index = candidates.length - 1; index >= 0; index -= 1) {
-    const messageId = normalizeNullableString(
-      candidates[index]?.event.replyTarget?.messageId,
-    )
-    if (messageId) {
-      return messageId
-    }
-  }
-  return null
 }
 
 function mergeAssistantUserMessageContent(
@@ -1536,21 +1419,22 @@ function buildAutoReplyAcceptedTurnInputItems(input: {
   captures: readonly AssistantAutoReplyGroupItem['summary'][]
   cursorFrom: AssistantAutomationCursor | null
   cursorTo: AssistantAutomationCursor | null
-  inputCandidates?: readonly (AssistantInputCandidate | null)[]
+  inputCandidates: readonly (AssistantInputCandidate | null)[]
 }): readonly AssistantAcceptedTurnInputItemInput[] {
   const captureIds = input.captures.map((capture) => capture.captureId)
   return input.captures.map((capture, index) => {
     const candidate = input.inputCandidates?.[index] ?? null
-    const base = candidate?.acceptedInput
+    if (!candidate) {
+      throw new TypeError(
+        'Assistant auto-reply accepted input requires an assistant input event candidate.',
+      )
+    }
+    const base = candidate.acceptedInput
+    const baseCaptureIds = base.captureIds ?? []
     return {
-      ...(base ?? {}),
-      captureIds: base?.captureIds ?? [capture.captureId],
-      contentRef: base?.contentRef ?? {
-        kind: 'inbox-capture',
-        refId: capture.captureId,
-        version: null,
-      },
-      cursorEffects: base?.cursorEffects && base.cursorEffects.length > 0
+      ...base,
+      captureIds: baseCaptureIds.length > 0 ? baseCaptureIds : [capture.captureId],
+      cursorEffects: base.cursorEffects && base.cursorEffects.length > 0
         ? base.cursorEffects
         : [
             {
@@ -1561,19 +1445,18 @@ function buildAutoReplyAcceptedTurnInputItems(input: {
               to: input.cursorTo,
             },
           ],
-      id: base?.id ?? `inbox:${capture.captureId}`,
-      promptFallbackReason: base?.promptFallbackReason ?? 'system-input',
+      promptFallbackReason: base.promptFallbackReason ?? 'system-input',
       promptFallbackText:
-        base?.promptFallbackText ??
-        (candidate ? buildAssistantInputCandidateTranscriptText(candidate) : null) ??
+        base.promptFallbackText ??
+        buildAssistantInputCandidateTranscriptText(candidate) ??
         buildAutoReplyAcceptedCaptureTranscriptText(capture),
-      source: base?.source ?? 'inbox',
     }
   })
 }
 
 async function mergeAssistantAutoReplyGroupContext(input: {
   context: AssistantAutoReplyGroupContext
+  inputCandidatesByCaptureId: ReadonlyMap<string, AssistantInputCandidate>
   lateCaptures: readonly AssistantAutoReplyGroupItem['summary'][]
   vault: string
 }): Promise<AssistantAutoReplyGroupContext | null> {
@@ -1582,6 +1465,7 @@ async function mergeAssistantAutoReplyGroupContext(input: {
   )
   const lateItems = await loadAssistantAutoReplyGroupItems({
     captures: input.lateCaptures,
+    inputCandidatesByCaptureId: input.inputCandidatesByCaptureId,
     vault: input.vault,
   })
 
@@ -1598,10 +1482,12 @@ async function mergeAssistantAutoReplyGroupContext(input: {
 
 async function createAssistantAutoReplyContextForCaptures(input: {
   captures: readonly AssistantAutoReplyGroupItem['summary'][]
+  inputCandidatesByCaptureId?: ReadonlyMap<string, AssistantInputCandidate>
   vault: string
 }): Promise<AssistantAutoReplyGroupContext | null> {
   const items = await loadAssistantAutoReplyGroupItems({
     captures: input.captures,
+    inputCandidatesByCaptureId: input.inputCandidatesByCaptureId,
     vault: input.vault,
   })
 
