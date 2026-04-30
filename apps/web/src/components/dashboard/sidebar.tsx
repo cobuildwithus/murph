@@ -4,8 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { ChevronsUpDown } from "lucide-react";
-import { useEffect, useState, type CSSProperties } from "react";
+import { Activity, ChevronsUpDown, FlaskConical, Home } from "lucide-react";
+import { useEffect, useState, type CSSProperties, type ElementType } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
@@ -46,13 +46,20 @@ import type {
 } from "@/src/lib/device-sync/sidebar-status";
 import { cn } from "@/src/lib/utils";
 
-const navItems = [
+const navItems: {
+  label: string;
+  href: string;
+  matchPrefix?: string;
+  icon?: ElementType;
+}[] = [
+  { label: "Home", href: "/home", icon: Home },
   {
     label: "Biomarkers",
     href: "/biomarkers/resting-heart-rate",
     matchPrefix: "/biomarkers",
+    icon: Activity,
   },
-  { label: "Experiments", href: "/experiments" },
+  { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
 
 const sidebarThemeStyle = {
@@ -66,7 +73,7 @@ const sidebarThemeStyle = {
 
 function BrandMark() {
   return (
-    <Link href="/experiments" className="flex items-center px-2 py-1">
+    <Link href="/home" className="flex items-center px-2 py-1">
       <Image
         src="/logo-dark.svg"
         alt="Murph"
@@ -103,7 +110,7 @@ function SidebarAuthActions() {
       <Dialog open={authDialogOpen} onOpenChange={setAuthDialogOpen}>
         <DialogContent className="max-w-md p-6 md:p-7">
           <DialogHeader className="pr-10">
-            <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
+            <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
               Log in or sign up
             </DialogTitle>
             <DialogDescription>
@@ -259,32 +266,55 @@ export function Sidebar({
     <ShadcnSidebar
       collapsible="offcanvas"
       className={cn(
-        "bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
+        "bg-linear-to-br from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
         "[&_[data-slot=sidebar-inner]]:bg-transparent",
         "group-data-[side=left]:[&_[data-slot=sidebar-container]]:border-r-0",
       )}
       style={sidebarThemeStyle}
     >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage: "radial-gradient(#ffffff 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at 100% 30%, rgba(180, 130, 70, 0.15), transparent 60%)",
+        }}
+      />
       <SidebarHeader className="pt-7 pb-6">
         <BrandMark />
       </SidebarHeader>
 
-      <SidebarContent className="px-2">
-        <SidebarMenu className="gap-1">
+      <SidebarContent className="justify-center px-2">
+        <SidebarMenu className="gap-3">
           {navItems.map((item) => {
             const activePrefix = item.matchPrefix ?? item.href;
             const isActive =
               pathname === item.href || pathname.startsWith(activePrefix);
+            const Icon = item.icon;
 
             return (
               <SidebarMenuItem key={item.href}>
                 <SidebarMenuButton
                   isActive={isActive}
+                  size="lg"
                   className={cn(
-                    "rounded-lg text-white/60 hover:bg-white/5 hover:text-white/80",
+                    "rounded-lg px-4 py-3.5 text-[15px] text-white/70 hover:bg-white/5 hover:text-white/80 active:bg-white/5 active:text-white/80",
                     "data-active:bg-white/10 data-active:text-white",
                   )}
-                  render={<Link href={item.href}>{item.label}</Link>}
+                  render={
+                    <Link href={item.href}>
+                      {Icon ? <Icon className="size-5 shrink-0" /> : null}
+                      {item.label}
+                    </Link>
+                  }
                 />
               </SidebarMenuItem>
             );

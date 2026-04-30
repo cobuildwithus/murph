@@ -22,8 +22,8 @@ export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
     title: "Chat wherever you live",
   },
   {
-    body: "Oura, WHOOP, Garmin, and Strava sync into every experiment automatically.",
+    body: "Apple Health, wearables, and lab results sync into every experiment automatically.",
     icon: ActivityIcon,
-    title: "Wearables connected",
+    title: "Health connected",
   },
 ] as const;
