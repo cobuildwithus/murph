@@ -106,10 +106,35 @@ describe('assistant local PDF evidence guidance', () => {
       'Supported connect-link requests are handled by the hosted runtime before the model turn',
     )
     expect(prompt).toContain(
+      'If no real link is present in the current turn, say you cannot create one right now instead of fabricating a URL',
+    )
+    expect(prompt).toContain(
+      'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
+    )
+    expect(prompt).toContain(
+      'Only send a wearable connect link when it is present in the current turn as an actual runtime or helper result',
+    )
+    expect(prompt).toContain(
       'offer to send a connection link',
     )
     expect(prompt).not.toContain('hosted connect helper is not exposed')
     expect(prompt).not.toContain('connection links are temporarily unavailable')
+  })
+
+  it('forbids fabricated wearable connect URLs even when hosted connect is unavailable', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      onboardingGuidance: false,
+    }))
+
+    expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).toContain(
+      'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
+    )
+    expect(prompt).toContain(
+      'Only send a wearable connect link when it is present in the current turn as an actual runtime or helper result',
+    )
   })
 
   it('teaches Codex to inspect local PDF artifacts with Poppler tools', () => {
@@ -213,7 +238,7 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'b718ad73ceee5afe17242671b5a41da03a7957181d187e4f0887518f8ce6c2be',
+      '5e0d3bc2e5d46f4960385370ed5c76295d8ea43669d228fa81129ade5bd6242f',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
