@@ -833,6 +833,7 @@ function redactHostedExecutionText(value: string): string {
     .replace(/\/Users\/[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(/\/home\/[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(/\/root\/[^\s)"']+/gu, "<REDACTED_PATH>")
+    .replace(/\/app\/[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(/\b[A-Za-z]:\\Users\\[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(
       /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+\b/giu,

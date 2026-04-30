@@ -5,6 +5,8 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
+import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import type { AttachmentParseJobRecord, RunAttachmentParseJobResult } from "@murphai/parsers";
 import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
@@ -84,6 +86,50 @@ function createRuntime() {
     },
     platformEnv: {},
   } as const;
+}
+
+function createRuntimeWithLogPort(logRequests: HostedRuntimeLogRequest[]) {
+  const runtime = createRuntime();
+  return {
+    ...runtime,
+    platform: {
+      ...runtime.platform,
+      logPort: {
+        async write(request: HostedRuntimeLogRequest) {
+          logRequests.push(request);
+          return {
+            loggedCount: request.entries.length,
+          };
+        },
+      },
+    },
+  } as const;
+}
+
+function createParseJobResult(
+  overrides: Pick<RunAttachmentParseJobResult, "status"> & Partial<RunAttachmentParseJobResult>,
+): RunAttachmentParseJobResult {
+  return {
+    job: createParseJobRecord({
+      state: overrides.status,
+    }),
+    ...overrides,
+  };
+}
+
+function createParseJobRecord(
+  overrides: Partial<AttachmentParseJobRecord>,
+): AttachmentParseJobRecord {
+  return {
+    attachmentId: "attachment_123",
+    attempts: 1,
+    captureId: "capture_123",
+    createdAt: "2026-04-08T00:00:00.000Z",
+    jobId: "job_123",
+    pipeline: "attachment_text",
+    state: "pending",
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -394,6 +440,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
 
   it("keeps persisted conversation import successful when post-persistence parser setup fails", async () => {
     const order: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
       close: vi.fn(),
       processCapture: vi.fn(async () => {
@@ -418,7 +465,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
 
     const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: {
-        ...createRuntime(),
+        ...createRuntimeWithLogPort(logRequests),
         forwardedEnv: {
           LINQ_API_TOKEN: "linq-token",
         },
@@ -447,6 +494,164 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(1);
     expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
     expect(mocks.createInboxParserService).not.toHaveBeenCalled();
+    expect(logRequests).toHaveLength(1);
+    expect(logRequests[0]?.entries).toEqual([
+      expect.objectContaining({
+        component: "mailbox",
+        errorCode: "runtime_error",
+        eventCode: "mailbox.parser_drain_failed",
+        level: "warn",
+        phase: "import",
+        redactedJson: {
+          captureIdPresent: true,
+          errorMessage: "parser setup failed",
+        },
+      }),
+    ]);
+  });
+
+  it("logs aggregate parser job failures without exposing attachment paths", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.createInboxParserService.mockReturnValueOnce({
+      drain: vi.fn(async () => [
+        createParseJobResult({
+          errorCode: "ffmpeg_unavailable",
+          errorMessage: "spawn /app/test-parser-toolchain/ffmpeg ENOENT",
+          job: createParseJobRecord({
+            jobId: "job_ffmpeg_failure",
+            state: "failed",
+          }),
+          status: "failed",
+        }),
+        createParseJobResult({
+          errorCode: "provider_unavailable",
+          errorMessage: "No parser provider found for audio/mp4",
+          job: createParseJobRecord({
+            jobId: "job_provider_failure",
+            state: "failed",
+          }),
+          status: "failed",
+        }),
+        createParseJobResult({
+          job: createParseJobRecord({
+            jobId: "job_success",
+            state: "succeeded",
+          }),
+          manifestPath: "raw/inbox/capture_123/parser-results/manifest.json",
+          providerId: "provider_123",
+          status: "succeeded",
+        }),
+      ]),
+    });
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: createRuntimeWithLogPort(logRequests),
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_parser_job_failure",
+        linqMessage: {
+          chatId: "chat_after_parser_job_failure",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(importResult.metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 3,
+    });
+    expect(logRequests).toHaveLength(1);
+    expect(logRequests[0]?.entries).toEqual([
+      expect.objectContaining({
+        component: "mailbox",
+        eventCode: "mailbox.parser_jobs_failed",
+        level: "warn",
+        phase: "import",
+        redactedJson: {
+          captureIdPresent: true,
+          errorCodes: ["ffmpeg_unavailable", "provider_unavailable"],
+          errorMessages: [
+            "spawn <REDACTED_PATH> ENOENT",
+            "No parser provider found for audio/mp4",
+          ],
+          parserFailed: 2,
+          parserObservedFailedJobs: 0,
+          parserProcessed: 3,
+          parserSucceeded: 1,
+        },
+      }),
+    ]);
+  });
+
+  it("logs failed parser job state when drain returns no job result", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.openInboxRuntime.mockResolvedValueOnce({
+      close: vi.fn(),
+      listAttachmentParseJobs: vi.fn(() => [
+        createParseJobRecord({
+          errorCode: "ffmpeg_unavailable",
+          errorMessage: "spawn /app/test-parser-toolchain/ffmpeg ENOENT",
+          jobId: "job_failed_from_state",
+          state: "failed",
+        }),
+      ]),
+    });
+    mocks.createInboxParserService.mockReturnValueOnce({
+      drain: vi.fn(async () => []),
+    });
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: createRuntimeWithLogPort(logRequests),
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_parser_state_failure",
+        linqMessage: {
+          chatId: "chat_after_parser_state_failure",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(importResult.metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 0,
+    });
+    expect(logRequests).toHaveLength(1);
+    expect(logRequests[0]?.entries).toEqual([
+      expect.objectContaining({
+        component: "mailbox",
+        eventCode: "mailbox.parser_jobs_failed",
+        level: "warn",
+        phase: "import",
+        redactedJson: {
+          captureIdPresent: true,
+          errorCodes: ["ffmpeg_unavailable"],
+          errorMessages: ["spawn <REDACTED_PATH> ENOENT"],
+          parserFailed: 1,
+          parserObservedFailedJobs: 1,
+          parserProcessed: 0,
+          parserSucceeded: 0,
+        },
+      }),
+    ]);
   });
 
   it("does not create runtime-only inbox projection rows when canonical inbox persistence fails", async () => {
