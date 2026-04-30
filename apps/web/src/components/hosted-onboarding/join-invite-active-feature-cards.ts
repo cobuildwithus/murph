@@ -17,7 +17,7 @@ export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
     title: "See what worked",
   },
   {
-    body: "Text Murph via iMessage, Telegram, or email. It remembers your data.",
+    body: "Text Murph via iMessage, Telegram, or email.",
     icon: MessageCircleIcon,
     title: "Chat wherever you live",
   },
