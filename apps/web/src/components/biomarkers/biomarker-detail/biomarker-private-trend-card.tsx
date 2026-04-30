@@ -1,6 +1,7 @@
 "use client";
 
-import { LineChartIcon, LockKeyholeIcon } from "lucide-react";
+import { ArrowRightIcon, LineChartIcon, LockKeyholeIcon } from "lucide-react";
+import Link from "next/link";
 import { useMemo } from "react";
 
 import {
@@ -72,25 +73,31 @@ export function BiomarkerPrivateTrendCard({ biomarker }: { biomarker: BiomarkerP
 
   if (trend.status === "empty") {
     return (
-      <Card className="border border-border/60">
-        <CardHeader>
-          <div className="mb-1 flex size-10 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-            <LockKeyholeIcon className="size-5" aria-hidden />
-          </div>
-          <CardTitle>{trend.title}</CardTitle>
-          <CardDescription>{trend.body}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+      <div className="rounded-xl border border-dashed border-border/60">
+        <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+          <LockKeyholeIcon className="size-5 text-muted-foreground/60" aria-hidden />
+          <p className="font-serif text-lg font-semibold text-foreground">
+            {trend.title}
+          </p>
+          <p className="max-w-sm text-sm text-muted-foreground">
             {emptyStateGuidance(trend.panelStatus)}
-          </div>
+          </p>
           {trend.detail ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground/80">
               {trend.detail}
             </p>
           ) : null}
-        </CardContent>
-      </Card>
+          {shouldShowConnectAction(trend.panelStatus) ? (
+            <Link
+              href="/connect"
+              className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Connect a device
+              <ArrowRightIcon className="size-3.5" />
+            </Link>
+          ) : null}
+        </div>
+      </div>
     );
   }
 
@@ -268,7 +275,7 @@ function resolvePrivateTrend(input: {
       body: panel.emptyState?.body ?? "Your private biomarker trend is not available yet.",
       panelStatus: panel.status,
       status: "empty",
-      title: panel.emptyState?.title ?? "Private trend unavailable",
+      title: panel.emptyState?.title ?? "Biomarker unavailable",
     };
   }
 
@@ -299,18 +306,22 @@ function resolvePrivateTrend(input: {
 
 function emptyStateGuidance(status: BrowserVaultBiomarkerPanelStatus): string {
   if (status === "unsupported") {
-    return "This public biomarker page does not have a private browser-vault metric binding yet.";
+    return "Private tracking for this biomarker is not available yet.";
   }
 
   if (status === "no_data") {
-    return "Your browser-vault replica is available, but it does not contain values for this biomarker yet.";
+    return "Connect a device that tracks this biomarker to see your personal trend here.";
   }
 
   if (status === "insufficient_data") {
-    return "Keep syncing private data; this card will update automatically.";
+    return "Keep wearing your device. This card updates automatically as new data arrives.";
   }
 
-  return "Sync a browser-vault replica to see this module. Nothing from this card is public.";
+  return "Connect a health device to see your personal trend here. Your data stays private.";
+}
+
+function shouldShowConnectAction(status: BrowserVaultBiomarkerPanelStatus): boolean {
+  return status === "no_private_vault" || status === "no_data";
 }
 
 function toSparklinePoints(series: readonly TrendPoint[]): Array<{ x: number; y: number }> {
