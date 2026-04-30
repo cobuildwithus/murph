@@ -38,13 +38,13 @@ relations:
     target: biomarker:resting-heart-rate
   -
     type: secondary_biomarker
+    target: biomarker:morning-blood-pressure
+  -
+    type: secondary_biomarker
     target: biomarker:hrv-rmssd
   -
     type: secondary_biomarker
     target: biomarker:sleep-efficiency
-  -
-    type: secondary_biomarker
-    target: biomarker:morning-blood-pressure
   -
     type: cites
     target: source_artifact:norwegian-4x4-bibliography
@@ -188,14 +188,14 @@ testPlans:
     primaryBiomarkerKey: biomarker:estimated-vo2max
     secondaryBiomarkerKeys:
       - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
       - biomarker:hrv-rmssd
       - biomarker:sleep-efficiency
-      - biomarker:morning-blood-pressure
     minimumAdherenceSessions: 8
     targetAdherenceSessions: 12
     notes:
       - Use the wearable cardio-fitness or VO2max estimate as a noisy proxy, not as a laboratory VO2max measurement.
-      - Session fidelity is part of the outcome; record whether each interval reached the intended heart-rate zone without unsafe symptoms.
+      - Session fidelity supports interpretation; record whether each interval reached the intended heart-rate zone without unsafe symptoms.
       - Resting heart rate and heart-rate recovery may be useful secondary signals, but sleep, illness, stress, alcohol, heat, and training load can confound them.
       - HRV is exploratory. Sleep efficiency is recovery context and a confounder; neither is a promised outcome.
 expectedSignalDescriptions:
@@ -203,51 +203,62 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:estimated-vo2max
     expected: up_or_stable
+    protocolProminence: focus
     estimatedChange:
       kind: relative_percent
-      low: 0
+      low: 3
       high: 10
       unit: "%"
       window: 4-8 weeks
       confidence: moderate
-      basis: "Direct 4x4 sources include a 6-week overweight/obese adult trial reporting about a 10% VO2max gain, while broader HIIT evidence and wearable proxy limits make individual change uncertain."
-    description: "Four-minute hard intervals keep oxygen demand high for repeated stretches. Across weeks, that can improve how much oxygen the heart and muscles deliver and use."
+      basis: "Direct 4x4 sources include a 6-week overweight/obese adult trial reporting about a 10% VO2max gain, an 8-week trained-adult trial favoring 4x4 for lab VO2max, and broader HIIT meta-analysis support; wearable cardio-fitness proxies can lag or under-report the change."
+    description: "Four-minute hard reps keep cardiac output and muscle oxygen extraction near the top of the aerobic range. As stroke volume, capillary delivery, and mitochondrial oxygen use improve, lab VO2max or same-device cardio-fitness estimates can rise."
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: down_or_stable
+    protocolProminence: focus
     estimatedChange:
-      kind: mixed_or_contextual
+      kind: absolute
+      low: -4
+      high: 0
+      unit: bpm
       window: 4-8 weeks
       confidence: low
-      basis: "Resting pulse is a plausible adaptation signal, but the Norwegian 4x4 research package does not provide a source-backed personal range for a home wearable experiment."
-    description: "If the heart pumps more blood per beat after training, it may need fewer beats at rest. Resting heart rate can drift lower as that adaptation builds."
+      basis: "The direct 4x4 evidence package centers VO2max rather than resting pulse, but improved stroke volume and autonomic balance make a small same-device resting-heart-rate drop plausible when recovery keeps up."
+    description: "If each beat pumps more blood after training, the heart can deliver resting blood flow with fewer beats. A same-device morning RHR trend may drift lower when adaptation outpaces fatigue."
+  -
+    biomarkerKey: biomarker:morning-blood-pressure
+    expected: down_or_stable
+    protocolProminence: focus
+    estimatedChange:
+      kind: absolute
+      low: -5
+      high: 0
+      unit: mmHg systolic
+      window: 4-8 weeks
+      confidence: low
+      basis: "A supervised hypertension 4x4-lineage trial reported larger 12-week blood-pressure reductions, while normotensive or unscreened home users over 6 weeks should expect smaller or no movement."
+    description: "Repeated high-flow intervals increase vessel shear stress and nitric-oxide signaling. If vascular tone eases, standardized morning systolic pressure can drift down, especially when baseline pressure is elevated."
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: mixed_or_contextual
+    protocolProminence: context
     estimatedChange:
       kind: mixed_or_contextual
       window: 4-8 weeks
       confidence: mixed
-      basis: "Exercise-training syntheses support HRV as an adjacent autonomic signal, but hard intervals can also suppress HRV when recovery is not keeping up."
-    description: "Hard intervals tax the nervous system at first. If fitness improves and recovery keeps up, overnight HRV may rise or stabilize."
+      basis: "The autonomic-control review found HIIT-related HRV changes small, inconsistent, and sensitive to population, dose, sleep, illness, alcohol, and total training load."
+    description: "The intervals spike sympathetic load. Recoverable training can increase overnight parasympathetic rebound; too much intensity or too little recovery can suppress RMSSD."
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: mixed_or_contextual
+    protocolProminence: context
     estimatedChange:
       kind: mixed_or_contextual
       window: 4-8 weeks
       confidence: low
-      basis: "Sleep efficiency is recovery context for this protocol, not a direct 4x4 outcome with a source-backed expected range."
-    description: "Hard aerobic work can increase sleep pressure and recovery need. Sleep efficiency may improve when the dose is well matched, or stall if the sessions are too taxing."
-  -
-    biomarkerKey: biomarker:morning-blood-pressure
-    expected: down_or_stable
-    estimatedChange:
-      kind: mixed_or_contextual
-      window: 4-8 weeks
-      confidence: low
-      basis: "Aerobic interval training can affect blood pressure in clinical or hypertensive contexts, but this page should not promise a home blood-pressure treatment effect."
-    description: "Repeated aerobic intervals may help blood vessels relax and control pressure. Morning blood pressure can move lower if that adaptation appears."
+      basis: "Sleep efficiency is recovery context for this protocol, not a direct 4x4 efficacy endpoint with a source-backed numeric range."
+    description: "Hard aerobic work raises sleep pressure, but late sessions, heat, soreness, or under-recovery can fragment sleep. Sleep efficiency shows whether the training dose fits the recovery window."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -777,7 +788,7 @@ expectedSignal:
   primary:
     biomarkerKey: biomarker:estimated-vo2max
     direction: increase_or_no_clear_change
-    latency: 4-6 weeks, with wearable update lag possible
+    latency: 4-8 weeks, with wearable update lag possible
     confidence: low_to_moderate
     sourceKeys:
       - source_artifact:pmid-17414804
@@ -790,6 +801,11 @@ expectedSignal:
       direction: decrease_or_no_clear_change
       latency: 2-6 weeks
       confidence: low_to_moderate
+    -
+      biomarkerKey: biomarker:morning-blood-pressure
+      direction: decrease_or_no_clear_change
+      latency: 4-8 weeks
+      confidence: low
     -
       biomarkerKey: biomarker:hrv-rmssd
       direction: mixed
@@ -823,9 +839,9 @@ This is not a permanent training identity. It is a bounded test of whether this 
 
 ## What to watch
 
-The main read is whether cardio fitness trends in a useful direction without making recovery worse. Session fidelity matters too: did the intervals reach the intended zone, did recovery stay reasonable, and did the protocol remain repeatable?
+The main read is whether same-device cardio fitness trends up without making recovery worse. Resting heart rate and standardized morning blood pressure are practical downstream checks. Session fidelity supports interpretation: did the intervals reach the intended zone, did recovery stay reasonable, and did the protocol remain repeatable?
 
-HRV, sleep, soreness, symptoms, and morning blood pressure are context. They help explain the result, but they are not promised wins.
+HRV, sleep, soreness, symptoms, and next-day recovery are context. They help explain whether the dose is recoverable, not whether the workout was completed.
 
 ## What to log every session
 
