@@ -229,6 +229,24 @@ test('device CLI contracts normalize provider keys and parse result payloads', (
     baseUrl,
     providers: [providerRecord],
   }).providers[0], providerRecord)
+  assert.deepEqual(deviceProviderListResultSchema.parse({
+    local: {
+      baseUrl,
+      status: 'not_configured',
+      configuredProviders: [],
+      message: 'Device sync daemon is not running.',
+    },
+    providers: [
+      {
+        ...providerRecord,
+        source: 'catalog',
+        displayName: 'Test provider',
+        callbackUrl: null,
+        webhookUrl: null,
+        localConfigured: false,
+      },
+    ],
+  }).providers[0]?.callbackUrl, null)
   assert.equal(deviceConnectResultSchema.parse({
     baseUrl,
     provider,
@@ -242,6 +260,17 @@ test('device CLI contracts normalize provider keys and parse result payloads', (
     provider: null,
     accounts: [account],
   }).accounts[0]?.id, account.id)
+  assert.deepEqual(deviceAccountListResultSchema.parse({
+    baseUrl,
+    local: {
+      baseUrl,
+      status: 'not_running',
+      configuredProviders: [provider],
+      message: 'Device sync daemon is not running.',
+    },
+    provider: null,
+    accounts: [],
+  }).accounts, [])
   assert.equal(deviceAccountShowResultSchema.parse({ baseUrl, account }).account.id, account.id)
   assert.equal(
     deviceAccountReconcileResultSchema.parse({ baseUrl, account, job }).job.id,

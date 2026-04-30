@@ -9,6 +9,7 @@ import { parseVersionedJsonStateEnvelope } from '@murphai/runtime-state/node'
 import {
   ensureManagedDeviceSyncControlPlane,
   getManagedDeviceSyncDaemonStatus,
+  resolveExistingManagedDeviceSyncControlPlane,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
 } from '@murphai/operator-config/device-daemon'
@@ -251,6 +252,91 @@ test.sequential(
         'http://localhost:8788/healthz',
         'http://localhost:8788/healthz',
       ])
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'resolveExistingManagedDeviceSyncControlPlane reuses a healthy managed daemon without provider env',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    const livePids = new Set<number>()
+    let healthy = false
+
+    try {
+      await startManagedDeviceSyncDaemon({
+        vault: vaultRoot,
+        baseUrl: 'http://localhost:9876',
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          ...TEST_WHOOP_PROVIDER_ENV,
+        },
+        dependencies: {
+          fetchImpl: async (_input, init) => {
+            const authorization = readAuthorizationHeader(init?.headers)
+            if (!authorization) {
+              return new Response(JSON.stringify({ ok: false }), { status: 503 })
+            }
+            return new Response(
+              JSON.stringify({
+                ok: healthy && authorization === 'Bearer control-token-for-tests',
+              }),
+              {
+                ...deviceSyncAuthResponse(
+                  healthy && authorization === 'Bearer control-token-for-tests'
+                    ? 200
+                    : 401,
+                ),
+              },
+            )
+          },
+          isProcessAlive(pid) {
+            return livePids.has(pid)
+          },
+          resolveDeviceSyncPackageEntry() {
+            return '/virtual/device-syncd/dist/index.js'
+          },
+          async spawnProcess() {
+            livePids.add(4343)
+            healthy = true
+            return { pid: 4343 }
+          },
+        },
+      })
+
+      const controlPlane = await resolveExistingManagedDeviceSyncControlPlane({
+        vault: vaultRoot,
+        baseUrl: 'http://localhost:9876',
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: '',
+          WHOOP_CLIENT_ID: '',
+          WHOOP_CLIENT_SECRET: '',
+        },
+        dependencies: {
+          fetchImpl: async (_input, init) => {
+            const authorization = readAuthorizationHeader(init?.headers)
+            return new Response(
+              JSON.stringify({
+                ok: authorization === 'Bearer control-token-for-tests',
+              }),
+              deviceSyncAuthResponse(
+                authorization === 'Bearer control-token-for-tests' ? 200 : 401,
+              ),
+            )
+          },
+          isProcessAlive(pid) {
+            return livePids.has(pid)
+          },
+        },
+      })
+
+      assert.deepEqual(controlPlane, {
+        baseUrl: 'http://localhost:9876',
+        controlToken: 'control-token-for-tests',
+        managed: true,
+      })
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

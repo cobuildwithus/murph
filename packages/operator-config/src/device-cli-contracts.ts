@@ -41,12 +41,15 @@ export const deviceSyncAccountStatusSchema = z.enum([
 
 export const deviceSyncProviderSchema = z.object({
   provider: z.string().min(1),
-  callbackPath: z.string().min(1),
-  callbackUrl: z.string().url(),
+  source: z.enum(['catalog', 'local_control_plane']).optional(),
+  displayName: z.string().min(1).optional(),
+  callbackPath: z.string().min(1).nullable(),
+  callbackUrl: z.string().url().nullable(),
   webhookPath: z.string().min(1).nullable(),
   webhookUrl: z.string().url().nullable(),
   supportsWebhooks: z.boolean(),
   defaultScopes: z.array(z.string().min(1)),
+  localConfigured: z.boolean().optional(),
 })
 
 export const deviceSyncAccountSchema = z.object({
@@ -92,8 +95,22 @@ export const deviceSyncJobSchema = z.object({
   finishedAt: isoTimestampSchema.nullable(),
 })
 
-export const deviceProviderListResultSchema = z.object({
+export const deviceSyncLocalAvailabilitySchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,
+  status: z.enum([
+    'healthy',
+    'not_configured',
+    'not_running',
+    'unhealthy',
+    'conflict',
+  ]),
+  configuredProviders: z.array(z.string().min(1)),
+  message: z.string().min(1).nullable(),
+})
+
+export const deviceProviderListResultSchema = z.object({
+  baseUrl: deviceSyncBaseUrlSchema.optional(),
+  local: deviceSyncLocalAvailabilitySchema.optional(),
   providers: z.array(deviceSyncProviderSchema),
 })
 
@@ -107,7 +124,8 @@ export const deviceConnectResultSchema = z.object({
 })
 
 export const deviceAccountListResultSchema = z.object({
-  baseUrl: deviceSyncBaseUrlSchema,
+  baseUrl: deviceSyncBaseUrlSchema.optional(),
+  local: deviceSyncLocalAvailabilitySchema.optional(),
   provider: z.string().min(1).nullable(),
   accounts: z.array(deviceSyncAccountSchema),
 })

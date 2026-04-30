@@ -1,11 +1,13 @@
 import {
   ensureManagedDeviceSyncControlPlane,
   getManagedDeviceSyncDaemonStatus,
+  resolveExistingManagedDeviceSyncControlPlane,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
 } from '@murphai/operator-config/device-daemon'
 import {
   createDeviceSyncClient,
+  DEVICE_SYNC_BASE_URL_ENV,
 } from '@murphai/operator-config/device-sync-client'
 import type {
   DeviceAccountDisconnectResult,
@@ -18,6 +20,11 @@ import type {
   DeviceDaemonStopResult,
   DeviceProviderListResult,
 } from '@murphai/operator-config/device-cli-contracts'
+import {
+  listConfiguredDeviceSyncProviderNames,
+  listDeviceSyncProviderCatalog,
+  readConfiguredDeviceSyncProviderConfigs,
+} from '@murphai/device-syncd/config'
 import {
   createUnwiredMethod,
 } from '@murphai/vault-usecases/runtime'
@@ -92,14 +99,114 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     })
   }
 
-  return {
-    async listProviders(input) {
-      const client = await createControlPlaneClient(input)
-      const result = await client.listProviders()
+  function hasExplicitControlPlaneTarget(input: {
+    baseUrl?: string
+  }): boolean {
+    const envBaseUrl = process.env[DEVICE_SYNC_BASE_URL_ENV]
+    return (
+      (typeof input.baseUrl === 'string' && input.baseUrl.trim().length > 0) ||
+      (typeof envBaseUrl === 'string' && envBaseUrl.trim().length > 0)
+    )
+  }
+
+  function readLocalProviderConfig() {
+    try {
+      const configs = readConfiguredDeviceSyncProviderConfigs(process.env)
+      const configuredProviders = listConfiguredDeviceSyncProviderNames(configs)
 
       return {
-        baseUrl: client.baseUrl,
-        providers: result.providers,
+        configuredProviderSet: new Set<string>(configuredProviders),
+        configuredProviders,
+        errorMessage: null,
+      }
+    } catch (error) {
+      return {
+        configuredProviderSet: new Set<string>(),
+        configuredProviders: [],
+        errorMessage: error instanceof Error
+          ? error.message
+          : 'Local provider configuration could not be inspected.',
+      }
+    }
+  }
+
+  async function readLocalAvailability(input: {
+    vault: string
+    baseUrl?: string
+  }) {
+    const { configuredProviders, errorMessage } = readLocalProviderConfig()
+    const status = await getManagedDeviceSyncDaemonStatus({
+      vault: input.vault,
+      baseUrl: input.baseUrl,
+    })
+    const localStatus = summarizeLocalAvailabilityStatus(
+      status,
+      configuredProviders,
+    )
+
+    return {
+      baseUrl: status.baseUrl,
+      status: localStatus,
+      configuredProviders,
+      message:
+        localStatus === 'not_configured'
+          ? errorMessage ?? status.message
+          : status.message,
+    } as const
+  }
+
+  return {
+    async listProviders(input) {
+      if (hasExplicitControlPlaneTarget(input)) {
+        const client = await createControlPlaneClient(input)
+        const result = await client.listProviders()
+
+        return {
+          baseUrl: client.baseUrl,
+          providers: result.providers,
+        }
+      }
+
+      const vault = requireDeviceVault(input.vault)
+      const { configuredProviderSet } = readLocalProviderConfig()
+      const local = await readLocalAvailability({
+        vault,
+        baseUrl: input.baseUrl,
+      })
+      const controlPlane = local.status === 'healthy'
+        ? await resolveExistingManagedDeviceSyncControlPlane({
+            vault,
+            baseUrl: input.baseUrl,
+          })
+        : null
+
+      if (controlPlane) {
+        const client = createDeviceSyncClient({
+          baseUrl: controlPlane.baseUrl,
+          controlToken: controlPlane.controlToken,
+        })
+        const result = await client.listProviders()
+
+        return {
+          baseUrl: client.baseUrl,
+          local,
+          providers: result.providers.map((provider) => ({
+            ...provider,
+            source: 'local_control_plane' as const,
+            localConfigured: true,
+          })),
+        }
+      }
+
+      return {
+        local,
+        providers: listDeviceSyncProviderCatalog().map((provider) => ({
+          ...provider,
+          source: 'catalog' as const,
+          callbackUrl: null,
+          webhookUrl: null,
+          localConfigured: configuredProviderSet.has(provider.provider),
+        })),
       }
     },
     async connect(input) {
@@ -120,13 +227,50 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async listAccounts(input) {
-      const client = await createControlPlaneClient(input)
+      if (hasExplicitControlPlaneTarget(input)) {
+        const client = await createControlPlaneClient(input)
+        const result = await client.listAccounts({
+          provider: input.provider,
+        })
+
+        return {
+          baseUrl: client.baseUrl,
+          provider: input.provider ?? null,
+          accounts: result.accounts,
+        }
+      }
+
+      const vault = requireDeviceVault(input.vault)
+      const local = await readLocalAvailability({
+        vault,
+        baseUrl: input.baseUrl,
+      })
+      const controlPlane = local.status === 'healthy'
+        ? await resolveExistingManagedDeviceSyncControlPlane({
+            vault,
+            baseUrl: input.baseUrl,
+          })
+        : null
+
+      if (!controlPlane) {
+        return {
+          local,
+          provider: input.provider ?? null,
+          accounts: [],
+        }
+      }
+
+      const client = createDeviceSyncClient({
+        baseUrl: controlPlane.baseUrl,
+        controlToken: controlPlane.controlToken,
+      })
       const result = await client.listAccounts({
         provider: input.provider,
       })
 
       return {
         baseUrl: client.baseUrl,
+        local,
         provider: input.provider ?? null,
         accounts: result.accounts,
       }
@@ -178,6 +322,40 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       })
     },
   } satisfies DeviceSyncServices
+}
+
+function requireDeviceVault(vault: string | null | undefined): string {
+  if (typeof vault === 'string' && vault.trim().length > 0) {
+    return vault.trim()
+  }
+
+  throw new Error('Device commands require a vault path.')
+}
+
+function summarizeLocalAvailabilityStatus(
+  status: DeviceDaemonStatusResult,
+  configuredProviders: readonly string[],
+): 'healthy' | 'not_configured' | 'not_running' | 'unhealthy' | 'conflict' {
+  if (status.healthy && status.running) {
+    return 'healthy'
+  }
+
+  if (
+    status.message?.includes('not managed by this Murph vault') ||
+    status.message?.includes('already listening')
+  ) {
+    return 'conflict'
+  }
+
+  if (status.managed || status.pid !== null) {
+    return 'unhealthy'
+  }
+
+  if (configuredProviders.length === 0) {
+    return 'not_configured'
+  }
+
+  return 'not_running'
 }
 
 function createUnwiredServiceGroup<TServiceGroup extends object>(

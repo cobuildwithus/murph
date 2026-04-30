@@ -55,7 +55,7 @@ const deviceControlOptionsSchema = withBaseOptions({
   baseUrl: deviceSyncBaseUrlSchema
     .optional()
     .describe(
-      'Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.',
+      'Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.',
     ),
 })
 
@@ -80,12 +80,12 @@ export function registerDeviceCommands(
 
   const provider = Cli.create('provider', {
     description:
-      'List the provider connectors currently registered in the local device sync control plane.',
+      'List supported device providers plus local daemon availability.',
   })
 
   provider.command('list', {
     description:
-      'List device sync providers and their callback/webhook descriptors.',
+      'List the provider catalog without starting the local daemon; include live local descriptors when a daemon is already available.',
     args: emptyArgsSchema,
     options: deviceControlOptionsSchema,
     output: deviceProviderListResultSchema,
@@ -141,7 +141,7 @@ export function registerDeviceCommands(
 
   account.command('list', {
     description:
-      'List known device sync accounts, optionally filtered to one provider.',
+      'List local daemon device accounts when an explicit or already-running control plane is available.',
     args: emptyArgsSchema,
     options: deviceControlOptionsSchema.extend({
       provider: providerNameSchema.optional(),

@@ -151,6 +151,7 @@ export {
   deviceSyncProviderManifests,
   getConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
+  listDeviceSyncProviderCatalog,
   listConfiguredDeviceSyncProviderManifests,
   normalizeConfiguredDeviceSyncJobInput,
   normalizeConfiguredDeviceSyncJobRecord,
@@ -181,6 +182,7 @@ export type {
 } from "./config/provider-configs.ts";
 export type {
   ConfiguredDeviceSyncProviderCapabilities,
+  DeviceSyncProviderCatalogEntry,
   DeviceSyncJobPayloadFieldKind,
   DeviceSyncJobPayloadFieldSpec,
   DeviceSyncProviderJobDefinition,

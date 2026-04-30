@@ -2875,7 +2875,7 @@
                           "maxLength": 128
                         },
                         "baseUrl": {
-                          "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
+                          "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -2920,7 +2920,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
+                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -2960,7 +2960,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
+                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -2993,7 +2993,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
+                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3021,7 +3021,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
+                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3049,7 +3049,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
+                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -9854,6 +9854,11 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 128
+                                },
+                                "date": {
+                                  "description": "Optional intended local session date in YYYY-MM-DD form.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "occurredAt": {
                                   "description": "Optional session timestamp in ISO 8601 form or YYYY-MM-DD form.",

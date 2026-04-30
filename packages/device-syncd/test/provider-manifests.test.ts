@@ -9,6 +9,7 @@ import {
   deviceSyncProviderRuntimeVariableEnvKeys,
   getConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
+  listDeviceSyncProviderCatalog,
   normalizeConfiguredDeviceSyncJobInput,
   normalizeConfiguredDeviceSyncJobRecord,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
@@ -87,6 +88,19 @@ describe("deviceSyncProviderManifests", () => {
     expect([...deviceSyncProviderRuntimeVariableEnvKeys]).toEqual(
       [...new Set(deviceSyncProviderManifests.flatMap((manifest) => manifest.env.variableKeys))],
     );
+  });
+
+  it("lists a redacted provider catalog without runtime config or URLs", () => {
+    const catalog = listDeviceSyncProviderCatalog();
+
+    expect(catalog.map((provider) => provider.provider)).toEqual(configuredDeviceSyncProviderKeys);
+    expect(catalog.find((provider) => provider.provider === "whoop")).toMatchObject({
+      displayName: "WHOOP",
+      callbackPath: "/oauth/whoop/callback",
+      webhookPath: "/webhooks/whoop",
+      supportsWebhooks: true,
+    });
+    expect(JSON.stringify(catalog)).not.toMatch(/clientSecret|clientId|readConfig|createProvider/u);
   });
 
   it("reads configured providers and creates runtime providers through the manifest registry", () => {
