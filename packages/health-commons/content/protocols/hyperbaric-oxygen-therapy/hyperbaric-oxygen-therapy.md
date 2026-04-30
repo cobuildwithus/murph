@@ -33,7 +33,10 @@ relations:
     target: "experiment_family:hyperbaric-oxygen-therapy"
   -
     type: "primary_biomarker"
-    target: "biomarker:sleep-efficiency"
+    target: "biomarker:morning-blood-pressure"
+  -
+    type: "secondary_biomarker"
+    target: "biomarker:estimated-vo2max"
   -
     type: "secondary_biomarker"
     target: "biomarker:resting-heart-rate"
@@ -562,11 +565,12 @@ protocol:
     - "ear or sinus symptoms and equalization difficulty"
     - "vision changes"
     - "anxiety or claustrophobia"
-    - "glucose or blood-pressure checks if relevant"
+    - "pre- and post-session blood pressure checks if relevant"
+    - "glucose checks or CGM lows if diabetes or hypoglycemia risk is present"
     - "other adverse events or staff interventions"
     - "session paused shortened or stopped"
-    - "sleep efficiency recovery context"
-    - "resting heart rate and HRV context"
+    - "same-device VO2 max or cardio-fitness estimate if performance tracking is relevant"
+    - "resting heart rate and HRV recovery context"
   stopConditions:
     - "Do not start an unsupervised course without a current clinician prescription and medically supervised facility safety controls."
     - "Stop or defer immediately if the facility or clinician identifies untreated pneumothorax, unsafe device/implant compatibility, intraocular gas, prohibited materials, or another absolute safety issue."
@@ -579,8 +583,9 @@ testPlans:
     durationDays: 49
     baselineDays: 7
     interventionDays: 42
-    primaryBiomarkerKey: "biomarker:sleep-efficiency"
+    primaryBiomarkerKey: "biomarker:morning-blood-pressure"
     secondaryBiomarkerKeys:
+      - "biomarker:estimated-vo2max"
       - "biomarker:resting-heart-rate"
       - "biomarker:hrv-rmssd"
     minimumAdherenceSessions: 1
@@ -588,18 +593,56 @@ testPlans:
     notes:
       - "Use this only to track a clinician-prescribed HBOT course; Murph should not recommend or initiate HBOT as a self-experiment."
       - "Replace the default intervention window and target sessions with the actual care plan when the prescription is known."
-      - "Sleep efficiency is the primary Murph signal; resting heart rate and HRV are supporting recovery context, not promised HBOT benefits."
+      - "Blood pressure is the primary Murph signal because HBOT can acutely raise pressure; glucose checks belong in session logs for diabetes or hypoglycemia risk."
+      - "VO2 max or wearable cardio-fitness is relevant when the course resembles the older-adult performance protocol or the user already tracks it; resting heart rate and HRV are recovery context."
       - "Disease-specific benefit should be judged by clinician-defined outcomes, not by wearable proxies."
 expectedSignalDescriptions:
   -
-    biomarkerKey: "biomarker:sleep-efficiency"
-    description: "A prescribed HBOT course adds travel, time in the chamber, and possible symptoms. That load can break up sleep, while symptom relief may let sleep settle."
+    biomarkerKey: "biomarker:morning-blood-pressure"
+    description: "Pressurized oxygen tightens blood vessels during and after a session. Same-cuff readings before and after treatment catch the BP rise most likely to matter, especially for people who start hypertensive."
+    expected: "Watch for post-session rise"
+    estimatedChange:
+      kind: "absolute"
+      low: 6
+      high: 16
+      unit: "mmHg"
+      window: "pre/post session"
+      confidence: "moderate"
+      basis: "Direct HBOT safety cohort: average post-session blood-pressure rise was about +6 mmHg in normotensive sessions and +16.2 mmHg in hypertensive sessions."
+    protocolProminence: "focus"
+  -
+    biomarkerKey: "biomarker:estimated-vo2max"
+    description: "Repeated intermittent hyperoxia under pressure pushes extra oxygen into plasma and changes vascular and cardiac perfusion. In the older-adult performance protocol, the measurable signal was higher VO2 max, not just feeling more energetic."
+    expected: "Could improve in 60-session courses"
+    estimatedChange:
+      kind: "absolute"
+      low: 1
+      high: 3
+      unit: "mL/kg/min"
+      window: "12 weeks / 60 sessions"
+      confidence: "low"
+      basis: "Single 63-person sedentary older-adult RCT reported a net VO2max/kg increase of 1.91 ± 3.29 mL/kg/min versus control; other indications and course designs may not match."
+    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:resting-heart-rate"
-    description: "Ear pain, chamber anxiety, glucose or blood-pressure swings, and post-session fatigue can raise overnight pulse. If sessions are well tolerated, resting pulse may stay stable or ease."
+    description: "Pressure equalization, confinement anxiety, BP or glucose swings, and post-session fatigue all add recovery load. Overnight pulse shows whether that load is carrying into rest."
+    expected: "Watch for recovery load"
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "overnight trend during course"
+      confidence: "low"
+      basis: "The extracted HBOT evidence supports BP, glucose, adverse-event, and VO2 monitoring more directly than RHR; use same-device RHR as tolerability context."
+    protocolProminence: "context"
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "HRV may fall when pressure changes, symptoms, anxiety, or fatigue keep the nervous system activated after sessions. It may stabilize if the course adds little stress."
+    description: "Pressure changes, anxiety, illness, or fatigue keep autonomic tone elevated after treatment. Same-device RMSSD helps separate an easy course from one suppressing recovery."
+    expected: "Watch for strain"
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "overnight trend during course"
+      confidence: "low"
+      basis: "No extracted HBOT trial gives a reliable RMSSD effect size for this broad protocol; HRV is useful for recovery interpretation, not efficacy scoring."
+    protocolProminence: "context"
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
