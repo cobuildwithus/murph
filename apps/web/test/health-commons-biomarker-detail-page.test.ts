@@ -9,6 +9,7 @@ import {
 } from "@murphai/contracts";
 import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
 
+import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail/biomarker-about-grid";
 import {
   listHealthCommonsBiomarkerRoutes,
   resolveHealthCommonsBiomarkerDetail,
@@ -504,6 +505,23 @@ describe("BiomarkerPage", () => {
       ?.biomarker as BiomarkerPageModel;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
+      about: [
+        {
+          body: "It can reflect aerobic fitness, recovery load, sleep disruption, stress, illness, alcohol, and whether an experiment is adding too much strain.",
+          iconKey: "whyPeopleCare",
+          title: "Why people care",
+        },
+        {
+          body: "Use the same wearable or the same quiet morning resting method. Compare like-with-like windows rather than mixing devices or time-of-day contexts.",
+          iconKey: "howToMeasure",
+          title: "How to measure it",
+        },
+        {
+          body: "Cardio training, sleep, alcohol, heat exposure, illness, hard training, travel, dehydration, medications, and stress can all move RHR.",
+          iconKey: "whatMovesIt",
+          title: "What moves it",
+        },
+      ],
       key: "biomarker:resting-heart-rate",
       routeId: "resting-heart-rate",
       shortName: "RHR",
@@ -545,6 +563,57 @@ describe("BiomarkerPage", () => {
     expect(markup).toContain('data-biomarker-id="resting-heart-rate"');
     expect(markup).toContain('data-biomarker-key="biomarker:resting-heart-rate"');
     expect(markup).toContain("Resting Heart Rate");
+  });
+
+  it("renders the resting-heart-rate about grid from Health Commons markdown", () => {
+    const detail = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+
+    expect(detail).not.toBeNull();
+    if (!detail) {
+      throw new Error("Expected resting-heart-rate detail.");
+    }
+
+    const markup = renderToStaticMarkup(createElement(BiomarkerAboutGrid, {
+      biomarker: detail,
+    }));
+
+    expect(markup).toContain("Why people care");
+    expect(markup).toContain("How to measure it");
+    expect(markup).toContain("What moves it");
+    expect(markup).toContain(
+      "It can reflect aerobic fitness, recovery load, sleep disruption, stress, illness, alcohol, and whether an experiment is adding too much strain.",
+    );
+    expect(markup).toContain(
+      "Use the same wearable or the same quiet morning resting method. Compare like-with-like windows rather than mixing devices or time-of-day contexts.",
+    );
+    expect(markup).toContain(
+      "Cardio training, sleep, alcohol, heat exposure, illness, hard training, travel, dehydration, medications, and stress can all move RHR.",
+    );
+  });
+
+  it("keeps three about columns for every published generated biomarker page", () => {
+    const publishedRoutes = generateStaticParams().map((param) => param.biomarkerId);
+
+    for (const routeId of publishedRoutes) {
+      const detail = resolveHealthCommonsBiomarkerDetail(routeId);
+
+      expect(detail?.about, routeId).toHaveLength(3);
+    }
+
+    expect(resolveHealthCommonsBiomarkerDetail("blood-oxygen-spo2")?.about).toEqual([
+      expect.objectContaining({
+        iconKey: "whyPeopleCare",
+        title: "Why people care",
+      }),
+      expect.objectContaining({
+        iconKey: "howToMeasure",
+        title: "How to read it",
+      }),
+      expect.objectContaining({
+        iconKey: "whatMovesIt",
+        title: "What can fool it",
+      }),
+    ]);
   });
 
   it("returns metadata for the published RHR biomarker page", async () => {
