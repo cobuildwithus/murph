@@ -4,10 +4,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/src/components/ui/sidebar";
-import {
-  resolvePreferredMurphChatContactOption,
-} from "@/src/lib/murph-contact-routing";
-import { getHostedMurphContactContext } from "@/src/lib/hosted-onboarding/hosted-contact-context";
+import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { cn } from "@/src/lib/utils";
 
 const SIDEBAR_CHAT_MENU_BUTTON_CLASS =
@@ -30,11 +28,7 @@ export function SidebarChatWithMurphFallback() {
 }
 
 export async function SidebarChatWithMurphAction() {
-  const { initialContactChannels, murphPhoneNumber } = await getHostedMurphContactContext();
-  const option = resolvePreferredMurphChatContactOption({
-    contactChannels: initialContactChannels,
-    murphPhoneNumber,
-  });
+  const option = await resolveHostedMurphContactOption();
 
   if (!option) {
     return <SidebarChatWithMurphFallback />;
@@ -45,31 +39,16 @@ export async function SidebarChatWithMurphAction() {
       <SidebarMenuButton
         size="lg"
         className={SIDEBAR_CHAT_MENU_BUTTON_CLASS}
-        render={<SidebarChatWithMurphLink option={option} />}
+        render={
+          <MurphContactLink
+            actionLabel="Chat with Murph"
+            option={option}
+          >
+            <MessageCircle className="size-5 shrink-0" />
+            Chat with Murph
+          </MurphContactLink>
+        }
       />
     </SidebarMenuItem>
-  );
-}
-
-function SidebarChatWithMurphLink({
-  option,
-}: {
-  option: NonNullable<ReturnType<typeof resolvePreferredMurphChatContactOption>>;
-}) {
-  const opensInNewTab = option.target === "_blank";
-
-  return (
-    <a
-      href={option.href}
-      target={option.target}
-      rel={option.rel}
-      aria-label={`Chat with Murph in ${option.label}${
-        opensInNewTab ? " (opens in a new tab)" : ""
-      }`}
-    >
-      <MessageCircle className="size-5 shrink-0" />
-      Chat with Murph
-      {opensInNewTab ? <span className="sr-only"> Opens in a new tab.</span> : null}
-    </a>
   );
 }

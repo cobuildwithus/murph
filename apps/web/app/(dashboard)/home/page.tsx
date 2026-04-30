@@ -1,7 +1,12 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
+import {
+  UploadLabsActionFallback,
+  UploadLabsMurphContactAction,
+} from "@/src/components/home/upload-labs-action";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -25,7 +30,13 @@ export default function HomePage() {
         </p>
       </div>
 
-      <OnboardingSteps />
+      <OnboardingSteps
+        uploadLabsAction={
+          <Suspense fallback={<UploadLabsActionFallback />}>
+            <UploadLabsMurphContactAction />
+          </Suspense>
+        }
+      />
       <FeatureHighlights />
     </div>
   );
