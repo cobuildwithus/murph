@@ -416,14 +416,17 @@ Only ask the user to intervene for:
 - Research send helpers live under each workspace `commands/`
 - Thread export/download/wake primitives come from `cobuild-review-gpt thread ...`
 
-When writing or editing research prompts, keep claims conservative and evidence-led:
+When writing or editing research prompts, keep claims evidence-led and useful in the protocol UI:
 
 - no invented identifiers or sample sizes
 - preserve null, mixed, negative, safety, and mismatch findings
 - keep adjacent variants separate unless extraction proves a merge
-- keep safety language stronger than efficacy where evidence is thin
-- choose protocol signal markers that are not just the protocol exposure or adherence metric. Daily step count is assumed to be logged for Daily Step Floor, and daily protein intake is assumed to be logged for Protein Floor; primary/secondary markers should usually be downstream responses unless the protocol is explicitly an adherence experiment
-- prefer primary UI markers that are objective and easy to measure from ordinary Murph data when a credible downstream signal exists; subjective or process-adjacent markers like sedentary time, walking-bout minutes, or musculoskeletal pain belong lower in the stack as `also worth watching` unless they are the protocol's actual reason to run
+- keep safety boundaries visible without turning every mechanism sentence into hedging
+- for `expectedSignalDescriptions`, write concise mechanism-first copy: what the protocol changes in the body or behavior, and why that could plausibly move the biomarker
+- prefer objective, downstream markers that people can reasonably check with wearables, sensors, home devices, or standard labs when a credible signal exists, such as resting heart rate, HRV/RMSSD, sleep metrics, blood pressure, CGM/glucose, lipids, ApoB, body weight, body composition, VO2 max, creatinine/eGFR, and liver enzymes
+- use subjective outcomes only when they are central to why someone would run the protocol or when there is no better measurable signal
+- do not promote tautological exposure or adherence metrics as outcome wins. Daily step count for Daily Step Floor, daily protein intake for Protein Floor, sauna sessions, supplement adherence, alcohol-free days, dose completion, and similar fields are usually exposure/adherence context, not primary proof the protocol worked
+- for `estimatedChange`, provide a best-effort estimate in the clearest marker-specific unit when defensible, such as bpm, mmHg, minutes, %, kg, mg/dL, mmol/L, score points, or similar; use `mixed_or_contextual` only when a numeric range would mislead
 - write the protocol frontmatter `summary:` field directly below `title:` using `agent-docs/product-specs/protocol-summary-copy.md` as the source of truth
 - keep internal source keys out of user-facing Health Commons prose; preserve them only in structured source-key fields, ledgers, source pages, evidence appraisals, and manifests
 - never put `Source basis:`, `Sources: source_artifact:...`, `Safety basis: source_artifact:...`, or similar internal source-key footnotes inside user-facing protocol, family, or biomarker copy/descriptions
