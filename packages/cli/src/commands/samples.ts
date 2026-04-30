@@ -19,12 +19,15 @@ import {
   listItemSchema,
   localDateSchema,
   pathSchema,
+  samplesCsvProfileResultSchema,
   showResultSchema,
   samplesImportCsvResultSchema,
+  samplesSummarizeResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
   importCsvSamples as importCsvSamplesWithArtifacts,
+  profileCsvSampleFile as profileCsvSampleFileWithArtifacts,
 } from './sample-import-command-helpers.js'
 import {
   listSampleBatches as listSampleBatchesWithArtifacts,
@@ -33,6 +36,7 @@ import {
 import {
   listSamples as listSamplesWithArtifacts,
   showSample as showSampleWithArtifacts,
+  summarizeSampleWindow as summarizeSampleWindowWithArtifacts,
 } from './sample-query-command-helpers.js'
 import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 
@@ -72,6 +76,47 @@ function normalizeBatchSourceFileName(value: string): string {
   }
 
   return fileName
+}
+
+const sampleSummaryProfileSchema = z
+  .enum(['oxygen-night'])
+  .describe('Optional summary preset. oxygen-night adds SpO2 thresholds and a cautious oxygen-trace screen.')
+
+function normalizeThresholdBelowOption(value: number[] | undefined): number[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const entries = [...new Set(value.filter((entry) => Number.isFinite(entry)))]
+  return entries.length > 0 ? entries : undefined
+}
+
+function buildCsvImportOptions(options: {
+  delimiter?: string
+  metadataColumns?: string[]
+  preset?: string
+  requestId?: string
+  source?: string
+  stream?: string
+  tsColumn?: string
+  unit?: string
+  valueColumn?: string
+  vault: string
+}) {
+  return {
+    delimiter: options.delimiter,
+    metadataColumns: normalizeRepeatableFlagOption(
+      options.metadataColumns,
+      'metadata-columns',
+    ),
+    presetId: options.preset,
+    requestId: requestIdFromOptions(options),
+    source: options.source,
+    stream: options.stream,
+    tsColumn: options.tsColumn,
+    valueColumn: options.valueColumn,
+    unit: options.unit,
+  }
 }
 
 const sampleListItemSchema = listItemSchema.extend({
@@ -605,25 +650,207 @@ export function registerSamplesCommands(
       }),
       output: samplesImportCsvResultSchema,
       async run({ args, options }) {
+        const csvOptions = buildCsvImportOptions(options)
         return importCsvSamplesWithArtifacts({
-          delimiter: options.delimiter,
+          ...csvOptions,
           file: args.file,
-          metadataColumns: normalizeRepeatableFlagOption(
-            options.metadataColumns,
-            'metadata-columns',
-          ),
-          presetId: options.preset,
-          requestId: requestIdFromOptions(options),
-          source: options.source,
-          stream: options.stream,
-          tsColumn: options.tsColumn,
-          valueColumn: options.valueColumn,
-          unit: options.unit,
           vault: options.vault,
         })
       },
     },
   )
+
+  const csv = Cli.create('csv', {
+    description: 'CSV sample planning and import commands.',
+  })
+
+  csv.command(
+    'profile',
+    {
+      description: 'Profile a timestamped sample CSV without writing to the vault.',
+      args: z.object({
+        file: pathSchema.describe('Source CSV file to profile.'),
+      }),
+      options: withBaseOptions({
+        preset: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional preset id that supplies stream, delimiter, and column defaults.'),
+        stream: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional stream identifier. Recognized aliases such as SpO2 are accepted.'),
+        tsColumn: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional timestamp column override.'),
+        valueColumn: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional numeric value column override.'),
+        unit: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional unit override.'),
+        delimiter: z
+          .string()
+          .length(1)
+          .optional()
+          .describe('Optional single-character CSV delimiter override.'),
+        metadataColumns: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Optional metadata columns to copy into batch provenance rows. Repeat --metadata-columns for multiple values.',
+          ),
+        source: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional sample source hint such as import, device, or manual.'),
+        includeSummary: z
+          .boolean()
+          .optional()
+          .describe('Include pre-write summaries for the planned numeric streams.'),
+        summaryProfile: sampleSummaryProfileSchema.optional(),
+        thresholdBelow: z
+          .array(z.coerce.number())
+          .optional()
+          .describe('Threshold burden to compute as value-below-N. Repeat --threshold-below for multiple thresholds.'),
+        gapSeconds: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Minimum inter-sample gap, in seconds, used for gap and run detection.'),
+      }),
+      output: samplesCsvProfileResultSchema,
+      async run({ args, options }) {
+        const csvOptions = buildCsvImportOptions(options)
+        return samplesCsvProfileResultSchema.parse(await profileCsvSampleFileWithArtifacts({
+          ...csvOptions,
+          file: args.file,
+          gapSeconds: options.gapSeconds,
+          includeSummary: options.includeSummary,
+          summaryProfile: options.summaryProfile,
+          thresholdBelow: normalizeThresholdBelowOption(options.thresholdBelow),
+          vault: options.vault,
+        }))
+      },
+    },
+  )
+
+  csv.command(
+    'import',
+    {
+      description: 'Import timestamped numeric samples from a CSV file.',
+      args: z.object({
+        file: pathSchema.describe('Source CSV file to import.'),
+      }),
+      options: withBaseOptions({
+        preset: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional preset id that supplies stream, delimiter, and column defaults.'),
+        stream: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional stream identifier. Recognized aliases such as SpO2 are accepted.'),
+        tsColumn: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional timestamp column override.'),
+        valueColumn: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional numeric value column override.'),
+        unit: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional unit override.'),
+        delimiter: z
+          .string()
+          .length(1)
+          .optional()
+          .describe('Optional single-character CSV delimiter override.'),
+        metadataColumns: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Optional metadata columns to copy into batch provenance rows. Repeat --metadata-columns for multiple values.',
+          ),
+        source: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional sample source override such as import, device, or manual.'),
+      }),
+      output: samplesImportCsvResultSchema,
+      async run({ args, options }) {
+        const csvOptions = buildCsvImportOptions(options)
+        return importCsvSamplesWithArtifacts({
+          ...csvOptions,
+          file: args.file,
+          vault: options.vault,
+        })
+      },
+    },
+  )
+
+  samples.command(csv)
+
+  samples.command('summarize', {
+    description: 'Summarize stored samples for one stream across a time window.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      stream: z.string().min(1).describe('Sample stream to summarize, such as spo2 or heart_rate.'),
+      from: z
+        .string()
+        .pipe(isoTimestampSchema)
+        .optional()
+        .describe('Inclusive lower timestamp bound.'),
+      to: z
+        .string()
+        .pipe(isoTimestampSchema)
+        .optional()
+        .describe('Inclusive upper timestamp bound.'),
+      profile: sampleSummaryProfileSchema.optional(),
+      thresholdBelow: z
+        .array(z.coerce.number())
+        .optional()
+        .describe('Threshold burden to compute as value-below-N. Repeat --threshold-below for multiple thresholds.'),
+      gapSeconds: z
+        .number()
+        .positive()
+        .optional()
+        .describe('Minimum inter-sample gap, in seconds, used for gap and run detection.'),
+    }),
+    output: samplesSummarizeResultSchema,
+    async run({ options }) {
+      const summary = await summarizeSampleWindowWithArtifacts(options.vault, {
+        stream: options.stream,
+        from: options.from,
+        to: options.to,
+        profile: options.profile,
+        thresholdBelow: normalizeThresholdBelowOption(options.thresholdBelow),
+        gapSeconds: options.gapSeconds,
+      })
+
+      return {
+        vault: options.vault,
+        summary,
+      }
+    },
+  })
 
   samples.command('show', {
     description: 'Show one sample record by canonical sample id.',

@@ -18,6 +18,15 @@ export interface SampleListOptions {
   to?: string
 }
 
+export interface SampleSummarizeOptions {
+  from?: string
+  gapSeconds?: number
+  profile?: 'oxygen-night'
+  stream: string
+  thresholdBelow?: number[]
+  to?: string
+}
+
 export async function showSample(
   vaultRoot: string,
   sampleId: string,
@@ -50,4 +59,28 @@ export async function listSamples(
     .sort(compareByLatest)
 
   return applyLimit(items, options.limit).map(toSampleCommandListItem)
+}
+
+export async function summarizeSampleWindow(
+  vaultRoot: string,
+  options: SampleSummarizeOptions,
+) {
+  const query = await loadQueryRuntime()
+  const vault = await query.readVault(vaultRoot)
+
+  if (typeof query.summarizeSampleWindow !== 'function') {
+    throw new VaultCliError(
+      'runtime_unavailable',
+      'Query runtime does not expose sample window summaries.',
+    )
+  }
+
+  return query.summarizeSampleWindow(vault, {
+    stream: options.stream,
+    from: options.from,
+    to: options.to,
+    thresholdsBelow: options.thresholdBelow,
+    gapSeconds: options.gapSeconds,
+    profile: options.profile,
+  })
 }

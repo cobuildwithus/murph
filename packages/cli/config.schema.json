@@ -8430,6 +8430,234 @@
                     }
                   }
                 },
+                "csv": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "profile": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "preset": {
+                                  "description": "Optional preset id that supplies stream, delimiter, and column defaults.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "stream": {
+                                  "description": "Optional stream identifier. Recognized aliases such as SpO2 are accepted.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "tsColumn": {
+                                  "description": "Optional timestamp column override.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "valueColumn": {
+                                  "description": "Optional numeric value column override.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "unit": {
+                                  "description": "Optional unit override.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "delimiter": {
+                                  "description": "Optional single-character CSV delimiter override.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1
+                                },
+                                "metadataColumns": {
+                                  "description": "Optional metadata columns to copy into batch provenance rows. Repeat --metadata-columns for multiple values.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "source": {
+                                  "description": "Optional sample source hint such as import, device, or manual.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "includeSummary": {
+                                  "description": "Include pre-write summaries for the planned numeric streams.",
+                                  "type": "boolean"
+                                },
+                                "summaryProfile": {
+                                  "type": "string",
+                                  "enum": [
+                                    "oxygen-night"
+                                  ],
+                                  "description": "Optional summary preset. oxygen-night adds SpO2 thresholds and a cautious oxygen-trace screen."
+                                },
+                                "thresholdBelow": {
+                                  "description": "Threshold burden to compute as value-below-N. Repeat --threshold-below for multiple thresholds.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "gapSeconds": {
+                                  "description": "Minimum inter-sample gap, in seconds, used for gap and run detection.",
+                                  "type": "number",
+                                  "exclusiveMinimum": 0
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "import": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "preset": {
+                                  "description": "Optional preset id that supplies stream, delimiter, and column defaults.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "stream": {
+                                  "description": "Optional stream identifier. Recognized aliases such as SpO2 are accepted.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "tsColumn": {
+                                  "description": "Optional timestamp column override.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "valueColumn": {
+                                  "description": "Optional numeric value column override.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "unit": {
+                                  "description": "Optional unit override.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "delimiter": {
+                                  "description": "Optional single-character CSV delimiter override.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1
+                                },
+                                "metadataColumns": {
+                                  "description": "Optional metadata columns to copy into batch provenance rows. Repeat --metadata-columns for multiple values.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "source": {
+                                  "description": "Optional sample source override such as import, device, or manual.",
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "summarize": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "stream": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Sample stream to summarize, such as spo2 or heart_rate."
+                        },
+                        "from": {
+                          "description": "Inclusive lower timestamp bound.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "to": {
+                          "description": "Inclusive upper timestamp bound.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "profile": {
+                          "type": "string",
+                          "enum": [
+                            "oxygen-night"
+                          ],
+                          "description": "Optional summary preset. oxygen-night adds SpO2 thresholds and a cautious oxygen-trace screen."
+                        },
+                        "thresholdBelow": {
+                          "description": "Threshold burden to compute as value-below-N. Repeat --threshold-below for multiple thresholds.",
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "gapSeconds": {
+                          "description": "Minimum inter-sample gap, in seconds, used for gap and run detection.",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      }
+                    }
+                  }
+                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,

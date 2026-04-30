@@ -13,6 +13,8 @@ import {
   parseDelimitedRows,
   prepareCsvSampleImport,
   prepareMealImport,
+  profileCsvSampleFile,
+  summarizeSampleSeries,
 } from "../src/index.ts";
 import type { DocumentImportPayload } from "../src/index.ts";
 import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
@@ -223,6 +225,77 @@ test("importCsvSamples auto-imports multiple recognizable sample columns and nor
       { stream: "spo2", skippedCount: 1, transformId: "xfm_spy" },
       { stream: "heart_rate", skippedCount: 1, transformId: "xfm_spy" },
       { stream: "steps", skippedCount: 1, transformId: "xfm_spy" },
+    ],
+  );
+});
+
+test("profileCsvSampleFile exposes a non-mutating CSV plan with source hints and optional summaries", async () => {
+  const filePath = await createTempFile(
+    "O2Ring-export.csv",
+    [
+      "Time,Oxygen Level,Pulse Rate,Motion",
+      "00:55:47 Apr 17 2026,96%,75 bpm,0",
+      "00:55:48 Apr 17 2026,89%,74 bpm,0",
+      "00:55:49 Apr 17 2026,97%,73 bpm,0",
+      "   ,   ,   ,   ",
+    ].join("\n"),
+  );
+  const { calls } = createCorePortSpy();
+
+  const profile = await profileCsvSampleFile({
+    filePath,
+    includeSummary: true,
+    summaryProfile: "oxygen-night",
+  });
+
+  assert.equal(calls.samples.length, 0);
+  assert.equal(profile.file.kind, "csv");
+  assert.equal(profile.file.fileName, "O2Ring-export.csv");
+  assert.equal(profile.file.blankRowCount, 1);
+  assert.equal(profile.time.timestampColumn, "Time");
+  assert.equal(profile.sourceHints[0]?.id, "wellue-o2ring-csv");
+  assert.deepEqual(
+    profile.columns
+      .filter((column) => column.role === "sample_value")
+      .map((column) => [column.name, column.stream]),
+    [
+      ["Oxygen Level", "spo2"],
+      ["Pulse Rate", "heart_rate"],
+    ],
+  );
+  assert.equal(profile.series.find((entry) => entry.stream === "spo2")?.importableCount, 3);
+  assert.equal(profile.summaries?.find((entry) => entry.stream === "spo2")?.thresholds[1]?.below, 90);
+  assert.equal(profile.summaries?.find((entry) => entry.stream === "spo2")?.screen?.level, "normal_oxygen_trace");
+});
+
+test("summarizeSampleSeries computes threshold burden, runs, and gaps", () => {
+  const summary = summarizeSampleSeries({
+    stream: "spo2",
+    unit: "%",
+    profile: "oxygen-night",
+    samples: [
+      { recordedAt: "2026-04-17T00:00:00.000Z", value: 96 },
+      { recordedAt: "2026-04-17T00:00:01.000Z", value: 89 },
+      { recordedAt: "2026-04-17T00:00:02.000Z", value: 88 },
+      { recordedAt: "2026-04-17T00:00:10.000Z", value: 97 },
+      { recordedAt: "2026-04-17T00:00:11.000Z", value: 87 },
+    ],
+  });
+
+  assert.equal(summary.sampleCount, 5);
+  assert.equal(summary.sampleIntervalSeconds, 1);
+  assert.deepEqual(summary.gaps.map((gap) => gap.durationSeconds), [8]);
+  assert.deepEqual(
+    summary.thresholds.map((threshold) => ({
+      below: threshold.below,
+      sampleCount: threshold.sampleCount,
+      runCount: threshold.runCount,
+      longestRunSeconds: threshold.longestRunSeconds,
+    })),
+    [
+      { below: 92, sampleCount: 3, runCount: 2, longestRunSeconds: 2 },
+      { below: 90, sampleCount: 3, runCount: 2, longestRunSeconds: 2 },
+      { below: 88, sampleCount: 1, runCount: 1, longestRunSeconds: 1 },
     ],
   );
 });

@@ -2,7 +2,7 @@ import * as coreRuntime from "@murphai/core";
 
 import type { SamplePresetRegistry } from "./preset-registry.ts";
 import { importAssessmentResponse } from "./assessment/import-assessment-response.ts";
-import { importCsvSamples } from "./csv-sample-importer.ts";
+import { importCsvSamples, profileCsvSampleFile } from "./csv-sample-importer.ts";
 import { importDocument } from "./document-importer.ts";
 import {
   createDeviceProviderRegistry,
@@ -44,6 +44,11 @@ export function createImporters({
     importCsvSamples(input: unknown) {
       return importCsvSamples(input, {
         corePort: writer,
+        presetRegistry: registry,
+      });
+    },
+    profileCsvSampleFile(input: unknown) {
+      return profileCsvSampleFile(input, {
         presetRegistry: registry,
       });
     },

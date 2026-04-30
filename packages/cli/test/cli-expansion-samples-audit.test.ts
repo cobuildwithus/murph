@@ -75,6 +75,33 @@ test('samples import-csv schema exposes the expansion-only import options', asyn
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
+test('samples csv profile and summarize schemas expose composable profiling options', async () => {
+  const profileSchema = JSON.parse(
+    await runRawSliceCli(['samples', 'csv', 'profile', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const summarizeSchema = JSON.parse(
+    await runRawSliceCli(['samples', 'summarize', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('includeSummary' in profileSchema.options.properties, true)
+  assert.equal('summaryProfile' in profileSchema.options.properties, true)
+  assert.equal('thresholdBelow' in profileSchema.options.properties, true)
+  assert.deepEqual(profileSchema.options.required, ['vault'])
+  assert.equal('profile' in summarizeSchema.options.properties, true)
+  assert.equal('thresholdBelow' in summarizeSchema.options.properties, true)
+  assert.deepEqual(summarizeSchema.options.required, ['vault', 'stream'])
+})
+
 test.sequential('samples add records typed manual samples and validates stream-specific fields', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-samples-add-'))
 
@@ -210,6 +237,35 @@ test.sequential('samples commands support richer import options plus show/list/b
       'utf8',
     )
 
+    const profiled = await runSliceCli<{
+      file: { dataRowCount: number }
+      series: Array<{ stream: string; importableCount: number }>
+      summaries: Array<{ stream: string; sampleCount: number }>
+    }>([
+      'samples',
+      'csv',
+      'profile',
+      csvPath,
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'heart_rate',
+      '--ts-column',
+      'recorded_at',
+      '--value-column',
+      'value',
+      '--unit',
+      'bpm',
+      '--delimiter',
+      ';',
+      '--include-summary',
+    ])
+    assert.equal(profiled.ok, true)
+    assert.equal(profiled.meta?.command, 'samples csv profile')
+    assert.equal(requireData(profiled).file.dataRowCount, 2)
+    assert.deepEqual(requireData(profiled).series.map((entry) => entry.stream), ['heart_rate'])
+    assert.equal(requireData(profiled).summaries[0]?.sampleCount, 2)
+
     const imported = await runSliceCli<{
       imports: Array<{
         manifestFile: string | null
@@ -253,6 +309,32 @@ test.sequential('samples commands support richer import options plus show/list/b
     assert.match(String(requireData(imported).imports[0]?.transformId), /^xfm_/u)
     assert.equal(requireData(imported).lookupIds.length, 2)
     await access(path.join(vaultRoot, requireData(imported).imports[0]?.manifestFile ?? ''))
+
+    const summarized = await runSliceCli<{
+      summary: {
+        sampleCount: number
+        stream: string
+        thresholds: Array<{ below: number }>
+      }
+    }>([
+      'samples',
+      'summarize',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'heart_rate',
+      '--from',
+      '2026-03-12T08:00:00.000Z',
+      '--to',
+      '2026-03-12T08:05:00.000Z',
+      '--threshold-below',
+      '62',
+    ])
+    assert.equal(summarized.ok, true)
+    assert.equal(summarized.meta?.command, 'samples summarize')
+    assert.equal(requireData(summarized).summary.stream, 'heart_rate')
+    assert.equal(requireData(summarized).summary.sampleCount, 2)
+    assert.deepEqual(requireData(summarized).summary.thresholds.map((entry) => entry.below), [62])
 
     const csvMetadataColumns = await runSliceCli([
       'samples',
@@ -384,6 +466,28 @@ test.sequential('samples commands support richer import options plus show/list/b
       requireData(batchList).items.map((item) => item.batchId),
       [requireData(imported).imports[0]?.transformId],
     )
+
+    const nestedImported = await runSliceCli<{ streams: string[] }>([
+      'samples',
+      'csv',
+      'import',
+      csvPath,
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'heart_rate',
+      '--ts-column',
+      'recorded_at',
+      '--value-column',
+      'value',
+      '--unit',
+      'bpm',
+      '--delimiter',
+      ';',
+    ])
+    assert.equal(nestedImported.ok, true)
+    assert.equal(nestedImported.meta?.command, 'samples csv import')
+    assert.deepEqual(requireData(nestedImported).streams, ['heart_rate'])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

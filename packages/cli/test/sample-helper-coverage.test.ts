@@ -243,6 +243,93 @@ test('importCsvSamples resets the cached runtime after loader failures', async (
   assert.deepEqual(retried.lookupIds, ['smp_retry'])
 })
 
+test('profileCsvSampleFile normalizes runtime profile output', async () => {
+  const loadRuntimeModule = vi.fn(async () => ({
+    createImporters() {
+      return {
+        async profileCsvSampleFile(input: Record<string, unknown>) {
+          return {
+            sourcePath: input.filePath,
+            sourceFileName: 'samples.csv',
+            file: {
+              kind: 'csv',
+              fileName: 'samples.csv',
+              byteSize: 120,
+              delimiter: ',',
+              rowCount: 3,
+              dataRowCount: 2,
+              blankRowCount: 0,
+            },
+            columns: [
+              { name: 'Time', index: 0, role: 'timestamp' },
+              { name: 'Oxygen Level', index: 1, role: 'sample_value', stream: 'spo2', unit: '%' },
+            ],
+            time: {
+              timeZone: 'UTC',
+              timestampColumn: 'Time',
+              firstRecordedAt: '2026-04-17T00:00:00.000Z',
+              lastRecordedAt: '2026-04-17T00:00:01.000Z',
+              sampleIntervalSeconds: 1,
+              gapCount: 0,
+              gaps: [],
+            },
+            series: [
+              {
+                stream: 'spo2',
+                unit: '%',
+                valueColumn: 'Oxygen Level',
+                importableCount: 2,
+                skippedCount: 0,
+                skipReasons: [],
+                minValue: 95,
+                maxValue: 96,
+                averageValue: 95.5,
+                confidence: 0.98,
+              },
+            ],
+            sourceHints: [],
+            warnings: [],
+            summaries: input.includeSummary ? [{ stream: 'spo2', sampleCount: 2 }] : undefined,
+          }
+        },
+      }
+    },
+  }))
+
+  vi.doMock('@murphai/vault-usecases/runtime', () => ({
+    createRuntimeUnavailableError: vi.fn((operationType: string, error: unknown) =>
+      Object.assign(new Error(`runtime unavailable: ${operationType}`), {
+        code: 'runtime_unavailable',
+        cause: error,
+      }),
+    ),
+    loadRuntimeModule,
+  }))
+
+  const { profileCsvSampleFile } = await loadSampleImportHelpers()
+  const result = await profileCsvSampleFile({
+    file: '/tmp/samples.csv',
+    includeSummary: true,
+    summaryProfile: 'oxygen-night',
+    thresholdBelow: [92, 90],
+    vault: '/vaults/main',
+  })
+
+  assert.equal(loadRuntimeModule.mock.calls.length, 1)
+  assert.equal(result.vault, '/vaults/main')
+  assert.equal(result.sourceFile, '/tmp/samples.csv')
+  assert.deepEqual(result.file, {
+    kind: 'csv',
+    fileName: 'samples.csv',
+    byteSize: 120,
+    delimiter: ',',
+    rowCount: 3,
+    dataRowCount: 2,
+    blankRowCount: 0,
+  })
+  assert.deepEqual(result.summaries, [{ stream: 'spo2', sampleCount: 2 }])
+})
+
 test('listSampleBatches sorts, filters, and infers sample streams from stored manifests', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-batches-'))
   cleanupPaths.push(vaultRoot)
@@ -429,4 +516,56 @@ test('showSample and listSamples use the query runtime helpers for filtering and
       error.code === 'not_found' &&
       error.message === 'No sample found for "smp_missing".',
   )
+})
+
+test('summarizeSampleWindow delegates to the query runtime summary helper', async () => {
+  const loadQueryRuntime = vi.fn(async () => ({
+    async readVault(vaultRoot: string) {
+      return {
+        vaultRoot,
+        samples: [],
+      }
+    },
+    summarizeSampleWindow(vault: { vaultRoot: string }, input: Record<string, unknown>) {
+      assert.equal(vault.vaultRoot, '/vaults/main')
+      assert.deepEqual(input, {
+        stream: 'spo2',
+        from: '2026-04-17T00:00:00.000Z',
+        to: '2026-04-17T08:00:00.000Z',
+        thresholdsBelow: [92, 90],
+        gapSeconds: 3,
+        profile: 'oxygen-night',
+      })
+
+      return {
+        stream: 'spo2',
+        unit: '%',
+        sampleCount: 2,
+      }
+    },
+  }))
+
+  vi.doMock('@murphai/vault-usecases/helpers', () => ({
+    applyLimit: <T>(items: T[]) => items,
+    compareByLatest: () => 0,
+    loadQueryRuntime,
+    toCommandShowEntity: vi.fn(),
+    toSampleCommandListItem: vi.fn(),
+  }))
+
+  const { summarizeSampleWindow } = await loadSampleQueryHelpers()
+  const summary = await summarizeSampleWindow('/vaults/main', {
+    stream: 'spo2',
+    from: '2026-04-17T00:00:00.000Z',
+    to: '2026-04-17T08:00:00.000Z',
+    thresholdBelow: [92, 90],
+    gapSeconds: 3,
+    profile: 'oxygen-night',
+  })
+
+  assert.deepEqual(summary, {
+    stream: 'spo2',
+    unit: '%',
+    sampleCount: 2,
+  })
 })

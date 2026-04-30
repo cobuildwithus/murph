@@ -97,8 +97,8 @@ export type {
   ExperimentProtocolProjectionFields,
   ProtocolSummary,
 } from "./protocols.ts";
-export type { DailySampleSummary } from "./summaries.ts";
-export { summarizeDailySamples } from "./summaries.ts";
+export type { DailySampleSummary, SampleWindowSummaryFilter } from "./summaries.ts";
+export { summarizeDailySamples, summarizeSampleWindow } from "./summaries.ts";
 export {
   readMealNutritionTotals,
   summarizeMealNutritionTotals,

@@ -122,6 +122,9 @@ vault-cli meal manifest <id> --vault <path> [--request-id <id>]
 vault-cli samples add --vault <path> --stream <stream> --unit <unit> --recorded-at <ts> [--value <number>] [--source <source>] [--quality <quality>] [--stage <stage>] [--start-at <ts>] [--end-at <ts>] [--duration-minutes <n>] [--source-path <path>] [--batch-source-file-name <name>] [--batch-preset-id <id>] [--batch-delimiter <char>] [--batch-timestamp-column <name>] [--batch-value-column <name>] [--batch-metadata-columns <name> ...] [--request-id <id>]
 vault-cli samples import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
+vault-cli samples csv profile <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--include-summary] [--summary-profile oxygen-night] [--threshold-below <n> ...] [--gap-seconds <n>] [--request-id <id>]
+vault-cli samples csv import <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
+vault-cli samples summarize --vault <path> --stream <stream> [--from <ts>] [--to <ts>] [--profile oxygen-night] [--threshold-below <n> ...] [--gap-seconds <n>] [--request-id <id>]
 vault-cli samples show <id> --vault <path> [--request-id <id>]
 vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--request-id <id>]
 vault-cli samples batch show <id> --vault <path> [--request-id <id>]
@@ -236,7 +239,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
 - `intake` exposes `import | show | list | manifest | raw | project`.
-- `samples` exposes `add | import-json | import-csv | show | list | batch show | batch list`.
+- `samples` exposes `add | import-json | import-csv | csv profile | csv import | summarize | show | list | batch show | batch list`.
 - `experiment` is a lifecycle noun.
 - `journal` is a date-addressed document noun.
 - `vault` exposes `show | stats | repair | update`.
@@ -495,6 +498,100 @@ Saved workout formats are vault-local Markdown docs only. They store a reusable 
 
 The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `intervention_session` event plus one inferred or explicit `interventionType`, optional `durationMinutes`, and an optional `regimenId` link back to one therapy or habit regimen when the session should stay attached to a longer-running plan.
 
+### `samples csv profile`
+
+`samples csv profile` is the non-mutating companion to CSV import. It returns the planner's view of the file: detected columns, row counts, blank rows, inferred timestamp column, vault timezone assumption, candidate streams, skipped-row reasons, source-shape hints, and optional pre-write summaries. It must not write canonical samples, raw sample manifests, or audit ledger entries.
+
+When `--include-summary` is supplied, the command summarizes the planned numeric samples before write. `--summary-profile oxygen-night` adds the generic SpO2 thresholds `92`, `90`, and `88`, run/cluster detection, gap detection, and a cautious oxygen-trace screen. The screen is a data summary only; it must not diagnose or rule out sleep apnea.
+
+```json
+{
+  "vault": "<path>",
+  "sourceFile": "<path>",
+  "file": {
+    "kind": "csv",
+    "fileName": "export.csv",
+    "byteSize": 990000,
+    "delimiter": ",",
+    "rowCount": 30010,
+    "dataRowCount": 30009,
+    "blankRowCount": 0
+  },
+  "time": {
+    "timeZone": "America/New_York",
+    "timestampColumn": "Time",
+    "firstRecordedAt": "2026-04-17T04:55:47.000Z",
+    "lastRecordedAt": "2026-04-17T13:16:00.000Z",
+    "sampleIntervalSeconds": 1,
+    "gapCount": 0,
+    "gaps": []
+  },
+  "series": [
+    {
+      "stream": "spo2",
+      "unit": "%",
+      "valueColumn": "Oxygen Level",
+      "importableCount": 30009,
+      "skippedCount": 0,
+      "skipReasons": [],
+      "minValue": 88,
+      "maxValue": 99,
+      "averageValue": 96.6,
+      "confidence": 0.98
+    }
+  ],
+  "sourceHints": [
+    {
+      "id": "wellue-o2ring-csv",
+      "label": "O2Ring-style CSV",
+      "confidence": 0.86
+    }
+  ],
+  "warnings": []
+}
+```
+
+Source hints are advisory only. They may describe familiar export shapes, but durable records remain normal canonical `samples`; this command must not introduce device-specific sample records or a device-specific importer family.
+
+### `samples summarize`
+
+`samples summarize` reads stored canonical samples for one stream and one timestamp window, then runs the same generic summary engine used by pre-write CSV profiling.
+
+```json
+{
+  "vault": "<path>",
+  "summary": {
+    "stream": "spo2",
+    "unit": "%",
+    "from": "2026-04-17T04:55:47.000Z",
+    "to": "2026-04-17T13:16:00.000Z",
+    "sampleCount": 30009,
+    "numericSampleCount": 30009,
+    "firstSampleAt": "2026-04-17T04:55:47.000Z",
+    "lastSampleAt": "2026-04-17T13:16:00.000Z",
+    "durationSeconds": 30013,
+    "sampleIntervalSeconds": 1,
+    "minValue": 88,
+    "maxValue": 99,
+    "averageValue": 96.6,
+    "thresholds": [
+      {
+        "below": 90,
+        "sampleCount": 4,
+        "durationSeconds": 4,
+        "runCount": 1,
+        "clusterCount": 1,
+        "longestRunSeconds": 4
+      }
+    ],
+    "gaps": [],
+    "warnings": []
+  }
+}
+```
+
+For `--profile oxygen-night`, the summary defaults to SpO2 threshold burden below `92`, `90`, and `88`, reports longest runs and cluster counts, and may include a conservative `screen` field. The screen is intended for assistant grounding, not clinical diagnosis.
+
 ### `samples import-csv`
 
 ```json
@@ -533,7 +630,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 }
 ```
 
-Each entry in `imports` represents one stream-specific batch attempt. When a stream had no importable rows after best-effort parsing, that entry still reports `skippedCount` and `skipReasons`, but its `transformId`, `manifestFile`, `lookupIds`, and `ledgerFiles` stay empty or `null` because no canonical batch was written.
+Each entry in `imports` represents one stream-specific batch attempt. When a stream had no importable rows after best-effort parsing, that entry still reports `skippedCount` and `skipReasons`, but its `transformId`, `manifestFile`, `lookupIds`, and `ledgerFiles` stay empty or `null` because no canonical batch was written. `samples csv import` is the preferred composable spelling for the same import path; `samples import-csv` remains as a compatibility wrapper.
 
 `samples import-csv` should make a best-effort pass over real-world device exports: it may infer one shared timestamp column, import every recognizable metric column in the same file, normalize common naive timestamps using the vault timezone, parse obvious numeric suffixes such as `%`, `bpm`, and digit group separators, and skip malformed rows in provenance instead of failing the entire batch. It should fail only for true ambiguity, such as multiple plausible timestamp columns or multiple columns mapping to the same canonical stream.
 

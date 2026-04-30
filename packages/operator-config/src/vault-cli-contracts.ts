@@ -391,6 +391,112 @@ export const samplesImportCsvResultSchema = z.object({
   }),
 })
 
+const sampleSkipReasonSchema = z.object({
+  count: z.number().int().positive(),
+  reason: z.string().min(1),
+})
+
+const sampleWindowGapSchema = z.object({
+  from: isoTimestampSchema,
+  to: isoTimestampSchema,
+  durationSeconds: z.number().nonnegative(),
+})
+
+const sampleThresholdSummarySchema = z.object({
+  below: z.number(),
+  sampleCount: z.number().int().nonnegative(),
+  durationSeconds: z.number().nonnegative(),
+  runCount: z.number().int().nonnegative(),
+  clusterCount: z.number().int().nonnegative(),
+  longestRunSeconds: z.number().nonnegative(),
+})
+
+export const sampleWindowSummarySchema = z.object({
+  stream: z.string().min(1),
+  unit: z.string().min(1).nullable(),
+  from: isoTimestampSchema.nullable(),
+  to: isoTimestampSchema.nullable(),
+  sampleCount: z.number().int().nonnegative(),
+  numericSampleCount: z.number().int().nonnegative(),
+  firstSampleAt: isoTimestampSchema.nullable(),
+  lastSampleAt: isoTimestampSchema.nullable(),
+  durationSeconds: z.number().nonnegative().nullable(),
+  sampleIntervalSeconds: z.number().positive().nullable(),
+  minValue: z.number().nullable(),
+  maxValue: z.number().nullable(),
+  averageValue: z.number().nullable(),
+  thresholds: z.array(sampleThresholdSummarySchema),
+  gaps: z.array(sampleWindowGapSchema),
+  warnings: z.array(z.string().min(1)),
+  screen: z.object({
+    profile: z.literal('oxygen-night'),
+    level: z.enum([
+      'normal_oxygen_trace',
+      'borderline_oxygen_trace',
+      'concerning_oxygen_trace',
+    ]),
+    reasons: z.array(z.string().min(1)),
+    caveat: z.string().min(1),
+  }).optional(),
+})
+
+export const samplesSummarizeResultSchema = z.object({
+  vault: pathSchema,
+  summary: sampleWindowSummarySchema,
+})
+
+export const samplesCsvProfileResultSchema = z.object({
+  vault: pathSchema,
+  sourceFile: pathSchema,
+  vaultRoot: pathSchema.optional(),
+  sourcePath: pathSchema,
+  sourceFileName: z.string().min(1),
+  file: z.object({
+    kind: z.literal('csv'),
+    fileName: z.string().min(1),
+    byteSize: z.number().int().nonnegative(),
+    delimiter: z.string().min(1),
+    rowCount: z.number().int().nonnegative(),
+    dataRowCount: z.number().int().nonnegative(),
+    blankRowCount: z.number().int().nonnegative(),
+  }),
+  columns: z.array(z.object({
+    name: z.string(),
+    index: z.number().int().nonnegative(),
+    role: z.enum(['timestamp', 'sample_value', 'metadata', 'ignored']),
+    stream: z.string().min(1).optional(),
+    unit: z.string().min(1).optional(),
+  })),
+  time: z.object({
+    timeZone: timeZoneSchema,
+    timestampColumn: z.string().min(1),
+    firstRecordedAt: isoTimestampSchema.nullable(),
+    lastRecordedAt: isoTimestampSchema.nullable(),
+    sampleIntervalSeconds: z.number().positive().nullable(),
+    gapCount: z.number().int().nonnegative(),
+    gaps: z.array(sampleWindowGapSchema),
+  }),
+  series: z.array(z.object({
+    stream: z.string().min(1),
+    unit: z.string().min(1),
+    valueColumn: z.string().min(1),
+    importableCount: z.number().int().nonnegative(),
+    skippedCount: z.number().int().nonnegative(),
+    skipReasons: z.array(sampleSkipReasonSchema),
+    minValue: z.number().nullable(),
+    maxValue: z.number().nullable(),
+    averageValue: z.number().nullable(),
+    confidence: z.number().min(0).max(1),
+  })),
+  sourceHints: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    confidence: z.number().min(0).max(1),
+  })),
+  warnings: z.array(z.string().min(1)),
+  summaries: z.array(sampleWindowSummarySchema).optional(),
+})
+
 export const experimentCreateResultSchema = z.object({
   vault: pathSchema,
   experimentId: z.string().min(1),
@@ -532,6 +638,15 @@ export type WorkoutImportCsvResult = z.infer<typeof workoutImportCsvResultSchema
 export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
 export type SamplesImportCsvResult = z.infer<
   typeof samplesImportCsvResultSchema
+>
+export type SampleWindowSummaryResult = z.infer<
+  typeof sampleWindowSummarySchema
+>
+export type SamplesSummarizeResult = z.infer<
+  typeof samplesSummarizeResultSchema
+>
+export type SamplesCsvProfileResult = z.infer<
+  typeof samplesCsvProfileResultSchema
 >
 export type ExperimentCreateResult = z.infer<
   typeof experimentCreateResultSchema

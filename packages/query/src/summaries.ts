@@ -1,5 +1,10 @@
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { VaultReadModel } from "./read-model.ts";
+import {
+  summarizeSampleSeries,
+  type SampleSummaryProfile,
+  type SampleWindowSummary,
+} from "@murphai/importers";
 
 export interface DailySampleSummary {
   date: string;
@@ -23,6 +28,15 @@ export interface SampleSummaryFilter {
   to?: string;
   streams?: string[];
   experimentSlug?: string;
+}
+
+export interface SampleWindowSummaryFilter {
+  stream: string;
+  from?: string;
+  to?: string;
+  thresholdsBelow?: number[];
+  gapSeconds?: number;
+  profile?: SampleSummaryProfile;
 }
 
 export function summarizeDailySamples(
@@ -97,6 +111,32 @@ export function summarizeDailySamples(
   return [...groups.values()]
     .map(({ summary, values, unitSet }) => finalizeSummary(summary, values, unitSet))
     .sort(compareDailySampleSummaries);
+}
+
+export function summarizeSampleWindow(
+  vault: VaultReadModel,
+  filters: SampleWindowSummaryFilter,
+): SampleWindowSummary {
+  const samples = vault.samples
+    .filter((sample) => sample.stream === filters.stream)
+    .map((sample) => ({
+      recordedAt: sample.occurredAt ?? "",
+      value: getNumericValue(sample) ?? undefined,
+      unit: getString(sample.attributes.unit),
+    }))
+    .filter((sample) => sample.recordedAt.length > 0);
+  const units = [...new Set(samples.map((sample) => sample.unit).filter((unit): unit is string => unit !== null))].sort();
+
+  return summarizeSampleSeries({
+    stream: filters.stream,
+    unit: units.length === 1 ? units[0] : null,
+    samples,
+    from: filters.from,
+    to: filters.to,
+    thresholdsBelow: filters.thresholdsBelow,
+    gapSeconds: filters.gapSeconds,
+    profile: filters.profile,
+  });
 }
 
 function getOrCreateSummaryGroup(
