@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 
+import { PageHeader } from "@/src/components/ui/page-header";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+
+import { ConnectSourcesGrid } from "./connect-page-client";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Connect Devices — Murph",
@@ -25,193 +27,193 @@ type ConnectSource = {
 
 const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
-    description: "Recovery, strain, sleep, heart rate, and daily readiness from Whoop.",
+    description: "Recovery, strain, sleep, and heart rate.",
     id: "whoop",
     logo: logoAsset("whoop.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 96, 15),
     name: "Whoop",
   },
   {
-    description: "Logged workouts, routes, pace, distance, and activity history from MapMyFitness.",
+    description: "Workouts, routes, pace, and distance.",
     id: "mapmyfitness",
     logo: logoAsset("mapmyfitness.png"),
     name: "MapMyFitness",
   },
   {
-    description: "Ring-based sleep, recovery, temperature, movement, and metabolic insight signals from Ultrahuman.",
+    description: "Smart ring. Sleep, recovery, temperature, and movement.",
     id: "ultrahuman",
     logo: logoAsset("ultrahuman.png"),
     name: "Ultrahuman",
   },
   {
-    description: "Legacy Dexcom glucose readings and sensor trends from G6-era devices.",
+    description: "Continuous glucose and sensor trends.",
     id: "dexcom-g6-and-older",
     logo: logoAsset("dexcom-g6-and-older.png"),
     name: "Dexcom (G6 and older)",
   },
   {
-    description: "Smart-scale weight, body composition, and measurement trends from Renpho devices.",
+    description: "Smart scale. Weight and body composition.",
     id: "renpho",
     logo: logoAsset("renpho.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 110, 22),
     name: "Renpho",
   },
   {
-    description: "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
+    description: "Runs, walks, routes, and pace.",
     id: "runkeeper",
     logo: logoAsset("runkeeper.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 132, 20),
     name: "Runkeeper",
   },
   {
-    description: "Samsung phone and watch activity, sleep, heart, and wellness metrics.",
+    description: "Phone and watch activity, sleep, and heart rate.",
     id: "samsung-health",
     logo: logoAsset("samsung-health.png"),
     name: "Samsung Health",
   },
   {
-    description: "Insulin pump, CGM, therapy, and diabetes device records from Tandem.",
+    description: "Insulin pump and CGM therapy records.",
     id: "tandem-source",
     logo: logoAsset("tandem-source.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 120, 25),
     name: "Tandem Source",
   },
   {
-    description: "Blood pressure, scale, glucose, and home health measurements from Beurer.",
+    description: "Blood pressure, weight, glucose, and pulse ox.",
     id: "beurer",
     logo: logoAsset("beurer.png"),
     name: "Beurer",
   },
   {
-    description: "Rides, runs, workouts, route context, power, and training load from Strava.",
+    description: "Rides, runs, power, and training load.",
     id: "strava",
     logo: logoAsset("strava.svg", "h-auto max-h-9 w-auto max-w-[8rem] object-contain", 96, 20),
     name: "Strava",
   },
   {
-    description: "Bluetooth Libre glucose readings, trends, and sensor status in near real time.",
+    description: "Real-time glucose via Bluetooth sensor.",
     id: "freestyle-libre-ble",
     logo: logoAsset("freestyle-libre-ble.png"),
     name: "Freestyle Libre BLE",
   },
   {
-    description: "Blood pressure, pulse, weight, and connected home measurements from Omron.",
+    description: "Blood pressure, pulse, and weight.",
     id: "omron",
     logo: logoAsset("omron.png", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 106, 40),
     name: "Omron",
   },
   {
-    description: "Accu-Chek glucose readings, meter history, and diabetes tracking context records.",
+    description: "Glucose meter readings and history.",
     id: "accuchek",
     logo: logoAsset("accuchek.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 14),
     name: "Accu-Chek",
   },
   {
-    description: "Mattress-based sleep, temperature, heart rate, and nightly recovery signal trends.",
+    description: "Smart mattress. Sleep, temperature, and heart rate.",
     id: "eight-sleep",
     logo: logoAsset("eight-sleep.svg"),
     name: "Eight Sleep",
   },
   {
-    description: "Fitbit sleep, activity, heart rate, exercise, and daily readiness-style trends.",
+    description: "Sleep, activity, heart rate, and daily readiness.",
     id: "fitbit",
     logo: logoAsset("fitbit.svg"),
     name: "Fitbit",
   },
   {
-    description: "Libre glucose history, sensor trends, and daily time-in-range context patterns.",
+    description: "Glucose history, trends, and time in range.",
     id: "freestyle-libre",
     logo: logoAsset("freestyle-libre.png"),
     name: "Freestyle Libre",
   },
   {
-    description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
+    description: "Workouts, sleep, stress, heart rate, and body battery.",
     id: "garmin",
     logo: logoAsset("garmin.png"),
     name: "Garmin",
   },
   {
-    description: "Hammerhead cycling rides, route data, distance, elevation, and performance metrics.",
+    description: "Cycling computer. Rides, routes, elevation, and power.",
     id: "hammerhead",
     logo: logoAsset("hammerhead.png"),
     name: "Hammerhead",
   },
   {
-    description: "iHealth blood pressure, glucose, weight, oxygen, and home measurement records.",
+    description: "Blood pressure, glucose, weight, and pulse ox.",
     id: "ihealth",
     logo: logoAsset("ihealth.png"),
     name: "iHealth",
   },
   {
-    description: "Oura sleep, readiness, activity, temperature, heart, and nightly recovery trends.",
+    description: "Smart ring. Sleep, readiness, temperature, and recovery.",
     id: "oura",
     logo: logoAsset("oura.png", "h-auto max-h-8 w-auto max-w-[8rem] object-contain", 96, 30),
     name: "Oura",
   },
   {
-    description: "Peloton rides, runs, strength sessions, output, and performance training history.",
+    description: "Rides, runs, strength, and output.",
     id: "peloton",
     logo: logoAsset("peloton.svg"),
     name: "Peloton",
   },
   {
-    description: "Wahoo cycling, running, heart rate, power, and trainer workout data.",
+    description: "Cycling, running, heart rate, and power.",
     id: "wahoo",
     logo: logoAsset("wahoo.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 108, 26),
     name: "Wahoo",
   },
   {
-    description: "Bluetooth Contour glucose meter readings and diabetes tracking history records.",
+    description: "Bluetooth glucose meter readings.",
     id: "contour-ble",
     logo: logoAsset("contour-ble.png"),
     name: "Contour BLE",
   },
   {
-    description: "Withings scale, sleep, blood pressure, temperature, and activity measurement trends.",
+    description: "Weight, sleep, blood pressure, temperature, and activity.",
     id: "withings",
     logo: logoAsset("withings.png"),
     name: "Withings",
   },
   {
-    description: "Android activity, steps, heart points, workouts, and wellness record context.",
+    description: "Steps, workouts, and heart rate from Android.",
     id: "google-fit",
     logo: logoAsset("google-fit.svg"),
     name: "Google Fit",
   },
   {
-    description: "Indoor rides, runs, power, distance, elevation, and virtual training sessions.",
+    description: "Virtual rides, runs, power, and distance.",
     id: "zwift",
     logo: logoAsset("zwift.png"),
     name: "Zwift",
   },
   {
-    description: "OneTouch glucose readings, meter history, and diabetes tracking record context.",
+    description: "Glucose meter readings and trends.",
     id: "onetouch",
     logo: logoAsset("onetouch.png"),
     name: "OneTouch",
   },
   {
-    description: "Abbott LibreView glucose reports, trends, sensor history, and sharing data.",
+    description: "Glucose reports, trends, and sensor history.",
     id: "abbott-libreview",
     logo: logoAsset("abbott-libreview.svg"),
     name: "Abbott LibreView",
   },
   {
-    description: "Current Dexcom CGM glucose readings, trend arrows, and sensor sessions.",
+    description: "Real-time CGM glucose and trend arrows.",
     id: "dexcom",
     logo: logoAsset("dexcom.png"),
     name: "Dexcom",
   },
   {
-    description: "Kardia ECG recordings, rhythm summaries, and heart health observation history.",
+    description: "Portable ECG recordings and rhythm detection.",
     id: "kardia",
     logo: logoAsset("kardia.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 104, 20),
     name: "Kardia",
   },
   {
-    description: "Nutrition logs, calories, macros, micronutrients, and meal timing from Cronometer.",
+    description: "Calories, macros, micronutrients, and meal timing.",
     id: "cronometer",
     logo: logoAsset("cronometer.png"),
     name: "Cronometer",
   },
   {
-    description: "Polar training, sleep, heart rate, recovery, and cardio load data.",
+    description: "Training, sleep, heart rate, and recovery.",
     id: "polar",
     logo: logoAsset("polar.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 20),
     name: "Polar",
@@ -221,73 +223,14 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
 export default function ConnectPage() {
   return (
     <div className="flex w-full min-w-0 max-w-[calc(100vw-3rem)] flex-col gap-8 md:max-w-full">
-      <div className="min-w-0">
-        <div className="min-w-0">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            Just Cobuild sources
-          </p>
-          <h1 className="mt-2 font-serif text-3xl font-semibold tracking-normal text-foreground">
-            Connect your health
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Bring in sleep, activity, recovery, glucose, and device context from
-            the tools you already use.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Live Well"
+        title="Connect your health"
+        description="Bring in sleep, activity, recovery, glucose, and device context from the tools you already use."
+      />
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        {CONNECT_SOURCES.map((source) => (
-          <div
-            key={source.id}
-            className="box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-5"
-          >
-            <div className="mb-5 flex h-14 min-w-0 items-center">
-              <SourceLogo source={source} />
-            </div>
-
-            <div className="mb-5 min-w-0">
-              <h2 className="font-serif text-lg font-semibold text-foreground">
-                {source.name}
-              </h2>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                {source.description}
-              </p>
-            </div>
-
-            <div className="mt-auto flex justify-end">
-              <SourceStatusDot connected={source.connected} />
-            </div>
-          </div>
-        ))}
-      </div>
+      <ConnectSourcesGrid sources={CONNECT_SOURCES} />
     </div>
-  );
-}
-
-function SourceStatusDot({ connected = false }: { connected?: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      data-connection-state={connected ? "connected" : "idle"}
-      className={
-        connected
-          ? "size-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]"
-          : "size-2.5 rounded-full bg-stone-300 shadow-[0_0_0_3px_rgba(120,113,108,0.12)]"
-      }
-    />
-  );
-}
-
-function SourceLogo({ source }: { source: ConnectSource }) {
-  return (
-    <Image
-      src={source.logo.src}
-      alt=""
-      width={source.logo.width}
-      height={source.logo.height}
-      className={source.logo.className}
-    />
   );
 }
 

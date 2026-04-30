@@ -17,6 +17,7 @@ export function HostedVerificationCodeStep({
   primaryActionLabel,
   primaryActionPendingLabel,
   secondaryAction = null,
+  size = "default",
   inputRef,
   onCodeChange,
   onResendCode,
@@ -31,6 +32,7 @@ export function HostedVerificationCodeStep({
   primaryActionLabel: string;
   primaryActionPendingLabel: string;
   secondaryAction?: ReactNode;
+  size?: "default" | "compact";
   inputRef?: Ref<HTMLInputElement>;
   onCodeChange: (value: string) => void;
   onResendCode: () => void;
@@ -49,7 +51,7 @@ export function HostedVerificationCodeStep({
             disabled={disabled}
             variant="link"
             size="xs"
-            className="h-auto p-0 text-xs text-muted-foreground"
+            className="h-auto p-0 text-sm text-muted-foreground"
           >
             {pendingAction === "send-code" ? "Sending..." : "Resend code"}
           </Button>
@@ -58,6 +60,8 @@ export function HostedVerificationCodeStep({
           id={codeInputId}
           autoFocus={autoFocus}
           autoComplete="one-time-code"
+          data-1p-ignore
+          data-lpignore="true"
           maxLength={CODE_LENGTH}
           ref={inputRef}
           value={code}
@@ -70,7 +74,7 @@ export function HostedVerificationCodeStep({
               <InputOTPSlot
                 key={index}
                 index={index}
-                className="h-12 flex-1 min-w-0 rounded-lg border bg-card text-lg"
+                className={`${size === "compact" ? "h-14 text-lg" : "h-16 text-xl"} flex-1 min-w-0 rounded-lg border bg-card`}
               />
             ))}
           </InputOTPGroup>

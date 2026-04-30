@@ -28,7 +28,6 @@ export function HostedAuthPanel({
   onCompleted,
   onSignOut,
   requireLaunchConsentOnCompletion,
-  showLegalNotice = false,
   showPassiveLegalNotice,
   size,
 }: {
@@ -37,7 +36,6 @@ export function HostedAuthPanel({
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   requireLaunchConsentOnCompletion?: boolean;
-  showLegalNotice?: boolean;
   showPassiveLegalNotice?: boolean;
   size?: "default" | "compact";
 }) {
@@ -53,10 +51,8 @@ export function HostedAuthPanel({
   const includesEmail = methods.includes("email");
   const canSwap = includesPhone && includesEmail;
   const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
-  const shouldRequireLaunchConsent =
-    requireLaunchConsentOnCompletion ?? showLegalNotice;
-  const shouldShowPassiveLegalNotice =
-    showPassiveLegalNotice ?? showLegalNotice;
+  const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
+  const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
 
   async function handleAuthCompleted(result: HostedAuthCompletionResult) {
     if (shouldGateHostedAuthCompletionWithLaunchConsent({
@@ -86,6 +82,8 @@ export function HostedAuthPanel({
       await onCompleted(result.payload);
       return;
     }
+
+    pendingAuthCompletionRef.current = null;
     window.location.assign(result.redirectUrl);
   }
 
@@ -135,10 +133,10 @@ export function HostedAuthPanel({
 
       {showAlternateMethods ? (
         <>
-          <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400">
-            <span className="h-px flex-1 bg-stone-200" />
+          <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
             OR
-            <span className="h-px flex-1 bg-stone-200" />
+            <span className="h-px flex-1 bg-border" />
           </div>
           <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
             {includesTelegram ? (
