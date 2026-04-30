@@ -298,6 +298,7 @@ export interface HealthCommonsWebExperimentShell {
 
 export interface HealthCommonsWebExperimentSignal {
   baseline?: string;
+  biomarkerRouteId?: string;
   delta: string;
   description?: string;
   direction: "up" | "down" | "neutral";
@@ -1146,6 +1147,7 @@ function toExpectedSignal(
     value: "",
     delta: "",
     direction: hint.direction,
+    biomarkerRouteId: biomarker.key.replace(/^biomarker:/u, ""),
     estimatedChange: protocolSignal?.estimatedChange,
     expected,
     description:

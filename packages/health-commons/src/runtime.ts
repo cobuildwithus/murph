@@ -2024,6 +2024,10 @@ function isGeneratedWebExperimentSignal(value: unknown): boolean {
       value["estimatedChange"] === undefined ||
       isGeneratedWebExperimentSignalEstimate(value["estimatedChange"])
     ) &&
+    (
+      value["biomarkerRouteId"] === undefined ||
+      typeof value["biomarkerRouteId"] === "string"
+    ) &&
     typeof value["expected"] === "string" &&
     typeof value["label"] === "string" &&
     (

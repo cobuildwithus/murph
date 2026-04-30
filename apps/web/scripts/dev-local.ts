@@ -29,7 +29,21 @@ interface HostedWebDevRuntimePaths {
   distDirName: string;
   lockMetadataPath: string;
   lockPath: string;
+  nextDevLockPath: string;
   turbopackCacheDir: string;
+}
+
+interface NextDevLockDescriptor {
+  pid: number;
+  port: number;
+}
+
+interface NextDevLockCleanupOptions {
+  isProcessRunning?: (pid: number) => boolean;
+  processCommand?: (pid: number) => string | null;
+  sleep?: (milliseconds: number) => Promise<void>;
+  stderr?: Pick<NodeJS.WritableStream, "write">;
+  terminateProcess?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 export function buildHostedWebDevArgv(
@@ -93,6 +107,7 @@ export function resolveHostedWebDevRuntimePaths(
     distDirName,
     lockMetadataPath: path.join(lockPath, hostedWebDevLockMetadataFileName),
     lockPath,
+    nextDevLockPath: path.join(distDir, "dev", "lock"),
     turbopackCacheDir: path.join(distDir, "dev", "cache", "turbopack"),
   };
 }
@@ -120,6 +135,7 @@ async function main(): Promise<void> {
   ];
 
   try {
+    await clearConflictingNextDevLock(runtimePaths.nextDevLockPath);
     await pruneOversizedHostedWebDevArtifacts(runtimePaths, process.env);
     await import(pathToFileURL(nextBinPath).href);
     // The Next CLI returns after booting dev, while the server keeps the event loop alive.
@@ -439,6 +455,153 @@ function buildProcessCommand(argv: readonly string[] = process.argv): string {
     .filter(Boolean);
 
   return parts.join(" ").trim() || "unknown";
+}
+
+export async function clearConflictingNextDevLock(
+  nextDevLockPath: string,
+  options: NextDevLockCleanupOptions = {},
+): Promise<void> {
+  const checkProcessRunning = options.isProcessRunning ?? isProcessRunning;
+  const getProcessCommand = options.processCommand ?? readProcessCommand;
+  const sleepFor = options.sleep ?? sleep;
+  const stderr = options.stderr ?? process.stderr;
+  const terminateProcess = options.terminateProcess ?? terminateProcessId;
+  const descriptor = await readNextDevLockDescriptor(nextDevLockPath);
+
+  if (descriptor === null) {
+    return;
+  }
+
+  if (!checkProcessRunning(descriptor.pid)) {
+    await rm(nextDevLockPath, { force: true });
+    return;
+  }
+
+  const command = getProcessCommand(descriptor.pid);
+  if (!isRecoverableNextDevLockOwner(command)) {
+    throw new Error(
+      [
+        `Next dev lock is held by an active non-Next process (pid ${descriptor.pid}, port ${descriptor.port}).`,
+        "Stop that process or remove apps/web/.next-dev after confirming it is stale.",
+      ].join(" "),
+    );
+  }
+
+  stderr.write(
+    `Recovering stale Next dev server on port ${descriptor.port} (pid ${descriptor.pid}).\n`,
+  );
+  terminateProcess(descriptor.pid, "SIGINT");
+
+  if (!(await waitForProcessExit(descriptor.pid, 5_000, checkProcessRunning, sleepFor))) {
+    terminateProcess(descriptor.pid, "SIGKILL");
+    await waitForProcessExit(descriptor.pid, 5_000, checkProcessRunning, sleepFor);
+  }
+
+  const nextDescriptor = await readNextDevLockDescriptor(nextDevLockPath);
+  if (nextDescriptor === null || !checkProcessRunning(nextDescriptor.pid)) {
+    await rm(nextDevLockPath, { force: true });
+  }
+}
+
+async function readNextDevLockDescriptor(
+  nextDevLockPath: string,
+): Promise<NextDevLockDescriptor | null> {
+  let rawLock: string;
+
+  try {
+    rawLock = await readFile(nextDevLockPath, "utf8");
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(rawLock);
+  } catch {
+    await rm(nextDevLockPath, { force: true });
+    return null;
+  }
+
+  if (
+    !parsed
+    || typeof parsed !== "object"
+    || !("pid" in parsed)
+    || !("port" in parsed)
+    || typeof parsed.pid !== "number"
+    || !Number.isInteger(parsed.pid)
+    || typeof parsed.port !== "number"
+    || !Number.isInteger(parsed.port)
+  ) {
+    await rm(nextDevLockPath, { force: true });
+    return null;
+  }
+
+  return {
+    pid: parsed.pid,
+    port: parsed.port,
+  };
+}
+
+function isRecoverableNextDevLockOwner(command: string | null): boolean {
+  if (command === null) {
+    return false;
+  }
+
+  const normalizedCommand = command.replace(/\\/gu, "/");
+  return (
+    normalizedCommand.startsWith("next-server ")
+    || normalizedCommand === "next-server"
+    || normalizedCommand.includes("/node_modules/next/dist/bin/next")
+  );
+}
+
+async function waitForProcessExit(
+  pid: number,
+  timeoutMs: number,
+  checkProcessRunning: (pid: number) => boolean = isProcessRunning,
+  sleepFor: (milliseconds: number) => Promise<void> = sleep,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (!checkProcessRunning(pid)) {
+      return true;
+    }
+
+    await sleepFor(100);
+  }
+
+  return !checkProcessRunning(pid);
+}
+
+async function sleep(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function terminateProcessId(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
+function readProcessCommand(pid: number): string | null {
+  try {
+    return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function isHostedWebDevServerLockMetadata(value: unknown): value is HostedWebDevServerLockMetadata {

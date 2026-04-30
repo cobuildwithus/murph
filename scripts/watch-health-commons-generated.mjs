@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { watch } from "node:fs";
+import { existsSync, rmSync, utimesSync, watch } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,17 @@ const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const contentRoot = path.join(repoRoot, "packages", "health-commons", "content");
 const generatorScript = path.join(repoRoot, "scripts", "ensure-health-commons-generated.mjs");
+const hostedWebDevCachePaths = [
+  path.join(repoRoot, "apps", "web", ".next-dev", "dev", "cache", "fetch-cache"),
+];
+const hostedWebHealthCommonsBridgeFiles = [
+  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "biomarker-detail.ts"),
+  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-browse.ts"),
+  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-detail.ts"),
+  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "experiment-projections.ts"),
+  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "generated-experiment-artifacts.ts"),
+  path.join(repoRoot, "apps", "web", "src", "lib", "health-commons", "measurement-method-detail.ts"),
+];
 const debounceMs = readPositiveIntegerEnv(process.env.MURPH_HEALTH_COMMONS_WATCH_DEBOUNCE_MS, 300);
 const skipInitialGenerate = process.env.MURPH_HEALTH_COMMONS_WATCH_SKIP_INITIAL === "1";
 
@@ -95,6 +106,7 @@ function runGenerate(reason) {
       if (signal) {
         console.error(`[health-commons:watch] generate stopped by ${signal}`);
       } else if (code === 0) {
+        invalidateHostedWebHealthCommonsDevCache();
         console.error("[health-commons:watch] generate complete");
       } else {
         console.error(`[health-commons:watch] generate failed with exit code ${code ?? 1}`);
@@ -104,6 +116,47 @@ function runGenerate(reason) {
       resolve();
     });
   });
+}
+
+function invalidateHostedWebHealthCommonsDevCache() {
+  let invalidated = 0;
+
+  for (const cachePath of hostedWebDevCachePaths) {
+    if (!existsSync(cachePath)) {
+      continue;
+    }
+
+    try {
+      rmSync(cachePath, { force: true, recursive: true });
+      invalidated += 1;
+    } catch (error) {
+      console.error(formatError(
+        `Unable to remove hosted web dev cache ${formatRepoPath(cachePath)}`,
+        error,
+      ));
+    }
+  }
+
+  const now = new Date();
+  for (const filePath of hostedWebHealthCommonsBridgeFiles) {
+    if (!existsSync(filePath)) {
+      continue;
+    }
+
+    try {
+      utimesSync(filePath, now, now);
+      invalidated += 1;
+    } catch (error) {
+      console.error(formatError(
+        `Unable to touch hosted web Health Commons bridge ${formatRepoPath(filePath)}`,
+        error,
+      ));
+    }
+  }
+
+  if (invalidated > 0) {
+    console.error("[health-commons:watch] invalidated hosted web Health Commons dev cache");
+  }
 }
 
 function isMarkdownContentChange(fileName) {
@@ -152,6 +205,10 @@ function readPositiveIntegerEnv(value, fallback) {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatRepoPath(filePath) {
+  return path.relative(repoRoot, filePath).replaceAll(path.sep, "/");
 }
 
 function formatError(prefix, error) {
