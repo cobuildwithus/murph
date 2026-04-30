@@ -1,6 +1,7 @@
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
 
 import type { HostedBrowserDeviceSyncConnection } from "./public-connection";
+import type { HostedBrowserDeviceSyncConnectionSource } from "./public-ingress-service";
 
 import { formatHostedDeviceSyncProviderLabel } from "./provider-label";
 
@@ -37,6 +38,13 @@ export interface HostedDeviceSyncSettingsSource {
   statusLabel: string;
   tone: HostedDeviceSyncSettingsTone;
   updatedAt: string | null;
+  upstreamSources: HostedDeviceSyncSettingsUpstreamSource[];
+}
+
+export interface HostedDeviceSyncSettingsUpstreamSource {
+  providerLabel: string;
+  resourceCount: number;
+  status: HostedBrowserDeviceSyncConnectionSource["status"];
 }
 
 export interface HostedDeviceSyncSettingsResponse {
@@ -60,12 +68,14 @@ const CONNECTION_LABEL_FORMATTER = new Intl.DateTimeFormat("en-US", {
 });
 
 export function buildHostedDeviceSyncSettingsSources(input: {
+  connectionSources?: readonly HostedBrowserDeviceSyncConnectionSource[];
   connections: readonly HostedBrowserDeviceSyncConnection[];
   now?: Date;
   providers: readonly PublicProviderDescriptor[];
 }): HostedDeviceSyncSettingsSource[] {
   const now = input.now ?? new Date();
   const connectionsByProvider = new Map<string, HostedBrowserDeviceSyncConnection[]>();
+  const upstreamSourcesByConnectionId = groupUpstreamSourcesByConnectionId(input.connectionSources ?? []);
 
   for (const connection of input.connections) {
     const key = connection.provider.trim().toLowerCase();
@@ -103,6 +113,7 @@ export function buildHostedDeviceSyncSettingsSources(input: {
         duplicateCount: connections.length,
         now,
         provider,
+        upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
       }));
     }
   }
@@ -116,6 +127,7 @@ export function buildHostedDeviceSyncSettingsSources(input: {
       sources.push(buildUnavailableSource(connection, {
         connectionIndex,
         duplicateCount: connections.length,
+        upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
       }));
     }
   }
@@ -150,6 +162,7 @@ function buildAvailableSource(provider: PublicProviderDescriptor): HostedDeviceS
     statusLabel: "Not connected",
     tone: "muted",
     updatedAt: null,
+    upstreamSources: [],
   } satisfies HostedDeviceSyncSettingsSource;
 }
 
@@ -159,6 +172,7 @@ function buildConnectedSource(input: {
   duplicateCount: number;
   now: Date;
   provider: PublicProviderDescriptor;
+  upstreamSources: HostedDeviceSyncSettingsUpstreamSource[];
 }): HostedDeviceSyncSettingsSource {
   const { connection, now } = input;
   const providerLabel = formatHostedDeviceSyncProviderLabel(connection.provider);
@@ -210,6 +224,7 @@ function buildConnectedSource(input: {
       statusLabel: "Disconnected",
       tone: "muted",
       updatedAt: connection.updatedAt,
+      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -250,6 +265,7 @@ function buildConnectedSource(input: {
       statusLabel: setupNeedsAttention ? "Setup incomplete" : "Setting up",
       tone: setupNeedsAttention ? "attention" : "muted",
       updatedAt: connection.updatedAt,
+      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -282,6 +298,7 @@ function buildConnectedSource(input: {
       statusLabel: "Needs reconnect",
       tone: "attention",
       updatedAt: connection.updatedAt,
+      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -324,6 +341,7 @@ function buildConnectedSource(input: {
       statusLabel: hasRecentError ? "Needs attention" : "Connected",
       tone: hasRecentError ? "attention" : "calm",
       updatedAt: connection.updatedAt,
+      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -351,6 +369,7 @@ function buildConnectedSource(input: {
       statusLabel: "Connected",
       tone: "calm",
       updatedAt: connection.updatedAt,
+      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -378,6 +397,7 @@ function buildConnectedSource(input: {
       statusLabel: "Connected",
       tone: "calm",
       updatedAt: connection.updatedAt,
+      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -409,6 +429,7 @@ function buildConnectedSource(input: {
     statusLabel: hasRecentError ? "Needs attention" : "Quiet lately",
     tone: hasRecentError ? "attention" : "muted",
     updatedAt: connection.updatedAt,
+    upstreamSources: input.upstreamSources,
   } satisfies HostedDeviceSyncSettingsSource;
 }
 
@@ -417,6 +438,7 @@ function buildUnavailableSource(
   input: {
     connectionIndex: number;
     duplicateCount: number;
+    upstreamSources: HostedDeviceSyncSettingsUpstreamSource[];
   },
 ): HostedDeviceSyncSettingsSource {
   const providerLabel = formatHostedDeviceSyncProviderLabel(connection.provider);
@@ -460,6 +482,7 @@ function buildUnavailableSource(
     statusLabel: "Unavailable",
     tone: "muted",
     updatedAt: connection.updatedAt,
+    upstreamSources: input.upstreamSources,
   } satisfies HostedDeviceSyncSettingsSource;
 }
 
@@ -498,6 +521,96 @@ function resolveDisplayName(input: {
   }
 
   return `Connected ${CONNECTION_LABEL_FORMATTER.format(new Date(parsed))} (#${input.connectionIndex + 1})`;
+}
+
+function groupUpstreamSourcesByConnectionId(
+  sources: readonly HostedBrowserDeviceSyncConnectionSource[],
+): Map<string, HostedDeviceSyncSettingsUpstreamSource[]> {
+  const grouped = new Map<string, HostedDeviceSyncSettingsUpstreamSource[]>();
+
+  for (const source of sources) {
+    const connectionId = source.connectionId.trim();
+    if (!connectionId) {
+      continue;
+    }
+
+    const entry = toSettingsUpstreamSource(source);
+    const existing = grouped.get(connectionId);
+    if (existing) {
+      existing.push(entry);
+    } else {
+      grouped.set(connectionId, [entry]);
+    }
+  }
+
+  for (const entries of grouped.values()) {
+    entries.sort(compareUpstreamSources);
+  }
+
+  return grouped;
+}
+
+function toSettingsUpstreamSource(
+  source: HostedBrowserDeviceSyncConnectionSource,
+): HostedDeviceSyncSettingsUpstreamSource {
+  return {
+    providerLabel: formatPublicUpstreamSourceLabel(source.sourceProviderSlug),
+    resourceCount: source.resourceCount,
+    status: source.status,
+  };
+}
+
+function compareUpstreamSources(
+  left: HostedDeviceSyncSettingsUpstreamSource,
+  right: HostedDeviceSyncSettingsUpstreamSource,
+): number {
+  if (left.status !== right.status) {
+    return sourceStatusRank(left.status) - sourceStatusRank(right.status);
+  }
+
+  if (left.providerLabel !== right.providerLabel) {
+    return left.providerLabel.localeCompare(right.providerLabel);
+  }
+
+  return left.resourceCount - right.resourceCount;
+}
+
+function formatPublicUpstreamSourceLabel(sourceProviderSlug: string): string {
+  const normalized = sourceProviderSlug.trim().toLowerCase().replace(/_/gu, "-");
+
+  switch (normalized) {
+    case "dexcom-v3":
+      return "Dexcom";
+    case "fitbit":
+      return "Fitbit";
+    case "freestyle-libre":
+      return "Freestyle Libre";
+    case "garmin":
+      return "Garmin";
+    case "oura":
+      return "Oura";
+    case "strava":
+      return "Strava";
+    case "whoop":
+      return "WHOOP";
+    case "withings":
+      return "Withings";
+  }
+
+  return "Connected source";
+}
+
+function sourceStatusRank(status: HostedDeviceSyncSettingsUpstreamSource["status"]): number {
+  switch (status) {
+    case "connected":
+      return 0;
+    case "error":
+      return 1;
+    case "unavailable":
+      return 2;
+  }
+
+  return 3;
 }
 
 function latestIsoTimestamp(...values: Array<string | null | undefined>): string | null {

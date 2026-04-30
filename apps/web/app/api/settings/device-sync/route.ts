@@ -9,12 +9,13 @@ import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/reques
 export const GET = withJsonError(async (request: Request) => {
   const auth = await requireActivePrivyMemberAuth(request);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const { connections, providers } = await controlPlane.listConnections(auth.member.id);
+  const { connectionSources, connections, providers } = await controlPlane.listConnections(auth.member.id);
 
   return jsonOk({
     generatedAt: new Date().toISOString(),
     ok: true,
     sources: buildHostedDeviceSyncSettingsSources({
+      connectionSources,
       connections,
       providers,
     }),

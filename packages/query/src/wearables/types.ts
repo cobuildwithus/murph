@@ -1,5 +1,6 @@
 import type { WearableCanonicalMetricKey } from "@murphai/importers/device-providers/metric-catalog";
 import type { DeviceProviderMetricFamily } from "@murphai/importers/device-providers/provider-descriptors";
+import type { DeviceDataOrigin } from "@murphai/contracts";
 
 export type WearableConfidenceLevel = "none" | "low" | "medium" | "high";
 export type WearableCandidateSourceFamily = "canonical" | "event" | "sample" | "derived";
@@ -14,6 +15,7 @@ export interface WearableExternalRef {
 
 export interface WearableMetricCandidate {
   candidateId: string;
+  dataOrigin?: DeviceDataOrigin | null;
   date: string;
   externalRef: WearableExternalRef | null;
   metric: string;
@@ -278,6 +280,7 @@ export interface WearableDriftSummary {
 
 export interface WearableSleepWindowCandidate {
   candidateId: string;
+  dataOrigin?: DeviceDataOrigin | null;
   date: string;
   durationMinutes: number;
   endAt: string | null;
@@ -296,6 +299,7 @@ export interface WearableSleepWindowCandidate {
 export interface WearableActivitySessionAggregate {
   activityTypes: string[];
   candidateId: string;
+  dataOrigin?: DeviceDataOrigin | null;
   date: string;
   paths: string[];
   provider: string;

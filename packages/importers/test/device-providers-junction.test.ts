@@ -36,6 +36,12 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
           sourceName: "Withings",
           sourceType: "scale",
         },
+        {
+          id: "source-dexcom",
+          sourceProviderSlug: "dexcom_v3",
+          sourceName: "Dexcom",
+          sourceType: "cgm",
+        },
       ],
       summaries: {
         profile: {
@@ -97,7 +103,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
           value: 97,
         }],
         glucose: [{
-          connectionId: "source-withings",
+          connectionId: "source-dexcom",
           timestamp: "2026-04-22T07:16:00Z",
           value: 101,
         }],
@@ -111,16 +117,16 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.deepEqual(payload.provenance?.timeseriesResources, [
     "heartrate",
     "blood_oxygen",
+    "glucose",
   ]);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-activity"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role.includes("glucose")), false);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role.includes("glucose")), true);
 
   const observations = payload.events ?? [];
   const samples = payload.samples ?? [];
   assert.ok(observations.length >= 5);
-  assert.equal(samples.length, 2);
+  assert.equal(samples.length, 3);
   assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
   assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
   assert.ok(observations.every((event) => !event.externalRef?.resourceType.includes(":")));
@@ -128,8 +134,10 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
 
   const stepEvents = observations.filter((event) => event.fields?.metric === "daily-steps");
   assert.deepEqual(stepEvents.map((event) => event.dataOrigin?.sourceProviderSlug).sort(), ["oura", "withings"]);
-  assert.equal(stepEvents.find((event) => event.dataOrigin?.sourceProviderSlug === "oura")?.dataOrigin?.sourceDeviceId, "device-oura-ring-1");
-  assert.equal(stepEvents.find((event) => event.dataOrigin?.sourceProviderSlug === "oura")?.dataOrigin?.sourceAppId, "app-oura-cloud-1");
+  const sourceInstanceId = stepEvents.find((event) => event.dataOrigin?.sourceProviderSlug === "oura")?.dataOrigin?.sourceInstanceId;
+  assert.match(sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/);
+  assert.equal(sourceInstanceId?.includes("device-oura-ring-1"), false);
+  assert.equal(sourceInstanceId?.includes("app-oura-cloud-1"), false);
   assert.ok(stepEvents.every((event) => event.externalRef?.resourceType.startsWith("junction-")));
   assert.ok(stepEvents.every((event) => event.externalRef?.resourceType !== "oura"));
 
@@ -146,6 +154,11 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.equal(floatingSample?.dataOrigin?.timestampSemantics, "floating");
   assert.equal(floatingSample?.recordedAt, "2026-04-22T23:59:59.000Z");
 
+  const glucoseSample = samples.find((sample) => sample.stream === "glucose");
+  assert.equal(glucoseSample?.unit, "mg_dL");
+  assert.equal(glucoseSample?.dataOrigin?.sourceProviderSlug, "dexcom-v3");
+  assert.equal(glucoseSample?.dataOrigin?.sourceType, "cgm");
+
   const canonicalRecords = payload.canonicalWearableRecords ?? [];
   assert.ok(canonicalRecords.every((record) => record.source.provider === "junction"));
   assert.ok(canonicalRecords.every((record) => record.source.externalRef?.system === "junction"));
@@ -160,6 +173,37 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
     canonicalStepRecords.map((record) => record.source.origin?.sourceProviderSlug).sort(),
     ["oura", "withings"],
   );
+});
+
+test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timestamp and source provenance", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    connections: [
+      {
+        id: "source-dexcom",
+        sourceProviderSlug: "dexcom_v3",
+        sourceName: "Dexcom",
+        sourceType: "cgm",
+      },
+    ],
+    timeseries: {
+      glucose: [{
+        connectionId: "source-dexcom",
+        timestamp: "2026-04-22T07:16:00Z",
+        value: 101,
+      }],
+    },
+  });
+
+  const glucoseSample = payload.samples?.find((sample) => sample.stream === "glucose");
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
+  assert.equal(glucoseSample?.unit, "mg_dL");
+  assert.equal(glucoseSample?.dataOrigin?.sourceProviderSlug, "dexcom-v3");
+  assert.equal(glucoseSample?.dataOrigin?.sourceType, "cgm");
+  assert.equal(glucoseSample?.dataOrigin?.observedAtRaw, "2026-04-22T07:16:00Z");
+  assert.equal(glucoseSample?.dataOrigin?.timestampSemantics, "utc");
+  assert.equal(glucoseSample?.recordedAt, "2026-04-22T07:16:00.000Z");
 });
 
 test("Junction normalizer defaults to the PR3 resource allowlist", () => {
@@ -186,10 +230,13 @@ test("Junction normalizer defaults to the PR3 resource allowlist", () => {
   assert.equal(payload.provider, "junction");
   assert.deepEqual(payload.provenance?.summaryResources, JUNCTION_DEFAULT_SUMMARY_RESOURCES);
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
+  assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("glucose"), false);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));
   assert.ok(payload.samples?.every((sample) => sample.externalRef?.system === "junction"));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "weight"));
+  assert.equal(payload.samples?.some((sample) => sample.stream === "weight"), false);
 });
 
 test("Junction normalizer does not inherit device attribution from non-unique provider slug fallback", () => {
@@ -222,7 +269,7 @@ test("Junction normalizer does not inherit device attribution from non-unique pr
 
   const stepEvent = payload.events?.find((event) => event.fields?.metric === "daily-steps");
   assert.equal(stepEvent?.dataOrigin?.sourceProviderSlug, "oura");
-  assert.equal(stepEvent?.dataOrigin?.sourceDeviceId, undefined);
+  assert.equal(stepEvent?.dataOrigin?.sourceInstanceId, undefined);
 
   const profileArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-profile");
   assert.deepEqual(profileArtifact?.content, {

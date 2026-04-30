@@ -3,6 +3,7 @@ import type {
   WearableSleepWindowCandidate,
 } from "./types.ts";
 import { latestIsoTimestamp, uniqueStrings } from "./shared.ts";
+import { wearableDataOriginKey } from "./origin.ts";
 
 export function dedupeExactMetricCandidates(
   candidates: readonly WearableMetricCandidate[],
@@ -40,8 +41,10 @@ export function dedupeSleepWindowCandidates(
   const deduped = new Map<string, WearableSleepWindowCandidate>();
 
   for (const candidate of candidates) {
+    const originKey = wearableDataOriginKey(candidate.dataOrigin);
     const key = [
       candidate.provider,
+      ...(originKey ? [originKey] : []),
       candidate.date,
       candidate.startAt ?? "",
       candidate.endAt ?? "",
@@ -68,8 +71,11 @@ export function dedupeSleepWindowCandidates(
 }
 
 export function buildCandidateExactKey(candidate: WearableMetricCandidate): string {
+  const originKey = wearableDataOriginKey(candidate.dataOrigin);
+
   return [
     candidate.provider,
+    ...(originKey ? [originKey] : []),
     candidate.date,
     candidate.metric,
     candidate.unit ?? "",

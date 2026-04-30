@@ -121,7 +121,7 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
     aggregatorProvider: "junction",
     sourceProviderSlug: "oura",
     sourceType: "ring",
-    sourceAppId: "oura-cloud-app-raw",
+    sourceInstanceId: "source-oura-ring-a",
   } satisfies DeviceDataOrigin;
   const events: DeviceEventPayload[] = [
     {
@@ -137,9 +137,6 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
       dataOrigin: {
         ...baseOrigin,
         observedAtRaw: "2026-04-21T06:00:00+00:00",
-        sourceName: "Oura Ring",
-        sourceDeviceId: "oura-ring-raw-a",
-        sourceWorkoutId: "oura-sleep-window-raw-a",
         timeZoneOffsetMinutes: 0,
         timestampSemantics: "offset",
         originConfidence: "high",
@@ -163,9 +160,7 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
       },
       dataOrigin: {
         ...baseOrigin,
-        sourceName: "Travel Ring",
-        sourceDeviceId: "oura-ring-raw-b",
-        sourceWorkoutId: "oura-sleep-window-raw-b",
+        sourceInstanceId: "source-oura-ring-b",
       },
       fields: {
         metric: "sleep-score",
@@ -185,9 +180,6 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
       },
       dataOrigin: {
         ...baseOrigin,
-        sourceName: "Renamed Ring",
-        sourceDeviceId: "oura-ring-raw-a",
-        sourceWorkoutId: "oura-workout-raw-c",
       },
       fields: {
         metric: "daily-steps",
@@ -207,10 +199,7 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
       },
       dataOrigin: {
         ...baseOrigin,
-        sourceName: "Oura Ring",
-        sourceDeviceId: "oura-ring-raw-a",
-        sourceAppId: "oura-companion-app-raw",
-        sourceWorkoutId: "oura-sleep-window-raw-d",
+        sourceInstanceId: "source-oura-ring-companion",
       },
       fields: {
         metric: "sleep-score",
@@ -232,9 +221,8 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
         version: 1,
         aggregatorProvider: "junction",
         sourceProviderSlug: "withings",
-        sourceName: "Withings",
         sourceType: "scale",
-        sourceDeviceId: "withings-scale-raw-a",
+        sourceInstanceId: "source-withings-scale-a",
         timestampSemantics: "utc",
         normalizerVersion: "junction-normalizer.v1",
       },
@@ -269,9 +257,7 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
   ]);
   assert.equal(records[0]?.source.origin?.sourceProviderSlug, "oura");
   assert.equal(records[0]?.source.origin?.version, 1);
-  assert.equal(records[0]?.source.origin?.sourceDeviceId, "oura-ring-raw-a");
-  assert.equal(records[0]?.source.origin?.sourceAppId, "oura-cloud-app-raw");
-  assert.equal(records[0]?.source.origin?.sourceWorkoutId, "oura-sleep-window-raw-a");
+  assert.equal(records[0]?.source.origin?.sourceInstanceId, "source-oura-ring-a");
   assert.equal(records[0]?.source.origin?.observedAtRaw, "2026-04-21T06:00:00+00:00");
   assert.equal(records[0]?.source.origin?.timeZoneOffsetMinutes, 0);
   assert.equal(records[0]?.source.origin?.timestampSemantics, "offset");
@@ -290,12 +276,10 @@ test("canonicalizeDeviceBatchPayload separates Junction upstream origins without
     providerResourceType: record.source.providerResourceType,
     externalRef: record.source.externalRef,
   })));
-  assert.ok(!serializedTransportFields.includes("oura-ring-raw-a"));
-  assert.ok(!serializedTransportFields.includes("oura-ring-raw-b"));
-  assert.ok(!serializedTransportFields.includes("oura-cloud-app-raw"));
-  assert.ok(!serializedTransportFields.includes("oura-companion-app-raw"));
-  assert.ok(!serializedTransportFields.includes("oura-workout-raw-c"));
-  assert.ok(!serializedTransportFields.includes("withings-scale-raw-a"));
+  assert.ok(!serializedTransportFields.includes("source-oura-ring-a"));
+  assert.ok(!serializedTransportFields.includes("source-oura-ring-b"));
+  assert.ok(!serializedTransportFields.includes("source-oura-ring-companion"));
+  assert.ok(!serializedTransportFields.includes("source-withings-scale-a"));
 });
 
 test("canonicalizeDeviceBatchPayload keys Junction data sources by upstream source provider slug", () => {
@@ -424,7 +408,7 @@ test("canonicalizeDeviceBatchPayload preserves sample origins and falls back fro
           aggregatorProvider: "junction",
           sourceProviderSlug: "oura",
           sourceType: "ring",
-          sourceDeviceId: "oura-ring-raw-stage",
+          sourceInstanceId: "source-oura-ring-stage",
           observedAtRaw: "2026-04-22 07:15:00",
           timeZoneOffsetMinutes: null,
           timestampSemantics: "floating",
@@ -451,7 +435,7 @@ test("canonicalizeDeviceBatchPayload preserves sample origins and falls back fro
   assert.equal(records[0]?.source.origin?.timestampSemantics, "offset");
   assert.equal(records[0]?.source.origin?.originConfidence, "high");
   assert.equal(records[1]?.kind, "sample");
-  assert.equal(records[1]?.source.origin?.sourceDeviceId, "oura-ring-raw-stage");
+  assert.equal(records[1]?.source.origin?.sourceInstanceId, "source-oura-ring-stage");
   assert.equal(records[1]?.source.origin?.observedAtRaw, "2026-04-22 07:15:00");
   assert.equal(records[1]?.source.origin?.timeZoneOffsetMinutes, null);
   assert.equal(records[1]?.source.origin?.timestampSemantics, "floating");
@@ -606,8 +590,7 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
               aggregatorProvider: "junction",
               sourceProviderSlug: "polar",
               sourceType: "watch",
-              sourceDeviceId: "polar-watch-raw-1",
-              sourceAppId: "polar-app-raw",
+              sourceInstanceId: "source-polar-watch-1",
             },
             fields: {
               metric: "daily-steps",
@@ -654,7 +637,7 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
   assert.equal(canonicalRecords[0] && "metric" in canonicalRecords[0] ? canonicalRecords[0].metric : null, "steps");
   assert.equal(canonicalRecords[0]?.source.origin?.version, 1);
   assert.equal(canonicalRecords[0]?.source.origin?.sourceProviderSlug, "polar");
-  assert.equal(canonicalRecords[0]?.source.origin?.sourceDeviceId, "polar-watch-raw-1");
+  assert.equal(canonicalRecords[0]?.source.origin?.sourceInstanceId, "source-polar-watch-1");
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === `wearable-raw-envelope:${rawEnvelope?.id}`));
   const canonicalArtifact = payload.rawArtifacts?.find(
     (artifact) => artifact.role === `wearable-canonical-records:${rawEnvelope?.id}`,
@@ -668,7 +651,7 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
       };
     }>;
   };
-  assert.equal(canonicalArtifactContent.records?.[0]?.source?.origin?.sourceDeviceId, "polar-watch-raw-1");
+  assert.equal(canonicalArtifactContent.records?.[0]?.source?.origin?.sourceInstanceId, "source-polar-watch-1");
 });
 
 test("prepareDeviceProviderSnapshotImport preserves timestamp origin semantics in canonical provenance", async () => {
@@ -695,7 +678,6 @@ test("prepareDeviceProviderSnapshotImport preserves timestamp origin semantics i
               version: 1,
               aggregatorProvider: "junction",
               sourceProviderSlug: "withings",
-              sourceName: "Withings",
               sourceType: "scale",
               observedAtRaw: "2026-04-22 17:00:00",
               timeZoneOffsetMinutes: null,

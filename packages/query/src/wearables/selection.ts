@@ -3,11 +3,13 @@ import {
   compareWearableProviders,
   formatMetricLabel,
   formatProviderName,
+  hasDirectWearableProviderForSource,
   resolveMetricTolerance,
   resourceTypeScore,
   sourceFamilyScore,
 } from "./provider-policy.ts";
-import { compareIsoDesc } from "./shared.ts";
+import { normalizeWearableOriginSourceSlug } from "./origin.ts";
+import { compareIsoDesc, normalizeLowercaseString } from "./shared.ts";
 import type {
   WearableMetricCandidate,
   WearableMetricConfidence,
@@ -19,6 +21,9 @@ import type {
   WearableSleepWindowScorecard,
   WearableSleepWindowCandidate,
 } from "./types.ts";
+
+const JUNCTION_UNSUPPORTED_SOURCE_PRIORITY_BOOST = 3;
+const JUNCTION_DIRECT_DUPLICATE_PENALTY = -1_000;
 
 export function resolveMetric(
   metric: WearableMetricKey,
@@ -243,7 +248,8 @@ function rankMetricCandidates(
   const scorecards = new Map<string, WearableMetricScorecard>();
 
   for (const candidate of candidates) {
-    const providerScore = providerScores.get(candidate.provider) ?? 0;
+    const providerScore =
+      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, candidates);
     const resourceScore = resourceTypeScore(metric, candidate.externalRef?.resourceType);
     const familyScore = sourceFamilyScore(candidate.sourceFamily);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.occurredAt ?? "") ?? 0;
@@ -309,7 +315,8 @@ function rankSleepWindows(
   const scorecards = new Map<string, WearableSleepWindowScorecard>();
 
   for (const candidate of candidates) {
-    const providerScore = providerScores.get(candidate.provider) ?? 0;
+    const providerScore =
+      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, candidates);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.endAt ?? candidate.startAt ?? "") ?? 0;
     const durationScore = durationScores.get(candidate.durationMinutes) ?? 0;
     const agreementScore = scoreSleepWindowAgreement(candidate, candidates);
@@ -371,6 +378,29 @@ function buildProviderRankScores(
   });
 
   return scores;
+}
+
+function scoreJunctionSourcePolicy(
+  candidate: WearableMetricCandidate | WearableSleepWindowCandidate,
+  candidates: readonly (WearableMetricCandidate | WearableSleepWindowCandidate)[],
+): number {
+  if (normalizeLowercaseString(candidate.provider) !== "junction") {
+    return 0;
+  }
+
+  const sourceProviderSlug = normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    return 0;
+  }
+
+  if (!hasDirectWearableProviderForSource(sourceProviderSlug)) {
+    return JUNCTION_UNSUPPORTED_SOURCE_PRIORITY_BOOST;
+  }
+
+  const directCandidateExists = candidates.some((other) =>
+    normalizeLowercaseString(other.provider) === sourceProviderSlug
+  );
+  return directCandidateExists ? JUNCTION_DIRECT_DUPLICATE_PENALTY : 0;
 }
 
 function buildTimestampRankScores(

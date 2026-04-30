@@ -119,6 +119,41 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("summarizes upstream Junction sources without exposing raw source names or instance keys", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [
+        {
+          connectionId: "dspc_example",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-04-03T08:00:00.000Z",
+          resourceCount: 3,
+          sourceProviderSlug: "dexcom_v3",
+          status: "connected",
+        },
+      ],
+      connections: [buildConnection({
+        provider: "junction",
+      })],
+      providers: [{
+        ...OURA_PROVIDER,
+        callbackPath: "/connect/junction/callback",
+        callbackUrl: "https://example.com/connect/junction/callback",
+        connectionKind: "external_link",
+        credentialPolicy: "provider_config",
+        defaultScopes: [],
+        provider: "junction",
+      }],
+    });
+
+    expect(source?.upstreamSources).toEqual([
+      {
+        providerLabel: "Dexcom",
+        resourceCount: 3,
+        status: "connected",
+      },
+    ]);
+  });
+
   it("hides generic provider labels from the rendered display name", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({

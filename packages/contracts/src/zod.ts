@@ -127,6 +127,7 @@ const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$
 const SINGLE_PATH_SEGMENT_PATTERN = "^[A-Za-z0-9._-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SHA256_DIGEST_PATTERN = "^sha256:[a-f0-9]{64}$";
+const DEVICE_DATA_ORIGIN_SLUG_PATTERN = "^[a-z0-9]+(?:[-_][a-z0-9]+)*$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
@@ -322,6 +323,21 @@ export const externalRefSchema = z
     resourceId: boundedString(1, 200),
     version: boundedString(1, 200).optional(),
     facet: patternedString(SLUG_PATTERN).optional(),
+  })
+  .strict();
+
+export const deviceDataOriginSchema = z
+  .object({
+    version: z.literal(1),
+    aggregatorProvider: patternedString(DEVICE_DATA_ORIGIN_SLUG_PATTERN, 1, 80).optional(),
+    sourceProviderSlug: patternedString(DEVICE_DATA_ORIGIN_SLUG_PATTERN, 1, 80).optional(),
+    sourceType: patternedString(DEVICE_DATA_ORIGIN_SLUG_PATTERN, 1, 80).optional(),
+    sourceInstanceId: patternedString(DEVICE_DATA_ORIGIN_SLUG_PATTERN, 1, 120).nullable().optional(),
+    observedAtRaw: boundedString(1, 160).optional(),
+    timeZoneOffsetMinutes: integerSchema(-24 * 60, 24 * 60).nullable().optional(),
+    timestampSemantics: z.enum(["utc", "offset", "floating", "unknown"]).optional(),
+    originConfidence: z.enum(["high", "medium", "low", "unknown"]).optional(),
+    normalizerVersion: boundedString(1, 120).optional(),
   })
   .strict();
 
@@ -653,6 +669,7 @@ const baseEventOptionalShape = {
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
+  dataOrigin: deviceDataOriginSchema.optional(),
   lifecycle: eventLifecycleSchema.optional(),
   timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;
@@ -701,6 +718,7 @@ const baseSampleShape = {
 
 const baseSampleOptionalShape = {
   externalRef: externalRefSchema.optional(),
+  dataOrigin: deviceDataOriginSchema.optional(),
   timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;
 
@@ -1810,6 +1828,7 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 );
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
+export type DeviceDataOrigin = z.infer<typeof deviceDataOriginSchema>;
 export type NutritionData = z.infer<typeof nutritionDataSchema>;
 export type NutritionProvenance = z.infer<typeof nutritionProvenanceSchema>;
 export type FoodNutrition = z.infer<typeof foodNutritionSchema>;

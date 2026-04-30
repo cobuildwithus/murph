@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
     getConnectionForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
+    listConnectionSources: vi.fn(),
     listConnectionsForUser: vi.fn(),
     persistStoredConnectionTokenBundle: vi.fn(),
     readHostedDeviceSyncEnvironment: vi.fn(),
@@ -181,6 +182,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
+    listConnectionSources = mocks.listConnectionSources;
     listConnectionsForUser = mocks.listConnectionsForUser;
     persistStoredConnectionTokenBundle = mocks.persistStoredConnectionTokenBundle;
     syncDurableConnectionState = mocks.syncDurableConnectionState;
@@ -318,6 +320,7 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection());
+    mocks.listConnectionSources.mockResolvedValue([]);
     mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.persistStoredConnectionTokenBundle.mockResolvedValue(undefined);
     mocks.registryGet.mockReturnValue(undefined);
@@ -710,6 +713,7 @@ describe("appendHostedDeviceSyncWake", () => {
           updatedAt: "2026-03-26T12:00:00.000Z",
         },
       ],
+      connectionSources: [],
     });
   });
 

@@ -409,6 +409,7 @@ function createDeviceSyncSource(
     statusLabel: "Connected",
     tone: "calm",
     updatedAt: null,
+    upstreamSources: [],
     ...overrides,
   };
 }

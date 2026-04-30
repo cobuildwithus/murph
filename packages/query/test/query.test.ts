@@ -649,6 +649,68 @@ test("wearable metric ranking balances specificity and recency ahead of provider
   }
 });
 
+test("wearable query uses Junction data origin to avoid outranking direct provider duplicates", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-junction-source-policy-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_steps_direct_oura_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T08:00:00Z",
+          recordedAt: "2026-04-01T08:01:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Direct Oura steps",
+          metric: "daily-steps",
+          value: 8200,
+          unit: "count",
+          externalRef: {
+            system: "oura",
+            resourceType: "activity",
+            resourceId: "oura-activity-01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_steps_junction_oura_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T08:05:00Z",
+          recordedAt: "2026-04-01T08:06:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Oura via Junction steps",
+          metric: "daily-steps",
+          value: 8200,
+          unit: "count",
+          externalRef: {
+            system: "junction",
+            resourceType: "junction-oura-activity",
+            resourceId: "junction-oura-activity-01",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const day = summarizeWearableDay(vault, "2026-04-01");
+
+    assert.equal(day?.activity?.steps.selection.provider, "oura");
+    assert.equal(day?.activity?.steps.selection.title, "Direct Oura steps");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("sleep-window ranking does not treat selected session duration as total sleep", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-sleep-window-ranking-"));
 

@@ -612,6 +612,141 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
   assert.equal(matchesDateFilters("2026-04-03", { to: "2026-04-02" }), false);
 });
 
+test("collectWearableDataset infers Junction source provenance from legacy resource types", () => {
+  const vault = makeVault([
+    makeWearableEntity({
+      attributes: {
+        externalRef: makeExternalRef({
+          resourceId: "legacy-junction-steps-1",
+          resourceType: "junction-oura-sleep",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-02T07:00:00Z",
+        unit: "count",
+        value: 9000,
+      },
+      entityId: "evt_legacy_junction_steps",
+      family: "event",
+      kind: "observation",
+      recordClass: "ledger",
+      title: "Legacy Junction steps",
+    }),
+  ]);
+
+  const dataset = collectWearableDataset(vault, {});
+  const candidate = dataset.rawMetricCandidates[0];
+
+  assert.equal(candidate?.provider, "junction");
+  assert.equal(candidate?.metric, "steps");
+  assert.equal(candidate?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(candidate?.dataOrigin?.originConfidence, "low");
+  assert.equal(candidate?.externalRef?.resourceType, "junction-oura-sleep");
+});
+
+test("collectWearableDataset ignores malformed persisted origin before legacy fallback", () => {
+  const vault = makeVault([
+    makeWearableEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceInstanceId: "source-should-not-survive",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+        },
+        externalRef: makeExternalRef({
+          resourceId: "legacy-junction-steps-1",
+          resourceType: "junction-oura-activity",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-02T07:00:00Z",
+        unit: "count",
+        value: 9000,
+      },
+      entityId: "evt_malformed_origin_steps",
+      family: "event",
+      kind: "observation",
+      recordClass: "ledger",
+      title: "Malformed origin steps",
+    }),
+  ]);
+
+  const dataset = collectWearableDataset(vault, {});
+  const candidate = dataset.rawMetricCandidates[0];
+
+  assert.equal(candidate?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(candidate?.dataOrigin?.originConfidence, "low");
+  assert.equal(candidate?.dataOrigin?.sourceInstanceId, undefined);
+  assert.equal(candidate?.dataOrigin?.sourceType, undefined);
+});
+
+test("collectWearableDataset keeps sourceInstanceId in wearable candidate identity", () => {
+  const sharedExternalRef = makeExternalRef({
+    resourceId: "junction-steps-1",
+    resourceType: "junction-oura-activity",
+    system: "junction",
+  });
+
+  const vault = makeVault([
+    makeWearableEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceInstanceId: "source-oura-ring-a",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          version: 1,
+        },
+        externalRef: sharedExternalRef,
+        metric: "daily-steps",
+        occurredAt: "2026-04-02T07:00:00Z",
+        recordedAt: "2026-04-02T07:01:00Z",
+        unit: "count",
+        value: 9000,
+      },
+      entityId: "evt_junction_steps_a",
+      family: "event",
+      kind: "observation",
+      recordClass: "ledger",
+      title: "Junction steps A",
+    }),
+    makeWearableEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceInstanceId: "source-oura-ring-b",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          version: 1,
+        },
+        externalRef: sharedExternalRef,
+        metric: "daily-steps",
+        occurredAt: "2026-04-02T07:00:00Z",
+        recordedAt: "2026-04-02T07:01:00Z",
+        unit: "count",
+        value: 9000,
+      },
+      entityId: "evt_junction_steps_b",
+      family: "event",
+      kind: "observation",
+      recordClass: "ledger",
+      title: "Junction steps B",
+    }),
+  ]);
+
+  const dataset = collectWearableDataset(vault, {});
+  const candidateIds = dataset.rawMetricCandidates.map((candidate) => candidate.candidateId);
+
+  assert.deepEqual(
+    dataset.rawMetricCandidates.map((candidate) => candidate.dataOrigin?.sourceInstanceId),
+    ["source-oura-ring-a", "source-oura-ring-b"],
+  );
+  assert.equal(candidateIds[0]?.includes("source-oura-ring-a"), true);
+  assert.equal(candidateIds[1]?.includes("source-oura-ring-b"), true);
+  assert.notEqual(candidateIds[0], candidateIds[1]);
+});
+
 test("exported helpers merge and group wearable candidates deterministically", () => {
   const activityCandidates = [
     makeMetricCandidate({
