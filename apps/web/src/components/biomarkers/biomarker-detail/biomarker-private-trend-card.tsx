@@ -58,16 +58,19 @@ export function BiomarkerPrivateTrendCard({ biomarker }: { biomarker: BiomarkerP
 
   if (trend.status === "loading") {
     return (
-      <Card className="border border-border/60">
-        <CardHeader>
-          <CardTitle>Your private {biomarker.shortName}</CardTitle>
-          <CardDescription>Loading browser-vault data…</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <Skeleton className="h-16 w-40" />
-          <Skeleton className="h-24 w-full" />
-        </CardContent>
-      </Card>
+      <div className="animate-pulse rounded-xl border border-border/60 p-6">
+        <div className="flex flex-col gap-5">
+          <div className="space-y-2">
+            <div className="h-3 w-24 rounded bg-muted" />
+            <div className="h-5 w-48 rounded bg-muted" />
+          </div>
+          <div className="flex items-end gap-2">
+            <div className="h-12 w-28 rounded bg-muted" />
+            <div className="mb-1 h-4 w-10 rounded bg-muted" />
+          </div>
+          <div className="h-24 w-full rounded-xl bg-muted/50" />
+        </div>
+      </div>
     );
   }
 

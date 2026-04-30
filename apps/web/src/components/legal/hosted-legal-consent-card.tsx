@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { ExternalLinkIcon, ShieldCheckIcon } from "lucide-react";
+import { ExternalLinkIcon, LoaderCircleIcon, ShieldCheckIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -142,11 +142,11 @@ export function HostedLegalConsentCard({
         aria-busy="true"
         aria-live="polite"
         role="status"
-        className={joinClassNames(cardClassName(mode), "py-4", className)}
+        className={joinClassNames(cardClassName(mode), className)}
       >
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
-          <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/60" />
-          <span>Loading...</span>
+          <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />
+          <span>Checking Murph legal consent...</span>
         </div>
       </div>
     );
