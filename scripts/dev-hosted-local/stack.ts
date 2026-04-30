@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -58,6 +58,17 @@ import {
 } from "./vercel.ts";
 
 const HOSTED_WEB_HEALTH_PATH = "/api/internal/health";
+const HOSTED_WEB_HEALTH_COMMONS_DEV_CACHE_PATHS = [
+  path.join(webDir, ".next-dev", "dev", "cache", "fetch-cache"),
+];
+const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
+  path.join(webDir, "src", "lib", "health-commons", "biomarker-detail.ts"),
+  path.join(webDir, "src", "lib", "health-commons", "experiment-browse.ts"),
+  path.join(webDir, "src", "lib", "health-commons", "experiment-detail.ts"),
+  path.join(webDir, "src", "lib", "health-commons", "experiment-projections.ts"),
+  path.join(webDir, "src", "lib", "health-commons", "generated-experiment-artifacts.ts"),
+  path.join(webDir, "src", "lib", "health-commons", "measurement-method-detail.ts"),
+];
 
 export interface HostedLocalDevStack {
   config: HostedLocalDevConfig;
@@ -297,6 +308,7 @@ export async function startHostedLocalDevStack(input: {
         env: runtimeEnv,
         name: "setup",
       });
+      await invalidateHostedWebHealthCommonsDevCache(input.stderrTarget);
     }
 
     if (workerRuntimeEnv !== null) {
@@ -577,6 +589,66 @@ export async function startHostedLocalDevStack(input: {
     }
     throw error;
   }
+}
+
+async function invalidateHostedWebHealthCommonsDevCache(
+  stderrTarget: NodeJS.WritableStream | undefined,
+): Promise<void> {
+  let invalidated = 0;
+
+  for (const cachePath of HOSTED_WEB_HEALTH_COMMONS_DEV_CACHE_PATHS) {
+    try {
+      await rm(cachePath, { force: true, recursive: true });
+      invalidated += 1;
+    } catch (error) {
+      writeHostedWebHealthCommonsInvalidationWarning(
+        stderrTarget,
+        `Unable to remove hosted web dev cache ${formatRepoPath(cachePath)}`,
+        error,
+      );
+    }
+  }
+
+  const now = new Date();
+  for (const filePath of HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES) {
+    try {
+      await utimes(filePath, now, now);
+      invalidated += 1;
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        continue;
+      }
+
+      writeHostedWebHealthCommonsInvalidationWarning(
+        stderrTarget,
+        `Unable to touch hosted web Health Commons bridge ${formatRepoPath(filePath)}`,
+        error,
+      );
+    }
+  }
+
+  if (invalidated > 0) {
+    (stderrTarget ?? process.stderr).write(
+      "[setup] Invalidated hosted web Health Commons dev cache.\n",
+    );
+  }
+}
+
+function writeHostedWebHealthCommonsInvalidationWarning(
+  stderrTarget: NodeJS.WritableStream | undefined,
+  message: string,
+  error: unknown,
+): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  (stderrTarget ?? process.stderr).write(`[setup] ${message}: ${detail}\n`);
+}
+
+function formatRepoPath(filePath: string): string {
+  return path.relative(repoRoot, filePath).replaceAll(path.sep, "/");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 async function maybeRunRunnerContainerSmoke(input: {

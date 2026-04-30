@@ -119,6 +119,7 @@ vi.mock("node:fs/promises", () => ({
   rename: vi.fn(async () => {}),
   rm: vi.fn(async () => {}),
   symlink: vi.fn(async () => {}),
+  utimes: vi.fn(async () => {}),
   writeFile: vi.fn(async () => {}),
 }));
 

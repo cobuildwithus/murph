@@ -442,6 +442,10 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       schemaVersion: "murph.commons.web.experiment-results-public.v1",
     }));
     expect(protocolTab?.expectedSignals.length).toBeGreaterThan(0);
+    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
+      biomarkerRouteId: "resting-heart-rate",
+      label: "Resting Heart Rate",
+    }));
     expect(protocolTab?.protocol.length).toBeGreaterThan(0);
     expect(protocolTab?.safety.precautions.length).toBeGreaterThan(0);
     expect(resultsPublic?.protocol).toEqual(protocolTab?.protocol);
