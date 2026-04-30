@@ -159,7 +159,6 @@ const sampleBatchShowResultSchema = z.object({
   importedAt: z.string().min(1).nullable(),
   source: z.string().min(1).nullable(),
   importedCount: z.number().int().nonnegative().nullable(),
-  sampleIds: z.array(z.string().min(1)),
   importConfig: sampleBatchManifestSchema,
   artifacts: z.array(sampleBatchManifestSchema),
   manifest: sampleBatchManifestSchema,

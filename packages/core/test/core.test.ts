@@ -4697,12 +4697,12 @@ test("importSamples retries reuse stable transform ids and avoid duplicating can
     sourcePath: csvPath,
     samples: [
       {
-        recordedAt: "2026-03-12T08:00:00.000Z",
-        value: 61,
-      },
-      {
         recordedAt: "2026-03-12T08:01:00.000Z",
         value: 63,
+      },
+      {
+        recordedAt: "2026-03-12T08:00:00.000Z",
+        value: 61,
       },
     ],
   };
@@ -4748,12 +4748,12 @@ test("importSamples retries repair partial shard state without minting new ids",
     sourcePath: csvPath,
     samples: [
       {
-        recordedAt: "2026-03-12T08:00:00.000Z",
-        value: 61,
-      },
-      {
         recordedAt: "2026-03-12T08:01:00.000Z",
         value: 63,
+      },
+      {
+        recordedAt: "2026-03-12T08:00:00.000Z",
+        value: 61,
       },
     ],
   };
@@ -4777,7 +4777,10 @@ test("importSamples retries repair partial shard state without minting new ids",
     importId: string;
     provenance?: {
       importedCount?: number;
-      sampleIds?: string[];
+      rowCount?: number;
+      skippedCount?: number;
+      firstSampleAt?: string | null;
+      lastSampleAt?: string | null;
     };
   };
 
@@ -4795,7 +4798,47 @@ test("importSamples retries repair partial shard state without minting new ids",
   );
   assert.equal(manifest.importId, first.transformId);
   assert.equal(manifest.provenance?.importedCount, 2);
-  assert.deepEqual(manifest.provenance?.sampleIds, first.records.map((record) => record.id));
+  assert.equal(manifest.provenance?.rowCount, 2);
+  assert.equal(manifest.provenance?.skippedCount, 0);
+  assert.equal(manifest.provenance?.firstSampleAt, "2026-03-12T08:00:00.000Z");
+  assert.equal(manifest.provenance?.lastSampleAt, "2026-03-12T08:01:00.000Z");
+});
+
+test("importSamples stores aggregate skip reasons from v1 batch provenance", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+  const csvPath = await writeExternalFile(
+    sourceRoot,
+    "aggregate-samples.csv",
+    "recorded_at,bpm\nbad,\n2026-03-12T08:00:00.000Z,61\n",
+  );
+
+  const imported = await importSamples({
+    vaultRoot,
+    stream: "heart_rate",
+    unit: "bpm",
+    sourcePath: csvPath,
+    samples: [{ recordedAt: "2026-03-12T08:00:00.000Z", value: 61 }],
+    batchProvenance: {
+      rowCount: 2,
+      skippedCount: 1,
+      skipReasons: [{ reason: "missing_value", count: 1 }],
+    },
+  });
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, imported.manifestPath), "utf8"),
+  ) as {
+    provenance?: {
+      rowCount?: number;
+      skippedCount?: number;
+      skipReasons?: Array<{ reason: string; count: number }>;
+    };
+  };
+
+  assert.equal(manifest.provenance?.rowCount, 2);
+  assert.equal(manifest.provenance?.skippedCount, 1);
+  assert.deepEqual(manifest.provenance?.skipReasons, [{ reason: "missing_value", count: 1 }]);
 });
 
 test("public core exports include the high-level canonical mutation ports", () => {

@@ -1,6 +1,8 @@
 import type { VaultReadModel } from "./read-model.ts";
 import {
+  materializeSafeSampleSummarySearchDocuments,
   materializeSafeSearchDocuments,
+  materializeSampleSummarySearchDocuments,
   materializeSearchDocuments,
   scoreSearchDocuments,
   type SearchCitation,
@@ -10,6 +12,7 @@ import {
   type SearchHit,
   type SearchResult,
 } from "./search-shared.ts";
+import { summarizeDailySamples } from "./summaries.ts";
 
 export { scoreSearchDocuments } from "./search-shared.ts";
 export type {
@@ -35,7 +38,10 @@ export function searchVault(
   query: string,
   filters: SearchFilters = {},
 ): SearchResult {
-  const documents = materializeSearchDocuments(vault.entities);
+  const documents = [
+    ...materializeSearchDocuments(vault.entities.filter((entity) => entity.family !== "sample")),
+    ...materializeSampleSummarySearchDocuments(summarizeDailySamples(vault)),
+  ];
   return scoreSearchDocuments(documents, query, filters);
 }
 
@@ -44,7 +50,10 @@ export function searchVaultSafe(
   query: string,
   filters: SearchFilters = {},
 ): SafeSearchResult {
-  const documents = materializeSafeSearchDocuments(vault.entities);
+  const documents = [
+    ...materializeSafeSearchDocuments(vault.entities.filter((entity) => entity.family !== "sample")),
+    ...materializeSafeSampleSummarySearchDocuments(summarizeDailySamples(vault)),
+  ];
   const result = scoreSearchDocuments(documents, query, filters);
 
   return {

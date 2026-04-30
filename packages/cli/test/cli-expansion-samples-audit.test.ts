@@ -423,7 +423,7 @@ test.sequential('samples commands support richer import options plus show/list/b
     const batchShow = await runSliceCli<{
       batchId: string
       stream: string | null
-      sampleIds: string[]
+      importedCount: number | null
       importConfig: {
         metadataColumns?: string[]
       }
@@ -441,10 +441,7 @@ test.sequential('samples commands support richer import options plus show/list/b
     assert.equal(batchShow.ok, true)
     assert.equal(requireData(batchShow).batchId, requireData(imported).imports[0]?.transformId)
     assert.equal(requireData(batchShow).stream, 'heart_rate')
-    assert.deepEqual(
-      requireData(batchShow).sampleIds,
-      requireData(imported).lookupIds,
-    )
+    assert.equal(requireData(batchShow).importedCount, 2)
     assert.deepEqual(requireData(batchShow).importConfig.metadataColumns, ['device', 'context'])
     assert.equal(requireData(batchShow).manifest.importId, requireData(imported).imports[0]?.transformId)
 

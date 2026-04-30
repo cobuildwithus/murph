@@ -227,7 +227,7 @@ function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {
     stream: summary.stream,
     experimentSlug: null,
     path: summary.sourcePaths[0] ?? null,
-    relatedIds: summary.sampleIds,
+    relatedIds: [],
     tags: ["sample_summary", summary.stream],
     data: {
       stream: summary.stream,
@@ -240,7 +240,6 @@ function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {
       sumValue: summary.sumValue,
       firstSampleAt: summary.firstSampleAt,
       lastSampleAt: summary.lastSampleAt,
-      sampleIds: summary.sampleIds,
       sourcePaths: summary.sourcePaths,
     },
   };

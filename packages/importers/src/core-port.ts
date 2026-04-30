@@ -28,15 +28,9 @@ export interface SampleImportRecord {
   value: number;
 }
 
-export interface SampleImportRowProvenance {
-  rowNumber: number;
-  recordedAt?: string;
-  value?: number;
-  rawRecordedAt: string;
-  rawValue: string;
-  metadata?: Record<string, string>;
-  skipped?: boolean;
-  skipReason?: string;
+export interface SampleImportSkipReasonCount {
+  count: number;
+  reason: string;
 }
 
 export interface SampleImportConfig {
@@ -50,7 +44,9 @@ export interface SampleImportConfig {
 export interface SampleImportBatchProvenance {
   sourceFileName?: string;
   importConfig?: SampleImportConfig;
-  rows?: SampleImportRowProvenance[];
+  rowCount?: number;
+  skippedCount?: number;
+  skipReasons?: SampleImportSkipReasonCount[];
 }
 
 export interface SampleImportPayload {

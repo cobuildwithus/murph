@@ -3,7 +3,6 @@ import path from 'node:path'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   applyLimit,
-  arrayOfStrings,
   asObject,
   compareNullableDates,
   firstString,
@@ -34,7 +33,6 @@ export interface SampleBatchDetails {
   importedAt: string | null
   source: string | null
   importedCount: number | null
-  sampleIds: string[]
   importConfig: JsonObject
   artifacts: JsonObject[]
   manifest: JsonObject
@@ -120,7 +118,6 @@ async function readSampleBatchManifest(
         .map((artifact) => asObject(artifact))
         .filter(isJsonObject)
     : []
-  const sampleIds = arrayOfStrings(provenance?.sampleIds)
   const importConfig = asObject(provenance?.importConfig) ?? {}
 
   return {
@@ -131,7 +128,6 @@ async function readSampleBatchManifest(
     importedAt: firstString(manifest, ['importedAt']),
     source: nullableString(typedManifest.source),
     importedCount: numberOrNull(provenance?.importedCount),
-    sampleIds,
     importConfig,
     artifacts,
     manifest,

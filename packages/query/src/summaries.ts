@@ -4,7 +4,7 @@ import {
   summarizeSampleSeries,
   type SampleSummaryProfile,
   type SampleWindowSummary,
-} from "@murphai/importers";
+} from "@murphai/importers/sample-series-summary";
 
 export interface DailySampleSummary {
   date: string;
@@ -19,7 +19,6 @@ export interface DailySampleSummary {
   sumValue: number | null;
   firstSampleAt: string | null;
   lastSampleAt: string | null;
-  sampleIds: string[];
   sourcePaths: string[];
 }
 
@@ -82,7 +81,6 @@ export function summarizeDailySamples(
 
     const { summary, values, unitSet } = group;
     summary.sampleCount += 1;
-    summary.sampleIds.push(sample.entityId);
 
     if (!summary.sourcePaths.includes(sample.path)) {
       summary.sourcePaths.push(sample.path);
@@ -168,7 +166,6 @@ function getOrCreateSummaryGroup(
       sumValue: null,
       firstSampleAt: null,
       lastSampleAt: null,
-      sampleIds: [],
       sourcePaths: [],
     },
     values: [],
@@ -195,7 +192,6 @@ function finalizeSummary(
     summary.averageValue = Number((summary.sumValue / values.length).toFixed(4));
   }
 
-  summary.sampleIds.sort();
   summary.sourcePaths.sort();
 
   return summary;

@@ -149,15 +149,6 @@ interface AddMealResult {
   manifestPath: string;
 }
 
-interface SampleImportRowProvenance {
-  rowNumber: number;
-  recordedAt: string;
-  value: number;
-  rawRecordedAt: string;
-  rawValue: string;
-  metadata?: Record<string, string>;
-}
-
 interface SampleImportBatchProvenance {
   sourceFileName?: string;
   importConfig?: {
@@ -167,7 +158,9 @@ interface SampleImportBatchProvenance {
     valueColumn: string;
     metadataColumns?: string[];
   };
-  rows?: SampleImportRowProvenance[];
+  rowCount?: number;
+  skippedCount?: number;
+  skipReasons?: Array<{ count: number; reason: string }>;
 }
 
 interface SampleInputRecord extends LooseRecord {
@@ -660,6 +653,26 @@ function encodeBase32(bytes: Uint8Array, length: number): string {
 function deterministicContractId(prefix: string, seed: string): string {
   const hash = createHash("sha256").update(seed).digest();
   return `${prefix}_${encodeBase32(hash, 26)}`;
+}
+
+function sampleRecordTimeBounds(records: readonly SampleRecord[]): {
+  firstSampleAt: string | null;
+  lastSampleAt: string | null;
+} {
+  let firstSampleAt: string | null = null;
+  let lastSampleAt: string | null = null;
+
+  for (const record of records) {
+    if (!firstSampleAt || record.recordedAt < firstSampleAt) {
+      firstSampleAt = record.recordedAt;
+    }
+
+    if (!lastSampleAt || record.recordedAt > lastSampleAt) {
+      lastSampleAt = record.recordedAt;
+    }
+  }
+
+  return { firstSampleAt, lastSampleAt };
 }
 
 function normalizeOptionalContractId(value: string | undefined, prefix: string, fieldName: string): string | undefined {
@@ -1750,8 +1763,8 @@ export async function importSamples({
       "Each sample must be a plain object.",
     ),
   );
-  const transformFingerprint = normalizedSamples.map((sample) =>
-    buildSampleRecord({
+  const transformFingerprint = normalizedSamples.map((sample) => {
+    const { id: _id, ...record } = buildSampleRecord({
       stream: normalizedStream,
       recordedAt: sample.recordedAt ?? sample.occurredAt,
       timeZone: vault.metadata.timezone,
@@ -1760,8 +1773,10 @@ export async function importSamples({
       sample,
       unit,
       recordId: `${ID_PREFIXES.sample}_00000000000000000000000000`,
-    }),
-  );
+    });
+
+    return record;
+  });
   const transformId = deterministicContractId(
     ID_PREFIXES.transform,
     JSON.stringify({
@@ -1770,7 +1785,7 @@ export async function importSamples({
       source,
       quality,
       sourcePath: sourcePath ?? null,
-      rows: transformFingerprint.map(({ id, ...record }) => record),
+      samples: transformFingerprint,
     }),
   );
   const preparedRecords: Array<{ record: SampleRecord; relativePath: string }> = [];
@@ -1809,7 +1824,18 @@ export async function importSamples({
   const touchedFiles = raw ? [raw.relativePath] : [];
   const records = preparedRecords.map((entry) => entry.record);
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, preparedRecords);
-  const rowProvenance = batchProvenance?.rows ?? [];
+  const rowCount = typeof batchProvenance?.rowCount === "number"
+    ? Math.max(0, Math.trunc(batchProvenance.rowCount))
+    : records.length;
+  const skippedCount = typeof batchProvenance?.skippedCount === "number"
+    ? Math.max(0, Math.trunc(batchProvenance.skippedCount))
+    : Math.max(0, rowCount - records.length);
+  const skipReasons = Array.isArray(batchProvenance?.skipReasons)
+    ? batchProvenance.skipReasons
+        .filter((entry) => typeof entry.reason === "string" && Number.isFinite(entry.count))
+        .map((entry) => ({ reason: entry.reason, count: Math.max(0, Math.trunc(entry.count)) }))
+    : [];
+  const sampleBounds = sampleRecordTimeBounds(records);
   return runCanonicalWrite({
     vaultRoot,
     operationType: "sample_batch_import",
@@ -1847,12 +1873,14 @@ export async function importSamples({
               stream: normalizedStream,
               unit,
               importedCount: records.length,
-              sampleIds: records.map((record) => record.id),
               ledgerFiles: appendPlan.targetShardPaths,
               sourceFileName: batchProvenance?.sourceFileName ?? raw?.originalFileName ?? null,
               importConfig: batchProvenance?.importConfig ?? null,
-              rowCount: rowProvenance.length,
-              rows: rowProvenance,
+              rowCount,
+              skippedCount,
+              skipReasons,
+              firstSampleAt: sampleBounds.firstSampleAt,
+              lastSampleAt: sampleBounds.lastSampleAt,
             },
           })
         : "";
@@ -1869,7 +1897,7 @@ export async function importSamples({
         summary: `Imported ${records.length} ${normalizedStream} sample record(s).`,
         occurredAt: records[0]?.recordedAt ?? new Date(),
         files: touchedPaths,
-        targetIds: records.map((record) => record.id),
+        targetIds: [transformId],
       });
 
       return {
@@ -1957,8 +1985,6 @@ export async function importDeviceBatch({
               importedAt: deviceBatchPlan.importedAt,
               eventCount: eventRecords.length,
               sampleCount: sampleRecords.length,
-              eventIds: eventRecords.map((record) => record.id),
-              sampleIds: sampleRecords.map((record) => record.id),
               rawArtifacts: deviceBatchPlan.preparedRawArtifacts.map((artifact) => ({
                 role: artifact.role,
                 relativePath: artifact.raw.relativePath,
@@ -1986,7 +2012,7 @@ export async function importDeviceBatch({
         summary: `Imported ${deviceBatchPlan.provider} device batch with ${eventRecords.length} event(s) and ${sampleRecords.length} sample(s).`,
         occurredAt: deviceBatchPlan.importedAt,
         files: touchedPaths,
-        targetIds: [...eventRecords.map((record) => record.id), ...sampleRecords.map((record) => record.id)],
+        targetIds: [deviceBatchPlan.importId],
       });
 
       return {
