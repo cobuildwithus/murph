@@ -187,7 +187,7 @@ export function JoinInviteClient({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
         <JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />
-        <h1 className="font-serif text-5xl font-normal leading-[1.04] tracking-[-0.03em] text-foreground sm:text-6xl">
+        <h1 className="font-serif text-5xl font-normal leading-[1.04] tracking-[-0.03em] text-foreground md:whitespace-nowrap sm:text-6xl">
           {resolveJoinInviteTitle(status)}
         </h1>
         <p className="max-w-md text-base leading-relaxed text-muted-foreground">
