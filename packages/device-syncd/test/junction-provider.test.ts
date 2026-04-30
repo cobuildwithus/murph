@@ -222,23 +222,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
 
 test("Junction completeConnection treats Link callback as weak and enqueues scalar polling windows", async () => {
   const provider = createJunctionProvider(async (input) => {
-    const url = readUrl(input);
-
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [
-          {
-            slug: "oura",
-            status: "connected",
-            resource_availability: {
-              sleep: true,
-            },
-          },
-        ],
-      });
-    }
-
-    throw new Error(`Unexpected request: ${url}`);
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
   });
 
   const connection = await requireValue(provider.completeConnection)({
@@ -254,7 +238,7 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
   });
 
   assert.equal(connection.externalAccountId, "junction-user-1");
-  assert.equal(connection.setupPhase, "source_confirmed");
+  assert.equal(connection.setupPhase, "link_returned");
   assert.deepEqual(connection.initialJobs?.map((job) => job.kind), ["backfill", "reconcile"]);
   assert.deepEqual(connection.initialJobs?.[0]?.payload, {
     windowStart: "2026-01-03T00:00:00.000Z",
@@ -266,13 +250,7 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
 
 test("Junction completeConnection falls back to the callback user_id when no seed is present", async () => {
   const provider = createJunctionProvider(async (input) => {
-    const url = readUrl(input);
-
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-ignored") {
-      return createJsonResponse({ providers: [] });
-    }
-
-    throw new Error(`Unexpected request: ${url}`);
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
   });
 
   const connection = await requireValue(provider.completeConnection)({

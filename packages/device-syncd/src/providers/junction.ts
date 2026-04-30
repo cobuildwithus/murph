@@ -203,9 +203,6 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    const providers = await client.listUserProviders(externalAccountId);
-    const hasConnectedSource = providers.some((provider) => mapJunctionSourceStatus(provider.status) === "connected");
-
     return {
       externalAccountId,
       displayName: "Junction",
@@ -214,7 +211,7 @@ export function createJunctionDeviceSyncProvider(
         kind: "provider_config",
         providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
       },
-      setupPhase: hasConnectedSource ? "source_confirmed" : "link_returned",
+      setupPhase: "link_returned",
       initialJobs: buildInitialJobs(context.now),
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
     };

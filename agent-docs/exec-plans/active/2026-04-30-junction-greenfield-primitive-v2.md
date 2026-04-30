@@ -496,6 +496,7 @@ PR 1, the PR 2 foundation, and the PR 3 polling MVP are committed as `509fce23b`
 
 - OAuth/connect state now keeps owner identity on the typed state record instead of generic callback metadata, and provider-supplied callback metadata continues to strip raw owner/user/client identifiers.
 - Existing disconnected seeded external-link accounts cannot be reactivated by stale callbacks; local and hosted connection upserts preserve existing lifecycle status when a callback omits `status`.
+- Junction callback completion remains weak: it validates the Link outcome and seeded user identity, then enqueues polling without fetching source status on the browser return path.
 - Junction webhook `resource` jobs use hosted wake-safe scalar payload fields that the hosted hint parser accepts.
 - Unknown-account webhooks only complete without provider retries when a durable unknown/orphan hook exists; otherwise they release the trace and remain retryable.
 - Junction resource webhook jobs skip opt-in resources such as glucose unless the resource is configured for that account/provider runtime.
@@ -584,6 +585,7 @@ Final cross-plan hardening verification:
 
 ```txt
 pnpm --dir packages/device-syncd test -- public-ingress.test.ts hosted-runtime.test.ts junction-provider.test.ts
+pnpm --dir packages/device-syncd test:coverage
 pnpm exec vitest run apps/web/test/prisma-store-oauth-connection.test.ts --config apps/web/vitest.config.ts --no-coverage
 pnpm --dir packages/device-syncd typecheck
 pnpm --dir apps/web typecheck
