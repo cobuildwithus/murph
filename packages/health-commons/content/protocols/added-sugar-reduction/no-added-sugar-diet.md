@@ -34,9 +34,6 @@ relations:
   target: experiment_family:added-sugar-reduction
 -
   type: primary_biomarker
-  target: biomarker:added-sugar-intake
--
-  type: secondary_biomarker
   target: biomarker:body-weight
 -
   type: secondary_biomarker
@@ -44,6 +41,9 @@ relations:
 -
   type: secondary_biomarker
   target: biomarker:morning-blood-pressure
+-
+  type: secondary_biomarker
+  target: biomarker:added-sugar-intake
 -
   type: cites
   target: source_artifact:acog-healthy-eating-pregnancy-2026-04-25
@@ -409,7 +409,7 @@ protocol:
   - If the rule conflicts with hypoglycemia treatment, a medical nutrition plan, pregnancy or breastfeeding nutrition, child or adolescent nutrition, food access, or adequate energy and carbohydrates for training, use a lighter sugar-source-awareness or clinician-guided variant instead of the strict version.
   - Each day, log added-sugar grams, the biggest source avoided or consumed, replacements used, cravings or social friction, energy, symptoms, and any exceptions.
   - Keep regular meals, protein, fiber-rich carbohydrates, fruit, dairy or alternatives, and hydration in place; this is not a fasting, keto, or total-carbohydrate elimination protocol.
-  - At the end, compare baseline and intervention added-sugar intake first; interpret weight, waist, glucose, blood pressure, cravings, and taste changes only as secondary or exploratory context; log sleep or recovery as a confounder/context signal, not as an expected no-added-sugar outcome.
+  - At the end, use the baseline-to-intervention added-sugar drop as the dose check, then interpret weight, waist, blood pressure, glucose, cravings, and taste changes as downstream or exploratory outcomes; log sleep or recovery as a confounder/context signal, not as an expected no-added-sugar outcome.
   tips:
   - Start with drinks if they are a major source; beverage changes are often easier to execute than a whole pantry overhaul.
   - Use neutral language such as 'logged exception' instead of 'failure' or 'cheat.'
@@ -419,7 +419,7 @@ protocol:
   - Prefer weekly averages for weight or waist; single-day changes are noisy.
   - If sweeteners are used, treat them as optional transition tools and log them separately rather than making them the default recommendation.
   keepInMind:
-  - The most direct outcome is whether added-sugar intake fell, not guaranteed weight loss, glucose improvement, dental change, or a taste-preference reset.
+  - Added-sugar intake is the exposure check; the main downstream home signals are weight trend, waist trend, and morning blood pressure when those are safe to measure.
   - Many supporting studies use free-sugar, sugar-sweetened-beverage, pediatric, clinical, or substitution designs; these are adjacent to, not identical with, a strict adult no-added-sugar diet.
   - Pregnancy, children, diabetes medication, underweight or frailty, heavy athletic training, and eating-disorder history need a clinician-aligned or adapted approach.
   - This protocol should feel like a bounded measurement experiment, not a moral rule about food.
@@ -472,28 +472,40 @@ testPlans:
   durationDays: 28
   baselineDays: 7
   interventionDays: 21
-  primaryBiomarkerKey: biomarker:added-sugar-intake
+  primaryBiomarkerKey: biomarker:body-weight
   secondaryBiomarkerKeys:
-  - biomarker:body-weight
   - biomarker:waist-circumference
   - biomarker:morning-blood-pressure
+  - biomarker:added-sugar-intake
   minimumAdherenceSessions: 14
   targetAdherenceSessions: 21
   notes:
-  - Primary success is a lower added-sugar intake estimate versus baseline, using the same logging method across both phases.
-  - Weight, waist, blood pressure, glucose, cravings, and taste changes are secondary or exploratory signals; sleep or recovery should be logged as context/confounding unless a separate sleep protocol is active. Unchanged biomarkers do not automatically mean the protocol failed if added-sugar intake fell.
+  - Treat added-sugar intake as the dose check, not the outcome win; use the same logging method across baseline and intervention to confirm the rule actually changed exposure.
+  - Body weight is the first downstream home signal; waist and morning blood pressure are secondary signals, while glucose, cravings, and taste changes are exploratory context. Sleep or recovery should be logged as context/confounding unless a separate sleep protocol is active.
   - Track replacements and exceptions so the experiment can distinguish added-sugar reduction from juice substitution, sweetener substitution, lower total energy intake, or broader diet changes.
   - Use the 21-day intervention as a behavior and intake-fidelity test; longer windows or scheduled labs are needed for many cardiometabolic outcomes. The 21-day window and adherence thresholds are Murph run-quality defaults, not evidence-derived clinical thresholds.
+-
+  planId: added-sugar-exposure-28d-no-weight
+  durationDays: 28
+  baselineDays: 7
+  interventionDays: 21
+  primaryBiomarkerKey: biomarker:added-sugar-intake
+  minimumAdherenceSessions: 14
+  targetAdherenceSessions: 21
+  notes:
+  - Use this fallback only when body-weight tracking is unavailable, unsafe, or likely to increase distress, restriction, or food-rule rigidity.
+  - This is a measurement fallback, not a return to treating intake reduction as the outcome win; added-sugar intake confirms exposure changed while the run mainly answers whether the rule was safe, livable, and interpretable.
+  - Keep weight out of the run, and use waist or morning blood pressure only as optional context when those measurements are safe and already available.
 -
   planId: added-sugar-intake-42d
   durationDays: 42
   baselineDays: 14
   interventionDays: 28
-  primaryBiomarkerKey: biomarker:added-sugar-intake
+  primaryBiomarkerKey: biomarker:body-weight
   secondaryBiomarkerKeys:
-  - biomarker:body-weight
   - biomarker:waist-circumference
   - biomarker:morning-blood-pressure
+  - biomarker:added-sugar-intake
   minimumAdherenceSessions: 21
   targetAdherenceSessions: 28
   notes:
@@ -501,17 +513,54 @@ testPlans:
   - Do not use the longer plan to promise disease-risk changes; distal outcomes remain research context rather than personal self-experiment endpoints.
 expectedSignalDescriptions:
 -
-  biomarkerKey: biomarker:added-sugar-intake
-  description: Removing regular sweet drinks, desserts, and packaged sugar sources means fewer added-sugar grams enter the diet.
--
   biomarkerKey: biomarker:body-weight
-  description: Removing added sugar can lower calories, especially when sweet drinks or snacks are not replaced. Scale weight can fall if that calorie gap lasts.
+  expected: Could trend lower
+  protocolProminence: focus
+  estimatedChange:
+    kind: absolute
+    low: -1.6
+    high: -0.3
+    unit: kg
+    window: 4-12 weeks
+    confidence: moderate
+    basis: Adult free-sugar reduction evidence centers on small scale-weight changes when sugar calories are not replaced, from about -0.4 kg versus control at 12 weeks to -1.6 kg within-group over 4 weeks in a small reduced-sugar trial.
+  description: Added sugar often arrives as fast calories in drinks, desserts, and packaged snacks. When those calories are not replaced by juice, refined starch, or larger portions, the weekly scale average can drop.
 -
   biomarkerKey: biomarker:waist-circumference
-  description: If added-sugar reduction keeps calories lower, body fat may fall slowly, and waist size may follow.
+  expected: Could shrink slowly
+  protocolProminence: focus
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: -0.3
+    unit: cm
+    window: 4-12 weeks
+    confidence: low
+    basis: Waist movement is inferred from the modest weight and body-fat reductions seen in reduced/free-sugar interventions; direct waist effects were weaker and less consistently extracted.
+  description: A sustained calorie gap pulls stored fat down before tape measurements move much. Waist size is most likely to shift when sweet drinks or desserts were frequent and replacements stay calorie-light.
 -
   biomarkerKey: biomarker:morning-blood-pressure
-  description: Less added sugar may lower blood pressure when it reduces calories, body weight, or sugary drinks. The effect is not consistent.
+  expected: Could trend lower
+  protocolProminence: focus
+  estimatedChange:
+    kind: absolute
+    low: -7
+    high: -1
+    unit: mmHg systolic
+    window: 8-12+ weeks
+    confidence: low
+    basis: RCT synthesis comparing higher versus lower dietary sugar found the largest BP separation after at least 8 weeks; shorter home runs should use repeated morning averages.
+  description: Lower sugar load can reduce total energy and sugary-drink exposure. With weight loss or less high-fructose intake, vascular tone and sodium handling may ease enough for morning pressure to drift down.
+-
+  biomarkerKey: biomarker:added-sugar-intake
+  expected: Dose check
+  protocolProminence: context
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: daily during intervention
+    confidence: high
+    basis: The gram drop depends on baseline intake, boundary choice, labels, and unlabeled foods; use baseline-relative change to confirm exposure rather than treating grams reduced as the outcome win.
+  description: This is the exposure check, not the win. Label reading and replacement choices should push added-sugar grams down; use the drop to explain whether downstream signals had enough dose to move.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -589,6 +638,30 @@ experimentOnboarding:
     - A positive or uncertain screen is not a diagnosis; it means Murph should not set up a strict unsupervised version without adapted guidance.
     - Offer a lighter sugar-source-awareness experiment or clinician-aligned nutrition plan when the strict path is a poor fit.
     - When strict avoidance is unsafe or unrealistic, route to sugar-source awareness or clinician-guided adaptation rather than treating the run as failed.
+  adaptationPolicy:
+    fields:
+    -
+      id: measurement_plan
+      label: Measurement plan
+      target:
+        object: analysisPlan
+        field: measurementPlan
+      sourceSlotIds:
+      - weight_tracking_fit
+      requiredForRunSpec: true
+      protocolReusable: false
+      guidance: Use the body-weight-primary default plan only when weekly weight tracking is safe and available. If weight tracking is unavailable or would increase distress, restriction, or unsafe behavior, select the no-weight fallback plan and keep scale weight out of required signals.
+    measurementPlan:
+      testPlanId: added-sugar-intake-28d
+      requiredSignals:
+      - biomarker:body-weight
+      optionalSignals:
+      - biomarker:waist-circumference
+      - biomarker:morning-blood-pressure
+      - biomarker:added-sugar-intake
+      notes:
+      - The default measurement plan assumes safe weekly weight tracking.
+      - When that assumption fails, use added-sugar-exposure-28d-no-weight and treat intake logging as exposure fidelity rather than a downstream outcome win.
   setupSlots:
 
   -
@@ -644,6 +717,23 @@ experimentOnboarding:
       object: experimentRun
       field: replacementPlan
   -
+    id: weight_tracking_fit
+    label: Weight tracking fit
+    purpose: safety
+    valueType: enum
+    askPolicy: always
+    required: true
+    question: Is weekly body-weight tracking available and unlikely to increase distress, restriction, food-rule rigidity, or unsafe behavior?
+    options:
+    - weekly_weight_safe_available
+    - avoid_weight_tracking
+    target:
+      object: analysisPlan
+      field: weightTrackingFit
+    notes:
+    - Choose the body-weight-primary plan only for weekly_weight_safe_available.
+    - If the answer is avoid_weight_tracking, use added-sugar-exposure-28d-no-weight and do not ask for scale measurements.
+  -
     id: daily_log_time
     label: Daily log time
     purpose: assistant_support
@@ -676,7 +766,7 @@ experimentOnboarding:
     interventionDays: 21
     targetSessions: 21
     minimumUsefulSessions: 14
-    firstSessionGuidance: Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. The 7/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds.
+    firstSessionGuidance: Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. Use the body-weight-primary plan only when weekly weight tracking is safe and available; otherwise switch to the no-weight fallback. The 7/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds.
   logging:
     sessionFields:
     - daily_added_sugar_grams
@@ -1162,9 +1252,9 @@ claims:
   - Some sources are qualitative, guideline-based, or disease-specific.
   - Monitoring thresholds should be individualized for diabetes, pregnancy, malnutrition risk, and athletic training load.
 -
-  claimId: outcome-monitoring-001-added-sugar-intake-is-primary-outcome
+  claimId: outcome-monitoring-001-added-sugar-intake-is-exposure-fidelity-context
   type: design_guardrail
-  text: The primary measured outcome should be added-sugar intake, logged as grams per day and optionally percent of energy when feasible; packaged-food labels can distinguish Added Sugars from Total Sugars, while study reports using free sugars should be labeled separately because free sugars include added sugars plus sugars in honey, syrups, fruit juices, and fruit-juice concentrates.
+  text: Added-sugar intake should be logged as an exposure-fidelity check, not promoted as the downstream outcome win; packaged-food labels can distinguish Added Sugars from Total Sugars, while study reports using free sugars should be labeled separately because free sugars include added sugars plus sugars in honey, syrups, fruit juices, and fruit-juice concentrates.
   strength: high
   sourceKeys:
   - source_artifact:fda-added-sugars-label-2026-03-04
@@ -1193,9 +1283,9 @@ claims:
   - Clinical NAFLD findings should not be generalized to healthy adults.
   - People with diabetes, glucose-lowering medications, hypoglycemia risk, or pregnancy-related diabetes need individualized clinical monitoring; no-added-sugar rules must not block clinically indicated rapid carbohydrate treatment.
 -
-  claimId: outcome-monitoring-003-weight-and-waist-are-secondary-not-promised
+  claimId: outcome-monitoring-003-weight-and-waist-are-main-home-signals-not-promised
   type: mixed_evidence
-  text: Body weight, waist circumference, and body composition are reasonable secondary outcomes, but weight change should not be promised; evidence suggests sugar-related weight effects are often mediated by total energy intake, while direct and adjacent studies include fat-mass reductions, weak weight associations, null anthropometric findings, and observational associations that cannot establish protocol causality.
+  text: Body weight, waist circumference, and body composition are the most measurable downstream home signals for this protocol, with body weight first in the card order; evidence suggests sugar-related weight effects are often mediated by total energy intake, while direct and adjacent studies include fat-mass reductions, weak weight associations, null anthropometric findings, and observational associations that cannot establish protocol causality.
   strength: moderate
   sourceKeys:
   - source_artifact:pmid-23321486
@@ -1301,9 +1391,9 @@ claims:
   - Do not use long-term disease outcomes to judge a short personal experiment.
   - The added-sugars cardiovascular systematic review reported limited evidence for adult CVD mortality largely based on sugar-sweetened beverages and insufficient evidence for several other cardiovascular outcomes; preserve that uncertainty.
 researchLandscape:
-  bottomLine: 'Best read as a practical intake-reduction experiment: the most direct evidence supports reducing free/added-sugar intake, while sugar-sweetened-beverage trials are high-leverage adjacent evidence; downstream biomarkers and long-term disease outcomes remain mixed, adjacent, or context-only.'
+  bottomLine: 'Best read as a practical sugar-source substitution experiment: intake logs confirm the exposure changed, while weight, waist, and morning blood pressure are the most measurable downstream signals; glucose, lipids, dental outcomes, cravings, taste, and long-term disease outcomes remain mixed, adjacent, or context-only.'
   confidenceLabel: mixed
-  primaryClaim: A label-defined no-added-sugar experiment can test whether a user can measurably reduce added-sugar intake while preserving adequate nutrition; it should not promise weight loss, glucose improvement, dental reversal, disease prevention, or a taste reset.
+  primaryClaim: A label-defined no-added-sugar experiment can test whether replacing recurring added-sugar sources changes downstream home markers while preserving adequate nutrition; it should not promise weight loss, glucose improvement, dental reversal, disease prevention, or a taste reset.
   mainCaveat: The corpus combines free-sugar guidance, sugar-sweetened-beverage trials, clinical NAFLD and dental studies, sweetener-substitution studies, observational cohorts, safety-only sources, and external guidelines. These should not be collapsed into one direct adult efficacy claim.
   groups:
 
@@ -1459,7 +1549,7 @@ researchLandscape:
     id: outcome-monitoring-and-measurement
     label: Outcome monitoring and measurement
     stance: mixed
-    summary: This bucket keeps the protocol measurable without overpromising. The best primary signal is whether added-sugar intake actually falls, using label Added Sugars plus food logs or recalls while keeping added sugar separate from free sugar and total sugar. Weight, waist, glucose, HbA1c/CGM, lipids, blood pressure, and dental markers are useful secondary or context outcomes, but extracted direct evidence is mixed and often clinical, pediatric, short-term, beverage-specific, or observational. Cravings, lapses, and taste preference are implementation signals to track, not guaranteed outcomes.
+    summary: This bucket keeps the protocol measurable without overpromising. Added-sugar intake is the exposure-fidelity check, using label Added Sugars plus food logs or recalls while keeping added sugar separate from free sugar and total sugar. Weight, waist, and morning blood pressure are the most practical downstream home signals; glucose, HbA1c/CGM, lipids, dental markers, cravings, lapses, and taste preference remain exploratory or context outcomes because the direct evidence is mixed and often clinical, pediatric, short-term, beverage-specific, or observational.
     sourceKeys:
     - source_artifact:fda-added-sugars-label-2026-03-04
     - source_artifact:pmid-25905159
@@ -1541,7 +1631,7 @@ The default version uses the **Added Sugars** line on Nutrition Facts labels for
 
 ## How to interpret the experiment
 
-The primary question is not “did every biomarker improve?” The primary question is: **did estimated added-sugar intake fall compared with baseline, and was the protocol safe and livable?** Body weight, waist, blood pressure, glucose, cravings, and taste changes are useful context, but they are not promised outcomes; sleep and recovery are best treated as context or confounders for this protocol.
+The primary question is not “did every biomarker improve?” First confirm the dose: **did estimated added-sugar intake fall compared with baseline, and was the protocol safe and livable?** Then read the downstream signals in order: body weight, waist, and morning blood pressure. Glucose, cravings, and taste changes are useful context, but they are not promised outcomes; sleep and recovery are best treated as context or confounders for this protocol.
 
 ## Variant boundaries
 
