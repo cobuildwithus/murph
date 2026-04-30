@@ -30,6 +30,7 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
   assert.equal(metadata.title, "Connect Devices — Murph");
   assert.match(markup, /Connect your health/);
   assert.match(markup, /Just Cobuild sources/);
+  assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
   assert.doesNotMatch(markup, /Health data source from the Just Cobuild priority catalog/u);
