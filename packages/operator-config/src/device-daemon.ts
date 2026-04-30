@@ -26,6 +26,7 @@ import {
   resolveInstalledDeviceSyncPackageEntry,
 } from './device-daemon/paths.js'
 import {
+  defaultFindUnmanagedDeviceSyncDaemonPid,
   defaultIsProcessAlive,
   defaultSpawnDeviceDaemonProcess,
   isDeviceDaemonHealthy,
@@ -209,6 +210,7 @@ export async function startManagedDeviceSyncDaemon(input: {
   const state = await readDeviceDaemonState(paths, dependencies)
   const existingToken = readManagedControlToken(vault)
   const explicitControlToken = resolveDeviceSyncControlToken(undefined, env)
+  let recoveredUnmanagedDaemon = false
   const stateProcessAlive =
     state !== null && state.baseUrl === baseUrl
       ? dependencies.isProcessAlive(state.pid)
@@ -257,11 +259,20 @@ export async function startManagedDeviceSyncDaemon(input: {
   }
 
   if (await isDeviceDaemonControlPlaneReachable(baseUrl, dependencies.fetchImpl)) {
-    throw new VaultCliError(
-      'DEVICE_SYNC_DAEMON_CONFLICT',
-      buildUnmanagedReachableDeviceDaemonMessage(baseUrl),
-      { baseUrl },
-    )
+    recoveredUnmanagedDaemon = canStartDeviceSyncDaemonFromEnv(env)
+      ? await recoverUnmanagedReachableDeviceDaemon({
+          baseUrl,
+          dependencies,
+        })
+      : false
+
+    if (!recoveredUnmanagedDaemon) {
+      throw new VaultCliError(
+        'DEVICE_SYNC_DAEMON_CONFLICT',
+        buildUnmanagedReachableDeviceDaemonMessage(baseUrl),
+        { baseUrl },
+      )
+    }
   }
 
   if (!hasConfiguredDeviceSyncProviderConfigs(readConfiguredDeviceSyncProviderConfigs(env))) {
@@ -343,7 +354,9 @@ export async function startManagedDeviceSyncDaemon(input: {
     running: true,
     healthy: true,
     message:
-      'Murph started and is now managing the local device sync daemon.',
+      recoveredUnmanagedDaemon
+        ? 'Murph stopped an orphaned local device sync daemon and started a fresh managed daemon.'
+        : 'Murph started and is now managing the local device sync daemon.',
     started: true,
   })
 }
@@ -462,6 +475,9 @@ function createDeviceDaemonDependencies(
       ((pid, signal) => {
         process.kill(pid, signal)
       }),
+    findUnmanagedDeviceSyncDaemonPid:
+      overrides.findUnmanagedDeviceSyncDaemonPid ??
+      defaultFindUnmanagedDeviceSyncDaemonPid,
     spawnProcess: overrides.spawnProcess ?? defaultSpawnDeviceDaemonProcess,
     resolveDeviceSyncPackageEntry:
       overrides.resolveDeviceSyncPackageEntry ??
@@ -488,6 +504,53 @@ function requireManagedVault(vault: string | null | undefined): string {
     'DEVICE_SYNC_VAULT_REQUIRED',
     'Device sync daemon management needs a vault path. Pass `--vault <path>` or configure a default Murph vault first.',
   )
+}
+
+async function recoverUnmanagedReachableDeviceDaemon(input: {
+  baseUrl: string
+  dependencies: DeviceDaemonDependencies
+}): Promise<boolean> {
+  let expectedBinPath: string
+  try {
+    expectedBinPath = resolveDeviceSyncDaemonBinPath(input.dependencies)
+  } catch {
+    return false
+  }
+
+  const pid = await input.dependencies.findUnmanagedDeviceSyncDaemonPid({
+    baseUrl: input.baseUrl,
+    expectedBinPath,
+    port: readBaseUrlPort(input.baseUrl),
+  })
+  if (pid === null) {
+    return false
+  }
+
+  if (!input.dependencies.isProcessAlive(pid)) {
+    return true
+  }
+
+  try {
+    input.dependencies.killProcess(pid, 'SIGTERM')
+  } catch {
+    return false
+  }
+
+  return await waitForDeviceDaemonExit(
+    pid,
+    input.dependencies,
+    DEVICE_DAEMON_STOP_TIMEOUT_MS,
+  )
+}
+
+function canStartDeviceSyncDaemonFromEnv(env: NodeJS.ProcessEnv): boolean {
+  try {
+    return hasConfiguredDeviceSyncProviderConfigs(
+      readConfiguredDeviceSyncProviderConfigs(env),
+    )
+  } catch {
+    return false
+  }
 }
 
 function assertLoopbackBaseUrl(baseUrl: string): void {
