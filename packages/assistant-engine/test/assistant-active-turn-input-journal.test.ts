@@ -38,37 +38,12 @@ describe('assistant accepted active-turn input journal', () => {
         {
           captureIds: ['cap_1'],
           contentRef: {
-            kind: 'inbox-capture',
-            refId: 'cap_1',
-            version: 'ledger-v1',
+            kind: 'assistant-input-event',
+            refId: 'ain_00000000000000000000000000000001',
+            version: 'murph.assistant-input-event.v1',
           },
-          cursorEffects: [
-            {
-              captureIds: ['cap_1'],
-              cursorKind: 'auto-reply-channel',
-              from: {
-                captureId: 'cap_0',
-                createdAt: '2026-04-22T09:59:01.000Z',
-                occurredAt: '2026-04-22T09:59:00.000Z',
-              },
-              source: 'telegram',
-              to: {
-                captureId: 'cap_1',
-                createdAt: '2026-04-22T10:00:01.000Z',
-                occurredAt: '2026-04-22T10:00:00.000Z',
-              },
-            },
-            {
-              captureIds: ['mailbox_item_conversation_1'],
-              cursorKind: 'hosted-mailbox-import',
-              from: '41',
-              lane: 'conversation',
-              source: 'hosted-mailbox',
-              to: '42',
-            },
-          ],
           id: 'input_1',
-          source: 'inbox',
+          source: 'assistant-input',
         },
         {
           id: 'input_2',
@@ -98,19 +73,17 @@ describe('assistant accepted active-turn input journal', () => {
       turnId: 'turn_active_input',
     })
     expect(journal.inputs.map((input) => input.id)).toEqual(['input_1', 'input_2'])
-    expect(journal.inputs[0]?.cursorEffects[0]).toMatchObject({
+    expect(journal.inputs[0]).toMatchObject({
       captureIds: ['cap_1'],
-      cursorKind: 'auto-reply-channel',
-      source: 'telegram',
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: 'ain_00000000000000000000000000000001',
+        version: 'murph.assistant-input-event.v1',
+      },
+      id: 'input_1',
+      source: 'assistant-input',
     })
-    expect(journal.inputs[0]?.cursorEffects[1]).toEqual({
-      captureIds: ['mailbox_item_conversation_1'],
-      cursorKind: 'hosted-mailbox-import',
-      from: '41',
-      lane: 'conversation',
-      source: 'hosted-mailbox',
-      to: '42',
-    })
+    expect(journal.inputs[0]).not.toHaveProperty('cursorEffects')
     expect(journal.inputs[1]?.promptFallback).toMatchObject({
       reason: 'manual-input',
       textLengthBucket: '1-64',
@@ -123,6 +96,10 @@ describe('assistant accepted active-turn input journal', () => {
     expect(persistedRaw).not.toContain('Sensitive fallback prompt text')
     expect(persistedRaw).not.toContain('acct_1')
     expect(persistedRaw).not.toContain('thread_1')
+    expect(persistedRaw).not.toContain('cursorEffects')
+    expect(persistedRaw).not.toContain('auto-reply-channel')
+    expect(persistedRaw).not.toContain('inbox-scan')
+    expect(persistedRaw).not.toContain('hosted-mailbox-import')
     expect(assistantAcceptedTurnInputJournalSchema.parse(JSON.parse(persistedRaw))).toEqual(
       journal,
     )
@@ -297,11 +274,12 @@ describe('assistant accepted active-turn input journal', () => {
         {
           captureIds: ['cap_late'],
           contentRef: {
-            kind: 'inbox-capture',
-            refId: 'cap_late',
+            kind: 'assistant-input-event',
+            refId: 'ain_00000000000000000000000000000002',
+            version: 'murph.assistant-input-event.v1',
           },
           id: 'input_late',
-          source: 'inbox',
+          source: 'assistant-input',
         },
       ],
       now: new Date('2026-04-22T10:00:00.000Z'),
@@ -469,7 +447,12 @@ describe('assistant accepted active-turn input journal', () => {
         },
         {
           id: 'input_late',
-          source: 'inbox',
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: 'ain_00000000000000000000000000000003',
+            version: 'murph.assistant-input-event.v1',
+          },
+          source: 'assistant-input',
         },
       ],
       now: new Date('2026-04-22T10:00:00.000Z'),
@@ -493,28 +476,6 @@ describe('assistant accepted active-turn input journal', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_TURN_INPUT_JOURNAL_IDENTITY_MISMATCH',
     })
-    await expect(
-      appendAssistantAcceptedTurnInputItems({
-        inputs: [
-          {
-            cursorEffects: [
-              {
-                cursorKind: 'hosted-mailbox-import',
-                from: '01',
-                lane: 'conversation',
-                source: 'hosted-mailbox',
-                to: '2',
-              },
-            ],
-            id: 'input_bad_watermark',
-            source: 'inbox',
-          },
-        ],
-        sessionId: 'session_active_turn',
-        turnId: 'turn_bad_watermark',
-        vault: vaultRoot,
-      }),
-    ).rejects.toThrow()
     await expect(
       recordAssistantAcceptedTurnInputProviderRequest({
         acceptedInputIds: ['input_initial'],
@@ -808,7 +769,6 @@ describe('assistant accepted active-turn input journal', () => {
           acceptedAt: '2026-04-22T11:10:00.000Z',
           captureIds: [],
           contentRef: null,
-          cursorEffects: [],
           id: 'input_initial',
           promptFallback: null,
           source: 'initial',
@@ -822,7 +782,6 @@ describe('assistant accepted active-turn input journal', () => {
             refId: 'manual_input_late',
             version: null,
           },
-          cursorEffects: [],
           id: 'input_late',
           promptFallback: null,
           source: 'manual',
