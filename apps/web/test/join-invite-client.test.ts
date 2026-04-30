@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   fetchHostedInviteStatus: vi.fn(),
+  hostedLegalConsentCardProps: null as HostedLegalConsentCardProps | null,
   hostedInvitePhoneAuthProps: null as Record<string, unknown> | null,
   logout: vi.fn(),
   useHostedInviteStatusRefresh: vi.fn(),
@@ -33,6 +34,20 @@ vi.mock("@/src/components/hosted-onboarding/hosted-invite-phone-auth", () => ({
   },
 }));
 
+vi.mock("@/src/components/legal/hosted-legal-consent-card", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/components/legal/hosted-legal-consent-card")>();
+
+  return {
+    ...actual,
+    HostedLegalConsentCard(
+      props: Parameters<typeof actual.HostedLegalConsentCard>[0],
+    ) {
+      mocks.hostedLegalConsentCardProps = props;
+      return actual.HostedLegalConsentCard(props);
+    },
+  };
+});
+
 vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
   fetchHostedInviteStatus: mocks.fetchHostedInviteStatus,
   useHostedInviteStatusRefresh: mocks.useHostedInviteStatusRefresh,
@@ -43,6 +58,7 @@ import {
   resolveJoinInviteStatusFromRefresh,
   shouldAwaitHostedInviteSessionResolution,
 } from "@/src/components/hosted-onboarding/join-invite-client";
+import type { HostedLegalConsentCard as HostedLegalConsentCardComponent } from "@/src/components/legal/hosted-legal-consent-card";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import {
@@ -53,10 +69,12 @@ import {
 const activeJoinInviteClientCleanups = new Set<() => Promise<void> | void>();
 const requireFromJoinInviteClientTest = createRequire(import.meta.url);
 const { parseHTML } = loadJoinInviteClientLinkedom();
+type HostedLegalConsentCardProps = Parameters<typeof HostedLegalConsentCardComponent>[0];
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  mocks.hostedLegalConsentCardProps = null;
   mocks.hostedInvitePhoneAuthProps = null;
   mocks.usePrivy.mockReturnValue({
     authenticated: true,
@@ -172,7 +190,11 @@ test("verify-stage invite keeps polling while the session is still settling", ()
 });
 
 test("checkout stage does not auto-launch on an ordinary invite load", async () => {
-  const fetchMock = vi.fn<typeof fetch>();
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
+      status: 200,
+    }),
+  );
   vi.stubGlobal("fetch", fetchMock);
 
   const view = await renderJoinInviteClientForEffects({
@@ -186,18 +208,193 @@ test("checkout stage does not auto-launch on an ordinary invite load", async () 
     }),
   });
 
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(view.locationAssign).not.toHaveBeenCalled();
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Start your first experiment/);
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
+  expect(fetchMock).toHaveBeenCalledWith("/api/legal/consent/status", expect.objectContaining({
+    method: "GET",
+  }));
+
+  await view.cleanup();
+});
+
+test("checkout stage keeps payment choices hidden until launch legal consent is current", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: false })), {
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.hostedLegalConsentCardProps).toMatchObject({
+      mode: "panel",
+      preferredScope: "launch.required",
+      source: "join-invite-phone-verify",
+    });
+    expect(mocks.useHostedInviteStatusRefresh).toHaveBeenLastCalledWith(expect.objectContaining({
+      disabled: true,
+      shouldPoll: false,
+    }));
+  });
+
+  assert.match(view.container.textContent ?? "", /Review legal consent/);
+  assert.match(view.container.textContent ?? "", /Accept and continue/);
+  assert.doesNotMatch(view.container.textContent ?? "", /Get Pulse/);
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();
 });
 
-test("phone verification returns to the checkout plan picker without auto-launching Stripe", async () => {
+test("phone verification requires launch legal consent before showing checkout", async () => {
+  const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify(createConsentStatus({ launchGranted: false })), {
+        status: 200,
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
+        status: 200,
+      }),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteClientForEffects();
+  const onCompleted = readHostedInvitePhoneAuthOnCompleted();
+
+  await act(async () => {
+    await onCompleted(createCompletionPayload("checkout"));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.hostedLegalConsentCardProps).toMatchObject({
+      mode: "panel",
+      preferredScope: "launch.required",
+      source: "join-invite-phone-verify",
+    });
+    expect(mocks.useHostedInviteStatusRefresh).toHaveBeenLastCalledWith(expect.objectContaining({
+      disabled: true,
+      shouldPoll: false,
+    }));
+  });
+
+  expect(mocks.fetchHostedInviteStatus).not.toHaveBeenCalled();
+  expect(view.locationAssign).not.toHaveBeenCalled();
+  assert.match(view.container.textContent ?? "", /Review legal consent/);
+  assert.doesNotMatch(view.container.textContent ?? "", /Get Pulse/);
+
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Murph Terms of Service/);
+    assert.match(view.container.textContent ?? "", /Accept and continue/);
+  });
+
+  const checkbox = view.container.querySelector('input[type="checkbox"]');
+  assert.ok(checkbox);
+
+  await act(async () => {
+    setCheckboxChecked(view.window, checkbox as HTMLInputElement, true);
+  });
+
+  const acceptButton = findButtonByText(view.container, /Accept and continue/);
+  await vi.waitFor(() => {
+    expect(acceptButton.disabled).toBe(false);
+  });
+
+  await act(async () => {
+    acceptButton.dispatchEvent(new view.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Start your first experiment/);
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
+
+  expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/legal/consent/status", expect.objectContaining({
+    method: "GET",
+  }));
+  const acceptCall = fetchMock.mock.calls.find(([url]) => url === "/api/legal/consent/accept");
+  assert.ok(acceptCall);
+  expect(acceptCall[1]).toEqual(expect.objectContaining({
+    method: "POST",
+  }));
+  const acceptBody = acceptCall[1]?.body;
+  if (typeof acceptBody !== "string") {
+    throw new Error("Consent accept request did not include a string body.");
+  }
+  expect(JSON.parse(acceptBody)).toEqual({
+    acceptedDocumentVersions: {
+      "consumer-health-data-notice": "2026-04-29",
+      "health-ai-safety-disclosure": "2026-04-29",
+      "privacy-policy": "2026-04-29",
+      "terms-of-service": "2026-04-29",
+    },
+    scope: "launch.required",
+    source: "join-invite-phone-verify",
+  });
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/hosted-onboarding/billing/checkout",
+    expect.anything(),
+  );
+
+  await view.cleanup();
+});
+
+test.each(["checkout", "activating", "active"] as const)(
+  "phone verification pauses invite polling while launch consent is pending after a %s completion payload",
+  async (stage) => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(createConsentStatus({ launchGranted: false })), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = await renderJoinInviteClientForEffects();
+    const onCompleted = readHostedInvitePhoneAuthOnCompleted();
+
+    await act(async () => {
+      await onCompleted(createCompletionPayload(stage));
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.hostedLegalConsentCardProps).toMatchObject({
+        mode: "panel",
+        preferredScope: "launch.required",
+        source: "join-invite-phone-verify",
+      });
+      expect(mocks.useHostedInviteStatusRefresh).toHaveBeenLastCalledWith(expect.objectContaining({
+        disabled: true,
+        shouldPoll: false,
+      }));
+    });
+
+    assert.match(view.container.textContent ?? "", /Review legal consent/);
+    assert.match(view.container.textContent ?? "", /Murph Terms of Service/);
+    assert.match(view.container.textContent ?? "", /Accept and continue/);
+    expect(mocks.fetchHostedInviteStatus).not.toHaveBeenCalled();
+    expect(view.locationAssign).not.toHaveBeenCalled();
+
+    await view.cleanup();
+  },
+);
+
+test("phone verification skips the legal consent action when launch consent is current", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify({
-      alreadyActive: false,
-      url: "https://stripe.example.test/checkout",
-    }), {
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
       status: 200,
     }),
   );
@@ -210,11 +407,21 @@ test("phone verification returns to the checkout plan picker without auto-launch
     await onCompleted(createCompletionPayload("checkout"));
   });
 
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Start your first experiment/);
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
+
   expect(mocks.fetchHostedInviteStatus).not.toHaveBeenCalled();
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledWith("/api/legal/consent/status", expect.objectContaining({
+    method: "GET",
+  }));
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/legal/consent/accept",
+    expect.anything(),
+  );
   expect(view.locationAssign).not.toHaveBeenCalled();
-  assert.match(view.container.textContent ?? "", /Start your first experiment/);
-  assert.match(view.container.textContent ?? "", /Get Pulse/);
+  assert.doesNotMatch(view.container.textContent ?? "", /Accept and continue/);
 
   await view.cleanup();
 });
@@ -251,12 +458,9 @@ test("phone verification keeps checkout hidden until the server confirms invite 
   await view.cleanup();
 });
 
-test("stale invite status refreshes preserve the checkout plan picker", async () => {
+test("stale invite status refreshes preserve the checkout plan picker after consent is current", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify({
-      alreadyActive: false,
-      url: "https://stripe.example.test/race-proof",
-    }), {
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
       status: 200,
     }),
   );
@@ -281,16 +485,23 @@ test("stale invite status refreshes preserve the checkout plan picker", async ()
     }));
   });
 
-  expect(fetchMock).not.toHaveBeenCalled();
   expect(view.locationAssign).not.toHaveBeenCalled();
-  assert.match(view.container.textContent ?? "", /Start your first experiment/);
-  assert.match(view.container.textContent ?? "", /Get Pulse/);
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Start your first experiment/);
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
+  expect(fetchMock).toHaveBeenCalledWith("/api/legal/consent/status", expect.objectContaining({
+    method: "GET",
+  }));
 
   await view.cleanup();
 });
 
 test("manual checkout surfaces API errors and can retry", async () => {
   const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
+      status: 200,
+    }))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       error: {
         message: "Checkout unavailable.",
@@ -320,9 +531,12 @@ test("manual checkout surfaces API errors and can retry", async () => {
       stage: "checkout",
     }),
   });
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
   const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
-  expect(fetchMock).toHaveBeenCalledTimes(0);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(view.locationAssign).not.toHaveBeenCalled();
   assert.equal(checkoutButton.hasAttribute("disabled"), false);
 
@@ -330,8 +544,8 @@ test("manual checkout surfaces API errors and can retry", async () => {
     checkoutButton.click();
   });
 
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/hosted-onboarding/billing/checkout", expect.objectContaining({
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/hosted-onboarding/billing/checkout", expect.objectContaining({
     body: JSON.stringify({
       billingPlanCode: "launch_monthly",
       inviteCode: "invite-code",
@@ -346,21 +560,25 @@ test("manual checkout surfaces API errors and can retry", async () => {
   });
   await waitForCheckoutSuccessHold();
 
-  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
   expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/retry");
 
   await view.cleanup();
 });
 
 test("edge checkout sends the clicked monthly plan code without waiting for state", async () => {
-  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify({
-      alreadyActive: false,
-      url: "https://stripe.example.test/edge",
-    }), {
+  const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
       status: 200,
-    }),
-  );
+    }))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        alreadyActive: false,
+        url: "https://stripe.example.test/edge",
+      }), {
+        status: 200,
+      }),
+    );
   vi.stubGlobal("fetch", fetchMock);
 
   const view = await renderJoinInviteClientForEffects({
@@ -377,6 +595,9 @@ test("edge checkout sends the clicked monthly plan code without waiting for stat
       stage: "checkout",
     }),
   });
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Get Edge/);
+  });
   const edgeCheckoutButton = findButtonByText(view.container, /Get Edge/);
 
   await act(async () => {
@@ -384,7 +605,7 @@ test("edge checkout sends the clicked monthly plan code without waiting for stat
   });
   await waitForCheckoutSuccessHold();
 
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/checkout", expect.objectContaining({
     body: JSON.stringify({
       billingPlanCode: "launch_edge_monthly",
@@ -399,6 +620,9 @@ test("edge checkout sends the clicked monthly plan code without waiting for stat
 
 test("stale verify refreshes still leave the manual checkout fallback available after a checkout failure", async () => {
   const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
+      status: 200,
+    }))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       error: {
         message: "Checkout unavailable.",
@@ -425,6 +649,9 @@ test("stale verify refreshes still leave the manual checkout fallback available 
     }),
   });
   const onStatus = readHostedInviteStatusRefreshOnStatus();
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
   const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
   await act(async () => {
@@ -442,7 +669,7 @@ test("stale verify refreshes still leave the manual checkout fallback available 
     }));
   });
 
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(view.locationAssign).not.toHaveBeenCalled();
   assert.match(checkoutButton.textContent ?? "", /Get Pulse/);
 
@@ -451,21 +678,25 @@ test("stale verify refreshes still leave the manual checkout fallback available 
   });
   await waitForCheckoutSuccessHold();
 
-  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
   expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/recovered");
 
   await view.cleanup();
 });
 
 test("already-active checkout refreshes preserve the current stage when the returned verify payload is only stale", async () => {
-  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify({
-      alreadyActive: true,
-      url: null,
-    }), {
+  const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
       status: 200,
-    }),
-  );
+    }))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        alreadyActive: true,
+        url: null,
+      }), {
+        status: 200,
+      }),
+    );
   vi.stubGlobal("fetch", fetchMock);
   mocks.fetchHostedInviteStatus.mockResolvedValue(createStatus({
     capabilities: {
@@ -493,6 +724,9 @@ test("already-active checkout refreshes preserve the current stage when the retu
       stage: "checkout",
     }),
   });
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
   const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
   await act(async () => {
@@ -500,7 +734,7 @@ test("already-active checkout refreshes preserve the current stage when the retu
   });
   await waitForCheckoutSuccessHold();
 
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
   assert.match(view.container.textContent ?? "", /Start your first experiment/);
   assert.match(view.container.textContent ?? "", /Get Pulse/);
@@ -509,14 +743,18 @@ test("already-active checkout refreshes preserve the current stage when the retu
 });
 
 test("already-active checkout refreshes return to verify when the invite session is actually gone", async () => {
-  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify({
-      alreadyActive: true,
-      url: null,
-    }), {
+  const fetchMock = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
       status: 200,
-    }),
-  );
+    }))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        alreadyActive: true,
+        url: null,
+      }), {
+        status: 200,
+      }),
+    );
   vi.stubGlobal("fetch", fetchMock);
   mocks.fetchHostedInviteStatus.mockResolvedValue(createStatus({
     capabilities: {
@@ -544,6 +782,9 @@ test("already-active checkout refreshes return to verify when the invite session
       stage: "checkout",
     }),
   });
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Get Pulse/);
+  });
   const checkoutButton = findButtonByText(view.container, /Get Pulse/);
 
   await act(async () => {
@@ -551,7 +792,7 @@ test("already-active checkout refreshes return to verify when the invite session
   });
   await waitForCheckoutSuccessHold();
 
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
   assert.match(view.container.textContent ?? "", /Confirm your number/);
   assert.match(view.container.textContent ?? "", /Hosted invite phone auth/);
@@ -579,7 +820,10 @@ test("active invite state renders message and settings actions after launch cons
     }),
   });
 
-  await flushReactEffects();
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Murph will text you shortly\. Reply to start\./);
+    assert.match(view.container.textContent ?? "", /Text Murph/);
+  });
   const markup = view.container.innerHTML;
 
   assert.match(markup, /Murph will text you shortly\. Reply to start\./);
@@ -593,25 +837,34 @@ test("active invite state renders message and settings actions after launch cons
   await view.cleanup();
 });
 
-test("active invite state omits Murph contact actions when no assigned number is available", () => {
-  const markup = renderToStaticMarkup(
-    createElement(JoinInviteClient, {
-      initialLinkedAccounts: [],
-      initialStatus: createStatus({
-        session: {
-          authenticated: true,
-          expiresAt: null,
-          matchesInvite: true,
-        },
-        stage: "active",
-      }),
-      inviteCode: "invite-code",
+test("active invite state omits Murph contact actions when no assigned number is available", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
+      status: 200,
     }),
   );
+  vi.stubGlobal("fetch", fetchMock);
 
-  assert.doesNotMatch(markup, /href="sms:/);
-  assert.doesNotMatch(markup, /Add Murph to Contacts/);
-  assert.ok(markup.includes('href="/experiments"'));
+  const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "active",
+    }),
+  });
+
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /View experiments/);
+  });
+
+  assert.doesNotMatch(view.container.innerHTML, /href="sms:/);
+  assert.doesNotMatch(view.container.textContent ?? "", /Add Murph to Contacts/);
+  assert.ok(view.container.innerHTML.includes('href="/experiments"'));
+
+  await view.cleanup();
 });
 
 test("active invite state surfaces launch legal consent when signup has not recorded it yet", async () => {
@@ -645,26 +898,33 @@ test("active invite state surfaces launch legal consent when signup has not reco
   await view.cleanup();
 });
 
-test("activating invite state explains when vault and assistant setup is still running", () => {
-  const markup = renderToStaticMarkup(
-    createElement(JoinInviteClient, {
-      initialLinkedAccounts: [],
-      initialStatus: createStatus({
-        session: {
-          authenticated: true,
-          expiresAt: null,
-          matchesInvite: true,
-        },
-        stage: "activating",
-      }),
-      inviteCode: "invite-code",
+test("activating invite state explains when vault and assistant setup is still running", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
+      status: 200,
     }),
   );
+  vi.stubGlobal("fetch", fetchMock);
 
-  assert.match(markup, /Finishing your setup/);
-  assert.match(markup, /Setup finishes in about ten seconds\./);
-  assert.match(markup, /Setting up your vault and assistant/);
-  assert.match(markup, /This takes about ten seconds\. We’ll update here when it’s done\./);
+  const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "activating",
+    }),
+  });
+
+  await vi.waitFor(() => {
+    assert.match(view.container.textContent ?? "", /Finishing your setup/);
+    assert.match(view.container.textContent ?? "", /Setup finishes in about ten seconds\./);
+    assert.match(view.container.textContent ?? "", /Setting up your vault and assistant/);
+    assert.match(view.container.textContent ?? "", /This takes about ten seconds\. We’ll update here when it’s done\./);
+  });
+
+  await view.cleanup();
 });
 
 test("verified invite sessions do not regress back to verify during later status refreshes", () => {
@@ -984,6 +1244,17 @@ function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElemen
   );
   assert.ok(button);
   return button as HTMLButtonElement;
+}
+
+function setCheckboxChecked(
+  window: Window & typeof globalThis,
+  input: HTMLInputElement,
+  checked: boolean,
+) {
+  input.checked = checked;
+  input.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true }));
+  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new window.Event("change", { bubbles: true }));
 }
 
 function createConsentStatus(input: {

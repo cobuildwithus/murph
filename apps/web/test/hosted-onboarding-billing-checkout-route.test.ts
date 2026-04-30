@@ -1,15 +1,27 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
+  assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
+  getPrisma: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
   createHostedBillingCheckout: mocks.createHostedBillingCheckout,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
@@ -41,10 +53,12 @@ describe("hosted onboarding billing checkout route", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
+    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.createHostedBillingCheckout.mockResolvedValue({
       alreadyActive: false,
       url: "https://stripe.example.test/checkout",
     });
+    mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.completeHostedPrivyVerification.mockResolvedValue({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
@@ -132,8 +146,46 @@ describe("hosted onboarding billing checkout route", () => {
         suspendedAt: null,
       },
     });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: { prisma: true },
+    });
     expect(mocks.completeHostedPrivyVerification.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.assertHostedLaunchRequiredConsentGranted.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.assertHostedLaunchRequiredConsentGranted.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.createHostedBillingCheckout.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("rejects checkout before launch legal consent is current", async () => {
+    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the current Murph legal consent before continuing.",
+      }),
+    );
+
+    const response = await billingCheckoutRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+        body: JSON.stringify({
+          inviteCode: "invite_123",
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_CONSENT_REQUIRED",
+        message: "Accept the current Murph legal consent before continuing.",
+        retryable: false,
+      },
+    });
+    expect(mocks.createHostedBillingCheckout).not.toHaveBeenCalled();
   });
 
   it("returns the already-active checkout payload when the hosted member is already active", async () => {

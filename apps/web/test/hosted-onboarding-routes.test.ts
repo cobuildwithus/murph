@@ -5,12 +5,14 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { hostedWebConfigurationError } from "../src/lib/hosted-web/encryption";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedLaunchRequiredConsentGranted: vi.fn(),
   abortHostedInvitePhoneCode: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   getHostedInviteStatus: vi.fn(),
+  getPrisma: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -36,6 +38,14 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
   completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
@@ -134,10 +144,12 @@ describe("hosted onboarding routes", () => {
       stage: "checkout",
     });
     mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("checkout"));
+    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.createHostedBillingCheckout.mockResolvedValue({
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
+    mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.confirmHostedInvitePhoneCode.mockResolvedValue({
       ok: true,
     });
@@ -822,6 +834,10 @@ describe("hosted onboarding routes", () => {
         id: "member_123",
         suspendedAt: null,
       },
+    });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: { prisma: true },
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
