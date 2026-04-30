@@ -495,7 +495,7 @@ Webhooks start only after polling, parent account persistence, and source projec
 
 ## Current Implementation Status
 
-PR 1, the PR 2 foundation, and the PR 3 polling MVP are implemented in the active checkout but not committed because the tree contains many unrelated active rows. Webhooks remain deferred to PR 4.
+PR 1, the PR 2 foundation, and the PR 3 polling MVP are committed as `509fce23b`. PR 4 Junction webhooks are implemented in the active checkout as a follow-up slice.
 
 Current PR 3 landed slice:
 
@@ -509,7 +509,17 @@ Current PR 3 landed slice:
 - Default resources remain conservative: profile/activity/sleep/workouts/body plus steps/heartrate/hrv/respiratory-rate/blood-oxygen/weight. Glucose/CGM remains deferred.
 - CLI provider validation now includes Junction in the supported provider list.
 
-PR 3 must stay polling-first: do not add webhook delivery, Svix verification, orphan webhook traces, source-aware query policy, glucose/CGM, or SDK-only Link sources in this wave.
+PR 4 landed slice:
+
+- Junction descriptor now advertises `webhook_push` and `/webhooks/junction`.
+- Junction config adds provider-owned `JUNCTION_WEBHOOK_SECRET` and optional timestamp tolerance, while keeping webhook secret out of serializable runtime config.
+- Junction webhook parser verifies Svix `svix-id` / `svix-timestamp` / `svix-signature` against the raw body before parsing JSON.
+- Junction webhook events map to scalar hosted-hint-safe jobs: connection events enqueue backfill/reconcile, data events enqueue `resource`, and unknown/control events enqueue reconcile.
+- Junction `resource` jobs fetch only the hinted summary or timeseries resource/window and still refresh source projections before importing the snapshot.
+- Generic public ingress can complete verified unknown-account webhooks for providers that opt in, so Junction can avoid provider retries when the pre-Link parent is briefly not visible; hosted route returns `202` for that orphaned acceptance.
+- Webhooks remain freshness/fetch triggers only; no inline webhook normalization was added.
+
+PR 4 still intentionally excludes source-aware query policy, SDK-only Link sources, glucose/CGM, and richer source settings UI.
 
 The landed primitive/foundation slice includes:
 
@@ -536,9 +546,9 @@ The landed primitive/foundation slice includes:
 - Hosted Prisma `DeviceConnectionSource` / additive `2026050101_device_connection_sources` migration, aligned status vocabulary, deterministic listing, and same-provider multi-source coverage.
 - Source projection sanitation keeps account metadata shallow and strips raw identifier-shaped availability/source values from projection summaries.
 
-Pause here before starting PR 4. The next wave should add Junction webhooks on top of the now-present polling MVP, parent account seeding, source projection, and importer path.
+Pause here before starting PR 5. The next wave should focus on source-aware query policy and richer/high-risk resources on top of the now-present polling and webhook paths.
 
-Latest PR 3 verification:
+Latest PR 3/PR 4 verification:
 
 ```txt
 pnpm --dir packages/importers typecheck
@@ -548,9 +558,11 @@ pnpm --dir packages/device-syncd test
 pnpm --dir packages/operator-config typecheck
 pnpm --dir packages/operator-config test
 pnpm --dir packages/query typecheck
+pnpm --dir apps/web typecheck
+pnpm exec vitest run apps/web/test/agent-route.test.ts apps/web/test/device-sync-hosted-wake.test.ts --config apps/web/vitest.config.ts --no-coverage
 pnpm --dir packages/cli typecheck
 pnpm --dir packages/cli test
-git diff --check -- packages/importers packages/device-syncd packages/operator-config packages/cli agent-docs/exec-plans/active/2026-04-30-junction-greenfield-primitive-v2.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md
+git diff --check -- packages/importers packages/device-syncd apps/web/app/api/device-sync/webhooks apps/web/test/agent-route.test.ts agent-docs/exec-plans/active/2026-04-30-junction-greenfield-primitive-v2.md
 ```
 
 Known unrelated red hosted-web commands in the current dirty checkout:

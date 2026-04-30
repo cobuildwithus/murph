@@ -217,6 +217,40 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
   });
 
+  it("returns accepted for verified orphan webhook deliveries without forcing provider retries", async () => {
+    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
+      provider === "junction"
+        ? createOuraDeviceSyncProvider({
+            clientId: "oura-client-id",
+            clientSecret: "oura-client-secret",
+            webhookVerificationToken: "verify-token",
+          })
+        : undefined
+    );
+    mocks.handleWebhook.mockResolvedValue({
+      accepted: true,
+      duplicate: false,
+      orphaned: true,
+      provider: "junction",
+      eventType: "provider.connection.created",
+      traceId: "junction:trace",
+    });
+
+    const response = await webhookRoute.POST(
+      new Request("https://example.test/api/device-sync/webhooks/junction", {
+        method: "POST",
+      }),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      orphaned: true,
+      provider: "junction",
+    });
+  });
+
   it("short-circuits hosted webhook POSTs when provider preflight returns a response", async () => {
     const preflightProvider = createOuraDeviceSyncProvider({
       clientId: "oura-client-id",

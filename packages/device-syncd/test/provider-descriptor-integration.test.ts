@@ -71,7 +71,7 @@ describe("device-sync providers", () => {
     expect(provider.descriptor.transportModes).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.transportModes);
     expect(provider.descriptor.connection).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.connection);
     expect(provider.descriptor.sync?.windows).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows);
-    expect(provider.descriptor.webhook).toBeUndefined();
+    expect(provider.descriptor.webhook).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.webhook);
     expect(provider.credentialPolicy).toEqual({
       kind: "provider_config",
       providerConfigKey: "junction",

@@ -1,4 +1,4 @@
-import { createHmac, createHash } from "node:crypto";
+import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
@@ -30,6 +30,8 @@ import type {
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
+  ProviderWebhookContext,
+  ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
 
@@ -51,6 +53,8 @@ export interface JunctionDeviceSyncProviderConfig {
   requestTimeoutMs?: number;
   perAccountConcurrency?: number;
   globalConcurrency?: number;
+  webhookSecret?: string;
+  webhookTimestampToleranceMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -98,6 +102,7 @@ const DEFAULT_RECONCILE_DAYS = 7;
 const DEFAULT_RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
+const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
 
 export function createJunctionDeviceSyncProvider(
@@ -120,6 +125,8 @@ export function createJunctionDeviceSyncProvider(
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
   const reconcileIntervalMs = config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
+  const webhookTimestampToleranceMs =
+    config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS;
 
   async function beginConnection(
     context: ProviderBeginConnectionContext,
@@ -227,6 +234,10 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
   ): Promise<ProviderJobResult> {
+    if (job.kind === "resource") {
+      return executeResourceJob(context, job);
+    }
+
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
     await projectJunctionSources(context, sourceProviders);
@@ -255,6 +266,105 @@ export function createJunctionDeviceSyncProvider(
 
     return {
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+    };
+  }
+
+  async function executeResourceJob(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+  ): Promise<ProviderJobResult> {
+    const window = resolveJobWindow(job, context.now, reconcileDays);
+    const resource = normalizeProviderSlug(job.payload.resource);
+    const resourceCategory = normalizeString(job.payload.resourceCategory);
+    const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
+    await projectJunctionSources(context, sourceProviders);
+
+    const summaries: Record<string, unknown[]> = {};
+    const timeseries: Record<string, unknown[]> = {};
+
+    if (resource) {
+      const inferredCategory = inferJunctionResourceCategory(resourceCategory, resource);
+      if (inferredCategory === "timeseries") {
+        timeseries[resource] = await fetchTimeseriesResourceInChunks(
+          context.account.externalAccountId,
+          resource,
+          window.windowStart,
+          window.windowEnd,
+        );
+      } else {
+        summaries[resource] = await client.listSummary({
+          resource,
+          userId: context.account.externalAccountId,
+          windowStart: window.windowStart,
+          windowEnd: window.windowEnd,
+        });
+      }
+    }
+
+    await context.importSnapshot({
+      provider: "junction",
+      accountId: context.account.externalAccountId,
+      connectionId: context.account.id,
+      importedAt: context.now,
+      windowStart: window.windowStart,
+      windowEnd: window.windowEnd,
+      connections: sourceProviders,
+      summaries,
+      timeseries,
+    });
+
+    return {
+      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+    };
+  }
+
+  async function verifyAndParseWebhook(
+    context: ProviderWebhookContext,
+  ): Promise<ProviderWebhookResult> {
+    const webhookSecret = normalizeString(config.webhookSecret);
+    if (!webhookSecret) {
+      throw deviceSyncError({
+        code: "JUNCTION_WEBHOOK_SECRET_MISSING",
+        message: "Junction webhook verification requires JUNCTION_WEBHOOK_SECRET.",
+        retryable: false,
+        httpStatus: 500,
+      });
+    }
+
+    const verified = verifyAndParseJunctionWebhookEnvelope({
+      headers: context.headers,
+      rawBody: context.rawBody,
+      secret: webhookSecret,
+      now: context.now,
+      timestampToleranceMs: webhookTimestampToleranceMs,
+    });
+    const eventType = requireJunctionWebhookEventType(verified.payload);
+    const externalAccountId = requireJunctionWebhookUserId(verified.payload);
+    const data = readPlainObject(verified.payload.data);
+    const resource = inferJunctionWebhookResource(eventType, data);
+    const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
+    const objectId = extractJunctionWebhookObjectId(data);
+    const occurredAt = extractJunctionWebhookOccurredAt(data) ?? context.now;
+    const window = buildJunctionWebhookWindow(data, occurredAt, context.now);
+    const jobs = buildJunctionWebhookJobs({
+      eventType,
+      objectId,
+      occurredAt,
+      resource,
+      sourceProviderSlug,
+      summaryBackfillDays,
+      traceId: verified.messageId,
+      window,
+    });
+
+    return {
+      externalAccountId,
+      eventType,
+      traceId: verified.messageId,
+      occurredAt,
+      resourceCategory: resource?.category ?? null,
+      jobs,
+      unknownAccountAction: "accept",
     };
   }
 
@@ -371,6 +481,7 @@ export function createJunctionDeviceSyncProvider(
       });
     },
     createScheduledJobs,
+    verifyAndParseWebhook,
     executeJob,
   };
 }
@@ -527,6 +638,404 @@ function buildWindowJob(input: {
   };
 }
 
+function buildJunctionWebhookJobs(input: {
+  eventType: string;
+  objectId: string | null;
+  occurredAt: string;
+  resource: { name: string; category: "summary" | "timeseries" } | null;
+  sourceProviderSlug: string | null;
+  summaryBackfillDays: number;
+  traceId: string;
+  window: { windowStart: string; windowEnd: string };
+}): DeviceSyncJobInput[] {
+  if (isJunctionProviderConnectionEvent(input.eventType)) {
+    const backfillWindowStart = subtractDays(input.window.windowEnd, input.summaryBackfillDays);
+
+    return [
+      {
+        kind: "backfill",
+        payload: {
+          windowStart: backfillWindowStart,
+          windowEnd: input.window.windowEnd,
+        },
+        priority: 35,
+        dedupeKey: sha256Text(JSON.stringify(["junction-webhook", input.traceId, input.eventType, "backfill"])),
+      },
+      {
+        kind: "reconcile",
+        payload: {
+          windowStart: input.window.windowStart,
+          windowEnd: input.window.windowEnd,
+        },
+        priority: 45,
+        dedupeKey: sha256Text(JSON.stringify(["junction-webhook", input.traceId, input.eventType, "reconcile"])),
+      },
+    ];
+  }
+
+  if (input.resource) {
+    return [
+      {
+        kind: "resource",
+        payload: {
+          eventType: input.eventType,
+          objectId: input.objectId ?? "",
+          occurredAt: input.occurredAt,
+          resource: input.resource.name,
+          resourceCategory: input.resource.category,
+          sourceProviderSlug: input.sourceProviderSlug ?? "",
+          windowStart: input.window.windowStart,
+          windowEnd: input.window.windowEnd,
+        },
+        priority: 65,
+        dedupeKey: sha256Text(JSON.stringify([
+          "junction-webhook",
+          input.traceId,
+          input.eventType,
+          input.resource.name,
+          input.objectId,
+          input.sourceProviderSlug,
+        ])),
+      },
+    ];
+  }
+
+  return [
+    {
+      kind: "reconcile",
+      payload: {
+        windowStart: input.window.windowStart,
+        windowEnd: input.window.windowEnd,
+      },
+      priority: 50,
+      dedupeKey: sha256Text(JSON.stringify(["junction-webhook", input.traceId, input.eventType, "reconcile"])),
+    },
+  ];
+}
+
+function isJunctionProviderConnectionEvent(eventType: string): boolean {
+  return eventType === "provider.connection.created" || eventType === "provider.connection.updated";
+}
+
+function inferJunctionResourceCategory(
+  resourceCategory: string | null | undefined,
+  resource: string,
+): "summary" | "timeseries" {
+  const normalizedCategory = resourceCategory?.toLowerCase();
+  if (normalizedCategory === "summary" || normalizedCategory === "timeseries") {
+    return normalizedCategory;
+  }
+
+  return JUNCTION_DEFAULT_TIMESERIES_RESOURCES.includes(
+    resource as (typeof JUNCTION_DEFAULT_TIMESERIES_RESOURCES)[number],
+  )
+    ? "timeseries"
+    : "summary";
+}
+
+function inferJunctionWebhookResource(
+  eventType: string,
+  data: Record<string, unknown> | null,
+): { name: string; category: "summary" | "timeseries" } | null {
+  const explicitResource =
+    normalizeProviderSlug(data?.resource)
+    ?? normalizeProviderSlug(data?.resource_type)
+    ?? normalizeProviderSlug(data?.type)
+    ?? normalizeProviderSlug(data?.data_type);
+  const eventResource = normalizeProviderSlug(readJunctionWebhookResourceFromEventType(eventType));
+  const resource = explicitResource ?? eventResource;
+
+  if (!resource) {
+    return null;
+  }
+
+  const explicitCategory =
+    normalizeString(data?.resource_category)
+    ?? normalizeString(data?.category)
+    ?? (eventType.includes(".timeseries.") ? "timeseries" : null)
+    ?? (eventType.includes(".summary.") ? "summary" : null);
+
+  return {
+    name: resource,
+    category: inferJunctionResourceCategory(explicitCategory, resource),
+  };
+}
+
+function readJunctionWebhookResourceFromEventType(eventType: string): string | null {
+  const parts = eventType.split(".").map((part) => part.trim()).filter(Boolean);
+  const dataIndex = parts.indexOf("data");
+
+  if (dataIndex >= 0 && parts[dataIndex + 1]) {
+    return parts[dataIndex + 1] ?? null;
+  }
+
+  return null;
+}
+
+function extractJunctionWebhookSourceProviderSlug(data: Record<string, unknown> | null): string | null {
+  const source = readPlainObject(data?.source);
+  const provider = readPlainObject(data?.provider);
+
+  return (
+    normalizeProviderSlug(source?.slug)
+    ?? normalizeProviderSlug(source?.provider_slug)
+    ?? normalizeProviderSlug(provider?.slug)
+    ?? normalizeProviderSlug(data?.source_provider_slug)
+    ?? normalizeProviderSlug(data?.provider_slug)
+    ?? null
+  );
+}
+
+function extractJunctionWebhookObjectId(data: Record<string, unknown> | null): string | null {
+  return (
+    normalizeString(data?.id)
+    ?? normalizeString(data?.object_id)
+    ?? normalizeString(data?.resource_id)
+    ?? normalizeString(data?.workout_id)
+    ?? normalizeString(readPlainObject(data?.data)?.id)
+    ?? null
+  );
+}
+
+function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null): string | null {
+  const candidates = [
+    data?.occurred_at,
+    data?.created_at,
+    data?.updated_at,
+    data?.timestamp,
+    data?.date,
+    data?.start_time,
+    readPlainObject(data?.data)?.timestamp,
+  ];
+
+  for (const candidate of candidates) {
+    const iso = toIsoTimestampIfValid(candidate);
+    if (iso) {
+      return iso;
+    }
+  }
+
+  return null;
+}
+
+function buildJunctionWebhookWindow(
+  data: Record<string, unknown> | null,
+  occurredAt: string,
+  now: string,
+): { windowStart: string; windowEnd: string } {
+  const explicitStart =
+    toIsoTimestampIfValid(data?.window_start)
+    ?? toIsoTimestampIfValid(data?.start_date)
+    ?? toIsoTimestampIfValid(data?.start)
+    ?? toIsoTimestampIfValid(data?.from);
+  const explicitEnd =
+    toIsoTimestampIfValid(data?.window_end)
+    ?? toIsoTimestampIfValid(data?.end_date)
+    ?? toIsoTimestampIfValid(data?.end)
+    ?? toIsoTimestampIfValid(data?.to);
+
+  if (explicitStart && explicitEnd) {
+    return {
+      windowStart: explicitStart,
+      windowEnd: minIsoTimestamp(explicitEnd, now),
+    };
+  }
+
+  const occurredAtMs = Date.parse(occurredAt);
+  const boundedOccurredAt = Number.isFinite(occurredAtMs) ? occurredAt : now;
+
+  return {
+    windowStart: subtractDays(boundedOccurredAt, 1),
+    windowEnd: minIsoTimestamp(addMilliseconds(boundedOccurredAt, 24 * 60 * 60_000), now),
+  };
+}
+
+function verifyAndParseJunctionWebhookEnvelope(input: {
+  headers: Headers;
+  rawBody: Buffer;
+  secret: string;
+  now: string;
+  timestampToleranceMs: number;
+}): { messageId: string; payload: Record<string, unknown> } {
+  const messageId = requireJunctionWebhookHeader(input.headers, "svix-id");
+  const timestamp = requireJunctionWebhookHeader(input.headers, "svix-timestamp");
+  const signatureHeader = requireJunctionWebhookHeader(input.headers, "svix-signature");
+  const timestampMs = parseJunctionWebhookTimestamp(timestamp);
+  const nowMs = Date.parse(input.now);
+
+  if (Number.isFinite(nowMs) && Math.abs(nowMs - timestampMs) > input.timestampToleranceMs) {
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_TIMESTAMP_STALE",
+      message: "Junction webhook timestamp is outside the allowed tolerance.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  if (!verifySvixSignature({
+    messageId,
+    rawBody: input.rawBody,
+    secret: input.secret,
+    signatureHeader,
+    timestamp,
+  })) {
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_SIGNATURE_INVALID",
+      message: "Junction webhook signature verification failed.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+
+  const payload = parseWebhookJsonBody(input.rawBody);
+
+  return {
+    messageId,
+    payload,
+  };
+}
+
+function requireJunctionWebhookHeader(headers: Headers, name: string): string {
+  const value = normalizeString(headers.get(name));
+  if (value) {
+    return value;
+  }
+
+  throw deviceSyncError({
+    code: "JUNCTION_WEBHOOK_SIGNATURE_MISSING",
+    message: `Junction webhook is missing ${name}.`,
+    retryable: false,
+    httpStatus: 400,
+  });
+}
+
+function parseJunctionWebhookTimestamp(timestamp: string): number {
+  const seconds = Number(timestamp);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_TIMESTAMP_INVALID",
+      message: "Junction webhook timestamp is invalid.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return seconds * 1000;
+}
+
+function verifySvixSignature(input: {
+  messageId: string;
+  rawBody: Buffer;
+  secret: string;
+  signatureHeader: string;
+  timestamp: string;
+}): boolean {
+  const secret = decodeSvixWebhookSecret(input.secret);
+  const signedContent = Buffer.concat([
+    Buffer.from(`${input.messageId}.${input.timestamp}.`, "utf8"),
+    input.rawBody,
+  ]);
+  const expected = createHmac("sha256", secret).update(signedContent).digest();
+
+  for (const signature of readSvixV1Signatures(input.signatureHeader)) {
+    if (signature.length === expected.length && timingSafeEqual(signature, expected)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function decodeSvixWebhookSecret(secret: string): Buffer {
+  const normalized = secret.trim();
+  if (normalized.startsWith("whsec_")) {
+    return Buffer.from(normalized.slice("whsec_".length), "base64");
+  }
+
+  return Buffer.from(normalized, "utf8");
+}
+
+function readSvixV1Signatures(signatureHeader: string): Buffer[] {
+  return signatureHeader
+    .split(/\s+/u)
+    .map((part) => part.trim())
+    .map((part) => {
+      if (part.startsWith("v1,")) {
+        return part.slice(3);
+      }
+
+      if (part.startsWith("v1=") || part.startsWith("v1:")) {
+        return part.slice(3);
+      }
+
+      return "";
+    })
+    .filter((signature) => signature.length > 0)
+    .map((signature) => {
+      try {
+        return Buffer.from(signature, "base64");
+      } catch {
+        return Buffer.alloc(0);
+      }
+    })
+    .filter((signature) => signature.length > 0);
+}
+
+function parseWebhookJsonBody(rawBody: Buffer): Record<string, unknown> {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
+  } catch {
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_BODY_INVALID",
+      message: "Junction webhook body is not valid JSON.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  const record = readPlainObject(parsed);
+  if (!record) {
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_BODY_INVALID",
+      message: "Junction webhook body must be a JSON object.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return record;
+}
+
+function requireJunctionWebhookEventType(payload: Record<string, unknown>): string {
+  const eventType = normalizeString(payload.event_type) ?? normalizeString(payload.eventType);
+  if (eventType) {
+    return eventType;
+  }
+
+  throw deviceSyncError({
+    code: "JUNCTION_WEBHOOK_EVENT_TYPE_MISSING",
+    message: "Junction webhook event_type is missing.",
+    retryable: false,
+    httpStatus: 400,
+  });
+}
+
+function requireJunctionWebhookUserId(payload: Record<string, unknown>): string {
+  const userId = normalizeString(payload.user_id) ?? normalizeString(payload.userId);
+  if (userId) {
+    return userId;
+  }
+
+  throw deviceSyncError({
+    code: "JUNCTION_WEBHOOK_USER_ID_MISSING",
+    message: "Junction webhook user_id is missing.",
+    retryable: false,
+    httpStatus: 400,
+  });
+}
+
 async function projectJunctionSources(
   context: ProviderJobContext,
   providers: readonly JunctionProviderConnection[],
@@ -627,6 +1136,26 @@ function maxIsoTimestamp(left: string, right: string): string {
 
 function minIsoTimestamp(left: string, right: string): string {
   return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function toIsoTimestampIfValid(value: unknown): string | null {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Date.parse(normalized);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return new Date(parsed).toISOString();
+}
+
+function readPlainObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function assertValidJunctionClientUserIdSecret(secret: string): string {

@@ -295,6 +295,7 @@ export interface ProviderWebhookResult {
   // Keep the shared parser result narrow so ingress hooks do not inherit raw provider payloads.
   resourceCategory?: string | null;
   jobs: DeviceSyncJobInput[];
+  unknownAccountAction?: "retry" | "accept";
 }
 
 export interface DeviceSyncIngressWebhook {
@@ -455,6 +456,7 @@ export interface CompleteConnectionResult {
 export interface HandleWebhookResult {
   accepted: boolean;
   duplicate: boolean;
+  orphaned?: boolean;
   provider: string;
   eventType: string;
   traceId?: string;
