@@ -44,10 +44,25 @@ relations:
   target: biomarker:chosen-primary-outcome-score
 -
   type: secondary_biomarker
-  target: biomarker:supplement-adherence
+  target: biomarker:standardized-skin-photo-score
 -
   type: secondary_biomarker
-  target: biomarker:gi-symptom-score
+  target: biomarker:skin-texture-roughness-score
+-
+  type: secondary_biomarker
+  target: biomarker:musculoskeletal-pain
+-
+  type: secondary_biomarker
+  target: biomarker:lean-body-mass
+-
+  type: secondary_biomarker
+  target: biomarker:muscle-soreness-score
+-
+  type: secondary_biomarker
+  target: biomarker:perceived-recovery-score
+-
+  type: secondary_biomarker
+  target: biomarker:gi-tolerance
 -
   type: cites
   target: source_artifact:pmid-33742704
@@ -500,8 +515,13 @@ testPlans:
   interventionDays: 84
   primaryBiomarkerKey: biomarker:chosen-primary-outcome-score
   secondaryBiomarkerKeys:
-  - biomarker:supplement-adherence
-  - biomarker:gi-symptom-score
+  - biomarker:standardized-skin-photo-score
+  - biomarker:skin-texture-roughness-score
+  - biomarker:musculoskeletal-pain
+  - biomarker:lean-body-mass
+  - biomarker:muscle-soreness-score
+  - biomarker:perceived-recovery-score
+  - biomarker:gi-tolerance
   minimumAdherenceSessions: 56
   targetAdherenceSessions: 84
   notes:
@@ -512,9 +532,9 @@ testPlans:
   durationDays: 35
   baselineDays: 7
   interventionDays: 28
-  primaryBiomarkerKey: biomarker:gi-symptom-score
+  primaryBiomarkerKey: biomarker:gi-tolerance
   secondaryBiomarkerKeys:
-  - biomarker:supplement-adherence
+  - biomarker:adverse-symptoms
   - biomarker:chosen-primary-outcome-score
   minimumAdherenceSessions: 21
   targetAdherenceSessions: 28
@@ -523,13 +543,99 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:chosen-primary-outcome-score
-  description: Collagen peptides can supply amino acids and peptide cues for connective-tissue turnover. A skin, joint, tendon, or recovery score should move only if that tissue is remodeling.
+  expected: Choose before start
+  protocolProminence: focus
+  description: Treat the selected target as the primary signal. Choose one domain before baseline, keep the same scale and context through the run, and do not compare skin, pain, tendon/loading, recovery, and tolerability scores as if they were one pooled collagen outcome.
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: target-specific
+    confidence: low
+    basis: "HCP evidence is endpoint-specific, so the primary signal is only interpretable after the user selects the target, direction, scale, and matching context before the baseline week."
 -
-  biomarkerKey: biomarker:supplement-adherence
-  description: Collagen only has a chance to matter when the planned grams are taken often enough.
+  biomarkerKey: biomarker:standardized-skin-photo-score
+  expected: Could improve slowly
+  protocolProminence: focus
+  description: Skin is the best-matched HCP signal. If the selected target is skin-specific, hydration and elasticity can show up as steadier texture, less dry-looking skin, or fewer visible fine-line changes on the same photo setup.
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: 8-12 weeks
+    confidence: low
+    basis: "source_artifact:pmid-33742704 and source_artifact:pmid-40826844 support pooled hydration and elasticity improvements, while source_artifact:pmid-40324552 keeps the funding and heterogeneity caveat visible. Home photo scores do not map cleanly to instrument units."
 -
-  biomarkerKey: biomarker:gi-symptom-score
-  description: Collagen peptides, source proteins, sweeteners, or other active ingredients can bother digestion.
+  biomarkerKey: biomarker:skin-texture-roughness-score
+  expected: Could feel smoother
+  protocolProminence: context
+  description: Hydration and elasticity changes usually matter to users as smoother, less rough, or less crepey-looking skin. Score the same area and lighting; skincare, sun, humidity, and procedures can move this faster than collagen.
+  estimatedChange:
+    kind: absolute
+    low: -1
+    high: -0.3
+    unit: 0-10 score points
+    window: 8-12 weeks
+    confidence: low
+    basis: "Skin RCTs and reviews support hydration, elasticity, and wrinkle directions, but not a validated Murph 0-10 roughness conversion; this is a practical low-confidence self-rating range."
+-
+  biomarkerKey: biomarker:musculoskeletal-pain
+  expected: Could trend lower
+  protocolProminence: focus
+  description: Joint and tendon claims only make sense against a repeatable load. If the selected target is joint or tendon/loading tolerance, the same walk, lift, sport drill, or rehab session should hurt a little less or function a little better without extra rescue medication.
+  estimatedChange:
+    kind: absolute
+    low: -1.5
+    high: -0.3
+    unit: 0-10 rating points
+    window: 12-24 weeks
+    confidence: low
+    basis: "source_artifact:pmid-18416885 supports activity-related joint-pain improvement over 24 weeks, while OA and tendon sources are mixed and product-specific. Keep activity load and analgesic use visible."
+-
+  biomarkerKey: biomarker:lean-body-mass
+  expected: Training-dependent
+  protocolProminence: context
+  description: Collagen is not a complete muscle-building protein, but in a stable training block it can be part of the recovery input. Same-device lean-mass or fat-free-mass trends are useful only when paired with body weight, training volume, total protein, and hydration context.
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 1
+    unit: kg
+    window: 8-12 weeks
+    confidence: low
+    basis: "source_artifact:pmid-39060741 found favorable training-plus-collagen body-composition effects, but the signal requires concurrent training and should not be read as collagen-alone muscle gain."
+-
+  biomarkerKey: biomarker:muscle-soreness-score
+  expected: Could trend lower
+  protocolProminence: context
+  description: Recovery claims need a repeatable stressor. If the selected target is post-exercise soreness, the same muscle group should feel less sore at 24, 48, or 72 hours; a new workout plan or harder session can overwhelm the signal.
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: 24-72 hours after matched workouts
+    confidence: low
+    basis: "source_artifact:pmid-39060741 reports favorable training-linked recovery signals, while source_artifact:pmid-39771010 found no clear acute recovery advantage after downhill running."
+-
+  biomarkerKey: biomarker:perceived-recovery-score
+  expected: Could improve
+  protocolProminence: context
+  description: Some users care most about whether joints or muscles feel ready for the next session. Treat readiness as context next to soreness, sleep, stress, and training load rather than proof that tissue repaired faster.
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 1
+    unit: 0-10 score points
+    window: 8-12 weeks
+    confidence: low
+    basis: "Recovery and performance evidence is mixed across stressors and training phases; a small readiness range is only defensible when the same recovery prompt and similar workouts are repeated."
+-
+  biomarkerKey: biomarker:gi-tolerance
+  expected: Should stay stable
+  protocolProminence: context
+  description: GI tolerance is a safety and feasibility signal, not the win condition. Collagen peptides, source proteins, sweeteners, flavors, or beauty-blend coingredients can cause nausea, bloating, reflux, diarrhea, or abdominal discomfort.
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 1
+    unit: 0-10 symptom points
+    window: first days to 4 weeks
+    confidence: low
+    basis: "Short HCP trials often report acceptable tolerability, but adverse-event extraction is incomplete and source_artifact:racgp-oa-nutraceuticals-2026-04-25 notes GI events as a practical monitoring signal."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
