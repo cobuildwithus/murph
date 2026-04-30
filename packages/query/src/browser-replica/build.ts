@@ -144,15 +144,47 @@ function projectEntity(entity: CanonicalEntity): BrowserVaultEntity {
     family: entity.family,
     id: entity.entityId,
     kind: entity.kind,
-    links: entity.links.map((link) => ({ targetId: link.targetId, type: link.type })),
-    lookupIds: uniqueStrings([entity.primaryLookupId, ...entity.lookupIds, entity.entityId]),
+    links: projectEntityLinks(entity),
+    lookupIds: projectEntityLookupIds(entity),
     occurredAt: entity.occurredAt,
     recordClass: entity.recordClass,
     status: entity.status,
     stream: entity.stream,
-    tags: entity.tags.slice(),
-    title: entity.title,
+    tags: projectEntityTags(entity),
+    title: projectEntityTitle(entity),
   };
+}
+
+function projectEntityLinks(entity: CanonicalEntity): BrowserVaultEntity["links"] {
+  if (entity.family === "event") {
+    return [];
+  }
+
+  return entity.links.map((link) => ({ targetId: link.targetId, type: link.type }));
+}
+
+function projectEntityLookupIds(entity: CanonicalEntity): string[] {
+  if (entity.family === "event") {
+    return [entity.entityId];
+  }
+
+  return uniqueStrings([entity.primaryLookupId, ...entity.lookupIds, entity.entityId]);
+}
+
+function projectEntityTags(entity: CanonicalEntity): string[] {
+  if (entity.family === "event") {
+    return [];
+  }
+
+  return entity.tags.slice();
+}
+
+function projectEntityTitle(entity: CanonicalEntity): string | null {
+  if (entity.family === "event") {
+    return null;
+  }
+
+  return entity.title;
 }
 
 function projectEntityBodyPreview(entity: CanonicalEntity): string | null {
@@ -218,16 +250,10 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
       return projectSafeAttributeKeys(entity, [
         "experimentId",
         "experimentSlug",
-        "interventionType",
         "protocolId",
-        "regimenId",
         "sessionStatus",
-        "durationMinutes",
-        "timing",
-        "temperatureC",
-        "afterExercise",
-        "symptoms",
-        "confounders",
+        "sessionLocalDate",
+        "scheduledLocalDate",
       ]);
     case "experiment_context":
       return projectSafeAttributeKeys(entity, [
@@ -267,9 +293,32 @@ function projectTimelineRow(entry: TimelineEntry): BrowserVaultTimelineRow {
     kind: entry.kind,
     occurredAt: entry.occurredAt,
     stream: entry.stream,
-    tags: entry.tags.slice(),
-    title: entry.title,
+    tags: projectTimelineTags(entry),
+    title: projectTimelineTitle(entry),
   };
+}
+
+function projectTimelineTags(entry: TimelineEntry): string[] {
+  if (entry.entryType === "event") {
+    return [];
+  }
+
+  return entry.tags.slice();
+}
+
+function projectTimelineTitle(entry: TimelineEntry): string {
+  if (entry.entryType !== "event") {
+    return entry.title;
+  }
+
+  switch (entry.kind) {
+    case "intervention_session":
+      return "Intervention session";
+    case "experiment_context":
+      return "Experiment context";
+    default:
+      return "Event";
+  }
 }
 
 function projectSearchRow(entity: BrowserVaultEntity): BrowserVaultSearchRow {

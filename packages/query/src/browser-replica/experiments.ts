@@ -133,6 +133,7 @@ export interface BrowserVaultExperimentMetricWindowSummary {
 }
 
 export interface BrowserVaultExperimentExpectedRange {
+  dayOrigin: "run" | "intervention";
   endDay: number;
   high: number;
   low: number;
@@ -399,10 +400,10 @@ function readRunWindows(attributes: JsonRecord): BrowserVaultExperimentRunWindow
   const runPlan = readRecord(attributes.runPlan);
 
   return {
-    baselineEnd: readIsoDate(runPlan?.baselineEnd),
-    baselineStart: readIsoDate(runPlan?.baselineStart),
-    interventionEnd: readIsoDate(runPlan?.interventionEnd),
-    interventionStart: readIsoDate(runPlan?.interventionStart),
+    baselineEnd: readIsoDate(runPlan?.baselineEnd) ?? readIsoDate(attributes.baselineEnd),
+    baselineStart: readIsoDate(runPlan?.baselineStart) ?? readIsoDate(attributes.baselineStart),
+    interventionEnd: readIsoDate(runPlan?.interventionEnd) ?? readIsoDate(attributes.interventionEnd),
+    interventionStart: readIsoDate(runPlan?.interventionStart) ?? readIsoDate(attributes.interventionStart),
   };
 }
 
@@ -443,7 +444,7 @@ function selectExperimentEvents(
       return false;
     }
 
-    const eventDate = readEventLocalDate(entity, eventTimeZone);
+    const eventDate = readSessionEventLocalDate(entity) ?? readEventLocalDate(entity, eventTimeZone);
     if (from && eventDate && eventDate < from) {
       return false;
     }
@@ -478,6 +479,13 @@ function readEventLocalDate(entity: BrowserVaultEntity, timeZone: string | null)
   }
 
   return entity.date ?? extractDate(entity.occurredAt);
+}
+
+function readSessionEventLocalDate(entity: BrowserVaultEntity): string | null {
+  return (
+    readIsoDate(entity.attributes.scheduledLocalDate) ??
+    readIsoDate(entity.attributes.sessionLocalDate)
+  );
 }
 
 function buildMetricWindowContext(
@@ -797,7 +805,7 @@ function buildScheduleExpansionEvents(
   return events
     .filter((event) => event.kind === "intervention_session")
     .map((event) => ({
-      localDate: event.occurredAt ? null : event.date,
+      localDate: readSessionEventLocalDate(event) ?? (event.occurredAt ? null : event.date),
       occurredAt: event.occurredAt,
       status: readSessionScheduleStatus(event),
     }));
@@ -1052,13 +1060,15 @@ function readExpectedRange(
   const low = readFiniteNumber(record.low);
   const high = readFiniteNumber(record.high);
   const scale = readExpectedRangeScale(record.scale);
+  const dayOrigin = readExpectedRangeDayOrigin(record.dayOrigin);
 
   if (
     startDay === null ||
     endDay === null ||
     low === null ||
     high === null ||
-    scale === null
+    scale === null ||
+    dayOrigin === null
   ) {
     return null;
   }
@@ -1066,6 +1076,7 @@ function readExpectedRange(
   const sourceKeys = readStringArray(record.sourceKeys);
 
   return {
+    dayOrigin,
     endDay,
     high,
     low,
@@ -1079,6 +1090,20 @@ function readExpectedRange(
 function readExpectedRangeScale(value: unknown): BrowserVaultExperimentExpectedRange["scale"] | null {
   if (value === "absolute" || value === "delta" || value === "percent") {
     return value;
+  }
+
+  return null;
+}
+
+function readExpectedRangeDayOrigin(
+  value: unknown,
+): BrowserVaultExperimentExpectedRange["dayOrigin"] | null {
+  if (value === undefined || value === null || value === "run") {
+    return "run";
+  }
+
+  if (value === "intervention") {
+    return "intervention";
   }
 
   return null;

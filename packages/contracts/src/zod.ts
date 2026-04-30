@@ -834,6 +834,8 @@ export const eventRecordSchema = withContractMetadata(
       regimenId: idSchema(ID_PREFIXES.regimen).optional(),
       ...experimentLinkShape,
       sessionStatus: experimentSessionStatusSchema.optional(),
+      sessionLocalDate: isoDateString().optional(),
+      scheduledLocalDate: isoDateString().optional(),
       timing: boundedString(1, 120).optional(),
       temperatureC: numberSchema(0, 200).optional(),
       afterExercise: z.boolean().optional(),

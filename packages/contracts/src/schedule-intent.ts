@@ -6,7 +6,9 @@ export const scheduleIntentKindValues = Object.freeze(["at", "every", "cron", "d
 export const experimentRunScheduleIntentKindValues = Object.freeze(["dailyLocal", "cron"] as const);
 
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
-const fiveFieldCronPattern = /^\S+(?:\s+\S+){4}$/u;
+export const experimentRunCronExpressionPattern =
+  "^(?:[0-5]?\\d)\\s+(?:[01]?\\d|2[0-3])\\s+\\*\\s+\\*\\s+[0-7](?:,[0-7])*$";
+const experimentRunCronExpressionRegex = new RegExp(experimentRunCronExpressionPattern, "u");
 
 const timeZoneSchema = z
   .string()
@@ -47,7 +49,10 @@ export const experimentRunScheduleIntentCronSchema = z.object({
     .string()
     .min(1)
     .max(400)
-    .regex(fiveFieldCronPattern, "Expected a five-field cron expression."),
+    .regex(
+      experimentRunCronExpressionRegex,
+      "Expected simple cron: concrete minute/hour, * day/month, numeric weekday list.",
+    ),
   timeZone: timeZoneSchema,
 }).strict();
 

@@ -416,6 +416,43 @@ describe("experiment detail private-run composition", () => {
     expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
+  it("renders done private runs as finished results", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const doneRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-29T08:00:00.000Z",
+        trackedExperiments: [{
+          id: "exp_sauna_done",
+          slug: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          startedOn: "2026-04-01",
+          status: "done",
+          summary: "Private run present; outcome export still pending.",
+          tags: ["sauna"],
+          title: "Finnish Dry Sauna",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    const doneMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun: doneRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(doneRun).toEqual(expect.objectContaining({
+      status: "finished",
+    }));
+    expect(doneMarkup).toContain("No biomarker comparison exported yet");
+    expect(doneMarkup).toContain("Private run recorded");
+    expect(doneMarkup).toContain("The browser-vault snapshot has the finished run, but no outcome window is ready yet.");
+  });
+
   it("maps real browser-vault biomarker trends without inventing an expected range band", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -524,8 +561,9 @@ describe("experiment detail private-run composition", () => {
               biomarkerKey: "biomarker:resting-heart-rate",
               sourceKeys: ["source_artifact:range"],
               range: {
-                startDay: 8,
-                endDay: 8,
+                dayOrigin: "intervention",
+                startDay: 1,
+                endDay: 1,
                 low: -10,
                 high: -5,
                 scale: "percent",

@@ -942,6 +942,9 @@ export function registerExperimentCommands(
     description: 'Log one structured intervention session for an experiment using typed fields.',
     args: experimentJournalLookupArgSchema,
     options: withBaseOptions({
+      date: localDateSchema
+        .optional()
+        .describe('Optional intended local session date in YYYY-MM-DD form.'),
       occurredAt: z
         .string()
         .min(1)
@@ -1011,6 +1014,7 @@ export function registerExperimentCommands(
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         lookup: args.lookup,
+        date: options.date,
         occurredAt: await normalizeOccurredAtOption({
           vault: options.vault,
           occurredAt:
