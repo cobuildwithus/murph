@@ -9,11 +9,8 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   HostedBillingSettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted billing settings ${String(props.authenticated)}`)),
-  HostedDeviceSyncSettings: vi.fn((props: {
-    authenticated: boolean;
-    member: { billingStatus: string; id: string; suspendedAt: Date | null } | null;
-  }) =>
-    React.createElement("div", null, `Hosted device sync settings ${String(props.authenticated)} ${String(props.member?.id ?? "")}`)),
+  HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
+    React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedEmailSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
     React.createElement(
       "div",
@@ -30,17 +27,12 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted phone settings ${String(props.authenticated)} ${String(props.initialLinkedAccounts.length)} ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  HostedTelegramSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
+  HostedTelegramCardSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
     React.createElement(
       "div",
       null,
       `Hosted Telegram settings ${String(props.authenticated)} ${String(props.initialLinkedAccounts.length)}`,
     )),
-  HostedVaultSyncSettings: vi.fn((props: {
-    authenticated: boolean;
-    member: { billingStatus: string; id: string; suspendedAt: Date | null } | null;
-  }) =>
-    React.createElement("div", null, `Hosted vault sync settings ${String(props.authenticated)} ${String(props.member?.id ?? "")}`)),
   prisma: {},
   readHostedMemberRoutingState: vi.fn(),
 }));
@@ -91,16 +83,12 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
   HostedBillingSettings: mocks.HostedBillingSettings,
 }));
 
-vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
-  HostedTelegramSettings: mocks.HostedTelegramSettings,
+vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
+  HostedTelegramCardSettings: mocks.HostedTelegramCardSettings,
 }));
 
-vi.mock("@/src/components/settings/hosted-device-sync-settings", () => ({
-  HostedDeviceSyncSettings: mocks.HostedDeviceSyncSettings,
-}));
-
-vi.mock("@/src/components/settings/hosted-vault-sync-settings", () => ({
-  HostedVaultSyncSettings: mocks.HostedVaultSyncSettings,
+vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
+  HostedDataPrivacySettings: mocks.HostedDataPrivacySettings,
 }));
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -166,13 +154,20 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
   assert.match(markup, /Hosted phone settings true 1 \+15550100001/);
   assert.match(markup, /Hosted email settings/);
   assert.match(markup, /Hosted Telegram settings/);
-  assert.match(markup, /Hosted vault sync settings/);
-  assert.match(markup, /Hosted device sync settings/);
-  assert.ok(
-    markup.indexOf("Hosted device sync settings") < markup.indexOf("Hosted vault sync settings"),
-  );
+  assert.match(markup, /Hosted data privacy settings/);
   assert.match(markup, /Your account/);
-  assert.match(markup, /Subscription, connected accounts, vault sync, wearables, and data privacy\./);
+  assert.match(markup, /Subscription, connected accounts, data sources, and data privacy\./);
+  assert.match(markup, /Data sources/);
+  assert.match(markup, /href="\/connect"[^>]*>Connect devices/);
+  assert.equal(markup.includes("Wearables"), false);
+  assert.equal(markup.includes("Hosted device sync settings"), false);
+  for (const removedCopy of [
+    ["vault", "sync"].join(" "),
+    ["Sync", "local", "vault"].join(" "),
+    ["Local", "to-hosted import"].join("-"),
+  ]) {
+    assert.equal(markup.includes(removedCopy), false);
+  }
   assert.match(markup, /data-phone-country-code="CA"/);
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
@@ -191,24 +186,11 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
     authenticated: true,
     initialLinkedAccounts: expect.any(Array),
   }), undefined);
-  expect(mocks.HostedTelegramSettings).toHaveBeenCalledWith(expect.objectContaining({
+  expect(mocks.HostedTelegramCardSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
     initialLinkedAccounts: expect.any(Array),
   }), undefined);
-  expect(mocks.HostedVaultSyncSettings).toHaveBeenCalledWith(expect.objectContaining({
+  expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
-    member: expect.objectContaining({
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    }),
-  }), undefined);
-  expect(mocks.HostedDeviceSyncSettings).toHaveBeenCalledWith(expect.objectContaining({
-    authenticated: true,
-    member: expect.objectContaining({
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    }),
   }), undefined);
 });

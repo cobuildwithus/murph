@@ -49,7 +49,7 @@ function createDeferredTelegramSync() {
   };
 }
 
-describe("HostedTelegramSettings", () => {
+describe("ConnectTelegram", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.linkTelegram.mockResolvedValue(undefined);
@@ -87,14 +87,14 @@ describe("HostedTelegramSettings", () => {
   });
 
   it("syncs an existing linked Telegram account in the background without a manual save button", async () => {
-    const { HostedTelegramSettings } = await import(
+    const { ConnectTelegram } = await import(
       "@/src/components/settings/hosted-telegram-settings"
     );
     const backgroundSync = createDeferredTelegramSync();
     mocks.requestHostedOnboardingJson.mockReturnValueOnce(backgroundSync.promise);
 
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedTelegramSettings, {
+      createElement(ConnectTelegram, {
         authenticated: true,
         initialLinkedAccounts: [],
       }),
@@ -139,7 +139,7 @@ describe("HostedTelegramSettings", () => {
   });
 
   it("renders the unconnected Telegram state with the same compact link row", async () => {
-    const { HostedTelegramSettings } = await import(
+    const { ConnectTelegram } = await import(
       "@/src/components/settings/hosted-telegram-settings"
     );
     mocks.useUser.mockReturnValue({
@@ -150,25 +150,20 @@ describe("HostedTelegramSettings", () => {
     });
 
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedTelegramSettings, {
+      createElement(ConnectTelegram, {
         authenticated: true,
         initialLinkedAccounts: [],
       }),
     );
     cleanupRender = cleanup;
 
-    expect(container.textContent).toContain("Telegram");
-    expect(container.textContent).toContain("Not connected");
-    expect(container.textContent).toContain("Link Telegram");
-    expect(container.textContent).not.toContain(
-      "Connect your Telegram account so Murph can message you there.",
-    );
+    expect(container.textContent).toContain("Connect Telegram");
     expect(container.textContent).not.toContain("Message @withmurph_bot");
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
   it("keeps a newer relink result when an older background sync resolves later", async () => {
-    const { HostedTelegramSettings } = await import(
+    const { ConnectTelegram } = await import(
       "@/src/components/settings/hosted-telegram-settings"
     );
     const backgroundSync = createDeferredTelegramSync();
@@ -187,7 +182,7 @@ describe("HostedTelegramSettings", () => {
     });
 
     const { cleanup, container } = await renderClientComponent(
-      createElement(HostedTelegramSettings, {
+      createElement(ConnectTelegram, {
         authenticated: true,
         initialLinkedAccounts: [],
       }),

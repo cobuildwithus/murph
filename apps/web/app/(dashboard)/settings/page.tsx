@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
-import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
-import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
-import { HostedVaultSyncSettings } from "@/src/components/settings/hosted-vault-sync-settings";
+import { HostedTelegramCardSettings } from "@/src/components/settings/hosted-telegram-card-settings";
 import { getPrisma } from "@/src/lib/prisma";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -44,7 +43,7 @@ export default async function SettingsPage() {
             Your account
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Subscription, connected accounts, vault sync, wearables, and data privacy.
+            Subscription, connected accounts, data sources, and data privacy.
           </p>
         </div>
 
@@ -65,29 +64,21 @@ export default async function SettingsPage() {
               initialLinkedAccounts={linkedAccounts}
               murphPhoneNumber={routing?.linqRecipientPhone ?? null}
             />
-            <HostedTelegramSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
+            <HostedTelegramCardSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
             <HostedEmailSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
           </div>
         </section>
 
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Wearables
+            Data sources
           </div>
-          <HostedDeviceSyncSettings
-            authenticated={authenticated}
-            member={authenticatedMember}
-          />
-        </section>
-
-        <section className="flex flex-col gap-4">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Vault
-          </div>
-          <HostedVaultSyncSettings
-            authenticated={authenticated}
-            member={authenticatedMember}
-          />
+          <Link
+            className="inline-flex w-fit items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            href="/connect"
+          >
+            Connect devices
+          </Link>
         </section>
 
         <section className="flex flex-col gap-4">

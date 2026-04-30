@@ -1,15 +1,18 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-
 import {
   ArrowRightIcon,
   CheckCircleIcon,
   CheckIcon,
+  ChevronRightIcon,
   DiamondIcon,
+  ExternalLinkIcon,
   LoaderCircleIcon,
+  PhoneIcon,
+  SendIcon,
   SparkleIcon,
   LockIcon,
   RefreshCwIcon,
@@ -20,6 +23,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { CheckoutButton } from "@/src/components/ui/checkout-button";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
+import { cn } from "@/src/lib/utils";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
   HostedInviteStatusPayload,
@@ -27,12 +31,21 @@ import type {
 } from "@/src/lib/hosted-onboarding/types";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
+import type {
+  HostedConsentScopeStatus,
+  HostedConsentStatus,
+} from "@/src/lib/legal/consent";
+
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "./client-api";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
+import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import { HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
-import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
-import { HostedTelegramSettings } from "../settings/hosted-telegram-settings";
+import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 
 const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
@@ -102,6 +115,61 @@ function HostedInviteSignOutButton({
   );
 }
 
+type ContactMethod = "phone" | "telegram";
+
+function ContactMethodCard({
+  active,
+  icon: Icon,
+  label,
+  subtitle,
+  onClick,
+}: {
+  active: boolean;
+  badge?: string;
+  icon: typeof PhoneIcon;
+  label: string;
+  subtitle: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex flex-1 items-start gap-4 rounded-xl border p-5 text-left transition-colors",
+        active
+          ? "border-olive/25 bg-olive/[0.06]"
+          : "border-border bg-card hover:border-olive/15",
+      )}
+    >
+      <span
+        className={cn(
+          "flex size-10 shrink-0 items-center justify-center rounded-xl",
+          active ? "bg-olive/10 text-olive" : "bg-muted text-muted-foreground",
+        )}
+      >
+        <Icon className="size-5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-foreground">{label}</span>
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+      </div>
+      <span
+        className={cn(
+          "mt-1 flex size-6 shrink-0 items-center justify-center rounded-full",
+          active
+            ? "bg-foreground text-background"
+            : "border-2 border-muted-foreground/25",
+        )}
+      >
+        {active ? <CheckIcon className="size-3.5" strokeWidth={2.5} /> : null}
+      </span>
+    </button>
+  );
+}
+
 export function JoinInviteVerificationPanel({
   awaitingInviteSessionResolution,
   inviteCode,
@@ -113,6 +181,9 @@ export function JoinInviteVerificationPanel({
   onRefreshStatus,
   onRetryStatusRefresh,
 }: JoinInviteVerificationPanelProps) {
+  const [contactMethod, setContactMethod] = useState<ContactMethod>("phone");
+  const [consentGated, setConsentGated] = useState(false);
+
   if (awaitingInviteSessionResolution) {
     if (statusRefreshErrorMessage) {
       return (
@@ -149,16 +220,63 @@ export function JoinInviteVerificationPanel({
   }
 
   return (
-    <div className="rounded-2xl border border-amber/25 bg-card p-6">
-      <HostedInvitePhoneAuth
-        inviteCode={inviteCode}
-        phoneAuthTarget={phoneAuthTarget}
-        phoneHint={phoneHint}
-        onSignOut={async () => {
-          await onRefreshStatus();
-        }}
-        onCompleted={onPhoneVerified}
-      />
+    <div className="flex flex-col gap-5">
+      <div className="rounded-2xl border border-border bg-card/80 p-6">
+        <div className="flex gap-3">
+          <ContactMethodCard
+            active={contactMethod === "phone"}
+            badge="Recommended"
+            icon={PhoneIcon}
+            label="Phone"
+            subtitle="iMessage + SMS"
+            onClick={() => setContactMethod("phone")}
+          />
+          <ContactMethodCard
+            active={contactMethod === "telegram"}
+            badge="Optional"
+            icon={SendIcon}
+            label="Telegram"
+            subtitle="Private messaging"
+            onClick={() => setContactMethod("telegram")}
+          />
+        </div>
+
+        <div className="mt-6">
+          {contactMethod === "phone" ? (
+            <HostedInvitePhoneAuth
+              inviteCode={inviteCode}
+              phoneAuthTarget={phoneAuthTarget}
+              phoneHint={phoneHint}
+              sendCodeGated={consentGated}
+              onSignOut={async () => {
+                await onRefreshStatus();
+              }}
+              onCompleted={onPhoneVerified}
+            />
+          ) : (
+            <ConnectTelegram
+              authenticated={false}
+              initialLinkedAccounts={[]}
+              onSynced={async () => {
+                await onRefreshStatus();
+              }}
+            />
+          )}
+        </div>
+
+        {contactMethod === "phone" ? (
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="text-sm text-muted-foreground">
+              We&apos;ll text you a one-time code to verify your number.
+            </p>
+          </div>
+        ) : null}
+
+        <div className="mt-5">
+          <InlineCheckoutConsent onGateChange={setConsentGated} />
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -177,7 +295,7 @@ export function JoinInviteLaunchLegalConsentPanel({
           void onLaunchLegalConsentSatisfied();
         }
       }}
-      preferredScope="launch.required"
+      preferredScope="launch.legal"
       source="join-invite-phone-verify"
     />
   );
@@ -185,33 +303,69 @@ export function JoinInviteLaunchLegalConsentPanel({
 
 export function JoinInviteMessagingSetupPanel({
   authenticated,
+  consentRequired = false,
   initialLinkedAccounts,
+  onConsentSatisfied,
   onRefreshStatus,
 }: {
   authenticated: boolean;
+  consentRequired?: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  onConsentSatisfied?: () => Promise<void>;
   onRefreshStatus: () => Promise<HostedInviteStatusPayload>;
 }) {
+  const [contactMethod, setContactMethod] = useState<ContactMethod>("phone");
+  const [consentGated, setConsentGated] = useState(false);
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-amber/25 bg-card p-6">
-        <HostedPhoneSettings
-          authenticated={authenticated}
-          autoOpen
-          initialLinkedAccounts={initialLinkedAccounts}
-          onLinked={async () => {
-            await onRefreshStatus();
-          }}
-        />
-      </div>
-      <div className="rounded-2xl border border-amber/25 bg-card p-6">
-        <HostedTelegramSettings
-          authenticated={authenticated}
-          initialLinkedAccounts={initialLinkedAccounts}
-          onSynced={async () => {
-            await onRefreshStatus();
-          }}
-        />
+    <div className="flex flex-col gap-5">
+      <div className="rounded-2xl border border-border bg-card/80 p-6">
+        <div className="flex gap-3">
+          <ContactMethodCard
+            active={contactMethod === "phone"}
+            badge="Recommended"
+            icon={PhoneIcon}
+            label="Phone"
+            subtitle="iMessage + SMS"
+            onClick={() => setContactMethod("phone")}
+          />
+          <ContactMethodCard
+            active={contactMethod === "telegram"}
+            badge="Optional"
+            icon={SendIcon}
+            label="Telegram"
+            subtitle="Private messaging"
+            onClick={() => setContactMethod("telegram")}
+          />
+        </div>
+
+        <div className="mt-6">
+          {contactMethod === "phone" ? (
+            <HostedPhoneAuth
+              intent="link"
+              sendCodeGated={consentGated}
+              showPassiveConsentNotice={false}
+              onLinked={async () => {
+                await onRefreshStatus();
+              }}
+            />
+          ) : (
+            <ConnectTelegram
+              authenticated={authenticated}
+              initialLinkedAccounts={initialLinkedAccounts}
+              onSynced={async () => {
+                await onRefreshStatus();
+              }}
+            />
+          )}
+        </div>
+
+        <div className="mt-5">
+          <InlineCheckoutConsent
+            onConsentSatisfied={onConsentSatisfied}
+            onGateChange={setConsentGated}
+          />
+        </div>
       </div>
     </div>
   );
@@ -246,16 +400,20 @@ const EDGE_FEATURES = [
 export function JoinInviteCheckoutPanel({
   billingReady,
   billingPlans,
+  consentRequired = false,
   onCheckout,
   onCheckoutSuccess,
   onCheckoutError,
+  onConsentSatisfied,
   onSelectBillingPlan,
 }: {
   billingReady: boolean;
   billingPlans: HostedInviteStatusPayload["billing"]["plans"];
+  consentRequired?: boolean;
   onCheckout: (billingPlanCode: HostedBillingPlanCode) => Promise<void>;
   onCheckoutSuccess: () => void;
   onCheckoutError: (error: unknown) => void;
+  onConsentSatisfied?: () => Promise<void>;
   onSelectBillingPlan: (billingPlanCode: HostedBillingPlanCode) => void;
 }) {
   const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly");
@@ -284,7 +442,7 @@ export function JoinInviteCheckoutPanel({
                 />
               }
             >
-              <span className="flex-1 text-center">Open Source</span>
+              <span className="flex-1 text-center">View on GitHub</span>
               <ArrowRightIcon className="size-4 shrink-0" />
             </Button>
           }
@@ -343,6 +501,10 @@ export function JoinInviteCheckoutPanel({
         />
       </div>
 
+      {consentRequired ? (
+        <InlineCheckoutConsent onConsentSatisfied={onConsentSatisfied} />
+      ) : null}
+
       <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-0">
           <CheckoutTrustItem
@@ -364,6 +526,161 @@ export function JoinInviteCheckoutPanel({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function InlineCheckoutConsent({
+  onConsentSatisfied,
+  onGateChange,
+}: {
+  onConsentSatisfied?: () => Promise<void>;
+  onGateChange?: (gated: boolean) => void;
+}) {
+  const [status, setStatus] = useState<HostedConsentStatus | null>(null);
+  const [legalAccepted, setLegalAccepted] = useState(false);
+  const [healthDataAccepted, setHealthDataAccepted] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const loadStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const nextStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
+        url: "/api/legal/consent/status",
+      });
+      setStatus(nextStatus);
+    } catch {
+      // Consent loading failed — let checkout proceed without blocking
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  const allLaunchScopes = status?.launchScopes ?? [];
+  const pendingLaunchScopes = useMemo(() => {
+    return allLaunchScopes.filter((s) => !s.granted);
+  }, [allLaunchScopes]);
+
+  const legalScope = status?.scopes.find((s) => s.scope === "launch.legal") ?? null;
+  const healthDataScope = status?.scopes.find((s) => s.scope === "launch.health-data") ?? null;
+
+  const hasLegal = allLaunchScopes.some((s) => s.scope === "launch.legal");
+  const hasHealthData = allLaunchScopes.some((s) => s.scope === "launch.health-data");
+  const legalGranted = legalScope?.granted ?? false;
+  const healthDataGranted = healthDataScope?.granted ?? false;
+
+  const consentVisible = !loading && allLaunchScopes.length > 0;
+  const allAccepted =
+    (!hasLegal || legalAccepted || legalGranted) &&
+    (!hasHealthData || healthDataAccepted || healthDataGranted);
+  const gated = consentVisible && !allAccepted;
+
+  useEffect(() => {
+    onGateChange?.(gated);
+  }, [gated, onGateChange]);
+
+  useEffect(() => {
+    if (status && pendingLaunchScopes.length === 0) {
+      void onConsentSatisfied?.();
+    }
+  }, [pendingLaunchScopes, onConsentSatisfied, status]);
+
+  async function handleCheck(
+    scope: "legal" | "health-data",
+    checked: boolean,
+  ) {
+    if (scope === "legal") setLegalAccepted(checked);
+    else setHealthDataAccepted(checked);
+
+    if (!checked || pending) return;
+
+    const targetScope = scope === "legal" ? legalScope : healthDataScope;
+    if (!targetScope || targetScope.granted) return;
+
+    setPending(true);
+    try {
+      const nextStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
+        method: "POST",
+        payload: {
+          acceptedDocumentVersions: Object.fromEntries(
+            targetScope.documents.map((doc) => [doc.id, doc.version]),
+          ),
+          scope: targetScope.scope,
+          source: "join-invite-checkout",
+        },
+        url: "/api/legal/consent/accept",
+      });
+      setStatus(nextStatus);
+      if (nextStatus.launchGranted) {
+        await onConsentSatisfied?.();
+      }
+    } catch {
+      if (scope === "legal") setLegalAccepted(false);
+      else setHealthDataAccepted(false);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (!consentVisible) return null;
+
+  return (
+    <div className="space-y-3">
+      {hasLegal && legalScope ? (
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background p-4 text-sm leading-relaxed transition-colors hover:border-olive/30 active:bg-muted/40">
+          <input
+            type="checkbox"
+            checked={legalAccepted || legalGranted}
+            disabled={pending || legalGranted}
+            onChange={(event) => void handleCheck("legal", event.currentTarget.checked)}
+            className="mt-0.5 size-5 shrink-0 rounded border-border text-olive"
+          />
+          <span className="text-muted-foreground">
+            I agree to the{" "}
+            {legalScope.documents.map((doc, i) => (
+              <span key={doc.id}>
+                {i > 0 ? (i === legalScope.documents.length - 1 ? " and " : ", ") : ""}
+                <a
+                  href={doc.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-foreground underline-offset-4 hover:underline"
+                >
+                  {doc.title.replace("Murph ", "")}
+                </a>
+              </span>
+            ))}
+          </span>
+        </label>
+      ) : null}
+
+      {hasHealthData && healthDataScope ? (
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background p-4 text-sm leading-relaxed transition-colors hover:border-olive/30 active:bg-muted/40">
+          <input
+            type="checkbox"
+            checked={healthDataAccepted || healthDataGranted}
+            disabled={pending || healthDataGranted}
+            onChange={(event) => void handleCheck("health-data", event.currentTarget.checked)}
+            className="mt-0.5 size-5 shrink-0 rounded border-border text-olive"
+          />
+          <span className="text-muted-foreground">
+            I agree to the{" "}
+            <a
+              href={healthDataScope.documents[0]?.href ?? "#"}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Consumer Health Data Notice
+            </a>
+          </span>
+        </label>
+      ) : null}
     </div>
   );
 }
