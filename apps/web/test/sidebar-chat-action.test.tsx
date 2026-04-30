@@ -153,7 +153,7 @@ test("SidebarChatWithMurphAction does not use assigned SMS without a connected p
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai\?subject=Chat%20with%20Murph"/);
+  assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai\?subject=Hey%20Murph"/);
   assert.doesNotMatch(markup, /href="sms:\+15550100001"/);
   assert.doesNotMatch(markup, /member@example\.test/);
 });
