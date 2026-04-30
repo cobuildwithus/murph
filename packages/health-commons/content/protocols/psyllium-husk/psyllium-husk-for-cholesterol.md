@@ -4,7 +4,7 @@ entityType: "protocol_variant"
 key: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol"
 slug: "protocols/psyllium-husk/psyllium-husk-for-cholesterol"
 title: "Psyllium Husk For Cholesterol"
-summary: "A lab-measured cholesterol experiment using daily psyllium husk as a diet adjunct, aiming mainly at LDL-C and total-cholesterol change while enforcing hydration, swallowing, allergy, medication-spacing, and lab-follow-up guardrails."
+summary: "A lab-measured cholesterol experiment using daily psyllium husk as a diet adjunct, aiming primarily at LDL-C while tracking non-HDL-C, ApoB, and total cholesterol as companion lipid labs with hydration, swallowing, allergy, medication-spacing, and lab-follow-up guardrails."
 status: "draft"
 quality: "usable"
 hidden: true
@@ -42,19 +42,19 @@ relations:
     target: "biomarker:ldl-c"
   -
     type: "secondary_biomarker"
-    target: "biomarker:total-cholesterol"
-  -
-    type: "secondary_biomarker"
     target: "biomarker:non-hdl-c"
   -
     type: "secondary_biomarker"
     target: "biomarker:apolipoprotein-b"
   -
     type: "secondary_biomarker"
-    target: "biomarker:hdl-c"
+    target: "biomarker:total-cholesterol"
   -
     type: "secondary_biomarker"
     target: "biomarker:triglycerides"
+  -
+    type: "secondary_biomarker"
+    target: "biomarker:hdl-c"
 lineage:
   relationship: "root"
   rationale: "Murph canonical cholesterol-specific psyllium husk variant. It is separated from generic soluble-fiber protocols, constipation-only use, portfolio-diet protocols, diabetes/glycemic variants, pediatric protocols, and external named claims."
@@ -63,7 +63,7 @@ attribution:
   note: "Built from Murph Health Commons psyllium cholesterol research outputs and source extraction batches."
 protocol:
   doseSignature: "Daily · 7–10.5 g/day active psyllium husk target · divided with meals · at least 8 oz / 240 mL liquid per dose · 8–12 weeks"
-  target: "LDL-C and total cholesterol change on repeat lipid panel"
+  target: "LDL-C primary change plus non-HDL-C, ApoB, and total cholesterol companion labs on repeat lipid panel"
   frequency:
     sessionsPerDay: 2
     sessionsPerWeek: 14
@@ -91,7 +91,7 @@ protocol:
     - "Use the same lab and similar fasting/non-fasting conditions for baseline and follow-up when practical."
     - "Food/cereal forms are not automatically equivalent to powder or capsules and still require adequate liquid; do not use food mixing as a workaround for swallowing difficulty."
   keepInMind:
-    - "LDL-C and total cholesterol are the main protocol endpoints; HDL-C and triglycerides are context metrics, not promised improvements."
+    - "LDL-C is the primary endpoint; non-HDL-C, ApoB, and total cholesterol are the most useful lab companions, while HDL-C and triglycerides are context metrics."
     - "This is a diet-adjunct experiment, not a replacement for lipid-lowering medication or cardiovascular-risk care; do not delay, stop, or change clinician-directed medication to preserve attribution."
     - "People with near-normal baseline cholesterol may see less change or mixed results."
     - "Regulatory health-claim eligibility and product labels are context, not proof that any individual product or dose will lower your LDL-C."
@@ -162,16 +162,16 @@ testPlans:
     interventionDays: 84
     primaryBiomarkerKey: "biomarker:ldl-c"
     secondaryBiomarkerKeys:
-      - "biomarker:total-cholesterol"
       - "biomarker:non-hdl-c"
       - "biomarker:apolipoprotein-b"
-      - "biomarker:hdl-c"
+      - "biomarker:total-cholesterol"
       - "biomarker:triglycerides"
+      - "biomarker:hdl-c"
     minimumAdherenceSessions: 112
     targetAdherenceSessions: 168
     notes:
       - "Get a lipid panel before starting and repeat after the 84-day intervention window when possible."
-      - "Use LDL-C as the primary outcome; use total cholesterol, non-HDL-C, ApoB, HDL-C, and triglycerides as secondary/context outcomes."
+      - "Use LDL-C as the primary outcome; use non-HDL-C, ApoB, and total cholesterol as secondary lab outcomes, with triglycerides and HDL-C as context."
       - "Interpret only with product, dose, adherence, medication, diet, weight, and fasting-status notes visible."
   -
     planId: "lipid-panel-8-week-minimum"
@@ -180,11 +180,11 @@ testPlans:
     interventionDays: 56
     primaryBiomarkerKey: "biomarker:ldl-c"
     secondaryBiomarkerKeys:
-      - "biomarker:total-cholesterol"
       - "biomarker:non-hdl-c"
       - "biomarker:apolipoprotein-b"
-      - "biomarker:hdl-c"
+      - "biomarker:total-cholesterol"
       - "biomarker:triglycerides"
+      - "biomarker:hdl-c"
     minimumAdherenceSessions: 80
     targetAdherenceSessions: 112
     notes:
@@ -194,22 +194,82 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: "biomarker:ldl-c"
-    description: "Psyllium gel can bind bile acids in the gut and carry them out in stool. The liver may then pull more LDL from blood to replace them."
-  -
-    biomarkerKey: "biomarker:total-cholesterol"
-    description: "Total cholesterol may fall if LDL-C falls, because LDL-C makes up much of the total value."
+    expected: "Could trend lower"
+    description: "Viscous psyllium gel traps bile acids and cholesterol in the gut. The liver replaces lost bile acids using cholesterol and can clear more LDL particles from blood, so LDL-C can drop."
+    estimatedChange:
+      kind: "absolute"
+      low: -13
+      high: -8
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "moderate"
+      basis: "Direct psyllium lipid syntheses report LDL-C lowering around -8.55 mg/dL to -0.33 mmol/L (~-13 mg/dL), with larger relative effects in elevated-cholesterol diet-adjunct trials."
+    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:non-hdl-c"
-    description: "Non-HDL-C may fall if bile-acid loss helps lower LDL and related cholesterol-carrying particles."
+    expected: "Could trend lower"
+    description: "Bile-acid loss shifts liver cholesterol handling toward clearing apoB-containing particles. Non-HDL-C sums the cholesterol in those particles, so it can fall alongside LDL-C."
+    estimatedChange:
+      kind: "absolute"
+      low: -15
+      high: -10
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "moderate"
+      basis: "The 2018 psyllium RCT meta-analysis reported non-HDL-C -0.39 mmol/L (~-15 mg/dL); the estimate is anchored to that direct pooled result and LDL-C-aligned movement."
+    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
-    description: "When bile-acid loss makes the liver clear more LDL, the number of LDL-related particles can fall. Because each particle carries ApoB, ApoB may fall too."
+    expected: "Could trend lower"
+    description: "Each LDL and remnant particle carries one ApoB. If psyllium-driven bile-acid loss makes the liver clear more apoB-containing particles, ApoB can decline."
+    estimatedChange:
+      kind: "absolute"
+      low: -8
+      high: -3
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "moderate"
+      basis: "The 2018 psyllium RCT meta-analysis reported ApoB -0.05 g/L, with an extracted confidence interval equivalent to roughly -8 to -3 mg/dL."
+    protocolProminence: "focus"
   -
-    biomarkerKey: "biomarker:hdl-c"
-    description: "Psyllium mainly works through LDL-C and total cholesterol. HDL-C may stay about the same even when LDL-C changes."
+    biomarkerKey: "biomarker:total-cholesterol"
+    expected: "Could trend lower"
+    description: "Total cholesterol is the sum of lipid-panel fractions. Psyllium does not need to move every fraction; a lower LDL-C component can pull the total value down."
+    estimatedChange:
+      kind: "absolute"
+      low: -15
+      high: -9
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "moderate"
+      basis: "Direct psyllium syntheses report total-cholesterol lowering around -9.05 mg/dL to -0.375 mmol/L (~-15 mg/dL), with older hypercholesterolemia trials near a 4% reduction."
+    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:triglycerides"
-    description: "Psyllium mainly targets LDL-C. Triglycerides tend to change only if diet, weight, or carbs change during the run."
+    expected: "Small/no reliable change"
+    description: "Psyllium slows gut mixing and absorption but does not directly target liver triglyceride export. Triglycerides mostly reflect fasting state, recent carbs, alcohol, weight change, and glucose control."
+    estimatedChange:
+      kind: "absolute"
+      low: -12
+      high: 2
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "mixed"
+      basis: "The 2025 41-RCT lipid meta-analysis estimated triglycerides at -5.29 mg/dL with a confidence interval crossing zero; older direct syntheses also found no significant change."
+    protocolProminence: "context"
+  -
+    biomarkerKey: "biomarker:hdl-c"
+    expected: "Usually stable"
+    description: "Psyllium's main lever is bile-acid and LDL-particle handling, not HDL remodeling. HDL-C usually changes little while LDL-C falls."
+    estimatedChange:
+      kind: "absolute"
+      low: -1
+      high: 2
+      unit: "mg/dL"
+      window: "8–12 weeks"
+      confidence: "mixed"
+      basis: "The 2025 41-RCT lipid meta-analysis estimated HDL-C at +0.57 mg/dL with a confidence interval crossing zero; older direct syntheses found no significant change or a small lower value."
+    protocolProminence: "context"
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -1035,7 +1095,7 @@ safety:
 ---
 ## What this protocol is
 
-This is a **lab-measured psyllium husk cholesterol experiment**. The intended question is: after a stable period of daily psyllium husk use, do LDL-C and total cholesterol change compared with a baseline lipid panel? The evidence backbone is psyllium-specific lipid trials and syntheses, not generic fiber, constipation-only use, or broad cardiovascular-outcome claims.
+This is a **lab-measured psyllium husk cholesterol experiment**. The intended question is: after a stable period of daily psyllium husk use, does LDL-C change, with non-HDL-C, ApoB, and total cholesterol as companion lipid labs, compared with a baseline lipid panel? The evidence backbone is psyllium-specific lipid trials and syntheses, not generic fiber, constipation-only use, or broad cardiovascular-outcome claims.
 
 ## Best-fit user
 
@@ -1049,7 +1109,7 @@ Powder, granules, cereal/food vehicles, and capsules should remain explicit setu
 
 ## Measurement plan
 
-Use LDL-C as the primary endpoint. Total cholesterol, non-HDL-C, and ApoB are useful secondary endpoints when available. HDL-C and triglycerides should be watched as context because findings are mixed or less consistent for this protocol.
+Use LDL-C as the primary endpoint. Non-HDL-C, ApoB, and total cholesterol are useful secondary endpoints when available. Triglycerides and HDL-C should be watched as context because findings are mixed or less consistent for this protocol.
 
 The default test plan is 7 baseline days plus 84 intervention days, with a lipid panel before the first dose and another around 8–12 weeks after stable dosing. The lab result is hard to interpret unless Murph can also see product, dose, adherence, lipid medication changes, diet changes, weight changes, and fasting or non-fasting status.
 
