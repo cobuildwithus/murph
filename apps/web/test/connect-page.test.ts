@@ -42,11 +42,6 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
       name: "Whoop",
     },
     {
-      assetPath: "/brand-logos/connect/manual.svg",
-      description: "Flexible hand-entered measurements, notes, workouts, and observations when no device fits.",
-      name: "Manual",
-    },
-    {
       assetPath: "/brand-logos/connect/mapmyfitness.png",
       description: "Logged workouts, routes, pace, distance, and activity history from MapMyFitness.",
       name: "MapMyFitness",
@@ -213,12 +208,13 @@ test("ConnectPage renders Just Cobuild source names and logo marks", async () =>
     },
   ];
 
-  assert.equal(sources.length, 35);
+  assert.equal(sources.length, 34);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.doesNotMatch(markup, /Coming soon/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Connect<\/button>/u);
+  assert.doesNotMatch(markup, />Manual</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
 
   for (const source of sources) {
