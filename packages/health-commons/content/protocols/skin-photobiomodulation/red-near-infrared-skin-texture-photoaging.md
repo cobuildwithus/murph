@@ -25,9 +25,9 @@ relations:
 - type: parent_family
   target: experiment_family:skin-photobiomodulation
 - type: primary_biomarker
-  target: biomarker:standardized-skin-photo-score
-- type: secondary_biomarker
   target: biomarker:periocular-wrinkle-score
+- type: secondary_biomarker
+  target: biomarker:standardized-skin-photo-score
 - type: secondary_biomarker
   target: biomarker:skin-texture-roughness-score
 - type: secondary_biomarker
@@ -289,9 +289,9 @@ testPlans:
   durationDays: 56
   baselineDays: 14
   interventionDays: 42
-  primaryBiomarkerKey: biomarker:standardized-skin-photo-score
+  primaryBiomarkerKey: biomarker:periocular-wrinkle-score
   secondaryBiomarkerKeys:
-  - biomarker:periocular-wrinkle-score
+  - biomarker:standardized-skin-photo-score
   - biomarker:skin-texture-roughness-score
   - biomarker:skin-tolerability-symptoms
   minimumAdherenceSessions: 24
@@ -301,6 +301,52 @@ testPlans:
   - Score week-4 photos as an early safety, adherence, and workflow check and week-6 photos as the first starter read, not a definitive efficacy endpoint; an 8-to-16-week extension can be created as a separate fork when the device label and user burden support it.
   - Analyze standardized photo scores separately from satisfaction or skin-feel ratings because subjective and objective signals can diverge.
   - Treat tolerability and eye symptoms as safety outcomes, not as noise to be averaged away.
+expectedSignalDescriptions:
+- biomarkerKey: biomarker:periocular-wrinkle-score
+  description: Red and NIR photons reach the thin crow's-feet region and can shift skin-cell energy and repair signaling. If dermal remodeling follows, same-expression photos should show shallower periocular lines.
+  expected: Could improve
+  estimatedChange:
+    kind: absolute
+    low: -1.0
+    high: -0.3
+    unit: points on 0-10 score
+    window: 6-week read; stronger evidence at 8-16 weeks
+    confidence: moderate
+    basis: Direct 630/850 nm home-mask RCT evidence favored active treatment over sham for crow's-feet scores at 8, 12, and 16 weeks; older 633/830 nm facial studies also reported periocular response. The 6-week starter estimate is scaled down from those longer endpoints.
+  protocolProminence: focus
+- biomarkerKey: biomarker:standardized-skin-photo-score
+  description: The mask exposes a fixed facial region, so any broad effect should show up in the same camera, lighting, distance, and expression workflow. Look for a lower photoaging or appearance score across fine lines, texture, pores, tone, and pigment appearance.
+  expected: Could improve
+  estimatedChange:
+    kind: absolute
+    low: -0.8
+    high: -0.2
+    unit: points on 0-10 score
+    window: 6 weeks
+    confidence: low
+    basis: Direct home/facial red+NIR sources report positive crow's-feet, texture, brightening, and global-improvement signals, while several adjacent studies show method-specific or null findings. A broad self-photo score should move less cleanly than a pre-specified wrinkle or texture endpoint.
+  protocolProminence: focus
+- biomarkerKey: biomarker:skin-texture-roughness-score
+  description: Red/NIR exposure can nudge fibroblast and dermal-matrix signaling in treated skin. If surface support improves, roughness should drop and the same-region photo or texture rubric should look smoother.
+  expected: Could smooth slightly
+  estimatedChange:
+    kind: absolute
+    low: -1.0
+    high: -0.3
+    unit: points on 0-10 score
+    window: 6-8 weeks
+    confidence: low
+    basis: A small 637/854 nm home split-face pilot reported treated-side texture improvement at 8 weeks, and broader facial/clinic LED sources include texture or roughness signals. Hydration and elasticity results are mixed, so roughness is the cleaner home endpoint.
+  protocolProminence: focus
+- biomarkerKey: biomarker:skin-tolerability-symptoms
+  description: This is a nonthermal, eye-protected run. Heat, pain, pigment change, afterimages, blurry vision, flashes, or eye discomfort mean the device is stressing the wrong tissue or dose boundary.
+  expected: Should stay absent
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: each session and week-6 review
+    confidence: moderate
+    basis: Direct home/facial studies generally report good short-term tolerability, but ocular, pigment, heat, photosensitivity, and procedure-adjacent safety sources drive stop rules rather than a pooled symptom-rate estimate.
+  protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -908,18 +954,17 @@ This page uses 10 minutes, five times weekly, for six intervention weeks as a co
 
 ## What counts as a signal
 
-Primary signal:
+Focus signals, in order:
 
-- change in **standardized skin photo score** versus the 14-day baseline workflow.
+- **periocular or crow’s-feet wrinkle score** when that region is treated, because the closest sham-controlled home-mask evidence is periocular;
+- **standardized skin photo score** for the treated region, using fixed lighting, camera distance, expression, and makeup/sunscreen rules;
+- **texture or roughness score**, scored from the same region photos or a pre-set 0–10 rubric.
 
-Secondary signals:
+Safety/context signal:
 
-- periocular or crow’s-feet wrinkle score when that region is treated,
-- texture or roughness score,
-- satisfaction or skin-feel rating, analyzed separately from photos,
-- skin and eye tolerability symptoms.
+- **skin and eye tolerability symptoms**: heat, pain, irritation, pigment change, headache, afterimages, blurry vision, flashes, spots, or eye discomfort should stay absent.
 
-Use week 4 as an early adherence, safety, and photo-workflow check and week 6 as the first read for this fixed starter, not as a definitive efficacy endpoint. Direct and adjacent sources reported outcomes across 4 weeks, 6–8 weeks, 8–12 weeks, and 12–16 weeks; a longer 8-to-16-week fork may be reasonable for specific device labels or periocular endpoints when user burden and safety gates allow it. [source_artifact:doi-10.3390-cosmetics12010004; source_artifact:pmid-32649063; source_artifact:pmid-39960921; source_artifact:pmid-16414908; source_artifact:pmid-17566756]
+Use week 4 as an early safety and photo-workflow check and week 6 as the first starter read. Direct and adjacent sources reported outcomes across 4 weeks, 6–8 weeks, 8–12 weeks, and 12–16 weeks; a longer 8-to-16-week fork may be reasonable for specific device labels or periocular endpoints when user burden and safety gates allow it. [source_artifact:doi-10.3390-cosmetics12010004; source_artifact:pmid-32649063; source_artifact:pmid-39960921; source_artifact:pmid-16414908; source_artifact:pmid-17566756]
 
 ## Setup gates before Murph creates a run
 
