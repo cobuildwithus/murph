@@ -121,9 +121,8 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
         state: "state-123",
         provider: "oura",
         returnTo: "https://example.test/return",
-        metadata: {
-          ownerId: "user-123",
-        },
+        ownerId: "user-123",
+        metadata: {},
         createdAt: "2026-03-25T00:00:00.000Z",
         expiresAt: "2026-03-25T01:00:00.000Z",
       },

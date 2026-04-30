@@ -100,7 +100,9 @@ export class PrismaHostedConnectionStore {
     const metadata = sanitizeHostedDeviceSyncConnectionMetadata(input.metadata ?? {});
     const scopes = normalizeStoredScopes(input.scopes);
     const connectedAt = new Date(input.connectedAt);
-    const status = normalizeHostedDeviceSyncLifecycleStatus(input.status);
+    const requestedStatus = input.status === undefined
+      ? null
+      : normalizeHostedDeviceSyncLifecycleStatus(input.status);
     const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
     const codec = requireHostedSecretCodec(this.codec);
     const credential = resolveHostedUpsertConnectionCredential(input);
@@ -156,7 +158,7 @@ export class PrismaHostedConnectionStore {
             metadataJson: toPrismaJsonObject(metadata),
             nextReconcileAt: maybeDate(input.nextReconcileAt),
             scopesJson: scopes,
-            status,
+            status: requestedStatus ?? existing.status,
           },
           ...hostedConnectionRecordArgs,
         });
@@ -199,7 +201,7 @@ export class PrismaHostedConnectionStore {
           provider: input.provider,
           providerAccountBlindIndex,
           scopesJson: scopes,
-          status,
+          status: requestedStatus ?? "active",
           userId: ownerId,
         },
         ...hostedConnectionRecordArgs,

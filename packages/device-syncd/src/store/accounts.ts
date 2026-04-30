@@ -673,7 +673,7 @@ export function upsertAccount(
   return withImmediateTransaction(database, () => {
     const existing = getAccountByExternalAccount(database, input.provider, input.externalAccountId);
     const now = input.connectedAt;
-    const status = input.status ?? "active";
+    const status = input.status ?? existing?.status ?? "active";
     const setupPhase = Object.prototype.hasOwnProperty.call(input, "setupPhase")
       ? input.setupPhase ?? null
       : existing?.setupPhase ?? null;

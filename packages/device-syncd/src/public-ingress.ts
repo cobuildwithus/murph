@@ -280,17 +280,9 @@ function buildConnectionCallbackQuery(input: HandleConnectionCallbackInput): URL
 }
 
 function buildConnectionStateMetadata(input: {
-  ownerId: string | null | undefined;
   providerMetadata: Record<string, unknown> | undefined;
 }): Record<string, unknown> {
-  const metadata = sanitizeConnectionStateMetadata(input.providerMetadata);
-
-  const ownerId = normalizeString(input.ownerId);
-  if (ownerId) {
-    metadata.ownerId = ownerId;
-  }
-
-  return metadata;
+  return sanitizeConnectionStateMetadata(input.providerMetadata);
 }
 
 function buildProviderConnectionStateMetadata(
@@ -522,7 +514,6 @@ export class DeviceSyncPublicIngress {
     }
 
     let stateMetadata = buildConnectionStateMetadata({
-      ownerId: input.ownerId,
       providerMetadata: started.stateMetadata,
     });
     if (seededAccount) {
@@ -534,6 +525,7 @@ export class DeviceSyncPublicIngress {
         state,
         provider: provider.provider,
         returnTo,
+        ownerId: input.ownerId ?? null,
         createdAt: now,
         expiresAt,
         metadata: stateMetadata,
@@ -605,6 +597,22 @@ export class DeviceSyncPublicIngress {
     let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
 
+    if (seededExternalAccountId) {
+      const seededAccount = await this.store.getConnectionByExternalAccount(
+        provider.provider,
+        seededExternalAccountId,
+      );
+
+      if (seededAccount?.status === "disconnected") {
+        throw deviceSyncError({
+          code: "CONNECTION_ALREADY_DISCONNECTED",
+          message: "Device sync connection callback was received after the seeded account was disconnected.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+    }
+
     try {
       if (!descriptor.callbackUrl && connectionFlowRequiresCallbackUrl(descriptor.connectionKind)) {
         throw deviceSyncError({
@@ -642,8 +650,7 @@ export class DeviceSyncPublicIngress {
         normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "oauth callback")
       );
 
-      const ownerId =
-        typeof stateRecord.metadata?.ownerId === "string" ? normalizeString(stateRecord.metadata.ownerId) : null;
+      const ownerId = normalizeString(stateRecord.ownerId);
       const setupPhase = resolveConnectionSetupPhase(connection, descriptor.connectionKind);
 
       account = await this.store.upsertConnection({
@@ -799,7 +806,7 @@ export class DeviceSyncPublicIngress {
         throw error;
       }
 
-      if (parsed.unknownAccountAction === "accept") {
+      if (parsed.unknownAccountAction === "accept" && this.hooks.onUnknownWebhook) {
         await this.store.completeWebhookTrace(provider.provider, traceId);
 
         return {

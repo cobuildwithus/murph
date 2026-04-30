@@ -1237,7 +1237,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             dataType: "sleep",
             occurredAt: "2026-04-09T00:00:30Z",
+            resource: "glucose",
+            resourceCategory: "timeseries",
             resourceId: "sleep_123",
+            sourceProviderSlug: "dexcom_v3",
           },
           priority: 10,
         },
@@ -1265,7 +1268,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             dataType: "sleep",
             occurredAt: "2026-04-09T00:00:30.000Z",
+            resource: "glucose",
+            resourceCategory: "timeseries",
             resourceId: "sleep_123",
+            sourceProviderSlug: "dexcom_v3",
           },
           priority: 10,
         },
@@ -1290,7 +1296,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           availableAt: "2026-04-09T00:00:00Z",
           kind: "resource",
           payload: {
+            resource: "activity",
+            resourceCategory: "summary",
             resourceId: "abc",
+            sourceProviderSlug: "oura",
             windowStart: "2026-04-08T00:00:00Z",
           },
         },
@@ -1302,7 +1311,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         availableAt: "2026-04-09T00:00:00.000Z",
         kind: "resource",
         payload: {
+          resource: "activity",
+          resourceCategory: "summary",
           resourceId: "abc",
+          sourceProviderSlug: "oura",
           windowStart: "2026-04-08T00:00:00.000Z",
         },
       },
