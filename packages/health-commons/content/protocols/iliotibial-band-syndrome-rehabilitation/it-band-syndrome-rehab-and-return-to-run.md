@@ -34,10 +34,6 @@ relations:
   target: biomarker:lateral-knee-pain
 - type: secondary_biomarker
   target: biomarker:running-tolerance
-- type: secondary_biomarker
-  target: biomarker:training-volume
-- type: secondary_biomarker
-  target: biomarker:adherence
 - type: cites
   target: source_artifact:pmid-20145781
 - type: cites
@@ -232,15 +228,39 @@ testPlans:
   primaryBiomarkerKey: biomarker:lateral-knee-pain
   secondaryBiomarkerKeys:
   - biomarker:running-tolerance
-  - biomarker:training-volume
-  - biomarker:adherence
   minimumAdherenceSessions: 12
   targetAdherenceSessions: 18
   notes:
   - Use manual symptom and function tracking as the primary readout; no extracted evidence supports a standalone wearable biomarker for ITBS recovery.
   - Compare the 6-week intervention against the user’s own 7-day baseline and inspect trend stability, not a single run.
   - 'Running load is both the exposure and a confounder: keep route, hills, pace, shoes, and cross-training visible.'
+  - Rehab completion and running exposure support interpretation; they are not outcome wins.
   - Treat the test as conservative self-management for appropriate users, not diagnostic triage or a cure claim.
+expectedSignalDescriptions:
+- biomarkerKey: biomarker:lateral-knee-pain
+  expected: Less run pain
+  description: Reducing the provocative running dose lowers lateral-knee irritation; hip/glute and single-leg control work gives each stride more capacity. The signal is lower peak pain during flat easy running and no same-day or next-morning rebound.
+  estimatedChange:
+    kind: absolute
+    low: -4
+    high: -1
+    unit: points
+    window: after 6 weeks
+    confidence: low
+    basis: Runner ITBS studies report pain reductions over 2–8 weeks, with a 2024 review summarizing 27–100% reductions across heterogeneous conservative treatments. This range converts to a practical 1–4 point drop on a 0–10 pain log for moderate starting pain.
+  protocolProminence: focus
+- biomarkerKey: biomarker:running-tolerance
+  expected: More pain-free minutes
+  description: Short, flat run/walk intervals reload the knee in small steps after the flare trigger is reduced. More pain-free minutes show the knee can handle repeated strides without forcing a stop or rebounding the next day.
+  estimatedChange:
+    kind: absolute
+    low: 10
+    high: 45
+    unit: minutes
+    window: after 6 weeks
+    confidence: low
+    basis: Direct runner rehab sources use pain-free running, function, and graded return-to-run tolerance as endpoints; case evidence reaches pain-free running within 4–6 weeks, while starting branch and deload size determine the minute gain.
+  protocolProminence: focus
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -492,7 +512,7 @@ claims:
   - Numeric pain caps are Murph safety heuristics unless a later ITBS-specific pain-monitoring source is extracted.
 - claimId: outcomes-are-symptom-and-function-based
   type: evidence_scope
-  text: 'The practical outcome set for self-guided runner ITBS rehab is symptom and function based: lateral knee pain, pain-free running duration, return-to-run tolerance, adherence, and stop-condition events.'
+  text: 'The practical outcome set for self-guided runner ITBS rehab is symptom and function based: lateral knee pain, pain-free run/walk duration, return-to-run tolerance, and stop-condition events. Running exposure and rehab completion support attribution; they are not outcome wins.'
   strength: moderate
   sourceKeys:
   - source_artifact:pmid-20145781
@@ -654,9 +674,9 @@ researchLandscape:
     - source_artifact:brighamandwomens-running-injury-prevention-return-to-running-2007-01-01
     defaultOpen: true
   - id: outcomes-and-test-plan
-    label: Symptom, function, and running-load tracking
+    label: Symptom and function tracking
     stance: supports
-    summary: Track lateral knee pain and running tolerance directly; use wearable or activity data as exposure context rather than a recovery biomarker.
+    summary: Track lateral knee pain and pain-free run/walk tolerance directly; use running load, wearable activity data, and rehab completion as exposure context rather than recovery biomarkers.
     sourceKeys:
     - source_artifact:pmid-20145781
     - source_artifact:pmid-22994651
@@ -815,9 +835,9 @@ Begin return-to-run only after normal walking, the current rehab phase, and late
 
 ## What to measure
 
-The primary signal is lateral knee pain during and after running. The supporting signals are pain-free run/walk duration, weekly running exposure, rehab adherence, and stop-condition events.
+The primary signal is lateral knee pain during and after running. The supporting signal is pain-free run/walk tolerance: how many flat, easy minutes the knee handles without forcing a stop or rebounding later that day or the next morning.
 
-Wearable activity data can help quantify exposure, but no supplied extraction supports a wearable biomarker that proves ITBS recovery.
+Weekly mileage, route, pace, hills, rehab completion, and wearable activity data help explain the result. They are exposure context, not proof that the protocol worked. No supplied extraction supports a wearable biomarker that proves ITBS recovery.
 
 ## Evidence stance
 
