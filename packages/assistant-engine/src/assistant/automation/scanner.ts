@@ -6,7 +6,6 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import {
   assistantInputIdFromInboxCaptureId,
-  createInboxBackedAssistantInputSource,
   type AssistantInputCandidate,
   type AssistantInputCursor,
   type AssistantInputSource,
@@ -63,7 +62,7 @@ export async function scanAssistantAutomationOnce(input: {
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
   state: Pick<AssistantAutomationState, 'autoReply' | 'inboxScanCursor'>
-  inputSource?: AssistantInputSource
+  inputSource: AssistantInputSource
   vault: string
   vaultServices?: VaultServices
 }): Promise<AssistantAutomationScanResult> {
@@ -94,16 +93,9 @@ export async function scanAssistantAutomationOnce(input: {
     }
   }
 
-  const inputSource =
-    input.inputSource ??
-    createInboxBackedAssistantInputSource({
-      inboxServices: input.inboxServices,
-      requestId: input.requestId ?? null,
-      vault: input.vault,
-    })
   const candidates = await listAssistantReplyCandidates({
     autoReply: applyCanonicalWrites ? scanState.autoReply : [],
-    inputSource,
+    inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
     requestId: input.requestId ?? null,
     vault: input.vault,
@@ -218,7 +210,7 @@ export async function scanAssistantAutomationOnce(input: {
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-      inputSource,
+      inputSource: input.inputSource,
       vault: input.vault,
     })
     const stopReplyScan = applyAssistantAutoReplyProcessResult({
@@ -374,9 +366,7 @@ function assistantInboxSummaryFromInputCandidate(
     createdAt: input.event.receivedAt ?? input.event.occurredAt,
     envelopePath: `assistant-input-events/${input.event.inputId}.json`,
     eventId: input.event.inputId,
-    externalId: input.event.replyTarget?.messageId
-      ? `${input.event.source}:${input.event.replyTarget.messageId}`
-      : input.event.inputId,
+    externalId: input.event.inputId,
     occurredAt: input.event.occurredAt,
     promotions: [],
     receivedAt: input.event.receivedAt,
@@ -396,10 +386,20 @@ function assistantInputCursorFromAutomationCursor(
   }
   return {
     createdAt: cursor.createdAt ?? null,
-    inputId: assistantInputIdFromInboxCaptureId(cursor.captureId),
+    inputId: assistantInputCursorInputIdFromAutomationCursor(cursor),
     occurredAt: cursor.occurredAt,
-    sourceKind: 'inbox-capture',
+    sourceKind: cursor.captureId.startsWith('ain_')
+      ? 'hosted-mailbox'
+      : 'inbox-capture',
   }
+}
+
+function assistantInputCursorInputIdFromAutomationCursor(
+  cursor: ReturnType<typeof cursorFromCapture>,
+): string {
+  return cursor.captureId.startsWith('ain_')
+    ? cursor.captureId
+    : assistantInputIdFromInboxCaptureId(cursor.captureId)
 }
 
 async function persistAssistantAutomationScanState(input: {

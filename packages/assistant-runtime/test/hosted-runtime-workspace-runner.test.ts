@@ -1408,6 +1408,77 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("preserves scheduled wake fields when checkpointing active-turn input acceptance", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_scheduled_wake",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const nextWakeAt = "2026-04-26T00:05:00.000Z";
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_acceptance_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_acceptance_wake",
+        async runAssistantPhase(input) {
+          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
+          if (typeof checkpointActiveTurnInput !== "function") {
+            throw new Error("Expected hosted active-turn checkpoint to be installed.");
+          }
+          await checkpointActiveTurnInput({
+            acceptedInputIds: ["request-1"],
+            providerRequestOrdinal: 0,
+            requestId: "request_synthetic_runner_acceptance_wake",
+            sessionId: "session_synthetic",
+            turnId: "turn_synthetic",
+            vault: vaultRoot,
+          });
+          return {};
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          version: "0",
+        }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "active_turn_acceptance",
+      ]);
+      assert.equal(checkpointRequests[1]?.nextWakeAt, nextWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("aborts without a later workspace checkpoint when active-turn admission checkpoint is rejected", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({

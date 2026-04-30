@@ -44,7 +44,9 @@ vi.mock("@murphai/operator-config/linq-runtime", () => ({
   markLinqChatRead: mocks.markLinqChatRead,
 }));
 
-import { ingestHostedConversationMessageWake } from "../src/hosted-runtime/events/conversation.ts";
+import {
+  importHostedConversationMessageWakeIntoLocalInbox,
+} from "../src/hosted-runtime/events/conversation.ts";
 
 describe("hosted Linq document preservation", () => {
   it("reproduces the hosted PDF no-reply boundary when inbox runtime config is missing", async () => {
@@ -77,7 +79,7 @@ describe("hosted Linq document preservation", () => {
     mocks.markLinqChatRead.mockResolvedValue(undefined);
 
     try {
-      const metrics = await ingestHostedConversationMessageWake({
+      const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
         runtime: {
           forwardedEnv: {},
           userEnv: {},
@@ -120,7 +122,7 @@ describe("hosted Linq document preservation", () => {
         }),
       });
 
-      assert.deepEqual(metrics, {
+      assert.deepEqual(importResult.metrics, {
         nextWakeAt: null,
         parserProcessed: 1,
       });

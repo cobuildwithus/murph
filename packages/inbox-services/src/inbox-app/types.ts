@@ -585,7 +585,6 @@ export interface ListInput extends CommandContext {
   afterCaptureId?: string | null
   afterCreatedAt?: string | null
   afterOccurredAt?: string | null
-  includeRuntimeOnly?: boolean
   oldestFirst?: boolean
   sourceId?: string | null
   limit?: number
@@ -597,7 +596,6 @@ export interface SearchInput extends ListInput {
 
 export interface ShowInput extends CommandContext {
   captureId: string
-  includeRuntimeOnly?: boolean
 }
 
 export interface PromoteInput extends CommandContext {

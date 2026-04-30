@@ -30,9 +30,13 @@ import {
 } from '../store.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
 import {
-  createInboxBackedAssistantInputSource,
+  createStoreBackedAssistantInputSource,
   type AssistantInputSource,
 } from '../input-source.js'
+import {
+  updateAssistantInputProjection,
+  upsertAssistantInputEvent,
+} from '../input-store.js'
 import { notifyAssistantActiveTurnInputAvailable } from '../active-turn-input-controller.js'
 import {
   errorMessage,
@@ -132,33 +136,38 @@ export async function runAssistantAutomation(
         {
           onEvent: (event) => {
             if (
+              event.type === 'capture.imported' &&
+              event.capture &&
+              event.persisted &&
+              (input.allowSelfAuthored || event.capture.actor.isSelf !== true)
+            ) {
+              stageImportedCaptureAssistantInputEvent({
+                capture: event.capture,
+                persisted: event.persisted,
+                vault: input.vault,
+              }).catch((error) => {
+                warnAssistantBestEffortFailure({
+                  error,
+                  operation: 'assistant input event staging',
+                })
+              }).finally(() => {
+                wakeController.requestWake()
+                notifyImportedCaptureInputAvailable({
+                  event,
+                  signal: controller.signal,
+                  vault: input.vault,
+                })
+              })
+            } else if (
               (event.type === 'capture.imported' &&
                 (input.allowSelfAuthored || event.capture?.actor?.isSelf !== true)) ||
               event.type === 'parser.jobs.drained'
             ) {
               wakeController.requestWake()
-            }
-            if (
-              event.type === 'capture.imported' &&
-              event.capture &&
-              event.capture.thread &&
-              (input.allowSelfAuthored || event.capture.actor.isSelf !== true)
-            ) {
-              notifyAssistantActiveTurnInputAvailable({
-                conversation: conversationRefFromCapture({
-                  accountId: event.capture.accountId,
-                  actorId: event.capture.actor.id,
-                  source: event.capture.source,
-                  threadId: event.capture.thread.id,
-                  threadIsDirect: event.capture.thread.isDirect ?? null,
-                }),
+              notifyImportedCaptureInputAvailable({
+                event,
                 signal: controller.signal,
                 vault: input.vault,
-              }).catch((error) => {
-                warnAssistantBestEffortFailure({
-                  error,
-                  operation: 'active turn input notification',
-                })
               })
             }
             input.onInboxEvent?.(event)
@@ -279,6 +288,132 @@ export async function runAssistantAutomation(
   }
 }
 
+async function stageImportedCaptureAssistantInputEvent(input: {
+  capture: NonNullable<InboxRunEvent['capture']>
+  persisted: NonNullable<InboxRunEvent['persisted']>
+  vault: string
+}): Promise<void> {
+  const text = typeof input.capture.text === 'string'
+    ? input.capture.text
+    : null
+  const stored = await upsertAssistantInputEvent({
+    vault: input.vault,
+    event: {
+      content: {
+        attachmentDescriptors: (input.capture.attachments ?? []).map(
+          (attachment, index) => ({
+            attachmentId: normalizeLocalAssistantInputToken(
+              attachment.externalId,
+              `attachment_${index}`,
+            ),
+            contentType: normalizeLocalAssistantInputContentType(
+              attachment.mime,
+            ),
+            fileName: null,
+            kind: normalizeLocalAssistantInputToken(attachment.kind, 'attachment'),
+            sizeBytes: normalizeLocalAssistantInputSize(
+              attachment.byteSize,
+            ),
+          }),
+        ),
+        text,
+        transcriptText: text,
+        userMessageContent: text
+          ? [
+              {
+                text,
+                type: 'text',
+              },
+            ]
+          : null,
+      },
+      conversation: {
+        accountId: input.capture.accountId ?? null,
+        actorId: input.capture.actor.id ?? null,
+        actorIsSelf: input.capture.actor.isSelf,
+        source: input.capture.source,
+        threadId: input.capture.thread?.id ?? null,
+        threadIsDirect: input.capture.thread?.isDirect ?? null,
+      },
+      occurredAt: input.capture.occurredAt,
+      receivedAt: input.persisted.createdAt,
+      sourceRef: {
+        captureId: input.persisted.captureId,
+        kind: 'inbox-capture',
+        source: input.capture.source,
+        version: null,
+      },
+    },
+  })
+  await updateAssistantInputProjection({
+    inputId: stored.inputId,
+    projection: {
+      captureId: input.persisted.captureId,
+      status: 'succeeded',
+    },
+    vault: input.vault,
+  })
+}
+
+function notifyImportedCaptureInputAvailable(input: {
+  event: InboxRunEvent
+  signal: AbortSignal
+  vault: string
+}): void {
+  if (
+    input.event.type !== 'capture.imported' ||
+    !input.event.capture ||
+    !input.event.capture.thread
+  ) {
+    return
+  }
+  notifyAssistantActiveTurnInputAvailable({
+    conversation: conversationRefFromCapture({
+      accountId: input.event.capture.accountId,
+      actorId: input.event.capture.actor.id,
+      source: input.event.capture.source,
+      threadId: input.event.capture.thread.id,
+      threadIsDirect: input.event.capture.thread.isDirect ?? null,
+    }),
+    signal: input.signal,
+    vault: input.vault,
+  }).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'active turn input notification',
+    })
+  })
+}
+
+function normalizeLocalAssistantInputToken(
+  value: unknown,
+  fallback: string,
+): string {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  if (
+    normalized.length > 0 &&
+    normalized.length <= 192 &&
+    /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u.test(normalized)
+  ) {
+    return normalized
+  }
+  return fallback
+}
+
+function normalizeLocalAssistantInputContentType(value: unknown): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
+      .test(normalized)
+    ? normalized
+    : null
+}
+
+function normalizeLocalAssistantInputSize(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null
+}
+
 export async function runAssistantAutomationPass(
   input: RunAssistantAutomationPassInput,
 ): Promise<AssistantAutomationPassResult> {
@@ -287,13 +422,9 @@ export async function runAssistantAutomationPass(
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const inputSource =
     input.inputSource ??
-    (executionContext.hosted
-      ? undefined
-      : createInboxBackedAssistantInputSource({
-          inboxServices,
-          requestId: input.requestId ?? null,
-          vault: input.vault,
-        }))
+    createStoreBackedAssistantInputSource({
+      vault: input.vault,
+    })
   const vaultServices = applyCanonicalWrites
     ? input.vaultServices ?? createIntegratedVaultServices()
     : undefined

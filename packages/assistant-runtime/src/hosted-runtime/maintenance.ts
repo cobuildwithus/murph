@@ -108,7 +108,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
   requestId: string;
-  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
@@ -156,7 +156,7 @@ export async function runHostedAssistantAutomation(
   requestId: string,
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
-  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
   signal?: AbortSignal,
 ): Promise<{
   nextWakeAt: string | null;
@@ -164,21 +164,17 @@ export async function runHostedAssistantAutomation(
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
 }> {
   const inboxServices = createIntegratedInboxServices();
-  const automationInboxServices = runtime
-    ? createHostedAutomationInboxServices(inboxServices)
-    : inboxServices;
+  const automationInboxServices = createHostedAutomationInboxServices(inboxServices);
   const vaultServices = createIntegratedVaultServices();
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;
-  const inputSource = runtime
-    ? createHostedAssistantInputSource({
-        requestId,
-        runtime,
-        vaultRoot,
-        wake,
-      })
-    : undefined;
+  const inputSource = createHostedAssistantInputSource({
+    requestId,
+    runtime,
+    vaultRoot,
+    wake,
+  });
   const beforeState = await readAssistantAutomationState(vaultRoot);
   redactedLogEntries.push(emitHostedRuntimeRedactedLog({
     component: "runtime",
@@ -248,7 +244,7 @@ export async function runHostedAssistantAutomation(
       vaultServices,
       requestId,
       signal,
-      ...(inputSource ? { inputSource } : {}),
+      inputSource,
       vault: vaultRoot,
     });
     const afterState = await readAssistantAutomationState(vaultRoot);

@@ -41,7 +41,7 @@ import {
 import type { SearchRow } from "./sqlite/rows.ts";
 import { createAttachmentParseJobStore } from "./sqlite/parse-jobs.ts";
 
-const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 3;
+const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 4;
 const SQLITE_WAL_COMPANION_SUFFIXES = ["-shm", "-wal"] as const;
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
 const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
@@ -50,13 +50,11 @@ const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
   "image",
   "video",
 ]);
-type InboxCapturePersistence = "canonical" | "runtime_only";
 
 export interface InboxCaptureProjectionEntry {
   captureId: string;
   eventId: string;
   input: InboundCapture;
-  persistence?: InboxCapturePersistence;
   stored: StoredCapture;
 }
 
@@ -83,7 +81,6 @@ export interface InboxRuntimeStore extends ParserRuntimeStore {
     captureId: string;
     eventId: string;
     input: InboundCapture;
-    persistence?: InboxCapturePersistence;
     stored: StoredCapture;
   }): string;
   enqueueDerivedJobs(input: { captureId: string; stored: StoredCapture }): void;
@@ -100,10 +97,7 @@ export interface InboxRuntimeStore extends ParserRuntimeStore {
   ): AttachmentParseJobFinalizeResult;
   listCaptures(filters?: InboxListFilters): InboxCaptureRecord[];
   searchCaptures(filters: InboxSearchFilters): InboxSearchHit[];
-  getCapture(
-    captureId: string,
-    options?: { includeRuntimeOnly?: boolean },
-  ): InboxCaptureRecord | null;
+  getCapture(captureId: string): InboxCaptureRecord | null;
 }
 
 export interface OpenInboxRuntimeInput {
@@ -143,6 +137,12 @@ function openInboxRuntimeDatabaseForPath(databasePath: string): DatabaseSync {
         version: 3,
         migrate(candidateDatabase) {
           ensureCaptureMutationOnUpdateTrigger(candidateDatabase);
+        },
+      },
+      {
+        version: 4,
+        migrate(candidateDatabase) {
+          deleteNonCanonicalCaptureRows(candidateDatabase);
         },
       },
     ],
@@ -391,6 +391,28 @@ function ensureCaptureMutationOnUpdateTrigger(database: DatabaseSync): void {
   `);
 }
 
+function deleteNonCanonicalCaptureRows(database: DatabaseSync): void {
+  database.exec(`
+    delete from attachment_parse_job
+    where capture_id in (
+      select capture_id from capture where capture_persistence <> 'canonical'
+    );
+
+    delete from capture_attachment
+    where capture_id in (
+      select capture_id from capture where capture_persistence <> 'canonical'
+    );
+
+    delete from capture_fts
+    where capture_id in (
+      select capture_id from capture where capture_persistence <> 'canonical'
+    );
+
+    delete from capture
+    where capture_persistence <> 'canonical';
+  `);
+}
+
 
 export async function listInboxCaptureMutations(input: {
   afterCursor?: number | null;
@@ -496,6 +518,7 @@ function createInboxRuntimeStore(
         created_at
       from capture
       where source = ? and account_id = ? and external_id = ?
+        and capture_persistence = 'canonical'
     `,
   );
   const findCaptureIdByExternalIdStatement = database.prepare(
@@ -557,11 +580,10 @@ function createInboxRuntimeStore(
         received_at,
         text_content,
         raw_json,
-        capture_persistence,
         vault_event_id,
         envelope_path,
         created_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict (capture_id) do update set
         source = excluded.source,
         account_id = excluded.account_id,
@@ -576,7 +598,6 @@ function createInboxRuntimeStore(
         received_at = excluded.received_at,
         text_content = excluded.text_content,
         raw_json = excluded.raw_json,
-        capture_persistence = excluded.capture_persistence,
         vault_event_id = excluded.vault_event_id,
         envelope_path = excluded.envelope_path,
         created_at = excluded.created_at
@@ -594,7 +615,6 @@ function createInboxRuntimeStore(
         or capture.received_at is not excluded.received_at
         or capture.text_content is not excluded.text_content
         or capture.raw_json is not excluded.raw_json
-        or capture.capture_persistence is not excluded.capture_persistence
         or capture.vault_event_id is not excluded.vault_event_id
         or capture.envelope_path is not excluded.envelope_path
         or capture.created_at is not excluded.created_at
@@ -658,7 +678,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where (? = 1 or capture_persistence = 'canonical')
+      where capture_persistence = 'canonical'
         and (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
@@ -675,7 +695,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where (? = 1 or capture_persistence = 'canonical')
+      where capture_persistence = 'canonical'
         and (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
@@ -692,7 +712,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where (? = 1 or capture_persistence = 'canonical')
+      where capture_persistence = 'canonical'
         and (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
@@ -709,7 +729,7 @@ function createInboxRuntimeStore(
     `
       select *
       from capture
-      where (? = 1 or capture_persistence = 'canonical')
+      where capture_persistence = 'canonical'
         and (? is null or source = ?)
         and (? is null or account_id = ?)
         and (
@@ -748,9 +768,6 @@ function createInboxRuntimeStore(
   );
   const getCaptureStatement = database.prepare(
     "select * from capture where capture_id = ? and capture_persistence = 'canonical'",
-  );
-  const getCaptureIncludingRuntimeOnlyStatement = database.prepare(
-    "select * from capture where capture_id = ?",
   );
   const parseJobs = createAttachmentParseJobStore({
     database,
@@ -853,7 +870,6 @@ function createInboxRuntimeStore(
       normalizeNullable(input.input.receivedAt),
       normalizeNullable(input.input.text),
       JSON.stringify(sanitizeRawMetadata(input.input.raw)),
-      input.persistence ?? "canonical",
       input.eventId,
       input.stored.envelopePath,
       input.stored.storedAt,
@@ -949,14 +965,13 @@ function createInboxRuntimeStore(
         deduped: true,
       };
     },
-    upsertCaptureIndex({ captureId, eventId, input, persistence, stored }) {
+    upsertCaptureIndex({ captureId, eventId, input, stored }) {
       withTransaction(database, () => {
         upsertCaptureProjection(
           {
             captureId,
             eventId,
             input,
-            persistence,
             stored,
           },
           {
@@ -1012,7 +1027,6 @@ function createInboxRuntimeStore(
       const afterTime =
         normalizedFilters.afterCreatedAt ?? normalizedFilters.afterOccurredAt;
       const rows = statement.all(
-        normalizedFilters.includeRuntimeOnly ? 1 : 0,
         normalizedFilters.source,
         normalizedFilters.source,
         normalizedFilters.accountId,
@@ -1030,11 +1044,7 @@ function createInboxRuntimeStore(
     searchCaptures(filters) {
       const query = buildFtsQuery(filters.text);
       if (!query) {
-        const listFilters: InboxListFilters = {
-          ...filters,
-          includeRuntimeOnly: false,
-        };
-        return this.listCaptures(listFilters).map(createSearchHitFromCapture);
+        return this.listCaptures(filters).map(createSearchHitFromCapture);
       }
 
       const normalizedFilters = normalizeCaptureFilters(filters);
@@ -1051,11 +1061,8 @@ function createInboxRuntimeStore(
 
       return rows.map(createSearchHitFromRow);
     },
-    getCapture(captureId, options = {}) {
-      const statement = options.includeRuntimeOnly === true
-        ? getCaptureIncludingRuntimeOnlyStatement
-        : getCaptureStatement;
-      const row = statement.get(captureId) as Record<string, unknown> | undefined;
+    getCapture(captureId) {
+      const row = getCaptureStatement.get(captureId) as Record<string, unknown> | undefined;
 
       if (!row) {
         return null;
@@ -1192,7 +1199,6 @@ function normalizeCaptureFilters(
   afterCaptureId: string | null;
   afterCreatedAt: string | null;
   afterOccurredAt: string | null;
-  includeRuntimeOnly: boolean;
   limit: number;
   oldestFirst: boolean;
 } {
@@ -1202,7 +1208,6 @@ function normalizeCaptureFilters(
     afterCaptureId: normalizeNullable(filters.afterCaptureId),
     afterCreatedAt: normalizeNullable(filters.afterCreatedAt),
     afterOccurredAt: normalizeNullable(filters.afterOccurredAt),
-    includeRuntimeOnly: filters.includeRuntimeOnly === true,
     limit: normalizeLimit(filters.limit, fallbackLimit),
     oldestFirst: filters.oldestFirst === true,
   };

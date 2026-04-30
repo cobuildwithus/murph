@@ -12,7 +12,10 @@ import {
   type AssistantInputCandidate,
   type AssistantInputSource,
 } from '../input-source.js'
-import { readAssistantInputEvent } from '../input-store.js'
+import {
+  createAssistantInputEventId,
+  readAssistantInputEvent,
+} from '../input-store.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { readAssistantAutoReplyTerminalEvidence } from './evidence.js'
 import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
@@ -332,7 +335,24 @@ async function loadAutoReplyRecoveryGroupItem(input: {
       requestId: input.requestId,
       vault: input.vault,
     })
+    const inputId = createAssistantInputEventId({
+      sourceRef: {
+        captureId: shown.capture.captureId,
+        kind: 'inbox-capture',
+        source: shown.capture.source,
+        version: null,
+      },
+    })
+    const storedInput = await readAssistantInputEvent({
+      inputId,
+      vault: input.vault,
+    })
+    if (!storedInput) {
+      return null
+    }
+    const candidate = assistantInputCandidateFromStoredEvent(storedInput)
     return {
+      inputCandidate: candidate,
       summary: shown.capture,
       telegramMetadata: await loadTelegramAutoReplyMetadata(
         input.vault,
@@ -383,9 +403,7 @@ function assistantRecoverySummaryFromInputCandidate(
     createdAt: input.event.receivedAt ?? input.event.occurredAt,
     envelopePath: `assistant-input-events/${input.event.inputId}.json`,
     eventId: input.event.inputId,
-    externalId: input.event.replyTarget?.messageId
-      ? `${input.event.source}:${input.event.replyTarget.messageId}`
-      : input.event.inputId,
+    externalId: input.event.inputId,
     occurredAt: input.event.occurredAt,
     promotions: [],
     receivedAt: input.event.receivedAt,

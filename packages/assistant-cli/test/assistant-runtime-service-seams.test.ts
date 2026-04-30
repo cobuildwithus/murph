@@ -60,7 +60,6 @@ const cronLocalMocks = vi.hoisted(() => ({
 const automationEngineMocks = vi.hoisted(() => ({
   runAssistantAutomationLocal: vi.fn(),
   scanAssistantAutomationOnce: vi.fn(),
-  scanAssistantAutoReplyOnce: vi.fn(),
 }))
 
 const runtimeModuleMocks = vi.hoisted(() => ({
@@ -105,7 +104,6 @@ vi.mock('@murphai/assistant-engine/assistant-cron', () => ({
 vi.mock('@murphai/assistant-engine/assistant-automation', () => ({
   runAssistantAutomation: automationEngineMocks.runAssistantAutomationLocal,
   scanAssistantAutomationOnce: automationEngineMocks.scanAssistantAutomationOnce,
-  scanAssistantAutoReplyOnce: automationEngineMocks.scanAssistantAutoReplyOnce,
 }))
 
 vi.mock('../src/assistant-runtime.js', () => runtimeModuleMocks)
@@ -653,8 +651,8 @@ test('assistant facade modules re-export the package runtime and daemon-aware se
     automationEngineMocks.scanAssistantAutomationOnce,
   )
   assert.equal(
-    assistantAutomationFacade.scanAssistantAutoReplyOnce,
-    automationEngineMocks.scanAssistantAutoReplyOnce,
+    Reflect.has(assistantAutomationFacade, 'scanAssistantAutoReplyOnce'),
+    false,
   )
   assert.equal(
     Reflect.has(assistantAutomationFacade, 'scanAssistantInboxOnce'),

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 import type {
   HostedExecutionConversationMessageWake,
@@ -223,11 +223,17 @@ export async function importHostedConversationMailboxItem(input: {
     await requireHostedBootstrapForWake(input.vaultRoot, decoded.wake);
   }
 
-  const stagedInput = await stageAssistantInputEvent({
-    item: input.item,
-    vaultRoot: input.vaultRoot,
-    wake: decoded.wake,
-  });
+  const hasAssistantReadyContent = hostedMailboxWakeHasAssistantReadyContent(decoded.wake);
+  const stageBeforeProjection =
+    hasAssistantReadyContent || !isHostedEmailConversationMessageWake(decoded.wake);
+  let stagedInput: HostedConversationMailboxAssistantInputStageResult | null =
+    stageBeforeProjection
+      ? await stageAssistantInputEvent({
+          item: input.item,
+          vaultRoot: input.vaultRoot,
+          wake: decoded.wake,
+        })
+      : null;
 
   await prepareWakeContext({
     runtime: input.runtime,
@@ -249,6 +255,22 @@ export async function importHostedConversationMailboxItem(input: {
       throw error;
     }
 
+    if (
+      projectionFailureReason === CONVERSATION_RAW_EMAIL_MISSING_REASON
+      && !hasAssistantReadyContent
+    ) {
+      return {
+        reasonCode: projectionFailureReason,
+        retryable: true,
+        status: "blocked",
+      };
+    }
+
+    stagedInput ??= await stageAssistantInputEvent({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake: decoded.wake,
+    });
     await recordHostedConversationProjectionBestEffort(stagedInput, {
       captureId: null,
       reasonCode: projectionFailureReason,
@@ -262,6 +284,11 @@ export async function importHostedConversationMailboxItem(input: {
       status: "imported",
     };
   }
+  stagedInput ??= await stageAssistantInputEvent({
+    item: input.item,
+    vaultRoot: input.vaultRoot,
+    wake: decoded.wake,
+  });
   if (imported.durable === false) {
     await recordHostedConversationProjectionBestEffort(stagedInput, {
       captureId: null,
@@ -363,18 +390,31 @@ function createHostedConversationAssistantInputEvent(input: {
   item: HostedMailboxResolvedImportItem;
   wake: HostedExecutionConversationMessageWake;
 }): UpsertAssistantInputEventInput {
-  const content = createHostedConversationAssistantInputContent(input.wake);
+  const identifierBlind = createHostedAssistantInputIdentifierBlind(input);
+  const content = createHostedConversationAssistantInputContent(
+    input.wake,
+    identifierBlind,
+  );
 
   return {
     content,
-    conversation: createHostedConversationAssistantInputConversation(input.wake),
+    conversation: createHostedConversationAssistantInputConversation(
+      input.wake,
+      identifierBlind,
+    ),
     occurredAt: input.wake.occurredAt,
     receivedAt: input.item.item.createdAt,
-    replyTarget: createHostedConversationAssistantInputReplyTarget(input.wake),
+    replyTarget: createHostedConversationAssistantInputReplyTarget(
+      input.wake,
+      identifierBlind,
+    ),
     sourceRef: {
-      dedupeKey: safeHostedAssistantInputTokenOrHash(input.item.item.dedupeKey),
-      eventId: safeHostedAssistantInputTokenOrHash(input.wake.eventId),
-      itemId: safeHostedAssistantInputTokenOrHash(input.item.item.id),
+      dedupeKey: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        input.item.item.dedupeKey,
+      ),
+      eventId: hashHostedAssistantInputIdentifier(identifierBlind, input.wake.eventId),
+      itemId: hashHostedAssistantInputIdentifier(identifierBlind, input.item.item.id),
       kind: "hosted-mailbox",
       lane: input.item.item.lane,
       laneSeq: safeHostedAssistantInputTokenOrHash(input.item.item.laneSeq),
@@ -388,10 +428,14 @@ function createHostedConversationAssistantInputEvent(input: {
 
 function createHostedConversationAssistantInputContent(
   wake: HostedExecutionConversationMessageWake,
+  identifierBlind: HostedAssistantInputIdentifierBlind,
 ): UpsertAssistantInputEventInput["content"] {
   const text = createHostedConversationAssistantInputText(wake);
   return {
-    attachmentDescriptors: createHostedConversationAssistantInputAttachmentDescriptors(wake),
+    attachmentDescriptors: createHostedConversationAssistantInputAttachmentDescriptors(
+      wake,
+      identifierBlind,
+    ),
     text,
     transcriptText: text,
     userMessageContent: text
@@ -446,38 +490,58 @@ function createHostedConversationAssistantInputText(
 
 function createHostedConversationAssistantInputConversation(
   wake: HostedExecutionConversationMessageWake,
+  identifierBlind: HostedAssistantInputIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
-      accountId: safeHostedAssistantInputTokenOrHash(wake.message.phoneLookupKey),
-      actorId: safeHostedAssistantInputTokenOrHash(wake.message.linqMessage.from),
+      accountId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.message.phoneLookupKey,
+      ),
+      actorId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.message.linqMessage.from,
+      ),
       actorIsSelf: wake.message.linqMessage.isFromMe,
       source: "linq",
-      threadId: safeHostedAssistantInputTokenOrHash(wake.message.linqMessage.chatId),
+      threadId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.message.linqMessage.chatId,
+      ),
       threadIsDirect: true,
     };
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
     return {
-      accountId: "bot",
+      accountId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        "telegram:bot",
+      ),
       actorId: null,
       actorIsSelf: false,
       source: "telegram",
-      threadId: safeHostedAssistantInputTokenOrHash(wake.message.telegramMessage.threadId),
+      threadId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.message.telegramMessage.threadId,
+      ),
       threadIsDirect: null,
     };
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
     return {
-      accountId: safeHostedAssistantInputTokenOrHash(
+      accountId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
         wake.message.identityId ?? "email",
       ),
       actorId: null,
       actorIsSelf: false,
       source: "email",
-      threadId: safeHostedAssistantInputTokenOrHash(wake.message.rawMessageKey),
+      threadId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.message.rawMessageKey,
+      ),
       threadIsDirect: true,
     };
   }
@@ -487,24 +551,31 @@ function createHostedConversationAssistantInputConversation(
 
 function createHostedConversationAssistantInputReplyTarget(
   wake: HostedExecutionConversationMessageWake,
+  identifierBlind: HostedAssistantInputIdentifierBlind,
 ): UpsertAssistantInputEventInput["replyTarget"] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
       channel: "linq",
-      messageId: safeHostedAssistantInputTokenOrHash(
+      messageId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
         wake.message.linqMessage.messageId,
       ),
-      threadId: safeHostedAssistantInputTokenOrHash(wake.message.linqMessage.chatId),
+      threadId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.message.linqMessage.chatId,
+      ),
     };
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
     return {
       channel: "telegram",
-      messageId: safeHostedAssistantInputTokenOrHash(
+      messageId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
         wake.message.telegramMessage.messageId,
       ),
-      threadId: safeHostedAssistantInputTokenOrHash(
+      threadId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
         wake.message.telegramMessage.threadId,
       ),
     };
@@ -513,8 +584,14 @@ function createHostedConversationAssistantInputReplyTarget(
   if (isHostedEmailConversationMessageWake(wake)) {
     return {
       channel: "email",
-      messageId: safeHostedAssistantInputTokenOrHash(wake.eventId),
-      threadId: safeHostedAssistantInputTokenOrHash(wake.message.rawMessageKey),
+      messageId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.eventId,
+      ),
+      threadId: hashNullableHostedAssistantInputIdentifier(
+        identifierBlind,
+        wake.message.rawMessageKey,
+      ),
     };
   }
 
@@ -523,6 +600,7 @@ function createHostedConversationAssistantInputReplyTarget(
 
 function createHostedConversationAssistantInputAttachmentDescriptors(
   wake: HostedExecutionConversationMessageWake,
+  identifierBlind: HostedAssistantInputIdentifierBlind,
 ): AssistantInputAttachmentDescriptor[] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return wake.message.linqMessage.parts.flatMap((part, index) => {
@@ -530,7 +608,8 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
         return [];
       }
       return [{
-        attachmentId: safeHostedAssistantInputTokenOrHash(
+        attachmentId: hashHostedAssistantInputIdentifier(
+          identifierBlind,
           part.attachmentId ?? `part_${index}`,
         ),
         contentType: normalizeHostedAssistantInputMimeType(part.mimeType),
@@ -543,7 +622,10 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
 
   if (isHostedTelegramConversationMessageWake(wake)) {
     return (wake.message.telegramMessage.attachments ?? []).map((attachment) => ({
-      attachmentId: safeHostedAssistantInputTokenOrHash(attachment.fileId),
+      attachmentId: hashHostedAssistantInputIdentifier(
+        identifierBlind,
+        attachment.fileId,
+      ),
       contentType: normalizeHostedAssistantInputMimeType(attachment.mimeType),
       fileName: null,
       kind: safeHostedAssistantInputTokenOrHash(attachment.kind),
@@ -570,6 +652,41 @@ function createEmptyHostedConversationWakeMetrics(): HostedConversationWakeMetri
     nextWakeAt: null,
     parserProcessed: 0,
   };
+}
+
+interface HostedAssistantInputIdentifierBlind {
+  key: string;
+}
+
+function createHostedAssistantInputIdentifierBlind(input: {
+  item: HostedMailboxResolvedImportItem;
+  wake: HostedExecutionConversationMessageWake;
+}): HostedAssistantInputIdentifierBlind {
+  const key = createHash("sha256")
+    .update("murph.hosted-assistant-input.identifier-blind.v1")
+    .update("\0")
+    .update(input.item.item.userId)
+    .digest("hex");
+  return { key };
+}
+
+function hashHostedAssistantInputIdentifier(
+  blind: HostedAssistantInputIdentifierBlind,
+  value: string | null | undefined,
+): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return `hid_${createHmac("sha256", blind.key)
+    .update(normalized || "empty")
+    .digest("hex")
+    .slice(0, 32)}`;
+}
+
+function hashNullableHostedAssistantInputIdentifier(
+  blind: HostedAssistantInputIdentifierBlind,
+  value: string | null | undefined,
+): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized ? hashHostedAssistantInputIdentifier(blind, normalized) : null;
 }
 
 function safeHostedAssistantInputTokenOrHash(value: string | null | undefined): string {
@@ -601,8 +718,13 @@ function isUnsafeHostedAssistantInputToken(value: string): boolean {
     || value.includes("{")
     || value.includes("}")
     || value.includes("\"")
+    || isE164LikeHostedAssistantInputToken(value)
     || value.toLowerCase().includes("authorization")
   );
+}
+
+function isE164LikeHostedAssistantInputToken(value: string): boolean {
+  return /^\+?[1-9]\d{7,14}$/u.test(value.replace(/[\s().-]/gu, ""));
 }
 
 function sanitizeHostedAssistantInputText(value: string): string | null {
@@ -617,6 +739,31 @@ function sanitizeHostedAssistantInputText(value: string): string | null {
   }
 
   return sanitized.length > 20_000 ? sanitized.slice(0, 20_000) : sanitized;
+}
+
+function hostedMailboxWakeHasAssistantReadyContent(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return wake.message.linqMessage.parts.some((part) => {
+      if (part.type === "text") {
+        return sanitizeHostedAssistantInputText(part.value) !== null;
+      }
+
+      return part.type === "media" || part.type === "voice_memo";
+    });
+  }
+
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return sanitizeHostedAssistantInputText(wake.message.telegramMessage.text ?? "") !== null
+      || (wake.message.telegramMessage.attachments?.length ?? 0) > 0;
+  }
+
+  if (isHostedEmailConversationMessageWake(wake)) {
+    return false;
+  }
+
+  return false;
 }
 
 function normalizeHostedAssistantInputMimeType(value: string | null | undefined): string | null {
@@ -652,7 +799,6 @@ async function prepareHostedConversationMailboxWakeContext(input: {
   wake: HostedExecutionConversationMessageWake;
 }): Promise<void> {
   void input.runtime;
-  await requireHostedBootstrapForWake(input.vaultRoot, input.wake);
   await prepareHostedLocalRuntimeForConversationImport(
     input.vaultRoot,
     input.wake.eventId,

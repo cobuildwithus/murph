@@ -629,8 +629,7 @@ async function checkpointHostedWorkspaceUsageExportCleanup(input: {
   );
   const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
     importResult: mailboxImport.importResult,
-    nextWakeAt: latestWorkspace.nextWakeAt ?? null,
-    nextWakeReason: latestWorkspace.nextWakeReason ?? null,
+    ...hostedWorkspaceScheduledWake(latestWorkspace),
     previousState: mailboxImport.state,
     reason: "maintenance",
     redactedStatus,
@@ -638,8 +637,7 @@ async function checkpointHostedWorkspaceUsageExportCleanup(input: {
   });
   const checkpoint = await input.workspacePort.checkpoint({
     ...checkpointRequest,
-    nextWakeAt: latestWorkspace.nextWakeAt ?? null,
-    nextWakeReason: latestWorkspace.nextWakeReason ?? null,
+    ...hostedWorkspaceScheduledWake(latestWorkspace),
     reason: "maintenance",
     redactedStatus,
   });
@@ -779,6 +777,11 @@ async function checkpointHostedWorkspaceActiveTurnInputAcceptance(input: {
 }): Promise<void> {
   const mailboxImport =
     input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
+  const latestWorkspace =
+    input.checkpointRequestBuilder.latestWorkspace()
+    ?? input.initialMailboxImport.checkpoint?.workspace
+    ?? null;
+  const preservedWake = latestWorkspace ? hostedWorkspaceScheduledWake(latestWorkspace) : {};
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
     mailboxImport,
     {
@@ -788,8 +791,7 @@ async function checkpointHostedWorkspaceActiveTurnInputAcceptance(input: {
   );
   const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
     importResult: mailboxImport.importResult,
-    nextWakeAt: null,
-    nextWakeReason: null,
+    ...preservedWake,
     previousState: mailboxImport.state,
     reason: "active_turn_acceptance",
     redactedStatus,
@@ -797,8 +799,6 @@ async function checkpointHostedWorkspaceActiveTurnInputAcceptance(input: {
   });
   const checkpoint = await input.workspacePort.checkpoint({
     ...checkpointRequest,
-    nextWakeAt: null,
-    nextWakeReason: null,
     reason: "active_turn_acceptance",
     redactedStatus,
   });
@@ -824,6 +824,18 @@ function buildHostedWorkspaceCheckpointRedactedStatus(
   return {
     ...buildHostedMailboxImportRedactedStatus(initialMailboxImport.importResult),
     ...(redactedStatus ?? {}),
+  };
+}
+
+function hostedWorkspaceScheduledWake(
+  workspace: Pick<HostedWorkspaceState, "nextWakeAt" | "nextWakeReason">,
+): {
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
+} {
+  return {
+    nextWakeAt: workspace.nextWakeAt ?? null,
+    nextWakeReason: workspace.nextWakeReason ?? null,
   };
 }
 

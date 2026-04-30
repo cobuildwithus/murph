@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -19,11 +20,16 @@ import {
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.ts'
 import {
-  assistantInputCandidateFromInboxCapture,
+  createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,
+  type AssistantInputSource,
   type AssistantTurnConversationInputQuery,
 } from '../src/assistant/input-source.ts'
-import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import {
+  createAssistantInputEventId,
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.ts'
+import { createTempVaultContext } from './test-helpers.ts'
 
 function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value))
@@ -87,6 +93,8 @@ const evidenceMocks = vi.hoisted(() => ({
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
 }))
+
+const tempRoots: string[] = []
 
 vi.mock('../src/assistant/automation/artifacts.ts', () => ({
   writeAssistantChatErrorArtifacts: replyMocks.writeAssistantChatErrorArtifacts,
@@ -519,6 +527,139 @@ function createInboxServices(
   }
 }
 
+function createAssistantInputSourceForCaptures(
+  captures: readonly ReturnType<typeof createCaptureSummary>[],
+): AssistantInputSource {
+  return {
+    refresh: vi.fn(async () => ({
+      progressed: false,
+      reason: 'no_new_input' as const,
+    })),
+    listInputCandidates: vi.fn(async (input) => ({
+      inputs: captures
+        .map((capture) => assistantInputCandidateFromInboxCapture(capture))
+        .filter((candidate) =>
+          input.sourceId ? candidate.event.source === input.sourceId : true,
+        )
+        .filter((candidate) =>
+          input.afterCursor
+            ? candidate.event.cursor.occurredAt > input.afterCursor.occurredAt ||
+              (
+                candidate.event.cursor.occurredAt === input.afterCursor.occurredAt &&
+                candidate.event.inputId > input.afterCursor.inputId
+              )
+            : true,
+        )
+        .slice(0, input.limit ?? captures.length),
+      nextCursor: captures[0]
+        ? assistantInputCandidateFromInboxCapture(captures[captures.length - 1]!)
+            .event.cursor
+        : input.afterCursor ?? null,
+    })),
+    listNewConversationInputs: vi.fn(async () => ({
+      inputs: [],
+      nextCursor: null,
+    })),
+  }
+}
+
+function assistantInputCandidateFromInboxCapture(
+  capture: ReturnType<typeof createCaptureSummary>,
+): AssistantInputCandidate {
+  const sourceRef = {
+    captureId: capture.captureId,
+    kind: 'inbox-capture' as const,
+    source: capture.source,
+    version: null,
+  }
+  const inputId = createAssistantInputEventId({
+    sourceRef,
+  })
+  return {
+    acceptedInput: {
+      captureIds: [capture.captureId],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: inputId,
+        version: 'murph.assistant-input-event.v1',
+      },
+      cursorEffects: [],
+      id: inputId,
+      source: 'assistant-input',
+    },
+    event: {
+      attachmentCount: capture.attachmentCount,
+      conversation: {
+        accountId: capture.accountId,
+        actorId: capture.actorId,
+        actorIsSelf: capture.actorIsSelf,
+        source: capture.source,
+        threadId: capture.threadId,
+        threadIsDirect: capture.threadIsDirect,
+      },
+      cursor: {
+        createdAt: capture.createdAt ?? null,
+        inputId,
+        occurredAt: capture.occurredAt,
+        sourceKind: 'inbox-capture',
+      },
+      inputId,
+      occurredAt: capture.occurredAt,
+      receivedAt: capture.receivedAt,
+      replyTarget: null,
+      source: capture.source,
+      sourceRef,
+      text: capture.text,
+      transcriptText: capture.text,
+      userMessageContent: null,
+    },
+    projection: {
+      captureId: capture.captureId,
+      reasonCode: null,
+      status: 'succeeded',
+    },
+  }
+}
+
+async function stageInboxCaptureAssistantInputEvent(input: {
+  capture: InboxShowResult['capture'] | ReturnType<typeof createCaptureSummary>
+  vault: string
+}) {
+  await upsertAssistantInputEvent({
+    vault: input.vault,
+    event: {
+      content: {
+        text: input.capture.text,
+        transcriptText: input.capture.text,
+        userMessageContent: input.capture.text
+          ? [
+              {
+                text: input.capture.text,
+                type: 'text',
+              },
+            ]
+          : null,
+      },
+      conversation: {
+        accountId: input.capture.accountId,
+        actorId: input.capture.actorId,
+        actorIsSelf: input.capture.actorIsSelf,
+        source: input.capture.source,
+        threadId: input.capture.threadId,
+        threadIsDirect: input.capture.threadIsDirect,
+      },
+      occurredAt: input.capture.occurredAt,
+      receivedAt: input.capture.receivedAt,
+      sourceRef: {
+        captureId: input.capture.captureId,
+        kind: 'inbox-capture',
+        source: input.capture.source,
+        version: null,
+      },
+    },
+  })
+}
+
 function createAutoReplyContextForTest(
   items: ReadonlyArray<{
     inputCandidate?: AssistantInputCandidate
@@ -531,29 +672,22 @@ function createAutoReplyContextForTest(
   if (!firstItem || !lastItem) {
     return null
   }
+  if (items.some((item) => !item.inputCandidate)) {
+    return null
+  }
 
   return {
     captureCount: items.length,
     captureIds: items.map((item) => item.summary.captureId),
     firstCaptureId: firstItem.summary.captureId,
     firstItem,
-    inputIds: items.map((item) =>
-      item.inputCandidate?.event.inputId ??
-      `inbox:${item.summary.captureId}`,
-    ),
+    inputIds: items.map((item) => item.inputCandidate!.event.inputId),
     items,
     lastCursor: {
       captureId: lastItem.summary.captureId,
       occurredAt: lastItem.summary.occurredAt,
     },
-    lastInputCursor:
-      lastItem.inputCandidate?.event.cursor ??
-      {
-        createdAt: null,
-        inputId: `inbox:${lastItem.summary.captureId}`,
-        occurredAt: lastItem.summary.occurredAt,
-        sourceKind: 'inbox-capture',
-      },
+    lastInputCursor: lastItem.inputCandidate!.event.cursor,
   }
 }
 
@@ -588,6 +722,7 @@ function createReplyGroupItem(
   telegramMetadata: { mediaGroupId: string | null; messageId: string | null; replyContext: string | null } | null = null,
 ) {
   return {
+    inputCandidate: assistantInputCandidateFromInboxCapture(summary),
     summary,
     telegramMetadata,
   }
@@ -787,10 +922,18 @@ beforeEach(() => {
     .mockResolvedValue(undefined)
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.resetModules()
+  await Promise.all(
+    tempRoots.splice(0).map((rootPath) =>
+      rm(rootPath, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  )
 })
 
 describe('assistant automation shared helpers', () => {
@@ -927,6 +1070,7 @@ describe('assistant automation scanner', () => {
 
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([]),
       state: createAutomationState(),
       vault: '/tmp/assistant-automation-vault',
     })
@@ -950,21 +1094,13 @@ describe('assistant automation scanner', () => {
     })
   })
 
-  it('primes the auto-reply cursor before scanning new inbound messages', async () => {
+  it('scans auto-reply candidates from the supplied assistant input source', async () => {
     const latest = createCaptureSummary({
       captureId: 'capture-latest',
       occurredAt: '2026-04-08T00:05:00.000Z',
     })
-    const list = vi
-      .fn()
-      .mockResolvedValueOnce(createListResult([latest], {
-        limit: 1,
-        oldestFirst: false,
-      }))
-      .mockResolvedValueOnce(createListResult([]))
-    const inboxServices = createInboxServices({
-      list,
-    })
+    const inboxServices = createInboxServices()
+    const inputSource = createAssistantInputSourceForCaptures([latest])
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
@@ -973,6 +1109,7 @@ describe('assistant automation scanner', () => {
     const events: Array<Record<string, unknown>> = []
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
+      inputSource,
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
       },
@@ -1005,9 +1142,7 @@ describe('assistant automation scanner', () => {
   })
 
   it('clears reply backlog state once the backlog is drained', async () => {
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([])),
-    })
+    const inboxServices = createInboxServices()
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
@@ -1015,6 +1150,7 @@ describe('assistant automation scanner', () => {
     const stateUpdates: AssistantAutomationState[] = []
     await scanner.scanAssistantAutomationOnce({
       inboxServices,
+      inputSource: createAssistantInputSourceForCaptures([]),
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
@@ -1036,16 +1172,15 @@ describe('assistant automation scanner', () => {
       captureId: 'capture-before-cursor',
       occurredAt: '2026-04-08T00:04:00.000Z',
     })
-    const list = vi.fn().mockResolvedValue(createListResult([capture]))
-    const inboxServices = createInboxServices({
-      list,
-    })
+    const inboxServices = createInboxServices()
+    const inputSource = createAssistantInputSourceForCaptures([capture])
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
 
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
+      inputSource,
       state: createAutomationState({
         autoReply: [
           {
@@ -1058,10 +1193,6 @@ describe('assistant automation scanner', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(list).toHaveBeenCalledWith(expect.objectContaining({
-      afterCaptureId: null,
-      afterOccurredAt: null,
-    }))
     expect(result.replies).toMatchObject({
       considered: 1,
       skipped: 1,
@@ -1102,15 +1233,15 @@ describe('assistant automation scanner', () => {
       skipped: 2,
       stopScanning: false,
     })
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([first, second])),
-    })
+    const inboxServices = createInboxServices()
+    const inputSource = createAssistantInputSourceForCaptures([first, second])
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
 
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
+      inputSource,
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
       }),
@@ -1263,16 +1394,106 @@ describe('assistant automation scanner', () => {
     })
   })
 
+  it('reads staged assistant input events from the store-backed source', async () => {
+    const context = await createTempVaultContext('assistant-scanner-input-store-')
+    tempRoots.push(context.parentRoot)
+    const stored = await upsertAssistantInputEvent({
+      vault: context.vaultRoot,
+      event: {
+        content: {
+          text: 'stored scanner input',
+          userMessageContent: [
+            {
+              text: 'stored scanner input',
+              type: 'text',
+            },
+          ],
+        },
+        conversation: {
+          accountId: 'acct_store',
+          actorId: 'actor_store',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'thread_store',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-04-08T00:07:00.000Z',
+        receivedAt: '2026-04-08T00:07:01.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'msg_store',
+          threadId: 'thread_store',
+        },
+        sourceRef: {
+          dedupeKey: 'dedupe_store',
+          eventId: 'evt_store',
+          itemId: 'item_store',
+          kind: 'hosted-mailbox',
+          lane: 'conversation',
+          laneSeq: '7',
+          payloadSchema: 'murph.hosted-mailbox-payload.v1',
+          payloadSource: 'inline',
+          source: 'hosted-mailbox',
+          wakeSchema: 'murph.hosted-execution-wake.v1',
+        },
+      },
+    })
+    const inputSource = createStoreBackedAssistantInputSource({
+      vault: context.vaultRoot,
+    })
+    const inboxServices = createInboxServices({
+      list: vi.fn().mockResolvedValue(createListResult([])),
+      show: vi.fn(),
+    })
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices,
+      inputSource,
+      state: createAutomationState({
+        autoReplyChannels: ['linq'],
+      }),
+      vault: context.vaultRoot,
+    })
+
+    expect(inboxServices.list).not.toHaveBeenCalled()
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(groupingMocks.collectAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captures: [
+          expect.objectContaining({
+            captureId: stored.inputId,
+            source: 'linq',
+            text: 'stored scanner input',
+          }),
+        ],
+      }),
+    )
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputIds: [stored.inputId],
+        }),
+      }),
+    )
+    expect(result.replies).toMatchObject({
+      considered: 1,
+      skipped: 1,
+    })
+  })
+
   it('continues reply processing when automatic document preservation fails', async () => {
     const capture = createCaptureSummary({
       attachmentCount: 1,
     })
     const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([capture])),
       preserveDocumentAttachments: vi
         .fn()
         .mockRejectedValue(new Error('preserve failed')),
     })
+    const inputSource = createAssistantInputSourceForCaptures([capture])
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
@@ -1280,6 +1501,7 @@ describe('assistant automation scanner', () => {
     const events: Array<Record<string, unknown>> = []
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
+      inputSource,
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
       },
@@ -1326,7 +1548,6 @@ describe('assistant automation scanner', () => {
       attachmentCount: 1,
     })
     const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([capture])),
       preserveDocumentAttachments,
     })
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
@@ -1337,6 +1558,7 @@ describe('assistant automation scanner', () => {
     const result = await scanner.scanAssistantAutomationOnce({
       applyCanonicalWrites: false,
       inboxServices,
+      inputSource: createAssistantInputSourceForCaptures([capture]),
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
         autoReplyPrimed: true,
@@ -1379,6 +1601,7 @@ describe('assistant automation scanner', () => {
     const stateUpdates: AssistantAutomationState[] = []
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
+      inputSource: createAssistantInputSourceForCaptures([first, second]),
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
@@ -1407,11 +1630,8 @@ describe('assistant automation scanner', () => {
       captureId: 'capture-reply',
       occurredAt: '2026-04-08T00:01:00.000Z',
     })
-    const list = vi.fn().mockResolvedValueOnce(createListResult([shared], {
-      limit: 1,
-    }))
+    const inputSource = createAssistantInputSourceForCaptures([shared])
     const inboxServices = createInboxServices({
-      list,
       preserveDocumentAttachments: vi
         .fn()
         .mockResolvedValue(createPreserveResult('capture-reply')),
@@ -1429,6 +1649,7 @@ describe('assistant automation scanner', () => {
 
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
+      inputSource,
       maxPerScan: 1,
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
@@ -1444,276 +1665,11 @@ describe('assistant automation scanner', () => {
       replied: 1,
       skipped: 0,
     })
-    expect(list).toHaveBeenCalledTimes(1)
+    expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('assistant auto-reply runtime', () => {
-  it('skips scan work when no auto-reply channels are enabled', async () => {
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-
-    const result = await reply.scanAssistantAutoReplyOnce({
-      enabledChannels: [],
-      inboxServices: createInboxServices(),
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      replied: 0,
-      skipped: 0,
-    })
-  })
-
-  it('keeps failed captures pending instead of advancing the reply cursor', async () => {
-    const latest = createCaptureSummary({
-      captureId: 'capture-latest',
-      occurredAt: '2026-04-08T00:03:00.000Z',
-    })
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(
-        createListResult([latest], {
-          limit: 1,
-          oldestFirst: false,
-        }),
-      ),
-    })
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-
-    const stateUpdates: Array<Record<string, unknown>> = []
-    const events: Array<Record<string, unknown>> = []
-    const result = await reply.scanAssistantAutoReplyOnce({
-      enabledChannels: ['telegram'],
-      inboxServices,
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
-      onStateProgress: async (state) => {
-        stateUpdates.push(toSnapshotRecord(state))
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 1,
-      failed: 1,
-      nextWakeAt: expect.any(String),
-      replied: 0,
-      skipped: 0,
-    })
-    expect(stateUpdates).toEqual([])
-    expect(events).not.toContainEqual(
-      expect.objectContaining({
-        type: 'reply.scan.primed',
-      }),
-    )
-  })
-
-  it('keeps a null reply cursor when no captures are present yet', async () => {
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([], {
-        limit: 1,
-        oldestFirst: false,
-      })),
-    })
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-
-    const stateUpdates: Array<Record<string, unknown>> = []
-    const events: Array<Record<string, unknown>> = []
-    const result = await reply.scanAssistantAutoReplyOnce({
-      enabledChannels: ['telegram'],
-      inboxServices,
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
-      onStateProgress: async (state) => {
-        stateUpdates.push(toSnapshotRecord(state))
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(stateUpdates).toEqual([])
-    expect(events).toContainEqual({
-      type: 'reply.scan.started',
-      details: '0 capture(s)',
-    })
-  })
-
-  it('keeps the supplied reply cursor when no new captures are found', async () => {
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([])),
-    })
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-
-    const stateUpdates: Array<Record<string, unknown>> = []
-    const result = await reply.scanAssistantAutoReplyOnce({
-      afterCursor: {
-        captureId: 'capture-previous',
-        occurredAt: '2026-04-08T00:01:00.000Z',
-      },
-      enabledChannels: ['telegram'],
-      inboxServices,
-      onStateProgress: async (state) => {
-        stateUpdates.push(toSnapshotRecord(state))
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(stateUpdates).toEqual([])
-  })
-
-  it('scans grouped captures without using the reply cursor as handling proof', async () => {
-    const first = createCaptureSummary({
-      captureId: 'capture-2',
-      occurredAt: '2026-04-08T00:02:00.000Z',
-    })
-    const second = createCaptureSummary({
-      captureId: 'capture-1',
-      occurredAt: '2026-04-08T00:02:00.000Z',
-    })
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([first, second])),
-      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
-        createShowResult(
-          createCaptureDetail({
-            captureId: input.captureId,
-            occurredAt: '2026-04-08T00:02:00.000Z',
-          }),
-        ),
-      ),
-    })
-    groupingMocks.collectAssistantAutoReplyGroup.mockResolvedValue({
-      endIndex: 1,
-      items: [
-        createReplyGroupItem(second),
-        createReplyGroupItem(first),
-      ],
-    })
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-
-    const stateUpdates: Array<Record<string, unknown>> = []
-    const events: Array<Record<string, unknown>> = []
-    const result = await reply.scanAssistantAutoReplyOnce({
-      enabledChannels: ['telegram'],
-      inboxServices,
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
-      onStateProgress: async (state) => {
-        stateUpdates.push(toSnapshotRecord(state))
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 2,
-      failed: 0,
-      nextWakeAt: null,
-      replied: 1,
-      skipped: 0,
-    })
-    expect(events).toContainEqual({
-      type: 'reply.scan.started',
-      details: '2 capture(s)',
-    })
-    expect(stateUpdates).toEqual([])
-  })
-
-  it('skips null reply contexts while keeping the scan cursor unchanged', async () => {
-    const capture = createCaptureSummary()
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([capture])),
-    })
-    groupingMocks.collectAssistantAutoReplyGroup.mockResolvedValue({
-      endIndex: 0,
-      items: [],
-    })
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-
-    const stateUpdates: Array<Record<string, unknown>> = []
-    const result = await reply.scanAssistantAutoReplyOnce({
-      afterCursor: {
-        captureId: 'capture-before',
-        occurredAt: '2026-04-08T00:00:00.000Z',
-      },
-      enabledChannels: ['telegram'],
-      inboxServices,
-      onStateProgress: async (state) => {
-        stateUpdates.push(toSnapshotRecord(state))
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(stateUpdates).toEqual([])
-  })
-
-  it('stops scanning immediately when the reply loop is already aborted', async () => {
-    const capture = createCaptureSummary()
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([capture])),
-    })
-    const signalController = new AbortController()
-    signalController.abort()
-    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
-      '../src/assistant/automation/reply.ts',
-    )
-
-    const stateUpdates: Array<Record<string, unknown>> = []
-    const result = await reply.scanAssistantAutoReplyOnce({
-      enabledChannels: ['telegram'],
-      inboxServices,
-      onStateProgress: async (state) => {
-        stateUpdates.push(toSnapshotRecord(state))
-      },
-      signal: signalController.signal,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(stateUpdates).toEqual([])
-  })
-
   it('exposes context helpers for grouped captures', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
@@ -1737,7 +1693,10 @@ describe('assistant auto-reply runtime', () => {
       captureIds: ['capture-1', 'capture-2'],
       firstCaptureId: 'capture-1',
       firstItem: first,
-      inputIds: ['inbox:capture-1', 'inbox:capture-2'],
+      inputIds: [
+        first.inputCandidate.event.inputId,
+        second.inputCandidate.event.inputId,
+      ],
       items: [first, second],
       lastCursor: {
         captureId: 'capture-2',
@@ -1746,7 +1705,7 @@ describe('assistant auto-reply runtime', () => {
       },
       lastInputCursor: {
         createdAt: '2026-04-08T00:00:01.000Z',
-        inputId: 'inbox:capture-2',
+        inputId: second.inputCandidate.event.inputId,
         occurredAt: '2026-04-08T00:02:00.000Z',
         sourceKind: 'inbox-capture',
       },
@@ -2668,6 +2627,7 @@ describe('assistant auto-reply runtime', () => {
       occurredAt: '2026-04-08T00:03:00.000Z',
       text: null,
     })
+    const lateInput = assistantInputCandidateFromInboxCapture(lateCapture)
     replyMocks.prepareAssistantAutoReplyInput.mockImplementation(
       async (captures: readonly { capture: { captureId: string } }[]) => {
         const captureIds = captures.map((entry) => entry.capture.captureId)
@@ -2743,7 +2703,6 @@ describe('assistant auto-reply runtime', () => {
             nextCursor: input.afterCursor ?? null,
           }
         }
-        const lateInput = assistantInputCandidateFromInboxCapture(lateCapture)
         return {
           inputs: [lateInput],
           nextCursor: lateInput.event.cursor,
@@ -2813,7 +2772,7 @@ describe('assistant auto-reply runtime', () => {
                 },
               }),
             ],
-            id: 'inbox:capture-late',
+            id: lateInput.event.inputId,
           }),
         ])
         expect(admitted.transcriptText).toBe('User sent an attachment.')
@@ -2827,7 +2786,7 @@ describe('assistant auto-reply runtime', () => {
           kind: 'no-new-input',
         })
         await input.activeTurnCheckpoint?.({
-          acceptedInputIds: ['inbox:capture-late'],
+          acceptedInputIds: [lateInput.event.inputId],
           providerRequestOrdinal: 0,
           sessionId: 'session-1',
           turnId: 'turn-1',
@@ -2924,7 +2883,7 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
         captureIds: ['capture-1', 'capture-late'],
-        inputIds: ['inbox:capture-1', 'inbox:capture-late'],
+        inputIds: [context.inputIds[0], lateInput.event.inputId],
         outcome: 'result',
       }),
     )
@@ -3026,7 +2985,7 @@ describe('assistant auto-reply runtime', () => {
         }
       },
       async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
-        expect(input.knownInputIds).toContain('inbox:capture-1')
+        expect(input.knownInputIds).toContain(context.inputIds[0])
         if (input.knownInputIds?.includes(hostedInput.event.inputId)) {
           return {
             inputs: [],
@@ -3109,7 +3068,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
-        inputIds: ['inbox:capture-1', hostedInput.event.inputId],
+        inputIds: [context.inputIds[0], hostedInput.event.inputId],
       }),
     )
   })
@@ -3540,7 +3499,7 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).not.toHaveBeenCalled()
   })
 
-  it('does not create a default turn-input port for hosted automation passes', async () => {
+  it('creates a store-backed input source for hosted automation passes', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
@@ -3564,13 +3523,21 @@ describe('assistant auto-reply runtime', () => {
     expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext,
-        inputSource: undefined,
+        inputSource: expect.objectContaining({
+          listInputCandidates: expect.any(Function),
+          listNewConversationInputs: expect.any(Function),
+          refresh: expect.any(Function),
+        }),
       }),
     )
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext,
-        inputSource: undefined,
+        inputSource: expect.objectContaining({
+          listInputCandidates: expect.any(Function),
+          listNewConversationInputs: expect.any(Function),
+          refresh: expect.any(Function),
+        }),
       }),
     )
   })
@@ -4138,6 +4105,15 @@ describe('assistant auto-reply runtime', () => {
 
 describe('assistant auto-reply receipt recovery', () => {
   it('retries a recent retry-safe failed auto-reply from persisted receipts', async () => {
+    const context = await createTempVaultContext('assistant-recovery-capture-')
+    tempRoots.push(context.parentRoot)
+    const capture = createCaptureDetail({
+      captureId: 'capture-1',
+    })
+    await stageInboxCaptureAssistantInputEvent({
+      capture,
+      vault: context.vaultRoot,
+    })
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         primaryCaptureId: 'capture-1',
@@ -4146,11 +4122,7 @@ describe('assistant auto-reply receipt recovery', () => {
     ])
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(
-        createShowResult(
-          createCaptureDetail({
-            captureId: 'capture-1',
-          }),
-        ),
+        createShowResult(capture),
       ),
     })
     scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValue({
@@ -4175,7 +4147,7 @@ describe('assistant auto-reply receipt recovery', () => {
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
       },
-      vault: '/tmp/assistant-automation-vault',
+      vault: context.vaultRoot,
     })
 
     expect(result).toEqual({
@@ -4416,6 +4388,28 @@ describe('assistant auto-reply receipt recovery', () => {
   })
 
   it('skips receipt recovery for ambiguous delivery failures', async () => {
+    const context = await createTempVaultContext('assistant-recovery-ambiguous-')
+    tempRoots.push(context.parentRoot)
+    const captureDetailsById = new Map(
+      ['capture-3', 'capture-4', 'capture-5'].map((captureId) => {
+        const capture = createCaptureDetail({
+          captureId,
+          occurredAt:
+            captureId === 'capture-5'
+              ? '2026-04-08T00:00:02.000Z'
+              : captureId === 'capture-4'
+                ? '2026-04-08T00:00:01.000Z'
+                : '2026-04-08T00:00:00.000Z',
+        })
+        return [captureId, capture] as const
+      }),
+    )
+    for (const capture of captureDetailsById.values()) {
+      await stageInboxCaptureAssistantInputEvent({
+        capture,
+        vault: context.vaultRoot,
+      })
+    }
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         turnId: 'turn-4',
@@ -4457,15 +4451,8 @@ describe('assistant auto-reply receipt recovery', () => {
     const inboxServices = createInboxServices({
       show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
         createShowResult(
-          createCaptureDetail({
-            captureId: input.captureId,
-            occurredAt:
-              input.captureId === 'capture-5'
-                ? '2026-04-08T00:00:02.000Z'
-                : input.captureId === 'capture-4'
-                  ? '2026-04-08T00:00:01.000Z'
-                  : '2026-04-08T00:00:00.000Z',
-          }),
+          captureDetailsById.get(input.captureId) ??
+          createCaptureDetail({ captureId: input.captureId }),
         ),
       ),
     })
@@ -4480,7 +4467,7 @@ describe('assistant auto-reply receipt recovery', () => {
         occurredAt: '2026-04-08T00:00:02.000Z',
       }),
       inboxServices,
-      vault: '/tmp/assistant-automation-vault',
+      vault: context.vaultRoot,
     })
 
     expect(result).toEqual({
@@ -4495,6 +4482,16 @@ describe('assistant auto-reply receipt recovery', () => {
   })
 
   it('retries failed receipts ahead of the fixed auto-reply eligibility boundary', async () => {
+    const context = await createTempVaultContext('assistant-recovery-boundary-')
+    tempRoots.push(context.parentRoot)
+    const capture = createCaptureDetail({
+      captureId: 'capture-2',
+      occurredAt: '2026-04-08T00:00:02.000Z',
+    })
+    await stageInboxCaptureAssistantInputEvent({
+      capture,
+      vault: context.vaultRoot,
+    })
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         primaryCaptureId: 'capture-2',
@@ -4503,12 +4500,7 @@ describe('assistant auto-reply receipt recovery', () => {
     ])
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(
-        createShowResult(
-          createCaptureDetail({
-            captureId: 'capture-2',
-            occurredAt: '2026-04-08T00:00:02.000Z',
-          }),
-        ),
+        createShowResult(capture),
       ),
     })
     const recovery = await vi.importActual<
@@ -4522,7 +4514,7 @@ describe('assistant auto-reply receipt recovery', () => {
         occurredAt: '2026-04-08T00:00:00.000Z',
       }),
       inboxServices,
-      vault: '/tmp/assistant-automation-vault',
+      vault: context.vaultRoot,
     })
 
     expect(result).toEqual({
@@ -4584,6 +4576,26 @@ describe('assistant auto-reply receipt recovery', () => {
   })
 
   it('skips malformed or already-handled receipts and stops after the recovery limit', async () => {
+    const context = await createTempVaultContext('assistant-recovery-limit-')
+    tempRoots.push(context.parentRoot)
+    const captureDetailsById = new Map(
+      ['capture-handled', 'capture-recover', 'capture-later'].map((captureId) => {
+        const capture = createCaptureDetail({
+          captureId,
+          occurredAt:
+            captureId === 'capture-later'
+              ? '2026-04-08T00:00:01.000Z'
+              : '2026-04-08T00:00:00.000Z',
+        })
+        return [captureId, capture] as const
+      }),
+    )
+    for (const capture of captureDetailsById.values()) {
+      await stageInboxCaptureAssistantInputEvent({
+        capture,
+        vault: context.vaultRoot,
+      })
+    }
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         turnId: 'turn-no-start',
@@ -4642,13 +4654,8 @@ describe('assistant auto-reply receipt recovery', () => {
     const inboxServices = createInboxServices({
       show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
         createShowResult(
-          createCaptureDetail({
-            captureId: input.captureId,
-            occurredAt:
-              input.captureId === 'capture-later'
-                ? '2026-04-08T00:00:01.000Z'
-                : '2026-04-08T00:00:00.000Z',
-          }),
+          captureDetailsById.get(input.captureId) ??
+          createCaptureDetail({ captureId: input.captureId }),
         ),
       ),
     })
@@ -4664,7 +4671,7 @@ describe('assistant auto-reply receipt recovery', () => {
       }),
       inboxServices,
       maxPerScan: 1,
-      vault: '/tmp/assistant-automation-vault',
+      vault: context.vaultRoot,
     })
 
     expect(result).toEqual({
@@ -4933,6 +4940,116 @@ describe('assistant automation run loop', () => {
     expect(result.reason).toBe('signal')
     expect(scanStartedAt).toHaveLength(2)
     expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
+  })
+
+  it('stages local imported captures as assistant input before the wake-driven scan', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const context = await createTempVaultContext('assistant-local-input-stage-')
+    tempRoots.push(context.parentRoot)
+    const externalAbort = new AbortController()
+    const stagedTexts: string[] = []
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          setTimeout(() => {
+            options.onEvent?.({
+              capture: {
+                accountId: 'acct-local',
+                actor: {
+                  id: 'actor-local',
+                  isSelf: false,
+                },
+                attachments: [],
+                externalId: 'msg-local',
+                occurredAt: '2026-04-09T00:00:10.000Z',
+                raw: {},
+                source: 'telegram',
+                text: 'local input staged from inbox import',
+                thread: {
+                  id: 'thread-local',
+                  isDirect: true,
+                },
+              },
+              connectorId: 'telegram',
+              persisted: {
+                captureId: 'capture-local',
+                createdAt: '2026-04-09T00:00:11.000Z',
+                deduped: false,
+                envelopePath: 'raw/inbox/telegram/capture-local/envelope.json',
+                eventId: 'event-local',
+              },
+              source: 'telegram',
+              type: 'capture.imported',
+            })
+          }, 10)
+
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async (input) => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        const batch = await input.inputSource.listInputCandidates({
+          afterCursor: null,
+          limit: 10,
+        })
+        stagedTexts.push(
+          ...batch.inputs.map((candidate: AssistantInputCandidate) =>
+            candidate.event.text ?? '',
+          ),
+        )
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: context.vaultRoot,
+    })
+
+    await vi.advanceTimersByTimeAsync(10)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(stagedTexts).toEqual(['local input staged from inbox import'])
   })
 
   it('wakes immediately on self-authored imported captures when allowSelfAuthored is enabled', async () => {

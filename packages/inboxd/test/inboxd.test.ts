@@ -685,35 +685,6 @@ test("capture mutation cursors advance for new captures, attachment parse update
     },
   ]);
 
-  const promotedRuntimeOnlyCaptureId = "cap_runtime_only_promoted";
-  const promotedRuntimeOnlyEventId = "evt_runtime_only_promoted";
-  const promotedRuntimeOnlyInput = {
-    source: "email",
-    externalId: "cursor-runtime-only-promoted",
-    thread: { id: "chat-cursor" },
-    actor: { isSelf: false },
-    occurredAt: "2026-03-13T11:02:00.000Z",
-    text: "Runtime-only text",
-    attachments: [],
-    raw: {},
-  };
-  const promotedRuntimeOnlyStored = {
-    captureId: promotedRuntimeOnlyCaptureId,
-    eventId: promotedRuntimeOnlyEventId,
-    storedAt: "2026-03-13T11:02:01.000Z",
-    sourceDirectory: "raw/inbox/email/default/2026/03/cap_runtime_only_promoted",
-    envelopePath: "raw/inbox/email/default/2026/03/cap_runtime_only_promoted/envelope.json",
-    attachments: [],
-  };
-  runtime.upsertCaptureIndex({
-    captureId: promotedRuntimeOnlyCaptureId,
-    eventId: promotedRuntimeOnlyEventId,
-    input: promotedRuntimeOnlyInput,
-    persistence: "runtime_only",
-    stored: promotedRuntimeOnlyStored,
-  });
-  assert.equal(await readInboxCaptureMutationHead(vaultRoot), thirdHead);
-
   const laterCanonicalCapture = await pipeline.processCapture({
     source: "email",
     externalId: "cursor-2",
@@ -733,26 +704,10 @@ test("capture mutation cursors advance for new captures, attachment parse update
     },
   ]);
 
-  runtime.upsertCaptureIndex({
-    captureId: promotedRuntimeOnlyCaptureId,
-    eventId: promotedRuntimeOnlyEventId,
-    input: promotedRuntimeOnlyInput,
-    persistence: "canonical",
-    stored: promotedRuntimeOnlyStored,
-  });
-  const fifthHead = await readInboxCaptureMutationHead(vaultRoot);
-  assert.ok(fifthHead > fourthHead);
-  assert.deepEqual(await listInboxCaptureMutations({ vaultRoot, afterCursor: fourthHead, limit: 10 }), [
-    {
-      captureId: promotedRuntimeOnlyCaptureId,
-      cursor: fifthHead,
-    },
-  ]);
-
   pipeline.close();
 });
 
-test("attachment parse job filters and requeue reset runtime-only parser state", async () => {
+test("attachment parse job filters and requeue reset parser runtime state", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-requeue-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-requeue-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

@@ -224,19 +224,19 @@ test("processCapture recovers from a crash after raw inbox evidence is written b
   pipeline.close();
 });
 
-test("processCapture persists canonical evidence even when a stale runtime row already claims the external id", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-only-dedupe-vault");
-  const sourceRoot = await makeTempDirectory("murph-inbox-runtime-only-dedupe-source");
+test("processCapture persists canonical evidence even when a stale projection row already claims the external id", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-stale-dedupe-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-stale-dedupe-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "canonical.pdf", "canonical attachment");
   const inbound = createCapture({
-    externalId: "msg-runtime-only-dedupe",
+    externalId: "msg-stale-dedupe",
     occurredAt: "2026-03-13T10:12:00.000Z",
     text: "Canonical capture",
     attachments: [
       {
-        externalId: "att-runtime-only-dedupe",
+        externalId: "att-stale-dedupe",
         kind: "document",
         mime: "application/pdf",
         originalPath: attachmentPath,
@@ -245,7 +245,7 @@ test("processCapture persists canonical evidence even when a stale runtime row a
     ],
   });
   const runtime = await openInboxRuntime({ vaultRoot });
-  const staleCaptureId = "cap_runtime_only_stale";
+  const staleCaptureId = "cap_projection_stale";
   const staleEventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2ST";
 
   runtime.upsertCaptureIndex({
@@ -260,8 +260,8 @@ test("processCapture persists canonical evidence even when a stale runtime row a
       captureId: staleCaptureId,
       eventId: staleEventId,
       storedAt: "2026-03-13T10:12:30.000Z",
-      sourceDirectory: "raw/inbox/email/self/2026/03/cap_runtime_only_stale",
-      envelopePath: "raw/inbox/email/self/2026/03/cap_runtime_only_stale/envelope.json",
+      sourceDirectory: "raw/inbox/email/self/2026/03/cap_projection_stale",
+      envelopePath: "raw/inbox/email/self/2026/03/cap_projection_stale/envelope.json",
       attachments: [],
     },
   });
@@ -680,29 +680,9 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
       attachments: [],
     },
   });
-  const staleRuntimeOnlyCaptureId = "cap_runtime_projection_hidden";
-  runtime.upsertCaptureIndex({
-    captureId: staleRuntimeOnlyCaptureId,
-    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RO",
-    input: createCapture({
-      externalId: "msg-stale-runtime-only-projection",
-      occurredAt: "2026-03-13T11:07:00.000Z",
-      text: "Hidden runtime-only projection row",
-    }),
-    persistence: "runtime_only",
-    stored: {
-      captureId: staleRuntimeOnlyCaptureId,
-      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RO",
-      storedAt: "2026-03-13T11:07:30.000Z",
-      sourceDirectory: "raw/inbox/email/self/2026/03/cap_runtime_projection_hidden",
-      envelopePath: "raw/inbox/email/self/2026/03/cap_runtime_projection_hidden/envelope.json",
-      attachments: [],
-    },
-  });
-
   const headBefore = await readInboxCaptureMutationHead(vaultRoot);
   assert.ok(headBefore > 0);
-  assert.equal(countRows(runtime.databasePath, "capture"), 3);
+  assert.equal(countRows(runtime.databasePath, "capture"), 2);
   assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "succeeded");
 
   await rebuildRuntimeFromVault({ vaultRoot, runtime });
@@ -711,10 +691,6 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
   assert.ok(rebuilt);
   assert.deepEqual(runtime.getCursor("email", "self"), { messageId: "msg-rebuild-reset" });
   assert.equal(runtime.getCapture(staleCaptureId), null);
-  assert.equal(
-    runtime.getCapture(staleRuntimeOnlyCaptureId, { includeRuntimeOnly: true }),
-    null,
-  );
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
   assert.equal(countRows(runtime.databasePath, "capture_mutation_tombstone"), 1);

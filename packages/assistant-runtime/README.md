@@ -16,6 +16,19 @@ Current responsibilities:
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
 - provide shared hosted runtime env sanitization so host apps can build their own launcher policy without forwarding control-plane secrets
 
+Hosted runtime is a thin containerized runner over the same local assistant input
+spine used by local automation:
+
+```text
+source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active turn -> accepted-input journal -> Codex
+```
+
+For hosted conversation traffic, the mailbox importer is the source adapter. It
+stages bounded `AssistantInputEvent` records before inbox projection. Inbox
+capture, parser work, attachment materialization, and display/search indexes are
+best-effort enrichment and recovery context; they are not a hidden runtime-only
+admission path for Codex.
+
 Current non-goals:
 
 - CLI command routing
