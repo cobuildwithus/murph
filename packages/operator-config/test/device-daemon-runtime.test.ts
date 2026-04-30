@@ -50,6 +50,10 @@ import {
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 const tempDirectories = new Set<string>()
+const TEST_WHOOP_PROVIDER_ENV = {
+  WHOOP_CLIENT_ID: 'whoop-client',
+  WHOOP_CLIENT_SECRET: 'whoop-secret',
+} as const
 
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -909,6 +913,32 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
       /lsof -nP -iTCP:8788 -sTCP:LISTEN/u.test(error.message),
   )
 
+  let missingProviderSpawned = false
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: conflictVault,
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+        },
+        dependencies: {
+          fetchImpl: async () => new Response(null, { status: 503 }),
+          isProcessAlive: () => false,
+          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          spawnProcess: async () => {
+            missingProviderSpawned = true
+            throw new Error('spawnProcess should not be called')
+          },
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_PROVIDER_CONFIG_REQUIRED' &&
+      /No local device sync provider credentials are configured/u.test(error.message) &&
+      /WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET/u.test(error.message),
+  )
+  assert.equal(missingProviderSpawned, false)
+
   await assert.rejects(
     () =>
       startManagedDeviceSyncDaemon({
@@ -944,6 +974,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
 
   const started = await startManagedDeviceSyncDaemon({
     vault: managedVault,
+    env: TEST_WHOOP_PROVIDER_ENV,
     dependencies: {
       now: () => new Date('2026-04-08T00:00:00.000Z'),
       sleep: async () => undefined,
@@ -1082,6 +1113,7 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
       startManagedDeviceSyncDaemon({
         vault: startFailureVault,
         baseUrl: 'http://127.0.0.1:4318',
+        env: TEST_WHOOP_PROVIDER_ENV,
         dependencies: {
           now: () => new Date(startFailureNowMs),
           sleep: async () => {
@@ -1110,6 +1142,45 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
   assert.equal(removedFiles.includes(startFailurePaths.launcherStatePath), true)
   assert.equal(resolveManagedControlToken(startFailurePaths), null)
 
+  const missingProviderLogVault = await createTempVault('operator-config-device-daemon-provider-log-')
+  const missingProviderLogPaths = resolveDeviceDaemonPaths(missingProviderLogVault)
+  let missingProviderLogNowMs = 0
+  await mkdir(path.dirname(missingProviderLogPaths.stderrLogPath), { recursive: true })
+  await writeFile(
+    missingProviderLogPaths.stderrLogPath,
+    'TypeError: No device sync providers are configured. Set at least one supported device provider client credential pair before starting device-syncd.\n',
+    'utf8',
+  )
+
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: missingProviderLogVault,
+        baseUrl: 'http://127.0.0.1:4318',
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          WHOOP_CLIENT_ID: 'whoop-client',
+          WHOOP_CLIENT_SECRET: 'whoop-secret',
+        },
+        dependencies: {
+          now: () => new Date(missingProviderLogNowMs),
+          sleep: async () => {
+            missingProviderLogNowMs += 100
+          },
+          fetchImpl: async () => new Response(null, { status: 503 }),
+          isProcessAlive: () => true,
+          killProcess: () => undefined,
+          resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+          spawnProcess: async () => ({ pid: 9102 }),
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_PROVIDER_CONFIG_REQUIRED' &&
+      !/Murph could not start/u.test(error.message) &&
+      error.context?.pid === 9102,
+  )
+
   const addressConflictVault = await createTempVault('operator-config-device-daemon-address-conflict-')
   const addressConflictPaths = resolveDeviceDaemonPaths(addressConflictVault)
   let addressConflictNowMs = 0
@@ -1125,6 +1196,7 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
       startManagedDeviceSyncDaemon({
         vault: addressConflictVault,
         baseUrl: 'http://127.0.0.1:4318',
+        env: TEST_WHOOP_PROVIDER_ENV,
         dependencies: {
           now: () => new Date(addressConflictNowMs),
           sleep: async () => {
@@ -1153,6 +1225,7 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
       startManagedDeviceSyncDaemon({
         vault: writeFailureVault,
         baseUrl: 'http://127.0.0.1:4318',
+        env: TEST_WHOOP_PROVIDER_ENV,
         dependencies: {
           chmod: async () => undefined,
           mkdir: async () => undefined,
@@ -1254,6 +1327,7 @@ test('device-daemon management also covers explicit spawn tokens and default kil
     vault: fallbackVault,
     env: {
       DEVICE_SYNC_CONTROL_TOKEN: ' explicit-token ',
+      ...TEST_WHOOP_PROVIDER_ENV,
     },
     dependencies: {
       fetchImpl: async (_input, init) =>

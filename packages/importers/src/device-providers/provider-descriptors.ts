@@ -220,6 +220,7 @@ const GARMIN_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   temperature: 90,
   temperatureDeviation: 80,
   timeInBedMinutes: 90,
+  totalCalories: 100,
   totalSleepMinutes: 80,
   weightKg: 100,
 } as const satisfies Record<string, number>);
@@ -255,6 +256,7 @@ const OURA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   temperature: 80,
   temperatureDeviation: 100,
   timeInBedMinutes: 100,
+  totalCalories: 90,
   totalSleepMinutes: 100,
   weightKg: 90,
 } as const satisfies Record<string, number>);
@@ -290,6 +292,7 @@ const WHOOP_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   temperature: 100,
   temperatureDeviation: 90,
   timeInBedMinutes: 80,
+  totalCalories: 80,
   totalSleepMinutes: 90,
   weightKg: 80,
 } as const satisfies Record<string, number>);
@@ -303,6 +306,7 @@ const STRAVA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   maxSpeedMps: 90,
   sessionCount: 80,
   sessionMinutes: 100,
+  totalCalories: 85,
   totalElevationGainMeters: 90,
 } as const satisfies Record<string, number>);
 

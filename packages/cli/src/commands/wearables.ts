@@ -107,14 +107,21 @@ const wearableActivitySummarySchema = z.object({
   activityScore: wearableResolvedMetricSchema,
   activeCalories: wearableResolvedMetricSchema,
   activityTypes: z.array(z.string().min(1)),
+  altitudeChangeMeters: wearableResolvedMetricSchema,
   date: localDateSchema,
   dayStrain: wearableResolvedMetricSchema,
   distanceKm: wearableResolvedMetricSchema,
+  estimatedVo2Max: wearableResolvedMetricSchema,
+  maxHeartRate: wearableResolvedMetricSchema,
   notes: z.array(z.string()),
+  percentRecorded: wearableResolvedMetricSchema,
   sessionCount: wearableResolvedMetricSchema,
   sessionMinutes: wearableResolvedMetricSchema,
   steps: wearableResolvedMetricSchema,
   summaryConfidence: wearableSummaryConfidenceSchema,
+  totalCalories: wearableResolvedMetricSchema,
+  totalElevationGainMeters: wearableResolvedMetricSchema,
+  workoutStrain: wearableResolvedMetricSchema,
 })
 
 const wearableSleepSummarySchema = z.object({

@@ -29,7 +29,7 @@ test("collectCanonicalWearableDataset keeps canonical candidates and suppresses 
       value: 12000,
     },
     {
-      id: "obs_active_calories",
+      id: "obs_total_calories",
       kind: "observation",
       schemaVersion: "wearable.canonical_record.v1",
       dayKey: "2026-04-20",
@@ -42,7 +42,7 @@ test("collectCanonicalWearableDataset keeps canonical candidates and suppresses 
         normalizerVersion: "test-normalizer.v1",
         rawArtifactRoles: ["daily-activity"],
       },
-      metric: "activeCalories",
+      metric: "totalCalories",
       unit: "kcal",
       value: 510,
     },
@@ -123,7 +123,7 @@ test("collectCanonicalWearableDataset keeps canonical candidates and suppresses 
   const dataset = collectCanonicalWearableDataset(records);
 
   assert.equal(dataset.metricCandidates.length, 2);
-  assert.deepEqual(dataset.metricCandidates.map((candidate) => candidate.metric), ["activeCalories", "deepMinutes"]);
+  assert.deepEqual(dataset.metricCandidates.map((candidate) => candidate.metric), ["totalCalories", "deepMinutes"]);
   assert.ok(dataset.metricCandidates.every((candidate) => candidate.sourceFamily === "canonical"));
   assert.equal(dataset.sleepWindows.length, 1);
   assert.equal(dataset.sleepWindows[0]?.nap, true);
@@ -213,12 +213,6 @@ test("collectCanonicalWearableDataset surfaces WHOOP metrics from normalized can
 
   assert.deepEqual(observations, [
     {
-      metric: "activeCalories",
-      sourceFamily: "canonical",
-      unit: "kcal",
-      value: 100,
-    },
-    {
       metric: "altitudeChangeMeters",
       sourceFamily: "canonical",
       unit: "meter",
@@ -235,6 +229,12 @@ test("collectCanonicalWearableDataset surfaces WHOOP metrics from normalized can
       sourceFamily: "canonical",
       unit: "%",
       value: 99,
+    },
+    {
+      metric: "totalCalories",
+      sourceFamily: "canonical",
+      unit: "kcal",
+      value: 100,
     },
     {
       metric: "totalElevationGainMeters",

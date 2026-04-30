@@ -33,6 +33,7 @@ export const wearableCanonicalMetricKeys = [
   "temperature",
   "temperatureDeviation",
   "timeInBedMinutes",
+  "totalCalories",
   "totalElevationGainMeters",
   "totalSleepMinutes",
   "workoutStrain",
@@ -65,7 +66,6 @@ export const wearableMetricCatalog = Object.freeze({
   activeCalories: defineMetric("activeCalories", "kcal", "daily_observation", 25, [
     "active_calories",
     "calories_active",
-    "energy_burned",
   ]),
   activityScore: defineMetric("activityScore", "%", "daily_observation", 1, ["activity_score"]),
   altitudeChangeMeters: defineMetric("altitudeChangeMeters", "meter", "session_observation", 5, [
@@ -125,6 +125,11 @@ export const wearableMetricCatalog = Object.freeze({
   temperature: defineMetric("temperature", "celsius", "daily_observation", 0.2, ["body_temperature", "temperature_celsius"]),
   temperatureDeviation: defineMetric("temperatureDeviation", "celsius", "daily_observation", 0.2, ["temperature_delta", "temperature_deviation"]),
   timeInBedMinutes: defineMetric("timeInBedMinutes", "minutes", "session_observation", 5, ["time_in_bed", "time_in_bed_minutes"]),
+  totalCalories: defineMetric("totalCalories", "kcal", "daily_observation", 25, [
+    "calories",
+    "energy_burned",
+    "total_calories",
+  ]),
   totalElevationGainMeters: defineMetric("totalElevationGainMeters", "meter", "session_observation", 5, [
     "altitude_gain",
     "altitude_gain_meter",
@@ -191,6 +196,8 @@ export function normalizeWearableMetricValue(
   switch (key) {
     case "activeCalories":
       return normalizeActiveCaloriesMetricValue(normalizedMetric, value, normalizedUnit);
+    case "totalCalories":
+      return normalizeTotalCaloriesMetricValue(value, normalizedUnit);
     case "distanceKm":
       return {
         key,
@@ -267,6 +274,25 @@ function normalizeActiveCaloriesMetricValue(
   if (isKilojouleUnit(unit)) {
     return {
       key: "activeCalories",
+      unit: "kcal",
+      value: Number((value / 4.184).toFixed(4)),
+    };
+  }
+
+  return null;
+}
+
+function normalizeTotalCaloriesMetricValue(
+  value: number,
+  unit: string | null,
+): NormalizedWearableMetricValue | null {
+  if (isKilocalorieUnit(unit) || unit === null) {
+    return { key: "totalCalories", unit: "kcal", value };
+  }
+
+  if (isKilojouleUnit(unit)) {
+    return {
+      key: "totalCalories",
       unit: "kcal",
       value: Number((value / 4.184).toFixed(4)),
     };

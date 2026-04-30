@@ -6,6 +6,18 @@
       "@murphai/importers": [
         "packages/importers/src/index.ts"
       ],
+      "@murphai/importers/device-providers/canonical-wearable-records": [
+        "packages/importers/src/device-providers/canonical-wearable-records.ts"
+      ],
+      "@murphai/importers/device-providers/metric-catalog": [
+        "packages/importers/src/device-providers/metric-catalog.ts"
+      ],
+      "@murphai/importers/device-providers/provider-descriptors": [
+        "packages/importers/src/device-providers/provider-descriptors.ts"
+      ],
+      "@murphai/importers/device-providers/raw-ingest-envelope": [
+        "packages/importers/src/device-providers/raw-ingest-envelope.ts"
+      ],
       "@murphai/importers/*": [
         "packages/importers/src/*"
       ],

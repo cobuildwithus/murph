@@ -15,6 +15,10 @@ import {
 
 const DEVICE_DAEMON_STATE_SCHEMA = 'murph.device-daemon-launcher-state.v1'
 const DEVICE_DAEMON_STATE_SCHEMA_VERSION = 1
+const TEST_WHOOP_PROVIDER_ENV = {
+  WHOOP_CLIENT_ID: 'whoop-client',
+  WHOOP_CLIENT_SECRET: 'whoop-secret',
+} as const
 
 interface SpawnProcessInput {
   command: string
@@ -110,6 +114,7 @@ test.sequential(
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
           VAULT_ROOT: '/legacy-vault-root',
+          ...TEST_WHOOP_PROVIDER_ENV,
         },
         dependencies: {
           fetchImpl: async (input, init) => {
@@ -265,6 +270,7 @@ test.sequential(
         vault: vaultRoot,
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          ...TEST_WHOOP_PROVIDER_ENV,
         },
         dependencies: {
           fetchImpl: async (input, init) => {
@@ -391,6 +397,7 @@ test.sequential(
         vault: vaultRoot,
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          ...TEST_WHOOP_PROVIDER_ENV,
         },
         dependencies: {
           fetchImpl: async (_input, init) => {
@@ -461,6 +468,7 @@ test.sequential(
             vault: vaultRoot,
             env: {
               DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+              ...TEST_WHOOP_PROVIDER_ENV,
             },
             dependencies: {
               now() {
@@ -516,6 +524,98 @@ test.sequential(
 )
 
 test.sequential(
+  'startManagedDeviceSyncDaemon surfaces missing provider credentials with a dedicated error code',
+  async () => {
+    const preflightVaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    const startupLogVaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    let spawnedWithoutProviders = false
+    let startupLogNowValue = 0
+    let signaledPid: number | null = null
+
+    try {
+      await assert.rejects(
+        () =>
+          startManagedDeviceSyncDaemon({
+            vault: preflightVaultRoot,
+            env: {
+              DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+            },
+            dependencies: {
+              fetchImpl: async () =>
+                new Response(JSON.stringify({ ok: false }), { status: 503 }),
+              isProcessAlive() {
+                return false
+              },
+              async spawnProcess() {
+                spawnedWithoutProviders = true
+                throw new Error('spawnProcess should not be called')
+              },
+            },
+          }),
+        (error) =>
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'DEVICE_SYNC_PROVIDER_CONFIG_REQUIRED' &&
+          /No local device sync provider credentials are configured/u.test(error.message),
+      )
+      assert.equal(spawnedWithoutProviders, false)
+
+      await assert.rejects(
+        () =>
+          startManagedDeviceSyncDaemon({
+            vault: startupLogVaultRoot,
+            env: {
+              DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+              ...TEST_WHOOP_PROVIDER_ENV,
+            },
+            dependencies: {
+              now() {
+                return new Date(startupLogNowValue)
+              },
+              sleep: async (milliseconds) => {
+                startupLogNowValue += milliseconds
+              },
+              fetchImpl: async () =>
+                new Response(JSON.stringify({ ok: false }), { status: 503 }),
+              isProcessAlive(pid) {
+                return pid === 9292
+              },
+              killProcess(pid) {
+                signaledPid = pid
+              },
+              readFile: async (filePath) => {
+                if (filePath.endsWith('stderr.log')) {
+                  return 'TypeError: No device sync providers are configured.'
+                }
+
+                return await readFile(filePath, 'utf8')
+              },
+              resolveDeviceSyncPackageEntry() {
+                return '/virtual/device-syncd/dist/index.js'
+              },
+              async spawnProcess() {
+                return { pid: 9292 }
+              },
+            },
+          }),
+        (error) => {
+          assert.equal(signaledPid, 9292)
+          return (
+            error instanceof Error &&
+            'code' in error &&
+            error.code === 'DEVICE_SYNC_PROVIDER_CONFIG_REQUIRED' &&
+            !/Murph could not start/u.test(error.message)
+          )
+        },
+      )
+    } finally {
+      await rm(preflightVaultRoot, { recursive: true, force: true })
+      await rm(startupLogVaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'startManagedDeviceSyncDaemon redacts secret-bearing startup log snippets on failure',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
@@ -529,6 +629,7 @@ test.sequential(
             vault: vaultRoot,
             env: {
               DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+              ...TEST_WHOOP_PROVIDER_ENV,
             },
             dependencies: {
               now() {
@@ -606,6 +707,7 @@ test.sequential(
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
           DEVICE_SYNC_SECRET: 'service-secret-for-tests',
+          ...TEST_WHOOP_PROVIDER_ENV,
         },
         dependencies: {
           fetchImpl: async () =>
@@ -710,6 +812,7 @@ test.sequential(
         vault: vaultRoot,
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          ...TEST_WHOOP_PROVIDER_ENV,
         },
         dependencies: {
           fetchImpl: async () =>
@@ -780,6 +883,7 @@ test.sequential(
         vault: vaultRoot,
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          ...TEST_WHOOP_PROVIDER_ENV,
         },
         dependencies: {
           fetchImpl: async () =>

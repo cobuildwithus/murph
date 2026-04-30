@@ -134,6 +134,9 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const activeCalories = resolveMetric("activeCalories", selectMetricCandidates(dateCandidates, "activeCalories"), {
       metricFamily: "activity",
     });
+    const totalCalories = resolveMetric("totalCalories", selectMetricCandidates(dateCandidates, "totalCalories"), {
+      metricFamily: "activity",
+    });
     const distanceKm = resolveMetric("distanceKm", selectMetricCandidates(dateCandidates, "distanceKm"), {
       metricFamily: "activity",
     });
@@ -179,6 +182,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const summaryConfidence = summarizeMetricsConfidence([
       ["steps", steps],
       ["activeCalories", activeCalories],
+      ["totalCalories", totalCalories],
       ["distanceKm", distanceKm],
       ["totalElevationGainMeters", totalElevationGainMeters],
       ["altitudeChangeMeters", altitudeChangeMeters],
@@ -216,6 +220,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       sessionMinutes,
       steps,
       summaryConfidence,
+      totalCalories,
       totalElevationGainMeters,
       workoutStrain,
     };

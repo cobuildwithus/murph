@@ -43,7 +43,7 @@ test("wearable metric catalog resolves current hyphenated and sample aliases", (
   assert.equal(resolveWearableCanonicalMetricKey("vo2max"), "estimatedVo2Max");
   assert.equal(resolveWearableCanonicalMetricKey("cardio_fitness"), "estimatedVo2Max");
   assert.equal(resolveWearableCanonicalMetricKey("cardiorespiratory_fitness"), "estimatedVo2Max");
-  assert.equal(resolveWearableCanonicalMetricKey("energy-burned"), "activeCalories");
+  assert.equal(resolveWearableCanonicalMetricKey("energy-burned"), "totalCalories");
   assert.equal(resolveWearableCanonicalMetricKey("max-heart-rate"), "maxHeartRate");
   assert.equal(resolveWearableCanonicalMetricKey("workout-strain"), "workoutStrain");
   assert.equal(resolveWearableCanonicalMetricKey("percent-recorded"), "percentRecorded");
@@ -113,18 +113,22 @@ test("canonicalizeDeviceBatchPayload preserves hashed account identity and maps 
   assert.ok(records.every((record) => record.source.dataSourceId.startsWith("wearable_source_")));
 });
 
-test("wearable metric normalization converts energy-burned and preserves WHOOP workout metrics", () => {
+test("wearable metric normalization converts energy-burned to total calories and preserves WHOOP workout metrics", () => {
   assert.deepEqual(
     normalizeWearableMetricValue("energy-burned", 418.4, "kJ"),
     {
-      key: "activeCalories",
+      key: "totalCalories",
       unit: "kcal",
       value: 100,
     },
   );
-  assert.equal(
+  assert.deepEqual(
     normalizeWearableMetricValue("energy-burned", 418.4, null),
-    null,
+    {
+      key: "totalCalories",
+      unit: "kcal",
+      value: 418.4,
+    },
   );
 
   const records = canonicalizeDeviceBatchPayload({
@@ -205,7 +209,7 @@ test("wearable metric normalization converts energy-burned and preserves WHOOP w
 
   assert.deepEqual(observationMetrics, [
     {
-      metric: "activeCalories",
+      metric: "totalCalories",
       unit: "kcal",
       value: 100,
     },
