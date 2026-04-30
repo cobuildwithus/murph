@@ -39,6 +39,11 @@
       "types": "./dist/device-providers/raw-ingest-envelope.d.ts",
       "import": "./dist/device-providers/raw-ingest-envelope.js",
       "default": "./dist/device-providers/raw-ingest-envelope.js"
+    },
+    "./sample-series-summary": {
+      "types": "./dist/sample-series-summary.d.ts",
+      "import": "./dist/sample-series-summary.js",
+      "default": "./dist/sample-series-summary.js"
     }
   },
   "scripts": {
