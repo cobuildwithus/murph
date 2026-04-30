@@ -319,6 +319,8 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.appended",
   "mailbox.dedupe_conflict",
   "mailbox.imported",
+  "mailbox.parser_drain_failed",
+  "mailbox.parser_jobs_failed",
   "mailbox.system_processed",
   "mailbox.quarantined",
   "mailbox.retryable_payload_missing",
