@@ -46,6 +46,7 @@ export interface AssistantSessionResolutionFields {
   actorId?: string | null
   alias?: string | null
   allowBindingRebind?: boolean
+  bindingDeliveryTarget?: string | null
   approvalPolicy?: AssistantApprovalPolicy | null
   channel?: string | null
   codexHome?: string | null

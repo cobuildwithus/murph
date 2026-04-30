@@ -4599,6 +4599,7 @@ describe('assistant auto-reply runtime', () => {
     expect(inboxServices.show).not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: 'real_thread_initial',
         conversation: expect.objectContaining({
           threadId: 'hid_thread_initial',
         }),
@@ -4993,6 +4994,7 @@ describe('assistant auto-reply runtime', () => {
       expect.objectContaining({
         deliveryReplyToMessageId: '<real-email-msg-initial@example.test>',
         deliveryTarget: hostedEmailThreadTarget,
+        bindingDeliveryTarget: hostedEmailThreadTarget,
       }),
     )
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)

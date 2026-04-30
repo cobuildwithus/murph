@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import type {
   HostedExecutionConversationMessageWake,
@@ -8,6 +8,12 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+  hashNullableHostedAssistantConversationIdentifier,
+  type HostedAssistantConversationIdentifierBlind,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import {
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
@@ -339,7 +345,10 @@ function createHostedConversationAssistantInputEvent(input: {
   item: HostedMailboxResolvedImportItem;
   wake: HostedExecutionConversationMessageWake;
 }): UpsertAssistantInputEventInput {
-  const identifierBlind = createHostedAssistantInputIdentifierBlind(input);
+  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+    secret: readHostedConversationAssistantIdentifierSecret(input.wake),
+    userId: input.item.item.userId,
+  });
   const content = createHostedConversationAssistantInputContent(
     input.wake,
     identifierBlind,
@@ -357,12 +366,18 @@ function createHostedConversationAssistantInputEvent(input: {
       input.wake,
     ),
     sourceRef: {
-      dedupeKey: hashNullableHostedAssistantInputIdentifier(
+      dedupeKey: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         input.item.item.dedupeKey,
       ),
-      eventId: hashHostedAssistantInputIdentifier(identifierBlind, input.wake.eventId),
-      itemId: hashHostedAssistantInputIdentifier(identifierBlind, input.item.item.id),
+      eventId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.wake.eventId,
+      ),
+      itemId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.item.item.id,
+      ),
       kind: "hosted-mailbox",
       lane: input.item.item.lane,
       laneSeq: safeHostedAssistantInputTokenOrHash(input.item.item.laneSeq),
@@ -376,7 +391,7 @@ function createHostedConversationAssistantInputEvent(input: {
 
 function createHostedConversationAssistantInputContent(
   wake: HostedExecutionConversationMessageWake,
-  identifierBlind: HostedAssistantInputIdentifierBlind,
+  identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["content"] {
   const text = createHostedConversationAssistantInputText(wake);
   return {
@@ -438,21 +453,21 @@ function createHostedConversationAssistantInputText(
 
 function createHostedConversationAssistantInputConversation(
   wake: HostedExecutionConversationMessageWake,
-  identifierBlind: HostedAssistantInputIdentifierBlind,
+  identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
-      accountId: hashNullableHostedAssistantInputIdentifier(
+      accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         wake.message.phoneLookupKey,
       ),
-      actorId: hashNullableHostedAssistantInputIdentifier(
+      actorId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         wake.message.linqMessage.from,
       ),
       actorIsSelf: wake.message.linqMessage.isFromMe,
       source: "linq",
-      threadId: hashNullableHostedAssistantInputIdentifier(
+      threadId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         wake.message.linqMessage.chatId,
       ),
@@ -462,14 +477,14 @@ function createHostedConversationAssistantInputConversation(
 
   if (isHostedTelegramConversationMessageWake(wake)) {
     return {
-      accountId: hashNullableHostedAssistantInputIdentifier(
+      accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         "telegram:bot",
       ),
       actorId: null,
       actorIsSelf: false,
       source: "telegram",
-      threadId: hashNullableHostedAssistantInputIdentifier(
+      threadId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         wake.message.telegramMessage.threadId,
       ),
@@ -481,14 +496,14 @@ function createHostedConversationAssistantInputConversation(
     const threadIdentity =
       wake.message.threadKey ?? wake.message.threadTarget ?? wake.message.rawMessageKey;
     return {
-      accountId: hashNullableHostedAssistantInputIdentifier(
+      accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         wake.message.identityId ?? "email",
       ),
       actorId: null,
       actorIsSelf: false,
       source: "email",
-      threadId: hashNullableHostedAssistantInputIdentifier(
+      threadId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         threadIdentity,
       ),
@@ -497,6 +512,30 @@ function createHostedConversationAssistantInputConversation(
   }
 
   return null;
+}
+
+function readHostedConversationAssistantIdentifierSecret(
+  wake: HostedExecutionConversationMessageWake,
+): string {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return wake.message.phoneLookupKey;
+  }
+
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return wake.message.telegramMessage.threadId;
+  }
+
+  if (isHostedEmailConversationMessageWake(wake)) {
+    return (
+      wake.message.identityId
+      ?? wake.message.selfAddress
+      ?? wake.message.threadKey
+      ?? wake.message.threadTarget
+      ?? wake.message.rawMessageKey
+    );
+  }
+
+  return wake.eventId;
 }
 
 function createHostedConversationAssistantInputReplyTarget(
@@ -550,7 +589,7 @@ function normalizeHostedAssistantInputReplyTargetIdentifier(
 
 function createHostedConversationAssistantInputAttachmentDescriptors(
   wake: HostedExecutionConversationMessageWake,
-  identifierBlind: HostedAssistantInputIdentifierBlind,
+  identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): AssistantInputAttachmentDescriptor[] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return wake.message.linqMessage.parts.flatMap((part, index) => {
@@ -558,7 +597,7 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
         return [];
       }
       return [{
-        attachmentId: hashHostedAssistantInputIdentifier(
+        attachmentId: hashHostedAssistantConversationIdentifier(
           identifierBlind,
           part.attachmentId ?? `part_${index}`,
         ),
@@ -572,7 +611,7 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
 
   if (isHostedTelegramConversationMessageWake(wake)) {
     return (wake.message.telegramMessage.attachments ?? []).map((attachment) => ({
-      attachmentId: hashHostedAssistantInputIdentifier(
+      attachmentId: hashHostedAssistantConversationIdentifier(
         identifierBlind,
         attachment.fileId,
       ),
@@ -602,41 +641,6 @@ function createEmptyHostedConversationWakeMetrics(): HostedConversationWakeMetri
     nextWakeAt: null,
     parserProcessed: 0,
   };
-}
-
-interface HostedAssistantInputIdentifierBlind {
-  key: string;
-}
-
-function createHostedAssistantInputIdentifierBlind(input: {
-  item: HostedMailboxResolvedImportItem;
-  wake: HostedExecutionConversationMessageWake;
-}): HostedAssistantInputIdentifierBlind {
-  const key = createHash("sha256")
-    .update("murph.hosted-assistant-input.identifier-blind.v1")
-    .update("\0")
-    .update(input.item.item.userId)
-    .digest("hex");
-  return { key };
-}
-
-function hashHostedAssistantInputIdentifier(
-  blind: HostedAssistantInputIdentifierBlind,
-  value: string | null | undefined,
-): string {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return `hid_${createHmac("sha256", blind.key)
-    .update(normalized || "empty")
-    .digest("hex")
-    .slice(0, 32)}`;
-}
-
-function hashNullableHostedAssistantInputIdentifier(
-  blind: HostedAssistantInputIdentifierBlind,
-  value: string | null | undefined,
-): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized ? hashHostedAssistantInputIdentifier(blind, normalized) : null;
 }
 
 function safeHostedAssistantInputTokenOrHash(value: string | null | undefined): string {

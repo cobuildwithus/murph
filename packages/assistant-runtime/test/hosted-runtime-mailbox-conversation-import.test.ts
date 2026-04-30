@@ -18,6 +18,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   listAssistantInputEvents,
 } from "@murphai/assistant-engine";
 import {
@@ -219,6 +220,64 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.ok(replyTarget);
     assert.equal(replyTarget.messageId?.startsWith("hid_"), false);
     assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
+  });
+
+  test("caps staged assistant input text at the shared message budget", async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-input-long-"),
+    );
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const fullText = "a".repeat(ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH + 512);
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_long_text_001",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_long_text",
+          from: "+15550100000",
+          isFromMe: false,
+          messageId: "msg_synthetic_long_text",
+          parts: [
+            {
+              type: "text",
+              value: fullText,
+            },
+          ],
+        },
+        phoneLookupKey: "+15550100000",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_long_text_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    assert.equal(
+      listed.events[0]?.content.text?.length,
+      ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
+    );
+    assert.equal(
+      listed.events[0]?.content.text,
+      fullText.slice(0, ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH),
+    );
   });
 
   test("keeps email conversation metadata hashed while replyTarget uses private thread authority", async () => {

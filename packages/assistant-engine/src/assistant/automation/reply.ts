@@ -372,6 +372,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       captures: input.context.items.map((item) => item.summary),
       inputCandidates: input.context.items.map((item) => item.inputCandidate ?? null),
     }),
+    bindingDeliveryTarget: decision.deliveryTarget,
     captureIds: input.context.captureIds,
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryTarget: decision.deliveryTarget,
@@ -890,6 +891,7 @@ async function executeAssistantAutoReply(input: {
   acceptedTurnInputInitialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
+  bindingDeliveryTarget: string | null
   captureIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryTarget: string | null
@@ -929,6 +931,7 @@ async function executeAssistantAutoReply(input: {
       userMessageContent: input.userMessageContent,
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
+      bindingDeliveryTarget: input.bindingDeliveryTarget,
       deliveryDispatchMode: input.deliveryDispatchMode,
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,

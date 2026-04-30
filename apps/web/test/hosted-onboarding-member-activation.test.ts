@@ -1,4 +1,8 @@
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -345,6 +349,7 @@ describe("hosted onboarding member activation", () => {
     expect(buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: null,
+      memberId: "member_telegram_route",
       memberPhoneNumber: null,
       phoneLookupKey: null,
       telegramThreadId: "telegram_user_456:business:biz-42:dm-topic:9",
@@ -363,15 +368,24 @@ describe("hosted onboarding member activation", () => {
   });
 
   it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "hbidx:phone:v1:lookup",
+      userId: "member_linq_participant_route",
+    });
+
     expect(buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: "+15550100099",
+      memberId: "member_linq_participant_route",
       memberPhoneNumber: "+15550100001",
       phoneLookupKey: "hbidx:phone:v1:lookup",
       telegramThreadId: null,
       telegramUserId: null,
     })).toEqual({
-      actorId: "+15550100001",
+      actorId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "+15550100001",
+      ),
       channel: "linq",
       delivery: {
         kind: "participant",
@@ -381,8 +395,47 @@ describe("hosted onboarding member activation", () => {
         },
         target: "+15550100001",
       },
-      identityId: "hbidx:phone:v1:lookup",
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "hbidx:phone:v1:lookup",
+      ),
       threadId: null,
+      threadIsDirect: true,
+    });
+  });
+
+  it("builds a Linq thread welcome route with blinded assistant identifiers", () => {
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "hbidx:phone:v1:lookup",
+      userId: "member_linq_thread_route",
+    });
+
+    expect(buildHostedMemberActivationWelcomeRoute({
+      linqChatId: "chat_home_123",
+      linqRecipientPhone: null,
+      memberId: "member_linq_thread_route",
+      memberPhoneNumber: "+15550100001",
+      phoneLookupKey: "hbidx:phone:v1:lookup",
+      telegramThreadId: null,
+      telegramUserId: null,
+    })).toEqual({
+      actorId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "+15550100001",
+      ),
+      channel: "linq",
+      delivery: {
+        kind: "thread",
+        target: "chat_home_123",
+      },
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "hbidx:phone:v1:lookup",
+      ),
+      threadId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "chat_home_123",
+      ),
       threadIsDirect: true,
     });
   });

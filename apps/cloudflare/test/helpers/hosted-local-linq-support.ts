@@ -4,6 +4,10 @@ import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import { createHostedPhoneLookupKey } from "./hosted-contact-privacy.js";
 import {
@@ -475,6 +479,13 @@ export function buildHostedLinqSignupWelcomeWake(input: {
   occurredAt?: string;
   userId: string;
 }) {
+  const phoneLookupKey = requireLinqPhoneLookupKey(input.userId);
+  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+    secret: phoneLookupKey,
+    userId: input.userId,
+  });
+  const recipientPhoneNumber = buildLinqRecipientPhoneNumber(input.userId);
+
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: input.eventId,
     memberId: input.userId,
@@ -495,7 +506,10 @@ export function buildHostedLinqSignupWelcomeWake(input: {
         text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       },
       route: {
-        actorId: buildLinqRecipientPhoneNumber(input.userId),
+        actorId: hashHostedAssistantConversationIdentifier(
+          identifierBlind,
+          recipientPhoneNumber,
+        ),
         channel: "linq",
         delivery: {
           kind: "participant",
@@ -503,9 +517,12 @@ export function buildHostedLinqSignupWelcomeWake(input: {
             fromPhoneNumber: buildLinqHomePhoneNumber(input.userId),
             kind: "linq",
           },
-          target: buildLinqRecipientPhoneNumber(input.userId),
+          target: recipientPhoneNumber,
         },
-        identityId: requireLinqPhoneLookupKey(input.userId),
+        identityId: hashHostedAssistantConversationIdentifier(
+          identifierBlind,
+          phoneLookupKey,
+        ),
         threadId: null,
         threadIsDirect: true,
       },

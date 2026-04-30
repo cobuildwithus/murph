@@ -211,6 +211,7 @@ describe("hosted execution coverage gaps", () => {
 
     expect(exportKeys).toEqual([
       ".",
+      "./assistant-identifiers",
       "./auth",
       "./browser-vault",
       "./bundles",

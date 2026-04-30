@@ -2,6 +2,11 @@ import type {
   HostedExecutionAssistantNotificationRoute,
   HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+  hashNullableHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import { normalizePhoneNumber } from "./phone";
 
@@ -70,21 +75,35 @@ export function resolveHostedMemberChannels(input: {
 export function resolveHostedMemberAssistantNotificationRoute(input: {
   linqChatId: string | null;
   linqRecipientPhone?: string | null;
+  memberId: string;
   memberPhoneNumber?: string | null;
   messaging: HostedMemberMessagingState;
 }): HostedMemberAssistantNotificationRoute {
   const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
 
   if (input.linqChatId && input.messaging.phoneLookupKey) {
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: input.messaging.phoneLookupKey,
+      userId: input.memberId,
+    });
     return {
-      actorId: memberPhoneNumber,
+      actorId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        memberPhoneNumber,
+      ),
       channel: "linq",
       delivery: {
         kind: "thread",
         target: input.linqChatId,
       },
-      identityId: input.messaging.phoneLookupKey,
-      threadId: input.linqChatId,
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.messaging.phoneLookupKey,
+      ),
+      threadId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.linqChatId,
+      ),
       threadIsDirect: true,
     };
   }
@@ -92,8 +111,15 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
   const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
 
   if (memberPhoneNumber && linqRecipientPhone && input.messaging.phoneLookupKey) {
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: input.messaging.phoneLookupKey,
+      userId: input.memberId,
+    });
     return {
-      actorId: memberPhoneNumber,
+      actorId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        memberPhoneNumber,
+      ),
       channel: "linq",
       delivery: {
         kind: "participant",
@@ -103,7 +129,10 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
         },
         target: memberPhoneNumber,
       },
-      identityId: input.messaging.phoneLookupKey,
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.messaging.phoneLookupKey,
+      ),
       threadId: null,
       threadIsDirect: true,
     };

@@ -87,7 +87,7 @@ function bindingInputFromResolvedLocator(
   locator: ReturnType<typeof resolveConversationLocator>,
   input: AssistantSessionLocator,
 ): AssistantBindingPatch {
-  return {
+  const patch: AssistantBindingPatch = {
     actorId: locator.bindingFields.actorId,
     channel: locator.conversation.channel ?? null,
     deliveryKind: input.deliveryKind ?? null,
@@ -95,6 +95,12 @@ function bindingInputFromResolvedLocator(
     threadId: locator.conversation.threadId ?? null,
     threadIsDirect: locator.bindingFields.threadIsDirect,
   }
+
+  if ('bindingDeliveryTarget' in input) {
+    patch.deliveryTarget = input.bindingDeliveryTarget ?? null
+  }
+
+  return patch
 }
 
 export function bindingPatchFromLocator(
@@ -115,6 +121,9 @@ export function bindingPatchFromLocator(
   }
   if ('deliveryKind' in input) {
     patch.deliveryKind = input.deliveryKind ?? null
+  }
+  if ('bindingDeliveryTarget' in input) {
+    patch.deliveryTarget = input.bindingDeliveryTarget ?? null
   }
 
   return patch

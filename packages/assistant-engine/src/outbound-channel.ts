@@ -33,6 +33,7 @@ import {
 } from './assistant/store.js'
 import { redactAssistantSessionForDisplay } from './assistant/redaction.js'
 import {
+  normalizeNullableString,
   normalizeRequiredText,
   warnAssistantBestEffortFailure,
 } from './assistant/shared.js'
@@ -201,11 +202,16 @@ function resolvePersistedBinding(
     delivery.targetKind === 'thread' &&
     (binding.threadId !== delivery.target || binding.delivery.target !== delivery.target)
   ) {
+    const promoteThreadToAssistantIdentity =
+      shouldRetargetThreadDeliveryAsAssistantIdentity({
+        currentDeliveryTarget: binding.delivery.target,
+        currentThreadId: binding.threadId,
+      })
     return mergeAssistantBinding(binding, {
       channel: delivery.channel,
-      threadId: delivery.target,
       deliveryKind: 'thread',
       deliveryTarget: delivery.target,
+      ...(promoteThreadToAssistantIdentity ? { threadId: delivery.target } : {}),
     })
   }
 
@@ -213,11 +219,16 @@ function resolvePersistedBinding(
     binding.delivery?.kind === 'participant' &&
     delivery.targetKind === 'thread'
   ) {
+    const promoteThreadToAssistantIdentity =
+      shouldPromoteMaterializedThreadToAssistantIdentity({
+        bindingDeliveryTarget: binding.delivery.target,
+        currentActorId: binding.actorId,
+      })
     return mergeAssistantBinding(binding, {
       channel: delivery.channel,
-      threadId: delivery.target,
       deliveryKind: 'thread',
       deliveryTarget: delivery.target,
+      ...(promoteThreadToAssistantIdentity ? { threadId: delivery.target } : {}),
       threadIsDirect: binding.threadIsDirect ?? true,
     })
   }
@@ -237,6 +248,24 @@ function resolvePersistedBinding(
   return mergeAssistantBinding(binding, {
     channel: delivery.channel,
   })
+}
+
+function shouldPromoteMaterializedThreadToAssistantIdentity(input: {
+  bindingDeliveryTarget: string | null | undefined
+  currentActorId: string | null | undefined
+}): boolean {
+  const actorId = normalizeNullableString(input.currentActorId)
+  const deliveryTarget = normalizeNullableString(input.bindingDeliveryTarget)
+  return actorId !== null && actorId === deliveryTarget
+}
+
+function shouldRetargetThreadDeliveryAsAssistantIdentity(input: {
+  currentDeliveryTarget: string | null | undefined
+  currentThreadId: string | null | undefined
+}): boolean {
+  const threadId = normalizeNullableString(input.currentThreadId)
+  const deliveryTarget = normalizeNullableString(input.currentDeliveryTarget)
+  return threadId !== null && threadId === deliveryTarget
 }
 
 export async function deliverAssistantMessageOverBinding(

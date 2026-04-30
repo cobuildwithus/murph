@@ -6,6 +6,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/device-syncd/hosted-runtime": "../device-syncd/src/hosted-runtime.ts",
   "@murphai/gateway-core": "../gateway-core/src/index.ts",
   "@murphai/hosted-execution": "./src/index.ts",
+  "@murphai/hosted-execution/assistant-identifiers": "./src/assistant-identifiers.ts",
   "@murphai/hosted-execution/runtime-control": "./src/runtime-control.ts",
 } as const;
 

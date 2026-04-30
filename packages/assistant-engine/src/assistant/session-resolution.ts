@@ -72,6 +72,7 @@ export function buildResolveAssistantSessionInput(
           ? false
           : undefined
   const deliveryKind = input.deliveryKind ?? undefined
+  const bindingDeliveryTarget = input.bindingDeliveryTarget ?? undefined
 
   const defaultSandbox = providerConfig.policy.sandbox ?? 'danger-full-access'
   const defaultApprovalPolicy = providerConfig.policy.approvalPolicy ?? 'never'
@@ -87,6 +88,7 @@ export function buildResolveAssistantSessionInput(
     ...(threadId !== undefined ? { threadId } : {}),
     ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
     ...(deliveryKind !== undefined ? { deliveryKind } : {}),
+    ...(bindingDeliveryTarget !== undefined ? { bindingDeliveryTarget } : {}),
     target,
     provider: resolveAssistantChatProviderFromConfig(providerConfig),
     model: providerConfig.target.model,

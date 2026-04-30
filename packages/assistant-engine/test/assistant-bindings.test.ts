@@ -136,11 +136,16 @@ describe('assistant bindings', () => {
         actorId: 'participant-2',
         channel: 'linq',
         deliveryKind: 'participant',
+        deliveryTarget: '+15550100001',
         threadIsDirect: true,
-      }).delivery,
-    ).toEqual({
-      kind: 'participant',
-      target: 'participant-2',
+      }),
+    ).toMatchObject({
+      actorId: 'participant-2',
+      conversationKey: 'channel:linq|actor:participant-2',
+      delivery: {
+        kind: 'participant',
+        target: '+15550100001',
+      },
     })
 
     expect(
@@ -338,7 +343,23 @@ describe('assistant bindings', () => {
       'actor: actor-1',
       'thread: chat-99',
       'thread is direct: true',
-      'delivery: thread -> chat-99',
+      'delivery: thread route available',
+      'iMessage route note: when the user asks to text or remind them here, use this conversation route with internal channel "linq"; call it iMessage in user-facing text.',
+    ])
+
+    expect(getAssistantBindingContextLines(createAssistantBinding({
+      actorId: 'hid_linq_actor',
+      channel: 'linq',
+      deliveryKind: 'participant',
+      deliveryTarget: '+15550100001',
+      identityId: 'hid_linq_identity',
+      threadIsDirect: true,
+    }))).toEqual([
+      'channel: linq (user-facing: iMessage)',
+      'identity: hid_linq_identity',
+      'actor: hid_linq_actor',
+      'thread is direct: true',
+      'delivery: participant route available',
       'iMessage route note: when the user asks to text or remind them here, use this conversation route with internal channel "linq"; call it iMessage in user-facing text.',
     ])
 

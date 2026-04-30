@@ -250,7 +250,32 @@ describe('assistant session resolution', () => {
       reasoningEffort: 'medium',
       sandbox: null,
     })
+  })
+
+  it('keeps binding delivery target separate from message explicit target', () => {
+    const result = buildResolveAssistantSessionInput(
+      createResolutionInput({
+        actorId: 'hid_linq_actor',
+        bindingDeliveryTarget: '+15550100001',
+        channel: 'linq',
+        deliveryKind: 'participant',
+        identityId: 'hid_linq_identity',
+        provider: 'codex-cli',
+        threadIsDirect: true,
+      }),
+      createOperatorDefaults(),
+    )
+
+    expect(result).toMatchObject({
+      actorId: 'hid_linq_actor',
+      bindingDeliveryTarget: '+15550100001',
+      channel: 'linq',
+      deliveryKind: 'participant',
+      identityId: 'hid_linq_identity',
+      threadIsDirect: true,
     })
+    expect(result).not.toHaveProperty('deliveryTarget')
+  })
 
   it('resolves targets from boundary defaults, operator defaults, and explicit overrides in order', () => {
     const boundaryDefaultTarget = createDefaultLocalAssistantModelTarget()

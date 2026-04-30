@@ -253,7 +253,7 @@ function buildHostedAssistantNotificationLogDetails(
       actorId: route.actorId,
       channel: route.channel,
       identityId: route.identityId,
-      threadId: delivery.kind === "thread" ? delivery.target : route.threadId,
+      threadId: route.threadId,
       threadIsDirect: route.threadIsDirect,
     }),
   };
@@ -325,6 +325,8 @@ function buildAssistantNotificationInput(
 
   return {
     actorId: route.actorId,
+    bindingDeliveryTarget:
+      delivery.kind === "explicit" ? null : delivery.target,
     channel: route.channel,
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
     deliveryDispatchMode: forceQueueOnly
@@ -361,7 +363,7 @@ function buildAssistantNotificationInput(
       }
     },
     responsePolicy: wake.notification.responsePolicy ?? null,
-    threadId: delivery.kind === "thread" ? delivery.target : route.threadId,
+    threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
     turnTrigger: "automation-cron",
     vault,
