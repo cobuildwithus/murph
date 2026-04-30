@@ -47,16 +47,19 @@ relations:
     target: "biomarker:total-sleep-time"
   -
     type: "secondary_biomarker"
-    target: "biomarker:daytime-sleepiness"
+    target: "biomarker:sleep-efficiency"
   -
     type: "secondary_biomarker"
-    target: "biomarker:sleep-efficiency"
+    target: "biomarker:resting-heart-rate"
+  -
+    type: "secondary_biomarker"
+    target: "biomarker:hrv-rmssd"
   -
     type: "secondary_biomarker"
     target: "biomarker:sleep-onset-latency"
   -
     type: "secondary_biomarker"
-    target: "biomarker:hrv-rmssd"
+    target: "biomarker:daytime-sleepiness"
   -
     type: "cites"
     target: "source_artifact:consistent-wake-time-bibliography"
@@ -292,7 +295,7 @@ protocol:
     - "This is not a treatment for chronic insomnia, sleep apnea, narcolepsy, circadian rhythm sleep-wake disorders, bipolar mood destabilization, or shift-work fatigue."
     - "The strongest direct source used both bedtime and wake-time windows, so evidence for wake-time-only effects is limited."
     - "No extracted source validates an optimal universal wake-time window, adherence percentage, weekend tolerance, or consumer-wearable algorithm."
-    - "Lower wake-time variability is the primary behavior signal; health, metabolic, cardiovascular, mortality, sleep-stage, or disease-prevention benefits should not be inferred from observational context."
+    - "Lower wake-time variability shows the schedule behavior changed; do not count it as a downstream health win without preserved sleep and downstream signal change."
   logFields:
     - "target wake/rise window"
     - "final wake time"
@@ -323,16 +326,17 @@ testPlans:
     primaryBiomarkerKey: "biomarker:wake-time-variability"
     secondaryBiomarkerKeys:
       - "biomarker:total-sleep-time"
-      - "biomarker:daytime-sleepiness"
       - "biomarker:sleep-efficiency"
-      - "biomarker:sleep-onset-latency"
+      - "biomarker:resting-heart-rate"
       - "biomarker:hrv-rmssd"
+      - "biomarker:sleep-onset-latency"
+      - "biomarker:daytime-sleepiness"
     minimumAdherenceSessions: 20
     targetAdherenceSessions: 28
     notes:
-      - "Treat wake-time variability and target-window adherence as the primary behavior outcomes."
-      - "Track total sleep time or sleep opportunity and daytime sleepiness as safety guardrails; do not count short-sleep success as a clean win."
-      - "Sleep efficiency, sleep-onset latency, and HRV are secondary or exploratory context signals with mixed and confounded evidence."
+      - "Treat wake-time variability as behavior verification, not as a downstream health win."
+      - "Track total sleep time, sleep opportunity, and daytime sleepiness as safety guardrails; do not count short-sleep success as a clean win."
+      - "Use sleep efficiency, resting heart rate, HRV/RMSSD, and sleep-onset latency as measurable downstream signals; interpret autonomic changes cautiously because direct evidence is small and mixed."
       - "Use the same wearable and diary method across baseline and intervention when possible; manually correct obvious wake-time detection errors."
       - "The 7-day baseline and 28-day intervention are Murph-pragmatic defaults, not source-validated optimum lengths."
       - "Interpret the 20/28 minimum only after separating unsafe or medically appropriate safety overrides from ordinary missed adherence days."
@@ -340,22 +344,95 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: "biomarker:wake-time-variability"
-    description: "The protocol directly targets wake timing. If the chosen window is realistic and followed often enough, wake times should tighten."
+    description: "The wake window removes late sleep-ins and early-morning drift as recurring schedule noise. Diary or wearable wake times should cluster closer together when the anchor is realistic."
+    expected: "Wake times tighten"
+    estimatedChange:
+      kind: "absolute"
+      low: -45
+      high: -15
+      unit: "minutes"
+      window: "2-4 weeks"
+      confidence: "moderate"
+      basis: "Directly targeted behavior. A small 12-night regular-timing crossover reduced sleep-duration SD from 57 to 31 minutes; wake-time SD should move most when baseline drift exceeds the target window."
+    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:total-sleep-time"
-    description: "A stable wake time only helps if bedtime and time in bed adjust with it. Total sleep time may stay stable or improve when the anchor reduces drift without creating short sleep."
-  -
-    biomarkerKey: "biomarker:daytime-sleepiness"
-    description: "More regular timing may make mornings feel steadier, but sleepiness should improve only if the plan preserves enough sleep."
+    description: "The fixed wake anchor changes the back end of sleep. It works cleanly only when bedtime or time in bed shifts early enough to protect sleep opportunity, so total sleep should hold steady instead of being cut."
+    expected: "Should stay stable"
+    estimatedChange:
+      kind: "absolute"
+      low: -15
+      high: 15
+      unit: "minutes"
+      window: "2-4 weeks"
+      confidence: "moderate"
+      basis: "The protocol explicitly protects sleep opportunity, and a small 12-night regular-timing crossover reduced irregularity while average sleep duration stayed similar."
+    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:sleep-efficiency"
-    description: "A steadier wake time gives the body clock the same morning anchor each day. That can reduce night-to-night drift and make sleep less broken."
+    description: "A steadier wake anchor can make bedtime timing and sleep pressure less erratic, but direct actigraphy evidence is mixed. Treat sleep efficiency as context, not as a promised win."
+    expected: "Track as mixed context"
+    estimatedChange:
+      kind: "absolute"
+      low: 0
+      high: 3
+      unit: "%"
+      window: "4 weeks"
+      confidence: "mixed"
+      basis: "One 4-week regular-schedule study reported improved sleep efficiency; a small 12-night actigraphy crossover found sleep efficiency unchanged, so do not promise a directional change."
+    protocolProminence: "context"
   -
-    biomarkerKey: "biomarker:sleep-onset-latency"
-    description: "A consistent wake anchor may make sleep pressure and body-clock timing more predictable by evening, so falling asleep may become easier."
+    biomarkerKey: "biomarker:resting-heart-rate"
+    description: "More regular sleep timing can reduce morning sympathetic carryover. When the anchor lowers overnight strain without shortening sleep, resting pulse may drift down."
+    expected: "May drop slightly"
+    estimatedChange:
+      kind: "absolute"
+      low: -3
+      high: 0
+      unit: "bpm"
+      window: "2-4 weeks"
+      confidence: "low"
+      basis: "A small 12-night crossover found resting heart rate fell from 65 to 62 bpm after regular sleep timing; older autonomic findings were mixed."
+    protocolProminence: "context"
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "Regular timing can reduce sleep debt and night-to-night drift. If sleep becomes more stable, overnight strain may ease."
+    description: "Stable sleep timing can shift more of the night toward predictable recovery and less autonomic arousal. If that happens, RMSSD-style HRV may rise; sleep loss, alcohol, illness, or hard training can erase it."
+    expected: "May rise if recoverable"
+    estimatedChange:
+      kind: "absolute"
+      low: 0
+      high: 8
+      unit: "ms"
+      window: "2-4 weeks"
+      confidence: "mixed"
+      basis: "A small 12-night crossover increased RMSSD from 34 to 42 ms after regular sleep timing, while an older 6-day regularization study reported reduced daytime parasympathetic activity."
+    protocolProminence: "context"
+  -
+    biomarkerKey: "biomarker:sleep-onset-latency"
+    description: "The same wake anchor builds sleep pressure on a more repeatable schedule. When evening timing follows it, sleep onset may shorten because the body clock and tiredness converge closer to bedtime."
+    expected: "May fall asleep sooner"
+    estimatedChange:
+      kind: "absolute"
+      low: -10
+      high: 0
+      unit: "minutes"
+      window: "2-4 weeks"
+      confidence: "low"
+      basis: "Mechanism-led estimate; direct regularization evidence reports mixed or unchanged sleep measures, so treat sleep-onset latency as secondary."
+    protocolProminence: "context"
+  -
+    biomarkerKey: "biomarker:daytime-sleepiness"
+    description: "The anchor should reduce circadian whiplash, not force short sleep. Sleepiness should ease only when wake regularity comes with enough time asleep; a rise means the target is too early or too rigid."
+    expected: "Should fall, not rise"
+    estimatedChange:
+      kind: "absolute"
+      low: -2
+      high: 0
+      unit: "score points"
+      window: "4 weeks"
+      confidence: "low"
+      basis: "A 4-week regular-schedule study reported lower subjective sleepiness and better alertness when participants were not sleep deprived; scales vary across diaries."
+    protocolProminence: "context"
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
