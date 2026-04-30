@@ -37,13 +37,13 @@ relations:
     target: biomarker:estimated-vo2max
   -
     type: secondary_biomarker
+    target: biomarker:morning-blood-pressure
+  -
+    type: secondary_biomarker
     target: biomarker:resting-heart-rate
   -
     type: secondary_biomarker
     target: biomarker:hrv-rmssd
-  -
-    type: secondary_biomarker
-    target: biomarker:morning-blood-pressure
   -
     type: cites
     target: source_artifact:health.gov-physical-activity-guidelines-2018-11-12
@@ -114,9 +114,9 @@ testPlans:
     planId: zone2-aerobic-base-readout
     primaryBiomarkerKey: biomarker:estimated-vo2max
     secondaryBiomarkerKeys:
+      - biomarker:morning-blood-pressure
       - biomarker:resting-heart-rate
       - biomarker:hrv-rmssd
-      - biomarker:morning-blood-pressure
     durationDays: 35
     baselineDays: 7
     interventionDays: 28
@@ -124,16 +124,53 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:estimated-vo2max
-    description: "Regular easy cardio trains the heart, blood vessels, and muscles to deliver and use oxygen better. Over several weeks, that may lift a wearable cardio-fitness estimate."
-  -
-    biomarkerKey: biomarker:resting-heart-rate
-    description: "As aerobic fitness improves, the heart can pump more blood with each beat. Resting pulse can fall when fewer beats are needed."
-  -
-    biomarkerKey: biomarker:hrv-rmssd
-    description: "Easy aerobic work can build fitness without a large stress load. If recovery stays ahead of the dose, HRV can become steadier."
+    expected: Could improve
+    description: "Conversational cardio repeatedly asks the heart, blood vessels, and working muscle to move and use oxygen for fuel. Better stroke volume and muscle oxidative capacity can lift same-device VO₂ max or cardio-fitness estimates."
+    estimatedChange:
+      kind: absolute
+      low: 0.5
+      high: 2.5
+      unit: ml/kg/min
+      window: 4 weeks
+      confidence: low
+      basis: "A nearby 6-week moderate cycling RCT increased VO₂max by about 3.4 ml/kg/min; this 4-week, 3x/week conversational block is shorter and usually lower dose, so the protocol-level estimate is scaled down."
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:morning-blood-pressure
-    description: "Regular aerobic activity can help blood vessels relax and reduce resistance, so morning pressure may ease down."
+    expected: Could trend lower
+    description: "Easy aerobic work improves endothelial signaling and lowers vascular resistance. Morning cuff averages can drift down, especially when baseline pressure is above ideal."
+    estimatedChange:
+      kind: absolute
+      low: -4
+      high: 0
+      unit: mmHg systolic
+      window: 4-12 weeks
+      confidence: low
+      basis: "Closest 3-day/week walking RCT reported blood-pressure improvement after 12 weeks; the 6-week cycling RCT found no resting-BP change, so a short 4-week readout should expect small or no movement."
+    protocolProminence: focus
+  -
+    biomarkerKey: biomarker:resting-heart-rate
+    expected: Could trend lower
+    description: "Aerobic adaptation increases stroke volume and autonomic efficiency. When more blood moves per beat, overnight or morning resting pulse can settle lower."
+    estimatedChange:
+      kind: absolute
+      low: -3
+      high: 0
+      unit: bpm
+      window: 4-6 weeks
+      confidence: low
+      basis: "Aerobic adaptation can lower resting pulse, but the adjacent 6-week cycling RCT reported no significant resting-HR change; this makes a small fall or no change the defensible early estimate."
+    protocolProminence: focus
+  -
+    biomarkerKey: biomarker:hrv-rmssd
+    expected: Recovery check
+    description: "A recoverable cardio dose strengthens vagal braking during rest. RMSSD can rise or stay steadier; a drop alongside higher resting pulse flags under-recovery."
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4 weeks
+      confidence: low
+      basis: "The protocol sources support HRV as recovery context, not as an efficacy endpoint; RMSSD can rise with recoverable training or fall when sleep, illness, heat, or excess load dominates."
+    protocolProminence: context
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
@@ -211,4 +248,4 @@ A session counts when you do continuous easy cardio for 35-60 minutes and stay c
 
 ## What counts as a signal
 
-After a stable baseline, this asks whether a short block of easy conversational cardio feels repeatable, stays tolerable and symptom-free under the stop rules, and produces any interpretable early cardio-fitness signal worth continuing to watch.
+After a stable baseline, read the block through downstream objective trends: same-device VO₂ max or cardio-fitness first, then morning blood pressure and resting heart rate, with HRV/RMSSD as recovery context. Session completion, minutes, talk-test pass, symptoms, and burden help interpret the run; they are not the outcome wins.
