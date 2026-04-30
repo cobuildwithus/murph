@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
+import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail/biomarker-about-grid";
 import { RouteTabs } from "@/src/components/ui/route-tabs";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
@@ -69,6 +70,8 @@ export function BiomarkerLayoutClient({
             All biomarkers
           </Link>
         </div>
+
+        <BiomarkerAboutGrid biomarker={biomarker} />
 
         <div className="w-full">
           <div ref={sentinelRef} aria-hidden="true" className="h-px" />
