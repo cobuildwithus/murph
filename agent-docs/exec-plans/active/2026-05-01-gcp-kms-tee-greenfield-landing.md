@@ -24,7 +24,7 @@ Success criteria:
 
 ## State
 
-in_progress
+in_progress - hosted-local crypto harness follow-up
 
 ## Done
 
@@ -34,10 +34,11 @@ in_progress
 - Applied web/runtime crypto hardening and focused tests.
 - Focused Cloudflare/web/runtime-state tests passed.
 - Cloudflare, hosted-web, runtime-state, and hosted-execution owner typechecks passed after a test env fix.
+- Ported the supplied hosted-local follow-up onto the partial landing: local KMS shim, generated local authority signing key, generated hosted-local crypto/wake/web encryption state, and default protection against pulled remote hosted-crypto values.
 
 ## Now
 
-- Review diff shape, run required audit passes, then run final verification.
+- Run focused hosted-local/web crypto tests and repair any type/test fallout.
 
 ## Next
 

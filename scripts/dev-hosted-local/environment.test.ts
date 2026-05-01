@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertLocalWorkerOidcEnvironment,
+  buildHostedLocalStateEnvFileText,
   buildHostedRunnerLocalBuildId,
   buildHostedLocalDevOverrides,
   buildWranglerEnvFileText,
@@ -54,11 +55,28 @@ const callbackPrivateJwkJson = JSON.stringify({
   x: "callback-x",
   y: "callback-y",
 });
-const hostedCryptoAuthorityEnv = {
-  HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/test/cryptoKeyVersions/1",
-  HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
-    "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
-} as const;
+const generatedPrivateJwkJson = JSON.stringify({
+  crv: "P-256",
+  d: "generated-d",
+  kty: "EC",
+  x: "generated-x",
+  y: "generated-y",
+});
+const generatedPublicJwkJson = JSON.stringify({
+  crv: "P-256",
+  kty: "EC",
+  x: "generated-x",
+  y: "generated-y",
+});
+const generatedAuthorityPrivateJwkJson = JSON.stringify({
+  crv: "P-256",
+  d: "authority-d",
+  kty: "EC",
+  x: "authority-x",
+  y: "authority-y",
+});
+const generatedAuthorityPublicPem =
+  "-----BEGIN PUBLIC KEY-----\nLOCAL_AUTHORITY_PUBLIC_KEY\n-----END PUBLIC KEY-----\n";
 
 describe("parseEnvText", () => {
   it("parses dotenv text values verbatim", () => {
@@ -137,7 +155,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
-        ...hostedCryptoAuthorityEnv,
+        HOSTED_CRYPTO_ENV: "local",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:9998",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "stale-token",
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:9999",
@@ -145,20 +163,14 @@ describe("mergeCloudflareLocalEnv", () => {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
       },
       oidcIdentity,
+      createEnvelopeKey: () => "generated-envelope",
       createJwkPair: () => ({
-        privateJwkJson: JSON.stringify({
-          crv: "P-256",
-          d: "generated-d",
-          kty: "EC",
-          x: "generated-x",
-          y: "generated-y",
-        }),
-        publicJwkJson: JSON.stringify({
-          crv: "P-256",
-          kty: "EC",
-          x: "generated-x",
-          y: "generated-y",
-        }),
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
       }),
     });
 
@@ -168,12 +180,36 @@ describe("mergeCloudflareLocalEnv", () => {
       "cloudflare-automation:local",
     );
     expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toBe(
-      hostedCryptoAuthorityEnv.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION,
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1",
     );
-    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
-      hostedCryptoAuthorityEnv.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(generatedAuthorityPublicPem);
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
+    expect(merged.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBe("local://murph-hosted-kms");
+    expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
     );
-    expect(merged.HOSTED_CRYPTO_ENV).toBe("development");
+    expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
+      generatedAuthorityPrivateJwkJson,
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
+    expect(merged.HOSTED_WAKE_ENCRYPTION_KEY).toBe("generated-envelope");
+    expect(merged.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON).toBe(
+      JSON.stringify({ v1: "generated-envelope" }),
+    );
+    expect(merged.HOSTED_WEB_ENCRYPTION_KEY).toBe("generated-envelope");
+    expect(merged.HOSTED_WEB_ENCRYPTION_KEYRING_JSON).toBe(
+      JSON.stringify({ v1: "generated-envelope" }),
+    );
+    expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON).toBe(
+      JSON.stringify({
+        v1: {
+          crv: "P-256",
+          kty: "EC",
+          x: "callback-x",
+          y: "callback-y",
+        },
+      }),
+    );
     expect(merged.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL).toBe("http://127.0.0.1:9998");
     expect(merged.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN).toBe("stale-token");
     expect(merged.ALLOW_LOCAL_INTERNAL_PROXY).toBe("true");
@@ -190,7 +226,6 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
-        ...hostedCryptoAuthorityEnv,
         LINQ_API_BASE_URL: "http://127.0.0.1:9999",
       },
       oidcIdentity,
@@ -204,16 +239,106 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.LINQ_API_TOKEN).toBe("linq-local-test-token");
   });
 
-  it("fails closed when local web crypto authority env is missing", () => {
-    expect(() =>
-      mergeCloudflareLocalEnv({
-        config: localConfig,
-        existing: {},
-        oidcIdentity,
-      })
-    ).toThrow(
-      "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION must be configured so local Cloudflare can verify web-hosted runtime crypto contexts.",
+  it("keeps local generated hosted crypto keys ahead of pulled Vercel values by default", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/prod/locations/global/keyRings/prod/cryptoKeys/web-wrap",
+      },
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
+    expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
     );
+  });
+
+  it("regenerates local hosted crypto state instead of reusing stale remote dev vars by default", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/prod/cryptoKeyVersions/1",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nREMOTE\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://cloudkms.googleapis.com/v1",
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/prod/locations/global/keyRings/prod/cryptoKeys/web-wrap",
+        HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "stale-remote-wrap",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
+      },
+      oidcIdentity,
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1",
+    );
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
+      generatedAuthorityPublicPem,
+    );
+    expect(merged.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBe("local://murph-hosted-kms");
+    expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
+    expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
+  });
+
+  it("allows explicitly opted-in remote hosted crypto keys", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/prod/cryptoKeyVersions/1",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nREMOTE\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/prod/locations/global/keyRings/prod/cryptoKeys/web-wrap",
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "1",
+      },
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("production");
+    expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
+      "projects/prod/locations/global/keyRings/prod/cryptoKeys/web-wrap",
+    );
+    expect(merged.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBeUndefined();
+    expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBeUndefined();
+    expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBeUndefined();
   });
 
   it("drops stale local Codex bridge proxy values when the bridge is disabled", () => {
@@ -223,7 +348,6 @@ describe("mergeCloudflareLocalEnv", () => {
         localCodexBridge: false,
       },
       existing: {
-        ...hostedCryptoAuthorityEnv,
         MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
       },
@@ -242,7 +366,6 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
-        ...hostedCryptoAuthorityEnv,
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
       },
       oidcIdentity,
@@ -262,7 +385,6 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
-        ...hostedCryptoAuthorityEnv,
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
       },
       oidcIdentity,
@@ -275,7 +397,6 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
-        ...hostedCryptoAuthorityEnv,
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
       },
       oidcIdentity,
@@ -293,7 +414,6 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
-        ...hostedCryptoAuthorityEnv,
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:9999",
       },
       oidcIdentity,
@@ -331,10 +451,18 @@ describe("buildHostedLocalDevOverrides", () => {
         x: "cloudflare-x",
         y: "cloudflare-y",
       }),
-      HOSTED_CRYPTO_ENV: "development",
+      HOSTED_CRYPTO_ENV: "local",
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+      HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+        "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
+      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
       HOSTED_WAKE_ENCRYPTION_KEY: "worker-wake-key",
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-worker-wake-key\"}",
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "worker:v2",
+      HOSTED_WEB_ENCRYPTION_KEY: "web-key",
+      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{\"web:v1\":\"web-key\"}",
+      HOSTED_WEB_ENCRYPTION_KEY_VERSION: "web:v1",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
     });
@@ -349,9 +477,17 @@ describe("buildHostedLocalDevOverrides", () => {
       HOSTED_WEB_BASE_URL: "http://localhost:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:local",
-      HOSTED_CRYPTO_ENV: "development",
+      HOSTED_CRYPTO_ENV: "local",
       HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/test/cryptoKeyVersions/1",
       HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+      HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+        "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
+      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
+      HOSTED_WEB_ENCRYPTION_KEY: "web-key",
+      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{\"web:v1\":\"web-key\"}",
+      HOSTED_WEB_ENCRYPTION_KEY_VERSION: "web:v1",
       VERCEL_PROJECT_PRODUCTION_URL: "localhost:3000",
     });
     expect(JSON.parse(overrides.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK ?? "")).toEqual({
@@ -365,6 +501,14 @@ describe("buildHostedLocalDevOverrides", () => {
       kty: "EC",
       x: "callback-x",
       y: "callback-y",
+    });
+    expect(JSON.parse(overrides.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON ?? "")).toEqual({
+      "callback:v1": {
+        crv: "P-256",
+        kty: "EC",
+        x: "callback-x",
+        y: "callback-y",
+      },
     });
   });
 
@@ -598,6 +742,41 @@ describe("buildWranglerEnvFileText", () => {
         MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
       }),
     ).toContain('MURPH_DEV_CODEX_APP_SERVER_PROXY_URL="tcp://127.0.0.1:4123"');
+  });
+
+  it("keeps web-only hosted-local crypto state out of worker env files", () => {
+    const text = buildWranglerEnvFileText({
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+      HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+        "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
+      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
+      HOSTED_WEB_ENCRYPTION_KEY: "web-key",
+      HOSTED_WEB_ENCRYPTION_KEY_VERSION: "web:v1",
+    });
+
+    expect(text).not.toContain("HOSTED_CRYPTO_GCP_KMS_API_ROOT=");
+    expect(text).not.toContain("HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME=");
+    expect(text).not.toContain("HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK=");
+    expect(text).not.toContain("HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY=");
+    expect(text).not.toContain("HOSTED_WEB_ENCRYPTION_KEY=");
+    expect(text).not.toContain("HOSTED_WEB_ENCRYPTION_KEY_VERSION=");
+  });
+
+  it("writes only hosted-local keyring state for persistence", () => {
+    const text = buildHostedLocalStateEnvFileText({
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: generatedPrivateJwkJson,
+      HOSTED_CRYPTO_ENV: "local",
+      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
+      LINQ_API_TOKEN: "remote-linq-token",
+    });
+
+    expect(text).toContain("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK=");
+    expect(text).toContain('HOSTED_CRYPTO_ENV="local"');
+    expect(text).toContain('HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY="local-wrap-key"');
+    expect(text).toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=");
+    expect(text).not.toContain("LINQ_API_TOKEN");
   });
 });
 

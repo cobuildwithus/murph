@@ -150,6 +150,19 @@ export async function deleteHostedEmailRawMessage(input: {
   );
 }
 
+export async function hostedEmailRawMessageUserPrefix(
+  rootKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "email-raw",
+    value: `user:${userId}`,
+  });
+  return `${HOSTED_EMAIL_RAW_MESSAGE_OBJECT_PREFIX}/${userSegment}/`;
+}
+
 export async function readHostedEmailMessageBytes(
   input: HostedEmailWorkerRequest["raw"],
   options: {
@@ -257,12 +270,7 @@ async function hostedEmailRawMessageObjectKey(
   userId: string,
   rawMessageKey: string,
 ): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "email-raw",
-    value: `user:${userId}`,
-  });
+  const userPrefix = await hostedEmailRawMessageUserPrefix(rootKey, userId);
   const messageSegment = await deriveHostedStorageOpaqueId({
     length: 40,
     rootKey,
@@ -270,7 +278,7 @@ async function hostedEmailRawMessageObjectKey(
     value: `message:${userId}:${rawMessageKey}`,
   });
 
-  return `${HOSTED_EMAIL_RAW_MESSAGE_OBJECT_PREFIX}/${userSegment}/${messageSegment}.eml`;
+  return `${userPrefix}${messageSegment}.eml`;
 }
 
 async function sha256Hex(input: Uint8Array): Promise<string> {

@@ -302,6 +302,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("routes local internal proxy requests onto the results.worker handler", async () => {
+    installOidcJwksFetch();
     const env = createWorkerEnv(undefined, {
       ALLOW_LOCAL_INTERNAL_PROXY: "true",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
@@ -752,7 +753,6 @@ describe("cloudflare worker routes", () => {
         ok: true,
         r2: {
           deletedObjectCount: 3,
-          deletedRootKeyEnvelope: true,
           skippedUserScopedPrefixes: false,
           supported: true,
           userScopedSkipReason: null,
@@ -782,7 +782,6 @@ describe("cloudflare worker routes", () => {
       ok: true,
       r2: {
         deletedObjectCount: 3,
-        deletedRootKeyEnvelope: true,
         skippedUserScopedPrefixes: false,
         supported: true,
         userScopedSkipReason: null,
@@ -934,6 +933,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
+    installOidcJwksFetch();
     const env = createWorkerEnv();
     const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
     const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
@@ -972,6 +972,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("rejects artifact writes when the request hash does not match the payload", async () => {
+    installOidcJwksFetch();
     const env = createWorkerEnv();
     const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
 
@@ -993,6 +994,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("keeps hosted artifact objects isolated per user", async () => {
+    installOidcJwksFetch();
     const env = createWorkerEnv();
     const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
     const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
@@ -1442,7 +1444,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       ok: true as const,
       r2: {
         deletedObjectCount: 0,
-        deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
         supported: true,
         userScopedSkipReason: null,

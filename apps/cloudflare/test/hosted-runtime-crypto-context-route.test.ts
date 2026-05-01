@@ -27,20 +27,11 @@ test("runtime user crypto context fetches signed ingress/runtime crypto context 
   const keyVersionName =
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
   const ingressRoot = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
-  const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 100 + index);
   const ingress = await createSignedWorkerEnvelope({
     domain: "ingress",
     keyVersionName,
     publicJwk: cloudflareRecipient.publicJwk,
     rootKey: ingressRoot,
-    signer: signer.privateKey,
-    userId: "user-1",
-  });
-  const runtime = await createSignedWorkerEnvelope({
-    domain: "runtime",
-    keyVersionName,
-    publicJwk: cloudflareRecipient.publicJwk,
-    rootKey: runtimeRoot,
     signer: signer.privateKey,
     userId: "user-1",
   });
@@ -62,7 +53,7 @@ test("runtime user crypto context fetches signed ingress/runtime crypto context 
     assert.equal(headers.get("x-hosted-execution-user-id"), "user-1");
     assert.equal(headers.has("x-hosted-execution-signature"), true);
     return new Response(JSON.stringify({
-      envelopes: { ingress, runtime },
+      envelopes: { ingress, runtime: { intentionallyInvalidForIngressOnlyRequest: true } },
       schema: "murph.hosted-runtime-crypto-context.v1",
       userId: "user-1",
     }), {
@@ -80,8 +71,8 @@ test("runtime user crypto context fetches signed ingress/runtime crypto context 
   });
 
   assert.deepEqual(crypto.rootKey, ingressRoot);
-  assert.deepEqual(crypto.ingressRootKey, ingressRoot);
-  assert.deepEqual(crypto.runtimeRootKey, runtimeRoot);
+  assert.equal(crypto.domain, "ingress");
+  assert.equal(crypto.rootKeyId, "udrk:ingress:test-root");
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 

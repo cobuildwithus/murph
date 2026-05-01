@@ -13,6 +13,7 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import { hostedEmailRawMessageUserPrefix } from "../src/hosted-email.ts";
 import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -222,7 +223,6 @@ describe("HostedUserRunner alarm routing", () => {
       ok: true,
       r2: {
         deletedObjectCount: 0,
-        deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
         supported: false,
       },
@@ -275,7 +275,6 @@ describe("HostedUserRunner alarm routing", () => {
       ok: true,
       r2: {
         deletedObjectCount: 0,
-        deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
         supported: false,
         userScopedSkipReason: "R2PrefixDeletionUnsupported",
@@ -307,7 +306,6 @@ describe("HostedUserRunner alarm routing", () => {
     await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
       ok: true,
       r2: {
-        deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
         userScopedSkipReason: "HostedUserCryptoRepairNeededError",
       },
@@ -327,7 +325,6 @@ describe("HostedUserRunner alarm routing", () => {
     await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
       ok: true,
       r2: {
-        deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
         supported: false,
         userScopedSkipReason: "R2PrefixDeletionUnsupported",
@@ -341,18 +338,26 @@ describe("HostedUserRunner alarm routing", () => {
   it("deletes user-scoped R2 prefixes and runner secrets when cleanup is fully supported", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const rootKey = getTestHostedRuntimeRootKey("runtime");
+    const ingressRootKey = getTestHostedRuntimeRootKey("ingress");
     const bundlePrefix = await hostedBundleUserPrefix(rootKey, "member_123");
     const artifactPrefix = await hostedArtifactUserPrefix(rootKey, "member_123");
     const browserVaultPrefix = await hostedBrowserVaultReplicaUserPrefix({
       rootKey,
       userId: "member_123",
     });
+    const emailRawPrefix = await hostedEmailRawMessageUserPrefix(ingressRootKey, "member_123");
+    const unrelatedEmailRawPrefix = await hostedEmailRawMessageUserPrefix(
+      ingressRootKey,
+      "other_member",
+    );
     const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, "member_123");
     await bucket.put(`${bundlePrefix}bundle.bundle.json`, "bundle");
     await bucket.put(`${artifactPrefix}artifact.artifact.bin`, "artifact");
     await bucket.put(`${browserVaultPrefix}replica.json`, "replica");
+    await bucket.put(`${emailRawPrefix}message.eml`, "raw email");
     await bucket.put(runnerSecretsKey, "runner secrets");
     await bucket.put("users/bundles/unrelated/vault/object.bundle.json", "unrelated");
+    await bucket.put(`${unrelatedEmailRawPrefix}message.eml`, "unrelated raw email");
     const { runner } = createRunnerHarness({
       bucket,
     });
@@ -361,8 +366,7 @@ describe("HostedUserRunner alarm routing", () => {
     await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
       ok: true,
       r2: {
-        deletedObjectCount: 4,
-        deletedRootKeyEnvelope: false,
+        deletedObjectCount: 5,
         skippedUserScopedPrefixes: false,
         supported: true,
         userScopedSkipReason: null,
@@ -373,12 +377,15 @@ describe("HostedUserRunner alarm routing", () => {
     expect(bucket.objects.has(`${bundlePrefix}bundle.bundle.json`)).toBe(false);
     expect(bucket.objects.has(`${artifactPrefix}artifact.artifact.bin`)).toBe(false);
     expect(bucket.objects.has(`${browserVaultPrefix}replica.json`)).toBe(false);
+    expect(bucket.objects.has(`${emailRawPrefix}message.eml`)).toBe(false);
     expect(bucket.objects.has(runnerSecretsKey)).toBe(false);
     expect(bucket.objects.get("users/bundles/unrelated/vault/object.bundle.json")).toBe("unrelated");
+    expect(bucket.objects.get(`${unrelatedEmailRawPrefix}message.eml`)).toBe("unrelated raw email");
     expect(new Set(bucket.deleted)).toEqual(new Set([
       `${bundlePrefix}bundle.bundle.json`,
       `${artifactPrefix}artifact.artifact.bin`,
       `${browserVaultPrefix}replica.json`,
+      `${emailRawPrefix}message.eml`,
       runnerSecretsKey,
     ]));
   });

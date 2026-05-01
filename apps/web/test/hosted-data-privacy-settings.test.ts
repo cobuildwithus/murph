@@ -100,7 +100,6 @@ beforeEach(() => {
         alarmCleared: true,
         configured: true,
         deleted: true,
-        deletedRootKeyEnvelope: true,
         errorCode: null,
         r2DeletedObjectCount: 1,
         r2SkippedUserScopedPrefixes: false,

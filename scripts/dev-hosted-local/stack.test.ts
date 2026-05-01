@@ -183,6 +183,7 @@ vi.mock("./environment.ts", () => ({
   buildHostedLocalDevOverrides: vi.fn(() => ({
     HOSTED_WEB_BASE_URL: "http://localhost:3000",
   })),
+  buildHostedLocalStateEnvFileText: vi.fn(() => 'HOSTED_CRYPTO_ENV="local"'),
   buildWranglerEnvFileText: vi.fn(() => 'HOSTED_WEB_BASE_URL="http://localhost:3000"'),
   buildWranglerLocalDevConfig: vi.fn(() => ({ name: "murph-hosted" })),
   buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://localhost:3000"]),
@@ -406,6 +407,22 @@ describe("hosted local dev stack", () => {
         mode: 0o600,
       },
     );
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/hosted-local-state.dev.vars",
+      'HOSTED_CRYPTO_ENV="local"\n',
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/hosted-local-state.dev.vars",
+      expect.stringContaining("apps/cloudflare/.dev.vars"),
+    );
+    expect(vi.mocked(rename)).not.toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars.backup",
+      expect.stringContaining("apps/cloudflare/.dev.vars"),
+    );
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(2);
     expect(startHostedLocalCodexBridge).toHaveBeenCalledWith(expect.objectContaining({
       codexCommand: "codex",
@@ -429,6 +446,50 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("scrubs pulled hosted crypto material unless remote hosted crypto keys are explicitly enabled", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const environmentModule = await import("./environment.ts");
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "remote-token",
+        HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://cloudkms.googleapis.com/v1",
+        HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: "{\"kty\":\"EC\",\"d\":\"remote\"}",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "remote-callback-private",
+        HOSTED_WEB_ENCRYPTION_KEY: "remote-web-key",
+        HOSTED_WAKE_ENCRYPTION_KEY: "remote-wake-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
+    expect(resolveInput?.overrides).toMatchObject({
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+    });
+    expect(resolveInput?.overrides?.HOSTED_CRYPTO_ENV).toBeUndefined();
+    expect(resolveInput?.overrides?.HOSTED_CRYPTO_GCP_ACCESS_TOKEN).toBeUndefined();
+    expect(resolveInput?.overrides?.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBeUndefined();
+    expect(resolveInput?.overrides?.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBeUndefined();
+    expect(resolveInput?.overrides?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
+    expect(resolveInput?.overrides?.HOSTED_WEB_ENCRYPTION_KEY).toBeUndefined();
+    expect(resolveInput?.overrides?.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
+
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.HOSTED_CRYPTO_GCP_ACCESS_TOKEN).toBeUndefined();
+    expect(cloudflareEnv.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBeUndefined();
+    expect(cloudflareEnv.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBeUndefined();
+    expect(cloudflareEnv.HOSTED_WEB_ENCRYPTION_KEY).toBeUndefined();
+    expect(cloudflareEnv.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
   });
 
   it("generates Health Commons once and starts the markdown watcher before web dev", async () => {
