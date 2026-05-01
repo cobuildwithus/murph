@@ -64,6 +64,15 @@ protocol:
   durationMinutes:
     min: 10
     max: 10
+  sessionShape:
+    label: One bedtime session
+    segments:
+      - label: silent meditation
+        kind: stimulus
+        durationMinutes: 10
+    ticks:
+      - "0"
+      - "10 min"
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
