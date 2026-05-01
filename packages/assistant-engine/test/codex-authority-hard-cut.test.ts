@@ -47,6 +47,22 @@ describe('Codex authority hard cut', () => {
     )
   })
 
+  it('does not hard-code hosted Codex model defaults in Murph config', async () => {
+    const hostedRuntime = await readWorkspacePackageSource(
+      'assistant-runtime/src/hosted-runtime/codex-config.ts',
+    )
+    const hostedOperatorConfig = await readWorkspacePackageSource(
+      'operator-config/src/hosted-assistant-config.ts',
+    )
+
+    expect(hostedRuntime).not.toContain('DEFAULT_HOSTED_CODEX_MODEL')
+    expect(hostedRuntime).not.toContain('model: runtimeEnv.HOSTED_ASSISTANT_MODEL')
+    expect(hostedOperatorConfig).not.toContain('DEFAULT_HOSTED_ASSISTANT_MODEL')
+    expect(hostedOperatorConfig).not.toContain(
+      'if (!normalizeHostedAssistantString(providerConfig.model))',
+    )
+  })
+
   it('does not materialize the displayed Codex default model into CLI turn selection', async () => {
     const source = await readWorkspacePackageSource(
       'assistant-cli/src/assistant/ui/chat-controller-models.ts',

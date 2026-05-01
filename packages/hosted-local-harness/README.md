@@ -54,7 +54,8 @@ Each command writes a redacted state file under:
 
 The state file records the profile, command, selected hosted-local env knobs,
 artifact directory, and service URLs once known. It is safe to upload in CI; any
-key/token/password/JWK/database URL-shaped values are redacted.
+key/token/password/JWK/database URL-shaped values, provider/user/contact
+identifiers, payload-like env values, and sensitive command args are redacted.
 
 ## Migration plan encoded by this package
 

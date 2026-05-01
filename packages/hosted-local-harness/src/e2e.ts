@@ -84,16 +84,20 @@ export async function runHostedLocalE2eSuite(
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
   const prepareRunnerBundle = input.prepareRunnerBundle === true;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
+  const vitestEnv = buildHostedLocalVitestEnv({
+    env,
+    injectSkipRunnerBundleEnv,
+  });
 
   try {
     if (prepareRunnerBundle) {
       await prepareHostedLocalRunnerBundle({ env, scenarios });
     }
-    await runHostedLocalVitest({ env, injectSkipRunnerBundleEnv, scenarios });
+    await runHostedLocalVitest({ env: vitestEnv, scenarios });
   } finally {
     await cleanupHostedRunnerContainers({
       cwd: repoRoot,
-      env,
+      env: vitestEnv,
       ignoreErrors: true,
     });
   }
@@ -118,19 +122,8 @@ async function prepareHostedLocalRunnerBundle(input: {
 
 async function runHostedLocalVitest(input: {
   env: NodeJS.ProcessEnv;
-  injectSkipRunnerBundleEnv: boolean;
   scenarios: readonly HostedLocalE2eScenario[];
 }): Promise<void> {
-  const env: NodeJS.ProcessEnv = input.injectSkipRunnerBundleEnv
-    ? {
-        ...input.env,
-        MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
-      }
-    : input.env;
-  if (input.injectSkipRunnerBundleEnv) {
-    delete env.MURPH_DEV_CF_WRANGLER_LOG_LEVEL;
-  }
-
   await runForegroundCommand({
     args: [
       "exec",
@@ -143,7 +136,23 @@ async function runHostedLocalVitest(input: {
     ],
     command: "pnpm",
     cwd: repoRoot,
-    env,
+    env: input.env,
     label: "Hosted local full-stack e2e suite",
   });
+}
+
+function buildHostedLocalVitestEnv(input: {
+  env: NodeJS.ProcessEnv;
+  injectSkipRunnerBundleEnv: boolean;
+}): NodeJS.ProcessEnv {
+  if (!input.injectSkipRunnerBundleEnv) {
+    return input.env;
+  }
+
+  const env: NodeJS.ProcessEnv = {
+    ...input.env,
+    MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
+  };
+  delete env.MURPH_DEV_CF_WRANGLER_LOG_LEVEL;
+  return env;
 }

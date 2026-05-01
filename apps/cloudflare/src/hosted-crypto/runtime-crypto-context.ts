@@ -1,0 +1,161 @@
+import {
+  buildHostedDomainRootWrapContext,
+  findHostedDomainRootWrap,
+  parseHostedDomainRootKeyEnvelope,
+  serializeAdditionalAuthenticatedData,
+  unwrapHostedDomainRootKeyWithP256Ecdh,
+  verifyHostedDomainRootEnvelopeSignatureWithPublicKey,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
+
+export interface HostedWorkerCryptoEnv {
+  HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION?: string;
+  HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: string;
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: string;
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: string;
+  HOSTED_CRYPTO_ENV: string;
+}
+
+export interface HostedRuntimeCryptoContextResponse {
+  envelopes: {
+    ingress: unknown;
+    runtime: unknown;
+  };
+  fetchedAt?: string;
+  schema: "murph.hosted-runtime-crypto-context.v1";
+  userId: string;
+}
+
+export interface UnwrappedHostedWorkerRuntimeRoots {
+  ingress: {
+    envelope: HostedDomainRootKeyEnvelopeV1;
+    rootKey: Uint8Array;
+  };
+  runtime: {
+    envelope: HostedDomainRootKeyEnvelopeV1;
+    rootKey: Uint8Array;
+  };
+}
+
+export async function unwrapHostedWorkerRuntimeRoots(input: {
+  context: HostedRuntimeCryptoContextResponse;
+  env: HostedWorkerCryptoEnv;
+}): Promise<UnwrappedHostedWorkerRuntimeRoots> {
+  assertHostedRuntimeCryptoContext(input.context);
+  const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
+  const [ingress, runtime] = await Promise.all([
+    unwrapWorkerDomainRoot({
+      domain: "ingress",
+      envelope: parseHostedDomainRootKeyEnvelope(input.context.envelopes.ingress),
+      env: input.env,
+      privateJwk,
+      userId: input.context.userId,
+    }),
+    unwrapWorkerDomainRoot({
+      domain: "runtime",
+      envelope: parseHostedDomainRootKeyEnvelope(input.context.envelopes.runtime),
+      env: input.env,
+      privateJwk,
+      userId: input.context.userId,
+    }),
+  ]);
+  return { ingress, runtime };
+}
+
+async function unwrapWorkerDomainRoot(input: {
+  domain: "ingress" | "runtime";
+  envelope: HostedDomainRootKeyEnvelopeV1;
+  env: HostedWorkerCryptoEnv;
+  privateJwk: JsonWebKey;
+  userId: string;
+}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
+  assertEnvelopeMatches({
+    domain: input.domain,
+    envelope: input.envelope,
+    userId: input.userId,
+  });
+  if (
+    input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION
+    && input.envelope.authoritySignature.keyVersionName
+      !== input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION
+  ) {
+    throw new Error(`Hosted ${input.domain} root envelope uses an unexpected authority signing key.`);
+  }
+  const valid = await verifyHostedDomainRootEnvelopeSignatureWithPublicKey({
+    envelope: input.envelope,
+    publicKeyPem: input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM.replace(/\\n/g, "\n"),
+  });
+  if (!valid) {
+    throw new Error(`Hosted ${input.domain} root envelope authority signature is invalid.`);
+  }
+  const wrap = findHostedDomainRootWrap({
+    envelope: input.envelope,
+    recipient: "cloudflare-automation-secret",
+  });
+  if (!wrap || wrap.kind !== "p256-ecdh-aesgcm") {
+    throw new Error(`Hosted ${input.domain} root envelope is missing Cloudflare automation wrap.`);
+  }
+  if (wrap.recipientKeyId !== input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID) {
+    throw new Error(`Hosted ${input.domain} root envelope uses an unexpected Cloudflare automation key.`);
+  }
+  const expectedContext = buildHostedDomainRootWrapContext({
+    domain: input.domain,
+    env: input.env.HOSTED_CRYPTO_ENV,
+    recipient: "cloudflare-automation-secret",
+    rootKeyId: input.envelope.rootKeyId,
+    userId: input.envelope.userId,
+  });
+  if (serializeAdditionalAuthenticatedData(expectedContext) !== serializeAdditionalAuthenticatedData(wrap.encryptionContext)) {
+    throw new Error(`Hosted ${input.domain} root envelope wrap context mismatch.`);
+  }
+  const rootKey = await unwrapHostedDomainRootKeyWithP256Ecdh({
+    privateJwk: input.privateJwk,
+    wrap,
+  });
+  if (rootKey.byteLength !== 32) {
+    throw new Error(`Hosted ${input.domain} root envelope decrypted to an invalid root length.`);
+  }
+  return { envelope: input.envelope, rootKey };
+}
+
+function assertEnvelopeMatches(input: {
+  domain: "ingress" | "runtime";
+  envelope: HostedDomainRootKeyEnvelopeV1;
+  userId: string;
+}): void {
+  if (input.envelope.userId !== input.userId) {
+    throw new Error("Hosted worker runtime crypto context userId mismatch.");
+  }
+  if (input.envelope.domain !== input.domain) {
+    throw new Error(`Hosted worker runtime crypto context expected ${input.domain} envelope.`);
+  }
+}
+
+function assertHostedRuntimeCryptoContext(value: HostedRuntimeCryptoContextResponse): void {
+  if (value.schema !== "murph.hosted-runtime-crypto-context.v1") {
+    throw new TypeError("Hosted runtime crypto context schema mismatch.");
+  }
+  if (!value.userId) {
+    throw new TypeError("Hosted runtime crypto context userId is required.");
+  }
+  if (!value.envelopes?.ingress || !value.envelopes?.runtime) {
+    throw new TypeError("Hosted runtime crypto context must include ingress and runtime envelopes.");
+  }
+}
+
+function parseP256PrivateJwk(value: string): JsonWebKey {
+  const jwk = JSON.parse(value) as JsonWebKey;
+  if (
+    jwk.kty !== "EC"
+    || jwk.crv !== "P-256"
+    || typeof jwk.d !== "string"
+    || typeof jwk.x !== "string"
+    || typeof jwk.y !== "string"
+    || jwk.d.length === 0
+    || jwk.x.length === 0
+    || jwk.y.length === 0
+  ) {
+    throw new TypeError("Cloudflare automation private JWK must be a P-256 EC private JWK with x, y, and d.");
+  }
+  return { crv: "P-256", d: jwk.d, kty: "EC", x: jwk.x, y: jwk.y };
+}

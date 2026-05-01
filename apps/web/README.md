@@ -41,6 +41,7 @@ The UI receives the composed `Experiment` view model, but public protocol prose,
 - hosted Linq and Telegram webhook ingress plus sparse routing state
 - per-user device connection ownership mapping plus token audit history
 - hosted member core, identity, routing, billing, email-authorization, and legal-consent slices
+- signed hosted user crypto root envelopes plus append-only crypto audit rows
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
@@ -96,6 +97,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - Cloudflare nudges the per-user runner only; it does not own a queue, mailbox
   cursor, or web-visible run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
+- `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
+  envelopes; plaintext roots are never stored
+- `hosted_user_crypto_audit` records hosted crypto authority events
 
 ## Key environment variables
 
@@ -174,6 +178,27 @@ Hosted onboarding extras:
 - `LINQ_API_BASE_URL`
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
+
+Hosted managed crypto:
+
+- `HOSTED_CRYPTO_ENV`
+- `HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME`
+- `HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION`
+- `HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
+- production Vercel OIDC / GCP Workload Identity Federation:
+  `HOSTED_CRYPTO_GCP_PROJECT_NUMBER`,
+  `HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL`,
+  `HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID`, and
+  `HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID`
+- local/dev escape hatch: `HOSTED_CRYPTO_GCP_ACCESS_TOKEN`
+- optional future recipients:
+  `HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK`,
+  `HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID`,
+  `HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID`,
+  `HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK`, and
+  `HOSTED_CRYPTO_RECOVERY_KEY_ID`
 
 Hosted AI usage metering:
 

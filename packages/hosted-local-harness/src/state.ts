@@ -58,6 +58,10 @@ const hostedLocalEnvPrefixAllowlist = [
 
 const secretKeyPattern =
   /(API[_-]?KEY|AUTH|COOKIE|CREDENTIAL|DATABASE_URL|DSN|ENCRYPTION|JWK|KEY|PASSWORD|PRIVATE|SECRET|SESSION|TOKEN)/iu;
+const identifierOrPayloadKeyPattern =
+  /(^|[_-])(ACCOUNT|ADDRESS|BODY|CHAT|CONTACT|EMAIL|EVENT|FROM|ID|IDENTITY|INBOX|LINQ|MAIL|MEMBER|MESSAGE|PAYLOAD|PHONE|RAW|RECIPIENT|ROUTE|SENDER|TELEGRAM|THREAD|USER|WORKSPACE)([_-]|$)/iu;
+const commandSensitiveKeyPattern =
+  /(^|[-_])(api[-_]?key|auth|contact|credential|database-url|dsn|email|encryption|from|id|inbox|jwk|key|linq|mail|member|message|password|phone|private|raw|recipient|sender|secret|session|telegram|thread|token|user)(=|$)/iu;
 const hostedLocalArtifactRoot = path.join(".artifacts", "hosted-local");
 
 export async function createHostedLocalHarnessState(
@@ -70,7 +74,7 @@ export async function createHostedLocalHarnessState(
   await mkdir(resolveHostedLocalRepoPath(artifactDir), { recursive: true });
   const state: HostedLocalHarnessState = {
     artifactDir,
-    command: input.command,
+    command: redactHostedLocalCommand(input.command),
     createdAt,
     cwd: formatHostedLocalStatePath(input.cwd ?? repoRoot),
     env: redactHostedLocalEnvironment(input.env),
@@ -159,7 +163,7 @@ function redactHostedLocalEnvironment(
     if (!shouldIncludeHostedLocalEnvKey(key)) {
       continue;
     }
-    redacted[key] = secretKeyPattern.test(key)
+    redacted[key] = shouldRedactHostedLocalEnvValue(key)
       ? "[redacted]"
       : redactHostedLocalStateValue(value);
   }
@@ -168,6 +172,17 @@ function redactHostedLocalEnvironment(
 
 function shouldIncludeHostedLocalEnvKey(key: string): boolean {
   return hostedLocalEnvPrefixAllowlist.some((prefix) => key === prefix || key.startsWith(prefix));
+}
+
+function shouldRedactHostedLocalEnvValue(key: string): boolean {
+  return secretKeyPattern.test(key) || identifierOrPayloadKeyPattern.test(key);
+}
+
+function redactHostedLocalCommand(command: readonly string[]): readonly string[] {
+  return command.map((entry) => {
+    const redacted = redactHostedLocalStateValue(entry);
+    return commandSensitiveKeyPattern.test(redacted) ? "[redacted]" : redacted;
+  });
 }
 
 function resolveHostedLocalRepoPath(value: string): string {

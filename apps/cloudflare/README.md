@@ -45,6 +45,10 @@ Root `pnpm dev` starts the same local Cloudflare container path and, by default,
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, and timestamps. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; bundle refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
 - Hosted raw email payloads now live under a durable encrypted prefix, are deleted after terminal wake cleanup when possible, and also carry a 1-hour R2 lifecycle backstop under `hosted-email/messages/` if eager cleanup misses them.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, and runner-secrets blobs. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
+- Runtime domain-root material comes from a signed web callback as ingress/runtime
+  envelopes only. Cloudflare verifies the GCP KMS authority signature and unwraps
+  only its configured P-256 automation recipient; it does not receive GCP KMS
+  decrypt credentials.
 
 ## Worker Contract
 
@@ -99,6 +103,11 @@ Optional execution vars and secrets:
 - `HOSTED_WAKE_ENCRYPTION_KEY_VERSION` and `HOSTED_WAKE_ENCRYPTION_KEYRING_JSON` for wake-payload key rotation inside the execution plane
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`, and `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` for staged key rotation or future envelope lanes
+- `HOSTED_CRYPTO_ENV`, `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`,
+  optional `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`,
+  `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`, and
+  `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK` when the runner unwraps
+  signed ingress/runtime root envelopes from web
 - Codex hosted assistant config plus `VERCEL_AI_API_KEY` for Vercel AI Gateway
 - `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`, `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED`, and `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing

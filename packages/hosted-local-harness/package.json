@@ -11,6 +11,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts",
+    "./compat": "./src/compat.ts",
+    "./harness": "./src/harness.ts",
     "./e2e": "./src/e2e.ts"
   },
   "scripts": {

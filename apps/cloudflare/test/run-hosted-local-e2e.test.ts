@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { rm } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -34,11 +35,31 @@ vi.mock("../../../scripts/dev-hosted-local/runtime.ts", () => ({
 }));
 
 describe("run-hosted-local-e2e", () => {
-  afterEach(() => {
+  afterEach(async () => {
+    const artifactDirs = new Set<string>();
+    for (const [, , options] of spawnMock.mock.calls) {
+      const artifactDir = options.env.MURPH_HOSTED_LOCAL_ARTIFACT_DIR;
+      if (artifactDir) {
+        artifactDirs.add(artifactDir);
+      }
+    }
+    for (const [cleanupInput] of cleanupHostedRunnerContainersMock.mock.calls) {
+      const artifactDir = cleanupInput.env.MURPH_HOSTED_LOCAL_ARTIFACT_DIR;
+      if (artifactDir) {
+        artifactDirs.add(artifactDir);
+      }
+    }
+
     spawnMock.mockReset();
     cleanupHostedRunnerContainersMock.mockReset();
     vi.resetModules();
     vi.restoreAllMocks();
+
+    await Promise.all(
+      [...artifactDirs].map((artifactDir) =>
+        rm(artifactDir, { force: true, recursive: true }),
+      ),
+    );
   });
 
   it("runs the full-stack hosted-local files in one vitest process and cleans up once", async () => {
@@ -89,14 +110,19 @@ function expectVitestSpawnCall(): void {
     "--no-coverage",
   ]);
   expect(typeof options?.cwd).toBe("string");
-  expect(options?.env === process.env).toBe(true);
+  expect(options?.env === process.env).toBe(false);
+  expect(options?.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
+  expect(options?.env.MURPH_HOSTED_LOCAL_RUN_ID).toEqual(expect.any(String));
+  expect(options?.env.MURPH_HOSTED_LOCAL_STATE_PATH).toEqual(expect.any(String));
+  expect(options?.env.MURPH_DEV_SKIP_RUNNER_BUNDLE).toBe("1");
   expect(options?.stdio).toBe("inherit");
 }
 
 function expectSingleCleanupCall(): void {
   expect(cleanupHostedRunnerContainersMock).toHaveBeenCalledTimes(1);
   const [cleanupInput] = cleanupHostedRunnerContainersMock.mock.calls[0] ?? [];
+  const [, , spawnOptions] = spawnMock.mock.calls[0] ?? [];
   expect(typeof cleanupInput?.cwd).toBe("string");
-  expect(cleanupInput?.env === process.env).toBe(true);
+  expect(cleanupInput?.env).toBe(spawnOptions?.env);
   expect(cleanupInput?.ignoreErrors).toBe(true);
 }
