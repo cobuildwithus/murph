@@ -13,6 +13,10 @@ import { compareAssistantInputCursors } from '../input-store.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
+  assistantAutomationInputSummaryFromCandidate,
+  type AssistantAutomationInputSummary,
+} from './input-summary.js'
+import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
 } from './evidence.js'
@@ -30,9 +34,6 @@ import {
   type AssistantRunEvent,
 } from './shared.js'
 
-type AssistantAutomationInputSummary = Awaited<
-  ReturnType<InboxServices['list']>
->['items'][number]
 type AssistantPreserveDocumentAttachmentsResult = Awaited<
   ReturnType<NonNullable<InboxServices['preserveDocumentAttachments']>>
 >
@@ -108,20 +109,20 @@ export async function scanAssistantAutomationOnce(input: {
 
   input.onEvent?.({
     type: 'scan.started',
-    details: `${candidates.length} capture(s)`,
+    details: `${candidates.length} input(s)`,
   })
 
-  const candidateSummaries = candidates.map((candidate) => candidate.summary)
-  const candidatesByCaptureId = new Map(
-    candidates.map((candidate) => [candidate.summary.captureId, candidate] as const),
+  const inputSummaries = candidates.map((candidate) => candidate.summary)
+  const candidatesByInputId = new Map(
+    candidates.map((candidate) => [candidate.summary.inputId, candidate] as const),
   )
-  const inputCandidatesByCaptureId = new Map(
+  const inputCandidatesByInputId = new Map(
     candidates.map((candidate) => [
-      candidate.summary.captureId,
+      candidate.summary.inputId,
       candidate.inputCandidate,
     ] as const),
   )
-  const preservedCaptureResults = new Map<
+  const preservedProjectionResults = new Map<
     string,
     AssistantPreserveDocumentAttachmentsResult
   >()
@@ -136,14 +137,11 @@ export async function scanAssistantAutomationOnce(input: {
     if (candidate.summary.attachmentCount === 0) {
       return
     }
-    if (
-      candidate.inputCandidate.projection.captureId === null ||
-      candidate.inputCandidate.projection.captureId !== candidate.summary.captureId
-    ) {
+    if (candidate.summary.projectionCaptureId === null) {
       return
     }
 
-    const existing = preservedCaptureResults.get(candidate.summary.captureId)
+    const existing = preservedProjectionResults.get(candidate.summary.projectionCaptureId)
     if (existing) {
       return
     }
@@ -152,10 +150,10 @@ export async function scanAssistantAutomationOnce(input: {
       const preserved = await input.inboxServices.preserveDocumentAttachments?.({
         vault: input.vault,
         requestId: input.requestId ?? null,
-        captureId: candidate.summary.captureId,
+        captureId: candidate.summary.projectionCaptureId,
       })
       if (preserved) {
-        preservedCaptureResults.set(candidate.summary.captureId, preserved)
+        preservedProjectionResults.set(candidate.summary.projectionCaptureId, preserved)
       }
     } catch {
       input.onEvent?.({
@@ -180,8 +178,8 @@ export async function scanAssistantAutomationOnce(input: {
     }
 
     const group = await collectAssistantAutoReplyGroup({
-      captures: candidateSummaries,
-      inputCandidatesByCaptureId,
+      inputSummaries,
+      inputCandidatesByInputId,
       startIndex: index,
       vault: input.vault,
     })
@@ -189,7 +187,7 @@ export async function scanAssistantAutomationOnce(input: {
     const groupItems = group.items.map((item) => ({
       ...item,
       inputCandidate:
-        candidatesByCaptureId.get(item.summary.captureId)?.inputCandidate ??
+        candidatesByInputId.get(item.summary.inputId)?.inputCandidate ??
         item.inputCandidate ??
         null,
     }))
@@ -199,7 +197,7 @@ export async function scanAssistantAutomationOnce(input: {
       continue
     }
 
-    replies.considered += context.captureCount
+    replies.considered += context.inputCount
     const replyResult = await processAssistantAutoReplyGroup({
       allowSelfAuthored: input.allowSelfAuthored ?? false,
       context,
@@ -235,7 +233,7 @@ export async function scanAssistantAutomationOnce(input: {
     await persistScanState()
 
     for (const item of context.items) {
-      const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
+      const groupCandidate = candidatesByInputId.get(item.summary.inputId)
       if (!groupCandidate) {
         continue
       }
@@ -384,35 +382,14 @@ function assistantAutomationCandidateFromInput(
 ): AssistantAutomationCandidate {
   return {
     inputCandidate: input,
-    summary: assistantInboxSummaryFromInputCandidate(input),
+    summary: assistantInputSummaryFromInputCandidate(input),
   }
 }
 
-function assistantInboxSummaryFromInputCandidate(
+function assistantInputSummaryFromInputCandidate(
   input: AssistantInputCandidate,
 ): AssistantAutomationInputSummary {
-  const conversation = input.event.conversation
-  const captureId = input.projection.captureId ?? input.event.inputId
-  return {
-    accountId: conversation?.accountId ?? null,
-    actorId: conversation?.actorId ?? null,
-    actorIsSelf: conversation?.actorIsSelf ?? false,
-    actorName: null,
-    attachmentCount: input.event.attachmentCount,
-    captureId,
-    createdAt: input.event.receivedAt ?? input.event.occurredAt,
-    envelopePath: `assistant-input-events/${input.event.inputId}.json`,
-    eventId: input.event.inputId,
-    externalId: input.event.inputId,
-    occurredAt: input.event.occurredAt,
-    promotions: [],
-    receivedAt: input.event.receivedAt,
-    source: input.event.source,
-    text: input.event.transcriptText ?? input.event.text,
-    threadId: conversation?.threadId ?? input.event.inputId,
-    threadIsDirect: conversation?.threadIsDirect ?? false,
-    threadTitle: null,
-  }
+  return assistantAutomationInputSummaryFromCandidate(input)
 }
 
 async function persistAssistantAutomationScanState(input: {

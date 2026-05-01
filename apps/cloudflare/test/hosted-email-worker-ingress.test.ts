@@ -335,6 +335,64 @@ describe("hosted email worker ingress", () => {
     })));
   });
 
+  it("omits prompt projection metadata when parsed email body text is unavailable", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user_123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+    const env = createWorkerEnv(bucket);
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        body: "",
+        from: "Owner <owner@example.com>",
+        to: replyAliasAddress,
+      }),
+      to: replyAliasAddress,
+    }, env);
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput?.body).toMatchObject({
+      eventId: expect.any(String),
+      identityId: "assistant@mail.example.test",
+      occurredAt: expect.any(String),
+      selfAddress: replyAliasAddress,
+    });
+    expect(appendInput?.body).not.toHaveProperty("attachmentSummaries");
+    expect(appendInput?.body).not.toHaveProperty("cc");
+    expect(appendInput?.body).not.toHaveProperty("from");
+    expect(appendInput?.body).not.toHaveProperty("subject");
+    expect(appendInput?.body).not.toHaveProperty("textPreview");
+    expect(appendInput?.body).not.toHaveProperty("to");
+  });
+
   it("posts hosted email appends to the mailbox callback route", async () => {
     const actualEmailIngressClient = await vi.importActual<
       typeof import("../src/web-control-plane-email-ingress.ts")
@@ -757,6 +815,7 @@ function createWorkerEnv(bucket: MemoryEncryptedR2Bucket): HostedEmailWorkerTest
 }
 
 function buildRawEmail(input: {
+  body?: string;
   extraHeaders?: string[];
   from: string;
   to: string;
@@ -767,7 +826,7 @@ function buildRawEmail(input: {
     `To: ${input.to}`,
     "Subject: hello",
     "",
-    "hello from murph",
+    input.body ?? "hello from murph",
   ].join("\r\n");
 }
 

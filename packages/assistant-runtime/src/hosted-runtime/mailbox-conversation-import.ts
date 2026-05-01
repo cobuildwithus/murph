@@ -467,10 +467,59 @@ function createHostedConversationAssistantInputText(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
-    return "Received an email message.";
+    return createHostedEmailConversationAssistantInputText(wake);
   }
 
   return "Received a hosted conversation message.";
+}
+
+function createHostedEmailConversationAssistantInputText(
+  wake: HostedExecutionConversationMessageWake & {
+    message: Extract<
+      HostedExecutionConversationMessageWake["message"],
+      { channel: "email" }
+    >;
+  },
+): string {
+  const bodyPreview = sanitizeHostedAssistantInputText(
+    wake.message.textPreview ?? "",
+  );
+  if (!bodyPreview) {
+    return "Received an email message.";
+  }
+
+  const lines = [
+    "Received an email message.",
+    renderHostedEmailPromptLine("Sender summary", wake.message.from),
+    renderHostedEmailPromptListLine("Recipient summary", wake.message.to),
+    renderHostedEmailPromptListLine("Cc summary", wake.message.cc),
+    renderHostedEmailPromptLine("Email subject", wake.message.subject),
+    `Email body preview - ${bodyPreview}`,
+  ];
+  return sanitizeHostedAssistantInputText(
+    lines.filter((line): line is string => line !== null).join("\n"),
+  ) ?? "Received an email message.";
+}
+
+function renderHostedEmailPromptLine(
+  label: string,
+  value: string | null | undefined,
+): string | null {
+  const sanitized = sanitizeHostedAssistantInputText(value ?? "");
+  return sanitized ? `${label} - ${sanitized}` : null;
+}
+
+function renderHostedEmailPromptListLine(
+  label: string,
+  values: readonly string[] | null | undefined,
+): string | null {
+  const sanitizedValues = (values ?? [])
+    .map((value) => sanitizeHostedAssistantInputText(value))
+    .filter((value): value is string => value !== null);
+  if (sanitizedValues.length === 0) {
+    return null;
+  }
+  return `${label} - ${sanitizedValues.join(", ")}`;
 }
 
 function createHostedConversationAssistantInputConversation(
@@ -613,6 +662,17 @@ function createHostedConversationAssistantInputSourceMetadata(
   wake: HostedExecutionConversationMessageWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["sourceMetadata"] {
+  if (isHostedEmailConversationMessageWake(wake)) {
+    const promptReady = Boolean(
+      sanitizeHostedAssistantInputText(wake.message.textPreview ?? ""),
+    );
+    return {
+      kind: "email",
+      promptReady,
+      promptUnavailableReason: promptReady ? null : "email.body_unavailable",
+    };
+  }
+
   if (!isHostedTelegramConversationMessageWake(wake)) {
     return null;
   }
@@ -680,6 +740,25 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
       fileName: null,
       kind: safeHostedAssistantInputTokenOrHash(attachment.kind),
       sizeBytes: normalizeHostedAssistantInputSize(attachment.fileSize),
+    }));
+  }
+
+  if (isHostedEmailConversationMessageWake(wake)) {
+    return (wake.message.attachmentSummaries ?? []).map((attachment, index) => ({
+      attachmentId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        [
+          "email",
+          String(index),
+          attachment.contentType ?? "",
+          attachment.fileName ?? "",
+          String(attachment.sizeBytes ?? ""),
+        ].join(":"),
+      ),
+      contentType: normalizeHostedAssistantInputMimeType(attachment.contentType),
+      fileName: normalizeHostedAssistantInputFileName(attachment.fileName),
+      kind: "email_attachment",
+      sizeBytes: normalizeHostedAssistantInputSize(attachment.sizeBytes),
     }));
   }
 
@@ -772,6 +851,16 @@ function normalizeHostedAssistantInputMimeType(value: string | null | undefined)
   const normalized = typeof value === "string" ? value.trim() : "";
   return /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
       .test(normalized)
+    ? normalized
+    : null;
+}
+
+function normalizeHostedAssistantInputFileName(value: string | null | undefined): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 &&
+    normalized.length <= 191 &&
+    /^[^/\\:?#[\]\r\n]{1,191}$/u.test(normalized) &&
+    !/^[a-z][a-z0-9+.-]*:\/\//iu.test(normalized)
     ? normalized
     : null;
 }

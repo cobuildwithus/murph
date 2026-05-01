@@ -18,6 +18,7 @@ import type {
   HostedExecutionWakeKind,
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
+  HostedExecutionEmailAttachmentSummary,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
 } from "./contracts.ts";
@@ -48,6 +49,7 @@ import {
   readNullableString,
   readNullableStringValue,
   readOptionalNullableString,
+  readOptionalStringArray,
 } from "./parsers/assertions.ts";
 import {
   parseHostedExecutionBundlePayload,
@@ -205,7 +207,31 @@ export function parseHostedExecutionConversationMessagePayload(
       };
     case "email":
       return {
+        ...(record.attachmentSummaries === undefined
+          ? {}
+          : {
+              attachmentSummaries: parseHostedExecutionEmailAttachmentSummaries(
+                record.attachmentSummaries,
+                "Hosted execution conversation.message wake payload attachmentSummaries",
+              ),
+            }),
         channel,
+        ...(record.cc === undefined
+          ? {}
+          : {
+              cc: readOptionalStringArray(
+                record.cc,
+                "Hosted execution conversation.message wake payload cc",
+              ),
+            }),
+        ...(record.from === undefined
+          ? {}
+          : {
+              from: readOptionalNullableString(
+                record.from,
+                "Hosted execution conversation.message wake payload from",
+              ),
+            }),
         identityId: readNullableStringValue(
           record.identityId,
           "Hosted execution conversation.message wake payload identityId",
@@ -230,6 +256,22 @@ export function parseHostedExecutionConversationMessagePayload(
                 "Hosted execution conversation.message wake payload selfAddress",
               ),
             }),
+        ...(record.subject === undefined
+          ? {}
+          : {
+              subject: readOptionalNullableString(
+                record.subject,
+                "Hosted execution conversation.message wake payload subject",
+              ),
+            }),
+        ...(record.textPreview === undefined
+          ? {}
+          : {
+              textPreview: readOptionalNullableString(
+                record.textPreview,
+                "Hosted execution conversation.message wake payload textPreview",
+              ),
+            }),
         ...(record.threadKey === undefined
           ? {}
           : {
@@ -246,8 +288,55 @@ export function parseHostedExecutionConversationMessagePayload(
                 "Hosted execution conversation.message wake payload threadTarget",
               ),
             }),
+        ...(record.to === undefined
+          ? {}
+          : {
+              to: readOptionalStringArray(
+                record.to,
+                "Hosted execution conversation.message wake payload to",
+              ),
+            }),
       };
   }
+}
+
+function parseHostedExecutionEmailAttachmentSummaries(
+  value: unknown,
+  label: string,
+): HostedExecutionEmailAttachmentSummary[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return value.map((entry, index) => {
+    const record = requireObject(entry, `${label}[${index}]`);
+    return {
+      ...(record.contentType === undefined
+        ? {}
+        : {
+            contentType: readOptionalNullableString(
+              record.contentType,
+              `${label}[${index}] contentType`,
+            ),
+          }),
+      ...(record.fileName === undefined
+        ? {}
+        : {
+            fileName: readOptionalNullableString(
+              record.fileName,
+              `${label}[${index}] fileName`,
+            ),
+          }),
+      ...(record.sizeBytes === undefined
+        ? {}
+        : {
+            sizeBytes: readNullableNumber(
+              record.sizeBytes,
+              `${label}[${index}] sizeBytes`,
+            ),
+          }),
+    };
+  });
 }
 
 function parseHostedExecutionOptionalTimeZone(

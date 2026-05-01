@@ -220,14 +220,26 @@ export interface HostedExecutionTelegramConversationMessagePayload {
   telegramMessage: HostedExecutionTelegramMessage;
 }
 
+export interface HostedExecutionEmailAttachmentSummary {
+  contentType?: string | null;
+  fileName?: string | null;
+  sizeBytes?: number | null;
+}
+
 export interface HostedExecutionEmailConversationMessagePayload {
+  attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   channel: "email";
+  cc?: string[];
+  from?: string | null;
   identityId: string | null;
   messageId?: string | null;
   rawMessageKey: string;
   selfAddress?: string | null;
+  subject?: string | null;
+  textPreview?: string | null;
   threadKey?: string | null;
   threadTarget?: string | null;
+  to?: string[];
 }
 
 export type HostedExecutionConversationMessagePayload =

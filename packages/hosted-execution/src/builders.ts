@@ -63,6 +63,15 @@ function cloneConversationMessagePayload(
     case "email":
       return {
         ...value,
+        ...(value.attachmentSummaries
+          ? {
+              attachmentSummaries: value.attachmentSummaries.map((attachment) => ({
+                ...attachment,
+              })),
+            }
+          : {}),
+        ...(value.cc ? { cc: [...value.cc] } : {}),
+        ...(value.to ? { to: [...value.to] } : {}),
       };
   }
 }
@@ -151,14 +160,20 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionEmailConversationMessageWake(input: {
+  attachmentSummaries?: HostedExecutionEmailConversationMessagePayload["attachmentSummaries"];
+  cc?: string[];
   eventId: string;
+  from?: string | null;
   identityId: string | null;
   messageId?: string | null;
   occurredAt: string;
   rawMessageKey: string;
   selfAddress?: string | null;
+  subject?: string | null;
+  textPreview?: string | null;
   threadKey?: string | null;
   threadTarget?: string | null;
+  to?: string[];
   userId: string;
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionEmailConversationMessagePayload;
@@ -167,13 +182,25 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
+      ...(input.attachmentSummaries === undefined
+        ? {}
+        : {
+            attachmentSummaries: input.attachmentSummaries.map((attachment) => ({
+              ...attachment,
+            })),
+          }),
       channel: "email",
+      ...(input.cc === undefined ? {} : { cc: [...input.cc] }),
+      ...(input.from === undefined ? {} : { from: input.from }),
       identityId: input.identityId,
       ...(input.messageId === undefined ? {} : { messageId: input.messageId }),
       rawMessageKey: input.rawMessageKey,
       ...(input.selfAddress === undefined ? {} : { selfAddress: input.selfAddress }),
+      ...(input.subject === undefined ? {} : { subject: input.subject }),
+      ...(input.textPreview === undefined ? {} : { textPreview: input.textPreview }),
       ...(input.threadKey === undefined ? {} : { threadKey: input.threadKey }),
       ...(input.threadTarget === undefined ? {} : { threadTarget: input.threadTarget }),
+      ...(input.to === undefined ? {} : { to: [...input.to] }),
     },
     occurredAt: input.occurredAt,
     userId: input.userId,

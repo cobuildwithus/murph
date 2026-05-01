@@ -17,6 +17,7 @@ import {
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
+import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 import {
   assistantResultArtifactExists,
   writeAssistantChatErrorArtifacts,
@@ -131,6 +132,34 @@ function createListCapture(
       },
     ],
   }).items[0]
+}
+
+function createInputSummary(
+  overrides: Partial<InboxListResult['items'][number]> &
+    Partial<AssistantAutomationInputSummary> = {},
+): AssistantAutomationInputSummary {
+  const capture = createListCapture(overrides)
+  return {
+    inputId: overrides.inputId ?? capture.captureId,
+    projectionCaptureId:
+      'projectionCaptureId' in overrides
+        ? overrides.projectionCaptureId ?? null
+        : capture.captureId,
+    source: capture.source,
+    conversation: overrides.conversation ?? {
+      accountId: capture.accountId,
+      actorId: capture.actorId,
+      actorIsSelf: capture.actorIsSelf,
+      source: capture.source,
+      threadId: capture.threadId,
+      threadIsDirect: capture.threadIsDirect,
+    },
+    occurredAt: capture.occurredAt,
+    receivedAt: capture.receivedAt,
+    text: capture.text,
+    attachmentCount: capture.attachmentCount,
+    actorIsSelf: capture.actorIsSelf,
+  }
 }
 
 function createTelegramAssistantInputCandidate(input: {
@@ -479,7 +508,7 @@ describe('assistant auto-reply grouping', () => {
   it('returns an empty group when the requested start capture is missing', async () => {
     await expect(
       collectAssistantAutoReplyGroup({
-        captures: [],
+        inputSummaries: [],
         startIndex: 4,
         vault: '/tmp/automation-support-vault',
       }),
@@ -491,20 +520,20 @@ describe('assistant auto-reply grouping', () => {
 
   it('groups adjacent email captures from the same thread and actor', async () => {
     const result = await collectAssistantAutoReplyGroup({
-      captures: [
-        createListCapture({
+      inputSummaries: [
+        createInputSummary({
           captureId: 'email-1',
           source: 'email',
           accountId: 'mailbox-1',
           threadId: 'thread-1',
         }),
-        createListCapture({
+        createInputSummary({
           captureId: 'email-2',
           source: 'email',
           accountId: 'mailbox-1',
           threadId: 'thread-1',
         }),
-        createListCapture({
+        createInputSummary({
           captureId: 'email-3',
           source: 'email',
           actorId: 'actor-2',
@@ -516,7 +545,7 @@ describe('assistant auto-reply grouping', () => {
     })
 
     expect(result.endIndex).toBe(1)
-    expect(result.items.map((item) => item.summary.captureId)).toEqual([
+    expect(result.items.map((item) => item.summary.projectionCaptureId)).toEqual([
       'email-1',
       'email-2',
     ])
@@ -525,22 +554,22 @@ describe('assistant auto-reply grouping', () => {
 
   it('groups adjacent linq captures from the same conversation lane', async () => {
     const result = await collectAssistantAutoReplyGroup({
-      captures: [
-        createListCapture({
+      inputSummaries: [
+        createInputSummary({
           captureId: 'linq-1',
           source: 'linq',
           accountId: 'linq-account-1',
           externalId: 'linq:1001',
           threadId: 'linq-thread-1',
         }),
-        createListCapture({
+        createInputSummary({
           captureId: 'linq-2',
           source: 'linq',
           accountId: 'linq-account-1',
           externalId: 'linq:1002',
           threadId: 'linq-thread-1',
         }),
-        createListCapture({
+        createInputSummary({
           captureId: 'linq-3',
           source: 'linq',
           accountId: 'linq-account-1',
@@ -553,102 +582,43 @@ describe('assistant auto-reply grouping', () => {
     })
 
     expect(result.endIndex).toBe(1)
-    expect(result.items.map((item) => item.summary.captureId)).toEqual([
+    expect(result.items.map((item) => item.summary.projectionCaptureId)).toEqual([
       'linq-1',
       'linq-2',
     ])
     expect(result.items.every((item) => item.telegramMetadata === null)).toBe(true)
   })
 
-  it('groups adjacent telegram captures from the same conversation even when album metadata differs', async () => {
-    const { vaultRoot } = await createTempVault('assistant-automation-support-')
-    const firstEnvelope = path.join(vaultRoot, 'inbox/telegram/capture-1.json')
-    const secondEnvelope = path.join(vaultRoot, 'inbox/telegram/capture-2.json')
-    const thirdEnvelope = path.join(vaultRoot, 'inbox/telegram/capture-3.json')
-
-    await mkdir(path.dirname(firstEnvelope), { recursive: true })
-
-    await writeFile(
-      firstEnvelope,
-      JSON.stringify({
-        input: {
-          raw: {
-            reply_context_preview: 'Replying to: Shared venue Coffee Shop',
-            schema: 'murph.telegram-capture.v1',
-            media_group_id: 'group-1',
-            message_id: '101',
-          },
-        },
-      }),
-      'utf8',
-    )
-    await writeFile(
-      secondEnvelope,
-      JSON.stringify({
-        input: {
-          raw: {
-            schema: 'murph.telegram-capture.v1',
-            media_group_id: 'group-2',
-            message_id: '102',
-          },
-        },
-      }),
-      'utf8',
-    )
-    await writeFile(
-      thirdEnvelope,
-      JSON.stringify({
-        input: {
-          raw: {
-            schema: 'murph.telegram-capture.v1',
-            media_group_id: 'group-2',
-            message_id: '103',
-          },
-        },
-      }),
-      'utf8',
-    )
-
+  it('groups adjacent telegram inputs without reading projected envelope metadata', async () => {
     const result = await collectAssistantAutoReplyGroup({
-      captures: [
-        createListCapture({
+      inputSummaries: [
+        createInputSummary({
           captureId: 'capture-1',
           envelopePath: 'inbox/telegram/capture-1.json',
         }),
-        createListCapture({
+        createInputSummary({
           captureId: 'capture-2',
           envelopePath: 'inbox/telegram/capture-2.json',
         }),
-        createListCapture({
+        createInputSummary({
           captureId: 'capture-3',
           actorId: 'actor-2',
           envelopePath: 'inbox/telegram/capture-3.json',
         }),
       ],
       startIndex: 0,
-      vault: vaultRoot,
+      vault: '/tmp/automation-support-vault',
     })
 
     expect(result.endIndex).toBe(1)
-    expect(result.items.map((item) => item.summary.captureId)).toEqual([
+    expect(result.items.map((item) => item.summary.projectionCaptureId)).toEqual([
       'capture-1',
       'capture-2',
     ])
-    expect(result.items.map((item) => item.telegramMetadata)).toEqual([
-      {
-        mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
-        messageId: '101',
-        replyContext: 'Replying to: Shared venue Coffee Shop',
-      },
-      {
-        mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
-        messageId: '102',
-        replyContext: null,
-      },
-    ])
+    expect(result.items.map((item) => item.telegramMetadata)).toEqual([null, null])
   })
 
-  it('uses assistant input Telegram metadata before synthetic envelope fallback', async () => {
+  it('uses assistant input Telegram metadata', async () => {
     const inputId = 'ain_0123456789abcdef0123456789abcdef'
     const candidate = createTelegramAssistantInputCandidate({
       inputId,
@@ -658,8 +628,9 @@ describe('assistant auto-reply grouping', () => {
     })
 
     const result = await collectAssistantAutoReplyGroup({
-      captures: [
-        createListCapture({
+      inputSummaries: [
+        createInputSummary({
+          inputId,
           captureId: inputId,
           envelopePath: `assistant-input-events/${inputId}.json`,
           eventId: inputId,
@@ -667,7 +638,7 @@ describe('assistant auto-reply grouping', () => {
           text: 'hello',
         }),
       ],
-      inputCandidatesByCaptureId: new Map([[inputId, candidate]]),
+      inputCandidatesByInputId: new Map([[inputId, candidate]]),
       startIndex: 0,
       vault: '/tmp/automation-support-vault',
     })

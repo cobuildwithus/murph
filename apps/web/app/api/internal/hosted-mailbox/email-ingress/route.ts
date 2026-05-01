@@ -23,14 +23,20 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(boundedRequest);
   const body = parseHostedEmailIngressWakeAppendRequest(await readOptionalJsonObject(boundedRequest));
   const envelope = buildHostedExecutionEmailConversationMessageWake({
+    ...(body.attachmentSummaries === undefined ? {} : { attachmentSummaries: body.attachmentSummaries }),
+    ...(body.cc === undefined ? {} : { cc: body.cc }),
     eventId: body.eventId,
+    ...(body.from === undefined ? {} : { from: body.from }),
     identityId: body.identityId,
     ...(body.messageId === undefined ? {} : { messageId: body.messageId }),
     occurredAt: body.occurredAt,
     rawMessageKey: body.rawMessageKey,
     ...(body.selfAddress === undefined ? {} : { selfAddress: body.selfAddress }),
+    ...(body.subject === undefined ? {} : { subject: body.subject }),
+    ...(body.textPreview === undefined ? {} : { textPreview: body.textPreview }),
     ...(body.threadKey === undefined ? {} : { threadKey: body.threadKey }),
     ...(body.threadTarget === undefined ? {} : { threadTarget: body.threadTarget }),
+    ...(body.to === undefined ? {} : { to: body.to }),
     userId,
   });
 

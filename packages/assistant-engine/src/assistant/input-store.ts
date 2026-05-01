@@ -192,8 +192,17 @@ const assistantInputTelegramSourceMetadataSchema = z
   })
   .strict()
 
+const assistantInputEmailSourceMetadataSchema = z
+  .object({
+    kind: z.literal('email'),
+    promptReady: z.boolean(),
+    promptUnavailableReason: safeNullableAssistantInputReasonCodeSchema(),
+  })
+  .strict()
+
 const assistantInputSourceMetadataSchema = z
   .discriminatedUnion('kind', [
+    assistantInputEmailSourceMetadataSchema,
     assistantInputTelegramSourceMetadataSchema,
   ])
   .nullable()
