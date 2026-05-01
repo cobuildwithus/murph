@@ -19,7 +19,6 @@ import {
   type HealthCommonsEntity,
   type HealthCommonsRouteBundleReader,
 } from "@murphai/health-commons/runtime";
-import { isBrowserVaultMetricBinding } from "./biomarker-bindings";
 import {
   cleanHealthCommonsUserFacingCopy,
   cleanHealthCommonsUserFacingCopyList,
@@ -281,8 +280,7 @@ function isPublishedBiomarker(
     && (entity.biomarker?.explainerCards?.length ?? 0) > 0
     && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
     && (entity.protocolRanking?.candidates?.length ?? 0) > 0
-    && entity.communityOutcomeSummary != null
-    && (entity.biomarker?.privateMetricBindings?.some(isBrowserVaultMetricBinding) ?? false);
+    && entity.communityOutcomeSummary != null;
 }
 
 function buildBiomarkerClaims(

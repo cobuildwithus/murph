@@ -49,18 +49,19 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
   const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
 
-  const dataVersion = ref?.dataVersion ?? null;
-
   const load = useCallback(async () => {
     setStatus("loading");
     setError(null);
 
     try {
-      const result = await loadBrowserVaultReplica(dataVersion);
+      const result = await loadBrowserVaultReplica(ref);
 
       if (result.state === "not_modified") {
+        if (!client) {
+          throw new Error("Browser vault replica was unchanged but no decrypted client was available.");
+        }
         setRef(result.replicaRef);
-        setStatus(client ? "ready" : "empty");
+        setStatus("ready");
         return;
       }
 
@@ -78,7 +79,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
       setStatus("error");
       setError(normalizeBrowserVaultError(loadError));
     }
-  }, [client, dataVersion]);
+  }, [client, ref]);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,12 +128,12 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<BrowserVaultContextValue>(() => ({
     client,
-    dataVersion,
+    dataVersion: ref?.dataVersion ?? null,
     error,
     ref,
     refresh: load,
     status,
-  }), [client, dataVersion, error, load, ref, status]);
+  }), [client, error, load, ref, status]);
 
   return (
     <BrowserVaultContext.Provider value={value}>
@@ -156,12 +157,14 @@ type BrowserVaultSessionLoadResult =
   | { replicaRef: HostedBrowserVaultReplicaRef; state: "not_modified" }
   | { client: BrowserVaultQueryClient; replicaRef: HostedBrowserVaultReplicaRef; state: "ready" };
 
-async function loadBrowserVaultReplica(knownDataVersion: string | null): Promise<BrowserVaultSessionLoadResult> {
+async function loadBrowserVaultReplica(
+  knownReplicaRef: HostedBrowserVaultReplicaRef | null,
+): Promise<BrowserVaultSessionLoadResult> {
   const { privateKeyJwk, publicKeyJwk } = await generateHostedUserRecipientKeyPair();
   const response = await fetch("/api/browser-vault/session", {
     body: JSON.stringify({
       browserPublicKeyJwk: publicKeyJwk,
-      knownDataVersion,
+      knownDataVersion: knownReplicaRef?.dataVersion ?? null,
     }),
     credentials: "same-origin",
     headers: {
@@ -185,11 +188,21 @@ async function loadBrowserVaultReplica(knownDataVersion: string | null): Promise
   }
 
   if (session.state === "not_modified") {
+    assertBrowserVaultNotModifiedRefMatchesKnown({
+      knownRef: knownReplicaRef,
+      ref: session.replicaRef,
+    });
+
     return {
       replicaRef: session.replicaRef,
       state: "not_modified",
     };
   }
+
+  assertBrowserVaultReplicaAadMatchesRef({
+    aad: session.replicaAad,
+    ref: session.replicaRef,
+  });
 
   const replicaKey = await unwrapHostedBrowserSessionKey({
     envelope: session.replicaKeyEnvelope,
@@ -215,6 +228,10 @@ async function loadBrowserVaultReplica(knownDataVersion: string | null): Promise
 
   if (replica.source.dataVersion !== session.replicaRef.dataVersion) {
     throw new Error("Browser vault replica dataVersion did not match its session ref.");
+  }
+
+  if (replica.source.sourceBundleHash !== session.replicaRef.sourceBundleHash) {
+    throw new Error("Browser vault replica sourceBundleHash did not match its session ref.");
   }
 
   return {
@@ -300,6 +317,64 @@ interface BrowserVaultReplicaAad {
   schema: "murph.browser-vault-replica.v1";
   sourceBundleHash: string;
   userId: string;
+}
+
+function assertBrowserVaultReplicaAadMatchesRef(input: {
+  aad: BrowserVaultReplicaAad;
+  ref: HostedBrowserVaultReplicaRef;
+}): void {
+  if (input.aad.dataVersion !== input.ref.dataVersion) {
+    throw new Error("Browser vault replica AAD dataVersion did not match its session ref.");
+  }
+
+  if (input.aad.objectKey !== input.ref.objectKey) {
+    throw new Error("Browser vault replica AAD objectKey did not match its session ref.");
+  }
+
+  if (input.aad.sourceBundleHash !== input.ref.sourceBundleHash) {
+    throw new Error("Browser vault replica AAD sourceBundleHash did not match its session ref.");
+  }
+}
+
+function assertBrowserVaultNotModifiedRefMatchesKnown(input: {
+  knownRef: HostedBrowserVaultReplicaRef | null;
+  ref: HostedBrowserVaultReplicaRef;
+}): void {
+  if (!input.knownRef) {
+    throw new Error("Browser vault unchanged session response did not have a known replica ref.");
+  }
+
+  if (input.ref.byteLength !== input.knownRef.byteLength) {
+    throw new Error("Browser vault unchanged session byteLength did not match the known ref.");
+  }
+
+  if (input.ref.dataVersion !== input.knownRef.dataVersion) {
+    throw new Error("Browser vault unchanged session dataVersion did not match the known ref.");
+  }
+
+  if (input.ref.generatedAt !== input.knownRef.generatedAt) {
+    throw new Error("Browser vault unchanged session generatedAt did not match the known ref.");
+  }
+
+  if (input.ref.keyId !== input.knownRef.keyId) {
+    throw new Error("Browser vault unchanged session keyId did not match the known ref.");
+  }
+
+  if (input.ref.objectKey !== input.knownRef.objectKey) {
+    throw new Error("Browser vault unchanged session objectKey did not match the known ref.");
+  }
+
+  if (input.ref.replicaSchema !== input.knownRef.replicaSchema) {
+    throw new Error("Browser vault unchanged session replicaSchema did not match the known ref.");
+  }
+
+  if (input.ref.schema !== input.knownRef.schema) {
+    throw new Error("Browser vault unchanged session schema did not match the known ref.");
+  }
+
+  if (input.ref.sourceBundleHash !== input.knownRef.sourceBundleHash) {
+    throw new Error("Browser vault unchanged session sourceBundleHash did not match the known ref.");
+  }
 }
 
 function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaultReplicaAad {
