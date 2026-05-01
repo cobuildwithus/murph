@@ -48,6 +48,8 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
+const ROUTING_INDEX_KEY = Buffer.alloc(32, 1);
+
 vi.mock("@murphai/device-syncd/public-ingress", async () => {
   const actual = await vi.importActual<typeof import("@murphai/device-syncd/public-ingress")>("@murphai/device-syncd/public-ingress");
   return {
@@ -94,6 +96,7 @@ vi.mock("@/src/lib/device-sync/env", () => ({
     encryptionKeyVersion: "v1",
     isProduction: false,
     publicBaseUrl: "https://control.example.test/api/device-sync",
+    routingIndexKey: ROUTING_INDEX_KEY,
   })),
 }));
 
@@ -103,6 +106,7 @@ function createHostedEnv(overrides: Partial<{
   encryptionKeyVersion: string;
   isProduction: boolean;
   publicBaseUrl: string | null;
+  routingIndexKey: Buffer;
 }> = {}) {
   return {
     allowedReturnOrigins: [],
@@ -110,6 +114,7 @@ function createHostedEnv(overrides: Partial<{
     encryptionKeyVersion: "v1",
     isProduction: false,
     publicBaseUrl: "https://control.example.test/api/device-sync",
+    routingIndexKey: ROUTING_INDEX_KEY,
     ...overrides,
   };
 }
@@ -236,7 +241,7 @@ import {
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
 function buildPublicConnectionId(connectionId: string): string {
-  return createHostedBrowserConnectionId("01234567890123456789012345678901", connectionId);
+  return createHostedBrowserConnectionId(ROUTING_INDEX_KEY, connectionId);
 }
 
 describe("appendHostedDeviceSyncWake", () => {

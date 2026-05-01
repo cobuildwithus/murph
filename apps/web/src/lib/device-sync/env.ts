@@ -131,7 +131,7 @@ function assertRemovedDeviceSyncDevAuthEnvUnset(source: NodeJS.ProcessEnv): void
 
 function assertRemovedDeviceSyncEncryptionEnvUnset(source: NodeJS.ProcessEnv): void {
   const configuredKeys = REMOVED_DEVICE_SYNC_ENCRYPTION_ENV_KEYS.filter((key) =>
-    Boolean(normalizeNullableString(source[key])),
+    Object.prototype.hasOwnProperty.call(source, key),
   );
 
   if (configuredKeys.length === 0) {

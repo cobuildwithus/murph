@@ -1,6 +1,6 @@
 # Land hosted crypto hard-cut device-sync patch
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -60,10 +60,12 @@ Updated: 2026-05-02
 
 ## Verification
 
-- Commands to run:
+- Passed:
   - `node scripts/check-hosted-crypto-hardcut.mjs`
-  - focused apps/web tests covering env/device-sync changed surfaces
+  - `pnpm exec vitest run apps/web/test/env.test.ts apps/web/test/device-sync-hosted-wake.test.ts apps/web/test/prisma-store-oauth-connection.test.ts --config apps/web/vitest.config.ts --no-coverage`
   - `pnpm --dir apps/web typecheck`
-  - `git diff --check`
-- Expected outcomes:
-  - Checks pass, or any unrelated dirty-tree blocker is named precisely.
+  - `pnpm typecheck`
+  - `git diff --check` for scoped follow-up files
+- Required security/privacy, coverage-write, and task-finish-review passes
+  completed; follow-up fixes were landed for env presence rejection, guard
+  allowlist narrowing, and focused test coverage.

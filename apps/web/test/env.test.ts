@@ -92,6 +92,16 @@ describe("readHostedDeviceSyncEnvironment", () => {
     ).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY.*no longer supported/u);
   });
 
+  it("rejects blank removed device-sync encryption env keys by presence", () => {
+    expect(() =>
+      readHostedDeviceSyncEnvironment({
+        NODE_ENV: "test",
+        DEVICE_SYNC_ENCRYPTION_KEY: " ",
+        HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
+      }),
+    ).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY.*no longer supported/u);
+  });
+
   it("rejects the removed development auth fallback env", () => {
     expect(() =>
       readHostedDeviceSyncEnvironment({

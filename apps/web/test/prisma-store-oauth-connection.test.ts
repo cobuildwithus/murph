@@ -733,6 +733,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
       prisma: {
         deviceConnection: {
           findMany: async () => [cloneConnection(connection)],
@@ -762,6 +763,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
       prisma: {
         deviceConnection: {
           findUnique: async ({ where }: { where: { provider_providerAccountBlindIndex: { provider: string; providerAccountBlindIndex: string } } }) =>
@@ -799,6 +801,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
       prisma: {
         deviceConnection: {
           findFirst: async () => cloneConnection(connection),
