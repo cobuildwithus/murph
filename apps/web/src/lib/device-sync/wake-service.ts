@@ -20,7 +20,9 @@ import type {
 
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { nudgeHostedRunnerBestEffort } from "../hosted-runner/control";
+import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
+import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
+import { HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS } from "../hosted-onboarding/webhook-nudge-policy";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
@@ -277,8 +279,8 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
       });
     },
     complete: traceId
-      ? async (tx) => {
-          await input.store.completeWebhookTrace(input.account.provider, traceId, tx);
+      ? async () => {
+          await input.store.completeWebhookTrace(input.account.provider, traceId);
         }
       : undefined,
   });
@@ -334,23 +336,57 @@ async function persistHostedDeviceSyncWake(input: {
   wake: HostedExecutionWake;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
-  complete?(tx: HostedPrismaTransactionClient): Promise<void>;
+  complete?(): Promise<void>;
 }): Promise<void> {
   // Webhook retries rebuild fresh signal rows, so the canonical wake identity must stay
   // tied to the stable wake event id instead of the transient signal primary key.
+  let mailboxItemId: string | null = null;
+
   await input.store.prisma.$transaction(async (tx) => {
     await input.persist(tx);
-    await appendHostedMailboxEnvelopeTx({
+    const mailboxAppend = await appendHostedMailboxEnvelopeTx({
       envelope: input.wake,
       tx,
     });
-    await input.complete?.(tx);
+    mailboxItemId = mailboxAppend.item.id;
   });
 
-  void nudgeHostedRunnerBestEffort({
+  if (!mailboxItemId) {
+    throw deviceSyncError({
+      code: "HOSTED_DEVICE_SYNC_WAKE_MAILBOX_APPEND_MISSING",
+      httpStatus: 503,
+      message: "Hosted device-sync wake could not be queued for runner handoff.",
+      retryable: true,
+    });
+  }
+
+  const nudgeResult = await nudgeHostedRunnerUserBestEffortResult({
     context: "device-sync.wake",
+    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
     userId: input.wake.userId,
   });
+
+  if (nudgeResult.accepted) {
+    await input.complete?.();
+    return;
+  }
+
+  try {
+    await startHostedWebhookNudgeWorkflow({
+      mailboxItemId,
+      source: "device-sync",
+    });
+  } catch (error) {
+    throw deviceSyncError({
+      cause: error,
+      code: "HOSTED_DEVICE_SYNC_NUDGE_WORKFLOW_START_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted device-sync wake is temporarily unavailable.",
+      retryable: true,
+    });
+  }
+
+  await input.complete?.();
 }
 
 function buildHostedDeviceSyncSignalPayload(input: {
