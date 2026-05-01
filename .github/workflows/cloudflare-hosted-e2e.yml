@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - ".github/workflows/cloudflare-hosted-e2e.yml"
+      - "package.json"
       - "apps/cloudflare/**"
       - "packages/assistant-engine/**"
       - "packages/assistant-runtime/**"
       - "packages/cloudflare-hosted-control/**"
       - "packages/hosted-execution/**"
+      - "packages/hosted-local-harness/**"
       - "scripts/dev-hosted-local/**"
+      - "scripts/hosted-local.ts"
+      - "scripts/hosted-local.test.ts"
   workflow_dispatch:
 
 permissions:
@@ -68,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm --dir apps/cloudflare test:e2e:device-connect:local 2>&1 \
+          pnpm hosted-local e2e device-connect 2>&1 \
             | tee .artifacts/cloudflare-hosted-e2e/device-connect.log
 
       - name: Upload device connect E2E logs
@@ -76,7 +80,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cloudflare-hosted-e2e-device-connect-logs
-          path: .artifacts/cloudflare-hosted-e2e/device-connect.log
+          path: |
+            .artifacts/cloudflare-hosted-e2e/device-connect.log
+            .artifacts/hosted-local/**/state.json
           if-no-files-found: warn
 
   linq-delivery:
@@ -120,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm --dir apps/cloudflare test:e2e:linq-delivery:local 2>&1 \
+          pnpm hosted-local e2e linq-delivery 2>&1 \
             | tee .artifacts/cloudflare-hosted-e2e/linq-delivery.log
 
       - name: Upload Linq delivery E2E logs
@@ -128,7 +134,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cloudflare-hosted-e2e-linq-delivery-logs
-          path: .artifacts/cloudflare-hosted-e2e/linq-delivery.log
+          path: |
+            .artifacts/cloudflare-hosted-e2e/linq-delivery.log
+            .artifacts/hosted-local/**/state.json
           if-no-files-found: warn
 
   telegram-delivery:
@@ -172,7 +180,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
-          pnpm --dir apps/cloudflare test:e2e:telegram:local 2>&1 \
+          pnpm hosted-local e2e telegram 2>&1 \
             | tee .artifacts/cloudflare-hosted-e2e/telegram-delivery.log
 
       - name: Upload Telegram delivery E2E logs
@@ -180,5 +188,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cloudflare-hosted-e2e-telegram-delivery-logs
-          path: .artifacts/cloudflare-hosted-e2e/telegram-delivery.log
+          path: |
+            .artifacts/cloudflare-hosted-e2e/telegram-delivery.log
+            .artifacts/hosted-local/**/state.json
           if-no-files-found: warn

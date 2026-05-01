@@ -9,7 +9,9 @@
     "pnpm": "10.33.0"
   },
   "scripts": {
-    "dev": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/dev-hosted-local.ts",
+    "hosted-local": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
+    "dev": "pnpm hosted-local up",
+    "test:e2e:hosted-local": "pnpm hosted-local e2e",
     "build": "pnpm -r --sort --workspace-concurrency=${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4} --filter './packages/**' build",
     "clean:build:workspace": "node scripts/clean-build-artifacts.mjs workspace",
     "clean:build:test-runtime": "node scripts/clean-build-artifacts.mjs test-runtime",
