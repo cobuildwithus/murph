@@ -362,6 +362,10 @@ test("device sync store stores provider-config and none credentials without toke
     });
 
     assertStoredCredentialKind(providerConfigAccount, "provider_config");
+    assert.equal("accessTokenEncrypted" in providerConfigAccount, false);
+    assert.equal("accessToken" in providerConfigAccount, false);
+    assert.equal("accessTokenEncrypted" in providerConfigAccount.credential, false);
+    assert.equal("accessToken" in providerConfigAccount.credential, false);
     assert.equal(providerConfigAccount.accessTokenExpiresAt, null);
     assert.deepEqual(providerConfigAccount.metadata, {
       clientUserIdHash: "drop-me-three",
@@ -451,6 +455,10 @@ test("device sync store stores provider-config and none credentials without toke
       connectedAt: "2026-04-07T03:00:00.000Z",
     });
     const noneCredential = readCredentialStateForTesting(store, noneAccount.id);
+    assert.equal("accessTokenEncrypted" in noneAccount, false);
+    assert.equal("accessToken" in noneAccount, false);
+    assert.equal("accessTokenEncrypted" in noneAccount.credential, false);
+    assert.equal("accessToken" in noneAccount.credential, false);
     assert.ok(noneCredential);
     assert.deepEqual({ ...noneCredential }, {
       access_token_encrypted: null,
@@ -513,6 +521,10 @@ test("device sync store hosted hydration can create provider-config accounts wit
     assert.ok(hydrated);
     assert.equal(hydrated?.provider, "junction");
     assertStoredCredentialKind(hydrated, "provider_config");
+    assert.equal("accessTokenEncrypted" in hydrated, false);
+    assert.equal("accessToken" in hydrated, false);
+    assert.equal("accessTokenEncrypted" in hydrated.credential, false);
+    assert.equal("accessToken" in hydrated.credential, false);
     assert.deepEqual(hydrated?.metadata, {
       linked: true,
     });
