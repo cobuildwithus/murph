@@ -7,8 +7,8 @@ import {
   JoinInviteCheckoutPanel,
   JoinInviteLaunchLegalConsentPanel,
   JoinInviteMessagingSetupPanel,
+  JoinInvitePhoneVerificationPanel,
   JoinInviteSignedInMismatchAlert,
-  JoinInviteVerificationPanel,
 } from "./join-invite-stage-panels";
 
 interface JoinInviteStageContentProps {
@@ -67,13 +67,14 @@ export function JoinInviteStageContent({
       ) : null}
 
       {!launchLegalConsentGateActive && status.stage === "verify" ? (
-        <JoinInviteVerificationPanel
+        <JoinInvitePhoneVerificationPanel
           awaitingInviteSessionResolution={awaitingInviteSessionResolution}
           inviteCode={inviteCode}
           phoneAuthTarget={status.invite?.phoneAuthTarget ?? null}
           phoneHint={status.invite?.phoneHint ?? null}
           statusRefreshErrorMessage={statusRefreshErrorMessage}
           statusRefreshRetryPending={statusRefreshRetryPending}
+          verificationMode={status.invite?.verificationMode ?? "manual_phone"}
           onPhoneVerified={onPhoneVerified}
           onRefreshStatus={onRefreshStatus}
           onRetryStatusRefresh={onRetryStatusRefresh}

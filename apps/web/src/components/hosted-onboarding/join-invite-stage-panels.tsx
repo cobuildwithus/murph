@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowRightIcon,
@@ -39,13 +39,14 @@ import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
-interface JoinInviteVerificationPanelProps {
+interface JoinInvitePhoneVerificationPanelProps {
   awaitingInviteSessionResolution: boolean;
   inviteCode: string;
   phoneAuthTarget?: NonNullable<HostedInviteStatusPayload["invite"]>["phoneAuthTarget"] | null;
   phoneHint?: string | null;
   statusRefreshErrorMessage: string | null;
   statusRefreshRetryPending: boolean;
+  verificationMode: NonNullable<HostedInviteStatusPayload["invite"]>["verificationMode"];
   onPhoneVerified: (payload: HostedPrivyCompletionPayload) => Promise<void>;
   onRefreshStatus: () => Promise<HostedInviteStatusPayload>;
   onRetryStatusRefresh: () => Promise<void>;
@@ -106,6 +107,66 @@ function HostedInviteSignOutButton({
 
 type ContactMethod = "phone" | "telegram";
 
+interface ContactMethodOption {
+  icon: typeof PhoneIcon;
+  label: string;
+  subtitle: string;
+  value: ContactMethod;
+}
+
+const CONTACT_METHOD_OPTIONS: readonly ContactMethodOption[] = [
+  {
+    icon: PhoneIcon,
+    label: "Phone",
+    subtitle: "iMessage + SMS",
+    value: "phone",
+  },
+  {
+    icon: SendIcon,
+    label: "Telegram",
+    subtitle: "Private messaging",
+    value: "telegram",
+  },
+];
+
+function JoinInvitePanelCard({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-2xl border border-border bg-card/80 p-6">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ContactMethodPicker({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly ContactMethodOption[];
+  value: ContactMethod;
+  onChange: (value: ContactMethod) => void;
+}) {
+  return (
+    <div
+      aria-label="Contact method"
+      className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+    >
+      {options.map((option) => (
+        <ContactMethodCard
+          key={option.value}
+          active={value === option.value}
+          icon={option.icon}
+          label={option.label}
+          subtitle={option.subtitle}
+          onClick={() => onChange(option.value)}
+        />
+      ))}
+    </div>
+  );
+}
+
 function ContactMethodCard({
   active,
   icon: Icon,
@@ -114,7 +175,6 @@ function ContactMethodCard({
   onClick,
 }: {
   active: boolean;
-  badge?: string;
   icon: typeof PhoneIcon;
   label: string;
   subtitle: string;
@@ -123,9 +183,10 @@ function ContactMethodCard({
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "flex flex-1 items-start gap-4 rounded-xl border p-5 text-left transition-colors",
+        "flex w-full items-start gap-4 rounded-xl border p-5 text-left transition-colors",
         active
           ? "border-olive/25 bg-olive/[0.06]"
           : "border-border bg-card hover:border-olive/15",
@@ -159,19 +220,18 @@ function ContactMethodCard({
   );
 }
 
-export function JoinInviteVerificationPanel({
+export function JoinInvitePhoneVerificationPanel({
   awaitingInviteSessionResolution,
   inviteCode,
   phoneAuthTarget,
   phoneHint,
   statusRefreshErrorMessage,
   statusRefreshRetryPending,
+  verificationMode,
   onPhoneVerified,
   onRefreshStatus,
   onRetryStatusRefresh,
-}: JoinInviteVerificationPanelProps) {
-  const [contactMethod, setContactMethod] = useState<ContactMethod>("phone");
-
+}: JoinInvitePhoneVerificationPanelProps) {
   if (awaitingInviteSessionResolution) {
     if (statusRefreshErrorMessage) {
       return (
@@ -207,60 +267,25 @@ export function JoinInviteVerificationPanel({
     );
   }
 
+  const resolvedPhoneAuthTarget =
+    verificationMode === "invite_phone"
+      ? phoneAuthTarget
+      : ({ kind: "manual" } as const);
+  const resolvedPhoneHint =
+    verificationMode === "invite_phone" ? phoneHint : null;
+
   return (
-    <div className="flex flex-col gap-5">
-      <div className="rounded-2xl border border-border bg-card/80 p-6">
-        <div className="flex gap-3">
-          <ContactMethodCard
-            active={contactMethod === "phone"}
-            badge="Recommended"
-            icon={PhoneIcon}
-            label="Phone"
-            subtitle="iMessage + SMS"
-            onClick={() => setContactMethod("phone")}
-          />
-          <ContactMethodCard
-            active={contactMethod === "telegram"}
-            badge="Optional"
-            icon={SendIcon}
-            label="Telegram"
-            subtitle="Private messaging"
-            onClick={() => setContactMethod("telegram")}
-          />
-        </div>
-
-        <div className="mt-6">
-          {contactMethod === "phone" ? (
-            <HostedInvitePhoneAuth
-              inviteCode={inviteCode}
-              phoneAuthTarget={phoneAuthTarget}
-              phoneHint={phoneHint}
-              onSignOut={async () => {
-                await onRefreshStatus();
-              }}
-              onCompleted={onPhoneVerified}
-            />
-          ) : (
-            <ConnectTelegram
-              authenticated={false}
-              initialLinkedAccounts={[]}
-              onSynced={async () => {
-                await onRefreshStatus();
-              }}
-            />
-          )}
-        </div>
-
-        {contactMethod === "phone" ? (
-          <div className="mt-5 border-t border-border pt-4">
-            <p className="text-sm text-muted-foreground">
-              We&apos;ll text you a one-time code to verify your number.
-            </p>
-          </div>
-        ) : null}
-      </div>
-
-    </div>
+    <JoinInvitePanelCard>
+      <HostedInvitePhoneAuth
+        inviteCode={inviteCode}
+        phoneAuthTarget={resolvedPhoneAuthTarget}
+        phoneHint={resolvedPhoneHint}
+        onSignOut={async () => {
+          await onRefreshStatus();
+        }}
+        onCompleted={onPhoneVerified}
+      />
+    </JoinInvitePanelCard>
   );
 }
 
@@ -296,47 +321,32 @@ export function JoinInviteMessagingSetupPanel({
   const [contactMethod, setContactMethod] = useState<ContactMethod>("phone");
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="rounded-2xl border border-border bg-card/80 p-6">
-        <div className="flex gap-3">
-          <ContactMethodCard
-            active={contactMethod === "phone"}
-            badge="Recommended"
-            icon={PhoneIcon}
-            label="Phone"
-            subtitle="iMessage + SMS"
-            onClick={() => setContactMethod("phone")}
-          />
-          <ContactMethodCard
-            active={contactMethod === "telegram"}
-            badge="Optional"
-            icon={SendIcon}
-            label="Telegram"
-            subtitle="Private messaging"
-            onClick={() => setContactMethod("telegram")}
-          />
-        </div>
+    <JoinInvitePanelCard>
+      <ContactMethodPicker
+        options={CONTACT_METHOD_OPTIONS}
+        value={contactMethod}
+        onChange={setContactMethod}
+      />
 
-        <div className="mt-6">
-          {contactMethod === "phone" ? (
-            <HostedPhoneAuth
-              intent="link"
-              onLinked={async () => {
-                await onRefreshStatus();
-              }}
-            />
-          ) : (
-            <ConnectTelegram
-              authenticated={authenticated}
-              initialLinkedAccounts={initialLinkedAccounts}
-              onSynced={async () => {
-                await onRefreshStatus();
-              }}
-            />
-          )}
-        </div>
+      <div className="mt-6">
+        {contactMethod === "phone" ? (
+          <HostedPhoneAuth
+            intent="link"
+            onLinked={async () => {
+              await onRefreshStatus();
+            }}
+          />
+        ) : (
+          <ConnectTelegram
+            authenticated={authenticated}
+            initialLinkedAccounts={initialLinkedAccounts}
+            onSynced={async () => {
+              await onRefreshStatus();
+            }}
+          />
+        )}
       </div>
-    </div>
+    </JoinInvitePanelCard>
   );
 }
 

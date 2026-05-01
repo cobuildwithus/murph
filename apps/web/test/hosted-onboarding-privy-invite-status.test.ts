@@ -230,6 +230,7 @@ describe("getHostedInviteStatus", () => {
         phoneHint: "*** 4567",
       },
       phoneHint: "*** 4567",
+      verificationMode: "invite_phone",
     });
     expect(status.invite).not.toHaveProperty("phonePrefill");
     expect(JSON.stringify(status)).not.toContain("+12025550123");
@@ -277,6 +278,7 @@ describe("getHostedInviteStatus", () => {
         phoneHint: "*** 0123",
       },
       phoneHint: "*** 0123",
+      verificationMode: "invite_phone",
     });
     expect(status.invite).not.toHaveProperty("phonePrefill");
     expect(JSON.stringify(status)).not.toContain("+12025550123");
@@ -316,6 +318,7 @@ describe("getHostedInviteStatus", () => {
         kind: "manual",
       },
       phoneHint: null,
+      verificationMode: "manual_phone",
     });
   });
 

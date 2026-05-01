@@ -64,7 +64,12 @@ describe("hosted onboarding invite-status route", () => {
       invite: {
         code: "invite-code",
         expiresAt: "2026-04-19T12:00:00.000Z",
+        phoneAuthTarget: {
+          kind: "saved",
+          phoneHint: "*** 2671",
+        },
         phoneHint: "*** 2671",
+        verificationMode: "invite_phone",
       },
       messagingSetupRequired: false,
       session: {
@@ -112,7 +117,12 @@ describe("hosted onboarding invite-status route", () => {
       invite: {
         code: "invite-code",
         expiresAt: "2026-04-19T12:00:00.000Z",
+        phoneAuthTarget: {
+          kind: "saved",
+          phoneHint: "*** 2671",
+        },
         phoneHint: "*** 2671",
+        verificationMode: "invite_phone",
       },
       messagingSetupRequired: false,
       session: {
