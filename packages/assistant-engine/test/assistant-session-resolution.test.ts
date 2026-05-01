@@ -31,6 +31,7 @@ import {
   resolveAssistantSessionForMessage,
   resolveAssistantSessionTarget,
 } from '../src/assistant/session-resolution.ts'
+import { resolveAssistantExecutionPlan } from '../src/assistant/execution-plan.ts'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
@@ -263,7 +264,9 @@ describe('assistant session resolution', () => {
         provider: 'codex-cli',
         threadIsDirect: true,
       }),
-      createOperatorDefaults(),
+      createOperatorDefaults({
+        backend: createCodexTarget(),
+      }),
     )
 
     expect(result).toMatchObject({
@@ -336,6 +339,45 @@ describe('assistant session resolution', () => {
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
     }))
+  })
+
+  it('keeps provider-only overrides off durable state while using the session target', () => {
+    const sessionTarget = createCodexTarget({
+      model: 'gpt-5-session',
+      modelProvider: 'vercel-ai-gateway',
+      reasoningEffort: 'low',
+    })
+
+    const plan = resolveAssistantExecutionPlan({
+      defaults: null,
+      override: {
+        provider: 'codex-cli',
+      },
+      sessionTarget,
+    })
+
+    expect(plan.primaryTarget).toMatchObject({
+      adapter: 'codex-cli',
+      model: 'gpt-5-session',
+      modelProvider: 'vercel-ai-gateway',
+      reasoningEffort: 'low',
+    })
+    expect(plan.codexRoute.providerOptions).toMatchObject({
+      provider: 'codex-cli',
+      model: 'gpt-5-session',
+      modelProvider: 'vercel-ai-gateway',
+      reasoningEffort: 'low',
+    })
+
+    expect(() =>
+      resolveAssistantExecutionPlan({
+        defaults: null,
+        override: {
+          provider: 'unsupported-provider',
+        },
+        sessionTarget,
+      }),
+    ).toThrowError(/Assistant runtime targets must use Codex App Server/u)
   })
 
   it('forwards the built message-resolution input into store resolution and returns its result', async () => {

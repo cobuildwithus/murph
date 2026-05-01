@@ -1,6 +1,6 @@
 # Land Codex authority hard-cut cleanup
 
-Status: active
+Status: completed
 Created: 2026-05-01
 Updated: 2026-05-01
 
@@ -68,3 +68,4 @@ Updated: 2026-05-01
   - `git diff --check`
 - Expected outcomes:
   - Checks pass, or any failure is tied to a documented unrelated active row in the current dirty checkout.
+Completed: 2026-05-01

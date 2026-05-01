@@ -81,8 +81,7 @@ export function resolveInitialAssistantSelection(input: {
     initialActiveModel:
       normalizeNullableString(input.input.model) ??
       normalizeNullableString(input.selectedProviderDefaults?.model) ??
-      normalizeNullableString(input.resolvedSession.providerOptions.model) ??
-      normalizeNullableString(input.codexDisplay.model),
+      normalizeNullableString(input.resolvedSession.providerOptions.model),
     initialActiveReasoningEffort:
       normalizeNullableString(input.input.reasoningEffort) ??
       normalizeNullableString(input.selectedProviderDefaults?.reasoningEffort) ??

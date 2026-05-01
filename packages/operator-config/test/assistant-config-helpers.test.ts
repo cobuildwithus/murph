@@ -16,7 +16,6 @@ import {
   assistantProviderConfigsEqual,
   compactAssistantProviderConfigInput,
   DEFAULT_MURPH_CODEX_REASONING_EFFORT,
-  inferAssistantProviderFromConfigInput,
   mergeAssistantProviderConfigs,
   mergeAssistantProviderConfigsForProvider,
   normalizeAssistantHeaders,
@@ -91,23 +90,19 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
   })
 })
 
-test('assistant provider config helpers infer, merge, compact, and serialize Codex targets only', () => {
-  assert.equal(
-    inferAssistantProviderFromConfigInput({
-      model: 'gpt-5.5',
-      modelProvider: 'vercel-ai-gateway',
-    }),
-    null,
-  )
+test('assistant provider config helpers merge, compact, and serialize Codex targets only', () => {
   assert.deepEqual(
     compactAssistantProviderConfigInput({
       provider: 'codex-cli',
       modelProvider: 'vercel-ai-gateway',
     }),
     {
-      provider: 'codex-cli',
       modelProvider: 'vercel-ai-gateway',
     },
+  )
+  assert.equal(
+    compactAssistantProviderConfigInput({ provider: 'codex-cli' }),
+    null,
   )
   const mergedCodex = mergeAssistantProviderConfigsForProvider(
     'codex-cli',

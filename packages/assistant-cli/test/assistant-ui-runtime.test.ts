@@ -577,7 +577,7 @@ test('model catalog hook uses Codex catalog inputs, and initial selection falls 
       selectedProviderDefaults: null,
     }),
     {
-      initialActiveModel: 'codex-default',
+      initialActiveModel: null,
       initialActiveReasoningEffort: null,
     },
   )

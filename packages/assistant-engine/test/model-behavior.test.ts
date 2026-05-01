@@ -103,7 +103,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'Supported connect-link requests are handled by the hosted runtime before the model turn',
+      'Supported connect-link requests must come from explicit hosted runtime context or helper results',
     )
     expect(prompt).toContain(
       'Python is available for small local scripts when it makes the task easier',
