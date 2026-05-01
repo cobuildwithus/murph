@@ -16,6 +16,11 @@ import {
 } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
 import {
+  ASSISTANT_INPUT_EVENT_SCHEMA,
+  readAssistantInputEvent,
+  type AssistantInputEventRecord,
+} from './input-store.js'
+import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store/paths.js'
@@ -175,6 +180,20 @@ export const assistantAcceptedTurnInputJournalSchema = z
       }
       seen.add(input.id)
       inputIndexes.set(input.id, index)
+      if (input.source === 'assistant-input') {
+        if (
+          input.contentRef?.kind !== 'assistant-input-event' ||
+          input.contentRef.refId !== input.id ||
+          input.contentRef.version !== ASSISTANT_INPUT_EVENT_SCHEMA
+        ) {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'assistant-input accepted turn inputs must reference the matching assistant input event.',
+            path: ['inputs', index, 'contentRef'],
+          })
+        }
+      }
     }
 
     let previousProviderRequestOrdinal = -1
@@ -347,6 +366,59 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
     await writeAssistantAcceptedTurnInputJournalAtPaths(paths, updated)
     return updated
   })
+}
+
+export async function assertAssistantAcceptedTurnInputAssistantInputEventsExist(
+  input: {
+    journal: AssistantAcceptedTurnInputJournal
+    vault: string
+  },
+): Promise<void> {
+  await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+    inputs: input.journal.inputs,
+    vault: input.vault,
+  })
+}
+
+export async function assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist(
+  input: {
+    inputs: readonly AssistantAcceptedTurnInputItemInput[]
+    vault: string
+  },
+): Promise<void> {
+  for (const item of input.inputs) {
+    if (item.source !== 'assistant-input') {
+      continue
+    }
+    const contentRef = item.contentRef
+    if (
+      contentRef?.kind !== 'assistant-input-event' ||
+      contentRef.refId !== item.id ||
+      contentRef.version !== ASSISTANT_INPUT_EVENT_SCHEMA
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_TURN_INPUT_JOURNAL_INVALID_ASSISTANT_INPUT_REF',
+        'Accepted assistant input must reference the matching assistant input event.',
+      )
+    }
+    const event = await readAssistantInputEvent({
+      inputId: contentRef.refId,
+      vault: input.vault,
+    })
+    if (!event) {
+      throw new VaultCliError(
+        'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+        'Accepted assistant input must resolve to a stored assistant input event before checkpointing.',
+        {
+          inputId: contentRef.refId,
+        },
+      )
+    }
+    assertAssistantAcceptedTurnInputEventMatchesRef({
+      event,
+      inputId: item.id,
+    })
+  }
 }
 
 export async function updateAssistantAcceptedTurnInputTranscriptRefs(input: {
@@ -750,6 +822,26 @@ function assertAssistantAcceptedTurnInputProviderRequestOrdinal(input: {
       )
     }
   }
+}
+
+function assertAssistantAcceptedTurnInputEventMatchesRef(input: {
+  event: AssistantInputEventRecord
+  inputId: string
+}): void {
+  if (
+    input.event.inputId === input.inputId &&
+    input.event.schema === ASSISTANT_INPUT_EVENT_SCHEMA
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_TURN_INPUT_JOURNAL_ASSISTANT_INPUT_EVENT_MISMATCH',
+    'Accepted assistant input event ref must resolve to the matching assistant input event.',
+    {
+      inputId: input.inputId,
+    },
+  )
 }
 
 function assertAssistantAcceptedTurnInputAdmissionStateTransition(input: {

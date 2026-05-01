@@ -2,6 +2,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   appendAssistantAcceptedTurnInputItems,
+  assertAssistantAcceptedTurnInputAssistantInputEventsExist,
   assistantAcceptedTurnInputJournalSchema,
   readAssistantAcceptedTurnInputJournal,
   recordAssistantAcceptedTurnInputProviderRequest,
@@ -10,6 +11,9 @@ import {
   updateAssistantAcceptedTurnInputProviderRequest,
   updateAssistantAcceptedTurnInputTranscriptRefs,
 } from '../src/assistant/active-turn-input-journal.ts'
+import {
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -42,7 +46,7 @@ describe('assistant accepted active-turn input journal', () => {
             refId: 'ain_00000000000000000000000000000001',
             version: 'murph.assistant-input-event.v1',
           },
-          id: 'input_1',
+          id: 'ain_00000000000000000000000000000001',
           source: 'assistant-input',
         },
         {
@@ -66,13 +70,16 @@ describe('assistant accepted active-turn input journal', () => {
 
     expect(journal).toMatchObject({
       admissionState: 'current-turn-open',
-      inputIds: ['input_1', 'input_2'],
+      inputIds: ['ain_00000000000000000000000000000001', 'input_2'],
       materializerVersion: 1,
       schema: 'murph.assistant-accepted-turn-input-journal.v1',
       sessionId: 'session_active_turn',
       turnId: 'turn_active_input',
     })
-    expect(journal.inputs.map((input) => input.id)).toEqual(['input_1', 'input_2'])
+    expect(journal.inputs.map((input) => input.id)).toEqual([
+      'ain_00000000000000000000000000000001',
+      'input_2',
+    ])
     expect(journal.inputs[0]).toMatchObject({
       captureIds: ['cap_1'],
       contentRef: {
@@ -80,7 +87,7 @@ describe('assistant accepted active-turn input journal', () => {
         refId: 'ain_00000000000000000000000000000001',
         version: 'murph.assistant-input-event.v1',
       },
-      id: 'input_1',
+      id: 'ain_00000000000000000000000000000001',
       source: 'assistant-input',
     })
     expect(journal.inputs[0]).not.toHaveProperty('cursorEffects')
@@ -141,6 +148,166 @@ describe('assistant accepted active-turn input journal', () => {
       id: 'ain_00000000000000000000000000000000',
       source: 'assistant-input',
     })
+  })
+
+  it('rejects assistant-input journal items without exact assistant input event refs', () => {
+    const baseJournal = {
+      admissionState: 'current-turn-open',
+      createdAt: '2026-04-22T10:00:00.000Z',
+      inputIds: ['ain_00000000000000000000000000000000'],
+      inputs: [
+        {
+          acceptedAt: '2026-04-22T10:00:00.000Z',
+          captureIds: [],
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: 'ain_00000000000000000000000000000000',
+            version: 'murph.assistant-input-event.v1',
+          },
+          id: 'ain_00000000000000000000000000000000',
+          promptFallback: null,
+          source: 'assistant-input',
+          transcriptRef: null,
+        },
+      ],
+      materializerVersion: 1,
+      providerRequests: [],
+      schema: 'murph.assistant-accepted-turn-input-journal.v1',
+      sessionId: 'session_assistant_input_ref',
+      turnId: 'turn_assistant_input_ref',
+      updatedAt: '2026-04-22T10:00:00.000Z',
+    }
+
+    expect(() =>
+      assistantAcceptedTurnInputJournalSchema.parse({
+        ...baseJournal,
+        inputs: [
+          {
+            ...baseJournal.inputs[0],
+            contentRef: null,
+          },
+        ],
+      }),
+    ).toThrow(/assistant input event/u)
+    expect(() =>
+      assistantAcceptedTurnInputJournalSchema.parse({
+        ...baseJournal,
+        inputs: [
+          {
+            ...baseJournal.inputs[0],
+            contentRef: {
+              kind: 'manual',
+              refId: 'ain_00000000000000000000000000000000',
+              version: null,
+            },
+          },
+        ],
+      }),
+    ).toThrow(/assistant input event/u)
+    expect(() =>
+      assistantAcceptedTurnInputJournalSchema.parse({
+        ...baseJournal,
+        inputs: [
+          {
+            ...baseJournal.inputs[0],
+            contentRef: {
+              kind: 'assistant-input-event',
+              refId: 'ain_00000000000000000000000000000001',
+              version: 'murph.assistant-input-event.v1',
+            },
+          },
+        ],
+      }),
+    ).toThrow(/matching assistant input event/u)
+    expect(() =>
+      assistantAcceptedTurnInputJournalSchema.parse({
+        ...baseJournal,
+        inputs: [
+          {
+            ...baseJournal.inputs[0],
+            contentRef: {
+              kind: 'assistant-input-event',
+              refId: 'ain_00000000000000000000000000000000',
+              version: 'murph.assistant-input-event.v0',
+            },
+          },
+        ],
+      }),
+    ).toThrow(/matching assistant input event/u)
+  })
+
+  it('requires accepted assistant-input refs to resolve before checkpointing', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-checkpoint-ref-',
+    )
+
+    const missing = await appendAssistantAcceptedTurnInputItems({
+      inputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: 'ain_00000000000000000000000000000000',
+            version: 'murph.assistant-input-event.v1',
+          },
+          id: 'ain_00000000000000000000000000000000',
+          source: 'assistant-input',
+        },
+      ],
+      now: new Date('2026-04-22T10:00:00.000Z'),
+      sessionId: 'session_checkpoint_ref',
+      turnId: 'turn_checkpoint_ref',
+      vault: vaultRoot,
+    })
+
+    await expect(
+      assertAssistantAcceptedTurnInputAssistantInputEventsExist({
+        journal: missing,
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+    })
+
+    const event = await upsertAssistantInputEvent({
+      event: {
+        content: {
+          text: 'checkpoint-visible input',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: {
+          captureId: 'cap_checkpoint_ref',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+      now: new Date('2026-04-22T10:00:01.000Z'),
+      vault: vaultRoot,
+    })
+    const stored = await appendAssistantAcceptedTurnInputItems({
+      inputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: event.inputId,
+            version: 'murph.assistant-input-event.v1',
+          },
+          id: event.inputId,
+          source: 'assistant-input',
+        },
+      ],
+      now: new Date('2026-04-22T10:00:02.000Z'),
+      sessionId: 'session_checkpoint_ref_stored',
+      turnId: 'turn_checkpoint_ref_stored',
+      vault: vaultRoot,
+    })
+
+    await expect(
+      assertAssistantAcceptedTurnInputAssistantInputEventsExist({
+        journal: stored,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBeUndefined()
   })
 
   it('updates transcript refs without persisting raw prompt fallback text', async () => {
@@ -278,7 +445,7 @@ describe('assistant accepted active-turn input journal', () => {
             refId: 'ain_00000000000000000000000000000002',
             version: 'murph.assistant-input-event.v1',
           },
-          id: 'input_late',
+          id: 'ain_00000000000000000000000000000002',
           source: 'assistant-input',
         },
       ],
@@ -300,7 +467,7 @@ describe('assistant accepted active-turn input journal', () => {
     })
     expect(withProviderRequest?.providerRequests).toEqual([
       {
-        acceptedInputIds: ['input_initial', 'input_late'],
+        acceptedInputIds: ['input_initial', 'ain_00000000000000000000000000000002'],
         continuation: {
           kind: 'provider-state-optimization',
         },
@@ -311,7 +478,7 @@ describe('assistant accepted active-turn input journal', () => {
     ])
     expect(withProviderRequest?.inputs.map((input) => input.id)).toEqual([
       'input_initial',
-      'input_late',
+      'ain_00000000000000000000000000000002',
     ])
     const updatedProviderRequest =
       await updateAssistantAcceptedTurnInputProviderRequest({
@@ -326,7 +493,7 @@ describe('assistant accepted active-turn input journal', () => {
       })
     expect(updatedProviderRequest?.providerRequests).toEqual([
       {
-        acceptedInputIds: ['input_initial', 'input_late'],
+        acceptedInputIds: ['input_initial', 'ain_00000000000000000000000000000002'],
         continuation: {
           kind: 'explicit-structured-history',
         },
@@ -446,12 +613,12 @@ describe('assistant accepted active-turn input journal', () => {
           source: 'initial',
         },
         {
-          id: 'input_late',
           contentRef: {
             kind: 'assistant-input-event',
             refId: 'ain_00000000000000000000000000000003',
             version: 'murph.assistant-input-event.v1',
           },
+          id: 'ain_00000000000000000000000000000003',
           source: 'assistant-input',
         },
       ],
@@ -495,7 +662,10 @@ describe('assistant accepted active-turn input journal', () => {
     ).resolves.toMatchObject({
       providerRequests: [
         {
-          acceptedInputIds: ['input_initial', 'input_late'],
+          acceptedInputIds: [
+            'input_initial',
+            'ain_00000000000000000000000000000003',
+          ],
           ordinal: 0,
         },
       ],
@@ -513,7 +683,11 @@ describe('assistant accepted active-turn input journal', () => {
     })
     await expect(
       recordAssistantAcceptedTurnInputProviderRequest({
-        acceptedInputIds: ['input_initial', 'input_late', 'input_more'],
+        acceptedInputIds: [
+          'input_initial',
+          'ain_00000000000000000000000000000003',
+          'input_more',
+        ],
         ordinal: 0,
         turnId: 'turn_identity',
         vault: vaultRoot,
@@ -523,7 +697,10 @@ describe('assistant accepted active-turn input journal', () => {
     })
     await expect(
       recordAssistantAcceptedTurnInputProviderRequest({
-        acceptedInputIds: ['input_late', 'input_initial'],
+        acceptedInputIds: [
+          'ain_00000000000000000000000000000003',
+          'input_initial',
+        ],
         ordinal: 1,
         turnId: 'turn_identity',
         vault: vaultRoot,
