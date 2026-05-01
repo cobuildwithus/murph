@@ -68,26 +68,6 @@ biomarker:
       - "illness or inflammation"
       - "weight change"
       - "alcohol change"
-protocolRanking:
-  version: "omega-3-supplementation-v1"
-  scoreFormula: "Higher evidenceWeight and biomarkerRelevance favor lab endpoints that directly reflect oral EPA/DHA exposure or lipid context; safety caution and measurement burden lower suitability for unsupervised runs."
-  candidates:
-
-    -
-      protocolKey: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation"
-      expectedDirection: "down"
-      relationship: "secondary_biomarker"
-      mechanism: "Oral EPA/DHA can change this lab marker or its lipid-context interpretation when product, dose, duration, adherence, and baseline context are tracked."
-      scoring:
-        evidenceWeight: 5
-        biomarkerRelevance: 4
-        wearableMeasurability: 0
-        burdenPenalty: 3
-        safetyCautionPenalty: 2
-      display:
-        confidence: "high"
-        burdenLabel: "Requires lab test"
-        cautionLabel: "Interpret with safety and clinical context"
 communityOutcomeSummary:
   state: "coming_soon"
   placeholder: "Community outcome summaries will require enough completed Murph experiments using the same lab context."

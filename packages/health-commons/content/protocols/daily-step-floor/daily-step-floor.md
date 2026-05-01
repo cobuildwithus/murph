@@ -62,14 +62,14 @@ protocol:
   interventionSessionsMinimum: 21
   interventionSessionsTarget: 28
   steps:
-  - 'Pick one source of truth: phone, watch, wearable, or pedometer. Keep the same device, placement, and carry/wear rule through baseline and intervention.'
-  - Observe baseline for 7–14 days before raising the target. If baseline activity is low, pain is present, the user is recovering from injury or acute illness, is pregnant/postpartum, frail, or has cardiopulmonary symptoms, start with baseline-only observation, a lower floor, or clinician-guided adaptation before any increase.
-  - Choose the floor before day 1 of the intervention. Acceptable tiers are baseline-only observation, baseline plus 1,000–2,000 steps, a fixed 6,000/8,000/10,000/12,000-step floor, or a custom ramp that is still expressed as total daily steps; treat these as commitment tiers rather than evidence-equivalent thresholds.
-  - 'Choose a fallback rule for poor sleep, acute illness, pain, hazardous weather, travel, or life disruption: reduce to baseline, reduce by a preset amount, or pause and log the safety reason.'
-  - 'Plan safe ways to fill the step gap: errands, indoor laps, short breaks, commute walking, or an easy planned walk. Avoid traffic, heat, unsafe surfaces, and routes that increase fall risk.'
-  - Accumulate steps however fits the day. Do not require a cadence threshold unless this is deliberately forked into a cadence or MVPA-bout variant.
-  - Each evening, log daily steps, selected floor, whether the floor was hit, device gaps or device changes, intentional walking or exercise, pain, safety symptoms, fatigue/recovery, sleep disruption, illness, injury/recovery status, footwear, terrain, occupational walking, and other major confounders.
-  - Review weekly. Keep the floor only if steps rise or stay meaningfully higher without worsening pain, recovery, safety symptoms, sleep, or life friction; otherwise lower the floor, slow the ramp, or stop the experiment.
+    - "Pick 1 step source—phone, watch, wearable, or pedometer—and keep placement and wear/carry rules stable."
+    - "Observe baseline 7–14 days before raising the target; use lower floors or guidance when safety context is uncertain."
+    - "Choose floor before day 1: baseline-only, baseline +1,000–2,000, fixed 6k/8k/10k/12k, or custom ramp."
+    - "Set fallback rule for poor sleep, illness, pain, heat, hazardous routes, travel, or disruption."
+    - "Fill the step gap safely with errands, indoor laps, breaks, commute walking, or an easy planned walk."
+    - "Accumulate steps however fits; cadence or MVPA targets belong to a separate variant."
+    - "Log steps, floor hit, device gaps, intentional walking, pain, symptoms, recovery, sleep, illness, terrain, and confounders."
+    - "Review weekly; lower, slow, or stop if pain, recovery, safety, sleep, or life friction worsens."
   tips:
   - First floor should be repeatable, not heroic — a sustainable number beats pushing through symptoms.
   - Use weekly median plus floor-hit days; one outlier day is not a signal.
@@ -137,6 +137,16 @@ testPlans:
   - Flag device gaps, illness, travel, weather/heat, pain, route risk, and concurrent exercise or rehab.
   - Do not count a high step total as success if safety symptoms, pain, recovery debt, or life friction worsened.
 expectedSignalDescriptions:
+- biomarkerKey: biomarker:daily-step-count
+  expected: up_or_stable
+  expectedDirection: up_or_stable
+  protocolProminence: focus
+  description: The primary exposure signal is whether total daily steps rise versus baseline without worsening safety, pain, or recovery.
+- biomarkerKey: biomarker:step-floor-days
+  expected: up_or_stable
+  expectedDirection: up_or_stable
+  protocolProminence: focus
+  description: Floor-hit days are the adherence signal; a high count with pain, unsafe symptoms, or obsessive behavior is not a good result.
 - biomarkerKey: biomarker:resting-heart-rate
   expected: down_or_stable
   protocolProminence: focus
@@ -221,6 +231,21 @@ expectedSignalDescriptions:
     window: 4 weeks
     confidence: low
     basis: 'Step-counter meta-analysis estimated about 23 fewer sedentary minutes per day, but effects depend on goals, reminders, and baseline sitting. Source keys: source_artifact:pmid-26334900; source_artifact:pmid-33036635; source_artifact:pmid-22843637.'
+- biomarkerKey: biomarker:moderate-to-vigorous-activity-minutes
+  expected: mixed_or_contextual
+  expectedDirection: mixed_or_contextual
+  protocolProminence: context
+  description: MVPA is a secondary interpretation signal, not proof that a total-step floor hit an intensity guideline.
+- biomarkerKey: biomarker:walking-bout-minutes
+  expected: mixed_or_contextual
+  expectedDirection: mixed_or_contextual
+  protocolProminence: context
+  description: Bout minutes explain how the floor was achieved, while the core protocol remains total daily steps.
+- biomarkerKey: biomarker:walking-cadence
+  expected: mixed_or_contextual
+  expectedDirection: mixed_or_contextual
+  protocolProminence: context
+  description: Cadence belongs in interpretation because turning the goal into a cadence prescription changes the intervention into a different MVPA variant.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

@@ -145,8 +145,121 @@ describe("Health Commons experiment protocol metadata", () => {
       "4 × hard / easy",
       "cool-down",
     ]);
-    expect(protocol?.sessionShape?.ticks).toEqual(["0", "10 min", "35 min", "40 min"]);
+    expect(protocol?.sessionShape?.ticks).toEqual([
+      { label: "0", offsetMinutes: 0 },
+      { label: "10 min", offsetMinutes: 10 },
+      { label: "35 min", offsetMinutes: 35 },
+      { label: "40 min", offsetMinutes: 40 },
+    ]);
     expect(protocolTab?.sessionShape).toEqual(protocol?.sessionShape);
+  });
+
+  it("projects requested concrete protocol windows from session-shape content", () => {
+    const expectedShapes = [
+      {
+        labels: ["easy cardio"],
+        routeId: "zone-2-aerobic-base-block",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "35 min minimum", offsetMinutes: 35 },
+          { label: "60 min", offsetMinutes: 60 },
+        ],
+      },
+      {
+        labels: ["entry", "cold exposure", "gentle rewarm"],
+        routeId: "cold-plunge",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "entry", offsetMinutes: 1 },
+          { label: "1-3 min in water", offsetMinutes: 4 },
+          { label: "rewarm", offsetMinutes: 5 },
+        ],
+      },
+      {
+        labels: ["outdoor light"],
+        routeId: "morning-outdoor-light-exposure",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "10 min minimum", offsetMinutes: 10 },
+          { label: "30 min", offsetMinutes: 30 },
+        ],
+      },
+      {
+        labels: ["post-meal walk"],
+        routeId: "walking-after-every-meal",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "10 min minimum", offsetMinutes: 10 },
+          { label: "15 min", offsetMinutes: 15 },
+        ],
+      },
+      {
+        labels: ["chamber session"],
+        routeId: "hyperbaric-oxygen-therapy",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "60 min minimum", offsetMinutes: 60 },
+          { label: "90 min", offsetMinutes: 90 },
+        ],
+      },
+      {
+        labels: ["red/NIR exposure"],
+        routeId: "whole-body-red-and-near-infrared-light-exposure",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "12 min minimum", offsetMinutes: 12 },
+          { label: "20 min", offsetMinutes: 20 },
+        ],
+      },
+      {
+        labels: ["fasting window", "first refeed"],
+        routeId: "prolonged-fasting-24-72-hours",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "24 h minimum", offsetMinutes: 1440 },
+          { label: "72 h / refeed", offsetMinutes: 4325 },
+        ],
+      },
+      {
+        labels: ["caffeine-free buffer", "bedtime"],
+        routeId: "caffeine-curfew-dose-reset",
+        ticks: [
+          { label: "cutoff", offsetMinutes: 0 },
+          { label: "8 h / bedtime", offsetMinutes: 485 },
+        ],
+      },
+      {
+        labels: ["rehab session"],
+        routeId: "it-band-syndrome-rehab-and-return-to-run",
+        ticks: [
+          { label: "0", offsetMinutes: 0 },
+          { label: "20 min minimum", offsetMinutes: 20 },
+          { label: "45 min", offsetMinutes: 45 },
+        ],
+      },
+      {
+        labels: ["wake/rise window"],
+        routeId: "consistent-wake-time",
+        ticks: ["target wake", "+60 min"],
+      },
+    ] as const;
+
+    for (const expectedShape of expectedShapes) {
+      const protocol = resolveHealthCommonsExperimentProtocol(expectedShape.routeId);
+      const protocolTab = resolveHealthCommonsExperimentProtocolTab(expectedShape.routeId);
+
+      expect(protocol?.sessionShape?.segments.map((segment) => segment.label)).toEqual(
+        expectedShape.labels,
+      );
+      expect(protocol?.sessionShape?.ticks).toEqual(expectedShape.ticks);
+      expect(protocolTab?.sessionShape).toEqual(protocol?.sessionShape);
+    }
+
+    const umbrellaProtocol = resolveHealthCommonsExperimentProtocol(
+      "pre-sleep-resonance-breathing-and-meditation",
+    );
+
+    expect(umbrellaProtocol?.sessionShape).toBeUndefined();
   });
 
   it("uses the dedicated caffeine curfew artwork", () => {

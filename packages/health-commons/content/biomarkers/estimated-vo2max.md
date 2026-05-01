@@ -185,43 +185,6 @@ claims:
       - source_artifact:pmid-24066036
     caveats:
       - Protocol adherence, safety screening, baseline fitness, intensity fidelity, and recovery determine whether a home experiment resembles supervised study conditions.
-protocolRanking:
-  version: deterministic-v1-vo2max
-  scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
-  candidates:
-
-    -
-      protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
-      expectedDirection: up
-      relationship: primary_biomarker
-      mechanism: Norwegian 4x4 directly targets aerobic power with repeated high-intensity intervals. It is the cleanest current Murph candidate for a VO₂ max outcome, especially when session intensity and recovery are tracked.
-      scoring:
-        evidenceWeight: 5
-        biomarkerRelevance: 5
-        wearableMeasurability: 4
-        burdenPenalty: 4
-        safetyCautionPenalty: 3
-        communityOutcomeConfidence: 0
-      display:
-        confidence: high
-        burdenLabel: High
-        cautionLabel: Higher
-    -
-      protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-      expectedDirection: mixed_or_contextual
-      relationship: secondary_biomarker
-      mechanism: Repeated heat exposure can create cardiovascular strain and recovery adaptations, but it is not a direct aerobic-capacity protocol and should not outrank actual aerobic training for VO₂ max.
-      scoring:
-        evidenceWeight: 2
-        biomarkerRelevance: 2
-        wearableMeasurability: 4
-        burdenPenalty: 2
-        safetyCautionPenalty: 2
-        communityOutcomeConfidence: 0
-      display:
-        confidence: low
-        burdenLabel: Moderate
-        cautionLabel: Moderate
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 30

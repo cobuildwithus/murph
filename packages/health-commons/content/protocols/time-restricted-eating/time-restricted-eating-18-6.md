@@ -147,19 +147,22 @@ protocol:
       kind: stimulus
       durationMinutes: 360
     ticks:
-    - "0"
-    - "18 h"
-    - "24 h"
+    - label: "0"
+      offsetMinutes: 0
+    - label: "18 h"
+      offsetMinutes: 1080
+    - label: "24 h"
+      offsetMinutes: 1440
   interventionSessionsMinimum: 16
   interventionSessionsTarget: 20
   steps:
-  - 'Baseline for 14 days: log normal first-calorie and last-calorie times, weight trend, hunger, energy, mood, symptoms, sleep, training, medication changes, and any calorie or protein estimates before narrowing the window.'
-  - Pick the earliest realistic 6-hour window you can repeat most target days, and record actual first-calorie and last-calorie times. Early 6-hour windows have the clearest timing-specific metabolic rationale in small or selected studies, while later 6-hour windows may still affect weight and are not proven ineffective.
-  - Ramp as Murph implementation scaffolding: 12:12 for 4 days, 14:10 for 4 days, 16:8 for 6 days, then target 18:6. No extracted trial validates this exact ramp as superior; stay at or return to the last tolerable tier if symptoms, binge-restrict patterns, sleep disruption, headache, repeated missed days, or major work/family/social disruption appear.
-  - After the ramp, use the Murph operational target of 5-7 logged target-window days per week; the minimum analyzable exposure is 4 logged target-window days per week after the ramp. This is an analysis threshold, not an evidence-derived optimal dose.
-  - Keep food quality, protein, fiber, training load, caffeine, alcohol, and sleep schedule as stable as possible so the experiment is not only measuring a new diet or recovery pattern.
-  - During the fasting interval, use water as the default. Do not turn unverified zero-calorie beverage rules into evidence-backed claims for this protocol.
-  - Log missed days and context rather than trying to compensate with longer fasts; repeatable adherence is interpretation context, not the outcome win.
+    - "Baseline 14 days: log normal first/last calorie times, weight, hunger, energy, mood, symptoms, sleep, training, meds, and intake estimates."
+    - "Pick the earliest repeatable 6h window; record actual first-calorie and last-calorie times."
+    - "Ramp 12:12 for 4 days, 14:10 for 4 days, 16:8 for 6 days, then target 18:6."
+    - "Stay at the last tolerable tier if symptoms, binge/restrict patterns, sleep disruption, headaches, missed days, or life friction appear."
+    - "Use 5–7 logged target-window days/week after ramp; 4 days/week is the minimum analyzable exposure."
+    - "Keep food quality, protein, fiber, training load, caffeine, alcohol, and sleep schedule stable."
+    - "Use water during fasting; log missed days and context instead of compensating with longer fasts."
   safetyNotes:
   - Potentially reasonable only as a safety-screened self-experiment for medically stable adults, with rollback rules.
   - Safety gating should take priority over efficacy interpretation.

@@ -60,24 +60,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: up_or_stable
-    relationship: primary_biomarker
-    mechanism: The primary signal is whether total steps rise versus baseline without worsening safety or recovery.
-    scoring:
-      evidenceWeight: 4
-      biomarkerRelevance: 5
-      wearableMeasurability: 5
-      burdenPenalty: 1
-      safetyCautionPenalty: 1
-    display:
-      confidence: medium
-      burdenLabel: low
-      cautionLabel: context
 ---
 
 Daily step count is the primary outcome for Daily Step Floor. Treat it as a within-person trend, not as a cross-device absolute.

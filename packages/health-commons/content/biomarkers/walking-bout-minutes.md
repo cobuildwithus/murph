@@ -59,24 +59,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: mixed_or_contextual
-    relationship: secondary_biomarker
-    mechanism: Bout minutes help explain how the floor was achieved, while the core protocol remains total daily steps.
-    scoring:
-      evidenceWeight: 3
-      biomarkerRelevance: 3
-      wearableMeasurability: 5
-      burdenPenalty: 1
-      safetyCautionPenalty: 1
-    display:
-      confidence: medium
-      burdenLabel: low
-      cautionLabel: context
 ---
 
 Walking bout minutes can distinguish errands and all-day accumulation from planned walks. Use it as context, not as a required dose unless testing a separate bout-based variant.

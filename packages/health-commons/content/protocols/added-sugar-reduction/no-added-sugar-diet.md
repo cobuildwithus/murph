@@ -397,16 +397,14 @@ protocol:
   interventionSessionsMinimum: 14
   interventionSessionsTarget: 21
   steps:
-  - For 7 baseline days, eat normally and log estimated added-sugar intake without trying to improve the number.
-  - 'Choose the boundary rule before day 1: the default Murph version is label-defined Added Sugars; a stricter free-sugar version must be logged as a separate boundary choice.'
-  - 'Do a one-time kitchen and shopping pass: identify recurring added-sugar sources and choose a finish, move, replace, or planned-exception strategy. Do not discard needed food or skip meals to make the pantry look perfect.'
-  - Replace obvious daily added-sugar sources first, especially sugar-sweetened drinks, with water, unsweetened drinks, whole fruit, or a planned lower-sugar option; do not make low/no-calorie sweeteners, sugar alcohols, fruit juice, fasting, or meal skipping the default replacement strategy.
-  - At meals and snacks, read labels when available and choose foods with 0 g Added Sugars when a reasonable option exists.
-  - For unlabeled restaurant or homemade foods, do not invent exact grams; log the food, whether added sugar was likely, and whether it was a planned exception.
-  - If the rule conflicts with hypoglycemia treatment, a medical nutrition plan, pregnancy or breastfeeding nutrition, child or adolescent nutrition, food access, or adequate energy and carbohydrates for training, use a lighter sugar-source-awareness or clinician-guided variant instead of the strict version.
-  - Each day, log added-sugar grams, the biggest source avoided or consumed, replacements used, cravings or social friction, energy, symptoms, and any exceptions.
-  - Keep regular meals, protein, fiber-rich carbohydrates, fruit, dairy or alternatives, and hydration in place; this is not a fasting, keto, or total-carbohydrate elimination protocol.
-  - At the end, use the baseline-to-intervention added-sugar drop as the dose check, then interpret weight, waist, blood pressure, glucose, cravings, and taste changes as downstream or exploratory outcomes; log sleep or recovery as a confounder/context signal, not as an expected no-added-sugar outcome.
+    - "Baseline 7 days: eat normally and log estimated added-sugar intake."
+    - "Choose boundary before day 1: label-defined Added Sugars, or stricter free-sugar boundary."
+    - "Identify recurring sugar sources; finish, move, replace, or set planned exceptions without skipping meals or discarding needed food."
+    - "Replace obvious daily sources first, especially sweet drinks; avoid default swaps to juice, fasting, meal skipping, or sweetener overload."
+    - "Choose 0 g Added Sugars labels when a reasonable meal or snack option exists."
+    - "For unlabeled foods, log likely added sugar and whether it was a planned exception; do not invent exact grams."
+    - "Keep regular meals, protein, fiber-rich carbs, fruit, dairy/alternatives, legumes, starches, and hydration in place."
+    - "Daily, log added-sugar grams, biggest source avoided/consumed, replacements, cravings, symptoms, social friction, and exceptions."
   tips:
   - Start with drinks if they are a major source — easier win than a full pantry overhaul.
   - Say 'logged exception,' not 'failure' or 'cheat.'

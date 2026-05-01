@@ -57,22 +57,41 @@ protocol:
   durationMinutes:
     min: 1
     max: 3
+  sessionShape:
+    label: One session
+    segments:
+    - label: entry
+      kind: transition
+      durationMinutes: 1
+    - label: cold exposure
+      kind: stimulus
+      durationMinutes: 3
+    - label: gentle rewarm
+      kind: recovery
+      durationMinutes: 1
+    ticks:
+    - label: "0"
+      offsetMinutes: 0
+    - label: entry
+      offsetMinutes: 1
+    - label: "1-3 min in water"
+      offsetMinutes: 4
+    - label: rewarm
+      offsetMinutes: 5
   temperatureC:
     min: 10
     max: 15
   interventionSessionsMinimum: 4
   interventionSessionsTarget: 6
   steps:
-  - Screen first. Do not start an unsupervised cold-water experiment if the safety screen is positive or uncertain.
-  - Use a controlled tub, plunge, or tank where you can stand or exit immediately. Do not use open water for this protocol.
-  - Measure the water temperature with a thermometer before every session. For the default first Murph run, do not start if temperature is unmeasured, the setup has changed, or the water is below 10 °C. Keep first-run sessions in the measured 10–15 °C range unless this is a separate clinician-guided or professionally supervised variant.
-  - Keep the session head-out. Do not combine the plunge with breathwork, deliberate hyperventilation, breath-holding, face submersion, alcohol, sedatives, or swimming challenges.
-  - 'Have an exit and rescue plan before entry: dry towel, stable footing, warm layers, tub cover/lid off and unlocked, a clear step-out path, and another adult nearby for the first session or any changed/colder/uncertain setup. A check-in is not enough for first exposure or any positive/uncertain safety screen.'
-  - Start the timer before or as you enter. Enter slowly enough to keep control of breathing, then stay still or make small movements only if safe.
-  - Breathe normally and keep your head out. If controlled breathing is not back within the first 15–30 seconds, or if gasping, panic, dizziness, chest symptoms, palpitations, confusion, inability to speak, or loss of control appears, exit immediately and end the session.
-  - Exit at the earlier of the planned duration, a stop condition, or any loss of confidence that you can get out safely.
-  - Rewarm gently with dry clothes, warm layers, and a warm indoor environment. Do not add sauna, hot-cold contrast, a very hot shower, breathwork, driving, or risky tasks while cold, shaky, numb, dizzy, or not fully clear-headed; those are outside this default protocol.
-  - Log temperature, time in water, mood before and after, cold-shock intensity, symptoms, recovery context, and whether the session was completed as planned.
+    - "Screen first; do not start if any cold-water safety answer is positive or uncertain."
+    - "Use a controlled tub, plunge, or tank where you can stand and exit immediately; avoid open water."
+    - "Measure water before every session; first-run range is 10–15 °C, never unmeasured or below 10 °C."
+    - "Keep head out; no breathwork, hyperventilation, breath holds, face submersion, alcohol, sedatives, or swimming challenges."
+    - "Set exit plan before entry: stable footing, towel, warm layers, open cover, clear path, and adult nearby for first exposure."
+    - "Start timer, enter slowly, regain controlled breathing within 15–30 sec, and stay still or move minimally."
+    - "Exit at planned time, any stop condition, or any loss of confidence in safe exit."
+    - "Rewarm gently; log temperature, time, mood, cold-shock intensity, symptoms, and completion."
   safetyNotes:
   - This is a high-caution protocol because cold-water immersion can trigger cold shock, gasping or hyperventilation, cardiovascular strain, arrhythmia-relevant contexts, hypothermia risk, and drowning/submersion hazards.
   - The 1–3 minute 10–15 °C starting range is a conservative Murph field-test dose, not a claim that this exact dose is proven optimal. It is intentionally shorter than several direct studies and stronger than many public protocols on screening.
@@ -151,15 +170,12 @@ testPlans:
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:self-reported-mood
   description: "Cold water creates a strong arousal surge, followed by relief after exit, shifting perceived challenge and mood state."
-  expected: acute mood may rise
+  expected: Mood lift
   estimatedChange:
-    kind: absolute
-    low: 0.5
-    high: 2
-    unit: 0–10 score points
+    kind: mixed_or_contextual
     window: 30–180 min post-session vs pre-session
     confidence: low
-    basis: Direct single-session CWI studies reported POMS/TMD mood improvements, but those scales and 5–20 minute exposures do not map cleanly to a 1–3 minute Murph run; this is a conservative user-scale translation.
+    basis: Direct single-session CWI studies reported POMS/TMD mood improvements, but those scales and 5–20 minute exposures do not map cleanly to a 1–3 minute Murph run or a simple mood check-in.
   protocolProminence: focus
 - biomarkerKey: biomarker:resting-heart-rate
   description: "Immersion raises cardiac load; next-morning resting pulse shows whether the stress response has resolved."

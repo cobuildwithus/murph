@@ -69,14 +69,14 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - Before starting, screen for red flags. Do not run this as a wellness self-test if sleep problems are chronic, impairing, linked to medication changes, associated with suspected or diagnosed sleep disorders, or occur during pregnancy/postpartum/lactation, older-adult medical complexity, pediatric/adolescent use, severe mood symptoms, panic/respiratory symptoms, trauma/dissociation, psychosis, mania, or prior adverse meditation/breathwork reactions.
-    - Read the safety boundaries before starting, especially if you have chronic insomnia, suspected sleep apnea, panic vulnerability, respiratory disease, trauma symptoms, dissociation, psychosis, mania, or prior adverse meditation experiences.
-    - Choose one child practice before the intervention window begins. Use either gentle resonance-like breathing or silent meditation. Do not treat the default test as evidence for a stacked breathing-plus-meditation protocol.
-    - Keep the practice in the final pre-bed window, preferably after screens and bright tasks are winding down and before lights-out pressure becomes frustrating.
-    - For the breathing child, sit or lie comfortably and breathe gently at a pace that feels easy. About 5-6 breaths per minute can be used as an optional guide, but do not force the pace, depth, inhale, exhale, or any exact rhythm. Use smaller, quieter breaths or stop if you notice air hunger, overbreathing, dizziness, chest tightness, tingling that feels alarming, or panic-like activation.
-    - For the meditation child, start with 5-10 minutes. Set a simple timer and practice silently without guided audio. Use a grounding anchor such as ambient sound, feet/contact points, or easy breath awareness; eyes may stay open. Stop rather than pushing through if inward attention increases panic, traumatic re-experiencing, dissociation, depersonalization/derealization, unusual mood elevation, or psychosis-like experiences.
-    - Do not combine breathing and meditation during the default self-test. If you intentionally run a combined exploratory variant later, first confirm that each child practice was tolerated on separate nights, keep the total session short, do breathing first and meditation second, and do not combine if any caution group or stop signal applies.
-    - Log practice start, practice end, chosen child, completion, bedtime target, actual bedtime, estimated sleep-onset latency, awakenings, sleep quality, next-morning restfulness, and any symptoms or distress.
+    - "Screen first; route chronic, impairing, clinical, pregnancy, respiratory, panic, trauma, psychosis, mania, or prior adverse reactions to guidance."
+    - "Choose 1 child practice before intervention: gentle slow breathing or silent meditation; do not stack by default."
+    - "Practice in the final pre-bed window after screens and bright tasks are winding down."
+    - "Breathing child: sit or lie comfortably; breathe gently at an easy pace, optionally ~5–6 breaths/min."
+    - "Stop breathing practice for air hunger, overbreathing, dizziness, chest tightness, alarming tingling, or panic-like activation."
+    - "Meditation child: start 5–10 min with timer, silent anchor, and eyes open if useful."
+    - "Stop meditation for panic, trauma re-experiencing, dissociation, mood elevation, or psychosis-like experiences."
+    - "Log practice type, start/end, completion, bedtime, sleep onset, awakenings, sleep quality, restfulness, symptoms, and distress."
   safetyNotes:
     - Use this only for mild, non-urgent pre-sleep arousal or sleep-onset friction. It is not a treatment pathway for chronic or impairing insomnia, suspected or diagnosed sleep apnea, PAP therapy, restless legs syndrome, periodic limb movement disorder, hypersomnolence, parasomnias, circadian rhythm sleep-wake disorders, pregnancy/postpartum/lactation sleep problems, medication decisions, panic disorder, asthma, trauma/PTSD, depression, psychosis, mania, or suicidality.
     - Get clinician guidance before starting if you are pregnant, postpartum, lactating, under 18, an older adult with medical complexity or polypharmacy, using sedatives or sleep medicines, using PAP/CPAP, changing medications, or experiencing severe daytime sleepiness, sleep attacks, drowsy driving, loud snoring, witnessed apneas, gasping, urge-to-move symptoms, disruptive limb movements, dream enactment, sleepwalking, or major sleep-timing instability.
@@ -221,16 +221,14 @@ expectedSignalDescriptions:
     protocolProminence: context
   -
     biomarkerKey: biomarker:pre-sleep-arousal
-    expected: Could trend lower
+    expected: Less wired
+    expectedDirection: down_or_stable
     description: Breath pacing and grounding give attention a repeatable low-threat task, reducing threat checks and rumination before lights-out.
     estimatedChange:
-      kind: absolute
-      low: -3
-      high: -1
-      unit: 0-10 rating points
+      kind: mixed_or_contextual
       window: 14 nights vs 7-night baseline
       confidence: low
-      basis: "The bedtime app-guided mindfulness pilot reported a PSAS change of -7.7 points, and structured mindfulness insomnia trials report lower pre-sleep arousal. Mapping those scales to a simple nightly 0-10 rating is approximate, and breathing-only arousal-scale estimates were not extracted."
+      basis: "The bedtime app-guided mindfulness pilot reported lower PSAS scores, and structured mindfulness insomnia trials report lower pre-sleep arousal. Mapping those scales to a simple nightly check-in is approximate, and breathing-only arousal-scale estimates were not extracted."
     protocolProminence: focus
 whyItWorks:
   - "## Slow breathing couples heart and lungs\n\nBreathing near 5–6 breaths/min amplifies heart-rate oscillation with each breath. The vagal brake becomes easier to engage before bed."

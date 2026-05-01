@@ -17,7 +17,6 @@ import {
   cleanOptionalHealthCommonsUserFacingCopy,
 } from "./user-facing-copy";
 
-const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";
 const STUDY_FINDING_MAX_LENGTH = 1_000;
 
@@ -83,10 +82,6 @@ function studyDisplayRank(entity: HealthCommonsEntity): number {
 
   if (priority === "high") {
     return 1;
-  }
-
-  if (bucket.includes("long-term finnish cohort")) {
-    return 2;
   }
 
   if (bucket.includes("acute") || bucket.includes("mechanistic")) {
@@ -495,19 +490,16 @@ export function toResearchStats({
   displaySources,
   evidenceAppraisals,
   protocolKey,
-  routeId,
 }: {
   countedResearchSources: readonly HealthCommonsEntity[];
   displaySources: readonly HealthCommonsEntity[];
   evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
   protocolKey: string;
-  routeId: string;
 }): ExperimentProtocol["researchStats"] {
   const participantCountSources = participantCountResearchSources({
     countedResearchSources,
     evidenceAppraisals,
     protocolKey,
-    routeId,
   });
 
   if (!hasMixedResearchAndProvenanceSources({
@@ -590,19 +582,13 @@ function participantCountResearchSources({
   countedResearchSources,
   evidenceAppraisals,
   protocolKey,
-  routeId,
 }: {
   countedResearchSources: readonly HealthCommonsEntity[];
   evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
   protocolKey: string;
-  routeId: string;
 }): readonly HealthCommonsEntity[] {
-  if (routeId !== NORWEGIAN_4X4_ROUTE_ID) {
-    return countedResearchSources;
-  }
-
   return countedResearchSources.filter((entity) =>
-    !isExcludedNorwegianParticipantCountSource(entity, protocolKey, evidenceAppraisals)
+    !isExcludedParticipantCountSource(entity, protocolKey, evidenceAppraisals)
   );
 }
 
@@ -628,7 +614,7 @@ function sumPrimaryParticipantCount(
   return [...countsByCohort.values()].reduce((sum, count) => sum + count, 0);
 }
 
-function isExcludedNorwegianParticipantCountSource(
+function isExcludedParticipantCountSource(
   entity: HealthCommonsEntity,
   protocolKey: string,
   evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],

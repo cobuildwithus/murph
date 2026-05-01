@@ -7,6 +7,7 @@ title: Red Light Glasses Before Bed
 summary: Bedtime light-filtering glasses, where less blue-green light reaches the retina so the brain gets a weaker signal to stay alert and delay melatonin.
 status: draft
 quality: usable
+sortRank: 30
 aliases:
 - red light glasses before bed
 - amber glasses before bed
@@ -67,12 +68,12 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-  - Choose high-filtering amber, red, or orange glasses. Prefer product spectral transmittance, melanopic, alpha-opic, or mDFD data when available; otherwise use visibly strong amber/red wraparound glasses as a practical, lower-confidence fallback.
-  - 'Keep the first seven days as baseline: do not wear the glasses, and keep bedtime, screens, room light, caffeine, alcohol, supplements, and exercise timing as stable as practical.'
-  - On intervention nights, put the glasses on 90–120 minutes before intended bedtime and keep them on during the usual indoor wind-down routine.
-  - Keep room lighting and screen habits stable unless the experiment is explicitly reframed as a broader room-light or screen-reduction test.
-  - Remove the glasses before sleep and before any safety-critical, low-light, motion-critical, contrast-critical, or color-critical task.
-  - Log glasses use, timing, subjective sleep onset, perceived ease of sleep onset, pre-bed wiredness or sleepiness, screen and room-light context, lens-confidence details, and symptoms the next morning.
+    - "Choose high-filtering amber, red, or orange glasses; prefer spectral, melanopic, alpha-opic, or mDFD data when available."
+    - "Baseline 7 days: no glasses; keep bedtime, screens, room light, caffeine, alcohol, supplements, and exercise timing stable."
+    - "On intervention nights, wear glasses 90–120 min before intended bedtime during usual indoor wind-down."
+    - "Keep room lighting and screen habits stable unless testing broader light or screen reduction."
+    - "Remove glasses before sleep and before driving, stairs, cooking, tools, low-light navigation, or color/contrast/motion-critical tasks."
+    - "Next morning, log use, timing, sleep onset, wiredness/sleepiness, screen/room-light context, lens confidence, and symptoms."
   safetyNotes:
   - Remove the glasses before driving, cycling, cooking with visual hazards, using tools, navigating stairs or unfamiliar low-light spaces, or doing color-, contrast-, or motion-critical work. Cycling, cooking, tools, stairs, and falls were not directly tested; this is a conservative extrapolation from visual-performance and low-light evidence [source_artifact:pmid-35227699; source_artifact:pmid-31369054; source_artifact:pmid-32830377; source_artifact:pmid-34475483; source_artifact:pmid-18954312; source_artifact:pmid-12322929; source_artifact:pmid-4564949; source_artifact:pmid-31696535].
   - This is a bounded adult wellness self-experiment about filtering ocular evening light; it is not eye care, insomnia treatment, bipolar or depression treatment, delayed-sleep-phase treatment, pregnancy guidance, pediatric guidance, shift-work adaptation, or a photobiomodulation protocol [source_artifact:evening-light-reduction-pmid-37593770; source_artifact:evening-light-reduction-pmid-31752544; source_artifact:evening-light-reduction-pmid-27226262; source_artifact:evening-light-reduction-pmid-41421618; source_artifact:evening-light-reduction-pmid-35024497; source_artifact:evening-light-reduction-pmid-35089982; source_artifact:doi-10.1001-jamapediatrics.2026.0976; source_artifact:pmid-33588653].
@@ -196,6 +197,36 @@ expectedSignalDescriptions:
     window: baseline vs 7-14 intervention nights
     confidence: low
     basis: Direct eyewear evidence centers on melatonin, sleep latency, sleep efficiency, insomnia ratings, and actigraphy total sleep time; it does not establish N3/deep-sleep effects, and consumer sleep-stage estimates are weaker than sleep/wake trends [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-40300398].
+  protocolProminence: context
+- biomarkerKey: biomarker:rem-sleep-minutes
+  description: "Evening light reduction may improve circadian timing and sleep opportunity; REM changes are most plausible when the final sleep cycles become less curtailed."
+  expected: up_or_stable
+  expectedDirection: up_or_stable
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: baseline vs 7-14 intervention nights
+    confidence: low
+    basis: Direct eyewear evidence centers on melatonin, sleep latency, sleep efficiency, insomnia ratings, and actigraphy total sleep time; it does not establish a reliable REM-minutes effect.
+  protocolProminence: context
+- biomarkerKey: biomarker:blood-oxygen-spo2
+  description: "Evening light reduction may improve sleep timing or continuity, but it does not treat sleep apnea or hypoxemia; SpO2 should remain stable."
+  expected: stable
+  expectedDirection: stable
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: baseline vs 7-14 intervention nights
+    confidence: low
+    basis: SpO2 is a safety-context signal here; repeated overnight drops should not be interpreted as protocol success or failure without sleep-disordered-breathing context.
+  protocolProminence: context
+- biomarkerKey: biomarker:blood-glucose
+  description: "Evening light reduction may improve sleep timing or circadian regularity, which can indirectly matter for glucose interpretation, but it is not a glucose intervention."
+  expected: mixed_or_contextual
+  expectedDirection: mixed_or_contextual
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: baseline vs 7-14 intervention nights
+    confidence: low
+    basis: The direct consumer eyewear evidence does not establish glucose lowering; use glucose only as context if sleep timing changes materially.
   protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1

@@ -254,16 +254,29 @@ protocol:
   durationMinutes:
     min: 5
     max: 40
+  sessionShape:
+    label: One session
+    segments:
+      - label: outdoor light
+        kind: stimulus
+        durationMinutes: 30
+    ticks:
+      - label: "0"
+        offsetMinutes: 0
+      - label: "10 min minimum"
+        offsetMinutes: 10
+      - label: "30 min"
+        offsetMinutes: 30
   interventionSessionsMinimum: 14
   interventionSessionsTarget: 21
   steps:
-    - Choose a safe outdoor place you can repeat most mornings, such as a porch, balcony, courtyard, park path, or shaded outdoor spot.
-    - After waking, go outside as early as practical. The default target is within the first 30-60 minutes after waking; a before-10-AM exposure still counts as the main backup window.
-    - Face open sky or ambient daylight, not the sun. Do not sun-gaze, use direct solar viewing, or force glare.
-    - Stay outside for 10-30 minutes. Start with 5-10 minutes if you are light-sensitive, migraine-prone, heat-sensitive, or unsure how you respond.
-    - Keep the session low-burden: stand, sit, or walk gently, but do not turn this into a new exercise protocol unless you log that activity separately.
-    - Use shade, hat, sunscreen, sunglasses, cooler timing, or skipping when UV, glare, symptoms, heat, medication, or skin/eye safety calls for it.
-    - Log wake time, exposure start time, minutes outdoors, weather or brightness context, sunglasses/hat/sunscreen, activity during exposure, symptoms, and next-night sleep quality.
+    - "Choose a safe repeatable outdoor spot: porch, balcony, courtyard, park path, or shaded open-sky area."
+    - "Go outside soon after waking; target first 30–60 min, with before 10 AM as backup."
+    - "Face open sky or ambient daylight, not the sun; no sun-gazing or forced glare."
+    - "Stay 10–30 min; start with 5–10 min if light-sensitive, migraine-prone, heat-sensitive, or unsure."
+    - "Sit, stand, or walk gently; log walking separately if it becomes exercise."
+    - "Use shade, hat, sunscreen, sunglasses, cooler timing, or skip when UV, glare, heat, medication, or symptoms require it."
+    - "Log wake time, start time, minutes, weather, protection, activity, symptoms, and next-night sleep quality."
   tips:
     - Hold evening light, caffeine, alcohol, exercise, bedtime, and wake time stable during the test.
     - Overcast still counts — cloudy outdoor light is far brighter than typical indoor light.

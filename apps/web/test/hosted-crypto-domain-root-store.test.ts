@@ -10,7 +10,6 @@ import {
 } from "@murphai/runtime-state";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { createHostedSecretCodec } from "../src/lib/device-sync/crypto";
 import {
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
@@ -461,14 +460,11 @@ function createLocalKmsClient(input: {
 }
 
 function restoreHostedSecureBoxTestCodec(): void {
-  const hostedSecureBoxTestCodec = createHostedSecretCodec({
-    key: Buffer.alloc(32, 7),
-    keyVersion: "test-v1",
-  });
-
   setHostedSecureBoxStringTestCodecForTests({
     decrypt(input) {
-      const decoded = JSON.parse(hostedSecureBoxTestCodec.decrypt(input.value)) as {
+      const decoded = JSON.parse(
+        Buffer.from(input.value.replace(/^hsb-test:/u, ""), "base64url").toString("utf8"),
+      ) as {
         lane?: string;
         scope?: string;
         userId?: string;
@@ -485,12 +481,12 @@ function restoreHostedSecureBoxTestCodec(): void {
       return decoded.value;
     },
     encrypt(input) {
-      return hostedSecureBoxTestCodec.encrypt(JSON.stringify({
+      return `hsb-test:${Buffer.from(JSON.stringify({
         lane: input.lane,
         scope: input.scope,
         userId: input.userId,
         value: input.value,
-      }));
+      }), "utf8").toString("base64url")}`;
     },
   });
 }

@@ -58,24 +58,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: mixed_or_contextual
-    relationship: secondary_biomarker
-    mechanism: MVPA is a secondary interpretation signal, not proof that the total-step floor hit an intensity guideline.
-    scoring:
-      evidenceWeight: 3
-      biomarkerRelevance: 3
-      wearableMeasurability: 5
-      burdenPenalty: 1
-      safetyCautionPenalty: 1
-    display:
-      confidence: medium
-      burdenLabel: low
-      cautionLabel: context
 ---
 
 MVPA minutes are useful when a device reports them, but requiring MVPA changes the dose from a daily total-step floor to an intensity protocol.

@@ -44,7 +44,6 @@ export type HealthCommonsWebProjectionKey =
   | "experiment.results-public";
 
 const SOURCE_SNIPPET_FINDING_MAX_LENGTH = 1_000;
-const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";
 const ROUTE_BUNDLE_REVERSE_RELATION_TYPES = new Set<string>([
   "alias_of",
@@ -132,6 +131,7 @@ export interface HealthCommonsWebExperimentIndexEntry {
   revision: HealthCommonsWebRevisionRef;
   routeId: string;
   slug: string;
+  sortRank?: number | null;
   status: string | null;
   studyCount: number;
   summary: string | null;
@@ -306,6 +306,7 @@ export interface HealthCommonsWebExperimentSignal {
   delta: string;
   description?: string;
   direction: "up" | "down" | "neutral";
+  displayValue?: string;
   estimatedChange?: HealthCommonsWebExperimentSignalEstimatedChange;
   expected: string;
   label: string;
@@ -595,11 +596,12 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             categories: entity.categories ?? [],
             hidden: entity.hidden === true,
             key: entity.key,
-            published: isPublishedBiomarkerIndexEntity(entity),
+            published: isPublishedBiomarkerIndexEntity(entity, entitiesByKey.values()),
             quality: entity.quality ?? null,
             revision: revisionRefForEntity(entity),
             routeId: bundle.route.routeId,
             slug: entity.slug,
+            sortRank: entity.sortRank ?? null,
             status: entity.status ?? null,
             summary: entity.summary ?? null,
             title: entity.biomarker?.displayName ?? entity.title,
@@ -636,6 +638,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             revision: revisionRefForEntity(entity),
             routeId: bundle.route.routeId,
             slug: entity.slug,
+            sortRank: entity.sortRank ?? null,
             status: entity.status ?? null,
             studyCount: countRouteBundleStudySources(bundle, entitiesByKey),
             summary: entity.summary ?? null,
@@ -926,7 +929,6 @@ function buildExperimentResearchTab(input: {
       displaySources,
       evidenceAppraisals,
       protocolKey: input.protocol.key,
-      routeId: input.bundle.route.routeId,
     }),
     revision: revisionRefForEntity(input.protocol),
     route: {
@@ -1061,6 +1063,7 @@ function toExpectedSignal(
     delta: "",
     direction,
     biomarkerRouteId: biomarker.key.replace(/^biomarker:/u, ""),
+    displayValue: protocolSignal?.displayValue,
     estimatedChange: protocolSignal?.estimatedChange,
     expected,
     description:
@@ -1075,13 +1078,13 @@ function toExpectedSignal(
 function normalizeExpectedSignalLabel(expected: string): string {
   switch (expected) {
     case "down":
-    case "mixed_or_contextual":
-      return "Possible change";
     case "down_or_stable":
       return "Could trend lower";
     case "up":
     case "up_or_stable":
       return "Could improve";
+    case "mixed_or_contextual":
+      return "Possible change";
     case "stable":
       return "Should stay stable";
     default:
@@ -1342,7 +1345,7 @@ function toSessionShape(
     ...(shape.summarySegments
       ? { summarySegments: shape.summarySegments.map(toSessionShapeSegment) }
       : {}),
-    ...(shape.ticks ? { ticks: [...shape.ticks] } : {}),
+    ...(shape.ticks ? { ticks: shape.ticks.map(toSessionShapeTick) } : {}),
   };
 }
 
@@ -1353,6 +1356,24 @@ function toSessionShapeSegment(
     durationMinutes: segment.durationMinutes,
     kind: segment.kind,
     label: segment.label,
+  };
+}
+
+function toSessionShapeTick(
+  tick: NonNullable<HealthCommonsProtocolSessionShape["ticks"]>[number],
+): NonNullable<HealthCommonsProtocolSessionShape["ticks"]>[number] {
+  if (typeof tick === "string") {
+    return tick;
+  }
+  if ("offsetMinutes" in tick) {
+    return {
+      label: tick.label,
+      offsetMinutes: tick.offsetMinutes,
+    };
+  }
+  return {
+    label: tick.label,
+    positionPercent: tick.positionPercent,
   };
 }
 
@@ -1830,10 +1851,6 @@ function studyDisplayRank(entity: HealthCommonsCatalogEntity): number {
     return 1;
   }
 
-  if (bucket.includes("long-term finnish cohort")) {
-    return 2;
-  }
-
   if (bucket.includes("acute") || bucket.includes("mechanistic")) {
     return 3;
   }
@@ -1985,19 +2002,15 @@ function toResearchStats({
   displaySources,
   evidenceAppraisals,
   protocolKey,
-  routeId,
 }: {
   countedResearchSources: readonly HealthCommonsCatalogEntity[];
   displaySources: readonly HealthCommonsCatalogEntity[];
   evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
   protocolKey: string;
-  routeId: string;
 }): HealthCommonsWebExperimentResearchStat[] {
-  const participantCountSources = routeId === NORWEGIAN_4X4_ROUTE_ID
-    ? countedResearchSources.filter((entity) =>
-        !isExcludedNorwegianParticipantCountSource(entity, protocolKey, evidenceAppraisals)
-      )
-    : countedResearchSources;
+  const participantCountSources = countedResearchSources.filter((entity) =>
+    !isExcludedParticipantCountSource(entity, protocolKey, evidenceAppraisals)
+  );
   const mixedResearchAndProvenance =
     countedResearchSources.length > 0 && countedResearchSources.length < displaySources.length;
   const statsSources = mixedResearchAndProvenance ? countedResearchSources : displaySources;
@@ -2054,7 +2067,7 @@ function sumPrimaryParticipantCount(
   return [...countsByCohort.values()].reduce((sum, count) => sum + count, 0);
 }
 
-function isExcludedNorwegianParticipantCountSource(
+function isExcludedParticipantCountSource(
   entity: HealthCommonsCatalogEntity,
   protocolKey: string,
   evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
@@ -2246,11 +2259,11 @@ function collectRouteClosureKeys(
   }
 
   if (primary.entityType === "biomarker") {
-    for (const candidate of primary.protocolRanking?.candidates ?? []) {
-      addKey(candidate.protocolKey);
-    }
-
     for (const entity of catalog.entities) {
+      if (!isPublicProtocolVariant(entity)) {
+        continue;
+      }
+
       const referencesBiomarker = (entity.relations ?? []).some(
         (relation) => stripRevision(relation.target) === primary.key,
       );
@@ -2258,8 +2271,11 @@ function collectRouteClosureKeys(
         plan.primaryBiomarkerKey === primary.key ||
         (plan.secondaryBiomarkerKeys ?? []).includes(primary.key)
       );
+      const expectedSignalReferencesBiomarker = (entity.expectedSignalDescriptions ?? []).some(
+        (signal) => stripRevision(signal.biomarkerKey) === primary.key,
+      );
 
-      if (referencesBiomarker || testPlanReferencesBiomarker) {
+      if (referencesBiomarker || testPlanReferencesBiomarker || expectedSignalReferencesBiomarker) {
         addKey(entity.key);
       }
     }
@@ -2285,6 +2301,7 @@ function prepareEntityForWebBundle(
     entityType: entity.entityType,
     hidden: entity.hidden,
     key: entity.key,
+    preferredRouteId: entity.preferredRouteId,
     quality: entity.quality,
     relativePath: entity.relativePath,
     relations: entity.entityType === "source_artifact" ? [] : entity.relations ?? [],
@@ -2328,7 +2345,6 @@ function prepareEntityForWebBundle(
     options: entity.options,
     profileImageUrl: readPassthroughString(entity, "profileImageUrl"),
     protocol: entity.protocol,
-    protocolRanking: entity.protocolRanking,
     researchLandscape: entity.researchLandscape,
     safety: entity.safety,
     sourceIdentity: entity.sourceIdentity,
@@ -2383,6 +2399,7 @@ function buildEntityRouteIds(
   redirects: readonly HealthCommonsRedirect[],
 ): string[] {
   return uniqueStrings([
+    entity.preferredRouteId,
     toTrailingRouteId(entity.slug),
     ...redirects.map((redirect) => toRouteIdFromKey(redirect.from)),
   ]);
@@ -2392,8 +2409,8 @@ function selectPrimaryRouteId(
   entity: HealthCommonsCatalogEntity | null,
   routeIds: readonly string[],
 ): string {
-  if (entity?.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week") {
-    return "finnish-sauna";
+  if (entity?.preferredRouteId && routeIds.includes(entity.preferredRouteId)) {
+    return entity.preferredRouteId;
   }
 
   return routeIds[0] ?? toTrailingRouteId(entity?.slug ?? "");
@@ -2403,19 +2420,45 @@ function bundlePathForEntity(entityType: HealthCommonsEntityType, routeId: strin
   return `bundles/${entityType}/${routeId}.json`;
 }
 
-function isPublishedBiomarkerIndexEntity(entity: HealthCommonsCatalogEntity): boolean {
+function isPublishedBiomarkerIndexEntity(
+  entity: HealthCommonsCatalogEntity,
+  entities: Iterable<HealthCommonsCatalogEntity>,
+): boolean {
   return entity.entityType === "biomarker"
     && entity.status !== "deprecated"
     && entity.hidden !== true
     && (entity.biomarker?.explainerCards?.length ?? 0) > 0
     && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
-    && (entity.protocolRanking?.candidates?.length ?? 0) > 0
+    && hasPublishedProtocolExpectedSignal(entity.key, entities)
     && entity.communityOutcomeSummary !== undefined
     && (entity.biomarker?.privateMetricBindings?.some((binding) =>
       binding.source === "browser_vault_metric"
       && typeof binding.domain === "string"
       && typeof binding.metric === "string"
     ) ?? false);
+}
+
+function hasPublishedProtocolExpectedSignal(
+  biomarkerKey: string,
+  entities: Iterable<HealthCommonsCatalogEntity>,
+): boolean {
+  for (const entity of entities) {
+    if (
+      entity.entityType !== "protocol_variant" ||
+      entity.status === "deprecated" ||
+      entity.hidden === true
+    ) {
+      continue;
+    }
+
+    if ((entity.expectedSignalDescriptions ?? []).some((signal) =>
+      stripRevision(signal.biomarkerKey) === biomarkerKey
+    )) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function formatProtocolCategory(entity: HealthCommonsCatalogEntity): string {

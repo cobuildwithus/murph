@@ -76,14 +76,14 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - Choose a 10-minute window in the last 30 minutes before intended bedtime; use the same window during the test when possible.
-    - "Prefer a chair or the edge of the bed. Use in-bed practice only if it does not make you lie awake, try harder to sleep, or blur meditation with sleep tracking; keep the room dim and the posture comfortable."
-    - "Keep the practice silent, unguided, and free of audio, app lessons, music, breath pacing, supplements, or other new sleep interventions."
-    - "Set a quiet timer, let breathing stay natural, and rest attention on a simple breath, body, contact-point, room-sound, or eyes-open soft-gaze anchor without trying to force sleepiness."
-    - "If breath or body attention increases panic, trauma memories, dissociation, disorientation, fear of losing control, or distress, stop the session rather than pushing through."
-    - "When planning, worry, or sleep-effort thoughts appear, notice them briefly, label them as thinking or worrying if useful, and return to the chosen neutral anchor."
-    - "When the timer ends, stop the practice; do not repeat or extend the session to chase sleep."
-    - "Make a quick log entry for minutes practiced, pre-bed wiredness, estimated sleep-onset latency, and any adverse or activating effects. If no stop condition occurred, proceed with the normal bedtime routine."
+    - "Choose a 10-min window in the last 30 min before intended bedtime; keep timing stable when possible."
+    - "Use a chair or bed edge; use in-bed practice only if it does not create wakefulness or tracker confusion."
+    - "Keep practice silent and unguided: no audio, app lessons, music, breath pacing, supplements, or new sleep interventions."
+    - "Set quiet timer; rest attention on breath, body, contact point, room sound, or eyes-open soft gaze."
+    - "Stop if breath/body attention triggers panic, trauma memories, dissociation, disorientation, fear, or distress."
+    - "Notice planning, worry, or sleep-effort thoughts; label if useful and return to the neutral anchor."
+    - "Stop when timer ends; do not repeat or extend the session to chase sleep."
+    - "Log minutes, pre-bed wiredness, estimated sleep onset, and any adverse or activating effects."
   tips:
     - Keep caffeine, alcohol, exercise, screens, bedtime, and sleep environment stable across baseline and intervention.
     - Neutral timer only; skip sleep-score checks during the session window.

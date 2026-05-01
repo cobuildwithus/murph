@@ -210,22 +210,30 @@ protocol:
   durationMinutes:
     min: 12
     max: 20
+  sessionShape:
+    label: One session
+    segments:
+      - label: red/NIR exposure
+        kind: stimulus
+        durationMinutes: 20
+    ticks:
+      - label: "0"
+        offsetMinutes: 0
+      - label: "12 min minimum"
+        offsetMinutes: 12
+      - label: "20 min"
+        offsetMinutes: 20
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - Confirm that the device is a documented non-UV, non-tanning, nonthermal red/NIR PBM device; do not substitute an infrared sauna, tanning bed, IPL, laser, or heat protocol.
-    - Before starting, check the avoid-or-get-clinician-guidance list; this ordinary wellness field test is for adults without the listed clinical boundaries.
-    - Use the device’s beginner or manufacturer-recommended setting and stay at the lower of the device instructions and this protocol’s candidate range; do not increase time, intensity, distance compensation, or frequency to chase an effect.
-    - Record the device name, wavelengths, irradiance if available, stated fluence if available, intensity mode, pulsing if available, session duration, exposure geometry, body coverage, and whether the session is front-only or front-and-back.
-    - Choose one stable session window and keep it as consistent as practical across the intervention rather than changing time of day from session to session.
-    - Use the device in a clearly nonthermal way; stop if skin feels hot, burning, painful, or unusually warm.
-    - Use device-appropriate eye protection for each session unless the manufacturer explicitly says it is not required, keep eyes away from direct emitter lines, and never stare into emitters.
-    - Keep clothing coverage, distance, body position, and exposure geometry stable within comfort, privacy, skin-integrity, and device-instruction limits.
-    - Do not stop, hold, or change prescribed medication for this protocol, including glucose-lowering or blood-pressure medication.
-    - Do not add another new sleep, recovery, light, heat, cold, training, or supplement intervention during the same 4-week window.
-    - Log acute symptoms, visual symptoms, afterimage duration, skin changes, mood, and sleep changes after every session.
-    - Missed sessions are acceptable; do not complete an adherence target by continuing through symptoms.
-    - Compare intervention averages against your own baseline instead of reading too much into single-night changes.
+    - "Confirm device is documented non-UV, non-tanning, nonthermal red/NIR PBM; exclude sauna, tanning, IPL, laser, and heat protocols."
+    - "Complete safety screen before start; route avoid/clinician-guidance items away from routine wellness setup."
+    - "Use beginner/manufacturer setting and the lower of device instructions and Murph range; do not increase dose to chase effect."
+    - "Record device, wavelengths, irradiance/fluence if known, intensity, pulsing, duration, geometry, coverage, and session orientation."
+    - "Choose 1 stable session window; keep device, duration, timing, coverage, distance, and body position consistent."
+    - "Use device-appropriate eye protection; avoid direct emitter gaze and keep sessions clearly nonthermal."
+    - "Log symptoms, visual effects, skin changes, mood, sleep changes, medication changes, and confounders after each session."
+    - "Stop for eye, skin, heat, mood, cardiopulmonary, neurologic, or severe symptoms; missed sessions beat pushing through."
   tips:
     - Report parameters, not marketing language. Wavelength alone is not the whole dose.
     - Keep device, duration, timing, and coverage steady so a null result is still interpretable.

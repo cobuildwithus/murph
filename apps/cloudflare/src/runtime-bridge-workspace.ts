@@ -33,7 +33,6 @@ import {
 import {
   decryptHostedMailboxPayloadCiphertext,
   createHostedMailboxEncryptionEnvironmentFromIngressRoot,
-  readHostedMailboxEncryptionEnvironment,
   type HostedMailboxEncryptionEnvironment,
 } from "./hosted-mailbox-encryption.ts";
 import {
@@ -190,7 +189,9 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
   userId: string;
 }): Promise<HostedMailboxEncryptionEnvironment> {
   if (Object.keys(input.platformEnv).length === 0) {
-    return readHostedMailboxEncryptionEnvironment();
+    throw new Error(
+      "Hosted runtime platformEnv is required for hosted mailbox payload decrypt.",
+    );
   }
   const workerEnv = readHostedExecutionWorkerEnvironment(input.platformEnv);
   const roots = await fetchHostedWorkerRuntimeRoots({
@@ -210,10 +211,14 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
     timeoutMs: workerEnv.webControlTimeoutMs,
     userId: input.userId,
   });
-  return createHostedMailboxEncryptionEnvironmentFromIngressRoot({
-    rootKey: roots.ingress.rootKey,
-    rootKeyId: roots.ingress.envelope.rootKeyId,
-  });
+  try {
+    return createHostedMailboxEncryptionEnvironmentFromIngressRoot({
+      rootKey: roots.ingress.rootKey,
+      rootKeyId: roots.ingress.envelope.rootKeyId,
+    });
+  } finally {
+    roots.runtime.rootKey.fill(0);
+  }
 }
 
 function createHostedWorkspaceBridgeMailboxImporter(input: {

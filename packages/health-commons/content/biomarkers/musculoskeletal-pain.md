@@ -61,24 +61,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: down_or_stable
-    relationship: secondary_biomarker
-    mechanism: Pain is a safety and feasibility outcome; pushing through worsening pain is a failed implementation.
-    scoring:
-      evidenceWeight: 3
-      biomarkerRelevance: 3
-      wearableMeasurability: 2
-      burdenPenalty: 1
-      safetyCautionPenalty: 3
-    display:
-      confidence: medium
-      burdenLabel: manual
-      cautionLabel: safety context
 ---
 
 Track pain or soreness daily during a step-floor experiment, especially in feet, ankles, knees, hips, shins, and back.

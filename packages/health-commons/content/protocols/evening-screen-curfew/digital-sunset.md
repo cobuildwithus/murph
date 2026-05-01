@@ -403,14 +403,14 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-  - Choose a realistic intended bedtime and set a screens-off time 30 minutes before it. Use 60 minutes only if that is realistic without delaying sleep or increasing anxiety.
-  - Before the cutoff, finish must-do messages, work handoffs, alarms, payments, calendar checks, and entertainment decisions only when doing so will not push bedtime later; otherwise shorten the window or log a planned exception rather than staying up to “prepare” for the curfew.
-  - "At the cutoff, stop discretionary personal interactive screens: phone, tablet, laptop, handheld gaming, social feeds, messaging, web browsing, work email, streaming on personal devices, and in-bed scrolling. Medical, caregiving, accessibility, emergency, crisis-support, and on-call use is a planned exception, not a breach."
-  - Before using silent mode, Do Not Disturb, app locks, or phone-outside-bedroom placement, confirm that VIP calls, medical/accessibility alerts, alarms, caregiving, on-call, and emergency contacts still work. Do not lock or mute safety channels.
-  - Put the phone out of bed; outside the bedroom is optional only when safe. If you need the phone for medical, accessibility, emergency, caregiving, or on-call availability, keep it reachable but reduce interaction with call-only mode, VIP calls, or another tested exception.
-  - Use a low-stimulation replacement activity that does not require a personal screen, such as paper reading, stretching, preparing clothes, journaling, quiet conversation, or audio that was started before the cutoff, does not require further phone interaction, and does not mask alarms, child/caregiver cues, emergency calls, or needed overnight alerts.
-  - If you use a screen after the cutoff, log it neutrally as a breach or planned exception, then return to the rule instead of treating the whole night as failed.
-  - The next morning, log actual screen-stop time, bedtime or lights-out, estimated sleep-onset latency, sleep quality, pre-sleep wiredness, next-day sleepiness, and any major confounders.
+    - "Choose intended bedtime; set screens-off 30 min before it, or 60 min only if sustainable."
+    - "Finish must-do messages, alarms, work handoffs, payments, and calendar checks before cutoff without delaying bed."
+    - "At cutoff, stop discretionary personal screens: phone, tablet, laptop, handheld gaming, feeds, messages, work email, and browsing."
+    - "Keep emergency, medical, accessibility, caregiving, on-call, VIP calls, and alarms working before using DND or app locks."
+    - "Put phone out of bed; keep it reachable only for safety, medical, caregiving, accessibility, or on-call needs."
+    - "Use low-stimulation replacements: paper reading, journaling, prep, stretching, quiet conversation, or pre-started audio."
+    - "Log planned exceptions or breaches neutrally; return to the rule the same night."
+    - "Next morning, log screen-stop time, bedtime, sleep onset, sleep quality, wiredness, sleepiness, and confounders."
   tips:
   - Start with 30 minutes. A consistent smaller window beats an ambitious rule that delays bedtime.
   - Move social/work/entertainment decisions earlier so the curfew window is not empty and tempting.

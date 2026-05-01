@@ -1893,6 +1893,11 @@ function isGeneratedWebExperimentIndexEntry(value: unknown): boolean {
     isRecord(value["revision"]) &&
     typeof value["routeId"] === "string" &&
     typeof value["slug"] === "string" &&
+    (
+      value["sortRank"] === undefined ||
+      typeof value["sortRank"] === "number" ||
+      value["sortRank"] === null
+    ) &&
     (typeof value["status"] === "string" || value["status"] === null) &&
     typeof value["studyCount"] === "number" &&
     (typeof value["summary"] === "string" || value["summary"] === null) &&
@@ -2032,6 +2037,7 @@ function isGeneratedWebExperimentSignal(value: unknown): boolean {
     typeof value["delta"] === "string" &&
     (value["description"] === undefined || typeof value["description"] === "string") &&
     isGeneratedWebSignalDirection(value["direction"]) &&
+    (value["displayValue"] === undefined || typeof value["displayValue"] === "string") &&
     (
       value["estimatedChange"] === undefined ||
       isGeneratedWebExperimentSignalEstimate(value["estimatedChange"])
@@ -2174,9 +2180,28 @@ function isGeneratedWebSessionShape(value: unknown): boolean {
     ) &&
     (
       value["ticks"] === undefined ||
-      (Array.isArray(value["ticks"]) && value["ticks"].every(isString))
+      (Array.isArray(value["ticks"]) && value["ticks"].every(isGeneratedWebSessionShapeTick))
     )
   );
+}
+
+function isGeneratedWebSessionShapeTick(value: unknown): boolean {
+  if (typeof value === "string") {
+    return true;
+  }
+  if (!isRecord(value) || typeof value["label"] !== "string") {
+    return false;
+  }
+
+  const hasOffset = typeof value["offsetMinutes"] === "number" &&
+    Number.isFinite(value["offsetMinutes"]) &&
+    value["offsetMinutes"] >= 0;
+  const hasPosition = typeof value["positionPercent"] === "number" &&
+    Number.isFinite(value["positionPercent"]) &&
+    value["positionPercent"] >= 0 &&
+    value["positionPercent"] <= 100;
+
+  return hasOffset !== hasPosition;
 }
 
 function isGeneratedWebSessionShapeSegment(value: unknown): boolean {

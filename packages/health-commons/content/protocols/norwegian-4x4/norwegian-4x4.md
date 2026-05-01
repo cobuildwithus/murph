@@ -7,6 +7,7 @@ title: Norwegian 4x4
 summary: "Four 4-minute hard intervals near top aerobic capacity, with easy recoveries between, where sustained high oxygen demand pushes heart to pump more blood per beat and muscles to extract more oxygen."
 status: field-testing
 quality: usable
+sortRank: 20
 aliases:
   - Norwegian 4x4
   - Norwegian 4x4 intervals
@@ -189,10 +190,14 @@ protocol:
         kind: cooldown
         durationMinutes: 5
     ticks:
-      - "0"
-      - "10 min"
-      - "35 min"
-      - "40 min"
+      - label: "0"
+        offsetMinutes: 0
+      - label: "10 min"
+        offsetMinutes: 10
+      - label: "35 min"
+        offsetMinutes: 35
+      - label: "40 min"
+        offsetMinutes: 40
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:
@@ -309,6 +314,50 @@ expectedSignalDescriptions:
       confidence: low
       basis: "Sleep efficiency is recovery context for this protocol, not a direct 4x4 efficacy endpoint with a source-backed numeric range."
     description: "Hard aerobic work builds sleep pressure; late timing, heat, soreness, and under-recovery increase arousal and fragment sleep."
+  -
+    biomarkerKey: biomarker:deep-sleep-minutes
+    expected: mixed_or_contextual
+    expectedDirection: mixed_or_contextual
+    protocolProminence: context
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: low
+      basis: "Deep sleep is recovery context for this protocol; the direct 4x4 evidence package does not establish a reliable consumer-wearable N3 effect."
+    description: "Regular exercise can improve sleep health overall, but hard intervals can acutely disrupt deep-sleep estimates when scheduled late or layered onto under-recovery."
+  -
+    biomarkerKey: biomarker:rem-sleep-minutes
+    expected: mixed_or_contextual
+    expectedDirection: mixed_or_contextual
+    protocolProminence: context
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: low
+      basis: "REM minutes are recovery context rather than a 4x4 efficacy endpoint; dose, timing, fatigue, and total sleep can move the wearable estimate in either direction."
+    description: "High-intensity training may support sleep when recovery is adequate, but it can also suppress or fragment REM when dose, timing, or fatigue are poorly matched."
+  -
+    biomarkerKey: biomarker:blood-oxygen-spo2
+    expected: stable
+    expectedDirection: stable
+    protocolProminence: context
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: low
+      basis: "Aerobic interval training targets cardiorespiratory fitness and estimated VO2max; resting or overnight SpO2 is tightly regulated in healthy users and should be treated as safety or illness context."
+    description: "Aerobic interval training targets fitness, not resting oxygen saturation; use SpO2 as a safety and illness-context check rather than the success marker."
+  -
+    biomarkerKey: biomarker:blood-glucose
+    expected: down_or_stable
+    expectedDirection: down_or_stable
+    protocolProminence: context
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: low
+      basis: "Repeated aerobic training can improve insulin sensitivity, but glucose is a secondary endpoint for this protocol and medication-associated hypoglycemia risk must stay visible."
+    description: "Repeated aerobic training can improve insulin sensitivity and muscle glucose disposal, but glucose remains a secondary endpoint for this protocol."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

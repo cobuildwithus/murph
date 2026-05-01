@@ -532,7 +532,6 @@ function createMeasurementMethodEntity(
       shortName: input.shortName,
       tier: input.tier,
     },
-    protocolRanking: undefined,
     slug: `measurement-methods/${input.routeId}`,
     summary: `${input.title} is a reusable measurement method fixture.`,
     title: input.title,

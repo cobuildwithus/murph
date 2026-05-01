@@ -1,6 +1,6 @@
 # Move protocol session shapes into Health Commons content
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -68,10 +68,22 @@ Updated: 2026-05-02
 
 ## Verification
 
-- Commands to run:
-- `pnpm --dir packages/health-commons generate`
-- Focused hosted-web protocol-tab tests.
-- Focused Health Commons/runtime/schema tests as needed.
-- `pnpm typecheck` or the routed scoped fallback if unrelated branch churn blocks it.
-- Required completion workflow audits for user-facing `apps/web` and Health Commons data/schema changes.
-- Expected outcomes: generated artifacts accept the new optional field, focused tests pass, and any broader failures are documented as unrelated with concrete failing targets.
+- Passed:
+  - `pnpm --dir packages/contracts typecheck`
+  - `pnpm --dir packages/contracts test`
+  - `pnpm --dir packages/health-commons generate:check`
+  - `pnpm --dir packages/health-commons generate`
+  - `pnpm --dir packages/health-commons typecheck`
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/health-commons-bryan-johnson-protocol.test.ts -t "projects requested concrete protocol windows" --no-coverage`
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/protocol-tab-session-shape.test.ts --no-coverage`
+  - `git diff --check` over the session-shape task files.
+- Required review passes:
+  - Coverage-write: no extra proof gap found.
+  - Security/privacy: no findings.
+  - Frontend-review: found evenly spaced ticks for unequal durations; fixed with structured tick offsets.
+  - Task-finish-review: no findings after the structured tick fix.
+- Blocked or unrelated:
+  - Full `pnpm --dir packages/health-commons test` still fails in `test/catalog.test.ts` on expected-signal fixture churn from the separate content-owned overrides row.
+  - Full `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/health-commons-bryan-johnson-protocol.test.ts --no-coverage` still fails one unrelated Finnish Sauna route-id expectation owned by the content-owned overrides row.
+  - `pnpm --dir apps/web typecheck` still fails in `apps/web/test/health-commons-biomarker-detail-page.test.ts` where `protocolRanking` test fixtures are being replaced by the separate content-owned overrides row.
+Completed: 2026-05-02

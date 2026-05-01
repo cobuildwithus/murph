@@ -63,24 +63,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: down_or_stable
-    relationship: secondary_biomarker
-    mechanism: Safety events override adherence and step-count gains.
-    scoring:
-      evidenceWeight: 3
-      biomarkerRelevance: 5
-      wearableMeasurability: 2
-      burdenPenalty: 1
-      safetyCautionPenalty: 3
-    display:
-      confidence: medium
-      burdenLabel: manual
-      cautionLabel: safety context
 ---
 
 Walking safety events are the protocol’s safety backstop. Chest symptoms, faintness, severe dizziness, falls, foot wounds, and heat-illness symptoms should pause the experiment and trigger appropriate guidance.

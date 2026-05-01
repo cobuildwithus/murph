@@ -11,6 +11,7 @@ import {
   createHealthCommonsRouteBundleReader,
   getGeneratedHealthCommonsCatalogReader,
   getGeneratedHealthCommonsWebBiomarkerIndex,
+  getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
   loadGeneratedHealthCommonsCatalog,
   loadGeneratedHealthCommonsWebExperimentProtocolTab,
@@ -247,6 +248,25 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       key: "biomarker:estimated-vo2max",
       published: true,
     }));
+  });
+
+  it("keeps protocol sort rank in the generated experiment index", () => {
+    const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
+    const firstProtocolIds = experimentIndex.experiments
+      .filter((entry) => entry.sortRank != null)
+      .sort((left, right) => (left.sortRank ?? 0) - (right.sortRank ?? 0))
+      .slice(0, 4)
+      .map((entry) => entry.routeId);
+
+    expect(firstProtocolIds).toEqual([
+      "finnish-sauna",
+      "norwegian-4x4",
+      "red-light-glasses-before-bed",
+      "bryan-johnson-blueprint",
+    ]);
+    expect(
+      experimentIndex.experiments.find((entry) => entry.routeId === "finnish-sauna"),
+    ).toEqual(expect.objectContaining({ sortRank: 10 }));
   });
 
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {

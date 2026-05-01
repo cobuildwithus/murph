@@ -9,24 +9,12 @@ import {
 } from "./generated-experiment-artifacts";
 import { cleanHealthCommonsUserFacingCopy } from "./user-facing-copy";
 
-const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
-const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
-const RED_LIGHT_GLASSES_ROUTE_ID = "red-light-glasses-before-bed";
-const BRYAN_JOHNSON_SAUNA_ROUTE_ID = "bryan-johnson-blueprint";
-
-const PROTOCOL_LIBRARY_ORDER = [
-  FINNISH_SAUNA_ROUTE_ID,
-  NORWEGIAN_4X4_ROUTE_ID,
-  RED_LIGHT_GLASSES_ROUTE_ID,
-  BRYAN_JOHNSON_SAUNA_ROUTE_ID,
-] as const;
-
 export function listHealthCommonsExperimentBrowseProtocols(): ExperimentProtocol[] {
   return getGeneratedExperimentIndex()
     .experiments
     .filter(isPublicExperimentIndexEntry)
-    .map(toExperimentProtocolIndexEntry)
-    .sort(compareExperimentProtocolOrder);
+    .sort(compareExperimentIndexEntries)
+    .map(toExperimentProtocolIndexEntry);
 }
 
 export function listHealthCommonsExperimentRouteParams(): { experimentId: string }[] {
@@ -102,26 +90,18 @@ function formatIndexResearchSummaryLabel(studyCount: number): string {
   return studyCount === 1 ? "1 study" : `${studyCount} studies`;
 }
 
-function compareExperimentProtocolOrder(
-  left: ExperimentProtocol,
-  right: ExperimentProtocol,
+function compareExperimentIndexEntries(
+  left: GeneratedExperimentIndexEntry,
+  right: GeneratedExperimentIndexEntry,
 ): number {
-  const leftOrder = protocolLibraryOrder(left.id);
-  const rightOrder = protocolLibraryOrder(right.id);
+  const leftOrder = left.sortRank ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.sortRank ?? Number.MAX_SAFE_INTEGER;
 
   if (leftOrder !== rightOrder) {
     return leftOrder - rightOrder;
   }
 
   return left.title.localeCompare(right.title);
-}
-
-function protocolLibraryOrder(protocolId: string): number {
-  const order = PROTOCOL_LIBRARY_ORDER.findIndex((knownProtocolId) =>
-    knownProtocolId === protocolId
-  );
-
-  return order === -1 ? Number.MAX_SAFE_INTEGER : order;
 }
 
 function uniqueStrings(values: (string | null | undefined)[]): string[] {

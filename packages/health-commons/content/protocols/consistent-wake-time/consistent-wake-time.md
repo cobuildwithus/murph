@@ -271,17 +271,26 @@ protocol:
   target: "Wake or rise within a personally realistic 60-minute window that still allows adequate sleep opportunity."
   frequency:
     sessionsPerWeek: 7
+  sessionShape:
+    label: "Morning wake/rise window"
+    segments:
+      - label: "wake/rise window"
+        kind: "stimulus"
+        durationMinutes: 60
+    ticks:
+      - "target wake"
+      - "+60 min"
   interventionSessionsMinimum: 20
   interventionSessionsTarget: 28
   steps:
-    - "For 7 baseline days, do not try to change your schedule; log final wake time, time out of bed, lights-out time, estimated sleep duration, daytime sleepiness, naps, and major confounders."
-    - "Choose a daily wake/rise window no wider than 60 minutes. Pick the latest window that still works with your real obligations and gives you enough sleep opportunity."
-    - "Set the wake window as a consistency target, not an exact-minute alarm. The aim is to reduce day-to-day drift while staying rested enough to function safely."
-    - "Plan bedtime backward from the wake window so the schedule preserves adequate sleep opportunity. If bedtime cannot realistically move earlier, choose a later wake window or postpone the run."
-    - "During the 28-day intervention, wake or get out of bed inside the chosen window on as many days as safely reasonable, including free days when you are not recovering from short sleep."
-    - "If you are acutely short on sleep, ill, jet-lagged, unusually sleepy, or facing safety-sensitive driving or work, prioritize sleep and safety, log the exception, and resume only when safe."
-    - "Review weekly trends in wake-time variability, days inside the window, sleep duration, sleepiness, naps, and confounders rather than judging single nights."
-    - "Safety overrides that protect sleep opportunity, illness recovery, drowsy-driving prevention, or safety-sensitive work should be logged as valid exceptions, not counted as nonadherence."
+    - "Baseline 7 days: log final wake, out-of-bed time, lights-out, sleep duration, sleepiness, naps, and major confounders."
+    - "Choose a daily wake/rise window ≤60 min that preserves enough sleep opportunity."
+    - "Treat the window as a consistency target, not an exact-minute alarm."
+    - "Plan bedtime backward from wake time; choose later wake or postpone if bedtime cannot move earlier."
+    - "Wake or get out of bed inside the window when sleep and safety allow."
+    - "Log valid exceptions for short sleep, illness, jet lag, unsafe sleepiness, caregiving, or safety-sensitive work."
+    - "Review weekly: wake variability, days inside window, sleep duration, sleepiness, naps, and confounders."
+    - "Stop or redesign if the target creates sleep debt, unsafe sleepiness, or mood destabilization."
   tips:
     - "Realistic beats aspirational — a later consistent window is safer than one that creates sleep debt."
     - "Pair wake target with a bedtime guardrail so consistency does not become sleep restriction."

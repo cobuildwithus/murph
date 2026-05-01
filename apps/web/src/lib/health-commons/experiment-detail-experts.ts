@@ -1,11 +1,6 @@
 import type { Expert } from "@/src/types/experiments";
 import type { HealthCommonsEntity } from "@murphai/health-commons/runtime";
 
-const SOURCE_PERSON_EXPERT_QUOTES: Partial<Record<string, string>> = {
-  "source_person:bryan-johnson":
-    "Founder of Blueprint and Don't Die. Trying to live forever.",
-};
-
 export function toExpert(entity: HealthCommonsEntity): Expert {
   const initials = entity.title
     .split(/\s+/u)
@@ -21,10 +16,7 @@ export function toExpert(entity: HealthCommonsEntity): Expert {
       ? ""
       : formatCategory(entity.categories?.[0] ?? "source"),
     profileImageUrl: readOptionalProfileImageUrl(entity),
-    quote:
-      SOURCE_PERSON_EXPERT_QUOTES[entity.key]
-      ?? entity.summary
-      ?? summarizeBody(entity.body),
+    quote: entity.summary ?? summarizeBody(entity.body),
   };
 }
 

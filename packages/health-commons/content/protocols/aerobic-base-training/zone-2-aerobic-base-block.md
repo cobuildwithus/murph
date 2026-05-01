@@ -75,14 +75,27 @@ protocol:
   target: sustainable easy aerobic volume
   frequency:
     sessionsPerWeek: 3
+  sessionShape:
+    label: One session
+    segments:
+      - label: easy cardio
+        kind: stimulus
+        durationMinutes: 60
+    ticks:
+      - label: "0"
+        offsetMinutes: 0
+      - label: "35 min minimum"
+        offsetMinutes: 35
+      - label: "60 min"
+        offsetMinutes: 60
   interventionSessionsMinimum: 9
   interventionSessionsTarget: 12
   steps:
-    - Choose a repeatable easy-cardio modality. Walking or another low-impact, controlled-environment option is the default.
-    - Schedule three sessions per week for 4 weeks.
-    - For each session, aim for 35-60 minutes at a pace where you can speak in full, comfortable sentences. If 35 minutes is not comfortably doable at current baseline, use a shorter ramp-up or adapted variant before starting this protocol.
-    - If speech becomes forced, you can only say a few words, RPE climbs, or heart rate seems out of proportion but you have no symptoms, slow down or shorten the session.
-    - If symptoms appear, glucose safety concerns appear, heat-illness signs appear, or the environment/equipment becomes unsafe, stop the session and follow the stop rules.
+    - "Choose 1 repeatable easy-cardio setup; walking or low-impact indoor cardio is the default."
+    - "Schedule 3 sessions/week for 4 weeks."
+    - "Hold 35–60 min at conversational pace; use a shorter ramp if 35 min is not comfortable yet."
+    - "Slow down or shorten when speech feels forced, RPE climbs, or heart rate feels out of proportion."
+    - "Stop for symptoms, unsafe heat, glucose concerns, pain, or equipment/route risk; log the reason."
   tips:
     - Wearable Zone 2 labels are optional context — talk test and symptoms are the anchor.
     - Other modalities fit only when the setup is safe and pain-free for that mode.

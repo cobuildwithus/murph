@@ -122,56 +122,6 @@ relations:
   -
     type: cites
     target: source_artifact:doi-10.3389-fcvm.2022.771280
-protocolRanking:
-  version: deterministic-v0
-  scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
-  candidates:
-
-    -
-      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
-      expectedDirection: up_or_stable
-      relationship: secondary_biomarker
-      mechanism: Evening light reduction may improve circadian timing and sleep opportunity. REM is later-night weighted, so the most plausible benefit is indirect; more consistent bedtime, fewer late-night light delays, or less curtailed final-cycle sleep.
-      scoring:
-        evidenceWeight: 3
-        biomarkerRelevance: 3
-        wearableMeasurability: 5
-        burdenPenalty: 1
-        safetyCautionPenalty: 1
-      display:
-        confidence: medium
-        burdenLabel: Low
-        cautionLabel: Low
-    -
-      protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-      expectedDirection: mixed_or_contextual
-      relationship: secondary_biomarker
-      mechanism: Heat exposure may change relaxation, thermoregulation, and sleep continuity for some people, but REM minutes are not the direct target and can move in either direction if total sleep, wake time, or fragmentation changes.
-      scoring:
-        evidenceWeight: 2
-        biomarkerRelevance: 2
-        wearableMeasurability: 5
-        burdenPenalty: 2
-        safetyCautionPenalty: 2
-      display:
-        confidence: low
-        burdenLabel: Moderate
-        cautionLabel: Moderate
-    -
-      protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
-      expectedDirection: mixed_or_contextual
-      relationship: related_protocol
-      mechanism: High-intensity training may support sleep through fitness and stress regulation when recovery is adequate, but it can also suppress or fragment sleep when dose, timing, or fatigue are poorly matched. Use REM as a recovery-context signal, not the success metric.
-      scoring:
-        evidenceWeight: 2
-        biomarkerRelevance: 1
-        wearableMeasurability: 5
-        burdenPenalty: 4
-        safetyCautionPenalty: 3
-      display:
-        confidence: low
-        burdenLabel: High
-        cautionLabel: Higher
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
