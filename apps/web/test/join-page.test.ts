@@ -210,7 +210,10 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
         type: "email",
       },
       {
+        first_name: "Do",
         id: "telegram-test-user",
+        last_name: "Not Serialize",
+        photo_url: "https://example.test/avatar.png",
         privateMetadata: "do-not-serialize",
         type: "telegram",
         username: "murph_test",
@@ -246,9 +249,6 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
   );
 
   expect(mocks.joinInvitePageViewProps?.model.telegramAccountForMessagingSetup).toEqual({
-    firstName: null,
-    lastName: null,
-    photoUrl: null,
     telegramUserId: "telegram-test-user",
     username: "murph_test",
   });

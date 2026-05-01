@@ -4,8 +4,7 @@ import { expect, test } from "vitest";
 
 import {
   buildJoinInviteStatusRefreshSnapshot,
-  resolveJoinInviteStatusFromRefresh,
-  shouldAwaitHostedInviteSessionResolution,
+  hasResolvedHostedInviteVerification,
   shouldRefreshJoinInviteStatusFromPayload,
 } from "@/src/components/hosted-onboarding/join-invite-state";
 import {
@@ -13,62 +12,6 @@ import {
   listHostedBillingPlanPresentations,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
-
-test("verified invite refreshes do not regress back to stale verify payloads", () => {
-  const refreshedStatus = resolveJoinInviteStatusFromRefresh({
-    nextStatus: createStatus({
-      session: {
-        authenticated: true,
-        expiresAt: null,
-        matchesInvite: true,
-      },
-    }),
-    status: createStatus({
-      session: {
-        authenticated: true,
-        expiresAt: null,
-        matchesInvite: true,
-      },
-      stage: "checkout",
-    }),
-  });
-
-  expect(refreshedStatus).toMatchObject({
-    session: {
-      authenticated: true,
-      matchesInvite: true,
-    },
-    stage: "checkout",
-  });
-});
-
-test("signed-out verify refreshes are not masked as stale", () => {
-  const refreshedStatus = resolveJoinInviteStatusFromRefresh({
-    nextStatus: createStatus({
-      session: {
-        authenticated: false,
-        expiresAt: null,
-        matchesInvite: false,
-      },
-    }),
-    status: createStatus({
-      session: {
-        authenticated: true,
-        expiresAt: null,
-        matchesInvite: true,
-      },
-      stage: "checkout",
-    }),
-  });
-
-  expect(refreshedStatus).toMatchObject({
-    session: {
-      authenticated: false,
-      matchesInvite: false,
-    },
-    stage: "verify",
-  });
-});
 
 test("server refresh snapshots ignore stale verify payloads and refresh changed same-stage render data", () => {
   const currentStatus = createStatus({
@@ -120,40 +63,23 @@ test("server refresh snapshots ignore stale verify payloads and refresh changed 
   );
 });
 
-test("verify-stage auth-settling guard only holds until the first hosted refresh completes", () => {
-  assert.equal(
-    shouldAwaitHostedInviteSessionResolution({
-      hasCompletedInitialRefresh: false,
-      status: createStatus({
-        session: {
-          authenticated: true,
-          expiresAt: null,
-          matchesInvite: false,
-        },
-      }),
-    }),
-    true,
-  );
-  assert.equal(
-    shouldAwaitHostedInviteSessionResolution({
-      hasCompletedInitialRefresh: true,
-      status: createStatus({}),
-    }),
-    false,
-  );
-  assert.equal(
-    shouldAwaitHostedInviteSessionResolution({
-      hasCompletedInitialRefresh: false,
-      status: createStatus({
-        session: {
-          authenticated: false,
-          expiresAt: null,
-          matchesInvite: false,
-        },
-      }),
-    }),
-    false,
-  );
+test("verify-stage session resolution only waits for authenticated unresolved verify state", () => {
+  expect(hasResolvedHostedInviteVerification(createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: false,
+    },
+  }))).toBe(false);
+  expect(hasResolvedHostedInviteVerification(createStatus({}))).toBe(true);
+  expect(hasResolvedHostedInviteVerification(createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  }))).toBe(true);
 });
 
 function createStatus(

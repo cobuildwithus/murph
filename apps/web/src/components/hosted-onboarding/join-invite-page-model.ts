@@ -1,10 +1,7 @@
 import "server-only";
 
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
-import {
-  extractHostedPrivyTelegramAccount,
-  type HostedPrivyTelegramAccount,
-} from "@/src/lib/hosted-onboarding/privy-shared";
+import { extractHostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
   buildJoinInvitePreviewStatus,
   parseJoinInvitePreviewStage,
@@ -40,7 +37,12 @@ export interface JoinInvitePageModel {
   launchConsent: JoinInviteLaunchConsentState;
   preview: boolean;
   status: HostedInviteStatusPayload;
-  telegramAccountForMessagingSetup: HostedPrivyTelegramAccount | null;
+  telegramAccountForMessagingSetup: JoinInviteTelegramAccountSeed | null;
+}
+
+export interface JoinInviteTelegramAccountSeed {
+  telegramUserId: string;
+  username: string | null;
 }
 
 export async function buildJoinInvitePageModel(input: {
@@ -82,9 +84,9 @@ export async function buildJoinInvitePageModel(input: {
     !launchConsent.gateActive
     && status.stage === "checkout"
     && status.messagingSetupRequired
-      ? extractHostedPrivyTelegramAccount({
+      ? sanitizeJoinInviteTelegramAccountSeed(extractHostedPrivyTelegramAccount({
           linkedAccounts: authSnapshot.linkedAccounts,
-        })
+        }))
       : null;
 
   return {
@@ -94,6 +96,19 @@ export async function buildJoinInvitePageModel(input: {
     preview: false,
     status,
     telegramAccountForMessagingSetup,
+  };
+}
+
+function sanitizeJoinInviteTelegramAccountSeed(
+  account: ReturnType<typeof extractHostedPrivyTelegramAccount>,
+): JoinInviteTelegramAccountSeed | null {
+  if (!account) {
+    return null;
+  }
+
+  return {
+    telegramUserId: account.telegramUserId,
+    username: account.username,
   };
 }
 

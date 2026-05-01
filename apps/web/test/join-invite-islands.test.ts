@@ -233,15 +233,16 @@ test("JoinInviteStatusRefreshIsland refreshes when a pending server state change
 });
 
 test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry action", async () => {
+  const currentStatus = createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: false,
+    },
+  });
   const { cleanup, container, window } = await renderClientComponent(
     createElement(JoinInviteStatusRefreshIsland, {
-      current: buildJoinInviteStatusRefreshSnapshot(createStatus({
-        session: {
-          authenticated: true,
-          expiresAt: null,
-          matchesInvite: false,
-        },
-      })),
+      current: buildJoinInviteStatusRefreshSnapshot(currentStatus),
       inviteCode: "invite-code",
       legalGateActive: false,
     }),
@@ -257,6 +258,16 @@ test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry actio
   expect(container.textContent).toContain("Unable to refresh invite status");
   expect(container.textContent).toContain("Status unavailable.");
 
+  await act(async () => {
+    refreshOptions.onStatus(currentStatus);
+  });
+
+  expect(container.textContent).not.toContain("Unable to refresh invite status");
+
+  await act(async () => {
+    refreshOptions.onError(new Error("Status unavailable."));
+  });
+
   const retryButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent?.includes("Try again"),
   );
@@ -267,6 +278,7 @@ test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry actio
   });
 
   expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  expect(container.textContent).not.toContain("Unable to refresh invite status");
   await cleanup();
 });
 
@@ -275,9 +287,6 @@ test("JoinInviteMessagingSetupIsland defaults to Telegram when a Telegram seed e
     createElement(JoinInviteMessagingSetupIsland, {
       authenticated: true,
       initialTelegramAccount: {
-        firstName: null,
-        lastName: null,
-        photoUrl: null,
         telegramUserId: "telegram-test-user",
         username: "murph_test",
       },
@@ -289,8 +298,8 @@ test("JoinInviteMessagingSetupIsland defaults to Telegram when a Telegram seed e
   expect(container.textContent).toContain("Telegram");
   expect(container.textContent).toContain("murph_test");
   expect(container.querySelector('[role="radiogroup"]')).toBeTruthy();
-  expect(container.querySelector('button[value="telegram"]')?.getAttribute("aria-checked")).toBe("true");
-  expect(container.querySelector('button[value="phone"]')?.getAttribute("aria-checked")).toBe("false");
+  expect((container.querySelector('input[value="telegram"]') as HTMLInputElement | null)?.checked).toBe(true);
+  expect((container.querySelector('input[value="phone"]') as HTMLInputElement | null)?.checked).toBe(false);
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeNull();
   await cleanup();
@@ -305,8 +314,8 @@ test("JoinInviteMessagingSetupIsland keeps phone first without a Telegram seed",
     { requireButton: false },
   );
 
-  expect(container.querySelector('button[value="phone"]')?.getAttribute("aria-checked")).toBe("true");
-  expect(container.querySelector('button[value="telegram"]')?.getAttribute("aria-checked")).toBe("false");
+  expect((container.querySelector('input[value="phone"]') as HTMLInputElement | null)?.checked).toBe(true);
+  expect((container.querySelector('input[value="telegram"]') as HTMLInputElement | null)?.checked).toBe(false);
   expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeTruthy();
   expect(mocks.hostedPhoneAuthProps).toMatchObject({
     intent: "link",

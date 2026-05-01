@@ -19,7 +19,6 @@ import type {
   HostedInvitePhoneAuthTarget,
   HostedInviteVerificationMode,
 } from "@/src/lib/hosted-onboarding/types";
-import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { cn } from "@/src/lib/utils";
 
@@ -29,6 +28,7 @@ import { requestHostedBillingCheckout } from "./client-api";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
+import type { JoinInviteTelegramAccountSeed } from "./join-invite-page-model";
 import {
   shouldRefreshJoinInviteStatusFromPayload,
   type JoinInviteStatusRefreshSnapshot,
@@ -80,6 +80,7 @@ export function JoinInviteStatusRefreshIsland({
       setRefreshErrorMessage(error instanceof Error ? error.message : String(error));
     },
     onStatus: (payload) => {
+      setRefreshErrorMessage(null);
       const shouldRefresh = shouldRefreshJoinInviteStatusFromPayload({
         current,
         nextStatus: payload,
@@ -103,7 +104,15 @@ export function JoinInviteStatusRefreshIsland({
       <AlertTitle>Unable to refresh invite status</AlertTitle>
       <AlertDescription>{refreshErrorMessage}</AlertDescription>
       <div className="mt-3">
-        <Button type="button" onClick={() => router.refresh()} variant="outline" size="lg">
+        <Button
+          type="button"
+          onClick={() => {
+            setRefreshErrorMessage(null);
+            router.refresh();
+          }}
+          variant="outline"
+          size="lg"
+        >
           Try again
         </Button>
       </div>
@@ -178,7 +187,7 @@ export function JoinInviteMessagingSetupIsland({
   initialTelegramAccount,
 }: {
   authenticated: boolean;
-  initialTelegramAccount: HostedPrivyTelegramAccount | null;
+  initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
 }) {
   const router = useRouter();
   const [contactMethod, setContactMethod] = useState<ContactMethod>(
@@ -367,7 +376,7 @@ function ContactMethodPicker({
           name="join-contact-method"
           subtitle={option.subtitle}
           value={option.value}
-          onClick={() => onChange(option.value)}
+          onChange={() => onChange(option.value)}
         />
       ))}
     </div>
@@ -381,7 +390,7 @@ function ContactMethodCard({
   name,
   subtitle,
   value,
-  onClick,
+  onChange,
 }: {
   active: boolean;
   icon: typeof PhoneIcon;
@@ -389,23 +398,25 @@ function ContactMethodCard({
   name: string;
   subtitle: string;
   value: ContactMethod;
-  onClick: () => void;
+  onChange: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-checked={active}
-      name={name}
-      onClick={onClick}
-      role="radio"
-      value={value}
+    <label
       className={cn(
-        "flex w-full items-start gap-4 rounded-xl border p-5 text-left transition-colors",
+        "relative flex w-full cursor-pointer items-start gap-4 rounded-xl border p-5 text-left transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
         active
           ? "border-olive/25 bg-olive/[0.06]"
           : "border-border bg-card hover:border-olive/15",
       )}
     >
+      <input
+        type="radio"
+        checked={active}
+        className="absolute inset-0 size-full cursor-pointer opacity-0"
+        name={name}
+        onChange={onChange}
+        value={value}
+      />
       <span
         className={cn(
           "flex size-10 shrink-0 items-center justify-center rounded-xl",
@@ -430,6 +441,6 @@ function ContactMethodCard({
       >
         {active ? <CheckIcon className="size-3.5" strokeWidth={2.5} /> : null}
       </span>
-    </button>
+    </label>
   );
 }

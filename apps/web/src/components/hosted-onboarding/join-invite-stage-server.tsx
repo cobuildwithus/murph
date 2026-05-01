@@ -15,13 +15,15 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
-import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
-import type { JoinInvitePageModel } from "./join-invite-page-model";
+import type {
+  JoinInvitePageModel,
+  JoinInviteTelegramAccountSeed,
+} from "./join-invite-page-model";
 import {
   JoinInviteCheckoutPlanButtonIsland,
   JoinInviteLegalConsentIsland,
@@ -212,7 +214,7 @@ function JoinInviteMessagingSetupPanel({
   initialTelegramAccount,
 }: {
   authenticated: boolean;
-  initialTelegramAccount: HostedPrivyTelegramAccount | null;
+  initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
 }) {
   return (
     <JoinInvitePanelCard>
