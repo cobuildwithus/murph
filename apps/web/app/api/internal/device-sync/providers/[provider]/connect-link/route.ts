@@ -1,4 +1,5 @@
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { configuredDeviceSyncProviderKeys } from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
@@ -24,6 +25,10 @@ const HOSTED_ASSISTANT_DEVICE_CONNECT_UNAVAILABLE_ERROR = {
     "Hosted device connection links are temporarily unavailable. Please try again shortly.",
   retryable: true,
 } as const;
+const HOSTED_DEVICE_CONNECT_DIAGNOSTIC_PROVIDER_IDS = new Set<string>(
+  configuredDeviceSyncProviderKeys,
+);
+const HOSTED_DEVICE_CONNECT_DIAGNOSTIC_ERROR_CODE_MAX_LENGTH = 96;
 
 type HostedDeviceConnectLinkSetupPhase =
   | "callback_verification_setup"
@@ -60,24 +65,57 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
-  const userId = await requireHostedDeviceConnectCallbackRequest(request);
-  const provider = await resolveDecodedRouteParam(context.params, "provider");
-  const body = await readHostedDeviceConnectRequestBody(request);
-  const messagingReturnTarget = readHostedDeviceConnectMessagingReturnTarget(body);
-  const result = await startHostedDeviceConnection(
-    request,
-    userId,
-    provider,
-    messagingReturnTarget,
-  );
+  let stage: HostedDeviceConnectLinkRouteStage = "callback_verification";
+  let provider: string | null = null;
+  let messagingReturnTarget: HostedAssistantDeviceConnectMessagingReturnTarget | null = null;
 
-  return jsonOk({
-    authorizationUrl: result.authorizationUrl,
-    expiresAt: result.expiresAt,
-    provider: result.provider,
-    providerLabel: formatHostedDeviceSyncProviderLabel(result.provider),
-  });
+  try {
+    const userId = await requireHostedDeviceConnectCallbackRequest(request);
+    stage = "provider_param";
+    provider = await resolveDecodedRouteParam(context.params, "provider");
+    stage = "request_body";
+    const body = await readHostedDeviceConnectRequestBody(request);
+    stage = "messaging_return_target";
+    messagingReturnTarget = readHostedDeviceConnectMessagingReturnTarget(body);
+    stage = "control_plane";
+    const result = await startHostedDeviceConnection(
+      request,
+      userId,
+      provider,
+      messagingReturnTarget,
+    );
+    logHostedDeviceConnectRouteDiagnostic({
+      expiresAtPresent: Boolean(result.expiresAt),
+      messagingReturnTarget,
+      provider: result.provider,
+      stage: "control_plane",
+      status: "issued",
+    });
+
+    return jsonOk({
+      authorizationUrl: result.authorizationUrl,
+      expiresAt: result.expiresAt,
+      provider: result.provider,
+      providerLabel: formatHostedDeviceSyncProviderLabel(result.provider),
+    });
+  } catch (error) {
+    logHostedDeviceConnectRouteDiagnostic({
+      error,
+      messagingReturnTarget,
+      provider,
+      stage,
+      status: "failed",
+    });
+    throw error;
+  }
 });
+
+type HostedDeviceConnectLinkRouteStage =
+  | "callback_verification"
+  | "control_plane"
+  | "messaging_return_target"
+  | "provider_param"
+  | "request_body";
 
 async function requireHostedDeviceConnectCallbackRequest(request: Request): Promise<string> {
   try {
@@ -162,4 +200,106 @@ function remapHostedDeviceConnectBackendSetupError(
   }
 
   throw error;
+}
+
+function logHostedDeviceConnectRouteDiagnostic(input: {
+  error?: unknown;
+  expiresAtPresent?: boolean;
+  messagingReturnTarget: HostedAssistantDeviceConnectMessagingReturnTarget | null;
+  provider: string | null;
+  stage: HostedDeviceConnectLinkRouteStage;
+  status: "failed" | "issued";
+}): void {
+  const errorCode = input.error === undefined
+    ? null
+    : readHostedDeviceConnectRouteErrorString(input.error, "code");
+  const errorHttpStatus = input.error === undefined
+    ? null
+    : readHostedDeviceConnectRouteErrorNumber(input.error, "httpStatus")
+      ?? readHostedDeviceConnectRouteErrorNumber(input.error, "status")
+      ?? readHostedDeviceConnectRouteErrorNumber(input.error, "statusCode");
+  const errorRetryable = input.error === undefined
+    ? null
+    : readHostedDeviceConnectRouteErrorBoolean(input.error, "retryable");
+  const details = {
+    ...(errorCode ? { errorCode } : {}),
+    ...(errorHttpStatus ? { errorHttpStatus } : {}),
+    ...(errorRetryable === null ? {} : { errorRetryable }),
+    ...(input.expiresAtPresent === undefined
+      ? {}
+      : { expiresAtPresent: input.expiresAtPresent }),
+    messagingReturnTarget: input.messagingReturnTarget,
+    provider: readHostedDeviceConnectRouteProvider(input.provider),
+    stage: input.stage,
+    status: input.status,
+  };
+
+  if (input.status === "failed") {
+    console.warn("Hosted internal device-sync connect-link diagnostic.", details);
+    return;
+  }
+
+  console.info("Hosted internal device-sync connect-link diagnostic.", details);
+}
+
+function readHostedDeviceConnectRouteErrorString(
+  error: unknown,
+  property: "code",
+): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const value = Reflect.get(error, property);
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (
+    normalized.length === 0
+    || normalized.length > HOSTED_DEVICE_CONNECT_DIAGNOSTIC_ERROR_CODE_MAX_LENGTH
+  ) {
+    return null;
+  }
+
+  return /^[A-Z][A-Z0-9_:-]*$/u.test(normalized) ? normalized : null;
+}
+
+function readHostedDeviceConnectRouteErrorNumber(
+  error: unknown,
+  property: "httpStatus" | "status" | "statusCode",
+): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const value = Reflect.get(error, property);
+  return typeof value === "number"
+    && Number.isInteger(value)
+    && value >= 100
+    && value <= 599
+    ? value
+    : null;
+}
+
+function readHostedDeviceConnectRouteErrorBoolean(
+  error: unknown,
+  property: "retryable",
+): boolean | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const value = Reflect.get(error, property);
+  return typeof value === "boolean" ? value : null;
+}
+
+function readHostedDeviceConnectRouteProvider(provider: string | null): string | null {
+  if (!provider) {
+    return null;
+  }
+
+  const normalized = provider.trim().toLowerCase();
+  return HOSTED_DEVICE_CONNECT_DIAGNOSTIC_PROVIDER_IDS.has(normalized) ? normalized : null;
 }

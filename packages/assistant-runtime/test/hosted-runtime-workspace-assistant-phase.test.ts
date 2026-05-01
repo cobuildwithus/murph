@@ -193,6 +193,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("exposes hosted device connect providers and link helper from the platform port", async () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = {
       async applyUpdates() {
         return {
@@ -220,6 +221,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     } satisfies RuntimeDeviceSyncPort;
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -257,6 +259,108 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(connectLinkRequests).toEqual([
       { messagingReturnTarget: "telegram", provider: "whoop" },
     ]);
+    const deviceConnectLogs = logRequests
+      .flatMap((request) => request.entries)
+      .filter((entry) => entry.eventCode === "assistant.device_connect");
+    expect(deviceConnectLogs.map((entry) => entry.redactedJson)).toEqual([
+      expect.objectContaining({
+        deviceConnectIssueLinkAvailable: true,
+        deviceConnectPortPresent: true,
+        deviceConnectProviderCount: 1,
+        deviceConnectProviders: ["whoop"],
+        deviceConnectStage: "context",
+        deviceConnectStatus: "available",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "requested",
+        deviceConnectReturnTarget: "telegram",
+        provider: "whoop",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "issued",
+        deviceConnectReturnTarget: "telegram",
+        expiresAtPresent: true,
+        provider: "whoop",
+      }),
+    ]);
+    expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
+    expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
+  });
+
+  it("logs hosted device connect helper failures without leaking response details", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const deviceSyncPort = {
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        const error = new Error(
+          "Connect link failed for https://connect.example.test/oauth?state=opaque-secret",
+        );
+        Object.defineProperty(error, "status", {
+          enumerable: true,
+          value: 401,
+        });
+        throw error;
+      },
+      async fetchSnapshot() {
+        return {
+          connections: [],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    await expect(
+      hydratedContext?.hosted?.issueDeviceConnectLink?.({
+        messagingReturnTarget: "telegram",
+        provider: "whoop",
+      }),
+    ).rejects.toThrow("Connect link failed");
+    const failedLog = logRequests
+      .flatMap((request) => request.entries)
+      .find((entry) =>
+        entry.eventCode === "assistant.device_connect"
+        && entry.redactedJson?.deviceConnectStatus === "failed"
+      );
+    expect(failedLog).toEqual(expect.objectContaining({
+      errorCode: "authorization_error",
+      level: "warn",
+      redactedJson: expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "failed",
+        deviceConnectReturnTarget: "telegram",
+        errorCode: "authorization_error",
+        errorStatus: 401,
+        provider: "whoop",
+      }),
+    }));
+    expect(JSON.stringify(logRequests)).not.toContain("connect.example.test");
+    expect(JSON.stringify(logRequests)).not.toContain("opaque-secret");
+    expect(JSON.stringify(logRequests)).not.toContain("synthetic-whoop-secret");
   });
 
   it("writes a durable assistant pass summary without requiring local log storage", async () => {
