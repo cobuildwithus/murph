@@ -7,8 +7,8 @@ import type {
 
 export async function hostedWebhookNudgeWorkflow(
   input: HostedWebhookNudgeWorkflowInput,
-) {
+): Promise<void> {
   "use workflow";
 
-  return nudgeHostedWebhookMailboxItemStep(input);
+  await nudgeHostedWebhookMailboxItemStep(input);
 }
