@@ -50,6 +50,14 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
 test("hosted runtime config copies user and forwarded env maps", () => {
   const platform = createHostedRuntimePlatformStub();
   const forwardedEnv = { VERCEL_AI_API_KEY: "secret" };
+  const parserToolchain = {
+    tools: {
+      whisper: {
+        command: "/usr/local/bin/whisper-cli",
+        modelPath: "/home/runner/.murph/models/whisper/ggml-base.en.bin",
+      },
+    },
+  };
   const platformEnv = { TELEGRAM_BOT_TOKEN: "telegram-token" };
   const resolvedConfig = createHostedRuntimeResolvedConfig();
   const userEnv = { ANTHROPIC_API_KEY: "anthropic-secret" };
@@ -58,6 +66,7 @@ test("hosted runtime config copies user and forwarded env maps", () => {
     {
       commitTimeoutMs: 45_000,
       forwardedEnv,
+      parserToolchain,
       platformEnv,
       resolvedConfig,
       userEnv,
@@ -69,6 +78,13 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.equal(normalized.commitTimeoutMs, 45_000);
   assert.deepEqual(normalized.forwardedEnv, forwardedEnv);
   assert.notEqual(normalized.forwardedEnv, forwardedEnv);
+  assert.deepEqual(normalized.parserToolchain, parserToolchain);
+  assert.notEqual(normalized.parserToolchain, parserToolchain);
+  assert.notEqual(normalized.parserToolchain?.tools, parserToolchain.tools);
+  assert.notEqual(
+    normalized.parserToolchain?.tools.whisper,
+    parserToolchain.tools.whisper,
+  );
   assert.deepEqual(normalized.platformEnv, platformEnv);
   assert.notEqual(normalized.platformEnv, platformEnv);
   assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
@@ -472,9 +488,10 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
   const resolvedConfig = createHostedRuntimeResolvedConfig({
     deviceSync: {
       providerConfigs: {
-        garmin: {
-          clientId: "garmin-client",
-          clientSecret: "garmin-secret",
+        junction: {
+          environment: "sandbox",
+          providerFilter: ["garmin"],
+          region: "us",
         },
         oura: {
           clientId: "oura-client",
@@ -491,16 +508,6 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
       secret: "secret_123",
     },
   });
-  Object.defineProperty(
-    resolvedConfig.deviceSync?.providerConfigs.oura ?? {},
-    "webhookVerificationToken",
-    {
-      configurable: true,
-      enumerable: true,
-      value: "control-plane-only",
-    },
-  );
-
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       resolvedConfig,
@@ -521,8 +528,12 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
     resolvedConfig.deviceSync?.secret,
   );
   assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.garmin,
-    resolvedConfig.deviceSync?.providerConfigs.garmin,
+    normalized.resolvedConfig.deviceSync?.providerConfigs.junction,
+    {
+      environment: "sandbox",
+      providerFilter: ["garmin"],
+      region: "us",
+    },
   );
   assert.deepEqual(
     normalized.resolvedConfig.deviceSync?.providerConfigs.oura,
@@ -548,13 +559,6 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
   assert.notEqual(
     normalized.resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
     resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
-  );
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(
-      normalized.resolvedConfig.deviceSync?.providerConfigs.oura ?? {},
-      "webhookVerificationToken",
-    ),
-    false,
   );
   assert.notEqual(
     normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
@@ -690,7 +694,7 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
   }
 });
 
-test("withHostedProcessEnvironment preserves ambient operator parser tool env", async () => {
+test("withHostedProcessEnvironment omits ambient operator parser tool env", async () => {
   const originalValues = new Map(
     [
       "FFMPEG_COMMAND",
@@ -725,18 +729,15 @@ test("withHostedProcessEnvironment preserves ambient operator parser tool env", 
         vaultRoot: "/tmp/hosted-vault",
       },
       async () => {
-        assert.equal(process.env.FFMPEG_COMMAND, "/usr/bin/ffmpeg");
-        assert.equal(process.env.FILE_COMMAND, "/usr/bin/file");
-        assert.equal(process.env.MUTOOL_COMMAND, "/usr/bin/mutool");
-        assert.equal(process.env.PDFINFO_COMMAND, "/usr/bin/pdfinfo");
-        assert.equal(process.env.PDFTOPPM_COMMAND, "/usr/bin/pdftoppm");
-        assert.equal(process.env.PDFTOTEXT_COMMAND, "/usr/bin/pdftotext");
-        assert.equal(process.env.QPDF_COMMAND, "/usr/bin/qpdf");
-        assert.equal(process.env.WHISPER_COMMAND, "/usr/local/bin/whisper-cli");
-        assert.equal(
-          process.env.WHISPER_MODEL_PATH,
-          "/app/models/whisper/ggml-base.en.bin",
-        );
+        assert.equal(process.env.FFMPEG_COMMAND, undefined);
+        assert.equal(process.env.FILE_COMMAND, undefined);
+        assert.equal(process.env.MUTOOL_COMMAND, undefined);
+        assert.equal(process.env.PDFINFO_COMMAND, undefined);
+        assert.equal(process.env.PDFTOPPM_COMMAND, undefined);
+        assert.equal(process.env.PDFTOTEXT_COMMAND, undefined);
+        assert.equal(process.env.QPDF_COMMAND, undefined);
+        assert.equal(process.env.WHISPER_COMMAND, undefined);
+        assert.equal(process.env.WHISPER_MODEL_PATH, undefined);
       },
     );
   } finally {

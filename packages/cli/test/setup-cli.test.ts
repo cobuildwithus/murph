@@ -309,8 +309,8 @@ test('public URL review keeps wearable callbacks local and webhooks public when 
     ]),
     [
       [
-        'http://localhost:8788/oauth/garmin/callback',
-        'http://localhost:8788/oauth/garmin/callback',
+        'http://localhost:8788/connect/junction/callback',
+        'http://localhost:8788/connect/junction/callback',
         'required',
       ],
       [
@@ -371,7 +371,7 @@ test('public URL review keeps local callback guidance for wearable callbacks onl
   assert.deepEqual(
     review.targets.map((target) => `${target.label}:${target.requirement}`),
     [
-      'Garmin callback:required',
+      'Junction callback:required',
       'WHOOP callback:required',
       'WHOOP webhook:optional',
       'Oura callback:required',
@@ -1436,9 +1436,11 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
   )
   assert.deepEqual(
     resolveSetupWearableMissingEnv('garmin', {
-      GARMIN_CLIENT_ID: 'garmin-client',
+      JUNCTION_API_KEY: 'sk_us_junction-test',
+      JUNCTION_CLIENT_USER_ID_SECRET: 'junction-user-secret',
+      JUNCTION_ENV: 'sandbox',
     }),
-    ['GARMIN_CLIENT_SECRET'],
+    ['JUNCTION_REGION'],
   )
   assert.deepEqual(
     resolveSetupWearableMissingEnv('oura', {
@@ -1449,8 +1451,10 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
   assert.deepEqual(
     describeSelectedSetupWearables({
       env: {
-        GARMIN_CLIENT_ID: 'garmin-client',
-        GARMIN_CLIENT_SECRET: 'garmin-secret',
+        JUNCTION_API_KEY: 'sk_us_junction-test',
+        JUNCTION_CLIENT_USER_ID_SECRET: 'junction-user-secret',
+        JUNCTION_ENV: 'sandbox',
+        JUNCTION_REGION: 'us',
         WHOOP_CLIENT_ID: 'whoop-client',
         WHOOP_CLIENT_SECRET: 'whoop-secret',
       },

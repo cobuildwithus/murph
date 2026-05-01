@@ -62,10 +62,6 @@
       "types": "./dist/callback-redirect.d.ts",
       "default": "./dist/callback-redirect.js"
     },
-    "./providers/garmin": {
-      "types": "./dist/providers/garmin.d.ts",
-      "default": "./dist/providers/garmin.js"
-    },
     "./providers/oura": {
       "types": "./dist/providers/oura.d.ts",
       "default": "./dist/providers/oura.js"

@@ -91,7 +91,7 @@ Core execution tuning:
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
-- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant,parsers` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 
@@ -125,7 +125,7 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_SANDBOX`
 - `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter` and `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED` when delegated Vercel AI Gateway billing is enabled
 
-Opt-in runtime integrations and tool overrides:
+Opt-in runtime integrations:
 
 - `HOSTED_EMAIL_DEFAULT_SUBJECT`
 - `HOSTED_EMAIL_DOMAIN`
@@ -135,15 +135,6 @@ Opt-in runtime integrations and tool overrides:
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_FILE_BASE_URL`
-- `FFMPEG_COMMAND`
-- `FILE_COMMAND`
-- `MUTOOL_COMMAND`
-- `PDFINFO_COMMAND`
-- `PDFTOPPM_COMMAND`
-- `PDFTOTEXT_COMMAND`
-- `QPDF_COMMAND`
-- `WHISPER_COMMAND`
-- `WHISPER_MODEL_PATH`
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
@@ -152,20 +143,14 @@ Opt-in runtime integrations and tool overrides:
 - `JUNCTION_TIMESERIES_RESOURCES`
 - `JUNCTION_SUMMARY_BACKFILL_DAYS`
 - `JUNCTION_TIMESERIES_BACKFILL_DAYS`
-- `JUNCTION_RESOURCE_OVERRIDES`
 - `JUNCTION_RECONCILE_DAYS`
 - `JUNCTION_RECONCILE_INTERVAL_MS`
 - `JUNCTION_REQUEST_TIMEOUT_MS`
 
+Native parser binaries and the default Whisper model are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides.
+
 Device-sync provider runtime overrides:
 
-- `GARMIN_API_BASE_URL`
-- `GARMIN_AUTH_BASE_URL`
-- `GARMIN_BACKFILL_DAYS`
-- `GARMIN_RECONCILE_DAYS`
-- `GARMIN_RECONCILE_INTERVAL_MS`
-- `GARMIN_REQUEST_TIMEOUT_MS`
-- `GARMIN_TOKEN_BASE_URL`
 - `OURA_API_BASE_URL`
 - `OURA_AUTH_BASE_URL`
 - `OURA_BACKFILL_DAYS`
@@ -218,8 +203,6 @@ Opt-in execution integrations:
 
 - `HOSTED_EMAIL_SIGNING_SECRET`
 - `DEVICE_SYNC_SECRET`
-- `GARMIN_CLIENT_ID`
-- `GARMIN_CLIENT_SECRET`
 - `JUNCTION_API_KEY`
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_WEBHOOK_SECRET`

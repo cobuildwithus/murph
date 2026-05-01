@@ -1,5 +1,4 @@
 import {
-  garminProviderAdapter,
   junctionProviderAdapter,
   ouraProviderAdapter,
   stravaProviderAdapter,
@@ -7,7 +6,6 @@ import {
   type DeviceProviderAdapter,
 } from "@murphai/importers";
 import {
-  GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
@@ -17,7 +15,6 @@ import {
   type DeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
-import { createGarminDeviceSyncProvider } from "../providers/garmin.ts";
 import {
   createJunctionDeviceSyncProvider,
   JUNCTION_PROVIDER_CONFIG_KEY,
@@ -34,16 +31,6 @@ import {
   readOptionalCredentialPair,
 } from "./provider-config-helpers.ts";
 import {
-  GARMIN_API_BASE_URL_ENV_KEYS,
-  GARMIN_AUTH_BASE_URL_ENV_KEYS,
-  GARMIN_BACKFILL_DAYS_ENV_KEYS,
-  GARMIN_CLIENT_ID_ENV_KEYS,
-  GARMIN_CLIENT_SECRET_ENV_KEYS,
-  GARMIN_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  GARMIN_RECONCILE_DAYS_ENV_KEYS,
-  GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  GARMIN_TOKEN_BASE_URL_ENV_KEYS,
   JUNCTION_API_KEY_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
@@ -127,7 +114,6 @@ export type DeviceSyncProviderJobDefinitionMap =
 export type HostedHintPayloadFieldMap = Readonly<Record<string, HostedHintFieldKind>>;
 
 export interface ConfiguredDeviceSyncProviderCapabilities {
-  auth: "oauth2" | null;
   remoteDisconnect: boolean;
   scheduledPoll: boolean;
   tokenRefresh: boolean;
@@ -163,11 +149,6 @@ export interface DeviceSyncConfiguredProviderManifest<
 }
 
 export interface DeviceSyncConfiguredProviderManifestByKey {
-  garmin: DeviceSyncConfiguredProviderManifest<
-    "garmin",
-    ConfiguredDeviceSyncProviderConfigByKey["garmin"],
-    SerializableConfiguredDeviceSyncProviderConfigByKey["garmin"]
-  >;
   junction: DeviceSyncConfiguredProviderManifest<
     "junction",
     ConfiguredDeviceSyncProviderConfigByKey["junction"],
@@ -211,86 +192,6 @@ function stringJobField(
     ...options,
   };
 }
-
-function stringArrayJobField(
-  options: Pick<DeviceSyncJobPayloadFieldSpec, "required"> = {},
-): DeviceSyncJobPayloadFieldSpec {
-  return {
-    kind: "string[]",
-    ...options,
-  };
-}
-
-const GARMIN_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
-  "garmin",
-  ConfiguredDeviceSyncProviderConfigByKey["garmin"],
-  SerializableConfiguredDeviceSyncProviderConfigByKey["garmin"]
->({
-  provider: "garmin",
-  credentialPolicy: {
-    kind: "oauth_tokens",
-  },
-  descriptor: GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
-  importer: garminProviderAdapter,
-  env: GARMIN_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig(env) {
-    const credentials = readOptionalCredentialPair(
-      env,
-      GARMIN_CLIENT_ID_ENV_KEYS,
-      GARMIN_CLIENT_SECRET_ENV_KEYS,
-      "Garmin",
-    );
-
-    if (!credentials) {
-      return null;
-    }
-
-    return {
-      clientId: credentials.clientId,
-      clientSecret: credentials.clientSecret,
-      authBaseUrl: optionalEnv(env, GARMIN_AUTH_BASE_URL_ENV_KEYS),
-      tokenBaseUrl: optionalEnv(env, GARMIN_TOKEN_BASE_URL_ENV_KEYS),
-      apiBaseUrl: optionalEnv(env, GARMIN_API_BASE_URL_ENV_KEYS),
-      backfillDays: parseIntegerEnv(env, GARMIN_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, GARMIN_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS),
-    };
-  },
-  createProvider: createGarminDeviceSyncProvider,
-  serializableFields: {
-    apiBaseUrl: "string",
-    authBaseUrl: "string",
-    backfillDays: "number",
-    clientId: "string",
-    clientSecret: "string",
-    reconcileDays: "number",
-    reconcileIntervalMs: "number",
-    requestTimeoutMs: "number",
-    tokenBaseUrl: "string",
-  },
-  disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-  jobs: {
-    backfill: {
-      payload: {
-        dataType: stringJobField(),
-        dataTypes: stringArrayJobField(),
-        includeProfile: booleanJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-    reconcile: {
-      payload: {
-        dataType: stringJobField(),
-        dataTypes: stringArrayJobField(),
-        includeProfile: booleanJobField({ includeInHostedHint: true }),
-        windowEnd: stringJobField({ includeInHostedHint: true }),
-        windowStart: stringJobField({ includeInHostedHint: true }),
-      },
-    },
-  },
-});
 
 const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "junction",
@@ -666,7 +567,6 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
 });
 
 export const deviceSyncProviderManifestByKey = Object.freeze({
-  garmin: GARMIN_DEVICE_SYNC_PROVIDER_MANIFEST,
   junction: JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST,
   oura: OURA_DEVICE_SYNC_PROVIDER_MANIFEST,
   whoop: WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST,
@@ -841,7 +741,6 @@ function deriveConfiguredDeviceSyncProviderCapabilities(
   descriptor: DeviceProviderDescriptor,
 ): ConfiguredDeviceSyncProviderCapabilities {
   return {
-    auth: descriptor.transportModes.includes("oauth_callback") ? "oauth2" : null,
     remoteDisconnect: Boolean(descriptor.sync?.supportsRemoteDisconnect),
     scheduledPoll: descriptor.transportModes.includes("scheduled_poll"),
     tokenRefresh: Boolean(descriptor.sync?.supportsTokenRefresh),

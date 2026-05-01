@@ -17,6 +17,9 @@ import {
   buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
+import {
+  createHostedRunnerNativeParserToolchain,
+} from "../src/runner-native-parser-toolchain.ts";
 import { readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
 import {
   HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
@@ -26,29 +29,25 @@ import {
 } from "../scripts/deploy-automation/worker-optional-vars.ts";
 
 describe("buildHostedRunnerContainerEnv", () => {
-  it("forwards non-automation runner env without leaking unrelated worker vars", () => {
+  it("forwards non-automation runner env without leaking unrelated worker vars or parser selectors", () => {
     expect(buildHostedRunnerContainerEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
     })).toEqual({
-      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-      PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
     });
   });
 
-  it("forwards only the default assistant and parser runner env profiles", () => {
+  it("forwards only the default assistant runner env profile", () => {
     expect(buildHostedRunnerContainerEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
-      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-      PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -75,6 +74,42 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "true",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       NODE_ENV: "production",
+    });
+  });
+
+  it("forwards allowlisted env values that are readable by key but not enumerable", () => {
+    const source: Record<string, unknown> = {};
+    Object.defineProperties(source, {
+      HOSTED_ASSISTANT_PROVIDER: {
+        enumerable: false,
+        value: "vercel-ai-gateway",
+      },
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: {
+        enumerable: false,
+        value: "bridge-token",
+      },
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: {
+        enumerable: false,
+        value: "tcp://127.0.0.1:4222",
+      },
+      NODE_ENV: {
+        enumerable: false,
+        value: "development",
+      },
+      UNRELATED_SECRET: {
+        enumerable: false,
+        value: "not-forwarded",
+      },
+    });
+
+    expect(Object.keys(source)).toEqual([]);
+    expect(buildHostedRunnerContainerEnv(source)).toEqual({
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
+      NODE_ENV: "development",
     });
   });
 
@@ -314,6 +349,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       ),
       configSource,
       forwardedEnv,
+      parserToolchain: createHostedRunnerNativeParserToolchain(),
       platformEnv,
       userEnv: filterHostedRunnerSecrets(runnerSecrets, {
         ...configSource,
@@ -323,6 +359,12 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   });
 
   it("preserves typed runtime fields when the caller already resolved them", () => {
+    const parserToolchain = createHostedRunnerNativeParserToolchain({
+      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+    });
+
     expect(buildHostedRunnerJobRuntime({
       commitTimeoutMs: 45_000,
       configSource: {
@@ -332,6 +374,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_EMAIL_INGRESS_READY: "true",
         HOSTED_EMAIL_SEND_READY: "true",
       },
+      parserToolchain,
       resolvedConfig: {
         channelCapabilities: {
           emailSendReady: true,
@@ -348,6 +391,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_EMAIL_INGRESS_READY: "true",
         HOSTED_EMAIL_SEND_READY: "true",
       },
+      parserToolchain,
       resolvedConfig: {
         channelCapabilities: {
           emailSendReady: true,
@@ -359,6 +403,28 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         CUSTOM_API_KEY: "custom-user",
       },
     });
+  });
+
+  it("derives typed native parser config from platform config without forwarding parser env", () => {
+    const configSource = {
+      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,parsers",
+      LINQ_API_TOKEN: "linq-token",
+      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+    };
+
+    expect(buildHostedRunnerContainerEnv(configSource)).toEqual({
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      LINQ_API_TOKEN: "linq-token",
+      NODE_ENV: "production",
+    });
+    expect(buildHostedRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv: buildHostedRunnerContainerEnv(configSource),
+      runnerSecrets: {},
+    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain(configSource));
   });
 
   it("uses the shared config source for both timeout and allowed runner-secret filtering", () => {
@@ -420,6 +486,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toMatchObject({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
+      parserToolchain: createHostedRunnerNativeParserToolchain(),
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -585,6 +652,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toEqual({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
+      parserToolchain: createHostedRunnerNativeParserToolchain(),
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -606,9 +674,8 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       configSource: {
         DEVICE_SYNC_PUBLIC_BASE_URL: "https://murph.example/api/device-sync",
         DEVICE_SYNC_SECRET: "runtime-codec-secret",
-        GARMIN_API_BASE_URL: "https://garmin.example",
-        GARMIN_CLIENT_ID: "garmin-client",
-        GARMIN_CLIENT_SECRET: "garmin-secret",
+        OURA_CLIENT_ID: "oura-client",
+        OURA_CLIENT_SECRET: "oura-secret",
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         OURA_WEBHOOK_VERIFICATION_TOKEN: "control-plane-only",
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -632,10 +699,9 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime.resolvedConfig?.channelCapabilities.telegramBotConfigured).toBe(true);
     expect(runtime.resolvedConfig?.deviceSync).toEqual({
       providerConfigs: {
-        garmin: {
-          apiBaseUrl: "https://garmin.example",
-          clientId: "garmin-client",
-          clientSecret: "garmin-secret",
+        oura: {
+          clientId: "oura-client",
+          clientSecret: "oura-secret",
         },
       },
       publicBaseUrl: "https://murph.example/api/device-sync",
@@ -778,9 +844,6 @@ describe("hosted deploy automation device-sync surface", () => {
       "hosted-email,linq,mapbox,telegram",
     );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
-      expect.arrayContaining(["GARMIN_CLIENT_ID", "GARMIN_CLIENT_SECRET"]),
-    );
-    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining([
         "JUNCTION_API_KEY",
         "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -800,7 +863,6 @@ describe("hosted deploy automation device-sync surface", () => {
     );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
-        "GARMIN_API_BASE_URL",
         "HOSTED_AI_USAGE_BILLING_MODE",
         "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
         "HOSTED_ASSISTANT_PROVIDER",
@@ -825,11 +887,18 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
       "OURA_WEBHOOK_VERIFICATION_TOKEN",
     );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain("GARMIN_CLIENT_ID");
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain("GARMIN_CLIENT_SECRET");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
       "OURA_WEBHOOK_VERIFICATION_TOKEN",
     );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("GARMIN_API_BASE_URL");
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("JUNCTION_RESOURCE_OVERRIDES");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
       "LINQ_ATTACHMENT_CDN_BASE_URL",
     );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("FFMPEG_COMMAND");
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_COMMAND");
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_MODEL_PATH");
   });
 });

@@ -148,7 +148,7 @@ test('device account provider inputs reject public connect targets before daemon
     assert.equal(result.ok, false)
     if (!result.ok) {
       assert.match(result.error.message ?? '', /Unsupported device-sync provider/u)
-      assert.match(result.error.message ?? '', /garmin, junction, oura, whoop, strava/u)
+      assert.match(result.error.message ?? '', /junction, oura, whoop, strava/u)
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -186,8 +186,6 @@ test('device provider and account list do not start the managed daemon when loca
   try {
     const env = {
       DEVICE_SYNC_BASE_URL: '',
-      GARMIN_CLIENT_ID: '',
-      GARMIN_CLIENT_SECRET: '',
       MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
       OURA_CLIENT_ID: '',
       OURA_CLIENT_SECRET: '',
@@ -258,8 +256,6 @@ test('device provider and account list tolerate partial local provider credentia
   try {
     const env = {
       DEVICE_SYNC_BASE_URL: '',
-      GARMIN_CLIENT_ID: '',
-      GARMIN_CLIENT_SECRET: '',
       MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
       OURA_CLIENT_ID: '',
       OURA_CLIENT_SECRET: '',

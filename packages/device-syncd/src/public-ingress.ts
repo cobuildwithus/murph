@@ -1209,8 +1209,6 @@ export { createDeviceSyncRegistry } from "./registry.ts";
 export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
-export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
-export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";

@@ -131,21 +131,21 @@ test('setup wizard answered, detail, and hint rows render the expected labels an
   assert.equal(collectElementText(keyValue), 'Assistant: Codex')
 
   const publicUrl = createSetupWizardPublicUrlTargetRow({
-    detail: 'Required. Register this localhost callback URL in the Garmin dashboard.',
-    label: 'Garmin callback',
-    localReceiverUrl: 'http://127.0.0.1:8788/oauth/garmin/callback',
-    providerUrl: 'http://127.0.0.1:8788/oauth/garmin/callback',
+    detail: 'Required. Register this Junction Link callback URL before you connect Garmin.',
+    label: 'Junction callback',
+    localReceiverUrl: 'http://127.0.0.1:8788/connect/junction/callback',
+    providerUrl: 'http://127.0.0.1:8788/connect/junction/callback',
     requirement: 'required',
   })
   assert.equal(
     collectElementText(publicUrl),
     [
-      'Garmin callback (required)',
+      'Junction callback (required)',
       '  Local receiver: ',
-      'http://127.0.0.1:8788/oauth/garmin/callback',
+      'http://127.0.0.1:8788/connect/junction/callback',
       '  Paste into provider: ',
-      'http://127.0.0.1:8788/oauth/garmin/callback',
-      '  Required. Register this localhost callback URL in the Garmin dashboard.',
+      'http://127.0.0.1:8788/connect/junction/callback',
+      '  Required. Register this Junction Link callback URL before you connect Garmin.',
     ].join(''),
   )
 

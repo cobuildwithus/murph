@@ -67,6 +67,13 @@ describe("device sync settings routes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-03T12:00:00.000Z"));
     vi.clearAllMocks();
+    vi.stubEnv("OURA_CLIENT_ID", "oura-client");
+    vi.stubEnv("OURA_CLIENT_SECRET", "oura-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
+    vi.stubEnv("JUNCTION_ENV", "");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
+    vi.stubEnv("JUNCTION_REGION", "");
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -150,6 +157,7 @@ describe("device sync settings routes", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("lists calm settings sources for the authenticated hosted member", async () => {
@@ -223,10 +231,75 @@ describe("device sync settings routes", () => {
       prisma: mocks.prismaClient,
       scope: "feature.connected-health-source",
     });
-    expect(mocks.startConnection).toHaveBeenCalledWith("member_123", "oura", "/settings?tab=wearables");
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "oura",
+      "/settings?tab=wearables",
+      { sourceProviderSlug: null },
+    );
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
     });
+  });
+
+  it("starts Garmin settings connect through Junction when Garmin is a Junction target", async () => {
+    vi.stubEnv("OURA_CLIENT_ID", "");
+    vi.stubEnv("OURA_CLIENT_SECRET", "");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit,garmin");
+    vi.stubEnv("JUNCTION_REGION", "us");
+
+    const response = await settingsDeviceSyncConnectRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/settings/device-sync/providers/garmin/connect",
+        {
+          returnTo: "/connect",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ provider: "garmin" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "junction",
+      "/connect",
+      { sourceProviderSlug: "garmin" },
+    );
+  });
+
+  it("rejects Garmin settings connect when Junction does not expose Garmin", async () => {
+    const response = await settingsDeviceSyncConnectRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/settings/device-sync/providers/garmin/connect",
+        {
+          returnTo: "/connect",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ provider: "garmin" }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+        message: "Hosted device connect target is not configured.",
+        retryable: false,
+      },
+    });
+    expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
   it("rejects GET requests on the hosted settings connect route", async () => {

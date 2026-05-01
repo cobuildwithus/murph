@@ -37,7 +37,6 @@ export {
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncProviderConfigs,
-  readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredJunctionDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredStravaDeviceSyncProviderConfig,
@@ -71,8 +70,6 @@ export type {
 export { buildPublicDeviceSyncErrorPayload, startDeviceSyncHttpServer } from "./http.ts";
 export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";
-export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
-export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 export {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,

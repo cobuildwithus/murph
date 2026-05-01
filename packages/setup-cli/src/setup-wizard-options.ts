@@ -53,7 +53,7 @@ const DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS = [
 
 export const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [
   {
-    description: 'Sync sleep, daily health metrics, and activities from Garmin Connect.',
+    description: 'Connect Garmin through Junction Link for sleep, health metrics, and activities.',
     title: 'Garmin',
     wearable: 'garmin',
   },

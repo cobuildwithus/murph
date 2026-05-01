@@ -937,7 +937,7 @@ const VAULT_TREE = [
   { label: "experiments/", level: 2, sub: "protocols · runs · outcomes" },
   { label: "journal/", level: 2, sub: "free-text · timestamped" },
   { label: "sources/", level: 2, sub: "cited research · sideloaded docs" },
-  { label: "wearables/", level: 2, sub: "oura · whoop · strava · garmin" },
+  { label: "wearables/", level: 2, sub: "oura · whoop · strava · junction" },
   { label: "config", level: 1, sub: "toml · opinions" },
 ] as const;
 

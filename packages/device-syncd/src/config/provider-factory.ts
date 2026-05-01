@@ -61,10 +61,6 @@ function createConfiguredDeviceSyncProviderFromConfig<
   config: ConfiguredDeviceSyncProviderConfigByKey[TProvider],
 ): DeviceSyncProvider {
   switch (provider) {
-    case "garmin":
-      return getConfiguredDeviceSyncProviderManifest("garmin").createProvider(
-        config as ConfiguredDeviceSyncProviderConfigByKey["garmin"],
-      );
     case "junction":
       return getConfiguredDeviceSyncProviderManifest("junction").createProvider(
         config as ConfiguredDeviceSyncProviderConfigByKey["junction"],

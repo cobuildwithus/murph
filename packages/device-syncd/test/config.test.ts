@@ -20,7 +20,6 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncRuntimeConfig,
-  readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredStravaDeviceSyncProviderConfig,
@@ -46,18 +45,6 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
   assert.equal(providers[0]?.provider, "oura");
   assert.equal(loaded.http.host, "127.0.0.1");
   assert.equal(loaded.http.controlToken, "control-token-for-tests");
-});
-
-test("loadDeviceSyncEnvironment supports Garmin-only deployments", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    GARMIN_CLIENT_ID: "garmin-client-id",
-    GARMIN_CLIENT_SECRET: "garmin-client-secret",
-    ...createDeviceSyncEnv(),
-  });
-  const providers = requireValue(loaded.service.providers);
-
-  assert.equal(providers.length, 1);
-  assert.equal(providers[0]?.provider, "garmin");
 });
 
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
@@ -88,28 +75,8 @@ test("loadDeviceSyncEnvironment supports Strava-only deployments", () => {
   assert.equal(providers[0]?.provider, "strava");
 });
 
-test("loadDeviceSyncEnvironment supports Garmin, WHOOP, and Oura together", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    GARMIN_CLIENT_ID: "garmin-client-id",
-    GARMIN_CLIENT_SECRET: "garmin-client-secret",
-    WHOOP_CLIENT_ID: "whoop-client-id",
-    WHOOP_CLIENT_SECRET: "whoop-client-secret",
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-    ...createDeviceSyncEnv(),
-  });
-  const providers = requireValue(loaded.service.providers);
-
-  assert.deepEqual(
-    providers.map((provider) => provider.provider),
-    ["garmin", "oura", "whoop"],
-  );
-});
-
 test("createConfiguredDeviceSyncRegistry assembles the configured providers in descriptor order", () => {
   const registry = createConfiguredDeviceSyncRegistry({
-    GARMIN_CLIENT_ID: "garmin-client-id",
-    GARMIN_CLIENT_SECRET: "garmin-client-secret",
     WHOOP_CLIENT_ID: "whoop-client-id",
     WHOOP_CLIENT_SECRET: "whoop-client-secret",
     OURA_CLIENT_ID: "oura-client-id",
@@ -118,12 +85,27 @@ test("createConfiguredDeviceSyncRegistry assembles the configured providers in d
 
   assert.deepEqual(
     registry.list().map((provider) => provider.provider),
-    ["garmin", "oura", "whoop"],
+    ["oura", "whoop"],
   );
 });
 
 test("configuredDeviceSyncProviderKeys follow the shared descriptor order", () => {
-  assert.deepEqual(configuredDeviceSyncProviderKeys, ["garmin", "junction", "oura", "whoop", "strava"]);
+  assert.deepEqual(configuredDeviceSyncProviderKeys, ["junction", "oura", "whoop", "strava"]);
+});
+
+test("legacy Garmin env does not configure a direct provider", () => {
+  const env = {
+    GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
+    GARMIN_CLIENT_ID: "garmin-client-id",
+    GARMIN_CLIENT_SECRET: "garmin-client-secret",
+    ...createDeviceSyncEnv(),
+  };
+
+  assert.deepEqual(readConfiguredDeviceSyncProviderConfigs(env), {});
+  assert.throws(
+    () => loadDeviceSyncEnvironment(env),
+    /No device sync providers are configured/u,
+  );
 });
 
 test("shared provider-config helpers preserve descriptor order and report presence", () => {
@@ -141,8 +123,6 @@ test("shared provider-config helpers preserve descriptor order and report presen
 
 test("connect targets expose direct providers plus Junction-backed sources", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
-    GARMIN_CLIENT_ID: "garmin-client-id",
-    GARMIN_CLIENT_SECRET: "garmin-client-secret",
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
     JUNCTION_ENV: "sandbox",
@@ -157,8 +137,8 @@ test("connect targets expose direct providers plus Junction-backed sources", () 
       sourceProviderSlug: target.sourceProviderSlug ?? null,
     })),
     [
-      { connectTarget: "garmin", provider: "garmin", sourceProviderSlug: null },
       { connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
+      { connectTarget: "garmin", provider: "junction", sourceProviderSlug: "garmin" },
       { connectTarget: "dexcom_v3", provider: "junction", sourceProviderSlug: "dexcom_v3" },
     ],
   );
@@ -171,8 +151,6 @@ test("connect targets expose direct providers plus Junction-backed sources", () 
 
 test("shared provider runtime env key lists stay aligned with the configured providers", () => {
   assert.deepEqual(deviceSyncProviderRuntimeSecretEnvKeys, [
-    "GARMIN_CLIENT_ID",
-    "GARMIN_CLIENT_SECRET",
     "JUNCTION_API_KEY",
     "JUNCTION_CLIENT_USER_ID_SECRET",
     "JUNCTION_WEBHOOK_SECRET",
@@ -184,13 +162,6 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "STRAVA_CLIENT_SECRET",
   ]);
   assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
-    "GARMIN_API_BASE_URL",
-    "GARMIN_AUTH_BASE_URL",
-    "GARMIN_BACKFILL_DAYS",
-    "GARMIN_RECONCILE_DAYS",
-    "GARMIN_RECONCILE_INTERVAL_MS",
-    "GARMIN_REQUEST_TIMEOUT_MS",
-    "GARMIN_TOKEN_BASE_URL",
     "JUNCTION_ENV",
     "JUNCTION_PROVIDER_FILTER",
     "JUNCTION_RECONCILE_DAYS",
@@ -229,11 +200,6 @@ test("shared provider runtime env key lists stay aligned with the configured pro
 
 test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only runtime fields", () => {
   const cloned = cloneSerializableConfiguredDeviceSyncProviderConfigs({
-    garmin: {
-      clientId: "garmin-client-id",
-      clientSecret: "garmin-client-secret",
-      fetchImpl: fetch,
-    },
     oura: {
       clientId: "oura-client-id",
       clientSecret: "oura-client-secret",
@@ -257,10 +223,6 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
   });
 
   assert.deepEqual(cloned, {
-    garmin: {
-      clientId: "garmin-client-id",
-      clientSecret: "garmin-client-secret",
-    },
     oura: {
       clientId: "oura-client-id",
       clientSecret: "oura-client-secret",
@@ -400,17 +362,6 @@ test("cloneConfiguredDeviceSyncRuntimeConfig preserves the runtime-safe shape an
 test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted runtime subset", () => {
   const parsed = parseSerializableConfiguredDeviceSyncProviderConfigs(
     {
-      garmin: {
-        apiBaseUrl: "https://garmin.example.test",
-        authBaseUrl: "https://garmin-auth.example.test",
-        backfillDays: 14,
-        clientId: "garmin-client-id",
-        clientSecret: "garmin-client-secret",
-        reconcileDays: 7,
-        reconcileIntervalMs: 3_600_000,
-        requestTimeoutMs: 30_000,
-        tokenBaseUrl: "https://garmin-token.example.test",
-      },
       oura: {
         apiBaseUrl: "https://oura.example.test",
         authBaseUrl: "https://oura-auth.example.test",
@@ -450,17 +401,6 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted run
   );
 
   assert.deepEqual(parsed, {
-    garmin: {
-      apiBaseUrl: "https://garmin.example.test",
-      authBaseUrl: "https://garmin-auth.example.test",
-      backfillDays: 14,
-      clientId: "garmin-client-id",
-      clientSecret: "garmin-client-secret",
-      reconcileDays: 7,
-      reconcileIntervalMs: 3_600_000,
-      requestTimeoutMs: 30_000,
-      tokenBaseUrl: "https://garmin-token.example.test",
-    },
     oura: {
       apiBaseUrl: "https://oura.example.test",
       authBaseUrl: "https://oura-auth.example.test",
@@ -815,32 +755,6 @@ test("readConfiguredOuraDeviceSyncProviderConfig rejects invalid integer overrid
       }),
     /OURA_BACKFILL_DAYS must be an integer/u,
   );
-});
-
-test("readConfiguredGarminDeviceSyncProviderConfig keeps optional Garmin overrides", () => {
-  const config = readConfiguredGarminDeviceSyncProviderConfig({
-    GARMIN_CLIENT_ID: "garmin-client-id",
-    GARMIN_CLIENT_SECRET: "garmin-client-secret",
-    GARMIN_API_BASE_URL: "https://apis.garmin.example.test",
-    GARMIN_AUTH_BASE_URL: "https://connect.garmin.example.test",
-    GARMIN_TOKEN_BASE_URL: "https://token.garmin.example.test",
-    GARMIN_BACKFILL_DAYS: "14",
-    GARMIN_RECONCILE_DAYS: "7",
-    GARMIN_RECONCILE_INTERVAL_MS: "3600000",
-    GARMIN_REQUEST_TIMEOUT_MS: "15000",
-  });
-
-  assert.deepEqual(config, {
-    apiBaseUrl: "https://apis.garmin.example.test",
-    authBaseUrl: "https://connect.garmin.example.test",
-    backfillDays: 14,
-    clientId: "garmin-client-id",
-    clientSecret: "garmin-client-secret",
-    reconcileDays: 7,
-    reconcileIntervalMs: 3_600_000,
-    requestTimeoutMs: 15_000,
-    tokenBaseUrl: "https://token.garmin.example.test",
-  });
 });
 
 test("readConfiguredWhoopDeviceSyncProviderConfig trims scopes and parses integer overrides", () => {

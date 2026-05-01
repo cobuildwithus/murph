@@ -570,9 +570,10 @@ describe("hosted deploy automation helpers", () => {
 
     expect(buildHostedWorkerSecretsPayload({
       AGENTMAIL_API_KEY: "agentmail-secret",
-      ...legacyHostedAssistantProviderSecrets,
+      GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
+      ...legacyHostedAssistantProviderSecrets,
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
@@ -595,8 +596,6 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     })).toEqual({
-      GARMIN_CLIENT_ID: "garmin-client-id",
-      GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
@@ -618,6 +617,22 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_BOT_TOKEN: "bot-token",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     });
+  });
+
+  it("omits legacy direct Garmin env from worker secret payloads", () => {
+    const payload = buildHostedWorkerSecretsPayload({
+      GARMIN_CLIENT_ID: "garmin-client-id",
+      GARMIN_CLIENT_SECRET: "garmin-client-secret",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
+      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
+    });
+
+    expect(payload.GARMIN_CLIENT_ID).toBeUndefined();
+    expect(payload.GARMIN_CLIENT_SECRET).toBeUndefined();
   });
 
   it("keeps only known hosted assistant provider env names in deploy automation", () => {

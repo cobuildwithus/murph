@@ -36,11 +36,6 @@ describe("deviceSyncProviderManifests", () => {
     for (const manifest of deviceSyncProviderManifests) {
       expect(manifest.descriptor.provider).toBe(manifest.provider);
       expect(manifest.importer.provider).toBe(manifest.provider);
-      expect(manifest.capabilities.auth).toBe(
-        resolveDeviceProviderConnectionDescriptor(manifest.descriptor).kind === "oauth2"
-          ? "oauth2"
-          : null,
-      );
       expect(manifest.capabilities.scheduledPoll).toBe(
         manifest.descriptor.transportModes.includes("scheduled_poll"),
       );
@@ -131,13 +126,6 @@ describe("deviceSyncProviderManifests", () => {
   });
 
   it("declares provider-owned job definitions for every built-in provider job kind", () => {
-    expect(getConfiguredDeviceSyncProviderJobDefinition("garmin", "backfill")).toMatchObject({
-      payload: {
-        dataType: { kind: "string" },
-        dataTypes: { kind: "string[]" },
-        includeProfile: { kind: "boolean", includeInHostedHint: true },
-      },
-    });
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
       payload: {
         windowEnd: { kind: "string", includeInHostedHint: true },
@@ -195,8 +183,6 @@ describe("deviceSyncProviderManifests", () => {
 
   it("reads configured providers and creates runtime providers through the manifest registry", () => {
     const configs = readConfiguredDeviceSyncProviderConfigs({
-      GARMIN_CLIENT_ID: "garmin-client-id",
-      GARMIN_CLIENT_SECRET: "<REDACTED_GARMIN_CLIENT_SECRET>",
       JUNCTION_API_KEY: "sk_us_test_manifest",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
       JUNCTION_ENV: "sandbox",
@@ -206,12 +192,12 @@ describe("deviceSyncProviderManifests", () => {
       STRAVA_SCOPES: "activity:read, profile:read_all",
     });
 
-    expect(Object.keys(configs).sort()).toEqual(["garmin", "junction", "strava"]);
+    expect(Object.keys(configs).sort()).toEqual(["junction", "strava"]);
 
     const providers = createConfiguredDeviceSyncProvidersFromConfigs(configs);
 
-    expect(providers.map((provider) => provider.provider)).toEqual(["garmin", "junction", "strava"]);
-    expect(providers[2]?.descriptor.oauth?.defaultScopes).toEqual([
+    expect(providers.map((provider) => provider.provider)).toEqual(["junction", "strava"]);
+    expect(providers[1]?.descriptor.oauth?.defaultScopes).toEqual([
       "activity:read",
       "profile:read_all",
     ]);
@@ -219,17 +205,6 @@ describe("deviceSyncProviderManifests", () => {
 
   it("round-trips serializable provider configs through manifest field specs", () => {
     const cloned = cloneSerializableConfiguredDeviceSyncProviderConfigs({
-      garmin: {
-        apiBaseUrl: "https://apis.garmin.com",
-        authBaseUrl: "https://connect.garmin.com",
-        backfillDays: 14,
-        clientId: "garmin-id",
-        clientSecret: "<REDACTED_GARMIN_CLIENT_SECRET>",
-        reconcileDays: 7,
-        reconcileIntervalMs: 3_600_000,
-        requestTimeoutMs: 15_000,
-        tokenBaseUrl: "https://connectapi.garmin.com",
-      },
       junction: {
         allowedLinkHosts: ["junction.com", "tryvital.io"],
         apiKey: "sk_us_test_runtime",
@@ -392,22 +367,6 @@ describe("deviceSyncProviderManifests", () => {
 
   it("shapes hosted hint payloads from the provider manifest", () => {
     expect(
-      shapeHostedDeviceSyncJobHintPayload("garmin", {
-        kind: "backfill",
-        payload: {
-          includeProfile: true,
-          ignored: "value",
-          windowEnd: "2026-04-22T00:00:00.000Z",
-          windowStart: "2026-04-01T00:00:00.000Z",
-        },
-      }),
-    ).toEqual({
-      includeProfile: true,
-      windowEnd: "2026-04-22T00:00:00.000Z",
-      windowStart: "2026-04-01T00:00:00.000Z",
-    });
-
-    expect(
       shapeHostedDeviceSyncJobHintPayload("junction", {
         kind: "backfill",
         payload: {
@@ -512,19 +471,17 @@ describe("deviceSyncProviderManifests", () => {
 
   it("normalizes built-in job payloads through the manifest job definitions", () => {
     expect(
-      normalizeConfiguredDeviceSyncJobInput("garmin", {
+      normalizeConfiguredDeviceSyncJobInput("junction", {
         kind: "backfill",
         payload: {
-          dataTypes: ["sleeps", "activities"],
-          includeProfile: true,
+          windowEnd: "2026-04-22T00:00:00.000Z",
           windowStart: "2026-04-01T00:00:00.000Z",
         },
       }, "test"),
     ).toEqual({
       kind: "backfill",
       payload: {
-        dataTypes: ["sleeps", "activities"],
-        includeProfile: true,
+        windowEnd: "2026-04-22T00:00:00.000Z",
         windowStart: "2026-04-01T00:00:00.000Z",
       },
     });
@@ -608,8 +565,8 @@ describe("deviceSyncProviderManifests", () => {
   it("re-exports the manifest registry through the package root barrel", () => {
     expect(rootConfiguredDeviceSyncProviderKeys).toEqual(configuredDeviceSyncProviderKeys);
     expect(rootDeviceSyncProviderManifests).toEqual(deviceSyncProviderManifests);
-    expect(rootGetConfiguredDeviceSyncProviderManifest("garmin")).toBe(
-      getConfiguredDeviceSyncProviderManifest("garmin"),
+    expect(rootGetConfiguredDeviceSyncProviderManifest("junction")).toBe(
+      getConfiguredDeviceSyncProviderManifest("junction"),
     );
     expect(rootGetConfiguredDeviceSyncProviderJobDefinition("strava", "resource")).toBe(
       getConfiguredDeviceSyncProviderJobDefinition("strava", "resource"),

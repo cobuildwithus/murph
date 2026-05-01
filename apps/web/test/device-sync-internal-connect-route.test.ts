@@ -31,8 +31,6 @@ describe("device sync internal connect-link route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GARMIN_CLIENT_ID", "");
-    vi.stubEnv("GARMIN_CLIENT_SECRET", "");
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-secret");
     vi.stubEnv("JUNCTION_API_KEY", "");
