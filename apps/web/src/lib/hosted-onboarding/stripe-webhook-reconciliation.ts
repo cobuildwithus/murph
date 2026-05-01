@@ -11,6 +11,12 @@ import {
 import {
   reconcileHostedStripeEventById,
 } from "./stripe-event-reconciliation";
+import {
+  normalizeHostedStripeDispatchSourceType,
+} from "./stripe-dispatch";
+import {
+  requireHostedStripeApi,
+} from "./runtime";
 
 export type HostedStripeWebhookReconciliationResult = {
   activatedMemberId: string | null;
@@ -92,10 +98,11 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
       throw buildHostedStripeWebhookReceiptMissingError(input.eventId);
     }
 
-    if (shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(refreshedEvent, new Date())) {
-      return buildEmptyHostedStripeWebhookReconciliationResult({
+    if (refreshedEvent.status === HostedStripeEventStatus.completed) {
+      return await resolveCompletedHostedStripeWebhookActivationResult({
         eventId: input.eventId,
         eventType: refreshedEvent.type,
+        prisma,
       });
     }
 
@@ -112,6 +119,22 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
     eventType: storedEvent.type,
     hostedExecutionEventId: reconciled.hostedExecutionEventId ?? null,
   };
+}
+
+export async function processRecordedHostedStripeWebhookEvent(input: {
+  eventId: string;
+  prisma?: PrismaClient;
+  timeoutMs?: number;
+}): Promise<HostedStripeWebhookRunnerNudgeResult> {
+  const reconciliation = await reconcileRecordedHostedStripeWebhookEvent({
+    eventId: input.eventId,
+    prisma: input.prisma,
+  });
+
+  return nudgeHostedStripeWebhookActivationRunner({
+    ...reconciliation,
+    timeoutMs: input.timeoutMs,
+  });
 }
 
 export async function nudgeHostedStripeWebhookActivationRunner(input: {
@@ -235,16 +258,87 @@ function buildHostedStripeWebhookInlineRetryReset(
   };
 }
 
-function buildEmptyHostedStripeWebhookReconciliationResult(input: {
+async function resolveCompletedHostedStripeWebhookActivationResult(input: {
   eventId: string;
   eventType: string;
-}): HostedStripeWebhookReconciliationResult {
-  return {
-    activatedMemberId: null,
-    eventId: input.eventId,
-    eventType: input.eventType,
-    hostedExecutionEventId: null,
+  prisma: PrismaClient;
+}): Promise<HostedStripeWebhookReconciliationResult> {
+  const activation = await readHostedStripeActivationMailboxItemForCompletedEvent(input);
+
+  return activation
+    ? {
+      activatedMemberId: activation.userId,
+      eventId: input.eventId,
+      eventType: input.eventType,
+      hostedExecutionEventId: activation.dedupeKey,
+    }
+    : {
+      activatedMemberId: null,
+      eventId: input.eventId,
+      eventType: input.eventType,
+      hostedExecutionEventId: null,
+    };
+}
+
+async function readHostedStripeActivationMailboxItemForCompletedEvent(input: {
+  eventId: string;
+  eventType: string;
+  prisma: PrismaClient;
+}): Promise<{ dedupeKey: string; userId: string } | null> {
+  for (const sourceEventId of await resolveHostedStripeActivationSourceEventIds(input.eventId)) {
+    const activation = await input.prisma.hostedMailboxItem.findFirst({
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        dedupeKey: true,
+        userId: true,
+      },
+      where: {
+        dedupeKey: {
+          endsWith: `:${sourceEventId}`,
+          startsWith: `member.activated:${normalizeHostedStripeDispatchSourceType(input.eventType)}:`,
+        },
+        kind: "member.activated",
+      },
+    });
+
+    if (activation) {
+      return activation;
+    }
+  }
+
+  return null;
+}
+
+async function resolveHostedStripeActivationSourceEventIds(eventId: string): Promise<string[]> {
+  const stripeEvent = await requireHostedStripeApi().events.retrieve(eventId);
+  const sourceEventIds = [eventId];
+
+  if (stripeEvent.type === "invoice.paid") {
+    const invoiceId = readHostedStripeEventPayloadObjectId(stripeEvent);
+
+    if (invoiceId) {
+      sourceEventIds.unshift(`invoice:${invoiceId}`);
+    }
+  }
+
+  return sourceEventIds;
+}
+
+function readHostedStripeEventPayloadObjectId(event: {
+  data?: {
+    object?: unknown;
   };
+}): string | null {
+  const value = event.data?.object;
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 function buildHostedStripeWebhookReceiptMissingError(eventId: string) {

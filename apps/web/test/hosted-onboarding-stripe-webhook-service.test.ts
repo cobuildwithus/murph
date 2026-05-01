@@ -122,6 +122,43 @@ describe("hosted Stripe webhook service", () => {
     });
   });
 
+  it("retries pending duplicate Stripe events with a future next attempt by resetting the receipt and starting workflow", async () => {
+    const updatedAt = new Date("2026-04-23T00:00:00.000Z");
+    const prisma = createPrisma({
+      nextAttemptAt: new Date(Date.now() + 60_000),
+      status: HostedStripeEventStatus.pending,
+      updatedAt,
+    });
+    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
+      duplicate: true,
+      type: "invoice.paid",
+    });
+
+    await expect(handleHostedStripeWebhook({
+      prisma: prisma as never,
+      rawBody: "{}",
+      signature: "sig_test_123",
+    })).resolves.toEqual({
+      duplicate: true,
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(prisma.hostedStripeEvent.updateMany).toHaveBeenCalledWith({
+      data: {
+        claimExpiresAt: null,
+        nextAttemptAt: expect.any(Date),
+      },
+      where: {
+        eventId: "evt_123",
+        updatedAt,
+      },
+    });
+    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).toHaveBeenCalledWith({
+      eventId: "evt_123",
+    });
+  });
+
   it("skips duplicate workflow start when the stored Stripe receipt is already completed", async () => {
     const prisma = createPrisma({
       status: HostedStripeEventStatus.completed,

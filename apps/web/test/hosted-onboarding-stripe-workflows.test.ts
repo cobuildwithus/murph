@@ -11,8 +11,7 @@ import {
 } from "workflow";
 
 const mocks = vi.hoisted(() => ({
-  nudgeHostedStripeWebhookActivationRunner: vi.fn(),
-  reconcileRecordedHostedStripeWebhookEvent: vi.fn(),
+  processRecordedHostedStripeWebhookEvent: vi.fn(),
   start: vi.fn(),
 }));
 
@@ -27,18 +26,15 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-webhook-reconciliation", async () =>
 
   return {
     ...actual,
-    nudgeHostedStripeWebhookActivationRunner:
-      mocks.nudgeHostedStripeWebhookActivationRunner,
-    reconcileRecordedHostedStripeWebhookEvent:
-      mocks.reconcileRecordedHostedStripeWebhookEvent,
+    processRecordedHostedStripeWebhookEvent:
+      mocks.processRecordedHostedStripeWebhookEvent,
   };
 });
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { startHostedStripeWebhookReconciliationWorkflow } from "@/src/lib/hosted-onboarding/stripe-webhook-workflow-start";
 import {
-  nudgeHostedStripeWebhookActivationStep,
-  reconcileHostedStripeWebhookEventStep,
+  processHostedStripeWebhookEventStep,
 } from "@/src/lib/hosted-onboarding/stripe-webhook-workflow-steps";
 import { hostedStripeWebhookReconciliationWorkflow } from "@/src/lib/hosted-onboarding/stripe-webhook-workflows";
 
@@ -48,10 +44,7 @@ describe("hosted onboarding Stripe workflows", () => {
     mocks.start.mockResolvedValue({
       runId: "run_123",
     });
-    mocks.reconcileRecordedHostedStripeWebhookEvent.mockResolvedValue(
-      makeReconciliationResult(),
-    );
-    mocks.nudgeHostedStripeWebhookActivationRunner.mockResolvedValue({
+    mocks.processRecordedHostedStripeWebhookEvent.mockResolvedValue({
       accepted: true,
       required: true,
     });
@@ -85,18 +78,19 @@ describe("hosted onboarding Stripe workflows", () => {
     });
   });
 
-  it("reconciles the stored Stripe event by id", async () => {
-    await expect(reconcileHostedStripeWebhookEventStep({
+  it("processes the stored Stripe event by id without returning activation identifiers", async () => {
+    await expect(processHostedStripeWebhookEventStep({
       eventId: "evt_123",
-    })).resolves.toEqual(makeReconciliationResult());
+    })).resolves.toBeUndefined();
 
-    expect(mocks.reconcileRecordedHostedStripeWebhookEvent).toHaveBeenCalledWith({
+    expect(mocks.processRecordedHostedStripeWebhookEvent).toHaveBeenCalledWith({
       eventId: "evt_123",
+      timeoutMs: 5_000,
     });
   });
 
   it("marks missing Stripe receipts fatal inside Workflow", async () => {
-    mocks.reconcileRecordedHostedStripeWebhookEvent.mockRejectedValue(
+    mocks.processRecordedHostedStripeWebhookEvent.mockRejectedValue(
       hostedOnboardingError({
         code: "STRIPE_WEBHOOK_RECEIPT_MISSING",
         httpStatus: 500,
@@ -104,13 +98,13 @@ describe("hosted onboarding Stripe workflows", () => {
       }),
     );
 
-    await expect(reconcileHostedStripeWebhookEventStep({
+    await expect(processHostedStripeWebhookEventStep({
       eventId: "evt_missing",
     })).rejects.toBeInstanceOf(FatalError);
   });
 
   it("marks retryable reconciliation failures retryable inside Workflow", async () => {
-    mocks.reconcileRecordedHostedStripeWebhookEvent.mockRejectedValue(
+    mocks.processRecordedHostedStripeWebhookEvent.mockRejectedValue(
       hostedOnboardingError({
         code: "STRIPE_WEBHOOK_RECONCILE_FAILED",
         httpStatus: 500,
@@ -119,39 +113,19 @@ describe("hosted onboarding Stripe workflows", () => {
       }),
     );
 
-    await expect(reconcileHostedStripeWebhookEventStep({
+    await expect(processHostedStripeWebhookEventStep({
       eventId: "evt_123",
     })).rejects.toBeInstanceOf(RetryableError);
   });
 
-  it("nudges the hosted runner from the reconciliation result", async () => {
-    await expect(nudgeHostedStripeWebhookActivationStep(
-      makeReconciliationResult(),
-    )).resolves.toBeUndefined();
-
-    expect(mocks.nudgeHostedStripeWebhookActivationRunner).toHaveBeenCalledWith({
-      ...makeReconciliationResult(),
-      timeoutMs: 5_000,
-    });
-  });
-
   it("marks unaccepted Stripe activation nudges retryable inside Workflow", async () => {
-    mocks.nudgeHostedStripeWebhookActivationRunner.mockResolvedValue({
+    mocks.processRecordedHostedStripeWebhookEvent.mockResolvedValue({
       accepted: false,
       required: true,
     });
 
-    await expect(nudgeHostedStripeWebhookActivationStep(
-      makeReconciliationResult(),
-    )).rejects.toBeInstanceOf(RetryableError);
+    await expect(processHostedStripeWebhookEventStep({
+      eventId: "evt_123",
+    })).rejects.toBeInstanceOf(RetryableError);
   });
 });
-
-function makeReconciliationResult() {
-  return {
-    activatedMemberId: "member_123",
-    eventId: "evt_123",
-    eventType: "invoice.paid",
-    hostedExecutionEventId: "member.activated:member_123:stripe:evt_123",
-  };
-}

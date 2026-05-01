@@ -8,9 +8,7 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
-  nudgeHostedStripeWebhookActivationRunner,
-  reconcileRecordedHostedStripeWebhookEvent,
-  type HostedStripeWebhookReconciliationResult,
+  processRecordedHostedStripeWebhookEvent,
 } from "./stripe-webhook-reconciliation";
 import {
   HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_RETRY_AFTER,
@@ -18,33 +16,21 @@ import {
   type HostedStripeWebhookReconciliationWorkflowInput,
 } from "./stripe-webhook-workflow-types";
 
-export async function reconcileHostedStripeWebhookEventStep(
+export async function processHostedStripeWebhookEventStep(
   input: HostedStripeWebhookReconciliationWorkflowInput,
-): Promise<HostedStripeWebhookReconciliationResult> {
+): Promise<void> {
   "use step";
 
+  let result;
+
   try {
-    return await reconcileRecordedHostedStripeWebhookEvent({
+    result = await processRecordedHostedStripeWebhookEvent({
       eventId: input.eventId,
+      timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
     });
   } catch (error) {
     throw mapHostedStripeWorkflowStepError(error);
   }
-}
-
-Object.assign(reconcileHostedStripeWebhookEventStep, {
-  maxRetries: HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_STEP_MAX_RETRIES,
-});
-
-export async function nudgeHostedStripeWebhookActivationStep(
-  input: HostedStripeWebhookReconciliationResult,
-): Promise<void> {
-  "use step";
-
-  const result = await nudgeHostedStripeWebhookActivationRunner({
-    ...input,
-    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-  });
 
   if (!result.accepted) {
     throw new RetryableError(
@@ -56,7 +42,7 @@ export async function nudgeHostedStripeWebhookActivationStep(
   }
 }
 
-Object.assign(nudgeHostedStripeWebhookActivationStep, {
+Object.assign(processHostedStripeWebhookEventStep, {
   maxRetries: HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_STEP_MAX_RETRIES,
 });
 

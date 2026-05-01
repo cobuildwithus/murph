@@ -86,13 +86,15 @@ nudges only coalesce pending work.
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the
 minimal `HostedStripeEvent` receipt and starts a Stripe-specific Vercel Workflow
-with `{ eventId }`. The workflow re-fetches the Stripe event through the
-existing Stripe API reconciliation path, applies billing and activation mailbox
-facts behind the hosted Stripe receipt claim, then retries the Cloudflare runner
-nudge from the reconciliation result when activation appended runtime work. Raw
-Stripe payloads, signatures, customer objects, invoice objects, provider
-headers, and mailbox payloads must not be Workflow inputs. The minute cron drain
-remains a receipt retry fallback for due Stripe rows.
+with `{ eventId }`. The workflow uses one event-id step to re-fetch the Stripe
+event through the existing Stripe API reconciliation path, apply billing and
+activation mailbox facts behind the hosted Stripe receipt claim, and retry the
+Cloudflare runner nudge when activation appended runtime work. Step inputs and
+outputs stay pointer-only; any member or activation ids needed for retry are
+re-derived inside the step from web-owned Postgres and Stripe. Raw Stripe
+payloads, signatures, customer objects, invoice objects, provider headers, and
+mailbox payloads must not be Workflow inputs or step outputs. The minute cron
+drain remains a receipt retry fallback for due Stripe rows.
 
 Cloudflare does not acquire a web run row. A runner nudge only asks the
 per-user Durable Object to invoke the container if needed. The Durable Object

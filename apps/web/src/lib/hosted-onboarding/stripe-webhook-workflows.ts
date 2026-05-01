@@ -1,6 +1,5 @@
 import {
-  nudgeHostedStripeWebhookActivationStep,
-  reconcileHostedStripeWebhookEventStep,
+  processHostedStripeWebhookEventStep,
 } from "./stripe-webhook-workflow-steps";
 import type {
   HostedStripeWebhookReconciliationWorkflowInput,
@@ -11,6 +10,5 @@ export async function hostedStripeWebhookReconciliationWorkflow(
 ): Promise<void> {
   "use workflow";
 
-  const reconciliation = await reconcileHostedStripeWebhookEventStep(input);
-  await nudgeHostedStripeWebhookActivationStep(reconciliation);
+  await processHostedStripeWebhookEventStep(input);
 }
