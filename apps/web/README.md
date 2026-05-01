@@ -200,7 +200,8 @@ Hosted managed crypto:
   `HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID`,
   `HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID`,
   `HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK`, and
-  `HOSTED_CRYPTO_RECOVERY_KEY_ID`
+  `HOSTED_CRYPTO_RECOVERY_KEY_ID`; configure the recovery pair together, and
+  configure the TEE runtime public key, key ID, and policy ID together
 
 Hosted AI usage metering:
 
