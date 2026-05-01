@@ -43,6 +43,13 @@ export const JUNCTION_DEFAULT_PROVIDER_FILTER = Object.freeze(
   JUNCTION_CONNECT_SOURCE_TARGETS.map(({ providerSlug }) => providerSlug),
 );
 
+export const JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS = Object.freeze([
+  "apple_health",
+  "apple_health_kit",
+  "apple_healthkit",
+  "health_connect",
+] as const);
+
 const JUNCTION_PROVIDER_SLUG_BY_CONNECT_SOURCE_ID = new Map(
   JUNCTION_CONNECT_SOURCE_TARGETS.map((target) => [
     normalizeJunctionProviderSlug(target.connectSourceId),
@@ -75,6 +82,16 @@ export function resolveJunctionConnectSourceLabel(providerSlug: string): string 
   return JUNCTION_CONNECT_SOURCE_LABEL_BY_PROVIDER_SLUG.get(normalized) ?? null;
 }
 
+export function normalizeJunctionProviderFilter(value: string[] | undefined): string[] {
+  const requested = value && value.length > 0 ? value : [...JUNCTION_DEFAULT_PROVIDER_FILTER];
+  const blocked = new Set<string>(JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS);
+  return [...new Set(
+    requested
+      .map(normalizeJunctionProviderSlug)
+      .filter((entry): entry is string => entry !== null && !blocked.has(entry)),
+  )];
+}
+
 function normalizeJunctionProviderSlug(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -88,4 +105,3 @@ function normalizeJunctionProviderSlug(value: unknown): string | null {
 
   return normalized || null;
 }
-

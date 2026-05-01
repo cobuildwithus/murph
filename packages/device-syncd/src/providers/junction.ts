@@ -17,7 +17,10 @@ import {
   type JunctionProviderConnection,
   type JunctionRegion,
 } from "./junction-client.ts";
-import { JUNCTION_DEFAULT_PROVIDER_FILTER } from "./junction-connect-sources.ts";
+import {
+  JUNCTION_DEFAULT_PROVIDER_FILTER,
+  normalizeJunctionProviderFilter,
+} from "./junction-connect-sources.ts";
 
 import type {
   DeviceConnectionSourceStatus,
@@ -39,11 +42,14 @@ import type {
 
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
 export {
+  JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS,
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
+  normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
 } from "./junction-connect-sources.ts";
+export type { JunctionConnectSourceTarget } from "./junction-connect-sources.ts";
 
 export interface JunctionDeviceSyncProviderConfig {
   apiKey: string;
@@ -88,28 +94,6 @@ const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
 ]);
-export const JUNCTION_DEFAULT_PROVIDER_FILTER = Object.freeze([
-  "oura",
-  "fitbit",
-  "garmin",
-  "whoop",
-  "strava",
-  "withings",
-  "dexcom_v3",
-  "freestyle_libre",
-  "abbott_libreview",
-  "eight_sleep",
-  "renpho",
-] as const);
-
-export const JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS = Object.freeze([
-  "apple_health",
-  "apple_health_kit",
-  "apple_healthkit",
-  "health_connect",
-  "samsung_health",
-] as const);
-
 const DEFAULT_SUMMARY_BACKFILL_DAYS = 90;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
 const DEFAULT_RECONCILE_DAYS = 7;
@@ -134,7 +118,7 @@ export function createJunctionDeviceSyncProvider(
     JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     "timeseries",
   );
-  const providerFilter = normalizeProviderFilter(config.providerFilter);
+  const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
@@ -505,10 +489,6 @@ export function buildJunctionClientUserId(secret: string, ownerId: string): stri
   return `murph_${base32UrlEncode(digest)}`.slice(0, 32);
 }
 
-export function normalizeJunctionProviderFilter(value: string[] | undefined): string[] {
-  return normalizeProviderFilter(value);
-}
-
 function resolveJunctionLinkProviderFilter(
   providerFilter: string[],
   sourceProviderSlug: string | null | undefined,
@@ -518,7 +498,7 @@ function resolveJunctionLinkProviderFilter(
     return providerFilter;
   }
 
-  const [normalizedSource] = normalizeProviderFilter([requested]);
+  const [normalizedSource] = normalizeJunctionProviderFilter([requested]);
   if (!normalizedSource || !providerFilter.includes(normalizedSource)) {
     throw deviceSyncError({
       code: "JUNCTION_SOURCE_PROVIDER_NOT_CONFIGURED",
@@ -540,16 +520,6 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
     requestTimeoutMs: config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     fetchImpl: config.fetchImpl,
   };
-}
-
-function normalizeProviderFilter(value: string[] | undefined): string[] {
-  const requested = value && value.length > 0 ? value : [...JUNCTION_DEFAULT_PROVIDER_FILTER];
-  const blocked = new Set<string>(JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS);
-  return [...new Set(
-    requested
-      .map(normalizeProviderSlug)
-      .filter((entry): entry is string => entry !== null && !blocked.has(entry)),
-  )];
 }
 
 function normalizeResourceList(

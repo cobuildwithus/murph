@@ -1,5 +1,5 @@
 import { formatDeviceSyncProviderLabel } from "../provider-label.ts";
-import { normalizeJunctionProviderFilter } from "../providers/junction.ts";
+import { normalizeJunctionProviderFilter } from "../providers/junction-connect-sources.ts";
 import { listConfiguredDeviceSyncProviderNames } from "./provider-configs.ts";
 
 import type {
