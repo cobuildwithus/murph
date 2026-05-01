@@ -30,7 +30,10 @@ import {
   type WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
-import { appendHostedEmailIngressWakeInWeb } from "../web-control-plane-email-ingress.ts";
+import {
+  appendHostedEmailIngressWakeInWeb,
+  startHostedEmailIngressNudgeWorkflowInWeb,
+} from "../web-control-plane-email-ingress.ts";
 
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
@@ -160,26 +163,24 @@ export async function handleHostedEmailIngress(
   });
   const promptProjection = buildHostedEmailPromptProjection(parsedMessage);
 
-  try {
-    await appendHostedEmailIngressWakeInWeb({
-      baseUrl: environment.hostedWebBaseUrl,
-      body: {
-        ...promptProjection,
-        eventId,
-        identityId: route.identityId,
-        messageId: parsedMessage.messageId,
-        occurredAt,
-        rawMessageKey,
-        selfAddress: route.routeAddress,
-        threadKey,
-        threadTarget,
-      },
-      boundUserId: route.userId,
-      callbackSigning: environment.webCallbackSigning,
-      fetchImpl: fetch,
-      timeoutMs: environment.webControlTimeoutMs,
-    });
-  } catch (error) {
+  const appendResult = await appendHostedEmailIngressWakeInWeb({
+    baseUrl: environment.hostedWebBaseUrl,
+    body: {
+      ...promptProjection,
+      eventId,
+      identityId: route.identityId,
+      messageId: parsedMessage.messageId,
+      occurredAt,
+      rawMessageKey,
+      selfAddress: route.routeAddress,
+      threadKey,
+      threadTarget,
+    },
+    boundUserId: route.userId,
+    callbackSigning: environment.webCallbackSigning,
+    fetchImpl: fetch,
+    timeoutMs: environment.webControlTimeoutMs,
+  }).catch(async (error: unknown) => {
     if (
       !rawMessageObjectExistedBeforeWrite
       && isDefinitiveHostedEmailIngressAppendFailure(error)
@@ -211,28 +212,22 @@ export async function handleHostedEmailIngress(
     }
 
     throw error;
-  }
+  });
 
-  try {
-    const stub = await resolveUserRunnerStub(env, route.userId);
-    await stub.nudgeHostedRunner();
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "hosted.email",
-      details: buildHostedEmailIngressLogDetails({
-        eventId,
-        identityId: route.identityId,
-        reason: "runner-nudge-failed",
-        routeAddress: route.routeAddress,
-        to: message.to,
-      }),
-      error,
-      level: "warn",
-      message: "Hosted email runner nudge failed after appending the canonical ingress event.",
-      phase: "wake.running",
-      userId: route.userId,
-    });
-  }
+  await nudgeHostedEmailRunnerWithFallback({
+    env,
+    eventId,
+    identityId: route.identityId,
+    routeAddress: route.routeAddress,
+    to: message.to,
+    userId: route.userId,
+    webControl: {
+      baseUrl: environment.hostedWebBaseUrl,
+      callbackSigning: environment.webCallbackSigning,
+      mailboxItemId: appendResult.item.id,
+      timeoutMs: environment.webControlTimeoutMs,
+    },
+  });
 }
 
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT = 8;
@@ -241,6 +236,88 @@ const HOSTED_EMAIL_PROMPT_SUBJECT_MAX_CHARS = 240;
 const HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS = 4_000;
 const HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
+
+async function nudgeHostedEmailRunnerWithFallback(input: {
+  env: WorkerEnvironmentSource;
+  eventId: string;
+  identityId: string;
+  routeAddress: string;
+  to: string;
+  userId: string;
+  webControl: {
+    baseUrl: string;
+    callbackSigning: ReturnType<typeof readHostedExecutionEnvironment>["webCallbackSigning"];
+    mailboxItemId: string;
+    timeoutMs: number | null;
+  };
+}): Promise<void> {
+  try {
+    const stub = await resolveUserRunnerStub(input.env, input.userId);
+    const result = await stub.nudgeHostedRunner();
+    if (result.accepted) {
+      return;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        eventId: input.eventId,
+        identityId: input.identityId,
+        reason: "runner-nudge-not-accepted",
+        routeAddress: input.routeAddress,
+        to: input.to,
+      }),
+      level: "warn",
+      message: "Hosted email runner nudge was not accepted after appending the canonical ingress event.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        eventId: input.eventId,
+        identityId: input.identityId,
+        reason: "runner-nudge-failed",
+        routeAddress: input.routeAddress,
+        to: input.to,
+      }),
+      error,
+      level: "warn",
+      message: "Hosted email runner nudge failed after appending the canonical ingress event.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+  }
+
+  try {
+    await startHostedEmailIngressNudgeWorkflowInWeb({
+      baseUrl: input.webControl.baseUrl,
+      boundUserId: input.userId,
+      callbackSigning: input.webControl.callbackSigning,
+      fetchImpl: fetch,
+      mailboxItemId: input.webControl.mailboxItemId,
+      timeoutMs: input.webControl.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        eventId: input.eventId,
+        identityId: input.identityId,
+        reason: "runner-nudge-workflow-start-failed",
+        routeAddress: input.routeAddress,
+        to: input.to,
+      }),
+      error,
+      level: "warn",
+      message: "Hosted email runner nudge workflow failed to start after direct nudge failure.",
+      phase: "failed",
+      userId: input.userId,
+    });
+    throw error;
+  }
+}
 
 function buildHostedEmailPromptProjection(
   message: ParsedEmailMessage,

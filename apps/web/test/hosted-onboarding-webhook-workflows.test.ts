@@ -103,6 +103,19 @@ describe("hosted onboarding webhook workflows", () => {
     });
   });
 
+  it("uses the email source label for email ingress wake retry workflows", async () => {
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      source: "email",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:email:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+  });
+
   it("marks missing mailbox pointers fatal inside Workflow", async () => {
     mocks.readHostedMailboxItemOwnerById.mockResolvedValue(null);
 
