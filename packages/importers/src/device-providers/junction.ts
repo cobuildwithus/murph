@@ -770,7 +770,12 @@ function buildStableSummaryResourceId(
   const explicitId = firstStringFromPaths(entry, ["id", "resourceId", "resource_id", "externalId", "external_id"]);
 
   if (explicitId) {
-    return `${resourceContext.resourceSlug}-${slugify(explicitId, "id")}`;
+    return `${resourceContext.resourceSlug}-${shortHash([
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      explicitId,
+    ])}`;
   }
 
   return `${resourceContext.resourceSlug}-${shortHash([

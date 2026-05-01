@@ -354,11 +354,95 @@ test("Junction summary resource id stays stable when a same-id summary value cha
   const secondStepEvent = secondPayload.events?.find((event) => event.fields?.metric === "daily-steps");
   const firstCaloriesEvent = firstPayload.events?.find((event) => event.fields?.metric === "active-calories");
 
-  assert.equal(firstStepEvent?.externalRef?.resourceId, "activity-daily-activity-1");
+  assert.match(firstStepEvent?.externalRef?.resourceId ?? "", /^activity-[a-f0-9]{16}$/u);
   assert.equal(secondStepEvent?.externalRef?.resourceId, firstStepEvent?.externalRef?.resourceId);
   assert.equal(firstCaloriesEvent?.externalRef?.resourceId, firstStepEvent?.externalRef?.resourceId);
   assert.equal(firstStepEvent?.externalRef?.facet, "daily-steps");
   assert.equal(firstCaloriesEvent?.externalRef?.facet, "active-calories");
+});
+
+test("Junction summary resource id changes for same-provider explicit ids from different source instances", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          id: "daily-activity-1",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+          observedAt: "2026-04-22T12:00:00Z",
+          steps: 7200,
+        },
+        {
+          id: "daily-activity-1",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb",
+          observedAt: "2026-04-22T12:00:00Z",
+          steps: 7200,
+        },
+      ],
+    },
+  });
+
+  const stepEvents = payload.events?.filter((event) => event.fields?.metric === "daily-steps") ?? [];
+  const resourceIds = stepEvents.map((event) => event.externalRef?.resourceId);
+
+  assert.equal(stepEvents.length, 2);
+  assert.deepEqual(stepEvents.map((event) => event.externalRef?.resourceType), [
+    "junction-oura-activity",
+    "junction-oura-activity",
+  ]);
+  assert.match(resourceIds[0] ?? "", /^activity-[a-f0-9]{16}$/u);
+  assert.match(resourceIds[1] ?? "", /^activity-[a-f0-9]{16}$/u);
+  assert.notEqual(resourceIds[0], resourceIds[1]);
+});
+
+test("Junction summary resource id for explicit ids includes provider, source type, and source instance provenance", () => {
+  const buildPayload = (summary: {
+    sourceProviderSlug: string;
+    sourceType: string;
+    sourceInstanceId: string;
+  }) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        id: "daily-activity-1",
+        sourceProviderSlug: summary.sourceProviderSlug,
+        sourceType: summary.sourceType,
+        sourceInstanceId: summary.sourceInstanceId,
+        observedAt: "2026-04-22T12:00:00Z",
+        steps: 7200,
+      }],
+    },
+  }).events?.find((event) => event.fields?.metric === "daily-steps");
+
+  const baseEvent = buildPayload({
+    sourceProviderSlug: "oura",
+    sourceType: "ring",
+    sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  const providerVariantEvent = buildPayload({
+    sourceProviderSlug: "polar",
+    sourceType: "ring",
+    sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  const sourceTypeVariantEvent = buildPayload({
+    sourceProviderSlug: "oura",
+    sourceType: "watch",
+    sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  const sourceInstanceVariantEvent = buildPayload({
+    sourceProviderSlug: "oura",
+    sourceType: "ring",
+    sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb",
+  });
+
+  assert.match(baseEvent?.externalRef?.resourceId ?? "", /^activity-[a-f0-9]{16}$/u);
+  assert.notEqual(providerVariantEvent?.externalRef?.resourceId, baseEvent?.externalRef?.resourceId);
+  assert.notEqual(sourceTypeVariantEvent?.externalRef?.resourceId, baseEvent?.externalRef?.resourceId);
+  assert.notEqual(sourceInstanceVariantEvent?.externalRef?.resourceId, baseEvent?.externalRef?.resourceId);
 });
 
 test("Junction timeseries resource id stays stable when a same-key sample value changes", () => {
