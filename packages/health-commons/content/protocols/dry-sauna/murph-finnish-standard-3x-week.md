@@ -149,7 +149,7 @@ expectedSignalDescriptions:
       window: "2-6 weeks"
       confidence: "low"
       basis: "Short-term sauna-treatment meta-analysis reported about -5 mmHg systolic and -4 mmHg diastolic BP over 2-4 weeks in mostly clinical or adjacent protocols; direct Finnish-sauna physiology shows acute BP movement, but the Murph dose is shorter and healthier-user oriented."
-    description: "Heat opens skin blood vessels and lowers the resistance each heartbeat pushes against. Repeated sessions can leave morning vessel tone more relaxed, so a home-cuff average may drift down."
+    description: "Heat opens skin blood vessels and lowers vascular resistance, training morning vessel tone to relax after repeated tolerable sessions."
   -
     biomarkerKey: "biomarker:resting-heart-rate"
     expected: "Small change possible"
@@ -162,7 +162,7 @@ expectedSignalDescriptions:
       window: "2-6 weeks"
       confidence: "low"
       basis: "Acute sauna raises heart rate during heat exposure; repeated passive-heat evidence suggests small resting-pulse reductions, but direct dry-sauna RCT evidence for consumer RHR is mixed."
-    description: "Sauna makes the heart pump faster during the session to move heat to the skin. With repeat exposure, the same heat load can require less resting strain, showing up as a slightly lower overnight or morning pulse."
+    description: "Sauna raises heart rate during heat exposure; repeat tolerance lowers resting strain after recovery."
   -
     biomarkerKey: "biomarker:hrv-rmssd"
     expected: "May rise or fall"
@@ -172,7 +172,7 @@ expectedSignalDescriptions:
       window: "2-6 weeks"
       confidence: "low"
       basis: "Closest direct 3x/week dry-sauna trial used frequency-domain HRV in allergic-rhinitis patients, not RMSSD; passive-heating reviews show protocol-dependent sympathetic and vagal effects."
-    description: "Heat temporarily pulls the autonomic system toward higher sympathetic drive. A calm cooldown can restore vagal beat-to-beat control; dehydration, late timing, or stacked training can suppress next-morning RMSSD."
+    description: "Heat raises sympathetic drive; calm cooldown restores vagal control, while dehydration, late timing, and stacked training suppress RMSSD."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
     expected: "Could rise slightly"
@@ -185,7 +185,7 @@ expectedSignalDescriptions:
       window: "2-3 weeks"
       confidence: "low"
       basis: "Adjacent warm bath/shower passive-heating meta-analysis supports better sleep efficiency from a warm-to-cool transition; extracted Finnish-sauna sources do not provide a direct estimate."
-    description: "A sauna session followed by enough cooldown creates a warm-to-cool drop before bed. That heat-dissipation signal can shorten settling time and reduce wake time, nudging sleep efficiency upward."
+    description: "Sauna plus enough cooldown creates a warm-to-cool drop that supports settling and reduces wake time."
   -
     biomarkerKey: "biomarker:deep-sleep-minutes"
     expected: "Algorithm-sensitive"
@@ -195,7 +195,7 @@ expectedSignalDescriptions:
       window: "2-3 weeks"
       confidence: "low"
       basis: "No extracted direct Finnish-sauna finding supports a deep-sleep gain; consumer deep-sleep estimates depend on heart-rate, HRV, temperature, and movement proxies that sauna can perturb."
-    description: "Sauna changes overnight heart-rate, temperature, and movement patterns that wearables use to infer sleep stages. Deep-sleep minutes may move because the night is calmer, or because the algorithm reads the heat-recovery pattern differently."
+    description: "Sauna shifts overnight temperature, pulse, and movement patterns, changing how stable early-night deep sleep becomes."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

@@ -524,7 +524,7 @@ expectedSignalDescriptions:
     window: 4-12 weeks
     confidence: moderate
     basis: Adult free-sugar reduction evidence centers on small scale-weight changes when sugar calories are not replaced, from about -0.4 kg versus control at 12 weeks to -1.6 kg within-group over 4 weeks in a small reduced-sugar trial.
-  description: Added sugar often arrives as fast calories in drinks, desserts, and packaged snacks. When those calories are not replaced by juice, refined starch, or larger portions, the weekly scale average can drop.
+  description: Removing added sugar cuts fast calories from drinks, desserts, and packaged snacks when replacements stay calorie-light.
 -
   biomarkerKey: biomarker:waist-circumference
   expected: Could shrink slowly
@@ -537,7 +537,7 @@ expectedSignalDescriptions:
     window: 4-12 weeks
     confidence: low
     basis: Waist movement is inferred from the modest weight and body-fat reductions seen in reduced/free-sugar interventions; direct waist effects were weaker and less consistently extracted.
-  description: A sustained calorie gap pulls stored fat down before tape measurements move much. Waist size is most likely to shift when sweet drinks or desserts were frequent and replacements stay calorie-light.
+  description: A sustained calorie gap reduces stored abdominal fat over time, shrinking waist measurements after scale changes appear.
 -
   biomarkerKey: biomarker:morning-blood-pressure
   expected: Could trend lower
@@ -550,7 +550,7 @@ expectedSignalDescriptions:
     window: 8-12+ weeks
     confidence: low
     basis: RCT synthesis comparing higher versus lower dietary sugar found the largest BP separation after at least 8 weeks; shorter home runs should use repeated morning averages.
-  description: Lower sugar load can reduce total energy and sugary-drink exposure. With weight loss or less high-fructose intake, vascular tone and sodium handling may ease enough for morning pressure to drift down.
+  description: Lower sugar and sugary-drink exposure reduces energy load, high-fructose intake, vascular tone, and sodium-handling strain.
 -
   biomarkerKey: biomarker:added-sugar-intake
   expected: Dose check
@@ -560,7 +560,7 @@ expectedSignalDescriptions:
     window: daily during intervention
     confidence: high
     basis: The gram drop depends on baseline intake, boundary choice, labels, and unlabeled foods; use baseline-relative change to confirm exposure rather than treating grams reduced as the outcome win.
-  description: This is the exposure check, not the win. Label reading and replacement choices should push added-sugar grams down; use the drop to explain whether downstream signals had enough dose to move.
+  description: Label reading and replacement choices reduce added-sugar intake, confirming the exposure changed enough to affect downstream signals.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

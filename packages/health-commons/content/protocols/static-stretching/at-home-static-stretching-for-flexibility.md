@@ -629,7 +629,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:toe-touch-distance
   expected: Could move closer to floor
   protocolProminence: focus
-  description: Hamstring and posterior-chain holds repeatedly load the forward-bend end range. Higher stretch tolerance and less end-range resistance let the same setup reach farther; with fingertip-to-floor scoring, the number goes down.
+  description: Posterior-chain holds repeatedly load the forward-bend end range, raising stretch tolerance and reducing resistance so fingertips reach closer to the floor.
   estimatedChange:
     kind: absolute
     low: -6
@@ -642,7 +642,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:sit-and-reach-distance
   expected: Could reach farther
   protocolProminence: focus
-  description: Seated hamstring holds train the hip-flexed reach position. More tolerated posterior-chain length lets the hands slide farther on the same box, ruler, or chair setup.
+  description: Seated hamstring holds train hip-flexed reach, raising posterior-chain tolerance so the hands slide farther forward.
   estimatedChange:
     kind: absolute
     low: 2
@@ -655,7 +655,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:ankle-knee-to-wall-distance
   expected: Could increase
   protocolProminence: focus
-  description: Calf holds load the heel-down dorsiflexion end range. If the calf-Achilles unit lets the tibia move farther over the foot, the foot can start farther from the wall before the heel lifts.
+  description: Calf holds load heel-down dorsiflexion, letting the tibia move farther over the foot before the heel lifts.
   estimatedChange:
     kind: absolute
     low: 1
@@ -668,7 +668,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:shoulder-reach-distance
   expected: Could change in the trained reach
   protocolProminence: focus
-  description: The selected chest, lat, or posterior-shoulder hold trains one reach path. Less end-range guarding or passive resistance can change that same reach distance; it does not prove general shoulder function changed.
+  description: Chest, lat, or posterior-shoulder holds reduce end-range guarding along the trained reach path.
   estimatedChange:
     kind: mixed_or_contextual
     window: 6 weeks
@@ -678,7 +678,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:perceived-stiffness
   expected: May feel less stiff
   protocolProminence: context
-  description: Repeated mild holds can recalibrate the stretch sensation. The target area may feel less tight even when the ROM gain is small, so use stiffness as context for the measured reach.
+  description: Repeated mild holds recalibrate stretch sensation, making the target area feel less tight as tolerance improves.
   estimatedChange:
     kind: absolute
     low: -2

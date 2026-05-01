@@ -559,7 +559,7 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:fasting-triglycerides
-  description: EPA/DHA can reduce hepatic triglyceride output and VLDL export, so a fasting lipid panel can show lower triglycerides after the 12-week run.
+  description: EPA/DHA reduces hepatic triglyceride output and VLDL export, lowering fasting triglyceride traffic.
   expected: Could trend lower
   estimatedChange:
     kind: absolute
@@ -572,7 +572,7 @@ expectedSignalDescriptions:
   protocolProminence: focus
 -
   biomarkerKey: biomarker:ldl-cholesterol
-  description: As triglyceride-rich particles shrink and remodel, LDL-C can stay flat or rise; DHA-heavy and higher-dose patterns create the clearest upward signal.
+  description: Triglyceride-rich particles shrink and remodel; DHA-heavy and higher-dose patterns raise LDL-C in some lipid contexts.
   expected: May rise or stay flat
   estimatedChange:
     kind: absolute
@@ -585,7 +585,7 @@ expectedSignalDescriptions:
   protocolProminence: focus
 -
   biomarkerKey: biomarker:non-hdl-cholesterol
-  description: Lower VLDL/remnant cholesterol can pull non-HDL-C down, while an LDL-C rise can offset it; the useful signal is the full lipid-panel direction.
+  description: Lower VLDL and remnant cholesterol reduce non-HDL-C, while LDL-C remodeling pushes the opposite direction.
   expected: Could trend lower
   estimatedChange:
     kind: absolute
@@ -598,7 +598,7 @@ expectedSignalDescriptions:
   protocolProminence: context
 -
   biomarkerKey: biomarker:omega-3-index
-  description: EPA and DHA replace other fatty acids in red-blood-cell membranes over weeks; same-method retesting shows whether the product and dose changed tissue status.
+  description: EPA and DHA replace other fatty acids in red-blood-cell membranes over weeks, raising omega-3 tissue status.
   expected: Should rise
   estimatedChange:
     kind: absolute

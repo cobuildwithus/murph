@@ -303,7 +303,7 @@ testPlans:
   - Treat tolerability and eye symptoms as safety outcomes, not as noise to be averaged away.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:periocular-wrinkle-score
-  description: Red and NIR photons reach the thin crow's-feet region and can shift skin-cell energy and repair signaling. If dermal remodeling follows, same-expression photos should show shallower periocular lines.
+  description: Red and NIR photons reach periocular skin cells, shifting energy and repair signaling that supports dermal remodeling.
   expected: Could improve
   estimatedChange:
     kind: absolute
@@ -315,7 +315,7 @@ expectedSignalDescriptions:
     basis: Direct 630/850 nm home-mask RCT evidence favored active treatment over sham for crow's-feet scores at 8, 12, and 16 weeks; older 633/830 nm facial studies also reported periocular response. The 6-week starter estimate is scaled down from those longer endpoints.
   protocolProminence: focus
 - biomarkerKey: biomarker:standardized-skin-photo-score
-  description: The mask exposes a fixed facial region, so any broad effect should show up in the same camera, lighting, distance, and expression workflow. Look for a lower photoaging or appearance score across fine lines, texture, pores, tone, and pigment appearance.
+  description: Fixed-region red/NIR exposure supports skin-cell energy, matrix turnover, and repair signaling across fine lines, texture, pores, tone, and pigment appearance.
   expected: Could improve
   estimatedChange:
     kind: absolute
@@ -327,7 +327,7 @@ expectedSignalDescriptions:
     basis: Direct home/facial red+NIR sources report positive crow's-feet, texture, brightening, and global-improvement signals, while several adjacent studies show method-specific or null findings. A broad self-photo score should move less cleanly than a pre-specified wrinkle or texture endpoint.
   protocolProminence: focus
 - biomarkerKey: biomarker:skin-texture-roughness-score
-  description: Red/NIR exposure can nudge fibroblast and dermal-matrix signaling in treated skin. If surface support improves, roughness should drop and the same-region photo or texture rubric should look smoother.
+  description: Red/NIR exposure nudges fibroblast and dermal-matrix signaling, improving surface support and smoothing rough texture.
   expected: Could smooth slightly
   estimatedChange:
     kind: absolute
@@ -339,7 +339,7 @@ expectedSignalDescriptions:
     basis: A small 637/854 nm home split-face pilot reported treated-side texture improvement at 8 weeks, and broader facial/clinic LED sources include texture or roughness signals. Hydration and elasticity results are mixed, so roughness is the cleaner home endpoint.
   protocolProminence: focus
 - biomarkerKey: biomarker:skin-tolerability-symptoms
-  description: This is a nonthermal, eye-protected run. Heat, pain, pigment change, afterimages, blurry vision, flashes, or eye discomfort mean the device is stressing the wrong tissue or dose boundary.
+  description: Heat, pain, pigment change, afterimages, blurry vision, flashes, or eye discomfort signal tissue stress beyond the intended dose.
   expected: Should stay absent
   estimatedChange:
     kind: mixed_or_contextual

@@ -119,7 +119,7 @@ testPlans:
   - Mark attribution as weak if the user also changes screen curfew, room-light setup, melatonin, supplements, bedtime, or timed light therapy during the same test.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-onset-latency
-  description: Filtering blue-green evening light lowers the retinal signal that suppresses melatonin and keeps the brain alert. When that late-light cue is driving the delay, time to fall asleep can shorten [source_artifact:evening-light-reduction-pmid-16842544; source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797].
+  description: "Filtering blue-green evening light weakens retinal alerting and melatonin suppression, letting the brain shift toward sleep sooner."
   expected: down_or_stable
   estimatedChange:
     kind: absolute
@@ -131,7 +131,7 @@ expectedSignalDescriptions:
     basis: Pooled actigraphy across three crossover RCTs estimated SOL MD -4.86 min with a wide CI crossing zero; a small adult device-use eyewear trial reported significantly better sleep latency, while healthy-adult evidence was null or subgroup-limited [source_artifact:evening-light-reduction-pmid-41341515; source_artifact:evening-light-reduction-pmid-26730983; source_artifact:pmid-33707105].
   protocolProminence: focus
 - biomarkerKey: biomarker:sleep-efficiency
-  description: The glasses do not deepen sleep directly; they aim to reduce the awake-in-bed part of the night. If sleep starts sooner without adding more time in bed, sleep efficiency can rise [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515].
+  description: "Earlier sleep onset reduces awake time in bed when time in bed stays stable."
   expected: up_or_stable
   estimatedChange:
     kind: absolute
@@ -143,7 +143,7 @@ expectedSignalDescriptions:
     basis: A small adult device-use eyewear trial reported significantly better sleep efficiency; pooled actigraphy across three crossover RCTs estimated SE MD -0.61 percentage points with a wide CI crossing zero [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515].
   protocolProminence: context
 - biomarkerKey: biomarker:resting-heart-rate
-  description: Reducing late circadian alerting can make the sleep period less strained when it improves sleep onset or continuity. A wearable may show a small lower resting pulse; a rise usually points to alcohol, illness, stress, late training, short sleep, or schedule drift [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
+  description: "Lower late circadian alerting reduces nighttime strain after sleep begins, lowering resting pulse."
   expected: down_or_stable
   estimatedChange:
     kind: absolute
@@ -155,7 +155,7 @@ expectedSignalDescriptions:
     basis: Low-confidence downstream estimate from sleep-onset, sleep-efficiency, and total-sleep-time signals; the direct eyewear trials and actigraphy meta-analysis did not measure resting heart rate [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
   protocolProminence: context
 - biomarkerKey: biomarker:hrv-rmssd
-  description: Less late-light signaling can lower pre-bed alertness; when that produces longer or less fragmented sleep, nocturnal RMSSD can edge up. Read it beside alcohol, illness, stress, hard training, bedtime shifts, and sensor quality [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
+  description: "Less late-light signaling reduces pre-bed alertness, supporting parasympathetic recovery during less fragmented sleep."
   expected: up_or_stable
   estimatedChange:
     kind: relative_percent
@@ -167,7 +167,7 @@ expectedSignalDescriptions:
     basis: Low-confidence downstream estimate from improved sleep continuity rather than direct eyewear HRV data; direct sources measured melatonin, sleep latency, sleep efficiency, insomnia ratings, total sleep time, and actigraphy outcomes, not RMSSD [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
   protocolProminence: context
 - biomarkerKey: biomarker:deep-sleep-minutes
-  description: This protocol changes retinal light input and evening alertness, not sleep-stage machinery directly. Any deep-sleep change should come secondarily from longer or less fragmented sleep, so use same-device stage trends only as a weak cross-check [source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-40300398].
+  description: "Reduced evening alerting improves sleep continuity first; deeper sleep changes follow only when fragmentation drops."
   expected: mixed_or_contextual
   estimatedChange:
     kind: mixed_or_contextual

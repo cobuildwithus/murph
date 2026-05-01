@@ -599,7 +599,7 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:morning-blood-pressure"
-    description: "Pressurized oxygen tightens blood vessels during and after a session. Same-cuff readings before and after treatment catch the BP rise most likely to matter, especially for people who start hypertensive."
+    description: "Pressurized oxygen tightens blood vessels during and after treatment, raising vascular resistance and blood pressure in susceptible users."
     expected: "Watch for post-session rise"
     estimatedChange:
       kind: "absolute"
@@ -612,7 +612,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:estimated-vo2max"
-    description: "Repeated intermittent hyperoxia under pressure pushes extra oxygen into plasma and changes vascular and cardiac perfusion. In the older-adult performance protocol, the measurable signal was higher VO2 max, not just feeling more energetic."
+    description: "Repeated hyperoxia under pressure pushes extra oxygen into plasma and changes vascular and cardiac perfusion during the course."
     expected: "Could improve in 60-session courses"
     estimatedChange:
       kind: "absolute"
@@ -625,7 +625,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:resting-heart-rate"
-    description: "Pressure equalization, confinement anxiety, BP or glucose swings, and post-session fatigue all add recovery load. Overnight pulse shows whether that load is carrying into rest."
+    description: "Pressure equalization, confinement anxiety, pressure shifts, glucose swings, and fatigue add recovery load that carries into resting pulse."
     expected: "Watch for recovery load"
     estimatedChange:
       kind: "mixed_or_contextual"
@@ -635,7 +635,7 @@ expectedSignalDescriptions:
     protocolProminence: "context"
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "Pressure changes, anxiety, illness, or fatigue keep autonomic tone elevated after treatment. Same-device RMSSD helps separate an easy course from one suppressing recovery."
+    description: "Pressure changes, anxiety, illness, and fatigue keep autonomic tone elevated, suppressing parasympathetic recovery after treatment."
     expected: "Watch for strain"
     estimatedChange:
       kind: "mixed_or_contextual"

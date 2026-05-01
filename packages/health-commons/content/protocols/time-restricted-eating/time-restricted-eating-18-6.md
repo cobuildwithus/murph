@@ -216,7 +216,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:body-weight
   expected: down_or_stable
   protocolProminence: focus
-  description: A 6-hour eating window removes evening eating opportunity and often lowers total intake without calorie counting; if that creates an energy gap, weekly scale averages should drift down.
+  description: "A 6-hour eating window reduces eating opportunity and late calories, creating an energy gap that lowers weekly scale averages when intake falls."
   estimatedChange:
     kind: relative_percent
     low: -3
@@ -228,7 +228,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:blood-glucose
   expected: down_or_stable
   protocolProminence: focus
-  description: Earlier and shorter eating windows shift more calories into the part of the day with stronger insulin sensitivity and leave a longer overnight glucose-clearing interval, so CGM mean glucose or fasting glucose may fall.
+  description: "Earlier, shorter eating shifts calories into higher insulin sensitivity and leaves a longer overnight interval for glucose clearance."
   estimatedChange:
     kind: absolute
     low: -5
@@ -240,7 +240,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:morning-blood-pressure
   expected: down_or_stable
   protocolProminence: focus
-  description: Moving calories earlier and extending the overnight fast can lower insulin exposure and align salt and vascular rhythms with daytime handling, so morning systolic pressure may ease.
+  description: "Earlier calories and a longer overnight fast lower insulin exposure and support daytime salt and vascular rhythm handling."
   estimatedChange:
     kind: absolute
     low: -6
@@ -252,7 +252,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:waist-circumference
   expected: down_or_stable
   protocolProminence: context
-  description: If the narrower window produces real fat loss rather than only glycogen or water shifts, tape-measured waist can shrink alongside weight.
+  description: "Real fat loss reduces abdominal tissue over time, shrinking tape-measured waist alongside weight."
   estimatedChange:
     kind: absolute
     low: -4
@@ -264,7 +264,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-efficiency
   expected: stable
   protocolProminence: context
-  description: The window can reduce late meals for some people but can also add hunger, underfueling, or caffeine compensation; same-device sleep efficiency is mainly a tolerability check.
+  description: "Less late eating reduces nighttime digestion, while hunger, underfueling, and caffeine compensation fragment sleep."
   estimatedChange:
     kind: absolute
     low: -2

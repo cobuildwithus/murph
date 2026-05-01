@@ -320,7 +320,7 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:sleep-quality
-    description: Morning outdoor light strengthens the day-night contrast. When the clock is anchored earlier, sleep can feel more restorative even if wearable sleep-stage estimates barely move.
+    description: "Morning outdoor light strengthens day-night contrast and anchors the circadian clock earlier, helping nighttime sleep feel more restorative."
     expected: Could feel more restorative
     estimatedChange:
       kind: absolute
@@ -333,7 +333,7 @@ expectedSignalDescriptions:
     protocolProminence: focus
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: Morning daylight gives the circadian clock an early daytime signal. If sleepiness arrives closer to bedtime, time to fall asleep can shorten on nights with stable evening light, caffeine, and bedtime.
+    description: "Early daylight signals daytime to the circadian clock, aligning evening sleepiness with bedtime and shortening time spent trying to fall asleep."
     expected: May fall asleep sooner
     estimatedChange:
       kind: absolute
@@ -346,7 +346,7 @@ expectedSignalDescriptions:
     protocolProminence: focus
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: A brighter early-day signal can consolidate the sleep-wake rhythm. If it reduces quiet wakefulness after lights-out or early awakenings, sleep efficiency can edge higher.
+    description: "A stronger early-day light cue consolidates the sleep-wake rhythm, reducing quiet wakefulness after lights-out and early awakenings."
     expected: Could edge higher
     estimatedChange:
       kind: absolute

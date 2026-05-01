@@ -170,7 +170,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-onset-latency
     expected: May fall asleep sooner
-    description: A timed low-stimulation routine replaces problem-solving, scrolling, and clock-watching with either slow breath pacing or a simple meditation anchor. Lower pre-bed arousal can shorten the wake-to-sleep transition.
+    description: Slow breath pacing or a simple meditation anchor replaces problem-solving, scrolling, and clock-watching, lowering pre-bed arousal.
     estimatedChange:
       kind: absolute
       low: -10
@@ -183,7 +183,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: Could improve
-    description: Shorter sleep onset and fewer restless awake periods convert more time in bed into sleep. This is the cleanest wearable sleep-continuity signal after sleep-onset latency.
+    description: Shorter sleep onset and fewer restless awake periods turn more time in bed into sleep.
     estimatedChange:
       kind: absolute
       low: 1
@@ -196,7 +196,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
-    description: Unforced slow breathing increases the vagal brake and can lower pre-bed pulse. If that lower arousal carries into sleep, same-device overnight resting heart rate can drop.
+    description: Unforced slow breathing increases vagal braking and lowers pre-bed pulse as arousal drops.
     estimatedChange:
       kind: absolute
       low: -4
@@ -209,7 +209,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Could improve
-    description: Breathing near resonance amplifies beat-to-breath variability during practice. If bedtime starts from a lower-arousal state, overnight RMSSD can rise or hold steadier.
+    description: Breathing near resonance amplifies beat-to-breath variability, supporting stronger parasympathetic recovery overnight.
     estimatedChange:
       kind: relative_percent
       low: 0
@@ -222,7 +222,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:pre-sleep-arousal
     expected: Could trend lower
-    description: Breath pacing and grounding meditation give attention a repeatable, low-threat task before lights-out. Fewer threat checks and less rumination can lower a nightly wiredness rating.
+    description: Breath pacing and grounding give attention a repeatable low-threat task, reducing threat checks and rumination before lights-out.
     estimatedChange:
       kind: absolute
       low: -3

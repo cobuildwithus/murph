@@ -126,7 +126,7 @@ testPlans:
   - Anchor interpretation in sleep onset and sleep continuity; use deep-sleep staging, resting heart rate, blood pressure, and HRV as supporting same-device trends.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-onset-latency
-  description: Moving caffeine earlier lowers residual adenosine blockade and stimulant arousal near bedtime, so sleep pressure can show up sooner instead of being pushed later.
+  description: "Moving caffeine earlier reduces residual adenosine blockade and stimulant arousal near bedtime, letting sleep pressure appear sooner."
   expected: May shorten
   estimatedChange:
     kind: absolute
@@ -138,7 +138,7 @@ expectedSignalDescriptions:
     basis: Caffeine sleep meta-analyses and 400 mg timing trials report roughly 8-9 minutes longer sleep-onset latency with caffeine challenges; this protocol estimates the regain for users whose baseline included late or high-dose caffeine.
   protocolProminence: focus
 - biomarkerKey: biomarker:sleep-efficiency
-  description: Less residual caffeine can reduce quiet wakefulness and overnight fragmentation, so more time in bed becomes actual sleep.
+  description: "Less residual caffeine reduces quiet wakefulness and overnight fragmentation, turning more time in bed into sleep."
   expected: Could improve
   estimatedChange:
     kind: absolute
@@ -150,7 +150,7 @@ expectedSignalDescriptions:
     basis: Quantitative caffeine sleep syntheses report about 5-7 percentage-point lower sleep efficiency after caffeine challenges; athlete late-caffeine synthesis reported about 4.9 points lower with sensitivity limitations.
   protocolProminence: focus
 - biomarkerKey: biomarker:deep-sleep-minutes
-  description: Caffeine can keep sleep lighter and reduce slow-wave/N3 sleep; shifting dose earlier or lower may let deeper NREM sleep reappear on nights that were previously caffeine-affected.
+  description: "Lower nighttime caffeine exposure allows deeper NREM sleep to return when late caffeine was keeping sleep lighter."
   expected: Could increase
   estimatedChange:
     kind: absolute
@@ -162,7 +162,7 @@ expectedSignalDescriptions:
     basis: A caffeine sleep meta-analysis reported about 11.4 fewer deep-sleep minutes after caffeine; consumer wearables estimate stages indirectly, so use same-device trends beside duration and efficiency.
   protocolProminence: focus
 - biomarkerKey: biomarker:resting-heart-rate
-  description: If the curfew reduces nighttime stimulation and sleep fragmentation, sympathetic load can drop and same-device overnight resting heart rate may settle lower.
+  description: "Lower nighttime stimulation and smoother sleep reduce sympathetic load, lowering overnight resting pulse."
   expected: Could trend lower
   estimatedChange:
     kind: absolute
@@ -174,7 +174,7 @@ expectedSignalDescriptions:
     basis: Direct caffeine-curfew resting-heart-rate trials were not extracted; this is an indirect autonomic and sleep-continuity estimate for users whose late caffeine was causing nighttime arousal.
   protocolProminence: context
 - biomarkerKey: biomarker:morning-blood-pressure
-  description: Caffeine can acutely raise vascular tone in sensitive users; avoiding late doses and large boluses may leave less residual stimulation at the next morning's home-cuff reading.
+  description: "Less residual caffeine lowers vascular tone in sensitive users, reducing morning pressure after late-dose exposure."
   expected: Could trend lower
   estimatedChange:
     kind: absolute
@@ -186,7 +186,7 @@ expectedSignalDescriptions:
     basis: Blood-pressure effects are acute and user-specific; no direct 14-day curfew blood-pressure trial was extracted, so this range is a safety-context estimate for sensitive or late-dosing users.
   protocolProminence: context
 - biomarkerKey: biomarker:hrv-rmssd
-  description: Smoother sleep can support parasympathetic recovery, but caffeine and withdrawal can move RMSSD in different directions; use HRV to judge recoverability, not as the win condition.
+  description: "Smoother sleep supports parasympathetic recovery; withdrawal or excess caffeine keeps autonomic stress unsettled."
   expected: Could stabilize
   estimatedChange:
     kind: mixed_or_contextual

@@ -215,7 +215,7 @@ expectedSignalDescriptions:
       window: 2-8 weeks
       confidence: low
       basis: Adjacent repeated passive-heat evidence suggests roughly a 3 bpm resting-HR drop, while this exact daily 93 C post-workout routine could also raise RHR if recovery debt accumulates.
-    description: Daily 93 C heat after training keeps cardiac output high while skin vessels open and sweating pulls fluid. Heat adaptation can lower resting pulse; unrecovered training plus heat can push it up.
+    description: "Daily 93 C post-workout heat keeps cardiac output high; adaptation lowers resting pulse, while unrecovered heat and training push it up."
   -
     biomarkerKey: biomarker:morning-blood-pressure
     expected: Could trend lower
@@ -228,7 +228,7 @@ expectedSignalDescriptions:
       window: 4-8 weeks
       confidence: low
       basis: Adjacent post-exercise sauna RCT evidence showed about -8 mmHg systolic versus exercise alone at 8 weeks; acute sauna and passive-heat studies support vascular plausibility but not this exact dose.
-    description: Heat opens peripheral vessels and lowers vascular resistance during the session. Repeated post-workout heat may leave vessel tone slightly lower, most visibly in consistent morning cuff readings.
+    description: "Post-workout heat opens peripheral vessels and lowers vascular resistance, relaxing morning vessel tone after repeated tolerable sessions."
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Worth watching
@@ -238,7 +238,7 @@ expectedSignalDescriptions:
       window: 2-8 weeks
       confidence: low
       basis: Near-adjacent post-exercise sauna RCT evidence did not show a clear HRV advantage over exercise alone; consumer RMSSD is useful mainly as a recovery/tolerability trend.
-    description: This routine stacks workout stress, heat stress, fluid loss, and cooldown. RMSSD should hold or rise when recovery keeps up; a sustained drop flags that the heat load is outpacing adaptation.
+    description: "Workout stress, heat stress, fluid loss, and cooldown shift autonomic load; RMSSD drops when recovery cannot keep up."
   -
     biomarkerKey: biomarker:estimated-vo2max
     expected: Could improve
@@ -251,7 +251,7 @@ expectedSignalDescriptions:
       window: 6-8 weeks
       confidence: low
       basis: Adjacent 8-week exercise-plus-sauna RCT evidence showed +2.7 mL/kg/min cardiorespiratory-fitness change versus exercise alone; the Bryan routine is hotter, daily, and source-attributed.
-    description: Post-workout sauna extends heat and circulatory strain after exercise, which may add a small conditioning stimulus. If the extra heat reduces training quality or recovery, VO2max may not move.
+    description: "Post-workout sauna extends circulatory strain after exercise, adding conditioning only when it preserves training quality and recovery."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

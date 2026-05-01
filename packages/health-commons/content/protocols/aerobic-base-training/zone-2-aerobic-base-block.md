@@ -125,7 +125,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:estimated-vo2max
     expected: Could improve
-    description: "Conversational cardio repeatedly asks the heart, blood vessels, and working muscle to move and use oxygen for fuel. Better stroke volume and muscle oxidative capacity can lift same-device VO₂ max or cardio-fitness estimates."
+    description: "Steady conversational cardio trains the heart, blood vessels, and muscles to move and use oxygen more efficiently during sustained work."
     estimatedChange:
       kind: absolute
       low: 0.5
@@ -138,7 +138,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:morning-blood-pressure
     expected: Could trend lower
-    description: "Easy aerobic work improves endothelial signaling and lowers vascular resistance. Morning cuff averages can drift down, especially when baseline pressure is above ideal."
+    description: "Easy aerobic work improves endothelial signaling and lowers vascular resistance, reducing pressure against the artery walls."
     estimatedChange:
       kind: absolute
       low: -4
@@ -151,7 +151,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
-    description: "Aerobic adaptation increases stroke volume and autonomic efficiency. When more blood moves per beat, overnight or morning resting pulse can settle lower."
+    description: "Aerobic adaptation increases stroke volume, letting the heart maintain resting blood flow with fewer beats."
     estimatedChange:
       kind: absolute
       low: -3
@@ -164,7 +164,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Recovery check
-    description: "A recoverable cardio dose strengthens vagal braking during rest. RMSSD can rise or stay steadier; a drop alongside higher resting pulse flags under-recovery."
+    description: "A recoverable cardio dose strengthens vagal braking at rest; too much load suppresses that rebound."
     estimatedChange:
       kind: mixed_or_contextual
       window: 4 weeks

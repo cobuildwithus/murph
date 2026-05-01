@@ -1030,7 +1030,7 @@ expectedSignalDescriptions:
     window: 1-4 weeks
     confidence: low
     basis: One-month abstinence evidence in heavier-drinking cohorts reported lower ambulatory heart rate, while wearable RHR response in lower-risk users remains baseline- and device-dependent.
-  description: Removing alcohol cuts overnight sympathetic load, dehydration, and rebound arousal. If sleep and recovery settle, morning wearable pulse can drift lower.
+  description: "Removing alcohol reduces overnight sympathetic activation and rebound arousal, lowering the pulse needed during sleep."
 -
   biomarkerKey: biomarker:hrv-rmssd
   expected: May rise if recovery improves
@@ -1040,7 +1040,7 @@ expectedSignalDescriptions:
     window: 1-4 weeks
     confidence: low
     basis: Autonomic support is strongest from acute alcohol, wearable, and adjacent restriction evidence; direct abstinence RMSSD effect sizes are not stable enough for a numeric forecast.
-  description: Alcohol can suppress overnight parasympathetic recovery. RMSSD may stabilize or rise when the alcohol stressor is removed, but withdrawal stress, poor sleep, illness, and training can push it down.
+  description: "Less alcohol reduces autonomic stress and rebound arousal, giving parasympathetic recovery more room overnight."
 -
   biomarkerKey: biomarker:sleep-efficiency
   expected: Could edge higher
@@ -1053,7 +1053,7 @@ expectedSignalDescriptions:
     window: 1-4 weeks
     confidence: low
     basis: Acute alcohol and wearable context support the direction, but direct abstinence sleep-efficiency effect sizes are not well extracted for this wellness protocol.
-  description: Alcohol may sedate early and then fragment later sleep. Abstinence removes rebound arousal and late-night awakenings, so same-device sleep continuity can improve after the first adjustment nights.
+  description: "Alcohol-free nights avoid sedation-then-rebound sleep disruption, leaving fewer awakenings and more continuous sleep."
 -
   biomarkerKey: biomarker:morning-blood-pressure
   expected: Could trend lower
@@ -1066,7 +1066,7 @@ expectedSignalDescriptions:
     window: 3-4 weeks
     confidence: low
     basis: One-month moderate-to-heavy abstinence evidence reported about -6.6% systolic and -6.3% diastolic pressure, and a heavy-drinker ambulatory cohort reported lower BP and heart rate after abstinence.
-  description: Removing alcohol can reduce sympathetic and vascular load while improving sleep and fluid balance. Cuff readings are most likely to drop when baseline intake or baseline pressure was higher.
+  description: "Less alcohol lowers sympathetic drive, vascular tone, and fluid-hormone strain, easing pressure against artery walls."
 -
   biomarkerKey: biomarker:liver-enzyme-panel
   expected: May improve in a 30-day lab panel
@@ -1076,7 +1076,7 @@ expectedSignalDescriptions:
     window: about 1 month
     confidence: low
     basis: A small one-month moderate-consumer source reported a normal-range GGT decrease after abstinence and rebound after resumption, but analyte units and baseline liver context vary.
-  description: Alcohol-sensitive liver enzymes, especially GGT, can fall when alcohol exposure stops. Compare the same lab panel and reference ranges; this is lab context, not liver-disease treatment.
+  description: "No alcohol reduces hepatic ethanol-processing load and oxidative stress, allowing liver-enzyme activity to settle."
 -
   biomarkerKey: biomarker:body-weight
   expected: May drift lower
@@ -1089,7 +1089,7 @@ expectedSignalDescriptions:
     window: about 1 month
     confidence: low
     basis: One-month moderate-to-heavy abstinence evidence reported about -1.5% weight, but replacement calories, diet, glycogen, and hydration can erase the signal.
-  description: Removing alcohol removes liquid calories and a late-snacking cue for some users. Scale weight only moves if total intake drops enough to outlast hydration and glycogen noise.
+  description: "Alcohol removal cuts drink calories and late-night eating cues, lowering energy intake when replacements stay calorie-light."
 -
   biomarkerKey: biomarker:sleep-onset-latency
   expected: Can move either way
@@ -1099,7 +1099,7 @@ expectedSignalDescriptions:
     window: first nights to 4 weeks
     confidence: low
     basis: Bedtime alcohol can be both a sedating cue and a sleep-fragmenting exposure, so onset latency is useful context rather than a reliable benefit forecast.
-  description: If alcohol was a bedtime cue, removing it can make early nights harder to start. As rebound arousal settles and the routine changes, sleep onset may shorten.
+  description: "Removing alcohol reduces late-night rebound arousal and cue-driven wind-down disruption, helping sleep pressure arrive more cleanly."
 -
   biomarkerKey: biomarker:blood-glucose
   expected: Short-pilot only
@@ -1112,7 +1112,7 @@ expectedSignalDescriptions:
     window: 7 days
     confidence: low
     basis: A tiny selected 7-day male pilot with elevated fasting glucose reported fasting plasma glucose falling from 105.5 to 98.2 mg/dL and lower hepatic glucose output; it did not show improved muscle insulin sensitivity.
-  description: In selected users with elevated fasting glucose, one alcohol-free week may reduce hepatic glucose output. Do not generalize this to normoglycemic users, CGM users, or a 30-day cardiometabolic promise.
+  description: "Removing alcohol reduces hepatic redox stress and late-night eating, changing fasting-glucose context in short-pilot evidence."
 -
   biomarkerKey: biomarker:alcohol-withdrawal-symptoms
   expected: Should stay absent
@@ -1122,7 +1122,7 @@ expectedSignalDescriptions:
     window: days 1-7
     confidence: high
     basis: Withdrawal symptoms are safety routing signals, not improvement endpoints; positive or uncertain symptoms should override biomarker interpretation.
-  description: Stopping alcohol can uncover withdrawal symptoms in people who drink heavily or are dependent. Safety comes before sleep, heart-rate, or lab changes.
+  description: "Stopping alcohol unmasks dependence physiology when the nervous system has adapted to regular ethanol exposure."
 -
   biomarkerKey: biomarker:alcohol-craving
   expected: Track for support needs
@@ -1132,7 +1132,7 @@ expectedSignalDescriptions:
     window: days 1-30
     confidence: low
     basis: Direct one-month subjective evidence supports tracking refusal self-efficacy while keeping craving relief cautious because craving did not consistently improve.
-  description: Removing alcohol changes cues, rewards, and social routines. Craving may rise early, stay flat, or settle as support and replacement routines become clearer.
+  description: "Repeatedly passing drinking cues without alcohol weakens cue-response loops and builds alternative reward routines."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
