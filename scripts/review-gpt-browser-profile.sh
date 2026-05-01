@@ -377,11 +377,24 @@ murph_review_gpt_args_include_option() {
   return 1
 }
 
+murph_review_gpt_config_repo_context_url() {
+  local config_path="$1"
+
+  repo_context_url=""
+  review_gpt_register_preset() { :; }
+  review_gpt_register_dir_preset() { :; }
+  review_gpt_register_preset_group() { :; }
+
+  # shellcheck source=/dev/null
+  . "$config_path" >/dev/null 2>&1 || return 0
+  printf '%s\n' "${repo_context_url:-}"
+}
+
 murph_review_gpt_profile_run_review_gpt() {
   local profile_slug="$1"
   shift
 
-  local repo_root config_override="" config_path
+  local repo_root config_override="" config_path repo_context_url=""
   repo_root="$(murph_review_gpt_repo_root)" || return 1
 
   while [[ "$#" -gt 0 ]]; do
@@ -421,6 +434,24 @@ murph_review_gpt_profile_run_review_gpt() {
       murph_review_gpt_profile_export_browser_env "$profile_slug" || return 1
     fi
     exec pnpm exec cobuild-review-gpt delay --config "$config_path" "$@"
+  fi
+
+  if [[ "$config_path" == "$repo_root/scripts/review-gpt.config.sh" ]]; then
+    repo_context_url="$(murph_review_gpt_config_repo_context_url "$config_path")"
+  fi
+  if [[ -n "$repo_context_url" ]] && {
+    ! murph_review_gpt_args_skip_browser_prepare "$@" ||
+      murph_review_gpt_args_include_option --dry-run "$@" ||
+      murph_review_gpt_args_include_option --list-presets "$@"
+  }; then
+    if ! murph_review_gpt_args_skip_browser_prepare "$@"; then
+      murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
+    fi
+    exec node scripts/review-gpt-link-context.mjs \
+      --repo-root "$repo_root" \
+      --config "$config_path" \
+      --context-url "$repo_context_url" \
+      "$@"
   fi
 
   if murph_review_gpt_args_skip_browser_prepare "$@"; then
