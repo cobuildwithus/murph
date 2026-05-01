@@ -178,6 +178,7 @@ export {
   listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceSyncConnectTargetKey,
   resolveConfiguredDeviceSyncConnectTarget,
+  resolveConfiguredDeviceSyncConnectTargetBySourceId,
 } from "./config/connect-targets.ts";
 export {
   DEVICE_CONNECT_SOURCE_BY_ID,

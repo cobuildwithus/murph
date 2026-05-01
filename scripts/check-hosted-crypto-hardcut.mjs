@@ -45,12 +45,6 @@ const allowedFindingLabelsByFile = new Map([
     ]),
   ],
   [
-    "apps/web/src/lib/hosted-onboarding/env.ts",
-    new Set([
-      "legacy device-sync secret codec import",
-    ]),
-  ],
-  [
     "packages/assistant-runtime/src/hosted-device-sync-runtime.ts",
     new Set([
       "legacy packaged device-sync secret codec import",

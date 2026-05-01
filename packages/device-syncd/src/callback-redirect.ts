@@ -14,22 +14,28 @@ export const DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS = [
 export function buildDeviceSyncCallbackSuccessRedirectLocation(input: {
   returnTo: string | null;
   provider: string;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
 }): string | null {
   return buildDeviceSyncCallbackRedirectLocation(input.returnTo, (destination) => {
     destination.searchParams.set("deviceSyncStatus", "connected");
     destination.searchParams.set("deviceSyncProvider", input.provider);
+    appendConnectSourceParams(destination, input);
   });
 }
 
 export function buildDeviceSyncCallbackErrorRedirectLocation(input: {
   returnTo: string | null;
   provider: string;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
   errorCode: string;
 }): string | null {
   return buildDeviceSyncCallbackRedirectLocation(input.returnTo, (destination) => {
     destination.searchParams.set("deviceSyncStatus", "error");
     destination.searchParams.set("deviceSyncProvider", input.provider);
     destination.searchParams.set("deviceSyncError", input.errorCode);
+    appendConnectSourceParams(destination, input);
   });
 }
 
@@ -65,4 +71,27 @@ function resetDeviceSyncCallbackParams(destination: URL): void {
   for (const key of DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS) {
     destination.searchParams.delete(key);
   }
+}
+
+function appendConnectSourceParams(
+  destination: URL,
+  input: {
+    connectSourceId?: string | null;
+    connectTarget?: string | null;
+  },
+): void {
+  const connectSource = normalizeCallbackParam(input.connectSourceId);
+  const connectTarget = normalizeCallbackParam(input.connectTarget);
+
+  if (connectSource) {
+    destination.searchParams.set("connectSource", connectSource);
+  }
+  if (connectTarget) {
+    destination.searchParams.set("connectTarget", connectTarget);
+  }
+}
+
+function normalizeCallbackParam(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized || null;
 }

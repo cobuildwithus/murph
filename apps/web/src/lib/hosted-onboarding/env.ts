@@ -3,7 +3,6 @@ import {
   type HostedAiUsageBillingMode,
 } from "@murphai/hosted-execution";
 
-import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
 import { normalizeNullableString, parseInteger } from "../primitives";
@@ -15,6 +14,8 @@ import {
 import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_CONTACT_PRIVACY_VERSION_PATTERN = /^v[0-9]+$/u;
+const HOSTED_CONTACT_PRIVACY_KEY_BASE64_CANONICAL_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
 export interface HostedContactPrivacyKeyring {
   currentVersion: string;
@@ -132,7 +133,7 @@ function readHostedContactPrivacyKeyring(
       throw new TypeError(`HOSTED_CONTACT_PRIVACY_KEYS must not repeat ${version}.`);
     }
 
-    keysByVersion[version] = decodeHostedEncryptionKey(encodedKey);
+    keysByVersion[version] = decodeHostedContactPrivacyKey(encodedKey);
     readVersions.push(version);
   }
 
@@ -161,6 +162,65 @@ function readHostedContactPrivacyKeyring(
       ...readVersions.filter((version) => version !== currentVersion),
     ],
   };
+}
+
+function decodeHostedContactPrivacyKey(value: string): Buffer {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    throw new TypeError("Hosted contact privacy key must not be empty.");
+  }
+
+  if (/^[0-9a-f]{64}$/iu.test(normalized)) {
+    return Buffer.from(normalized, "hex");
+  }
+
+  const decoded = decodeStrictHostedContactPrivacyBase64(
+    normalizeHostedContactPrivacyBase64(normalized),
+  );
+
+  if (decoded.length !== 32) {
+    throw new TypeError(
+      "Hosted contact privacy key must decode to exactly 32 bytes (hex or base64/base64url).",
+    );
+  }
+
+  return decoded;
+}
+
+function normalizeHostedContactPrivacyBase64(value: string): string {
+  const normalized = value.trim().replace(/-/gu, "+").replace(/_/gu, "/");
+  const remainder = normalized.length % 4;
+
+  if (remainder === 0) {
+    return normalized;
+  }
+
+  return normalized.padEnd(normalized.length + (4 - remainder), "=");
+}
+
+function decodeStrictHostedContactPrivacyBase64(value: string): Buffer {
+  const normalized = value.trim();
+
+  if (
+    normalized.length === 0
+    || normalized.length % 4 !== 0
+    || !HOSTED_CONTACT_PRIVACY_KEY_BASE64_CANONICAL_PATTERN.test(normalized)
+  ) {
+    throw new TypeError(
+      "Hosted contact privacy key must decode to exactly 32 bytes (hex or base64/base64url).",
+    );
+  }
+
+  const decoded = Buffer.from(normalized, "base64");
+
+  if (decoded.toString("base64") !== normalized) {
+    throw new TypeError(
+      "Hosted contact privacy key must decode to exactly 32 bytes (hex or base64/base64url).",
+    );
+  }
+
+  return decoded;
 }
 
 function readHostedLinqConversationPhoneNumbers(

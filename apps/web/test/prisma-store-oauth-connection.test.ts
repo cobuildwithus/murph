@@ -12,7 +12,7 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
+import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type MutableOAuthSession = {

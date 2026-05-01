@@ -64,19 +64,14 @@ export function listProtocolBiomarkers(
   protocol: HealthCommonsCatalogEntity,
   catalog: HealthCommonsCatalogReader,
 ): HealthCommonsEntity[] {
-  const testPlan = protocol.testPlans?.[0];
-  const orderedKeys = Array.from(new Set([
-    testPlan?.primaryBiomarkerKey,
-    ...(testPlan?.secondaryBiomarkerKeys ?? []),
-    ...(testPlan?.safetyOutcomeKeys ?? []),
-  ].filter((key): key is string => typeof key === "string")));
-  const fromTestPlan = orderedKeys.flatMap((key) => {
+  const protocolKeys = listProtocolBiomarkerKeys(protocol);
+  const fromAuthoredSignals = protocolKeys.flatMap((key) => {
     const entity = catalog.findByKey(key);
     return entity?.entityType === "biomarker" ? [entity] : [];
   });
 
-  if (fromTestPlan.length > 0) {
-    return fromTestPlan;
+  if (fromAuthoredSignals.length > 0) {
+    return fromAuthoredSignals;
   }
 
   return catalog.listRelated({
@@ -84,6 +79,23 @@ export function listProtocolBiomarkers(
     entityTypes: ["biomarker"],
     relationTypes: ["primary_biomarker", "secondary_biomarker"],
   });
+}
+
+function listProtocolBiomarkerKeys(protocol: HealthCommonsCatalogEntity): string[] {
+  const testPlan = protocol.testPlans?.[0];
+
+  return uniqueStrings([
+    ...(protocol.expectedSignalDescriptions ?? []).map((signal) => signal.biomarkerKey),
+    testPlan?.primaryBiomarkerKey,
+    ...(testPlan?.secondaryBiomarkerKeys ?? []),
+    ...(testPlan?.safetyOutcomeKeys ?? []),
+  ]);
+}
+
+function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string =>
+    typeof value === "string" && value.length > 0
+  ))];
 }
 
 export function toExpectedSignal(

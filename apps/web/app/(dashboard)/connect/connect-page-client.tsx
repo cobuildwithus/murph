@@ -45,6 +45,7 @@ interface HostedDeviceSyncConnectResponse {
 
 export type ConnectCallbackInput = {
   connectTarget: string | null;
+  connectSource: string | null;
   errorCode: string | null;
   provider: string | null;
   status: "connected" | "error";
@@ -76,9 +77,16 @@ export function ConnectSourcesGrid({
     sourceId: string;
   } | null>(null);
   const [consentRetrySource, setConsentRetrySource] = useState<ConnectSource | null>(null);
+  const callbackConnectedSourceId = initialCallback?.status === "connected"
+    ? resolveCallbackSourceId(initialCallback, sources)
+    : null;
+  const displaySources = useMemo(
+    () => markCallbackConnectedSource(sources, callbackConnectedSourceId),
+    [callbackConnectedSourceId, sources],
+  );
   const filteredSources = useMemo(
-    () => filterConnectSourcesForSearch(sources, search),
-    [search, sources],
+    () => filterConnectSourcesForSearch(displaySources, search),
+    [displaySources, search],
   );
   const hasInitialCallback = Boolean(initialCallback);
 
@@ -102,9 +110,9 @@ export function ConnectSourcesGrid({
       const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
         method: "POST",
         payload: {
-          returnTo: `/connect?connectTarget=${encodeURIComponent(source.connectTarget)}`,
+          returnTo: `/connect?connectSource=${encodeURIComponent(source.id)}`,
         },
-        url: `/api/settings/device-sync/providers/${encodeURIComponent(source.connectTarget)}/connect`,
+        url: `/api/connect-sources/${encodeURIComponent(source.id)}/start`,
       });
       window.location.assign(readConnectAuthorizationUrl(result));
     } catch (error) {
@@ -169,7 +177,7 @@ export function ConnectSourcesGrid({
             Sources
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {filteredSources.length} of {sources.length} sources
+            {filteredSources.length} of {displaySources.length} sources
           </p>
         </div>
         <Input
@@ -302,26 +310,68 @@ function readConnectAuthorizationUrl(response: HostedDeviceSyncConnectResponse):
 }
 
 function resolveCallbackSourceLabel(input: {
+  connectSource: string | null;
   connectTarget: string | null;
   provider: string | null;
   sources: readonly ConnectSource[];
 }): string {
-  const target = normalizeConnectKey(input.connectTarget);
-  const provider = normalizeConnectKey(input.provider);
-  const source = input.sources.find((candidate) => {
-    const sourceTarget = normalizeConnectKey(candidate.connectTarget);
-    const sourceId = normalizeConnectKey(candidate.id);
-    return Boolean(
-      (target && (sourceTarget === target || sourceId === target))
-      || (provider && (sourceTarget === provider || sourceId === provider)),
-    );
-  });
+  const source = findCallbackSource(input);
 
   if (source) {
     return source.name;
   }
 
   return formatHostedDeviceSyncProviderLabel(input.provider ?? "source");
+}
+
+function resolveCallbackSourceId(
+  input: ConnectCallbackInput,
+  sources: readonly ConnectSource[],
+): string | null {
+  if (!input) {
+    return null;
+  }
+
+  return findCallbackSource({
+    connectSource: input.connectSource,
+    connectTarget: input.connectTarget,
+    provider: input.provider,
+    sources,
+  })?.id ?? null;
+}
+
+function findCallbackSource(input: {
+  connectSource: string | null;
+  connectTarget: string | null;
+  provider: string | null;
+  sources: readonly ConnectSource[];
+}): ConnectSource | null {
+  const source = normalizeConnectSourceId(input.connectSource);
+  const target = normalizeConnectKey(input.connectTarget);
+  const provider = normalizeConnectKey(input.provider);
+
+  return input.sources.find((candidate) => {
+    const sourceTarget = normalizeConnectKey(candidate.connectTarget);
+    const sourceId = normalizeConnectKey(candidate.id);
+    const normalizedSourceId = normalizeConnectSourceId(candidate.id);
+
+    return Boolean(
+      (source && normalizedSourceId === source)
+      || (target && (sourceTarget === target || sourceId === target))
+      || (provider && (sourceTarget === provider || sourceId === provider)),
+    );
+  }) ?? null;
+}
+
+function markCallbackConnectedSource(
+  sources: readonly ConnectSource[],
+  sourceId: string | null,
+): readonly ConnectSource[] {
+  if (!sourceId) {
+    return sources;
+  }
+
+  return sources.map((source) => source.id === sourceId ? { ...source, connected: true } : source);
 }
 
 function createConnectCallbackNotice(
@@ -333,6 +383,7 @@ function createConnectCallbackNotice(
   }
 
   const sourceLabel = resolveCallbackSourceLabel({
+    connectSource: input.connectSource,
     connectTarget: input.connectTarget,
     provider: input.provider,
     sources,
@@ -361,6 +412,7 @@ function stripConnectCallbackParams() {
   for (const key of DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS) {
     url.searchParams.delete(key);
   }
+  url.searchParams.delete("connectSource");
   url.searchParams.delete("connectTarget");
   window.history?.replaceState?.({}, "", url.toString());
 }
@@ -371,6 +423,16 @@ function normalizeConnectKey(value: string | null | undefined): string | null {
     .toLowerCase()
     .replace(/[^a-z0-9_]+/gu, "_")
     .replace(/^_+|_+$/gu, "");
+
+  return normalized || null;
+}
+
+function normalizeConnectSourceId(value: string | null | undefined): string | null {
+  const normalized = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
 
   return normalized || null;
 }

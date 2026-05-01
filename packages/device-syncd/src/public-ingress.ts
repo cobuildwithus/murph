@@ -63,6 +63,10 @@ const SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY =
   "__murphSeededConnectionExternalAccountId";
 const SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY =
   "__murphSeededConnectionSetupExpiresAt";
+const CONNECT_SOURCE_ID_STATE_METADATA_KEY =
+  "__murphConnectSourceId";
+const CONNECT_TARGET_STATE_METADATA_KEY =
+  "__murphConnectTarget";
 
 function toIngressWebhook(parsed: {
   eventType: string;
@@ -238,8 +242,18 @@ function buildConnectionCallbackQuery(input: HandleConnectionCallbackInput): URL
 
 function buildConnectionStateMetadata(input: {
   providerMetadata: Record<string, unknown> | undefined;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
 }): Record<string, unknown> {
-  return sanitizeConnectionStateMetadata(input.providerMetadata);
+  const metadata = sanitizeConnectionStateMetadata(input.providerMetadata);
+  const connectSourceId = normalizeString(input.connectSourceId);
+  const connectTarget = normalizeString(input.connectTarget);
+
+  return {
+    ...metadata,
+    ...(connectSourceId ? { [CONNECT_SOURCE_ID_STATE_METADATA_KEY]: connectSourceId } : {}),
+    ...(connectTarget ? { [CONNECT_TARGET_STATE_METADATA_KEY]: connectTarget } : {}),
+  };
 }
 
 function buildProviderConnectionStateMetadata(
@@ -250,6 +264,8 @@ function buildProviderConnectionStateMetadata(
   delete providerMetadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete providerMetadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
+  delete providerMetadata[CONNECT_TARGET_STATE_METADATA_KEY];
   return sanitizeConnectionStateMetadata(providerMetadata);
 }
 
@@ -260,6 +276,8 @@ function sanitizeConnectionStateMetadata(
   delete metadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete metadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
+  delete metadata[CONNECT_TARGET_STATE_METADATA_KEY];
 
   for (const key of Object.keys(metadata)) {
     if (isBlockedConnectionStateMetadataKey(key)) {
@@ -304,6 +322,18 @@ function readSeededConnectionSetupExpiresAt(
   metadata: Record<string, unknown> | undefined,
 ): string | null {
   const value = metadata?.[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  return typeof value === "string" ? normalizeString(value) ?? null : null;
+}
+
+function readConnectSourceId(
+  metadata: Record<string, unknown> | undefined,
+): string | null {
+  const value = metadata?.[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
+  return typeof value === "string" ? normalizeString(value) ?? null : null;
+}
+
+function readConnectTarget(metadata: Record<string, unknown> | undefined): string | null {
+  const value = metadata?.[CONNECT_TARGET_STATE_METADATA_KEY];
   return typeof value === "string" ? normalizeString(value) ?? null : null;
 }
 
@@ -473,6 +503,8 @@ export class DeviceSyncPublicIngress {
 
     let stateMetadata = buildConnectionStateMetadata({
       providerMetadata: started.stateMetadata,
+      connectSourceId: input.connectSourceId ?? null,
+      connectTarget: input.connectTarget ?? null,
     });
     if (seededAccount) {
       stateMetadata = setSeededConnectionStateMetadata(stateMetadata, seededAccount);
@@ -551,6 +583,8 @@ export class DeviceSyncPublicIngress {
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);
     const seededExternalAccountId = readSeededConnectionExternalAccountId(stateRecord.metadata);
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
+    const connectSourceId = readConnectSourceId(stateRecord.metadata);
+    const connectTarget = readConnectTarget(stateRecord.metadata);
     let connection: ProviderConnectionResult | null = null;
     let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
@@ -647,6 +681,8 @@ export class DeviceSyncPublicIngress {
       return {
         account,
         returnTo,
+        ...(connectSourceId ? { connectSourceId } : {}),
+        ...(connectTarget ? { connectTarget } : {}),
       };
     } catch (error) {
       if (connection) {

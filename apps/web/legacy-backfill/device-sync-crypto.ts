@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
 
-import { normalizeNullableString } from "./shared";
+import { normalizeNullableString } from "../src/lib/device-sync/shared";
 
 const ENCRYPTED_SECRET_PREFIX = "hbds";
 const BLIND_INDEX_PREFIX = "hbdi";

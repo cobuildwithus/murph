@@ -24,8 +24,6 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
   junction?: { providerFilter?: string[] };
 };
 
-const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["oura", "strava"]);
-
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value
     .trim()
@@ -63,19 +61,13 @@ export function listConfiguredDeviceSyncConnectTargets(
         continue;
       }
 
-      addDeviceSyncConnectTarget(
-        targetsBySourceId,
-        {
+      addDeviceSyncConnectTarget(targetsBySourceId, {
           connectSourceId: junctionRoute.source.connectSourceId,
           connectTarget: junctionRoute.route.connectTarget,
           label: junctionRoute.source.label,
           provider: "junction",
           sourceProviderSlug: junctionRoute.route.sourceProviderSlug,
-        },
-        {
-          replaceExisting: shouldPreferJunctionConnectSource(junctionRoute.source.connectSourceId),
-        },
-      );
+        });
     }
   }
 
@@ -93,6 +85,20 @@ export function resolveConfiguredDeviceSyncConnectTarget(
 
   return listConfiguredDeviceSyncConnectTargets(providerConfigs).find(
     (target) => target.connectTarget === connectTarget,
+  ) ?? null;
+}
+
+export function resolveConfiguredDeviceSyncConnectTargetBySourceId(
+  providerConfigs: DeviceSyncConnectTargetProviderConfigs,
+  requestedConnectSourceId: string,
+): DeviceSyncConnectTarget | null {
+  const connectSourceId = normalizeDeviceConnectSourceId(requestedConnectSourceId);
+  if (!connectSourceId) {
+    return null;
+  }
+
+  return listConfiguredDeviceSyncConnectTargets(providerConfigs).find(
+    (target) => target.connectSourceId === connectSourceId,
   ) ?? null;
 }
 
@@ -122,12 +128,4 @@ function addDeviceSyncConnectTarget(
     provider: target.provider,
     ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
   });
-}
-
-function shouldPreferJunctionConnectSource(connectSourceId: string): boolean {
-  const normalizedConnectSourceId = normalizeDeviceConnectSourceId(connectSourceId);
-
-  return normalizedConnectSourceId
-    ? JUNCTION_PREFERRED_CONNECT_SOURCE_IDS.has(normalizedConnectSourceId)
-    : false;
 }

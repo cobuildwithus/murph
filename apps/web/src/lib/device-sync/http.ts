@@ -55,6 +55,8 @@ export function redirectTo(url: string): NextResponse {
 export function providerCallbackRedirect(input: {
   returnTo: string | null;
   provider: string;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
 }): NextResponse | null {
   const location = buildDeviceSyncCallbackSuccessRedirectLocation(input);
   return location ? redirectTo(location) : null;
@@ -64,10 +66,14 @@ export function errorToCallbackRedirect(input: {
   returnTo: string | null;
   provider: string;
   error: DeviceSyncError;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
 }): NextResponse | null {
   const location = buildDeviceSyncCallbackErrorRedirectLocation({
     returnTo: input.returnTo,
     provider: input.provider,
+    connectSourceId: input.connectSourceId ?? null,
+    connectTarget: input.connectTarget ?? null,
     errorCode: input.error.code,
   });
   return location ? redirectTo(location) : null;

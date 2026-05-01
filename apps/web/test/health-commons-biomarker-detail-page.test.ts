@@ -94,6 +94,7 @@ describe("BiomarkerPage", () => {
       { biomarkerId: "hrv-rmssd" },
       { biomarkerId: "rem-sleep-minutes" },
       { biomarkerId: "resting-heart-rate" },
+      { biomarkerId: "sleep-quality" },
     ]);
   });
 

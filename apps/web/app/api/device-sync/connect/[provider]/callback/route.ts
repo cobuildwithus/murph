@@ -22,6 +22,8 @@ export async function GET(
     const redirect = providerCallbackRedirect({
       returnTo: result.returnTo,
       provider: result.account.provider,
+      connectSourceId: result.connectSourceId ?? null,
+      connectTarget: result.connectTarget ?? null,
     });
 
     return (
