@@ -147,12 +147,12 @@ describe("ensureHostedMemberForPhone", () => {
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
-        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
         walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
         walletChainType: "ethereum",
         walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
@@ -163,12 +163,12 @@ describe("ensureHostedMemberForPhone", () => {
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
-        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
         walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
         walletChainType: "ethereum",
         walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
@@ -222,12 +222,12 @@ describe("ensureHostedMemberForPhone", () => {
       create: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
-        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
       update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
-        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
       where: {
         memberId: expect.any(String),
@@ -298,7 +298,7 @@ describe("ensureHostedMemberForPhone", () => {
       },
       update: expect.objectContaining({
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
-        signupPhoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
     }));
   });
@@ -694,9 +694,9 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
     expect(upsert).toHaveBeenCalledWith({
       create: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
         pendingLinqChatIdEncrypted: null,
@@ -707,9 +707,9 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         telegramUserLookupKey: null,
       },
       update: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
       },
       where: {

@@ -16,6 +16,9 @@ import {
   filterHostedRunnerSecrets,
   rewriteHostedRunnerLoopbackUrlForContainer,
 } from "./hosted-env-policy.ts";
+import {
+  createHostedRunnerLocalE2eParserToolchain,
+} from "./runner-native-parser-toolchain.ts";
 
 export function buildHostedRunnerSupervisorEnv(input: {
   port: number;
@@ -110,6 +113,8 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
+  const localE2eParserToolchain =
+    createHostedRunnerLocalE2eParserToolchain(configSource);
 
   return buildHostedRunnerJobRuntime({
     commitTimeoutMs: readHostedRuntimeCommitTimeoutConfigValue(
@@ -117,6 +122,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     ),
     configSource,
     forwardedEnv: input.forwardedEnv,
+    parserToolchain: localE2eParserToolchain ?? undefined,
     platformEnv: Object.keys(platformEnv).length === 0 ? undefined : platformEnv,
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: input.runnerSecrets,

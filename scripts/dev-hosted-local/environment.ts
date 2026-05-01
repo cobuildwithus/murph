@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -41,6 +41,8 @@ const HOSTED_LOCAL_WEB_WRAP_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
 const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
+const HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY =
+  "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const LEGACY_HOSTED_EXECUTION_CRYPTO_ENV_RE =
   /^HOSTED_EXECUTION_(?:PLATFORM_ENVELOPE|AUTOMATION_RECIPIENT|RECOVERY_RECIPIENT|TEE_AUTOMATION_RECIPIENT)(?:_|$)/u;
 
@@ -279,7 +281,17 @@ function resolveHostedLocalAuthoritySigningKey(input: {
     input.readHostedLocalKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM")
     ?? input.readHostedLocalKey("HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM");
 
-  if (existingPrivateJwk && existingPublicPem) {
+  if (
+    existingPrivateJwk
+    && existingPublicPem
+    && (
+      input.useRemoteHostedCryptoKeys
+      || hostedLocalAuthoritySigningPairMatches({
+        privateJwkJson: existingPrivateJwk,
+        publicKeyPem: existingPublicPem,
+      })
+    )
+  ) {
     return {
       privateJwkJson: existingPrivateJwk,
       publicKeyPem: existingPublicPem,
@@ -294,6 +306,39 @@ function resolveHostedLocalAuthoritySigningKey(input: {
   }
 
   return input.createSigningKey();
+}
+
+function hostedLocalAuthoritySigningPairMatches(input: {
+  privateJwkJson: string;
+  publicKeyPem: string;
+}): boolean {
+  try {
+    const privateJwk = parsePrivateEcP256Jwk(
+      input.privateJwkJson,
+      "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+    );
+    const privateKey = createPrivateKey({
+      format: "jwk",
+      key: {
+        crv: privateJwk.crv,
+        d: privateJwk.d,
+        kty: privateJwk.kty,
+        x: privateJwk.x,
+        y: privateJwk.y,
+      } satisfies JsonWebKey,
+    });
+    const derivedPublicPem = createPublicKey(privateKey)
+      .export({ format: "pem", type: "spki" })
+      .toString();
+
+    return normalizePublicKeyPem(derivedPublicPem) === normalizePublicKeyPem(input.publicKeyPem);
+  } catch {
+    return false;
+  }
+}
+
+function normalizePublicKeyPem(value: string): string {
+  return value.replace(/\\n/g, "\n").trim();
 }
 
 function resolveExistingHostedLocalKeySource(source: Record<string, string>): Record<string, string> {
@@ -439,6 +484,9 @@ export function buildHostedLocalDevOverrides(
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_DEVICE_ROUTING_INDEX_KEY"),
+    HOSTED_MAILBOX_FINGERPRINT_KEY:
+      cloudflareDevVars.HOSTED_MAILBOX_FINGERPRINT_KEY?.trim()
+      || HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY,
     HOSTED_WEB_BASE_URL: webOrigin,
     ...(!cloudflareDevVars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK?.trim()
       && cloudflareAutomationPrivateJwkJson

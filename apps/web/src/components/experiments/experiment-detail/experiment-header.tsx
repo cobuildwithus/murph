@@ -48,6 +48,9 @@ export function ExperimentHeader({
   const inBaseline = baselineDays > 0 && day != null && day <= baselineDays;
   const protocolDays = formatProtocolDays(durationDays, baselineDays);
   const protocolDay = day == null ? null : Math.max(1, day - baselineDays);
+  const renderedDescription = description
+    ? normalizeExperimentHeaderDescription(description)
+    : null;
 
   return (
     <div className="relative z-10 flex flex-col gap-7">
@@ -128,9 +131,9 @@ export function ExperimentHeader({
             {title}
           </h1>
 
-          {description && (
+          {renderedDescription && (
             <p className="text-[16px] leading-[160%] text-muted-foreground">
-              {description}
+              {renderedDescription}
             </p>
           )}
         </div>
@@ -178,4 +181,11 @@ export function ExperimentHeader({
 
 function formatProtocolDays(durationDays: number, baselineDays: number): number {
   return Math.max(1, durationDays - baselineDays);
+}
+
+function normalizeExperimentHeaderDescription(description: string): string {
+  return description.replace(
+    /\s+best read as personal context rather than expected outcomes\.$/u,
+    ".",
+  );
 }

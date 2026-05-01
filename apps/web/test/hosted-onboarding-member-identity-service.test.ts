@@ -102,7 +102,7 @@ describe("hosted-onboarding member-identity-service", () => {
       update: expect.objectContaining({
         phoneNumberVerifiedAt: NOW,
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,

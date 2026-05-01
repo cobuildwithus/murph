@@ -21,8 +21,13 @@ export interface HostedExecutionWorkerEnvironment {
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
+export interface HostedExecutionWorkerEnvironmentOptions {
+  allowHostedWebHttpHosts?: readonly string[];
+}
+
 export function readHostedExecutionWorkerEnvironment(
   source: EnvSource = process.env,
+  options: HostedExecutionWorkerEnvironmentOptions = {},
 ): HostedExecutionWorkerEnvironment {
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
@@ -50,6 +55,7 @@ export function readHostedExecutionWorkerEnvironment(
       source.HOSTED_WEB_BASE_URL,
       "HOSTED_WEB_BASE_URL",
       {
+        allowHttpHosts: options.allowHostedWebHttpHosts,
         requireOriginOnly: true,
       },
     ),

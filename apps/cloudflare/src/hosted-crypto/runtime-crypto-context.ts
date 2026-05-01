@@ -51,6 +51,7 @@ export async function fetchHostedWorkerRuntimeRoots(input: {
   baseUrl: string;
   callbackSigning: HostedWebCallbackSigningEnvironment;
   cryptoEnv: HostedWorkerCryptoEnv;
+  allowHttpHosts?: readonly string[];
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
   userId: string;
@@ -58,6 +59,7 @@ export async function fetchHostedWorkerRuntimeRoots(input: {
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: input.baseUrl,
     boundUserId: input.userId,
+    allowHttpHosts: input.allowHttpHosts,
     callbackSigning: input.callbackSigning,
     fetchImpl: input.fetchImpl,
     method: "POST",
@@ -79,6 +81,7 @@ export async function fetchHostedWorkerRuntimeRoot(input: {
   callbackSigning: HostedWebCallbackSigningEnvironment;
   cryptoEnv: HostedWorkerCryptoEnv;
   domain: "ingress" | "runtime";
+  allowHttpHosts?: readonly string[];
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
   userId: string;
@@ -86,6 +89,7 @@ export async function fetchHostedWorkerRuntimeRoot(input: {
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: input.baseUrl,
     boundUserId: input.userId,
+    allowHttpHosts: input.allowHttpHosts,
     callbackSigning: input.callbackSigning,
     fetchImpl: input.fetchImpl,
     method: "POST",

@@ -11,6 +11,7 @@ import {
 } from "./runner-env.ts";
 import {
   createHostedRunnerNativeParserToolchain,
+  isHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 import {
   runHostedWorkspaceInvocationIsolatedDetailed,
@@ -18,6 +19,7 @@ import {
 } from "./node-runner-isolated.ts";
 import {
   buildHostedExecutionRuntimePlatform,
+  createCloudflareHostedRuntimeFetch,
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./runtime-platform.ts";
 import {
@@ -29,6 +31,13 @@ import {
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.ts";
+import {
+  LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+} from "./web-control-plane.ts";
 
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
@@ -105,6 +114,10 @@ function bindHostedExecutionJobParserToolchain(
     );
   }
 
+  if (parserToolchain && isHostedRunnerLocalE2eParserToolchain(parserToolchain)) {
+    return parserToolchain;
+  }
+
   return createHostedRunnerNativeParserToolchain();
 }
 
@@ -145,17 +158,36 @@ export function createHostedWorkspaceInvocationRunner(
       localInternalProxyBaseUrl,
       workspaceCheckpointBridge,
     });
+    const webControlFetch = internalWorkerProxyToken && localInternalProxyBaseUrl
+      ? createCloudflareHostedRuntimeFetch(
+          boundUserId,
+          internalWorkerProxyToken,
+          localInternalProxyBaseUrl,
+          fetch,
+        )
+      : undefined;
+    const runtimeBridgeJobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: runtimePlatform,
+      readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
+      request: input.request,
+      runtime,
+      ...(webControlFetch
+        ? {
+            webControlAllowHttpHosts: [
+              CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+              ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+            ],
+            webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+            webControlFetch,
+          }
+        : {}),
+    });
 
     if (runMode === "in-process") {
       return await runWorkspaceInProcess({
         request: input.request,
         runtime,
-      }, createHostedWorkspaceRuntimeBridgeJobOptions({
-        platform: runtimePlatform,
-        readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-        request: input.request,
-        runtime,
-      }));
+      }, runtimeBridgeJobOptions);
     }
 
     return await runIsolated({

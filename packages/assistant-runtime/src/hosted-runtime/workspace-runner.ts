@@ -250,6 +250,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     };
   }
 
+  await runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort({
+    checkpointRequestBuilder: checkpointRequestSession,
+    expectedUserId: input.expectedUserId,
+    initialMailboxImport,
+    input,
+  });
+
   const platform = withActiveTurnInputWorkspacePorts({
     initialMailboxImport,
     checkpointRequestBuilder: checkpointRequestSession,

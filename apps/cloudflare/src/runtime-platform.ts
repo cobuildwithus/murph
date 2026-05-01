@@ -381,7 +381,7 @@ function resolveHostedWebControlTransport(input: {
   return null;
 }
 
-function createCloudflareHostedRuntimeFetch(
+export function createCloudflareHostedRuntimeFetch(
   boundUserId: string,
   internalWorkerProxyToken: string | null,
   localInternalProxyBaseUrl: string | null,

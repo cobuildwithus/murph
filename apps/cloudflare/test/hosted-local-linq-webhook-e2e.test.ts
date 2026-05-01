@@ -56,6 +56,7 @@ describe("hosted local Linq webhook e2e", () => {
   beforeAll(async () => {
     await startLinqScenario((linq) => ({
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+      HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
       LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
       WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
       WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",

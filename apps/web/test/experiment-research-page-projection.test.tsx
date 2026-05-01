@@ -219,9 +219,7 @@ describe("ExperimentResearchPage", () => {
       );
 
       const firstRead = loadGeneratedExperimentProjection("norwegian-4x4", "experiment.protocol");
-      expect(firstRead?.protocolTips).toContain(
-        "Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule stable.",
-      );
+      expect(firstRead?.protocolTips).toEqual(protocol.protocolTips);
 
       await writeFile(
         protocolArtifactPath,

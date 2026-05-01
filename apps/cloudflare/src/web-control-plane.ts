@@ -10,10 +10,20 @@ import {
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
 
+export const LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS = [
+  "host.docker.internal",
+] as const;
+
+export interface HostedWebControlBaseUrlOptions {
+  allowHttpHosts?: readonly string[];
+}
+
 export function normalizeHostedWebControlBaseUrl(
   value: string | null | undefined,
+  options: HostedWebControlBaseUrlOptions = {},
 ): string | null {
   const normalized = normalizeHostedExecutionBaseUrl(value, {
+    allowHttpHosts: options.allowHttpHosts,
     allowHttpLocalhost: true,
     requireOriginOnly: true,
   });
@@ -28,6 +38,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   fetchImpl?: typeof fetch;
   method: "GET" | "POST";
   path: string;
+  allowHttpHosts?: readonly string[];
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
   search?: string | null;
   timeoutMs: number | null;
@@ -35,7 +46,9 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   const fetchImpl = input.fetchImpl ?? fetch;
   const targetUrl = new URL(
     input.path.replace(/^\/+/u, ""),
-    `${requireHostedWebControlBaseUrl(input.baseUrl)}/`,
+    `${requireHostedWebControlBaseUrl(input.baseUrl, {
+      allowHttpHosts: input.allowHttpHosts,
+    })}/`,
   );
 
   if (input.search) {
@@ -78,8 +91,11 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   });
 }
 
-function requireHostedWebControlBaseUrl(value: string): string {
-  const normalized = normalizeHostedWebControlBaseUrl(value);
+function requireHostedWebControlBaseUrl(
+  value: string,
+  options: HostedWebControlBaseUrlOptions = {},
+): string {
+  const normalized = normalizeHostedWebControlBaseUrl(value, options);
 
   if (!normalized) {
     throw new TypeError("Hosted web control-plane baseUrl must be configured.");

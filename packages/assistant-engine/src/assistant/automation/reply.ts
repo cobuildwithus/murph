@@ -921,6 +921,24 @@ async function loadAssistantAutoReplyPromptInputs(input: {
   return Promise.all(
     input.group.items.map(async (item) => {
       if (item.inputCandidate) {
+        const projectionCaptureId =
+          item.summary.projectionCaptureId ?? item.inputCandidate.projection.captureId
+        if (
+          projectionCaptureId &&
+          item.inputCandidate.event.sourceRef.kind === 'hosted-mailbox'
+        ) {
+          return createAssistantAutoReplyPromptInputFromProjectedInput({
+            capture: (
+              await input.inboxServices.show({
+                vault: input.vault,
+                requestId: input.requestId,
+                captureId: projectionCaptureId,
+              })
+            ).capture,
+            item,
+          })
+        }
+
         return createAssistantAutoReplyPromptInputFromInput(item)
       }
 
@@ -936,6 +954,27 @@ async function loadAssistantAutoReplyPromptInputs(input: {
       }
     }),
   )
+}
+
+function createAssistantAutoReplyPromptInputFromProjectedInput(input: {
+  capture: InboxShowResult['capture']
+  item: AssistantAutoReplyGroupItem
+}): AssistantAutoReplyPromptInput {
+  const candidate = input.item.inputCandidate
+  return {
+    attachmentDescriptors: candidate?.event.attachmentDescriptors ?? [],
+    capture: input.capture,
+    projectionReasonCode: candidate?.projection.reasonCode ?? null,
+    projectionStatus: candidate?.projection.status ?? null,
+    telegramMetadata:
+      input.item.telegramMetadata ??
+      (candidate
+        ? readTelegramAutoReplyMetadataFromAssistantInput({
+            replyTarget: candidate.event.replyTarget,
+            sourceMetadata: candidate.event.sourceMetadata,
+          })
+        : null),
+  }
 }
 
 function createAssistantAutoReplyPromptInputFromInput(

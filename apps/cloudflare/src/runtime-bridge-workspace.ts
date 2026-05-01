@@ -45,7 +45,6 @@ import {
 import {
   readHostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
-
 type HostedWorkspaceRuntimeBridgeImportItem =
   HostedWorkspaceRuntimeJobOptions["importItem"];
 type HostedWorkspaceRuntimeBridgeImportItemInput =
@@ -68,6 +67,9 @@ export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   request: HostedWorkspaceInvocationRequest;
   runtime: HostedAssistantRuntimeConfig;
   vaultRoot?: string | null;
+  webControlAllowHttpHosts?: readonly string[];
+  webControlBaseUrl?: string | null;
+  webControlFetch?: typeof fetch;
 }
 
 export function createHostedWorkspaceRuntimeBridgeJobOptions(
@@ -78,7 +80,12 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     ?? (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.request));
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, input.platform);
   const readEncryptionEnvironment = input.readEncryptionEnvironment
-    ?? createHostedMailboxEncryptionEnvironmentReader({ runtime });
+    ?? createHostedMailboxEncryptionEnvironmentReader({
+      runtime,
+      webControlAllowHttpHosts: input.webControlAllowHttpHosts,
+      webControlBaseUrl: input.webControlBaseUrl ?? null,
+      webControlFetch: input.webControlFetch,
+    });
 
   return {
     createCheckpointSnapshot: async (checkpointInput) => ({
@@ -115,6 +122,9 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
 
 function createHostedMailboxEncryptionEnvironmentReader(input: {
   runtime: Pick<HostedRuntimeBridgeNormalizedRuntime, "platformEnv">;
+  webControlAllowHttpHosts?: readonly string[];
+  webControlBaseUrl?: string | null;
+  webControlFetch?: typeof fetch;
 }): (readerInput: { userId: string }) => Promise<HostedMailboxEncryptionEnvironment> {
   const environmentsByUserId = new Map<string, Promise<HostedMailboxEncryptionEnvironment>>();
   return ({ userId }) => {
@@ -125,6 +135,9 @@ function createHostedMailboxEncryptionEnvironmentReader(input: {
     const created = readHostedMailboxEncryptionEnvironmentFromRuntime({
       platformEnv: input.runtime.platformEnv,
       userId,
+      webControlAllowHttpHosts: input.webControlAllowHttpHosts,
+      webControlBaseUrl: input.webControlBaseUrl ?? null,
+      webControlFetch: input.webControlFetch,
     });
     environmentsByUserId.set(userId, created);
     return created;
@@ -187,15 +200,20 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
 async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
   platformEnv: Readonly<Record<string, string>>;
   userId: string;
+  webControlAllowHttpHosts?: readonly string[];
+  webControlBaseUrl?: string | null;
+  webControlFetch?: typeof fetch;
 }): Promise<HostedMailboxEncryptionEnvironment> {
   if (Object.keys(input.platformEnv).length === 0) {
     throw new Error(
       "Hosted runtime platformEnv is required for hosted mailbox payload decrypt.",
     );
   }
-  const workerEnv = readHostedExecutionWorkerEnvironment(input.platformEnv);
+  const workerEnv = readHostedExecutionWorkerEnvironment(input.platformEnv, {
+    allowHostedWebHttpHosts: input.webControlAllowHttpHosts,
+  });
   const ingressRoot = await fetchHostedWorkerRuntimeRoot({
-    baseUrl: workerEnv.hostedWebBaseUrl,
+    baseUrl: input.webControlBaseUrl ?? workerEnv.hostedWebBaseUrl,
     callbackSigning: readHostedWebCallbackSigningEnvironment(input.platformEnv),
     cryptoEnv: {
       HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
@@ -209,6 +227,8 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
       HOSTED_CRYPTO_ENV: workerEnv.hostedCryptoEnv,
     } satisfies HostedWorkerCryptoEnv,
     domain: "ingress",
+    allowHttpHosts: input.webControlAllowHttpHosts,
+    fetchImpl: input.webControlFetch,
     timeoutMs: workerEnv.webControlTimeoutMs,
     userId: input.userId,
   });

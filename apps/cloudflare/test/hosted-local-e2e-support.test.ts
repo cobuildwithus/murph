@@ -4,6 +4,8 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
+  buildHostedLocalDeviceSyncProviderEnvClearances,
+  HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS,
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
   mergeRequiredEnvProfile,
   resolveHostedAssistantLocalDevEnv,
@@ -62,6 +64,17 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
       expect(env[key]).toBeUndefined();
     }
     expect(env.VERCEL_AI_API_KEY).toBe("stub-local-vercel-ai-gateway-key");
+  });
+
+  it("clears device-sync provider env that would otherwise leak into scenarios", () => {
+    const env = buildHostedLocalDeviceSyncProviderEnvClearances();
+
+    expect(HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS).toEqual(
+      expect.arrayContaining(["JUNCTION_API_KEY", "JUNCTION_ENV", "WHOOP_CLIENT_SECRET"]),
+    );
+    for (const key of HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS) {
+      expect(env[key]).toBeUndefined();
+    }
   });
 
   it("fails closed in live mode without explicit hosted assistant provider and model", () => {
