@@ -35,6 +35,28 @@ describe("hosted crypto GCP KMS access-token guard", () => {
       NODE_ENV: "test",
     })).not.toThrow();
   });
+
+  it("rejects custom GCP endpoint overrides in production", () => {
+    const productionBase = {
+      HOSTED_CRYPTO_ENV: "prod",
+      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789",
+      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "pool",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "provider",
+      NODE_ENV: "test",
+    } satisfies NodeJS.ProcessEnv;
+
+    for (const [key, value] of [
+      ["HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT", "https://iamcredentials.example.test/v1"],
+      ["HOSTED_CRYPTO_GCP_KMS_API_ROOT", "https://kms.example.test/v1"],
+      ["HOSTED_CRYPTO_GCP_STS_TOKEN_URI", "https://sts.example.test/v1/token"],
+    ] as const) {
+      expect(() => createHostedGcpKmsClientFromEnv({
+        ...productionBase,
+        [key]: value,
+      })).toThrow(new RegExp(`${key}.*not allowed in production`, "u"));
+    }
+  });
 });
 
 describe("hosted crypto local KMS", () => {
