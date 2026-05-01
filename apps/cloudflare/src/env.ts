@@ -4,6 +4,9 @@ import {
   type HostedUserRecipientPrivateKeyJwk,
   type HostedUserRecipientPublicKeyJwk,
 } from "@murphai/runtime-state";
+import {
+  normalizeHostedExecutionString,
+} from "@murphai/hosted-execution/env";
 
 import {
   requireHostedExecutionVercelOidcValidationEnvironment,
@@ -164,20 +167,28 @@ function readOptionalHostedWorkerCryptoEnvironment(
     ...(authoritySignKeyVersion
       ? { HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion }
       : {}),
-    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: requireHostedExecutionString(
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: requireHostedCryptoString(
       authoritySignPublicKeyPem,
       "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
     ),
-    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: requireHostedExecutionString(
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: requireHostedCryptoString(
       cloudflareAutomationKeyId,
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
     ),
-    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: requireHostedExecutionString(
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: requireHostedCryptoString(
       cloudflareAutomationPrivateJwk,
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
     ),
-    HOSTED_CRYPTO_ENV: requireHostedExecutionString(env, "HOSTED_CRYPTO_ENV"),
+    HOSTED_CRYPTO_ENV: requireHostedCryptoString(env, "HOSTED_CRYPTO_ENV"),
   };
+}
+
+function requireHostedCryptoString(value: string | null | undefined, label: string): string {
+  if (!value) {
+    throw new TypeError(`${label} is required when hosted runtime crypto context is configured.`);
+  }
+
+  return value;
 }
 
 function decodeHostedExecutionPlatformEnvelopeKeyring(input: {

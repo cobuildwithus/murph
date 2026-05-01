@@ -24,6 +24,12 @@ The live ownership split is:
 - `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
+  When hosted runtime crypto is configured, Cloudflare fetches signed
+  ingress/runtime root envelopes from web through the signed
+  `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority
+  signature, and unwraps only its `cloudflare-automation-secret` recipient. The
+  signed full envelopes are disclosed to preserve signature verification over
+  the web-authored body; Cloudflare still has no GCP KMS decrypt authority.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
   rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.

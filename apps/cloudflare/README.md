@@ -107,7 +107,10 @@ Optional execution vars and secrets:
   optional `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`,
   `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`, and
   `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK` when the runner unwraps
-  signed ingress/runtime root envelopes from web
+  signed ingress/runtime root envelopes from web. Web returns the signed full
+  ingress/runtime root envelopes so Cloudflare can verify the authority
+  signature before selecting only its `cloudflare-automation-secret` recipient
+  wrap.
 - Codex hosted assistant config plus `VERCEL_AI_API_KEY` for Vercel AI Gateway
 - `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`, `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED`, and `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
