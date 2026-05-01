@@ -68,8 +68,13 @@ describe("review-gpt context packaging", () => {
     const packageJson = readFileSync(path.join(repoRoot, "package.json"), "utf8");
     const packageScript = readFileSync(path.join(repoRoot, "scripts", "package-audit-context.sh"), "utf8");
     const protocolWrapper = readFileSync(path.join(repoRoot, "scripts", "review-gpt-protocol.sh"), "utf8");
+    const browserProfileWrapper = readFileSync(
+      path.join(repoRoot, "scripts", "review-gpt-browser-profile.sh"),
+      "utf8",
+    );
 
     expect(config).toContain('package_script="scripts/package-review-gpt-context.sh"');
+    expect(config).toContain('repo_context_url="https://github.com/cobuildwithus/murph"');
     expect(fullConfig).toContain('package_script="scripts/package-review-gpt-context-full.sh"');
     expect(protocolConfig).toContain('package_script="scripts/package-review-gpt-protocol-context.sh"');
     expect(protocolTargetConfig).toContain(
@@ -80,10 +85,77 @@ describe("review-gpt context packaging", () => {
     expect(packageJson).toContain('"review:gpt:protocol:all"');
     expect(packageJson).not.toContain("review:gpt:protocol:finnish-sauna");
     expect(protocolWrapper).toContain("resolve_protocol_slug");
+    expect(browserProfileWrapper).toContain("review-gpt-link-context.mjs");
+    expect(browserProfileWrapper).toContain('scripts/review-gpt.config.sh');
     expect(config).toContain('"output-packages/**"');
     expect(config).toContain('"packages/health-commons/content/**"');
     expect(config).toContain('"packages/health-commons/generated/**"');
     expect(protocolConfig).toContain('"packages/health-commons/content/**"');
+  });
+
+  it("stages normal review-gpt as GitHub-link context without attachments", () => {
+    const result = spawnSync(
+      "node",
+      [
+        "scripts/review-gpt-link-context.mjs",
+        "--repo-root",
+        repoRoot,
+        "--config",
+        "scripts/review-gpt.config.sh",
+        "--context-url",
+        "https://github.com/cobuildwithus/murph",
+        "--dry-run",
+        "--preset",
+        "architecture",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stdout).toContain("Repository context URL: https://github.com/cobuildwithus/murph");
+    expect(result.stdout).toContain("Attachments: disabled");
+    expect(result.stdout).not.toContain("ZIP:");
+    expect(result.stdout).not.toContain("Repomix attachment");
+  });
+
+  it("keeps upstream review-gpt discovery flags out of the link-only wrapper", () => {
+    const browserProfileWrapper = readFileSync(
+      path.join(repoRoot, "scripts", "review-gpt-browser-profile.sh"),
+      "utf8",
+    );
+
+    expect(browserProfileWrapper).toContain('murph_review_gpt_args_include_option --dry-run "$@"');
+    expect(browserProfileWrapper).toContain('murph_review_gpt_args_include_option --list-presets "$@"');
+    expect(browserProfileWrapper).toContain('exec pnpm exec cobuild-review-gpt --config "$config_path" "$@"');
+  });
+
+  it("rejects non-Murph review-gpt context URLs before staging", () => {
+    const result = spawnSync(
+      "node",
+      [
+        "scripts/review-gpt-link-context.mjs",
+        "--repo-root",
+        repoRoot,
+        "--config",
+        "scripts/review-gpt.config.sh",
+        "--context-url",
+        "file:///tmp/local-repo.zip",
+        "--dry-run",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Unsupported review-gpt context URL. Expected https://github.com/cobuildwithus/murph.",
+    );
+    expect(result.stderr).not.toContain(repoRoot);
   });
 
   it("omits output packages and Health Commons data from the normal review-gpt ZIP", () => {
