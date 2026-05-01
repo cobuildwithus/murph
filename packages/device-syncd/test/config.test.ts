@@ -193,8 +193,6 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "GARMIN_TOKEN_BASE_URL",
     "JUNCTION_BASE_URL",
     "JUNCTION_ENV",
-    "JUNCTION_GLOBAL_CONCURRENCY",
-    "JUNCTION_PER_ACCOUNT_CONCURRENCY",
     "JUNCTION_PROVIDER_FILTER",
     "JUNCTION_RECONCILE_DAYS",
     "JUNCTION_RECONCILE_INTERVAL_MS",
