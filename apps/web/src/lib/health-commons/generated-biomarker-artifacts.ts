@@ -85,8 +85,10 @@ export function loadGeneratedBiomarkerProjection(
     return null;
   }
   const routeId = routeIdFromBundlePath(route.bundlePath);
-  const artifactPath = route.projections?.[projectionKey]
-    ?? biomarkerProjectionPathForRouteId(projectionKey, routeId);
+  const artifactPath = route.projections?.[projectionKey];
+  if (!artifactPath) {
+    return null;
+  }
   assertProjectionPathMatchesRoute(projectionKey, artifactPath, routeId);
 
   return readCachedBiomarkerProjection(

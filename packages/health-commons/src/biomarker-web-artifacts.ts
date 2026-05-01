@@ -9,6 +9,7 @@ import type {
   HealthCommonsExpectedSignalDescription,
   HealthCommonsExpectedSignalEstimate,
   HealthCommonsSource,
+  StoredMedia,
 } from "@murphai/contracts";
 
 export const HEALTH_COMMONS_WEB_BIOMARKER_SHELL_SCHEMA_VERSION =
@@ -83,6 +84,7 @@ export interface HealthCommonsWebBiomarkerProtocolRankingModel {
   expectedSignalLabel: string;
   fitLabel: "Context" | "Exploratory" | "Good" | "Strong";
   href: string;
+  image: string | null;
   key: string;
   mechanism: string;
   title: string;
@@ -527,6 +529,7 @@ function toProtocolRanking(input: {
       expectedSignalLabel: formatExpectedSignalLabel(input.signal, expectedDirection),
       fitLabel: fitLabelForScore(rankScore),
       href: `/experiments/${toProtocolExperimentRouteId(input.protocol, input.routeIdByEntityKey)}`,
+      image: resolveProtocolPageImage(input.protocol),
       key: input.protocol.key,
       mechanism: input.signal.description,
       title: input.protocol.title,
@@ -825,6 +828,71 @@ function toProtocolExperimentRouteId(
   routeIdByEntityKey: ReadonlyMap<string, string>,
 ): string {
   return routeIdByEntityKey.get(protocol.key) ?? toTrailingRouteId(protocol.slug);
+}
+
+function resolveProtocolPageImage(protocol: HealthCommonsCatalogEntity): string | null {
+  const imageEntry = readProtocolMedia(protocol).find(isProtocolImageMedia);
+
+  if (!imageEntry) {
+    return null;
+  }
+
+  return imageEntry.relativePath.startsWith("/")
+    ? imageEntry.relativePath
+    : `/${imageEntry.relativePath}`;
+}
+
+function readProtocolMedia(protocol: HealthCommonsCatalogEntity): StoredMedia[] {
+  const protocolRecord = protocol as Record<string, unknown>;
+  const media = protocolRecord["media"];
+
+  if (!Array.isArray(media)) {
+    return [];
+  }
+
+  return media.filter(isStoredMediaEntry);
+}
+
+function isStoredMediaEntry(value: unknown): value is StoredMedia {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  const kind = record["kind"];
+  const relativePath = record["relativePath"];
+  const caption = record["caption"];
+
+  if (
+    kind !== "photo" &&
+    kind !== "video" &&
+    kind !== "gif" &&
+    kind !== "image" &&
+    kind !== "other"
+  ) {
+    return false;
+  }
+
+  if (typeof relativePath !== "string" || relativePath.length === 0) {
+    return false;
+  }
+
+  if (
+    record["mediaType"] !== undefined &&
+    (typeof record["mediaType"] !== "string" || record["mediaType"].length === 0)
+  ) {
+    return false;
+  }
+
+  return caption === undefined || typeof caption === "string";
+}
+
+function isProtocolImageMedia(media: StoredMedia): boolean {
+  return (
+    media.kind === "photo" ||
+    media.kind === "image" ||
+    media.mediaType?.startsWith("image/") === true
+  );
 }
 
 function formatProtocolCategory(protocol: HealthCommonsCatalogEntity): string {

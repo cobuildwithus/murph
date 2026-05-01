@@ -517,6 +517,25 @@ const EXPERIMENT_PROJECTION_SPECS: readonly HealthCommonsWebExperimentProjection
   },
 ];
 
+function projectionPathsForPublishedBiomarkerRoute(
+  entity: HealthCommonsCatalogEntity,
+  routeId: string,
+  allEntities: Iterable<HealthCommonsCatalogEntity>,
+): Partial<Record<HealthCommonsWebProjectionKey, string>> | undefined {
+  if (
+    entity.entityType !== "biomarker"
+    || !isPublishedBiomarkerIndexEntity(entity, allEntities)
+  ) {
+    return undefined;
+  }
+
+  return {
+    "biomarker.shell": `shell/biomarkers/${routeId}.json`,
+    "biomarker.overview": `pages/biomarkers/${routeId}/overview.json`,
+    "biomarker.research": `pages/biomarkers/${routeId}/research.json`,
+  };
+}
+
 export function buildHealthCommonsWebGeneratedArtifacts(
   catalog: HealthCommonsCatalog,
 ): HealthCommonsWebGeneratedArtifacts {
@@ -545,7 +564,8 @@ export function buildHealthCommonsWebGeneratedArtifacts(
     routeIdByEntityKey.set(entity.key, routeId);
     const bundlePath = bundlePathForEntity(entity.entityType, routeId);
     const aliases = routeIds.filter((candidate) => candidate !== routeId);
-    const projections = projectionPathsForRoute(entity, routeId);
+    const projections = projectionPathsForRoute(entity, routeId)
+      ?? projectionPathsForPublishedBiomarkerRoute(entity, routeId, entitiesByKey.values());
     if (routeBundles.has(bundlePath)) {
       throw new Error(`Duplicate Health Commons web bundle path generated for ${bundlePath}.`);
     }
@@ -2234,14 +2254,6 @@ function projectionPathsForRoute(
   entity: HealthCommonsCatalogEntity,
   routeId: string,
 ): Partial<Record<HealthCommonsWebProjectionKey, string>> | null {
-  if (entity.entityType === "biomarker") {
-    return {
-      "biomarker.overview": `pages/biomarkers/${routeId}/overview.json`,
-      "biomarker.research": `pages/biomarkers/${routeId}/research.json`,
-      "biomarker.shell": `shell/biomarkers/${routeId}.json`,
-    };
-  }
-
   if (isPublicProtocolVariant(entity)) {
     const projections: Partial<Record<HealthCommonsWebProjectionKey, string>> = {};
     for (const spec of EXPERIMENT_PROJECTION_SPECS) {

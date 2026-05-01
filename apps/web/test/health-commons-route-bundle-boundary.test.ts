@@ -76,6 +76,22 @@ describe("Health Commons route-bundle boundary", () => {
     }
   });
 
+  it("keeps biomarker experiment cards on projected protocol images", () => {
+    const files = [
+      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-card.tsx",
+      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-card-hero.tsx",
+      "apps/web/src/components/biomarkers/biomarker-detail/biomarker-experiment-row.tsx",
+    ];
+
+    for (const relativePath of files) {
+      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
+
+      expect(source, `${relativePath} should not N+1 load experiment shells`).not.toContain(
+        "resolveHealthCommonsExperimentShell",
+      );
+    }
+  });
+
   it("fails if existing Next traces include the monolithic generated catalog in public Health Commons routes", () => {
     const traceRoots = [
       "apps/web/.next",

@@ -4,7 +4,6 @@ import Link from "next/link";
 import type {
   BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-projections";
-import { resolveHealthCommonsExperimentShell } from "@/src/lib/health-commons/experiment-projections";
 import { cn } from "@/src/lib/utils";
 import { biomarkerFitToneClassName } from "./biomarker-fit-tone";
 
@@ -15,9 +14,7 @@ export function BiomarkerExperimentCard({
 }: {
   protocol: BiomarkerProtocolRankingModel;
 }) {
-  const experimentId = extractExperimentSlug(protocol.href);
-  const shell = experimentId ? resolveHealthCommonsExperimentShell(experimentId) : null;
-  const imageSrc = shell?.image ?? null;
+  const imageSrc = protocol.image;
   const directionArrow = directionArrowFor(protocol.expectedDirection);
 
   const expectedHighlight = `${directionArrow} ${protocol.expectedSignalLabel}`;
@@ -126,11 +123,6 @@ function Pill({ children }: { children: string }) {
       {children}
     </span>
   );
-}
-
-function extractExperimentSlug(href: string): string | null {
-  const match = href.match(/\/experiments\/([^/?#]+)/u);
-  return match ? match[1] : null;
 }
 
 function directionArrowFor(direction: BiomarkerProtocolRankingModel["expectedDirection"]): string {
