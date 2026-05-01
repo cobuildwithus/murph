@@ -248,7 +248,8 @@ async function createSignedHostedDomainRootEnvelope(input: {
   if (
     (input.domain === "ingress" || input.domain === "runtime") &&
     config.teeRuntimePublicJwk &&
-    config.teeRuntimeRecipientKeyId
+    config.teeRuntimeRecipientKeyId &&
+    config.teeRuntimeAttestedPolicyId
   ) {
     wraps.push(
       await createEcdhWrap({

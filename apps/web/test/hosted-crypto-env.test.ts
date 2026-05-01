@@ -56,6 +56,37 @@ test("hosted crypto env rejects private components in public recipient keys", ()
   ).toThrow(/must be a public P-256 EC JWK/u);
 });
 
+test("hosted crypto env rejects partial optional recipient configuration", () => {
+  expect(() =>
+    getHostedWebCryptoConfig({
+      ...buildEnv(),
+      HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK: JSON.stringify(PUBLIC_JWK),
+    }),
+  ).toThrow(/HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK and HOSTED_CRYPTO_RECOVERY_KEY_ID/u);
+
+  expect(() =>
+    getHostedWebCryptoConfig({
+      ...buildEnv(),
+      HOSTED_CRYPTO_RECOVERY_KEY_ID: "recovery-key-v1",
+    }),
+  ).toThrow(/HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK and HOSTED_CRYPTO_RECOVERY_KEY_ID/u);
+
+  expect(() =>
+    getHostedWebCryptoConfig({
+      ...buildEnv(),
+      HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID: "tee-runtime-v1",
+      HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK: JSON.stringify(PUBLIC_JWK),
+    }),
+  ).toThrow(/HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID/u);
+
+  expect(() =>
+    getHostedWebCryptoConfig({
+      ...buildEnv(),
+      HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID: "tee-policy-v1",
+    }),
+  ).toThrow(/HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK/u);
+});
+
 test("hosted crypto env rejects static GCP access tokens in production by default", () => {
   expect(() =>
     getHostedWebCryptoConfig(buildEnv({

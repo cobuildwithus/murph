@@ -23,6 +23,11 @@ export function getHostedWebCryptoConfig(
   if (cachedConfig && source === process.env && process.env.NODE_ENV !== "test") {
     return cachedConfig;
   }
+  const recoveryRecipient = readOptionalRecipientKeyPair(source, {
+    keyIdEnv: "HOSTED_CRYPTO_RECOVERY_KEY_ID",
+    publicJwkEnv: "HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK",
+  });
+  const teeRuntimeRecipient = readOptionalTeeRuntimeRecipient(source);
   const config: HostedWebCryptoConfig = {
     authoritySignKeyVersionName: readRequiredEnv(
       source,
@@ -42,11 +47,11 @@ export function getHostedWebCryptoConfig(
     ),
     env: readHostedCryptoEnv(source),
     gcpKms: createHostedGcpKmsClientFromEnv(source),
-    recoveryPublicJwk: readOptionalJsonWebKey(source, "HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK"),
-    recoveryRecipientKeyId: readOptionalEnv(source, "HOSTED_CRYPTO_RECOVERY_KEY_ID"),
-    teeRuntimeAttestedPolicyId: readOptionalEnv(source, "HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID"),
-    teeRuntimePublicJwk: readOptionalJsonWebKey(source, "HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK"),
-    teeRuntimeRecipientKeyId: readOptionalEnv(source, "HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID"),
+    recoveryPublicJwk: recoveryRecipient.publicJwk,
+    recoveryRecipientKeyId: recoveryRecipient.keyId,
+    teeRuntimeAttestedPolicyId: teeRuntimeRecipient.policyId,
+    teeRuntimePublicJwk: teeRuntimeRecipient.publicJwk,
+    teeRuntimeRecipientKeyId: teeRuntimeRecipient.keyId,
     webWrapKmsKeyName: readRequiredEnv(source, "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME"),
   };
   if (source === process.env && process.env.NODE_ENV !== "test") {
@@ -65,6 +70,47 @@ function readRequiredJsonWebKey(source: NodeJS.ProcessEnv, key: string): JsonWeb
     throw new TypeError(`${key} must be configured for hosted crypto.`);
   }
   return jwk;
+}
+
+function readOptionalTeeRuntimeRecipient(source: NodeJS.ProcessEnv): {
+  keyId: string | null;
+  policyId: string | null;
+  publicJwk: JsonWebKey | null;
+} {
+  const recipient = readOptionalRecipientKeyPair(source, {
+    keyIdEnv: "HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID",
+    publicJwkEnv: "HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK",
+  });
+  const policyId = readOptionalEnv(source, "HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID");
+  if (recipient.publicJwk && recipient.keyId && !policyId) {
+    throw new TypeError(
+      "HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID must be configured with hosted crypto TEE runtime recipient keys.",
+    );
+  }
+  if ((!recipient.publicJwk || !recipient.keyId) && policyId) {
+    throw new TypeError(
+      "HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK, HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID, and HOSTED_CRYPTO_TEE_RUNTIME_POLICY_ID must be configured together for hosted crypto.",
+    );
+  }
+  return {
+    keyId: recipient.keyId,
+    policyId,
+    publicJwk: recipient.publicJwk,
+  };
+}
+
+function readOptionalRecipientKeyPair(
+  source: NodeJS.ProcessEnv,
+  keys: { keyIdEnv: string; publicJwkEnv: string },
+): { keyId: string | null; publicJwk: JsonWebKey | null } {
+  const publicJwk = readOptionalJsonWebKey(source, keys.publicJwkEnv);
+  const keyId = readOptionalEnv(source, keys.keyIdEnv);
+  if ((publicJwk && !keyId) || (!publicJwk && keyId)) {
+    throw new TypeError(
+      `${keys.publicJwkEnv} and ${keys.keyIdEnv} must be configured together for hosted crypto.`,
+    );
+  }
+  return { keyId, publicJwk };
 }
 
 function readOptionalJsonWebKey(source: NodeJS.ProcessEnv, key: string): JsonWebKey | null {
