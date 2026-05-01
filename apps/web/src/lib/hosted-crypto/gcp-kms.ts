@@ -154,10 +154,16 @@ function createHostedGcpAccessTokenProviderFromEnv(
   if (staticAccessToken) {
     if (
       source.NODE_ENV === "production"
-      && readOptionalEnv(source, "HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN") !== "1"
+      || source.VERCEL_ENV === "production"
+      || source.HOSTED_CRYPTO_ENV === "prod"
     ) {
       throw new TypeError(
-        "HOSTED_CRYPTO_GCP_ACCESS_TOKEN is only allowed in production when HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN=1.",
+        "HOSTED_CRYPTO_GCP_ACCESS_TOKEN is not allowed in production; use Vercel OIDC / GCP Workload Identity Federation.",
+      );
+    }
+    if (readOptionalEnv(source, "HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV") !== "1") {
+      throw new TypeError(
+        "HOSTED_CRYPTO_GCP_ACCESS_TOKEN requires HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV=1.",
       );
     }
     return new StaticHostedGcpAccessTokenProvider(staticAccessToken);

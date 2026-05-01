@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
@@ -8,7 +9,6 @@ import type {
   HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
 
-import { readHostedExecutionEnvironment } from "../src/env.ts";
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
@@ -18,11 +18,14 @@ import {
   hostedBrowserVaultReplicaUserPrefix,
   hostedBundleUserPrefix,
   hostedRunnerSecretsObjectKey,
-  hostedUserRootKeyEnvelopeObjectKey,
 } from "../src/storage-paths.ts";
-import { createHostedUserKeyStoreFromEnvironment } from "../src/user-key-store.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
+import {
+  createTestHostedRuntimeCryptoContext,
+  getTestHostedRuntimeRootKey,
+} from "./hosted-runtime-crypto-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
@@ -141,7 +144,7 @@ describe("HostedUserRunner alarm routing", () => {
   it("treats stale duplicate alarms without pending work as no-ops", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       "UPDATE runner_meta SET next_wake_at = ?, pending_nudge = 0 WHERE user_id = ?",
@@ -275,7 +278,7 @@ describe("HostedUserRunner alarm routing", () => {
         deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
         supported: false,
-        userScopedSkipReason: "Error",
+        userScopedSkipReason: "R2PrefixDeletionUnsupported",
       },
       userId: "member_123",
     });
@@ -285,31 +288,16 @@ describe("HostedUserRunner alarm routing", () => {
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
-  it("keeps the root-key envelope when user-scoped R2 prefixes cannot be derived", async () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
-      environment.platformEnvelopeKey,
-      "member_123",
-    );
+  it("skips user-scoped R2 prefixes when the web crypto context is unavailable", async () => {
     const r2Deletes: string[] = [];
     const { runner } = createRunnerHarness({
+      cryptoContextStatus: 404,
       bucket: {
         async delete(key: string) {
           r2Deletes.push(key);
         },
-        async get(key: string) {
-          if (key !== rootEnvelopeKey) {
-            return null;
-          }
-
-          return {
-            async arrayBuffer(): Promise<ArrayBuffer> {
-              const bytes = new TextEncoder().encode("not a valid root envelope");
-              return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-            },
-          };
+        async get() {
+          return null;
         },
         async put() {},
       },
@@ -321,6 +309,7 @@ describe("HostedUserRunner alarm routing", () => {
       r2: {
         deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
+        userScopedSkipReason: "HostedUserCryptoRepairNeededError",
       },
       userId: "member_123",
     });
@@ -328,22 +317,8 @@ describe("HostedUserRunner alarm routing", () => {
     expect(r2Deletes).toEqual([]);
   });
 
-  it("keeps the root-key envelope when R2 prefix listing is unavailable", async () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
+  it("skips user-scoped R2 prefixes when R2 prefix listing is unavailable", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    await createHostedUserKeyStoreFromEnvironment({
-      bucket,
-      environment,
-    }).provisionManagedUserCryptoAtActivation("member_123", {
-      reason: "test-bootstrap",
-    });
-    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
-      environment.platformEnvelopeKey,
-      "member_123",
-    );
-    expect(bucket.objects.has(rootEnvelopeKey)).toBe(true);
     const { runner } = createRunnerHarness({
       bucket,
     });
@@ -360,38 +335,19 @@ describe("HostedUserRunner alarm routing", () => {
       userId: "member_123",
     });
 
-    expect(bucket.objects.has(rootEnvelopeKey)).toBe(true);
     expect(bucket.deleted).toEqual([]);
   });
 
-  it("deletes user-scoped R2 prefixes, runner secrets, and root-key envelope when cleanup is fully supported", async () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
+  it("deletes user-scoped R2 prefixes and runner secrets when cleanup is fully supported", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
-    await createHostedUserKeyStoreFromEnvironment({
-      bucket,
-      environment,
-    }).provisionManagedUserCryptoAtActivation("member_123", {
-      reason: "test-bootstrap",
-    });
-    const userCrypto = await createHostedUserKeyStoreFromEnvironment({
-      bucket,
-      environment,
-    }).requireUserCryptoContext("member_123", {
-      reason: "test-cleanup",
-    });
-    const bundlePrefix = await hostedBundleUserPrefix(userCrypto.rootKey, "member_123");
-    const artifactPrefix = await hostedArtifactUserPrefix(userCrypto.rootKey, "member_123");
+    const rootKey = getTestHostedRuntimeRootKey("runtime");
+    const bundlePrefix = await hostedBundleUserPrefix(rootKey, "member_123");
+    const artifactPrefix = await hostedArtifactUserPrefix(rootKey, "member_123");
     const browserVaultPrefix = await hostedBrowserVaultReplicaUserPrefix({
-      rootKey: userCrypto.rootKey,
+      rootKey,
       userId: "member_123",
     });
-    const runnerSecretsKey = await hostedRunnerSecretsObjectKey(userCrypto.rootKey, "member_123");
-    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
-      environment.platformEnvelopeKey,
-      "member_123",
-    );
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, "member_123");
     await bucket.put(`${bundlePrefix}bundle.bundle.json`, "bundle");
     await bucket.put(`${artifactPrefix}artifact.artifact.bin`, "artifact");
     await bucket.put(`${browserVaultPrefix}replica.json`, "replica");
@@ -405,8 +361,8 @@ describe("HostedUserRunner alarm routing", () => {
     await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
       ok: true,
       r2: {
-        deletedObjectCount: 5,
-        deletedRootKeyEnvelope: true,
+        deletedObjectCount: 4,
+        deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: false,
         supported: true,
         userScopedSkipReason: null,
@@ -418,19 +374,17 @@ describe("HostedUserRunner alarm routing", () => {
     expect(bucket.objects.has(`${artifactPrefix}artifact.artifact.bin`)).toBe(false);
     expect(bucket.objects.has(`${browserVaultPrefix}replica.json`)).toBe(false);
     expect(bucket.objects.has(runnerSecretsKey)).toBe(false);
-    expect(bucket.objects.has(rootEnvelopeKey)).toBe(false);
     expect(bucket.objects.get("users/bundles/unrelated/vault/object.bundle.json")).toBe("unrelated");
     expect(new Set(bucket.deleted)).toEqual(new Set([
       `${bundlePrefix}bundle.bundle.json`,
       `${artifactPrefix}artifact.artifact.bin`,
       `${browserVaultPrefix}replica.json`,
       runnerSecretsKey,
-      rootEnvelopeKey,
     ]));
   });
 });
 
-describe("HostedUserRunner first-workspace crypto bootstrap", () => {
+describe("HostedUserRunner runtime crypto context", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -457,7 +411,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       }
       throw new Error("Unexpected extra workspace invocation.");
     });
-    const { alarms, runner } = createRunnerBootstrapHarness(null, {
+    const { alarms, runner } = createRunnerCryptoContextHarness(null, {
       invoke,
     });
     await runner.bindUser("member_123");
@@ -512,7 +466,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       }
       throw new Error("Unexpected extra workspace invocation.");
     });
-    const { runner } = createRunnerBootstrapHarness(null, { invoke });
+    const { runner } = createRunnerCryptoContextHarness(null, { invoke });
     await runner.bindUser("member_123");
 
     await runner.nudgeHostedRunner();
@@ -556,7 +510,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       }
       throw new Error("Unexpected extra workspace invocation.");
     });
-    const { alarms, runner } = createRunnerBootstrapHarness(null, {
+    const { alarms, runner } = createRunnerCryptoContextHarness(null, {
       invoke,
     });
     await runner.bindUser("member_123");
@@ -613,7 +567,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       }
       throw new Error("Unexpected extra workspace invocation.");
     });
-    const { alarms, runner } = createRunnerBootstrapHarness(null, {
+    const { alarms, runner } = createRunnerCryptoContextHarness(null, {
       invoke,
     });
     await runner.bindUser("member_123");
@@ -647,7 +601,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: null;
       status: "idle";
     }>();
-    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null, {
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
       invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
     });
     await runner.bindUser("member_123");
@@ -700,7 +654,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: null;
       status: "idle";
     }>();
-    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null, {
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
       invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
     });
     await runner.bindUser("member_123");
@@ -741,7 +695,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: null;
       status: "idle";
     }>();
-    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+    const { alarms, invoke, runner } = createRunnerCryptoContextHarness(null, {
       invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
     });
     await runner.bindUser("member_123");
@@ -780,7 +734,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: null;
       status: "idle";
     }>();
-    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null, {
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
       invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
     });
     await runner.bindUser("member_123");
@@ -818,7 +772,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: string;
       status: "idle";
     }>();
-    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+    const { alarms, invoke, runner } = createRunnerCryptoContextHarness(null, {
       invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
     });
     await runner.bindUser("member_123");
@@ -848,7 +802,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("keeps a newly observed persisted-only invocation pending until the orphan grace deadline", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -880,7 +834,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("clears a persisted-only invocation on the second wake after orphan observation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -919,7 +873,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("clears a persisted-only invocation after the observed orphan grace and starts a replacement", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -960,7 +914,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("reports an expired persisted-only invocation as not running so the route can enqueue recovery", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { runner, sql } = createRunnerBootstrapHarness(null);
+    const { runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -990,7 +944,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("moves a pending nudge to the orphan check deadline when lease liveness clears orphan observation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, runner, sql } = createRunnerBootstrapHarness(null);
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -1026,7 +980,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("moves a pending nudge to the orphan check deadline when checkpoint liveness clears orphan observation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, runner, sql } = createRunnerBootstrapHarness(null);
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -1062,7 +1016,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("records heartbeat liveness and schedules pending work at the next orphan check deadline", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, runner, sql } = createRunnerBootstrapHarness(null);
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -1102,7 +1056,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   it("clears a persisted-only invocation after the last heartbeat grace and starts a replacement", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:46.000Z"));
-    const { invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -1134,8 +1088,8 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     expect(invoke).toHaveBeenCalledOnce();
   });
 
-  it("provisions managed user crypto before invoking a version-0 workspace without a snapshot", async () => {
-    const { invoke, runner } = createRunnerBootstrapHarness(createWorkspaceState({
+  it("uses the web crypto context before invoking a version-0 workspace without a snapshot", async () => {
+    const { invoke, runner } = createRunnerCryptoContextHarness(createWorkspaceState({
       snapshotRef: null,
       version: "0",
     }));
@@ -1156,17 +1110,10 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
         }),
       }),
     );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.user-key-store",
-        message: "root-key-bootstrap: member-activation-workspace-bootstrap",
-        userId: "member_123",
-      }),
-    );
   });
 
-  it("provisions managed user crypto before invoking when the web workspace is absent", async () => {
-    const { invoke, runner } = createRunnerBootstrapHarness(null);
+  it("uses the web crypto context before invoking when the web workspace is absent", async () => {
+    const { invoke, runner } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
@@ -1184,61 +1131,54 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
         }),
       }),
     );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.user-key-store",
-        message: "root-key-bootstrap: member-activation-workspace-bootstrap",
-        userId: "member_123",
-      }),
-    );
   });
 
-  it("keeps missing crypto fail-closed for version-0 workspaces with a snapshot", async () => {
-    const { invoke, runner } = createRunnerBootstrapHarness(createWorkspaceState({
+  it("keeps crypto-context fetch failures fail-closed for version-0 workspaces with a snapshot", async () => {
+    const { invoke, runner } = createRunnerCryptoContextHarness(createWorkspaceState({
       snapshotRef: createBundleRef("checkpointed"),
       version: "0",
-    }));
+    }), { cryptoContextStatus: 404 });
     await runner.bindUser("member_123");
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
       name: "HostedUserCryptoRepairNeededError",
-      reason: "missing-envelope",
+      reason: "runner-store-refresh",
+      status: 404,
     });
 
     expect(invoke).not.toHaveBeenCalled();
-    expectBootstrapAuditLogNotEmitted();
   });
 
-  it("keeps missing crypto fail-closed for nonzero workspace versions with a snapshot", async () => {
-    const { invoke, runner } = createRunnerBootstrapHarness(createWorkspaceState({
+  it("keeps crypto-context fetch failures fail-closed for nonzero workspace versions with a snapshot", async () => {
+    const { invoke, runner } = createRunnerCryptoContextHarness(createWorkspaceState({
       snapshotRef: createBundleRef("checkpointed"),
       version: "1",
-    }));
+    }), { cryptoContextStatus: 404 });
     await runner.bindUser("member_123");
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
       name: "HostedUserCryptoRepairNeededError",
-      reason: "missing-envelope",
+      reason: "runner-store-refresh",
+      status: 404,
     });
 
     expect(invoke).not.toHaveBeenCalled();
-    expectBootstrapAuditLogNotEmitted();
   });
 
-  it("keeps missing crypto fail-closed for nonzero workspace versions without a snapshot", async () => {
-    const { invoke, runner } = createRunnerBootstrapHarness(createWorkspaceState({
+  it("keeps crypto-context fetch failures fail-closed for nonzero workspace versions without a snapshot", async () => {
+    const { invoke, runner } = createRunnerCryptoContextHarness(createWorkspaceState({
       snapshotRef: null,
       version: "1",
-    }));
+    }), { cryptoContextStatus: 404 });
     await runner.bindUser("member_123");
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
       name: "HostedUserCryptoRepairNeededError",
-      reason: "missing-envelope",
+      reason: "runner-store-refresh",
+      status: 404,
     });
 
     expect(invoke).not.toHaveBeenCalled();
-    expectBootstrapAuditLogNotEmitted();
   });
 });
 
@@ -1248,6 +1188,7 @@ function createRunnerHarness(options: {
     get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
     put(key: string, value: string): Promise<void>;
   };
+  cryptoContextStatus?: number;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
 } = {}) {
   const sql = createTestSqlStorage();
@@ -1285,6 +1226,7 @@ function createRunnerHarness(options: {
     },
     async put() {},
   };
+  mockRuntimeCryptoContextWebControl(options.cryptoContextStatus ?? 200);
 
   return {
     alarms,
@@ -1331,9 +1273,10 @@ function createRunnerContainerNamespace(
   };
 }
 
-function createRunnerBootstrapHarness(
+function createRunnerCryptoContextHarness(
   workspace: HostedWorkspaceState | null,
   options: {
+    cryptoContextStatus?: number;
     invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
   } = {},
 ) {
@@ -1371,10 +1314,18 @@ function createRunnerBootstrapHarness(
   }));
 
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
+    boundUserId?: string;
     path: string;
   }) => {
+    if (input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH) {
+      if (options.cryptoContextStatus && options.cryptoContextStatus !== 200) {
+        return Response.json({ error: "Unavailable" }, { status: options.cryptoContextStatus });
+      }
+      return Response.json(await createTestHostedRuntimeCryptoContext(input.boundUserId ?? "member_123"));
+    }
+
     if (input.path !== HOSTED_RUNTIME_WORKSPACE_PATH) {
-      throw new Error(`Unexpected web control path in bootstrap test: ${input.path}`);
+      throw new Error(`Unexpected web control path in runtime crypto context test: ${input.path}`);
     }
 
     return createWorkspaceReadResponseBody(workspace);
@@ -1417,6 +1368,23 @@ function createRunnerBootstrapHarness(
     runner,
     sql,
   };
+}
+
+function mockRuntimeCryptoContextWebControl(status: number): void {
+  mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
+    boundUserId?: string;
+    path: string;
+  }) => {
+    if (input.path !== HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH) {
+      throw new Error(`Unexpected web control path in deletion test: ${input.path}`);
+    }
+
+    if (status !== 200) {
+      return Response.json({ error: "Unavailable" }, { status });
+    }
+
+    return Response.json(await createTestHostedRuntimeCryptoContext(input.boundUserId ?? "member_123"));
+  });
 }
 
 function createDeferred<T>() {
@@ -1496,14 +1464,4 @@ function createBundleRef(id: string) {
     size: 128,
     updatedAt: "2026-04-26T00:00:00.000Z",
   };
-}
-
-function expectBootstrapAuditLogNotEmitted(): void {
-  expect(
-    mocks.emitHostedExecutionStructuredLog.mock.calls.some(([record]) =>
-      record.component === "hosted.user-key-store"
-      && typeof record.message === "string"
-      && record.message.includes("member-activation-workspace-bootstrap")
-    ),
-  ).toBe(false);
 }

@@ -63,21 +63,16 @@ Set these in the selected GitHub environment as secrets:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
-- `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
-- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
-- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
-- `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
-- `HOSTED_WAKE_ENCRYPTION_KEY`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
-The wake encryption key is execution-only and should decrypt hosted mailbox payloads only. Do not reuse the broader web-owned `HOSTED_WEB_ENCRYPTION_*` private-field lane in Cloudflare.
+The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 
 ## Optional Vars
 
 Core execution tuning:
 
-- `CF_PLATFORM_ENVELOPE_KEY_ID` defaults to `v1`
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
@@ -102,17 +97,12 @@ Signed hosted-web callback metadata:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 
-Hosted mailbox encryption rotation metadata:
+Hosted crypto authority metadata:
 
-- `HOSTED_WAKE_ENCRYPTION_KEY_VERSION`
-
-Execution recipient key metadata:
-
-- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID`
-
-Optional TEE metadata:
-
-- `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID` when `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` is configured
+- `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`
+- `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
+- `HOSTED_CRYPTO_ENV`
 
 Hosted assistant config:
 
@@ -181,13 +171,6 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 ## Optional Secrets
 
-Key rotation and future envelope lanes:
-
-- `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`
-- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`
-- `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK`
-- `HOSTED_WAKE_ENCRYPTION_KEYRING_JSON`
-
 Hosted assistant provider secrets:
 
 - `VERCEL_AI_API_KEY` when the hosted assistant should call Vercel AI Gateway through Codex
@@ -236,11 +219,11 @@ export HOSTED_EXECUTION_DEPLOY_CONTEXT=preview
 export HOSTED_WEB_BASE_URL=https://web.example.test
 export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=your-team
 export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=your-project
-export HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=...
-export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
-export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...
-export HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK=...
-export HOSTED_WAKE_ENCRYPTION_KEY=...
+export HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION=...
+export HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM=...
+export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
+export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK=...
+export HOSTED_CRYPTO_ENV=prod
 export HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=...
 
 pnpm --dir apps/cloudflare deploy:preflight

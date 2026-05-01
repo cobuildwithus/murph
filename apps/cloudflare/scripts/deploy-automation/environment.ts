@@ -50,7 +50,6 @@ export interface HostedDeployAutomationEnvironment {
   allowedRunnerSecretKeys: string | null;
   bundlesBucketName: string;
   bundlesPreviewBucketName: string;
-  platformEnvelopeKeyId: string;
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
@@ -80,7 +79,6 @@ export function readHostedDeployAutomationEnvironment(
     allowedRunnerSecretKeys: normalizeOptionalString(source.CF_ALLOWED_RUNNER_SECRET_KEYS),
     bundlesBucketName,
     bundlesPreviewBucketName,
-    platformEnvelopeKeyId: normalizeOptionalString(source.CF_PLATFORM_ENVELOPE_KEY_ID) ?? "v1",
     compatibilityDate: normalizeOptionalString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
     containerInstanceType: normalizeContainerInstanceType(
       source.CF_CONTAINER_INSTANCE_TYPE,

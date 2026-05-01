@@ -17,11 +17,7 @@ import {
 } from "../src/hosted-env-policy.ts";
 
 const requiredWorkerSecrets = {
-  HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private",
-  HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public",
-  HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-envelope",
-  HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public",
-  HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption",
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
 } satisfies Record<string, string>;
 
@@ -70,13 +66,13 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("does not allow runner secrets to override hosted control-plane prefixes", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
-        "HOSTED_WAKE_ENCRYPTION_KEY_VERSION",
+        "HOSTED_CRYPTO_ENV",
         "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
       ].join(","),
     };
 
     expect(isHostedRunnerSecretKeyAllowed(
-      "HOSTED_WAKE_ENCRYPTION_KEY_VERSION",
+      "HOSTED_CRYPTO_ENV",
       source,
     )).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(

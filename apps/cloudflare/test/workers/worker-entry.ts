@@ -13,7 +13,6 @@ import {
   type HostedExecutionEnvironment,
 } from "../../src/env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
-import { createHostedUserKeyStore } from "../../src/user-key-store.js";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -244,7 +243,6 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
       return Response.json({ error: "userId is required." }, { status: 400 });
     }
 
-    await resolveHostedUserCryptoContext(body.userId);
     return Response.json(await getUserRunnerStub(body.userId).bindUser(body.userId));
   }
 
@@ -350,29 +348,6 @@ async function driveRunnerNudgeForTest(
 
 function hostedRunnerStatusIsIdle(status: HostedRunnerStatusResponse): boolean {
   return !status.inFlight && status.mailboxLag.every((lane) => lane.lag === "0");
-}
-
-async function resolveHostedUserCryptoContext(userId: string) {
-  const environment = readHostedExecutionEnvironment(
-    asWorkerStringEnvironment(readWorkerEnvironmentSource()),
-  );
-
-  const store = createHostedUserKeyStore({
-    automationRecipientKeyId: environment.automationRecipientKeyId,
-    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
-    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
-    automationRecipientPublicKey: environment.automationRecipientPublicKey,
-    bucket: (env as { BUNDLES: R2BucketLike }).BUNDLES,
-    envelopeEncryptionKey: environment.platformEnvelopeKey,
-    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
-    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
-    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
-    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
-    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
-    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  });
-  await store.provisionManagedUserCryptoAtActivation(userId);
-  return store.requireUserCryptoContext(userId);
 }
 
 function readTestWake(value: unknown): TestWake {

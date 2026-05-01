@@ -74,6 +74,28 @@ export type HostedCryptoRecipientKind =
   | HostedCryptoKmsRecipientKind
   | HostedCryptoEcdhRecipientKind;
 
+export const HOSTED_CRYPTO_DOMAIN_RECIPIENT_KINDS: Record<
+  HostedCryptoDomain,
+  readonly HostedCryptoRecipientKind[]
+> = {
+  control: ["web-control-kms", "recovery-offline"],
+  device: ["web-device-kms", "recovery-offline"],
+  ingress: [
+    "web-ingress-kms",
+    "cloudflare-automation-secret",
+    "tee-runtime-attested",
+    "recovery-offline",
+  ],
+  runtime: ["cloudflare-automation-secret", "tee-runtime-attested", "recovery-offline"],
+} as const;
+
+export function isHostedCryptoRecipientAllowedForDomain(input: {
+  domain: HostedCryptoDomain;
+  recipient: HostedCryptoRecipientKind;
+}): boolean {
+  return HOSTED_CRYPTO_DOMAIN_RECIPIENT_KINDS[input.domain].includes(input.recipient);
+}
+
 export interface HostedGcpKmsWrappedDomainRootKey {
   additionalAuthenticatedData: string;
   ciphertextBlob: string;
@@ -179,18 +201,25 @@ export function generateHostedDomainRootKey(): Uint8Array {
 export function buildHostedDomainRootWrapContext(
   input: HostedDomainRootWrapContextInput,
 ): Record<string, string> {
+  const domain = requireHostedCryptoDomain(
+    input.domain,
+    "Hosted domain root wrap context domain",
+  );
+  const recipient = requireHostedCryptoRecipientKind(
+    input.recipient,
+    "Hosted domain root wrap context recipient",
+  );
+  assertHostedCryptoRecipientAllowedForDomain({
+    domain,
+    label: "Hosted domain root wrap context recipient",
+    recipient,
+  });
   return {
     app: "murph",
-    domain: requireHostedCryptoDomain(
-      input.domain,
-      "Hosted domain root wrap context domain",
-    ),
+    domain,
     env: requireNonEmptyString(input.env, "Hosted domain root wrap context env"),
     purpose: "hosted-domain-root-wrap",
-    recipient: requireHostedCryptoRecipientKind(
-      input.recipient,
-      "Hosted domain root wrap context recipient",
-    ),
+    recipient,
     rootKeyId: requireNonEmptyString(
       input.rootKeyId,
       "Hosted domain root wrap context rootKeyId",
@@ -256,6 +285,7 @@ export function parseHostedDomainRootKeyEnvelope(
     ),
   };
   assertUniqueHostedRecipients(body.wraps, `${label}.wraps`);
+  assertHostedDomainRootEnvelopeWrapPolicy(body, `${label}.wraps`);
   const signatureRecord = requireRecord(
     record.authoritySignature,
     `${label}.authoritySignature`,
@@ -475,6 +505,12 @@ export async function wrapHostedDomainRootKeyWithP256Ecdh(input: {
 }): Promise<HostedEcdhWrappedDomainRootKey> {
   const recipient = requireHostedCryptoEcdhRecipientKind(input.recipient, "ECDH wrap recipient");
   const recipientKeyId = requireNonEmptyString(input.recipientKeyId, "ECDH wrap recipientKeyId");
+  const rootKey = requireRootKey(input.rootKey, "ECDH wrap rootKey");
+  const teePolicyId = normalizeHostedTeePolicyId(
+    input.teePolicyId ?? null,
+    recipient,
+    "ECDH wrap teePolicyId",
+  );
   const ephemeral = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
     true,
@@ -498,27 +534,32 @@ export async function wrapHostedDomainRootKeyWithP256Ecdh(input: {
       256,
     ),
   );
+  let wrapKey: CryptoKey;
   const ephemeralPublicJwk = await crypto.subtle.exportKey("jwk", ephemeral.publicKey);
   const wrapAad = buildHostedEcdhWrapAad({
     encryptionContext: input.encryptionContext,
     ephemeralPublicJwk,
     recipient,
     recipientKeyId,
-    teePolicyId: input.teePolicyId ?? null,
+    teePolicyId,
   });
-  const wrapKey = await deriveHostedEcdhWrapKey({
-    encryptionContext: input.encryptionContext,
-    recipient,
-    recipientKeyId,
-    sharedSecret,
-    teePolicyId: input.teePolicyId ?? null,
-  });
+  try {
+    wrapKey = await deriveHostedEcdhWrapKey({
+      encryptionContext: input.encryptionContext,
+      recipient,
+      recipientKeyId,
+      sharedSecret,
+      teePolicyId,
+    });
+  } finally {
+    sharedSecret.fill(0);
+  }
   const iv = crypto.getRandomValues(new Uint8Array(HOSTED_ECDH_WRAP_IV_BYTES));
   const ciphertext = new Uint8Array(
     await crypto.subtle.encrypt(
       { additionalData: toArrayBuffer(wrapAad), iv, name: "AES-GCM" },
       wrapKey,
-      toArrayBuffer(input.rootKey),
+      toArrayBuffer(rootKey),
     ),
   );
   return {
@@ -529,7 +570,7 @@ export async function wrapHostedDomainRootKeyWithP256Ecdh(input: {
     kind: "p256-ecdh-aesgcm",
     recipient,
     recipientKeyId,
-    ...(input.teePolicyId ? { teePolicyId: input.teePolicyId } : {}),
+    ...(teePolicyId ? { teePolicyId } : {}),
   };
 }
 
@@ -540,7 +581,7 @@ export async function unwrapHostedDomainRootKeyWithP256Ecdh(input: {
   const wrap = parseHostedEcdhWrappedDomainRootKey(input.wrap, "ECDH domain root wrap");
   const privateKey = await crypto.subtle.importKey(
     "jwk",
-    input.privateJwk,
+    normalizeP256PrivateJwk(input.privateJwk, "ECDH unwrap privateJwk"),
     { name: "ECDH", namedCurve: "P-256" },
     false,
     ["deriveBits"],
@@ -559,20 +600,30 @@ export async function unwrapHostedDomainRootKeyWithP256Ecdh(input: {
       256,
     ),
   );
+  const teePolicyId = normalizeHostedTeePolicyId(
+    wrap.teePolicyId ?? null,
+    wrap.recipient,
+    "ECDH unwrap teePolicyId",
+  );
   const wrapAad = buildHostedEcdhWrapAad({
     encryptionContext: wrap.encryptionContext,
     ephemeralPublicJwk: wrap.ephemeralPublicJwk,
     recipient: wrap.recipient,
     recipientKeyId: wrap.recipientKeyId,
-    teePolicyId: wrap.teePolicyId ?? null,
+    teePolicyId,
   });
-  const wrapKey = await deriveHostedEcdhWrapKey({
-    encryptionContext: wrap.encryptionContext,
-    recipient: wrap.recipient,
-    recipientKeyId: wrap.recipientKeyId,
-    sharedSecret,
-    teePolicyId: wrap.teePolicyId ?? null,
-  });
+  let wrapKey: CryptoKey;
+  try {
+    wrapKey = await deriveHostedEcdhWrapKey({
+      encryptionContext: wrap.encryptionContext,
+      recipient: wrap.recipient,
+      recipientKeyId: wrap.recipientKeyId,
+      sharedSecret,
+      teePolicyId,
+    });
+  } finally {
+    sharedSecret.fill(0);
+  }
   return new Uint8Array(
     await crypto.subtle.decrypt(
       {
@@ -741,6 +792,15 @@ function parseHostedEcdhWrappedDomainRootKey(
   label: string,
 ): HostedEcdhWrappedDomainRootKey {
   const record = requireRecord(value, label);
+  const recipient = requireHostedCryptoEcdhRecipientKind(record.recipient, `${label}.recipient`);
+  if ("teePolicyId" in record && typeof record.teePolicyId !== "string") {
+    throw new TypeError(`${label}.teePolicyId must be a string when present.`);
+  }
+  const teePolicyId = normalizeHostedTeePolicyId(
+    "teePolicyId" in record ? (record.teePolicyId as string) : null,
+    recipient,
+    `${label}.teePolicyId`,
+  );
   return {
     ciphertext: requireNonEmptyString(record.ciphertext, `${label}.ciphertext`),
     encryptionContext: requireStringRecord(record.encryptionContext, `${label}.encryptionContext`),
@@ -750,11 +810,9 @@ function parseHostedEcdhWrappedDomainRootKey(
     ),
     iv: requireNonEmptyString(record.iv, `${label}.iv`),
     kind: requireLiteral(record.kind, "p256-ecdh-aesgcm", `${label}.kind`),
-    recipient: requireHostedCryptoEcdhRecipientKind(record.recipient, `${label}.recipient`),
+    recipient,
     recipientKeyId: requireNonEmptyString(record.recipientKeyId, `${label}.recipientKeyId`),
-    ...(typeof record.teePolicyId === "string" && record.teePolicyId.length > 0
-      ? { teePolicyId: record.teePolicyId }
-      : {}),
+    ...(teePolicyId ? { teePolicyId } : {}),
   };
 }
 
@@ -769,6 +827,69 @@ function assertUniqueHostedRecipients(
       throw new TypeError(`${label} contains duplicate recipient ${key}.`);
     }
     seen.add(key);
+  }
+}
+
+function assertHostedDomainRootEnvelopeWrapPolicy(
+  body: HostedDomainRootKeyEnvelopeBodyV1,
+  label: string,
+): void {
+  if (body.wraps.length === 0) {
+    throw new TypeError(`${label} must contain at least one recipient wrap.`);
+  }
+  for (const wrap of body.wraps) {
+    assertHostedCryptoRecipientAllowedForDomain({
+      domain: body.domain,
+      label: `${label}.${wrap.recipient}`,
+      recipient: wrap.recipient,
+    });
+    assertHostedDomainRootWrapContextMatchesEnvelope({ body, label, wrap });
+  }
+}
+
+function assertHostedCryptoRecipientAllowedForDomain(input: {
+  domain: HostedCryptoDomain;
+  label: string;
+  recipient: HostedCryptoRecipientKind;
+}): void {
+  if (!isHostedCryptoRecipientAllowedForDomain(input)) {
+    throw new TypeError(
+      `${input.label} ${input.recipient} is not allowed for hosted ${input.domain} domain roots.`,
+    );
+  }
+}
+
+function assertHostedDomainRootWrapContextMatchesEnvelope(input: {
+  body: HostedDomainRootKeyEnvelopeBodyV1;
+  label: string;
+  wrap: HostedDomainRootKeyWrap;
+}): void {
+  const context = input.wrap.encryptionContext;
+  const expected = {
+    app: "murph",
+    domain: input.body.domain,
+    purpose: "hosted-domain-root-wrap",
+    recipient: input.wrap.recipient,
+    rootKeyId: input.body.rootKeyId,
+    schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+    userId: input.body.userId,
+  };
+  for (const [key, value] of Object.entries(expected)) {
+    if (context[key] !== value) {
+      throw new TypeError(
+        `${input.label}.${input.wrap.recipient}.encryptionContext.${key} mismatch.`,
+      );
+    }
+  }
+  requireNonEmptyString(
+    context.env,
+    `${input.label}.${input.wrap.recipient}.encryptionContext.env`,
+  );
+  if (
+    input.wrap.kind === "gcp-kms"
+    && input.wrap.additionalAuthenticatedData !== serializeAdditionalAuthenticatedData(context)
+  ) {
+    throw new TypeError(`${input.label}.${input.wrap.recipient}.additionalAuthenticatedData mismatch.`);
   }
 }
 
@@ -911,6 +1032,45 @@ function normalizeP256PublicJwk(jwk: JsonWebKey, label: string): JsonWebKey {
     x: jwk.x,
     y: jwk.y,
   };
+}
+
+function normalizeP256PrivateJwk(jwk: JsonWebKey, label: string): JsonWebKey {
+  if (
+    jwk.kty !== "EC"
+    || jwk.crv !== "P-256"
+    || typeof jwk.d !== "string"
+    || typeof jwk.x !== "string"
+    || typeof jwk.y !== "string"
+    || jwk.d.length === 0
+    || jwk.x.length === 0
+    || jwk.y.length === 0
+  ) {
+    throw new TypeError(`${label} must be a private P-256 EC JWK with d, x, and y.`);
+  }
+  return {
+    crv: "P-256",
+    d: jwk.d,
+    ext: false,
+    key_ops: ["deriveBits"],
+    kty: "EC",
+    x: jwk.x,
+    y: jwk.y,
+  };
+}
+
+function normalizeHostedTeePolicyId(
+  value: string | null,
+  recipient: HostedCryptoEcdhRecipientKind,
+  label: string,
+): string | null {
+  const normalized = typeof value === "string" && value.length > 0 ? value : null;
+  if (recipient === "tee-runtime-attested") {
+    return requireNonEmptyString(normalized, label);
+  }
+  if (normalized !== null) {
+    throw new TypeError(`${label} is only valid for tee-runtime-attested recipients.`);
+  }
+  return null;
 }
 
 async function importP256PublicKeyFromPem(pem: string): Promise<CryptoKey> {

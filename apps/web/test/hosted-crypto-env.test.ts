@@ -14,6 +14,7 @@ const PUBLIC_JWK = {
 const BASE_ENV: Record<string, string> = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK: JSON.stringify(PUBLIC_JWK),
+  HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
   HOSTED_CRYPTO_ENV: "test",
   HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "local-dev-token",
   HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
@@ -92,13 +93,7 @@ test("hosted crypto env rejects static GCP access tokens in production by defaul
     getHostedWebCryptoConfig(buildEnv({
       NODE_ENV: "production",
     })),
-  ).toThrow(/HOSTED_CRYPTO_GCP_ACCESS_TOKEN is only allowed in production/u);
-
-  const config = getHostedWebCryptoConfig(buildEnv({
-    HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN: "1",
-    NODE_ENV: "production",
-  }));
-  assert.equal(config.env, "test");
+  ).toThrow(/HOSTED_CRYPTO_GCP_ACCESS_TOKEN is not allowed in production/u);
 });
 
 function buildEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {

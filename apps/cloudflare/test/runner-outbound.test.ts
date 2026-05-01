@@ -17,7 +17,7 @@ import {
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-} from "../src/hosted-crypto/routes.ts";
+} from "@murphai/hosted-execution/routes";
 import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
@@ -30,12 +30,17 @@ import {
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
-import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import type {
   WorkerBindUserRunnerStubLike,
   WorkerUserRunnerNamespaceLike,
 } from "../src/worker-contracts.ts";
+import {
+  TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON,
+  TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+  TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+  TEST_HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
+} from "./hosted-execution-fixtures.ts";
 
 const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
@@ -922,27 +927,21 @@ function createRunnerOutboundEnv(
         values.set(key, value);
       },
     },
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v1",
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK:
-      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"deriveBits\"]}",
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK:
-      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
-    HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID: "recovery:v1",
-    HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK:
-      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
-    HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID: "tee-automation:v1",
-    HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK:
-      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
-    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
+    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+      TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+      TEST_HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+      TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON,
+    HOSTED_CRYPTO_ENV: "test",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-    HOSTED_WAKE_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString("base64url"),
     HOSTED_WEB_BASE_URL: "https://web.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
       "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"sign\"]}",
     ...overrides,
   } satisfies Omit<RunnerOutboundEnvironmentSource, "USER_RUNNER">;
-  const bootstrappedByUserId = new Map<string, Promise<void>>();
 
   return {
     ...env,
@@ -952,12 +951,6 @@ function createRunnerOutboundEnv(
         return {
           ...stub,
           async bindUser(boundUserId: string) {
-            let seeded = bootstrappedByUserId.get(boundUserId);
-            if (!seeded) {
-              seeded = ensureRunnerOutboundUserEnvelope(env, boundUserId);
-              bootstrappedByUserId.set(boundUserId, seeded);
-            }
-            await seeded;
             return stub.bindUser?.(boundUserId) ?? { userId: boundUserId };
           },
         };
@@ -1035,31 +1028,6 @@ async function createSignedWorkerEnvelope(input: {
     signature: Buffer.from(new Uint8Array(signature)).toString("base64"),
     signedAt: now,
   });
-}
-
-async function ensureRunnerOutboundUserEnvelope(
-  env: Record<string, unknown>,
-  userId: string,
-): Promise<void> {
-  const environment = readHostedExecutionEnvironment(
-    env as Readonly<Record<string, string | undefined>>,
-  );
-
-  const store = createHostedUserKeyStore({
-    automationRecipientKeyId: environment.automationRecipientKeyId,
-    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
-    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
-    automationRecipientPublicKey: environment.automationRecipientPublicKey,
-    bucket: env.BUNDLES as never,
-    envelopeEncryptionKey: environment.platformEnvelopeKey,
-    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
-    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
-    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
-    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
-    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
-    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  });
-  await store.provisionManagedUserCryptoAtActivation(userId);
 }
 
 async function generateP256EcdhKeyPair(): Promise<{

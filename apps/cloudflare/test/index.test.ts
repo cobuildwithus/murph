@@ -6,19 +6,14 @@ import { fileURLToPath } from "node:url";
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import type { HostedAssistantWorkspaceRuntimeJobResult } from "@murphai/assistant-runtime";
 import {
-  deriveHostedStorageOpaqueId,
-} from "../src/crypto-context.ts";
-import { readHostedExecutionEnvironment } from "../src/env.ts";
-import {
   createHostedWebCallbackSignatureHeaders,
 } from "../src/web-callback-auth.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
 } from "../src/storage-paths.ts";
-import { createHostedUserKeyStore } from "../src/user-key-store.ts";
-import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import type {
   UserRunnerDurableObjectStubLike,
   WorkerEnvironmentSource,
@@ -34,9 +29,17 @@ import {
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
 } from "@murphai/cloudflare-hosted-control/routes";
+import {
+  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+} from "@murphai/hosted-execution/routes";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
+import {
+  createTestHostedRuntimeCryptoContext,
+  getTestHostedRuntimeRootKey,
+} from "./hosted-runtime-crypto-fixtures";
+import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 
 const describe = baseDescribe.sequential;
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -986,10 +989,7 @@ describe("cloudflare worker routes", () => {
       `Hosted artifact hash mismatch: expected ${artifactSha256}`,
     );
 
-    expect(env.__bucketStore.keys()).toHaveLength(1);
-    await expect(hostedUserKeyEnvelopeObjectKeyForTest(env, "member_123")).resolves.toBe(
-      env.__bucketStore.keys()[0],
-    );
+    expect(env.__bucketStore.keys()).toHaveLength(0);
   });
 
   it("keeps hosted artifact objects isolated per user", async () => {
@@ -1303,7 +1303,6 @@ function createWorkerEnv(
     const wrappedStub: UserRunnerStub = {
       ...baseStub,
       bindUser: vi.fn(async (boundUserId: string) => {
-        await resolveHostedUserCryptoContextForTest(env, boundUserId);
         return baseStub.bindUser(boundUserId);
       }),
     };
@@ -1420,43 +1419,15 @@ async function hostedArtifactObjectKeyForTest(
   return hostedArtifactObjectKey(crypto.rootKey, userId, sha256);
 }
 
-async function hostedUserKeyEnvelopeObjectKeyForTest(
-  env: WorkerTestEnv,
-  userId: string,
-): Promise<string> {
-  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey: environment.platformEnvelopeKey,
-    scope: "user-key-envelope-path",
-    value: `user:${userId}`,
-  });
-
-  return `users/keys/${userSegment}.json`;
-}
-
 async function resolveHostedUserCryptoContextForTest(
-  env: WorkerTestEnv,
+  _env: WorkerTestEnv,
   userId: string,
 ) {
-  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-
-  const store = createHostedUserKeyStore({
-    automationRecipientKeyId: environment.automationRecipientKeyId,
-    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
-    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
-    automationRecipientPublicKey: environment.automationRecipientPublicKey,
-    bucket: env.BUNDLES,
-    envelopeEncryptionKey: environment.platformEnvelopeKey,
-    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
-    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
-    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
-    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
-    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
-    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  });
-  await store.provisionManagedUserCryptoAtActivation(userId);
-  return store.requireUserCryptoContext(userId);
+  return {
+    rootKey: getTestHostedRuntimeRootKey("runtime"),
+    rootKeyId: "udrk:runtime:test-root",
+    userId,
+  };
 }
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
@@ -1587,6 +1558,16 @@ function installOidcJwksFetch(delegate?: typeof fetch): void {
         },
         status: 200,
       });
+    }
+
+    const url = new URL(String(input));
+    if (url.pathname === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH) {
+      const headers = new Headers(init?.headers);
+      const userId = headers.get(HOSTED_EXECUTION_USER_ID_HEADER);
+      if (!userId) {
+        return Response.json({ error: "Missing hosted user id." }, { status: 400 });
+      }
+      return Response.json(await createTestHostedRuntimeCryptoContext(userId));
     }
 
     if (delegate) {

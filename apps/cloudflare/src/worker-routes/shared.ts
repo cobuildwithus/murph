@@ -13,7 +13,7 @@ import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import {
   requireHostedUserCryptoContextFromEnvironment,
-} from "../user-key-store.js";
+} from "../hosted-crypto/runtime-user-crypto-context.ts";
 import type {
   WorkerEnvironmentContract,
   WorkerUserRunnerStubLike,

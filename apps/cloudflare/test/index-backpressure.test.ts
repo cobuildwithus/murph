@@ -8,13 +8,6 @@ import {
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 
-import { readHostedExecutionEnvironment } from "../src/env.ts";
-import {
-  createHostedUserKeyStore,
-} from "../src/user-key-store.ts";
-import {
-  asWorkerStringEnvironment,
-} from "../src/worker-contracts.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
@@ -41,7 +34,6 @@ describe("cloudflare worker queue backpressure routes", () => {
   it("keeps the removed dispatch route unavailable without relying on legacy local queue state", async () => {
     const harness = createUserRunnerDurableObject();
     await harness.durableObject.bindUser("member_123");
-    await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
 
     const overflowResponse = await worker.fetch(
       await createSignedWakeRequest("/internal/dispatch", createWake("evt_overflow")),
@@ -130,28 +122,6 @@ function createUserRunnerDurableObject(
     },
     storage,
   };
-}
-
-async function provisionManagedUserCryptoAtActivationForTest(
-  env: ReturnType<typeof createUserRunnerDurableObject>["env"],
-  userId: string,
-): Promise<void> {
-  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-  const store = createHostedUserKeyStore({
-    automationRecipientKeyId: environment.automationRecipientKeyId,
-    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
-    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
-    automationRecipientPublicKey: environment.automationRecipientPublicKey,
-    bucket: env.BUNDLES,
-    envelopeEncryptionKey: environment.platformEnvelopeKey,
-    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
-    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
-    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
-    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
-    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
-    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  });
-  await store.provisionManagedUserCryptoAtActivation(userId);
 }
 
 function createBucketStore() {

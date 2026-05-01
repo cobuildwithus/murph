@@ -8,7 +8,7 @@ import type {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
 import { json } from "../json.ts";
-import { requireHostedUserCryptoContextFromEnvironment } from "../user-key-store.js";
+import { requireHostedUserCryptoContextFromEnvironment } from "../hosted-crypto/runtime-user-crypto-context.ts";
 import type {
   WorkerBindUserRunnerStubLike,
   WorkerEnvironmentContract,

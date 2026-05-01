@@ -108,10 +108,11 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
       HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v2",
+      HOSTED_CRYPTO_ENV: "prod",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
-      HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID: "tee-automation:v1",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v2",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
@@ -239,15 +240,16 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_AI_USAGE_BILLING_MODE).toBe("stripe_meter");
     expect(config.vars.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED).toBe("true");
-    expect(config.vars.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID).toBe("tee-automation:v1");
-    expect(config.vars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBe("wake:v2");
+    expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
+    expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
+    expect(config.vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe("cloudflare-automation:v2");
+    expect(config.vars.HOSTED_CRYPTO_ENV).toBe("prod");
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
     expect(config.vars.HOSTED_ASSISTANT_APPROVAL_POLICY).toBe("never");
     expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.5");
     expect(config.vars.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
     expect(config.vars.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(config.vars.HOSTED_ASSISTANT_SANDBOX).toBe("danger-full-access");
-    expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
@@ -520,16 +522,8 @@ describe("hosted deploy automation helpers", () => {
       ...legacyHostedAssistantProviderSecrets,
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
-      HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK: "tee-automation-public-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
-      HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-wake-key\"}",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
@@ -542,16 +536,8 @@ describe("hosted deploy automation helpers", () => {
     })).toEqual({
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
-      HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK: "tee-automation-public-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
-      HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-wake-key\"}",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
@@ -567,12 +553,8 @@ describe("hosted deploy automation helpers", () => {
     const payload = buildHostedWorkerSecretsPayload({
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
     });
 
     expect(payload.GARMIN_CLIENT_ID).toBeUndefined();
@@ -585,12 +567,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     });
     expect(providerSecretsPayload).toMatchObject({
@@ -604,12 +582,8 @@ describe("hosted deploy automation helpers", () => {
     const platformSecretsPayload = buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     });
     expect(platformSecretsPayload).toMatchObject({
@@ -622,12 +596,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
       OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",
     }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
 

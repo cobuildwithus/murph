@@ -598,8 +598,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("drops worker-only secret material from explicit forwarded env", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
@@ -784,11 +783,8 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
   it("preserves the explicit forwarded child runtime env when provided", () => {
     expect(buildHostedRunnerChildRuntimeEnv({
       forwardedEnv: {
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{}",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
-        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",

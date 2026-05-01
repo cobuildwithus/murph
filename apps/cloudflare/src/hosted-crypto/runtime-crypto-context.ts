@@ -9,14 +9,14 @@ import {
 } from "@murphai/runtime-state";
 
 import {
+  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+} from "@murphai/hosted-execution/routes";
+import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
 import type {
   HostedWebCallbackSigningEnvironment,
 } from "../web-callback-auth.ts";
-import {
-  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-} from "./routes.ts";
 
 export interface HostedWorkerCryptoEnv {
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION?: string;

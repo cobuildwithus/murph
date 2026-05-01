@@ -11,7 +11,7 @@ import {
 } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-} from "../hosted-crypto/routes.ts";
+} from "@murphai/hosted-execution/routes";
 
 export {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
