@@ -158,19 +158,15 @@ const assistantInputContentSchema = z
   .strict()
 
 const assistantInputProjectionSchema = z
-  .preprocess(
-    stripLegacyAssistantInputProjectionRetryState,
-    z
-      .object({
-        captureId: safeNullableAssistantInputTokenSchema('captureId'),
-        lastAttemptedAt: safeNullableAssistantInputTimestampSchema('lastAttemptedAt'),
-        reasonCode: safeNullableAssistantInputReasonCodeSchema(),
-        status: z.enum(assistantInputProjectionStatusValues),
-        updatedAt: safeNullableAssistantInputTimestampSchema('updatedAt'),
-      })
-      .strict()
-      .superRefine(assertValidAssistantInputProjection),
-  )
+  .object({
+    captureId: safeNullableAssistantInputTokenSchema('captureId'),
+    lastAttemptedAt: safeNullableAssistantInputTimestampSchema('lastAttemptedAt'),
+    reasonCode: safeNullableAssistantInputReasonCodeSchema(),
+    status: z.enum(assistantInputProjectionStatusValues),
+    updatedAt: safeNullableAssistantInputTimestampSchema('updatedAt'),
+  })
+  .strict()
+  .superRefine(assertValidAssistantInputProjection)
 
 const assistantInputReplyTargetSchema = z
   .object({
@@ -858,17 +854,6 @@ function assertValidAssistantInputProjection(
         'projection reasonCode is only valid for failed or quarantined status.',
     })
   }
-}
-
-function stripLegacyAssistantInputProjectionRetryState(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return value
-  }
-  const {
-    nextAttemptAfter: _nextAttemptAfter,
-    ...projection
-  } = value as Record<string, unknown>
-  return projection
 }
 
 function safeAssistantInputTokenSchema(fieldName: string) {

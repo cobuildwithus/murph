@@ -715,7 +715,7 @@ describe('assistant input event store', () => {
     })
   })
 
-  it('strips legacy projection retry scheduling fields when reading stored input', async () => {
+  it('rejects legacy projection retry scheduling fields when reading stored input', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-legacy-projection-retry-',
     )
@@ -743,6 +743,18 @@ describe('assistant input event store', () => {
       paths,
     })
 
+    await expect(
+      updateAssistantInputProjection({
+        inputId: event.inputId,
+        vault: vaultRoot,
+        projection: {
+          // @ts-expect-error legacy retry scheduling is no longer part of the update contract.
+          nextAttemptAfter: '2026-04-22T10:10:00.000Z',
+          status: 'pending',
+        },
+      }),
+    ).rejects.toThrow(/nextAttemptAfter/u)
+
     await writeFile(
       inputPath,
       `${JSON.stringify({
@@ -759,30 +771,12 @@ describe('assistant input event store', () => {
       { mode: 0o600 },
     )
 
-    const read = await readAssistantInputEvent({
-      inputId: event.inputId,
-      vault: vaultRoot,
-    })
-
-    expect(read?.projection).toEqual({
-      captureId: null,
-      lastAttemptedAt: null,
-      reasonCode: 'conversation_import.capture_persist_failed',
-      status: 'failed',
-      updatedAt: failed.projection.updatedAt,
-    })
-    expect(read?.projection).not.toHaveProperty('nextAttemptAfter')
     await expect(
-      updateAssistantInputProjection({
+      readAssistantInputEvent({
         inputId: event.inputId,
         vault: vaultRoot,
-        projection: {
-          // @ts-expect-error legacy retry scheduling is no longer part of the update contract.
-          nextAttemptAfter: '2026-04-22T10:10:00.000Z',
-          status: 'pending',
-        },
       }),
-    ).rejects.toThrow()
+    ).rejects.toThrow(/nextAttemptAfter/u)
   })
 
   it('uses source position to order same-timestamp hosted mailbox inputs', async () => {
