@@ -706,7 +706,7 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.getCalls.filter((key) => key.startsWith("users/browser-vault-replicas/"))).toEqual([]);
   });
 
-  it("nudges the hosted runner and queues an immediate workspace invocation wake", async () => {
+  it("nudges the hosted runner without enqueuing a normal-path wake", async () => {
     const stub = createUserRunnerStub({
       nudgeHostedRunner: vi.fn(async () => ({
         accepted: true,
@@ -739,12 +739,8 @@ describe("cloudflare worker routes", () => {
     });
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.__runnerWakeQueue.send).toHaveBeenCalledWith({
-      reason: "nudge",
-      requestedAt: expect.any(String),
-      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
-      userId: "member_123",
-    });
+    expect(stub.runWhenIdleOrBudget).not.toHaveBeenCalled();
+    expect(env.__runnerWakeQueue.send).not.toHaveBeenCalled();
   });
 
   it("deletes hosted runner user data without queuing a new invocation", async () => {
@@ -877,7 +873,7 @@ describe("cloudflare worker routes", () => {
     expect(env.__runnerWakeQueue.send).not.toHaveBeenCalled();
   });
 
-  it("accepts runner nudges when queue send fails because the Durable Object alarm remains armed", async () => {
+  it("accepts runner nudges without touching the wake queue", async () => {
     const stub = createUserRunnerStub({
       nudgeHostedRunner: vi.fn(async () => ({
         accepted: true,
@@ -903,8 +899,9 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(202);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(stub.runWhenIdleOrBudget).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
-    expect(env.__runnerWakeQueue.send).toHaveBeenCalledTimes(1);
+    expect(env.__runnerWakeQueue.send).not.toHaveBeenCalled();
   });
 
   it("rejects runner nudge route/user mismatches before touching the Durable Object", async () => {
@@ -941,14 +938,14 @@ describe("cloudflare worker routes", () => {
     await worker.queue(createQueueBatch([message]), env);
 
     expect(stub.bindUser).toHaveBeenCalledWith("member_123");
-    expect(stub.runUntilIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
+    expect(stub.runWhenIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
     expect(message.ack).toHaveBeenCalledTimes(1);
     expect(message.retry).not.toHaveBeenCalled();
   });
 
   it("retries queued hosted runner wake messages when the Durable Object run fails", async () => {
     const stub = createUserRunnerStub({
-      runUntilIdleOrBudget: vi.fn(async () => {
+      runWhenIdleOrBudget: vi.fn(async () => {
         throw new Error("runner failed");
       }),
     });
@@ -962,7 +959,7 @@ describe("cloudflare worker routes", () => {
 
     await worker.queue(createQueueBatch([message]), env);
 
-    expect(stub.runUntilIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
+    expect(stub.runWhenIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
     expect(message.ack).not.toHaveBeenCalled();
     expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
   });
@@ -981,6 +978,7 @@ describe("cloudflare worker routes", () => {
 
     expect(stub.bindUser).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(stub.runWhenIdleOrBudget).not.toHaveBeenCalled();
     expect(message.ack).toHaveBeenCalledTimes(1);
     expect(message.retry).not.toHaveBeenCalled();
   });
@@ -998,6 +996,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(404);
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(stub.runWhenIdleOrBudget).not.toHaveBeenCalled();
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -1592,13 +1591,19 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     ownsActiveInvocationLease: vi.fn(async () => true),
     recordActiveInvocationHeartbeat: vi.fn(async () => ({
+      inputAvailable: false,
       nextAlarmAt: null,
       ok: true as const,
+      pendingNudge: false,
     })),
     recordActiveInvocationWorkspaceCheckpoint: vi.fn(async () => ({
       recorded: true,
     })),
     runUntilIdleOrBudget: vi.fn(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    })),
+    runWhenIdleOrBudget: vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,
     })),

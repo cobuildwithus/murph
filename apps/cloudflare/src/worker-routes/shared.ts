@@ -32,8 +32,10 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     userId: string;
   }): Promise<
     | {
+      inputAvailable: boolean;
       nextAlarmAt: string | null;
       ok: true;
+      pendingNudge: boolean;
     }
     | {
       ok: false;
@@ -51,6 +53,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
+  runWhenIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runnerStatus(): Promise<HostedRunnerStatusResponse>;
 }
 
