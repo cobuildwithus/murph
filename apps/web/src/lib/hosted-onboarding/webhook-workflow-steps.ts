@@ -28,7 +28,7 @@ export async function nudgeHostedWebhookMailboxItemStep(
   }
 
   const result = await nudgeHostedRunnerUserBestEffortResult({
-    context: `webhook:${input.source}:workflow`,
+    context: resolveHostedNudgeWorkflowContext(input.source),
     timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
     userId: mailboxItemOwner.userId,
   });
@@ -46,3 +46,11 @@ export async function nudgeHostedWebhookMailboxItemStep(
 Object.assign(nudgeHostedWebhookMailboxItemStep, {
   maxRetries: HOSTED_WEBHOOK_NUDGE_WORKFLOW_STEP_MAX_RETRIES,
 });
+
+function resolveHostedNudgeWorkflowContext(
+  source: HostedWebhookNudgeWorkflowInput["source"],
+): string {
+  return source === "device-sync"
+    ? "device-sync.wake:workflow"
+    : `webhook:${source}:workflow`;
+}

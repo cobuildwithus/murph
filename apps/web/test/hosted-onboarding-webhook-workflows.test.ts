@@ -103,6 +103,19 @@ describe("hosted onboarding webhook workflows", () => {
     });
   });
 
+  it("uses the device-sync wake context for device-sync workflow nudges", async () => {
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      source: "device-sync",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "device-sync.wake:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+  });
+
   it("uses the email source label for email ingress wake retry workflows", async () => {
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",
