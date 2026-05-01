@@ -83,34 +83,42 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
         },
       },
     },
-    buildConnectUrl(context) {
-      return `https://example.test/oauth?state=${context.state}`;
+    connectionHandler: {
+      async beginConnection(context) {
+        return {
+          authorizationUrl: `https://example.test/oauth?state=${context.state}`,
+          scopes: context.scopes,
+        };
+      },
+      async completeConnection(context) {
+        const code = context.query.get("code") ?? "missing-code";
+        return {
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          displayName: `Demo ${code}`,
+          externalAccountId: `demo-${code}`,
+          initialJobs: [],
+          metadata: {
+            connectedBy: code,
+          },
+          nextReconcileAt: "2026-04-04T12:00:00.000Z",
+          scopes: ["offline", "read:data"],
+          tokens: {
+            accessToken: "provider-access-token",
+            refreshToken: "provider-refresh-token",
+          },
+        };
+      },
+      async refreshTokens(_account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+        return {
+          accessToken: "provider-access-token-2",
+          refreshToken: "provider-refresh-token-2",
+        };
+      },
     },
-    async exchangeAuthorizationCode(_context, code) {
-      return {
-        connectedAt: "2026-04-04T09:00:00.000Z",
-        displayName: `Demo ${code}`,
-        externalAccountId: `demo-${code}`,
-        initialJobs: [],
-        metadata: {
-          connectedBy: code,
-        },
-        nextReconcileAt: "2026-04-04T12:00:00.000Z",
-        scopes: ["offline", "read:data"],
-        tokens: {
-          accessToken: "provider-access-token",
-          refreshToken: "provider-refresh-token",
-        },
-      };
-    },
-    async refreshTokens(_account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
-      return {
-        accessToken: "provider-access-token-2",
-        refreshToken: "provider-refresh-token-2",
-      };
-    },
-    async executeJob(_context, _job: DeviceSyncJobRecord) {
-      return {};
+    jobExecutor: {
+      async executeJob(_context, _job: DeviceSyncJobRecord) {
+        return {};
+      },
     },
   };
 
@@ -213,6 +221,17 @@ function buildRuntimeSnapshot(input: {
           tokenVersion: input.tokenBundle?.tokenVersion ?? 4,
         }
   );
+  const credential = input.credential ?? (
+    tokenBundleForConnection
+      ? {
+          kind: "oauth_tokens" as const,
+          tokenBundle: tokenBundleForConnection,
+        }
+      : {
+          kind: "none" as const,
+          credentialMetadata: {},
+        }
+  );
   return {
     connections: [
       {
@@ -242,9 +261,7 @@ function buildRuntimeSnapshot(input: {
           lastWebhookAt: input.localState?.lastWebhookAt ?? null,
           nextReconcileAt: input.localState?.nextReconcileAt ?? null,
         },
-        ...(input.credential
-          ? { credential: input.credential, tokenBundle: tokenBundleForConnection }
-          : { tokenBundle: tokenBundleForConnection }),
+        credential,
       },
     ],
     generatedAt: input.generatedAt ?? "2026-04-04T09:10:00.000Z",
@@ -791,7 +808,10 @@ describe("hosted device-sync runtime", () => {
           clientUserIdHash: "hash_client_user",
         },
       });
-      assert.equal(state.snapshot?.connections[0]?.tokenBundle, null);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(state.snapshot?.connections[0] ?? {}, "tokenBundle"),
+        false,
+      );
 
       const stored = getStore(service).getAccountById(connected.account.id);
       assert.ok(stored);
@@ -2383,12 +2403,15 @@ describe("hosted device-sync runtime", () => {
         },
         observedTokenVersion: 7,
         observedUpdatedAt: "2026-04-02T12:30:00.000Z",
-        tokenBundle: {
-          accessToken: "local-access",
-          accessTokenExpiresAt: "2026-04-04T00:00:00.000Z",
-          keyVersion: "local-runtime",
-          refreshToken: "local-refresh",
-          tokenVersion: 7,
+        credential: {
+          kind: "oauth_tokens",
+          tokenBundle: {
+            accessToken: "local-access",
+            accessTokenExpiresAt: "2026-04-04T00:00:00.000Z",
+            keyVersion: "local-runtime",
+            refreshToken: "local-refresh",
+            tokenVersion: 7,
+          },
         },
       });
     } finally {
@@ -2566,7 +2589,10 @@ describe("hosted device-sync runtime", () => {
         connectionId: "hosted_conn_disconnect_after_sync",
         observedTokenVersion: 4,
         observedUpdatedAt: "2026-04-04T09:05:00.000Z",
-        tokenBundle: null,
+        credential: {
+          clearTokens: true,
+          kind: "oauth_tokens",
+        },
       });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -2708,7 +2734,10 @@ describe("hosted device-sync runtime", () => {
         connectionId: "hosted_conn_clear_tokens",
         observedTokenVersion: 4,
         observedUpdatedAt: "2026-04-04T09:05:00.000Z",
-        tokenBundle: null,
+        credential: {
+          clearTokens: true,
+          kind: "oauth_tokens",
+        },
       });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -2826,7 +2855,10 @@ describe("hosted device-sync runtime", () => {
               lastWebhookAt: null,
               nextReconcileAt: null,
             },
-            tokenBundle: null,
+            credential: {
+              kind: "none",
+              credentialMetadata: {},
+            },
           },
         ],
         generatedAt: "2026-04-04T09:10:00.000Z",
@@ -2936,12 +2968,15 @@ describe("hosted device-sync runtime", () => {
         },
         observedTokenVersion: null,
         observedUpdatedAt: null,
-        tokenBundle: {
-          accessToken: "local-first-access",
-          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-          keyVersion: "local-runtime",
-          refreshToken: "local-first-refresh",
-          tokenVersion: 1,
+        credential: {
+          kind: "oauth_tokens",
+          tokenBundle: {
+            accessToken: "local-first-access",
+            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+            keyVersion: "local-runtime",
+            refreshToken: "local-first-refresh",
+            tokenVersion: 1,
+          },
         },
       });
     } finally {

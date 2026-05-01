@@ -177,6 +177,17 @@ function createAuthorityHarness(input: {
       status: account.status,
       updatedAt: "2026-04-06T10:11:00.000Z",
     };
+    if (currentStoredAccount) {
+      currentStoredAccount = {
+        ...currentStoredAccount,
+        ...account,
+        credential: currentStoredAccount.credential,
+        disconnectGeneration: currentStoredAccount.disconnectGeneration,
+        keyVersion: currentStoredAccount.keyVersion,
+        tokenVersion: currentStoredAccount.tokenVersion,
+        updatedAt: "2026-04-06T10:11:00.000Z",
+      };
+    }
   });
 
   const persistStoredConnectionTokenBundle = vi.fn(async (input: {
@@ -294,12 +305,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             updates: [
               {
                 connectionId: "conn_123",
-                tokenBundle: {
-                  accessToken: "fresh-access-token",
-                  accessTokenExpiresAt: null,
-                  keyVersion: "kv_runtime",
-                  refreshToken: "fresh-refresh-token",
-                  tokenVersion: 1,
+                credential: {
+                  kind: "oauth_tokens",
+                  tokenBundle: {
+                    accessToken: "fresh-access-token",
+                    accessTokenExpiresAt: null,
+                    keyVersion: "kv_runtime",
+                    refreshToken: "fresh-refresh-token",
+                    tokenVersion: 1,
+                  },
                 },
               },
             ],
@@ -309,7 +323,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         }),
         trustedUserId: "user_123",
       }),
-    ).rejects.toThrow(/observedTokenVersion is required when credential or tokenBundle mutations are present/u);
+    ).rejects.toThrow(/observedTokenVersion is required when credential mutations are present/u);
 
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   });
@@ -334,12 +348,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               },
               observedTokenVersion: 2,
               observedUpdatedAt: "2026-04-06T09:59:00.000Z",
-              tokenBundle: {
-                accessToken: "replayed-access-token",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                keyVersion: "kv_runtime",
-                refreshToken: "replayed-refresh-token",
-                tokenVersion: 2,
+              credential: {
+                kind: "oauth_tokens",
+                tokenBundle: {
+                  accessToken: "replayed-access-token",
+                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                  keyVersion: "kv_runtime",
+                  refreshToken: "replayed-refresh-token",
+                  tokenVersion: 2,
+                },
               },
             },
           ],
@@ -370,7 +387,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
-  it("treats a disconnected status update as a token clear even when tokenBundle is omitted", async () => {
+  it("does not clear OAuth tokens from a disconnected status update without a credential mutation", async () => {
     const harness = createAuthorityHarness();
     const { applyHostedDeviceSyncRuntimeResult } = await import(
       "@/src/lib/device-sync/hosted-runtime-authority"
@@ -402,20 +419,21 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-04-06T10:11:00.000Z",
       }),
       connectionId: "conn_123",
-      tokenUpdate: "cleared",
+      tokenUpdate: "unchanged",
       writeUpdate: "applied",
     });
     expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
-    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenCalledTimes(1);
-    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connectionId: "conn_123",
-        tokenBundle: null,
-      }),
-    );
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(harness.record.accessTokenExpiresAt).toBeNull();
     expect(harness.record.status).toBe("disconnected");
-    expect(harness.storedAccount).toBeNull();
+    expect(harness.storedAccount).toMatchObject({
+      credential: {
+        kind: "oauth_tokens",
+        tokens: {
+          accessToken: "stored-access-token",
+        },
+      },
+    });
   });
 
   it("preserves the durable external account binding across tokenless clears and retokenization", async () => {
@@ -436,7 +454,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             {
               connectionId: "conn_123",
               observedTokenVersion: null,
-              tokenBundle: null,
+              credential: {
+                clearTokens: true,
+                kind: "oauth_tokens",
+              },
             },
           ],
           userId: "user_123",
@@ -472,12 +493,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             {
               connectionId: "conn_123",
               observedTokenVersion: null,
-              tokenBundle: {
-                accessToken: "fresh-access-token",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                keyVersion: "kv_runtime",
-                refreshToken: "fresh-refresh-token",
-                tokenVersion: 1,
+              credential: {
+                kind: "oauth_tokens",
+                tokenBundle: {
+                  accessToken: "fresh-access-token",
+                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                  keyVersion: "kv_runtime",
+                  refreshToken: "fresh-refresh-token",
+                  tokenVersion: 1,
+                },
               },
             },
           ],
@@ -575,9 +599,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         accessTokenExpiresAt: null,
         credentialKind: "provider_config",
         credentialMetadata: {
+          authHeader: "Bearer drop-me",
+          client: "raw-client",
           client_user_id: "raw-client-user",
+          clientUserIdHash: "hash_client_user",
           hmacSecret: "do-not-store",
+          opaqueNote: "abc123def456ghi789jkl012mno345pq",
+          owner: "raw-owner",
           region: "us",
+          user: "raw-user",
         },
         externalAccountId: null,
         provider: "junction",
@@ -621,12 +651,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         kind: "provider_config",
         providerConfigKey: "junction",
         credentialMetadata: {
+          clientUserIdHash: "hash_client_user",
           region: "us",
         },
       },
     });
+    expect(JSON.stringify(response)).not.toContain("Bearer drop-me");
+    expect(JSON.stringify(response)).not.toContain("raw-client");
     expect(JSON.stringify(response)).not.toContain("raw-client-user");
     expect(JSON.stringify(response)).not.toContain("do-not-store");
+    expect(JSON.stringify(response)).not.toContain("abc123def456ghi789jkl012mno345pq");
+    expect(JSON.stringify(response)).not.toContain("raw-owner");
+    expect(JSON.stringify(response)).not.toContain("raw-user");
   });
 
   it("applies runtime setup phase updates through durable connection state", async () => {
@@ -774,6 +810,68 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.updateConnectionRecord).not.toHaveBeenCalled();
   });
 
+  it("persists sanitized none credential metadata from runtime credential updates", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        credentialKind: "none",
+        credentialMetadata: {
+          previousReason: "initial",
+        },
+        provider: "custom",
+      }),
+      storedAccount: null,
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              credential: {
+                kind: "none",
+                credentialMetadata: {
+                  authHeader: "Bearer drop-me",
+                  client: "raw-client",
+                  reason: "manual_disconnect",
+                  owner: "raw-owner",
+                  sourceCount: 2,
+                  user: "raw-user",
+                },
+              },
+              observedTokenVersion: null,
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "missing",
+      writeUpdate: "applied",
+    });
+    expect(harness.updateConnectionRecord).toHaveBeenCalledWith({
+      where: {
+        id: "conn_123",
+      },
+      data: expect.objectContaining({
+        credentialKind: "none",
+        credentialMetadataJson: {
+          reason: "manual_disconnect",
+          sourceCount: 2,
+        },
+        providerConfigKey: null,
+      }),
+    });
+  });
+
   it("rejects token-bundle mutations for provider-config runtime credentials", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
@@ -795,7 +893,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             {
               connectionId: "conn_123",
               observedTokenVersion: null,
-              tokenBundle: null,
+              credential: {
+                clearTokens: true,
+                kind: "oauth_tokens",
+              },
             },
           ],
           userId: "user_123",
@@ -803,7 +904,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         method: "POST",
       }),
       trustedUserId: "user_123",
-    })).rejects.toThrow(/do not support tokenBundle mutations/u);
+    })).rejects.toThrow(/credential update for junction must match/u);
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
   });
 
@@ -831,12 +932,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               },
               observedTokenVersion: null,
               observedUpdatedAt: null,
-              tokenBundle: {
-                accessToken: "fresh-access-token",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                keyVersion: "kv_runtime",
-                refreshToken: "fresh-refresh-token",
-                tokenVersion: 1,
+              credential: {
+                kind: "oauth_tokens",
+                tokenBundle: {
+                  accessToken: "fresh-access-token",
+                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                  keyVersion: "kv_runtime",
+                  refreshToken: "fresh-refresh-token",
+                  tokenVersion: 1,
+                },
               },
             },
           ],
