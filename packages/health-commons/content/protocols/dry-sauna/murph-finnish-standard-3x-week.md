@@ -8,6 +8,7 @@ summary: "Traditional dry sauna at steady, tolerable heat, where the body opens 
 status: "field-testing"
 quality: "usable"
 preferredRouteId: "finnish-sauna"
+sortRank: 10
 aliases:
   - "dry sauna protocol"
   - "Finnish sauna protocol"
@@ -73,23 +74,27 @@ protocol:
         kind: cooldown
         durationMinutes: 3
     ticks:
-      - "0"
-      - "2 min"
-      - "20 min"
-      - "23 min"
+      - label: "0"
+        offsetMinutes: 0
+      - label: "2 min"
+        offsetMinutes: 2
+      - label: "20 min"
+        offsetMinutes: 20
+      - label: "23 min"
+        offsetMinutes: 23
   temperatureC:
     min: 70
     max: 90
   interventionSessionsMinimum: 4
   interventionSessionsTarget: 6
   steps:
-    - "Pick a traditional dry sauna and a time when you can cool down afterward without rushing; do not use a facility that feels poorly ventilated, overheated, unsafe, or hard to exit."
-    - "Start normally hydrated; do not sauna after alcohol or recreational drugs that day, and do not force large water or electrolyte doses."
-    - "For the first session, treat 5–10 minutes as a tolerance check. Later sessions can use 15–20 minutes only when well tolerated."
-    - "Sit where you can exit easily, use a lower bench when new, and do not chase extreme discomfort, a sweat target, or a core-temperature threshold."
-    - "Leave immediately for any stop condition. Early exit counts as a valid logged outcome, not a failed session."
-    - "Cool down gently before driving, exercising, hot showering, cold plunging, or going to bed; do not resume activity until you feel fully alert and steady."
-    - "Log the session dose, context, cool-down method, and any symptoms the same day."
+    - "Pick a traditional dry sauna with safe ventilation, temperature control, timer, and easy exit; schedule cooldown time afterward."
+    - "Start normally hydrated; avoid sauna after alcohol or recreational drugs; do not force large water or electrolyte doses."
+    - "Use 5–10 min as first-session tolerance check; use 15–20 min later only when tolerated."
+    - "Sit near the exit, lower bench when new; do not chase extreme discomfort, sweat, or core temperature."
+    - "Leave immediately for any stop condition; early exit counts as valid data, not failure."
+    - "Cool down gently before driving, exercise, hot showers, cold plunges, or bed; resume only fully alert and steady."
+    - "Log dose, context, cooldown method, and symptoms the same day."
   tips:
     - Same time of day when practical.
     - No cold plunges, new supplements, diet changes, or alcohol changes during the test window.
@@ -219,6 +224,50 @@ expectedSignalDescriptions:
       confidence: "low"
       basis: "No extracted direct Finnish-sauna finding supports a deep-sleep gain; consumer deep-sleep estimates depend on heart-rate, HRV, temperature, and movement proxies that sauna can perturb."
     description: "Sauna shifts overnight temperature, pulse, and movement patterns, changing how stable early-night deep sleep becomes."
+  -
+    biomarkerKey: "biomarker:rem-sleep-minutes"
+    expected: "Algorithm-sensitive"
+    expectedDirection: "mixed_or_contextual"
+    protocolProminence: "context"
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "2-3 weeks"
+      confidence: "low"
+      basis: "The direct Finnish-sauna evidence in this Commons set does not establish a REM-minutes effect; consumer REM estimates can move when total sleep, wake time, thermoregulation, or fragmentation changes."
+    description: "Heat exposure changes relaxation, thermoregulation, and sleep continuity for some people, but REM minutes are not the direct target and can move in either direction."
+  -
+    biomarkerKey: "biomarker:blood-oxygen-spo2"
+    expected: "Should stay stable"
+    expectedDirection: "stable"
+    protocolProminence: "context"
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "session and overnight checks"
+      confidence: "low"
+      basis: "Sauna is not an oxygenation intervention; SpO2 belongs here as safety context for heat stress, dehydration, illness, or respiratory strain."
+    description: "Sauna is a heat-stress and recovery experiment, not an oxygenation intervention; stable SpO2 is a guardrail rather than proof the protocol is working."
+  -
+    biomarkerKey: "biomarker:blood-glucose"
+    expected: "Context-dependent"
+    expectedDirection: "mixed_or_contextual"
+    protocolProminence: "context"
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "2-6 weeks"
+      confidence: "low"
+      basis: "Passive heat can change autonomic tone, hydration, and recovery context, but this Commons set does not support Finnish sauna as a validated glucose-lowering self-test."
+    description: "Passive heat can change autonomic tone, hydration, and recovery context, but dehydration or heat stress can also confound glucose readings."
+  -
+    biomarkerKey: "biomarker:estimated-vo2max"
+    expected: "Context-dependent"
+    expectedDirection: "mixed_or_contextual"
+    protocolProminence: "context"
+    estimatedChange:
+      kind: "mixed_or_contextual"
+      window: "4-8 weeks"
+      confidence: "low"
+      basis: "Repeated heat exposure can create cardiovascular strain, but this protocol is not a direct aerobic-capacity intervention and should stay below aerobic training for VO2max interpretation."
+    description: "Repeated heat exposure can create cardiovascular strain and recovery adaptations, but it is not a direct aerobic-capacity protocol."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

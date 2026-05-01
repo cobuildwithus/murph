@@ -63,24 +63,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: mixed_or_contextual
-    relationship: secondary_biomarker
-    mechanism: Cadence prescriptions change the intervention into a cadence/MVPA variant.
-    scoring:
-      evidenceWeight: 3
-      biomarkerRelevance: 3
-      wearableMeasurability: 5
-      burdenPenalty: 1
-      safetyCautionPenalty: 1
-    display:
-      confidence: medium
-      burdenLabel: low
-      cautionLabel: context
 ---
 
 Walking cadence can help interpret intensity, but Daily Step Floor should not require a cadence threshold unless the experiment is explicitly forked into a cadence or MVPA-bout protocol.

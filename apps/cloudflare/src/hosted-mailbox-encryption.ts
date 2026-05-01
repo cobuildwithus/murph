@@ -25,12 +25,6 @@ export function createHostedMailboxEncryptionEnvironmentFromIngressRoot(input: {
   return { ingressRootKey: input.rootKey, ingressRootKeyId: input.rootKeyId };
 }
 
-export function readHostedMailboxEncryptionEnvironment(): never {
-  throw new Error(
-    "Legacy hosted wake mailbox encryption has been removed. Use createHostedMailboxEncryptionEnvironmentFromIngressRoot with the unwrapped ingress runtime root.",
-  );
-}
-
 export async function decryptHostedMailboxPayloadCiphertext(input: {
   ciphertext: string;
   environment: HostedMailboxEncryptionEnvironment;

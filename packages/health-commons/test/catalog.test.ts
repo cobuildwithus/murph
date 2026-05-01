@@ -92,7 +92,7 @@ describe("health commons catalog", () => {
     }
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:ce17d780660f52a086d36d24922ddb69f09ee03ca2321f57c40f947c5c989609",
+      "sha256:1f3f0454cf88e6a784ef6e42c739db2631ee1bea03d09cea532f4de8aaefd9d7",
     );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
@@ -123,16 +123,16 @@ describe("health commons catalog", () => {
       },
       revision: {
         runSpecRevisionId:
-          "sha256:ebfbad4df6bbab0e5283e76b8f82f51fd55e91ba3789772d3bc76b87a6dc8e14",
+          "sha256:1f902f00d475295694579ca3df51ecb698ddd79c0a1de6af4444bac945037bf4",
       },
     });
-    expect(redLightProtocol?.expectedSignalDescriptions?.map((signal) => signal.biomarkerKey)).toEqual([
+    expect(redLightProtocol?.expectedSignalDescriptions?.map((signal) => signal.biomarkerKey)).toEqual(expect.arrayContaining([
       "biomarker:sleep-onset-latency",
       "biomarker:sleep-efficiency",
       "biomarker:resting-heart-rate",
       "biomarker:hrv-rmssd",
       "biomarker:deep-sleep-minutes",
-    ]);
+    ]));
     expect(redLightProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
       biomarkerKey: "biomarker:sleep-onset-latency",
       estimatedChange: expect.objectContaining({

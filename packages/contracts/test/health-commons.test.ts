@@ -86,6 +86,8 @@ const validProtocolVariantPageWithOnboarding = {
   lineage: {
     relationship: "root",
   },
+  preferredRouteId: "norwegian-4x4",
+  sortRank: 20,
   attribution: {
     ownerType: "murph",
   },
@@ -102,6 +104,14 @@ const validProtocolVariantPageWithOnboarding = {
       baselineDays: 7,
       interventionDays: 42,
       primaryBiomarkerKey: "biomarker:estimated-vo2max",
+    },
+  ],
+  expectedSignalDescriptions: [
+    {
+      biomarkerKey: "biomarker:estimated-vo2max",
+      description: "Wearable cardio-fitness may move when interval fidelity and recovery are good.",
+      expected: "up_or_stable",
+      expectedDirection: "up_or_stable",
     },
   ],
   experimentOnboarding: {
@@ -154,7 +164,7 @@ const validProtocolVariantPageWithOnboarding = {
   },
 } as const;
 
-const validBiomarkerPageWithRanking = {
+const validBiomarkerPage = {
   schemaVersion: HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
   entityType: "biomarker",
   key: "biomarker:resting-heart-rate",
@@ -203,25 +213,6 @@ const validBiomarkerPageWithRanking = {
         "illness",
       ],
     },
-  },
-  protocolRanking: {
-    version: "deterministic-v0",
-    scoreFormula: "evidenceWeight * 3",
-    candidates: [
-      {
-        protocolKey: "protocol_variant:norwegian-4x4/norwegian-4x4",
-        expectedDirection: "down",
-        mechanism: "Aerobic training can lower resting heart rate over time.",
-        relationship: "primary_biomarker",
-        scoring: {
-          evidenceWeight: 5,
-          biomarkerRelevance: 5,
-          wearableMeasurability: 5,
-          burdenPenalty: 4,
-          safetyCautionPenalty: 3,
-        },
-      },
-    ],
   },
   communityOutcomeSummary: {
     state: "coming_soon",
@@ -341,11 +332,11 @@ describe("@murphai/contracts health commons schemas", () => {
     expect(
       safeParseContract(
         healthCommonsPageFrontmatterSchema,
-        validBiomarkerPageWithRanking,
+        validBiomarkerPage,
       ),
     ).toEqual({
       success: true,
-      data: validBiomarkerPageWithRanking,
+      data: validBiomarkerPage,
     });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, validMeasurementMethodPage),
@@ -641,17 +632,9 @@ describe("@murphai/contracts health commons schemas", () => {
     });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, {
-        ...validBiomarkerPageWithRanking,
-        biomarker: undefined,
-      }),
-    ).toMatchObject({
-      success: false,
-    });
-    expect(
-      safeParseContract(healthCommonsPageFrontmatterSchema, {
-        ...validBiomarkerPageWithRanking,
+        ...validBiomarkerPage,
         biomarker: {
-          ...validBiomarkerPageWithRanking.biomarker,
+          ...validBiomarkerPage.biomarker,
           privateMetricBindings: [
             {
               source: "browser_vault_metric",
@@ -668,9 +651,9 @@ describe("@murphai/contracts health commons schemas", () => {
     });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, {
-        ...validBiomarkerPageWithRanking,
+        ...validBiomarkerPage,
         biomarker: {
-          ...validBiomarkerPageWithRanking.biomarker,
+          ...validBiomarkerPage.biomarker,
           privateMetricBindings: [
             {
               source: "browser_vault_metric",
@@ -706,7 +689,7 @@ describe("@murphai/contracts health commons schemas", () => {
     });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, {
-        ...validBiomarkerPageWithRanking,
+        ...validBiomarkerPage,
         measurementMethod: validMeasurementMethodPage.measurementMethod,
       }),
     ).toMatchObject({
@@ -734,7 +717,7 @@ describe("@murphai/contracts health commons schemas", () => {
     });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, {
-        ...validBiomarkerPageWithRanking,
+        ...validBiomarkerPage,
         sourceIdentity: {
           identityKind: "scholarly_work",
           canonicalIdBasis: "pmid",
@@ -770,6 +753,18 @@ describe("@murphai/contracts health commons schemas", () => {
             implication: "This should now live in evidence-appraisal JSONL.",
           },
         ],
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validBiomarkerPage,
+        protocolRanking: {
+          version: "deterministic-v0",
+          scoreFormula: "legacy hand-authored candidate ranking",
+          candidates: [],
+        },
       }),
     ).toMatchObject({
       success: false,

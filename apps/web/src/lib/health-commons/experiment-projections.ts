@@ -150,7 +150,29 @@ function cleanExperimentSessionShape(
     ...(shape.summarySegments
       ? { summarySegments: shape.summarySegments.map(cleanExperimentSessionShapeSegment) }
       : {}),
-    ...(shape.ticks ? { ticks: cleanHealthCommonsUserFacingCopyList(shape.ticks) } : {}),
+    ...(shape.ticks ? { ticks: shape.ticks.map(cleanExperimentSessionShapeTick) } : {}),
+  };
+}
+
+type ExperimentProjectionSessionShapeTick = NonNullable<
+  NonNullable<HealthCommonsWebExperimentProtocolTab["sessionShape"]>["ticks"]
+>[number];
+
+function cleanExperimentSessionShapeTick(
+  tick: ExperimentProjectionSessionShapeTick,
+): ExperimentProjectionSessionShapeTick {
+  if (typeof tick === "string") {
+    return cleanHealthCommonsUserFacingCopy(tick);
+  }
+  if ("offsetMinutes" in tick) {
+    return {
+      label: cleanHealthCommonsUserFacingCopy(tick.label),
+      offsetMinutes: tick.offsetMinutes,
+    };
+  }
+  return {
+    label: cleanHealthCommonsUserFacingCopy(tick.label),
+    positionPercent: tick.positionPercent,
   };
 }
 
@@ -205,12 +227,14 @@ function cleanExperimentSignal(
   const {
     baseline,
     description,
+    displayValue,
     estimatedChange,
     unit,
     ...requiredSignal
   } = signal;
   const cleanBaseline = cleanOptionalHealthCommonsUserFacingCopy(baseline);
   const cleanDescription = cleanOptionalHealthCommonsUserFacingCopy(description);
+  const cleanDisplayValue = cleanOptionalHealthCommonsUserFacingCopy(displayValue);
   const cleanEstimatedChange = cleanExperimentSignalEstimate(estimatedChange);
   const cleanUnit = cleanOptionalHealthCommonsUserFacingCopy(unit);
 
@@ -222,6 +246,7 @@ function cleanExperimentSignal(
     value: cleanHealthCommonsUserFacingCopy(requiredSignal.value),
     ...(cleanBaseline ? { baseline: cleanBaseline } : {}),
     ...(cleanDescription ? { description: cleanDescription } : {}),
+    ...(cleanDisplayValue ? { displayValue: cleanDisplayValue } : {}),
     ...(cleanEstimatedChange ? { estimatedChange: cleanEstimatedChange } : {}),
     ...(cleanUnit ? { unit: cleanUnit } : {}),
   };

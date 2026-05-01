@@ -563,27 +563,21 @@ expectedSignalDescriptions:
     basis: "source_artifact:pmid-33742704 and source_artifact:pmid-40826844 support pooled hydration and elasticity improvements, while source_artifact:pmid-40324552 keeps the funding and heterogeneity caveat visible. Home photo scores do not map cleanly to instrument units."
 -
   biomarkerKey: biomarker:skin-texture-roughness-score
-  expected: Could feel smoother
+  expected: Smoother texture
   protocolProminence: context
   description: Better hydration and matrix support make skin feel smoother, less rough, and less crepey.
   estimatedChange:
-    kind: absolute
-    low: -1
-    high: -0.3
-    unit: 0-10 score points
+    kind: mixed_or_contextual
     window: 8-12 weeks
     confidence: low
-    basis: "Skin RCTs and reviews support hydration, elasticity, and wrinkle directions, but not a validated Murph 0-10 roughness conversion; this is a practical low-confidence self-rating range."
+    basis: "Skin RCTs and reviews support hydration, elasticity, and wrinkle directions, but not a validated Murph roughness conversion; treat the self-rating as a directional texture check."
 -
   biomarkerKey: biomarker:musculoskeletal-pain
-  expected: Could trend lower
+  expected: Less joint pain
   protocolProminence: focus
   description: Collagen-derived peptides and amino acids support connective-tissue remodeling around repeated joint or tendon loading, reducing pain under the matched load.
   estimatedChange:
-    kind: absolute
-    low: -1.5
-    high: -0.3
-    unit: 0-10 rating points
+    kind: mixed_or_contextual
     window: 12-24 weeks
     confidence: low
     basis: "source_artifact:pmid-18416885 supports activity-related joint-pain improvement over 24 weeks, while OA and tendon sources are mixed and product-specific. Keep activity load and analgesic use visible."
@@ -612,27 +606,21 @@ expectedSignalDescriptions:
     basis: "source_artifact:pmid-39060741 reports favorable training-linked recovery signals, while source_artifact:pmid-39771010 found no clear acute recovery advantage after downhill running."
 -
   biomarkerKey: biomarker:perceived-recovery-score
-  expected: Could improve
+  expected: More recovered
   protocolProminence: context
   description: Readiness improves when joint and muscle discomfort eases enough for the next session to feel more available.
   estimatedChange:
-    kind: absolute
-    low: 0
-    high: 1
-    unit: 0-10 score points
+    kind: mixed_or_contextual
     window: 8-12 weeks
     confidence: low
     basis: "Recovery and performance evidence is mixed across stressors and training phases; a small readiness range is only defensible when the same recovery prompt and similar workouts are repeated."
 -
   biomarkerKey: biomarker:gi-tolerance
-  expected: Should stay stable
+  expected: Gut stays okay
   protocolProminence: context
   description: Collagen peptides, source proteins, sweeteners, flavors, and active coingredients change gut load, triggering nausea, bloating, reflux, diarrhea, or discomfort.
   estimatedChange:
-    kind: absolute
-    low: 0
-    high: 1
-    unit: 0-10 symptom points
+    kind: mixed_or_contextual
     window: first days to 4 weeks
     confidence: low
     basis: "Short HCP trials often report acceptable tolerability, but adverse-event extraction is incomplete and source_artifact:racgp-oa-nutraceuticals-2026-04-25 notes GI events as a practical monitoring signal."

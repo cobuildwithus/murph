@@ -46,11 +46,6 @@ import {
 
 export { readOptionalProfileImageUrl } from "./experiment-detail-experts";
 
-const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
-const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
-const RED_LIGHT_GLASSES_ROUTE_ID = "red-light-glasses-before-bed";
-const BRYAN_JOHNSON_SAUNA_ROUTE_ID = "bryan-johnson-blueprint";
-
 const QUALITY_TO_EVIDENCE_LEVEL: Record<string, number> = {
   stub: 1,
   usable: 3,
@@ -73,13 +68,6 @@ const QUALITY_LABELS: Record<string, string> = {
   usable: "Usable",
 };
 
-const PROTOCOL_LIBRARY_ORDER = [
-  FINNISH_SAUNA_ROUTE_ID,
-  NORWEGIAN_4X4_ROUTE_ID,
-  RED_LIGHT_GLASSES_ROUTE_ID,
-  BRYAN_JOHNSON_SAUNA_ROUTE_ID,
-] as const;
-
 export function listHealthCommonsExperimentProtocols(
   catalog?: HealthCommonsCatalogReader,
 ): ExperimentProtocol[] {
@@ -87,8 +75,8 @@ export function listHealthCommonsExperimentProtocols(
     return getGeneratedHealthCommonsWebExperimentIndex()
       .experiments
       .filter(isPublicExperimentIndexEntry)
-      .map(toExperimentProtocolIndexEntry)
-      .sort(compareExperimentProtocolOrder);
+      .sort(compareExperimentIndexEntries)
+      .map(toExperimentProtocolIndexEntry);
   }
 
   return catalog
@@ -96,8 +84,8 @@ export function listHealthCommonsExperimentProtocols(
     .filter((protocol) => protocol.entityType === "protocol_variant")
     .filter((protocol) => protocol.status !== "deprecated")
     .filter((protocol) => protocol.hidden !== true)
-    .map((protocol) => toExperimentDetail(protocol, catalog))
-    .sort(compareExperimentProtocolOrder);
+    .sort(compareProtocolEntities)
+    .map((protocol) => toExperimentDetail(protocol, catalog));
 }
 
 export function resolveHealthCommonsExperimentProtocol(
@@ -220,19 +208,15 @@ function formatIndexResearchSummaryLabel(studyCount: number): string {
 }
 
 function normalizeExperimentRouteId(value: string): string {
-  if (value === FINNISH_SAUNA_ROUTE_ID) {
-    return value;
-  }
-
   return value;
 }
 
-function compareExperimentProtocolOrder(
-  left: ExperimentProtocol,
-  right: ExperimentProtocol,
+function compareExperimentIndexEntries(
+  left: ReturnType<typeof getGeneratedHealthCommonsWebExperimentIndex>["experiments"][number],
+  right: ReturnType<typeof getGeneratedHealthCommonsWebExperimentIndex>["experiments"][number],
 ): number {
-  const leftOrder = protocolLibraryOrder(left.id);
-  const rightOrder = protocolLibraryOrder(right.id);
+  const leftOrder = left.sortRank ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.sortRank ?? Number.MAX_SAFE_INTEGER;
 
   if (leftOrder !== rightOrder) {
     return leftOrder - rightOrder;
@@ -241,12 +225,18 @@ function compareExperimentProtocolOrder(
   return left.title.localeCompare(right.title);
 }
 
-function protocolLibraryOrder(protocolId: string): number {
-  const order = PROTOCOL_LIBRARY_ORDER.findIndex((knownProtocolId) =>
-    knownProtocolId === protocolId
-  );
+function compareProtocolEntities(
+  left: HealthCommonsCatalogEntity,
+  right: HealthCommonsCatalogEntity,
+): number {
+  const leftOrder = left.sortRank ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.sortRank ?? Number.MAX_SAFE_INTEGER;
 
-  return order === -1 ? Number.MAX_SAFE_INTEGER : order;
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+
+  return left.title.localeCompare(right.title);
 }
 
 function toExperimentDetail(
@@ -352,7 +342,6 @@ function toExperimentDetail(
       displaySources: citedDisplaySources,
       evidenceAppraisals,
       protocolKey: protocol.key,
-      routeId,
     }),
     ...(protocol.researchLandscape
       ? {
@@ -420,7 +409,29 @@ function cleanSessionShapeCopy(
     ...(shape.summarySegments
       ? { summarySegments: shape.summarySegments.map(cleanSessionShapeSegmentCopy) }
       : {}),
-    ...(shape.ticks ? { ticks: cleanHealthCommonsUserFacingCopyList(shape.ticks) } : {}),
+    ...(shape.ticks ? { ticks: shape.ticks.map(cleanSessionShapeTickCopy) } : {}),
+  };
+}
+
+type ExperimentSessionShapeTick = NonNullable<
+  NonNullable<ExperimentProtocol["sessionShape"]>["ticks"]
+>[number];
+
+function cleanSessionShapeTickCopy(
+  tick: ExperimentSessionShapeTick,
+): ExperimentSessionShapeTick {
+  if (typeof tick === "string") {
+    return cleanHealthCommonsUserFacingCopy(tick);
+  }
+  if ("offsetMinutes" in tick) {
+    return {
+      label: cleanHealthCommonsUserFacingCopy(tick.label),
+      offsetMinutes: tick.offsetMinutes,
+    };
+  }
+  return {
+    label: cleanHealthCommonsUserFacingCopy(tick.label),
+    positionPercent: tick.positionPercent,
   };
 }
 
@@ -496,11 +507,7 @@ function formatProtocolCategory(protocol: HealthCommonsCatalogEntity): string {
 }
 
 function toExperimentId(protocol: HealthCommonsCatalogEntity): string {
-  if (protocol.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week") {
-    return FINNISH_SAUNA_ROUTE_ID;
-  }
-
-  return toTrailingRouteId(protocol.slug);
+  return protocol.preferredRouteId ?? toTrailingRouteId(protocol.slug);
 }
 
 function toTrailingRouteId(slug: string): string {

@@ -118,6 +118,9 @@ export function toExpectedSignal(
     value: "",
     delta: "",
     direction,
+    ...(protocolSignal?.displayValue
+      ? { displayValue: cleanHealthCommonsUserFacingCopy(protocolSignal.displayValue) }
+      : {}),
     ...(estimatedChange
       ? { estimatedChange }
       : {}),
@@ -163,13 +166,13 @@ function cleanExpectedSignalEstimate(
 function normalizeExpectedSignalLabel(expected: string): string {
   switch (expected) {
     case "down":
-    case "mixed_or_contextual":
-      return "Possible change";
     case "down_or_stable":
       return "Could trend lower";
     case "up":
     case "up_or_stable":
       return "Could improve";
+    case "mixed_or_contextual":
+      return "Possible change";
     case "stable":
       return "Should stay stable";
     default:

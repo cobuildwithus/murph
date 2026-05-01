@@ -88,26 +88,6 @@ biomarker:
       - new medication
       - new exercise
       - expectation effects
-protocolRanking:
-  version: 2026-04-24
-  scoreFormula: Manual seed: evidenceWeight + biomarkerRelevance + wearableMeasurability - burdenPenalty - safetyCautionPenalty; subjective sleep quality is favored because direct outdoor-light studies used subjective sleep outcomes.
-  candidates:
-
-    -
-      protocolKey: protocol_variant:morning-light-exposure/morning-outdoor-light-exposure
-      expectedDirection: up_or_stable
-      relationship: primary_biomarker
-      mechanism: Morning outdoor light may strengthen circadian light-dark timing and improve perceived sleep quality in some users; the evidence base is limited and population-bounded, so this remains a personal trend endpoint.
-      scoring:
-        evidenceWeight: 3
-        biomarkerRelevance: 5
-        wearableMeasurability: 2
-        burdenPenalty: 1
-        safetyCautionPenalty: 2
-      display:
-        confidence: medium
-        burdenLabel: one-tap morning log
-        cautionLabel: interpret with confounders
 communityOutcomeSummary:
   state: insufficient_data
   minimumCohortSize: 30

@@ -7,6 +7,7 @@ title: Bryan Johnson Sauna
 summary: High-heat dry sauna daily after a workout with groin ice, where stacking intense heat on exercise doubles the demand on heart and blood vessels to move heat out.
 status: field-testing
 quality: usable
+sortRank: 40
 aliases:
   - Bryan Johnson sauna
   - Bryan Johnson sauna protocol

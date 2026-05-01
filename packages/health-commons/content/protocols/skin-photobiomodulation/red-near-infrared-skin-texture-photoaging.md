@@ -251,14 +251,14 @@ protocol:
   interventionSessionsMinimum: 24
   interventionSessionsTarget: 30
   steps:
-  - Confirm the device model, red/NIR wavelengths or mode, labeled session length, treatment area, timer or auto-shutoff, and manufacturer eye-protection instructions before starting.
-  - Take baseline standardized photos of the chosen face regions before the first intervention session, using the same lighting, camera, distance, expression, and makeup/sunscreen rule you will use later.
-  - Use only the red/NIR wrinkle or texture mode for this run; do not use blue, violet, acne, UV, heat-seeking, laser, IPL, PDT, or topical-activation modes as part of this protocol.
-  - Put on the manufacturer-specified eye inserts, shields, or goggles before turning the device on, and do not look directly at active LEDs.
-  - Run one 10-minute session on 5 days each week for 6 weeks, unless the selected device label is more conservative; do not increase duration, frequency, or closeness to chase faster results.
-  - Keep skincare actives, exfoliation, peels, fillers, lasers/IPL, PDT, sun exposure habits, and other cosmetic interventions as stable as practical during the run.
-  - After each session, log session minutes, mode, treatment area, eye protection, heat or discomfort, skin irritation, pigment changes, headache, eye symptoms, and any skincare or procedure changes.
-  - Repeat the same standardized photos at week 4 and week 6; score only pre-specified regions and review adherence and confounders before interpreting the result.
+    - "Confirm device model, red/NIR mode or wavelengths, session length, treatment area, timer/auto-shutoff, and eye-protection instructions."
+    - "Take baseline standardized photos using the same lighting, camera, distance, expression, and makeup/sunscreen rule."
+    - "Use only red/NIR wrinkle or texture mode; exclude blue, violet, acne, UV, heat, laser, IPL, PDT, and topical-activation modes."
+    - "Put on manufacturer-specified eye protection before turning device on; never look directly at active LEDs."
+    - "Run 10 min, 5 days/week, for 6 weeks; do not increase duration, frequency, or closeness."
+    - "Keep skincare actives, exfoliation, peels, fillers, lasers/IPL, PDT, sun exposure, and cosmetic procedures stable."
+    - "After each session, log minutes, mode, treatment area, eye protection, heat, irritation, pigment changes, headache, eye symptoms, and skincare changes."
+    - "Repeat standardized photos at week 4 and week 6; score only pre-specified regions."
   tips:
   - Record manufacturer wavelength/irradiance, but know it is not independent radiometry.
   - A mask on skin differs from a panel; treat a panel as a separate fork with distance and angle logged.
@@ -313,36 +313,27 @@ testPlans:
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:periocular-wrinkle-score
   description: Red and NIR photons reach periocular skin cells, shifting energy and repair signaling that supports dermal remodeling.
-  expected: Could improve
+  expected: Softer lines
   estimatedChange:
-    kind: absolute
-    low: -1.0
-    high: -0.3
-    unit: points on 0-10 score
+    kind: mixed_or_contextual
     window: 6-week read; stronger evidence at 8-16 weeks
     confidence: moderate
-    basis: Direct 630/850 nm home-mask RCT evidence favored active treatment over sham for crow's-feet scores at 8, 12, and 16 weeks; older 633/830 nm facial studies also reported periocular response. The 6-week starter estimate is scaled down from those longer endpoints.
+    basis: Direct 630/850 nm home-mask RCT evidence favored active treatment over sham for crow's-feet scores at 8, 12, and 16 weeks; older 633/830 nm facial studies also reported periocular response. A 6-week starter read should stay directional because home scoring is approximate.
   protocolProminence: focus
 - biomarkerKey: biomarker:standardized-skin-photo-score
   description: Fixed-region red/NIR exposure supports skin-cell energy, matrix turnover, and repair signaling across fine lines, texture, pores, tone, and pigment appearance.
-  expected: Could improve
+  expected: Better skin
   estimatedChange:
-    kind: absolute
-    low: -0.8
-    high: -0.2
-    unit: points on 0-10 score
+    kind: mixed_or_contextual
     window: 6 weeks
     confidence: low
     basis: Direct home/facial red+NIR sources report positive crow's-feet, texture, brightening, and global-improvement signals, while several adjacent studies show method-specific or null findings. A broad self-photo score should move less cleanly than a pre-specified wrinkle or texture endpoint.
   protocolProminence: focus
 - biomarkerKey: biomarker:skin-texture-roughness-score
   description: Red/NIR exposure nudges fibroblast and dermal-matrix signaling, improving surface support and smoothing rough texture.
-  expected: Could smooth slightly
+  expected: Smoother texture
   estimatedChange:
-    kind: absolute
-    low: -1.0
-    high: -0.3
-    unit: points on 0-10 score
+    kind: mixed_or_contextual
     window: 6-8 weeks
     confidence: low
     basis: A small 637/854 nm home split-face pilot reported treated-side texture improvement at 8 weeks, and broader facial/clinic LED sources include texture or roughness signals. Hydration and elasticity results are mixed, so roughness is the cleaner home endpoint.

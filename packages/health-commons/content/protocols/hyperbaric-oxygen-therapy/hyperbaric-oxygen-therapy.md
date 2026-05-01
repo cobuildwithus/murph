@@ -531,16 +531,29 @@ protocol:
   durationMinutes:
     min: 60
     max: 90
+  sessionShape:
+    label: "One session"
+    segments:
+      - label: "chamber session"
+        kind: "stimulus"
+        durationMinutes: 90
+    ticks:
+      - label: "0"
+        offsetMinutes: 0
+      - label: "60 min minimum"
+        offsetMinutes: 60
+      - label: "90 min"
+        offsetMinutes: 90
   interventionSessionsMinimum: 1
   interventionSessionsTarget: 20
   steps:
-    - "Start only from an active clinician-prescribed HBOT plan at a facility using appropriate chamber/device safety procedures; do not use Murph to initiate unsupervised HBOT."
-    - "Before the first logged session, confirm the indication, chamber type, pressure units, oxygen delivery method, session duration, air-break schedule, planned number of sessions, and who is medically supervising the course."
-    - "Complete the facility safety screen and disclose pneumothorax history, lung disease, ear/sinus equalization problems, recent respiratory infection, seizure history, diabetes or hypoglycemia risk, pregnancy context, intraocular gas, implanted devices, medication or chemotherapy exposures, and claustrophobia/anxiety."
-    - "For each session, follow facility rules on clothing, electronics, personal items, grounding, device compatibility, monitoring, equalization, and staff instructions."
-    - "During descent and treatment, tell staff immediately about ear or sinus pain, inability to equalize, dizziness or faintness, cough or new pulmonary symptoms, chest pain, shortness of breath, neurologic symptoms, visual symptoms, severe anxiety, glucose symptoms, unsafe blood-pressure readings if relevant, device alarms, or any unusual sensation."
-    - "After each session, log pressure/ATA, minutes completed, air breaks, symptoms, adverse events, glucose/BP checks if relevant, vision or ear changes, and whether the session was paused, shortened, or stopped."
-    - "Keep mild/soft-chamber sessions, topical oxygen devices, normobaric oxygen, EWOT, athletic oxygen exposure, and named wellness programs out of this protocol log; track those as separate variants."
+    - "Start only with an active clinician-prescribed HBOT plan at a medically supervised facility."
+    - "Confirm indication, chamber type, pressure units, oxygen method, session length, air breaks, course length, and supervising clinician."
+    - "Complete facility safety screen; disclose lung, ear/sinus, seizure, diabetes, pregnancy, ocular gas, device, medication, and anxiety context."
+    - "Follow facility rules for clothing, electronics, personal items, grounding, device compatibility, monitoring, equalization, and staff instructions."
+    - "Tell staff immediately about ear/sinus pain, dizziness, pulmonary, chest, neurologic, visual, anxiety, glucose, BP, or device symptoms."
+    - "After each session, log pressure, minutes, air breaks, symptoms, adverse events, glucose/BP checks, vision/ear changes, and modifications."
+    - "Keep mild chambers, topical oxygen, normobaric oxygen, EWOT, athletic oxygen, and wellness programs in separate logs."
   tips:
     - "Replace defaults with the clinician’s actual pressure, O2 method, chamber type, duration, air breaks, frequency, and total sessions."
     - "Use the facility’s pressure units (ATA, bar, kPa) — do not silently convert."

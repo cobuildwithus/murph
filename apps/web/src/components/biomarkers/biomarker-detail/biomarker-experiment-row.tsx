@@ -2,15 +2,15 @@ import Image from "next/image";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
-import { resolveBiomarkerExperimentSignal } from "@/src/lib/biomarkers/biomarker-experiment-signals";
 import type {
-  BiomarkerPageModel,
   BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-detail";
 import { resolveHealthCommonsExperimentShell } from "@/src/lib/health-commons/experiment-projections";
+import { cn } from "@/src/lib/utils";
+import { biomarkerFitToneClassName } from "./biomarker-fit-tone";
 
 const ROW_GRID =
-  "grid-cols-[40px_minmax(0,1fr)_72px_64px] md:grid-cols-[40px_minmax(0,1fr)_120px_88px_88px_96px_64px_20px]";
+  "grid-cols-[40px_minmax(0,1fr)_max-content] md:grid-cols-[40px_minmax(0,1fr)_120px_88px_88px_96px_64px_20px]";
 
 export function BiomarkerExperimentRowHeader() {
   return (
@@ -23,33 +23,27 @@ export function BiomarkerExperimentRowHeader() {
       <span className="hidden md:inline">Duration</span>
       <span className="hidden md:inline">Burden</span>
       <span className="hidden md:inline">Evidence</span>
-      <span className="text-right md:text-left">Match</span>
+      <span className="justify-self-end whitespace-nowrap text-right md:justify-self-auto md:text-left">
+        Fit
+      </span>
       <span aria-hidden="true" className="hidden md:inline" />
     </div>
   );
 }
 
 export function BiomarkerExperimentRow({
-  biomarker,
   protocol,
 }: {
-  biomarker: BiomarkerPageModel;
   protocol: BiomarkerProtocolRankingModel;
 }) {
   const experimentId = extractExperimentSlug(protocol.href);
   const shell = experimentId ? resolveHealthCommonsExperimentShell(experimentId) : null;
   const imageSrc = shell?.image ?? null;
-  const signal = experimentId
-    ? resolveBiomarkerExperimentSignal(experimentId, biomarker.routeId)
-    : null;
-  const matchPercent = computeMatchPercent(protocol.scoring);
   const directionArrow = directionArrowFor(protocol.expectedDirection);
-  const expectedShort = signal?.range ?? formatExpectedShort(protocol.expectedDirection);
-  const durationShort = signal?.window ?? "—";
+  const expectedShort = protocol.expectedSignalLabel;
+  const durationShort = protocol.durationLabel;
   const burdenShort = formatChipLabel(protocol.burdenLabel);
-  const evidenceShort = signal?.evidence
-    ? formatChipLabel(signal.evidence)
-    : formatChipLabel(protocol.confidence);
+  const evidenceShort = protocol.evidenceLabel;
 
   return (
     <Link
@@ -93,8 +87,13 @@ export function BiomarkerExperimentRow({
       <span className="hidden text-sm text-foreground md:inline">
         {evidenceShort}
       </span>
-      <span className="font-serif text-base font-semibold text-primary tabular-nums text-right md:text-left">
-        {matchPercent}%
+      <span
+        className={cn(
+          "justify-self-end whitespace-nowrap text-right font-serif text-base font-semibold md:justify-self-auto md:text-left",
+          biomarkerFitToneClassName(protocol.fitLabel),
+        )}
+      >
+        {protocol.fitLabel}
       </span>
       <ChevronRight
         aria-hidden="true"
@@ -103,15 +102,6 @@ export function BiomarkerExperimentRow({
       />
     </Link>
   );
-}
-
-function computeMatchPercent(
-  scoring: BiomarkerProtocolRankingModel["scoring"],
-): number {
-  const positive =
-    scoring.evidenceWeight + scoring.biomarkerRelevance + scoring.wearableMeasurability;
-  const ratio = Math.max(0, Math.min(1, positive / 15));
-  return Math.round(ratio * 100);
 }
 
 function extractExperimentSlug(href: string): string | null {
@@ -131,21 +121,6 @@ function directionArrowFor(direction: BiomarkerProtocolRankingModel["expectedDir
       return "→";
     default:
       return "·";
-  }
-}
-
-function formatExpectedShort(value: BiomarkerProtocolRankingModel["expectedDirection"]): string {
-  switch (value) {
-    case "down":
-    case "down_or_stable":
-      return "lower";
-    case "up":
-    case "up_or_stable":
-      return "higher";
-    case "stable":
-      return "stable";
-    default:
-      return "varied";
   }
 }
 

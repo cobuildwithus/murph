@@ -1,4 +1,8 @@
-import { decryptHostedWebString, encryptHostedWebString } from "../../hosted-crypto/secure-box";
+import {
+  decryptHostedWebString,
+  encryptHostedWebString,
+  type HostedSecureBoxPrismaClient,
+} from "../../hosted-crypto/secure-box";
 import { maybeIsoTimestamp, normalizeNullableString } from "../shared";
 import {
   normalizeHostedDeviceSyncCredentialKind,
@@ -34,6 +38,7 @@ export type HostedStoredConnectionTokenBundle = {
 export async function encryptHostedConnectionSecret(input: {
   connectionId: string;
   provider: string;
+  prisma?: HostedSecureBoxPrismaClient;
   purpose: HostedDeviceSyncSecretPurpose;
   testCodec?: HostedDeviceSyncSecretTestCodec | null;
   tokenVersion?: number | null;
@@ -55,6 +60,7 @@ export async function encryptHostedConnectionSecret(input: {
       tokenVersion: input.tokenVersion,
     }),
     lane: descriptor.lane,
+    prisma: input.prisma,
     scope: descriptor.scope,
     userId: input.userId,
     value: input.value,
@@ -70,6 +76,7 @@ export async function encryptHostedConnectionSecret(input: {
 export async function readHostedStoredTokenBundle(
   record: HostedConnectionRecord,
   testCodec?: HostedDeviceSyncSecretTestCodec | null,
+  prisma?: HostedSecureBoxPrismaClient,
 ): Promise<HostedStoredConnectionTokenBundle | null> {
   if (normalizeHostedDeviceSyncCredentialKind(record.credentialKind) !== "oauth_tokens") {
     return null;
@@ -87,6 +94,7 @@ export async function readHostedStoredTokenBundle(
     accessToken: await decryptHostedConnectionSecret({
       connectionId: record.id,
       provider: record.provider,
+      prisma,
       purpose: "device-sync-access-token",
       testCodec,
       tokenVersion,
@@ -99,6 +107,7 @@ export async function readHostedStoredTokenBundle(
       ? await decryptHostedConnectionSecret({
         connectionId: record.id,
         provider: record.provider,
+        prisma,
         purpose: "device-sync-refresh-token",
         testCodec,
         tokenVersion,
@@ -113,6 +122,7 @@ export async function readHostedStoredTokenBundle(
 export async function readHostedStoredExternalAccountId(
   record: HostedConnectionRecord,
   testCodec?: HostedDeviceSyncSecretTestCodec | null,
+  prisma?: HostedSecureBoxPrismaClient,
 ): Promise<string | null> {
   const payload = normalizeNullableString(record.externalAccountIdEncrypted);
 
@@ -123,6 +133,7 @@ export async function readHostedStoredExternalAccountId(
   return await decryptHostedConnectionSecret({
     connectionId: record.id,
     provider: record.provider,
+    prisma,
     purpose: "device-sync-external-account-id",
     testCodec,
     tokenVersion: null,
@@ -148,6 +159,7 @@ function normalizeHostedDeviceSyncSecretTestCodec(
 async function decryptHostedConnectionSecret(input: {
   connectionId: string;
   provider: string;
+  prisma?: HostedSecureBoxPrismaClient;
   purpose: HostedDeviceSyncSecretPurpose;
   testCodec?: HostedDeviceSyncSecretTestCodec | null;
   tokenVersion?: number | null;
@@ -169,12 +181,17 @@ async function decryptHostedConnectionSecret(input: {
       tokenVersion: input.tokenVersion,
     }),
     lane: descriptor.lane,
+    prisma: input.prisma,
     scope: descriptor.scope,
     userId: input.userId,
     value: input.value,
   });
 
-  return decrypted ?? "";
+  if (decrypted === null) {
+    throw new TypeError("Hosted device-sync secure-box decryption returned an empty plaintext.");
+  }
+
+  return decrypted;
 }
 
 function resolveHostedDeviceSyncSecretDescriptor(

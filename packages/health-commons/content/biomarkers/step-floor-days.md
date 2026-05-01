@@ -60,24 +60,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: up_or_stable
-    relationship: secondary_biomarker
-    mechanism: This is an adherence marker; a high score with pain or obsession is not a good result.
-    scoring:
-      evidenceWeight: 3
-      biomarkerRelevance: 5
-      wearableMeasurability: 2
-      burdenPenalty: 1
-      safetyCautionPenalty: 1
-    display:
-      confidence: medium
-      burdenLabel: manual
-      cautionLabel: context
 ---
 
 Step floor days show whether the chosen floor was repeatable. Use it together with pain, fatigue, safety symptoms, and life-friction logs.

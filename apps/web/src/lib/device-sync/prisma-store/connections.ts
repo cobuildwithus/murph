@@ -13,6 +13,7 @@ import type {
   DeviceAccountCredentialKind,
 } from "@murphai/device-syncd/types";
 
+import type { HostedSecureBoxPrismaClient } from "../../hosted-crypto/secure-box";
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
 import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
@@ -135,6 +136,7 @@ export class PrismaHostedConnectionStore {
         const credentialWrite = await buildHostedConnectionCredentialWrite({
           connectionId: existing.id,
           credential,
+          prisma: tx,
           provider: input.provider,
           testCodec: this.testCodec,
           tokenVersion: typeof existing.tokenVersion === "number" && existing.tokenVersion > 0
@@ -155,6 +157,7 @@ export class PrismaHostedConnectionStore {
             externalAccountIdEncrypted: await encryptHostedConnectionSecret({
               connectionId: existing.id,
               provider: input.provider,
+              prisma: tx,
               purpose: "device-sync-external-account-id",
               testCodec: this.testCodec,
               userId: existing.userId,
@@ -182,6 +185,7 @@ export class PrismaHostedConnectionStore {
       const credentialWrite = await buildHostedConnectionCredentialWrite({
         connectionId,
         credential,
+        prisma: tx,
         provider: input.provider,
         testCodec: this.testCodec,
         tokenVersion: 1,
@@ -197,6 +201,7 @@ export class PrismaHostedConnectionStore {
           externalAccountIdEncrypted: await encryptHostedConnectionSecret({
             connectionId,
             provider: input.provider,
+            prisma: tx,
             purpose: "device-sync-external-account-id",
             testCodec: this.testCodec,
             userId: ownerId,
@@ -369,7 +374,7 @@ export class PrismaHostedConnectionStore {
       },
       ...hostedConnectionRecordArgs,
     });
-    return record ? await this.buildStoredConnectionAccount(record) : null;
+    return record ? await this.buildStoredConnectionAccount(record, prisma) : null;
   }
 
   async persistStoredConnectionTokenBundle(input: {
@@ -398,7 +403,7 @@ export class PrismaHostedConnectionStore {
       return;
     }
 
-    const existingExternalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec);
+    const existingExternalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, prisma);
     const requestedExternalAccountId = normalizeNullableString(input.externalAccountId);
     const externalAccountId = input.clearExternalAccountId === true
       ? null
@@ -411,6 +416,7 @@ export class PrismaHostedConnectionStore {
       ? await encryptHostedConnectionSecret({
         connectionId: input.connectionId,
         provider: input.provider,
+        prisma,
         purpose: "device-sync-access-token",
         testCodec: this.testCodec,
         tokenVersion: input.tokenBundle.tokenVersion,
@@ -422,6 +428,7 @@ export class PrismaHostedConnectionStore {
       ? await encryptHostedConnectionSecret({
         connectionId: input.connectionId,
         provider: input.provider,
+        prisma,
         purpose: "device-sync-refresh-token",
         testCodec: this.testCodec,
         tokenVersion: input.tokenBundle.tokenVersion,
@@ -433,6 +440,7 @@ export class PrismaHostedConnectionStore {
       ? await encryptHostedConnectionSecret({
         connectionId: input.connectionId,
         provider: input.provider,
+        prisma,
         purpose: "device-sync-external-account-id",
         testCodec: this.testCodec,
         userId: record.userId,
@@ -527,7 +535,7 @@ export class PrismaHostedConnectionStore {
     } = {},
   ): Promise<PublicDeviceSyncAccount> {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec);
+    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, this.prisma);
 
     return toRedactedPublicDeviceSyncAccount(
       buildHostedPublicDeviceSyncAccount({
@@ -537,9 +545,12 @@ export class PrismaHostedConnectionStore {
     );
   }
 
-  private async buildStoredConnectionAccount(record: HostedConnectionRecord): Promise<HostedStoredDeviceSyncAccount | null> {
+  private async buildStoredConnectionAccount(
+    record: HostedConnectionRecord,
+    prisma: HostedSecureBoxPrismaClient = this.prisma,
+  ): Promise<HostedStoredDeviceSyncAccount | null> {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec);
+    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, prisma);
 
     const publicConnection = buildHostedPublicDeviceSyncAccount({
       record: mappedRecord,
@@ -547,7 +558,7 @@ export class PrismaHostedConnectionStore {
 
     switch (mappedRecord.credentialKind) {
       case "oauth_tokens": {
-        const tokenBundle = await readHostedStoredTokenBundle(record, this.testCodec);
+        const tokenBundle = await readHostedStoredTokenBundle(record, this.testCodec, prisma);
 
         if (!tokenBundle) {
           return null;
@@ -700,6 +711,7 @@ function resolveHostedDeviceSyncSetupExpiresAt(input: {
 async function buildHostedConnectionCredentialWrite(input: {
   connectionId: string;
   credential: DeviceAccountCredential;
+  prisma: HostedPrismaTransactionClient;
   provider: string;
   testCodec: HostedDeviceSyncSecretTestCodec | null;
   tokenVersion: number;
@@ -711,6 +723,7 @@ async function buildHostedConnectionCredentialWrite(input: {
     case "oauth_tokens":
       return await buildHostedOAuthCredentialWrite({
         connectionId: input.connectionId,
+        prisma: input.prisma,
         provider: input.provider,
         testCodec: input.testCodec,
         tokenVersion: input.tokenVersion,
@@ -809,6 +822,7 @@ function normalizeDefaultProviderProfileKey(provider: string): string | null {
 
 async function buildHostedOAuthCredentialWrite(input: {
   connectionId: string;
+  prisma: HostedPrismaTransactionClient;
   provider: string;
   testCodec: HostedDeviceSyncSecretTestCodec | null;
   tokenVersion: number;
@@ -828,6 +842,7 @@ async function buildHostedOAuthCredentialWrite(input: {
     accessTokenEncrypted: await encryptHostedConnectionSecret({
       connectionId: input.connectionId,
       provider: input.provider,
+      prisma: input.prisma,
       purpose: "device-sync-access-token",
       testCodec: input.testCodec,
       tokenVersion: input.tokenVersion,
@@ -843,6 +858,7 @@ async function buildHostedOAuthCredentialWrite(input: {
       ? await encryptHostedConnectionSecret({
         connectionId: input.connectionId,
         provider: input.provider,
+        prisma: input.prisma,
         purpose: "device-sync-refresh-token",
         testCodec: input.testCodec,
         tokenVersion: input.tokenVersion,

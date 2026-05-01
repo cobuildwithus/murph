@@ -58,24 +58,6 @@ biomarker:
     - weather or heat
     - unusual work walking
     - footwear or terrain change
-protocolRanking:
-  version: daily-step-floor-draft-2026-04-28
-  scoreFormula: Protocol-specific ranking uses relevance to Daily Step Floor decision-making, measurement feasibility, burden, and safety caution.
-  candidates:
-  - protocolKey: protocol_variant:daily-step-floor/daily-step-floor
-    expectedDirection: down_or_stable
-    relationship: secondary_biomarker
-    mechanism: A step floor may reduce sedentary time, but sedentary-time interventions are not the same as a total-step-floor dose.
-    scoring:
-      evidenceWeight: 3
-      biomarkerRelevance: 3
-      wearableMeasurability: 5
-      burdenPenalty: 1
-      safetyCautionPenalty: 1
-    display:
-      confidence: medium
-      burdenLabel: low
-      cautionLabel: context
 ---
 
 Sedentary time is a context marker. It can help interpret whether a higher step count came from shorter sitting blocks, but it is not the canonical dose.

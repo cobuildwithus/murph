@@ -54,15 +54,29 @@ protocol:
   target: 'all caffeine sources: coffee, tea, energy products, supplements, decaf, chocolate/cocoa, and caffeine-containing medicines'
   frequency:
     sessionsPerWeek: 7
+  sessionShape:
+    label: Caffeine cutoff window
+    segments:
+    - label: caffeine-free buffer
+      kind: stimulus
+      durationMinutes: 480
+    - label: bedtime
+      kind: transition
+      durationMinutes: 5
+    ticks:
+    - label: cutoff
+      offsetMinutes: 0
+    - label: "8 h / bedtime"
+      offsetMinutes: 485
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-  - 'Run a 7-day baseline if possible: keep caffeine habits unchanged and log every caffeine source, serving size, approximate milligrams, and time consumed.'
-  - Choose an intended bedtime anchor and calculate the daily cutoff as the earlier of 10–11am or 8 hours before that bedtime.
-  - For 14 intervention days, keep all ordinary caffeine sources before the cutoff and log every source. Do not use caffeine pills, pure caffeine powder, liquid caffeine concentrate, energy shots, or pre-workout products to front-load the morning dose. Do not skip prescribed or needed medicines to meet the curfew; check medication labels and get pharmacist or clinician guidance if a medicine contains caffeine or may alter caffeine metabolism.
-  - Keep total daily caffeine and the largest single serving stable or lower than baseline. Do not compensate by stacking the day’s caffeine into one large early dose. If baseline intake is high, reduction causes functional impairment, or you rely on caffeine for safety-critical alertness, stop the ordinary experiment and use a slower taper or clinician-guided plan instead.
-  - Log curfew adherence, total estimated caffeine milligrams, sleep timing, sleep-onset estimate, sleep quality, wearable sleep metrics when available, and withdrawal or excess-caffeine symptoms each day.
-  - Review the result against your own baseline, using adherent days only and checking alcohol, illness, stress, travel, late exercise, schedule changes, and new medications or supplements before calling it a signal.
+    - "Run a 7-day baseline when possible; keep caffeine unchanged and log source, serving size, estimated mg, and time."
+    - "Choose bedtime anchor; set cutoff as earlier of 10–11 AM or 8h before bed."
+    - "For 14 days, keep all caffeine before cutoff; log coffee, tea, energy products, decaf, chocolate, supplements, and medicines."
+    - "Keep total caffeine stable or lower; do not stack one large early dose or use pills, powders, shots, or pre-workout."
+    - "Track cutoff adherence, total mg, sleep timing, sleep onset, sleep quality, and withdrawal or excess-caffeine symptoms daily."
+    - "Review adherent days against baseline; flag alcohol, illness, stress, travel, late exercise, schedule shifts, and medication changes."
   tips:
   - Use labels or tables for milligram estimates — cup counts are too crude.
   - Make the first caffeine deliberate and measured, not automatic refills.

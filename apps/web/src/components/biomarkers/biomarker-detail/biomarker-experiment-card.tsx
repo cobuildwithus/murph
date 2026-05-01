@@ -1,41 +1,29 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { resolveBiomarkerExperimentSignal } from "@/src/lib/biomarkers/biomarker-experiment-signals";
 import type {
-  BiomarkerPageModel,
   BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-detail";
 import { resolveHealthCommonsExperimentShell } from "@/src/lib/health-commons/experiment-projections";
 import { cn } from "@/src/lib/utils";
+import { biomarkerFitToneClassName } from "./biomarker-fit-tone";
 
 const CARD_IMAGE_SIZES = "(min-width: 1024px) 33vw, 100vw";
 
 export function BiomarkerExperimentCard({
-  biomarker,
   protocol,
 }: {
-  biomarker: BiomarkerPageModel;
   protocol: BiomarkerProtocolRankingModel;
 }) {
   const experimentId = extractExperimentSlug(protocol.href);
   const shell = experimentId ? resolveHealthCommonsExperimentShell(experimentId) : null;
   const imageSrc = shell?.image ?? null;
-  const signal = experimentId
-    ? resolveBiomarkerExperimentSignal(experimentId, biomarker.routeId)
-    : null;
-  const matchPercent = computeMatchPercent(protocol.scoring);
   const directionArrow = directionArrowFor(protocol.expectedDirection);
-  const directionLabel = formatExpectedDirection(protocol.expectedDirection);
 
-  const expectedHighlight = signal
-    ? `${directionArrow} ${signal.range}`
-    : `${directionArrow} ${directionLabel}`;
-  const durationHighlight = signal?.window ?? "—";
+  const expectedHighlight = `${directionArrow} ${protocol.expectedSignalLabel}`;
+  const durationHighlight = protocol.durationLabel;
 
-  const evidenceLabel = signal?.evidence
-    ? `${formatChipLabel(signal.evidence)} evidence`
-    : `${formatChipLabel(protocol.confidence)} evidence`;
+  const evidenceLabel = `${protocol.evidenceLabel} evidence`;
   const cautionLabel = `Caution ${protocol.cautionLabel.toLowerCase()}`;
 
   return (
@@ -71,11 +59,16 @@ export function BiomarkerExperimentCard({
             </h3>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
-            <span className="font-serif text-2xl/6 font-semibold tabular-nums text-primary">
-              {matchPercent}%
+            <span
+              className={cn(
+                "font-serif text-xl/6 font-semibold",
+                biomarkerFitToneClassName(protocol.fitLabel),
+              )}
+            >
+              {protocol.fitLabel}
             </span>
             <span className="font-mono text-[9px]/3 uppercase tracking-[0.14em] text-muted-foreground">
-              match
+              fit
             </span>
           </div>
         </div>
@@ -135,17 +128,6 @@ function Pill({ children }: { children: string }) {
   );
 }
 
-// TEMPORARY heuristic: rocketman-21 will replace with a real per-user
-// match score once user-baseline integration lands. Tracked in TODOS.md.
-function computeMatchPercent(
-  scoring: BiomarkerProtocolRankingModel["scoring"],
-): number {
-  const positive =
-    scoring.evidenceWeight + scoring.biomarkerRelevance + scoring.wearableMeasurability;
-  const ratio = Math.max(0, Math.min(1, positive / 15));
-  return Math.round(ratio * 100);
-}
-
 function extractExperimentSlug(href: string): string | null {
   const match = href.match(/\/experiments\/([^/?#]+)/u);
   return match ? match[1] : null;
@@ -163,25 +145,6 @@ function directionArrowFor(direction: BiomarkerProtocolRankingModel["expectedDir
       return "→";
     default:
       return "·";
-  }
-}
-
-function formatExpectedDirection(value: BiomarkerProtocolRankingModel["expectedDirection"]): string {
-  switch (value) {
-    case "down":
-    case "down_or_stable":
-      return "lower";
-    case "up":
-    case "up_or_stable":
-      return "higher";
-    case "stable":
-      return "stable";
-    case "mixed_or_contextual":
-      return "varied";
-    default: {
-      const _exhaustive: never = value;
-      return formatChipLabel(String(_exhaustive));
-    }
   }
 }
 

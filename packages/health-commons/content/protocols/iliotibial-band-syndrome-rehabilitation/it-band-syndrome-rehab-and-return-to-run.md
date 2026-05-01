@@ -166,18 +166,30 @@ protocol:
   durationMinutes:
     min: 20
     max: 45
+  sessionShape:
+    label: One session
+    segments:
+    - label: rehab session
+      kind: stimulus
+      durationMinutes: 45
+    ticks:
+    - label: "0"
+      offsetMinutes: 0
+    - label: "20 min minimum"
+      offsetMinutes: 20
+    - label: "45 min"
+      offsetMinutes: 45
   interventionSessionsMinimum: 12
   interventionSessionsTarget: 18
   steps:
-  - Screen first. Do not start this self-guided protocol if knee pain followed major injury or a sudden pop, the knee is locked or very swollen, weight bearing is unsafe, fever or a hot/red/warm swollen joint is present, neurologic symptoms appear, focal bony/rest/night pain is present, or the diagnosis is unclear.
-  - For 7 baseline days, log lateral knee pain, walking or stair symptoms, recent running exposure, terrain, hills, shoes, and any cross-training. Avoid running that clearly escalates pain while this baseline is being captured.
-  - Reduce the current running dose until lateral knee pain stays mild during daily activity. If running reliably triggers sharp or escalating pain, substitute walking or low-irritation cross-training and keep the return-to-run branch paused.
-  - Complete three weekly strength/control sessions. Emphasize tolerable hip abductor, glute, external-rotator, trunk, and single-leg control work rather than trying to aggressively stretch or compress the iliotibial band itself.
-  - Start the run/walk branch only after normal walking, the current rehab phase, and lateral-knee palpation are pain-free. Use short, flat, alternate-day run/walk sessions first, and keep hills, downhill running, cambered roads, speed work, sudden mileage jumps, and long strides out until flat running is repeatedly symptom-free.
-  - Begin with short run/walk intervals, such as 1 minute easy running and 2 minutes walking repeated 6–10 times. Stop the session if lateral knee pain rises above the agreed threshold, changes gait, becomes sharp, keeps increasing, appears at rest, or comes with swelling, warmth, redness, locking, catching, buckling, numbness, weakness, or inability to bear weight.
-  - Progress only one variable at a time. Add a small interval step, a few total minutes, or another easy run/walk exposure only after the current phase is symptom-free during the session and does not rebound later that day or the next morning; if symptoms recur, rest/reset and restart from the last pain-free phase.
-  - 'Optional movement experiment: if symptoms repeatedly appear at the same point in easy running, trial one small cue such as slightly higher cadence, shorter stride, or quieter landing. Do not stack multiple gait changes at once, and stop if the cue increases pain.'
-  - Keep strength/control work in place while the run/walk branch progresses. Once easy running is consistently tolerated for several weeks, taper rehab to maintenance instead of abruptly stopping it.
+    - "Screen first; do not start after trauma, locking, major swelling, unsafe weight bearing, fever, neurologic symptoms, bony pain, or unclear diagnosis."
+    - "Baseline 7 days: log lateral knee pain, walking/stair symptoms, running load, terrain, hills, shoes, and cross-training."
+    - "Reduce running until daily activity pain stays mild; use walking or low-irritation cross-training when running escalates pain."
+    - "Complete 3 weekly strength/control sessions focused on hip abductors, glutes, external rotators, trunk, and single-leg control."
+    - "Start run/walk only after walking, current rehab phase, and lateral-knee palpation are pain-free."
+    - "Use short flat alternate-day run/walk intervals; avoid hills, camber, speed work, long strides, and mileage jumps."
+    - "Stop if pain sharpens, rises above ceiling, changes gait, appears at rest, rebounds next day, or comes with red flags."
+    - "Progress 1 variable at a time; keep strength work until easy running is consistently tolerated."
   tips:
   - Agree on a pain rule up front. Sharp pain, gait change, or next-day rebound stops progression regardless of the number.
   - Flat routes, predictable surfaces, stable shoes, easy pace — keep the signal clean.

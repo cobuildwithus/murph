@@ -39,28 +39,9 @@ const allowedPathSegments = new Set([
 
 const allowedFindingLabelsByFile = new Map([
   [
-    "packages/assistant-runtime/src/hosted-runtime/environment.ts",
-    new Set([
-      "legacy hosted wake/mailbox data-encryption env",
-    ]),
-  ],
-  [
-    "apps/web/src/lib/hosted-encryption-shared.ts",
-    new Set([
-      "legacy device-sync secret codec import",
-      "legacy hosted shared secret codec factory",
-    ]),
-  ],
-  [
     "apps/web/src/lib/device-sync/env.ts",
     new Set([
       "legacy device-sync data-encryption env",
-    ]),
-  ],
-  [
-    "apps/web/src/lib/device-sync/crypto.ts",
-    new Set([
-      "legacy hosted shared secret codec factory",
     ]),
   ],
   [

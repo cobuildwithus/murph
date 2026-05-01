@@ -99,56 +99,6 @@ relations:
   -
     type: cites
     target: source_artifact:pmid-34622026
-protocolRanking:
-  version: deterministic-v0
-  scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
-  candidates:
-
-    -
-      protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
-      expectedDirection: down
-      relationship: primary_biomarker
-      mechanism: Aerobic adaptation is the clearest overall route to a lower resting pulse over time, though under-recovery can temporarily push RHR up.
-      scoring:
-        evidenceWeight: 5
-        biomarkerRelevance: 5
-        wearableMeasurability: 5
-        burdenPenalty: 4
-        safetyCautionPenalty: 3
-      display:
-        confidence: high
-        burdenLabel: High
-        cautionLabel: Higher
-    -
-      protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-      expectedDirection: down_or_stable
-      relationship: secondary_biomarker
-      mechanism: Repeated heat exposure can train cardiovascular and recovery responses, but RHR is more context-sensitive here than with direct aerobic training.
-      scoring:
-        evidenceWeight: 3
-        biomarkerRelevance: 4
-        wearableMeasurability: 5
-        burdenPenalty: 2
-        safetyCautionPenalty: 2
-      display:
-        confidence: medium
-        burdenLabel: Moderate
-        cautionLabel: Moderate
-    -
-      protocolKey: protocol_variant:evening-light-reduction/red-light-glasses-before-bed
-      expectedDirection: mixed_or_contextual
-      relationship: secondary_biomarker
-      mechanism: Evening light reduction may indirectly lower overnight strain if sleep timing or sleep quality improves, but RHR is not the primary endpoint.
-      scoring:
-        evidenceWeight: 2
-        biomarkerRelevance: 2
-        wearableMeasurability: 5
-        burdenPenalty: 1
-        safetyCautionPenalty: 1
-      display:
-        confidence: low
-        burdenLabel: Low
-        cautionLabel: Low
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20

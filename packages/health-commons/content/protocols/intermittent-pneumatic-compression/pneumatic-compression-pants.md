@@ -199,14 +199,14 @@ protocol:
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:
-  - Complete the safety screen before the first session; do not start if the goal is clot prevention, swelling treatment, wound care, post-surgical prophylaxis, or another medical use.
-  - Record the device model, garment coverage, pressure or intensity level, compression mode, planned duration, posture, and trigger context before the first intervention session.
-  - Inspect the skin that will sit under the garment; check that the garment, hose, pump, charger, and quick-release or power-off path are intact and reachable; and confirm the garment is not pressing focally on the fibular head, knee, ankle, groin/genitals, surgical site/hardware, skin graft/bypass area, or another bony prominence.
-  - Sit or recline in a stable position. Do not walk while wearing leg attachments; keep the disconnect or power-off path reachable; avoid any setup where tubing, cords, or inflated garments create a tripping/fall hazard or prevent quick removal.
-  - Start with the lowest comfortable pressure or intensity that produces compression without pain, numbness, tingling, pressure hot spots, or a need to brace against the device; do not copy high-pressure study settings or use the device maximum as a target.
-  - Run a 20–30 minute session after the chosen trigger, such as a hard workout or a prolonged standing/sitting day. Keep the rest of the recovery routine as stable as practical.
-  - Stop early if any stop condition occurs. After the session, remove the garment, inspect the skin again, and log soreness, fatigue, perceived recovery, leg heaviness, comfort, pressure, duration, and symptoms.
-  - For the 21-day intervention window, keep device, pressure, duration, mode, and timing consistent unless safety or comfort requires lowering the dose.
+    - "Complete safety screen; do not use for clot prevention, swelling treatment, wound care, surgery prophylaxis, or medical compression."
+    - "Record device model, garment coverage, pressure/intensity, mode, duration, posture, and trigger context."
+    - "Inspect skin and equipment; confirm quick removal and no focal pressure on nerves, joints, groin, hardware, grafts, or lesions."
+    - "Sit or recline; do not walk with attachments; keep tubing, cords, and garments from creating fall risk."
+    - "Start at lowest comfortable setting; stop for pain, numbness, tingling, hotspots, or bracing against pressure."
+    - "Run 20–30 min after the chosen trigger, keeping the rest of recovery stable."
+    - "Stop early for any stop condition; remove garment, inspect skin, and log symptoms."
+    - "Keep device, pressure, duration, mode, and timing consistent unless safety or comfort requires lowering dose."
   safetyNotes:
   - This is not a DVT/PE-prevention, lymphedema/lipedema, wound-care, PAD/CLTI, venous-ulcer, post-thrombotic-syndrome, diabetes-foot-risk, or post-surgical protocol.
   - Safety screening and stop rules are stronger than efficacy claims because direct recovery trials do not provide a robust consumer adverse-event denominator.
@@ -281,36 +281,30 @@ testPlans:
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:muscle-soreness-score
   description: "Compression cycles squeeze and refill leg tissue, moving venous blood and interstitial fluid to reduce pooling, stiffness, and soreness."
-  expected: Could trend lower
+  expected: Less sore
+  expectedDirection: down
   estimatedChange:
-    kind: absolute
-    low: -1
-    high: -0.3
-    unit: 0–10 score points
+    kind: mixed_or_contextual
     window: 24–96 hours after hard lower-body training
     confidence: moderate
-    basis: "source_artifact:pmid-35456170 reports SMD -0.33 for soreness from 24–96 hours after DOMS induction; source_artifact:pmid-39416507 supports pain/soreness as a clearer practical signal than objective recovery. The range maps that small standardized effect to a 0–10 score."
+    basis: "source_artifact:pmid-35456170 reports SMD -0.33 for soreness from 24–96 hours after DOMS induction; source_artifact:pmid-39416507 supports pain/soreness as a clearer practical signal than objective recovery. Mapping that standardized effect to a simple soreness check-in is approximate."
   protocolProminence: focus
 - biomarkerKey: biomarker:leg-heaviness-score
   description: "Sequential pressure empties and refills the lower legs, reducing pooled fluid that makes legs feel heavy."
-  expected: Could trend lower
+  expected: Lighter legs
+  expectedDirection: down
   estimatedChange:
-    kind: absolute
-    low: -1.5
-    high: -0.5
-    unit: 0–10 score points
+    kind: mixed_or_contextual
     window: Same evening or within 2 hours after a standing/sitting trigger
     confidence: low
     basis: "source_artifact:pmid-34260560 and source_artifact:pmid-36419142 reported leg-pain and circumference improvements after prolonged-standing contexts. Confidence stays low because leg heaviness was not pooled and this consumer protocol is not a swelling-treatment plan."
   protocolProminence: focus
 - biomarkerKey: biomarker:perceived-recovery-score
   description: "Fluid movement and quiet rest reduce immediate leg fatigue, making the next session feel more available."
-  expected: Could improve
+  expected: More recovered
+  expectedDirection: up
   estimatedChange:
-    kind: absolute
-    low: 0.3
-    high: 1
-    unit: 0–10 score points
+    kind: mixed_or_contextual
     window: Immediately after the session to next morning
     confidence: low
     basis: "source_artifact:doi-10.1007-s11332-024-01217-5 reported higher total-quality-recovery without better cycling power, and source_artifact:pmid-27011305 reported immediate fatigue relief after ultramarathon IPC. Null athlete trials keep confidence low."

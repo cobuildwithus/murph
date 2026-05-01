@@ -23,6 +23,7 @@ import type {
   ExperimentSessionShape,
   ExperimentSessionShapeSegment,
   ExperimentSessionShapeSegmentKind,
+  ExperimentSessionShapeTick,
   ExperimentSignal,
   ExperimentSignalEstimatedChange,
 } from "@/src/types/experiments";
@@ -99,19 +100,20 @@ const SIGNAL_ESTIMATE_FALLBACK: SignalEstimate = {
 function getSignalEstimate(signal: ExperimentSignal): SignalEstimate {
   const estimate = signal.estimatedChange;
   if (estimate?.kind === "mixed_or_contextual") {
+    const range = signal.displayValue ?? signal.expected;
     return {
       ...SIGNAL_ESTIMATE_FALLBACK,
-      range: signal.expected,
-      point: signal.expected.toLowerCase(),
+      range,
+      point: range.toLowerCase(),
       window: estimate.window ?? SIGNAL_ESTIMATE_FALLBACK.window,
       evidence: formatEstimateConfidence(estimate.confidence),
     };
   }
   if (estimate) {
-    const range = formatEstimatedChangeRange(estimate);
+    const range = signal.displayValue ?? formatEstimatedChangeRange(estimate);
     return {
       range,
-      point: range,
+      point: signal.displayValue ? range.toLowerCase() : range,
       window: estimate.window ?? SIGNAL_ESTIMATE_FALLBACK.window,
       baseline: "Baseline",
       projected: range,
@@ -122,8 +124,8 @@ function getSignalEstimate(signal: ExperimentSignal): SignalEstimate {
 
   return {
     ...SIGNAL_ESTIMATE_FALLBACK,
-    range: signal.expected,
-    point: signal.expected.toLowerCase(),
+    range: signal.displayValue ?? signal.expected,
+    point: (signal.displayValue ?? signal.expected).toLowerCase(),
   };
 }
 
@@ -864,13 +866,14 @@ function ProtocolShapeRail({
 }: {
   segments: readonly ExperimentSessionShapeSegment[];
   summarySegments?: readonly ExperimentSessionShapeSegment[];
-  ticks: ReadonlyArray<string>;
+  ticks: readonly ExperimentSessionShapeTick[];
 }) {
   const total = segments.reduce((sum, s) => sum + s.durationMinutes, 0);
   if (total <= 0) return null;
   const effectiveLabels = summarySegments ?? segments;
   const labelTotal =
     effectiveLabels.reduce((sum, l) => sum + l.durationMinutes, 0);
+  const positionedTicks = positionSessionShapeTicks(ticks, total);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -904,9 +907,15 @@ function ProtocolShapeRail({
           );
         })}
       </div>
-      <div className="flex justify-between font-mono text-[9px]/3 tabular-nums text-muted-foreground">
-        {ticks.map((tick, i) => (
-          <span key={i}>{tick}</span>
+      <div className="relative h-3 font-mono text-[9px]/3 tabular-nums text-muted-foreground">
+        {positionedTicks.map((tick, i) => (
+          <span
+            key={`${tick.label}-${i}`}
+            className="absolute top-0 -translate-x-1/2 whitespace-nowrap first:translate-x-0 last:-translate-x-full"
+            style={{ left: `${tick.positionPercent}%` }}
+          >
+            {tick.label}
+          </span>
         ))}
       </div>
       {labelTotal > 0 && (
@@ -931,6 +940,39 @@ function ProtocolShapeRail({
       )}
     </div>
   );
+}
+
+function positionSessionShapeTicks(
+  ticks: readonly ExperimentSessionShapeTick[],
+  total: number,
+): Array<{ label: string; positionPercent: number }> {
+  if (ticks.length === 0) {
+    return [];
+  }
+
+  return ticks.map((tick, index) => {
+    if (typeof tick === "string") {
+      const denominator = Math.max(ticks.length - 1, 1);
+      return {
+        label: tick,
+        positionPercent: (index / denominator) * 100,
+      };
+    }
+    if ("positionPercent" in tick) {
+      return {
+        label: tick.label,
+        positionPercent: clampPercent(tick.positionPercent),
+      };
+    }
+    return {
+      label: tick.label,
+      positionPercent: clampPercent((tick.offsetMinutes / total) * 100),
+    };
+  });
+}
+
+function clampPercent(value: number): number {
+  return Math.min(Math.max(value, 0), 100);
 }
 
 function sessionShapeSegmentClass(kind: ExperimentSessionShapeSegmentKind): string {

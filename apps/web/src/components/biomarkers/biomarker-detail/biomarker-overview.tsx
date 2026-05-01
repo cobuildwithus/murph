@@ -39,7 +39,6 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerPageModel
             {heroProtocols.map((protocol) => (
               <BiomarkerExperimentCardHero
                 key={protocol.key}
-                biomarker={biomarker}
                 protocol={protocol}
               />
             ))}
@@ -52,7 +51,6 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerPageModel
                 {standardProtocols.map((protocol) => (
                   <BiomarkerExperimentCard
                     key={protocol.key}
-                    biomarker={biomarker}
                     protocol={protocol}
                   />
                 ))}
@@ -68,7 +66,6 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerPageModel
                 {restProtocols.map((protocol) => (
                   <BiomarkerExperimentRow
                     key={protocol.key}
-                    biomarker={biomarker}
                     protocol={protocol}
                   />
                 ))}

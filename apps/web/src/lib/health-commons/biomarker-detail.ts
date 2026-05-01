@@ -2,12 +2,11 @@ import type {
   HealthCommonsBiomarkerCommunityOutcomeSummary,
   HealthCommonsBiomarkerExplainerCard,
   HealthCommonsBiomarkerPrivateMetricBinding,
-  HealthCommonsBiomarkerProtocolCandidate,
   HealthCommonsBiomarkerProtocolExpectedDirection,
-  HealthCommonsBiomarkerProtocolRelationship,
-  HealthCommonsBiomarkerProtocolScoring,
   HealthCommonsBiomarkerTrendAggregation,
   HealthCommonsClaim,
+  HealthCommonsExpectedSignalDescription,
+  HealthCommonsExpectedSignalEstimate,
   HealthCommonsInterpretationFrame,
   HealthCommonsSource,
 } from "@murphai/contracts";
@@ -17,16 +16,12 @@ import {
   loadGeneratedHealthCommonsWebRouteBundle,
   type HealthCommonsCatalogReader,
   type HealthCommonsEntity,
-  type HealthCommonsRouteBundleReader,
 } from "@murphai/health-commons/runtime";
 import {
   cleanHealthCommonsUserFacingCopy,
   cleanHealthCommonsUserFacingCopyList,
   cleanOptionalHealthCommonsUserFacingCopy,
 } from "./user-facing-copy";
-
-const FINNISH_SAUNA_PROTOCOL_KEY = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
-const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
 
 const STATUS_LABELS: Record<string, string> = {
   community: "Community",
@@ -56,11 +51,6 @@ const DEFAULT_TREND_DEFAULTS: BiomarkerTrendDefaults = {
   latestWindowDays: 7,
   minimumPoints: 5,
 };
-
-type ProtocolBiomarkerRelationType =
-  | "primary_biomarker"
-  | "related_protocol"
-  | "secondary_biomarker";
 
 export interface BiomarkerTrendDefaults {
   aggregation: HealthCommonsBiomarkerTrendAggregation;
@@ -108,18 +98,21 @@ export interface BiomarkerProtocolRankingModel {
   burdenLabel: string;
   cautionLabel: string;
   category: string;
-  confidence: "high" | "medium" | "low" | "unknown";
   description: string;
-  explicitCandidateIndex: number | null;
+  durationLabel: string;
+  evidenceLabel: string;
   expectedDirection: HealthCommonsBiomarkerProtocolExpectedDirection;
+  expectedSignalLabel: string;
+  fitLabel: string;
   href: string;
-  isExplicitCandidate: boolean;
   key: string;
   mechanism: string;
-  rankScore: number;
-  relationship: HealthCommonsBiomarkerProtocolRelationship;
-  scoring: HealthCommonsBiomarkerProtocolScoring;
   title: string;
+}
+
+interface ScoredBiomarkerProtocolRankingModel {
+  model: BiomarkerProtocolRankingModel;
+  rankScore: number;
 }
 
 export interface BiomarkerPageModel {
@@ -137,8 +130,6 @@ export interface BiomarkerPageModel {
   measurementContexts: string[];
   pageRevisionId: string;
   privateMetricBindings: HealthCommonsBiomarkerPrivateMetricBinding[];
-  protocolRankingFormula: string;
-  protocolRankingVersion: string;
   protocolRankings: BiomarkerProtocolRankingModel[];
   qualityLabel: string;
   routeId: string;
@@ -166,7 +157,7 @@ export function listHealthCommonsBiomarkerRoutes(
 
   return catalog
     .listByEntityType("biomarker")
-    .filter(isPublishedBiomarker)
+    .filter((entity) => isPublishedBiomarker(entity, catalog))
     .map((entity) => toTrailingRouteId(entity.slug))
     .sort();
 }
@@ -186,7 +177,7 @@ export function resolveHealthCommonsBiomarkerDetail(
     const reader = createHealthCommonsRouteBundleReader(bundle);
     const biomarker = reader.findByKey(bundle.primaryKey);
 
-    if (!isPublishedBiomarker(biomarker)) {
+    if (!isPublishedBiomarker(biomarker, reader)) {
       return null;
     }
 
@@ -202,7 +193,7 @@ export function resolveHealthCommonsBiomarkerDetail(
     return null;
   }
 
-  if (!isPublishedBiomarker(biomarker)) {
+  if (!isPublishedBiomarker(biomarker, catalog)) {
     return null;
   }
 
@@ -214,7 +205,6 @@ function toBiomarkerPageModel(
   catalog: HealthCommonsCatalogReader,
 ): BiomarkerPageModel {
   const biomarkerSpec = biomarker.biomarker;
-  const protocolRanking = biomarker.protocolRanking;
 
   return {
     aliases: biomarker.aliases ?? [],
@@ -251,10 +241,6 @@ function toBiomarkerPageModel(
     measurementContexts: cleanHealthCommonsUserFacingCopyList(biomarker.measurementContexts ?? []),
     pageRevisionId: biomarker.revision.pageRevisionId,
     privateMetricBindings: biomarkerSpec?.privateMetricBindings ?? [],
-    protocolRankingFormula: cleanHealthCommonsUserFacingCopy(protocolRanking?.scoreFormula
-      ?? "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
-    ),
-    protocolRankingVersion: protocolRanking?.version ?? "deterministic-v0",
     protocolRankings: buildProtocolRankings({ biomarker, catalog }),
     qualityLabel: formatQualityLabel(biomarker.quality),
     routeId: toTrailingRouteId(biomarker.slug),
@@ -274,12 +260,14 @@ function toBiomarkerPageModel(
 
 function isPublishedBiomarker(
   entity: HealthCommonsEntity | null,
+  catalog: HealthCommonsCatalogReader,
 ): entity is HealthCommonsEntity & { entityType: "biomarker" } {
   return entity?.entityType === "biomarker"
     && entity.status !== "deprecated"
+    && entity.hidden !== true
     && (entity.biomarker?.explainerCards?.length ?? 0) > 0
     && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
-    && (entity.protocolRanking?.candidates?.length ?? 0) > 0
+    && hasProtocolExpectedSignalCandidate(catalog, entity.key)
     && entity.communityOutcomeSummary != null;
 }
 
@@ -423,98 +411,63 @@ function buildProtocolRankings(input: {
   biomarker: HealthCommonsEntity;
   catalog: HealthCommonsCatalogReader;
 }): BiomarkerProtocolRankingModel[] {
-  const explicitCandidates = input.biomarker.protocolRanking?.candidates ?? [];
-  const explicitCandidateByKey = new Map(
-    explicitCandidates.map((candidate, index) => [
-      candidate.protocolKey,
-      { candidate, index },
-    ]),
-  );
-  const protocols = resolveProtocolCandidates(input);
-
-  return protocols
-    .map((protocol) => toProtocolRanking({
+  return resolveProtocolCandidates(input)
+    .map((candidate) => toProtocolRanking({
       biomarker: input.biomarker,
-      explicitCandidate: explicitCandidateByKey.get(protocol.key)?.candidate ?? null,
-      explicitCandidateIndex: explicitCandidateByKey.get(protocol.key)?.index ?? null,
-      protocol,
+      protocol: candidate.protocol,
+      signal: candidate.signal,
     }))
-    .sort(compareProtocolRankings);
+    .sort(compareProtocolRankings)
+    .map((ranking) => ranking.model);
 }
 
 function resolveProtocolCandidates(input: {
   biomarker: HealthCommonsEntity;
   catalog: HealthCommonsCatalogReader;
-}): HealthCommonsEntity[] {
-  const explicit = (input.biomarker.protocolRanking?.candidates ?? [])
-    .flatMap((candidate) => {
-      const protocol = input.catalog.findByKey(candidate.protocolKey);
-      return protocol?.entityType === "protocol_variant" ? [protocol] : [];
+}): Array<{ protocol: HealthCommonsEntity; signal: HealthCommonsExpectedSignalDescription }> {
+  return input.catalog
+    .listByEntityType("protocol_variant")
+    .filter(isRankableProtocolVariant)
+    .flatMap((protocol) => {
+      const signal = findExpectedSignalForBiomarker(protocol, input.biomarker.key);
+      return signal ? [{ protocol, signal }] : [];
     });
-  const direct = input.catalog.listRelated({
-    entity: input.biomarker,
-    entityTypes: ["protocol_variant"],
-    relationTypes: ["related_protocol"],
-  });
-  const inverse = isRouteBundleReader(input.catalog)
-    ? input.catalog
-        .listReverseEdges({
-          relationTypes: ["primary_biomarker", "secondary_biomarker"],
-          targetKey: input.biomarker.key,
-        })
-        .flatMap((edge) => {
-          const protocol = input.catalog.findByKey(edge.sourceKey);
-          return protocol?.entityType === "protocol_variant" ? [protocol] : [];
-        })
-    : input.catalog
-        .listByEntityType("protocol_variant")
-        .filter((protocol) => protocol.status !== "deprecated")
-        .filter((protocol) => hasProtocolBiomarkerRelation(protocol, input.biomarker.key));
-
-  return uniqueEntities([...explicit, ...direct, ...inverse]);
-}
-
-function isRouteBundleReader(
-  catalog: HealthCommonsCatalogReader,
-): catalog is HealthCommonsRouteBundleReader {
-  return "listReverseEdges" in catalog && typeof catalog.listReverseEdges === "function";
 }
 
 function toProtocolRanking(input: {
   biomarker: HealthCommonsEntity;
-  explicitCandidate: HealthCommonsBiomarkerProtocolCandidate | null;
-  explicitCandidateIndex: number | null;
   protocol: HealthCommonsEntity;
-}): BiomarkerProtocolRankingModel {
-  const relationship = input.explicitCandidate?.relationship
-    ?? inferProtocolRelationship(input.protocol, input.biomarker);
-  const scoring = input.explicitCandidate?.scoring
-    ?? fallbackProtocolScoring(input.protocol, relationship);
-  const rankScore = scoreProtocol(scoring);
+  signal: HealthCommonsExpectedSignalDescription;
+}): ScoredBiomarkerProtocolRankingModel {
+  const burdenPenalty = protocolBurdenPenalty(input.protocol);
+  const safetyPenalty = protocolSafetyPenalty(input.protocol);
+  const expectedDirection = input.signal.expectedDirection
+    ?? expectedDirectionForBiomarker(input.biomarker);
+  const rankScore = scoreProtocolCandidate({
+    biomarker: input.biomarker,
+    protocol: input.protocol,
+    signal: input.signal,
+  });
 
   return {
-    burdenLabel: input.explicitCandidate?.display?.burdenLabel
-      ?? labelForPenalty(scoring.burdenPenalty),
-    cautionLabel: input.explicitCandidate?.display?.cautionLabel
-      ?? labelForPenalty(scoring.safetyCautionPenalty),
-    category: formatProtocolCategory(input.protocol),
-    confidence: input.explicitCandidate?.display?.confidence ?? confidenceForScore(rankScore),
-    description: cleanHealthCommonsUserFacingCopy(
-      input.protocol.summary ?? summarizeBody(input.protocol.body),
-    ),
-    explicitCandidateIndex: input.explicitCandidateIndex,
-    expectedDirection: input.explicitCandidate?.expectedDirection
-      ?? expectedDirectionForBiomarker(input.biomarker),
-    href: `/experiments/${toProtocolExperimentRouteId(input.protocol)}`,
-    isExplicitCandidate: input.explicitCandidate !== null,
-    key: input.protocol.key,
-    mechanism: cleanHealthCommonsUserFacingCopy(input.explicitCandidate?.mechanism
-      ?? `${input.protocol.title} is linked to ${input.biomarker.title} in Health Commons. Use the protocol page for dosing, caveats, and expected measurement windows.`,
-    ),
     rankScore,
-    relationship,
-    scoring,
-    title: cleanHealthCommonsUserFacingCopy(input.protocol.title),
+    model: {
+      burdenLabel: labelForPenalty(burdenPenalty),
+      cautionLabel: labelForPenalty(safetyPenalty),
+      category: formatProtocolCategory(input.protocol),
+      description: cleanHealthCommonsUserFacingCopy(
+        input.protocol.summary ?? summarizeBody(input.protocol.body),
+      ),
+      durationLabel: input.signal.estimatedChange?.window ?? "—",
+      evidenceLabel: evidenceLabelForSignal(input.signal, input.protocol),
+      expectedDirection,
+      expectedSignalLabel: formatExpectedSignalLabel(input.signal, expectedDirection),
+      fitLabel: fitLabelForScore(rankScore),
+      href: `/experiments/${toProtocolExperimentRouteId(input.protocol)}`,
+      key: input.protocol.key,
+      mechanism: cleanHealthCommonsUserFacingCopy(input.signal.description),
+      title: cleanHealthCommonsUserFacingCopy(input.protocol.title),
+    },
   };
 }
 
@@ -597,91 +550,217 @@ function cleanCommunityOutcomeSummary(
   };
 }
 
-function scoreProtocol(scoring: HealthCommonsBiomarkerProtocolScoring): number {
-  return scoring.evidenceWeight * 3
-    + scoring.biomarkerRelevance * 3
-    + scoring.wearableMeasurability * 2
-    - scoring.burdenPenalty
-    - scoring.safetyCautionPenalty
-    + (scoring.communityOutcomeConfidence ?? 0);
-}
-
 function compareProtocolRankings(
-  left: BiomarkerProtocolRankingModel,
-  right: BiomarkerProtocolRankingModel,
+  left: ScoredBiomarkerProtocolRankingModel,
+  right: ScoredBiomarkerProtocolRankingModel,
 ): number {
-  if (left.isExplicitCandidate !== right.isExplicitCandidate) {
-    return left.isExplicitCandidate ? -1 : 1;
-  }
-
-  if (
-    left.isExplicitCandidate
-    && right.isExplicitCandidate
-    && left.explicitCandidateIndex !== right.explicitCandidateIndex
-  ) {
-    return (left.explicitCandidateIndex ?? Number.MAX_SAFE_INTEGER)
-      - (right.explicitCandidateIndex ?? Number.MAX_SAFE_INTEGER);
-  }
-
   const scoreDelta = right.rankScore - left.rankScore;
-  return scoreDelta === 0 ? left.title.localeCompare(right.title) : scoreDelta;
+  return scoreDelta === 0 ? left.model.title.localeCompare(right.model.title) : scoreDelta;
 }
 
-function fallbackProtocolScoring(
-  protocol: HealthCommonsEntity,
-  relationship: HealthCommonsBiomarkerProtocolRelationship,
-): HealthCommonsBiomarkerProtocolScoring {
-  return {
-    biomarkerRelevance: relevanceForRelationship(relationship),
-    burdenPenalty: protocolBurdenPenalty(protocol),
-    evidenceWeight: QUALITY_SCORE[protocol.quality ?? ""] ?? 2,
-    safetyCautionPenalty: protocolSafetyPenalty(protocol),
-    wearableMeasurability: 4,
-  };
+function isRankableProtocolVariant(protocol: HealthCommonsEntity): boolean {
+  return protocol.entityType === "protocol_variant"
+    && protocol.status !== "deprecated"
+    && protocol.hidden !== true;
 }
 
-function inferProtocolRelationship(
-  protocol: HealthCommonsEntity,
-  biomarker: HealthCommonsEntity,
-): HealthCommonsBiomarkerProtocolRelationship {
-  const inverse = protocol.relations?.find((relation) =>
-    relation.target === biomarker.key && isProtocolBiomarkerRelationType(relation.type)
-  );
+function hasProtocolExpectedSignalCandidate(
+  catalog: HealthCommonsCatalogReader,
+  biomarkerKey: string,
+): boolean {
+  return catalog
+    .listByEntityType("protocol_variant")
+    .filter(isRankableProtocolVariant)
+    .some((protocol) => findExpectedSignalForBiomarker(protocol, biomarkerKey) !== null);
+}
 
-  if (inverse?.type === "primary_biomarker" || inverse?.type === "secondary_biomarker") {
-    return inverse.type;
+function findExpectedSignalForBiomarker(
+  protocol: HealthCommonsEntity,
+  biomarkerKey: string,
+): HealthCommonsExpectedSignalDescription | null {
+  return protocol.expectedSignalDescriptions?.find((signal) =>
+    signal.biomarkerKey === biomarkerKey
+  ) ?? null;
+}
+
+function scoreProtocolCandidate(input: {
+  biomarker: HealthCommonsEntity;
+  protocol: HealthCommonsEntity;
+  signal: HealthCommonsExpectedSignalDescription;
+}): number {
+  return signalProminenceScore(input.signal)
+    + testPlanBiomarkerScore(input.protocol, input.biomarker.key)
+    + relationBiomarkerScore(input.protocol, input.biomarker.key)
+    + signalEvidenceScore(input.signal)
+    + estimatedChangeClarityScore(input.signal.estimatedChange)
+    + (QUALITY_SCORE[input.protocol.quality ?? ""] ?? 2)
+    - protocolBurdenPenalty(input.protocol)
+    - protocolSafetyPenalty(input.protocol);
+}
+
+function signalProminenceScore(signal: HealthCommonsExpectedSignalDescription): number {
+  return signal.protocolProminence === "focus" ? 12 : 4;
+}
+
+function testPlanBiomarkerScore(protocol: HealthCommonsEntity, biomarkerKey: string): number {
+  let score = 0;
+
+  for (const plan of protocol.testPlans ?? []) {
+    if (plan.primaryBiomarkerKey === biomarkerKey) {
+      score = Math.max(score, 10);
+    }
+    if ((plan.secondaryBiomarkerKeys ?? []).includes(biomarkerKey)) {
+      score = Math.max(score, 5);
+    }
+    if ((plan.safetyOutcomeKeys ?? []).includes(biomarkerKey)) {
+      score = Math.max(score, 2);
+    }
   }
 
-  const direct = biomarker.relations?.find((relation) =>
-    relation.type === "related_protocol" && relation.target === protocol.key
-  );
-
-  return direct ? "related_protocol" : "manual_candidate";
+  return score;
 }
 
-function hasProtocolBiomarkerRelation(protocol: HealthCommonsEntity, biomarkerKey: string): boolean {
-  return protocol.relations?.some((relation) =>
-    relation.target === biomarkerKey
-      && (relation.type === "primary_biomarker" || relation.type === "secondary_biomarker")
-  ) ?? false;
+function relationBiomarkerScore(protocol: HealthCommonsEntity, biomarkerKey: string): number {
+  let score = 0;
+
+  for (const relation of protocol.relations ?? []) {
+    if (relation.target !== biomarkerKey) {
+      continue;
+    }
+
+    if (relation.type === "primary_biomarker") {
+      score = Math.max(score, 6);
+    } else if (relation.type === "secondary_biomarker") {
+      score = Math.max(score, 3);
+    } else if (relation.type === "related_protocol") {
+      score = Math.max(score, 1);
+    }
+  }
+
+  return score;
 }
 
-function isProtocolBiomarkerRelationType(value: string): value is ProtocolBiomarkerRelationType {
-  return value === "primary_biomarker"
-    || value === "related_protocol"
-    || value === "secondary_biomarker";
-}
-
-function relevanceForRelationship(relationship: HealthCommonsBiomarkerProtocolRelationship): number {
-  switch (relationship) {
-    case "primary_biomarker":
-      return 5;
-    case "secondary_biomarker":
+function signalEvidenceScore(signal: HealthCommonsExpectedSignalDescription): number {
+  switch (signal.estimatedChange?.confidence) {
+    case "high":
+      return 8;
+    case "moderate":
+      return 6;
+    case "mixed":
+      return 4;
+    case "low":
       return 3;
-    case "related_protocol":
+    case undefined:
       return 2;
-    case "manual_candidate":
-      return 1;
+  }
+}
+
+function estimatedChangeClarityScore(
+  estimate: HealthCommonsExpectedSignalEstimate | undefined,
+): number {
+  if (!estimate) {
+    return 0;
+  }
+
+  return estimate.kind === "mixed_or_contextual" ? 0 : 3;
+}
+
+function evidenceLabelForSignal(
+  signal: HealthCommonsExpectedSignalDescription,
+  protocol: HealthCommonsEntity,
+): string {
+  switch (signal.estimatedChange?.confidence) {
+    case "high":
+      return "High";
+    case "moderate":
+      return "Moderate";
+    case "mixed":
+      return "Variable";
+    case "low":
+      return "Low";
+    case undefined:
+      return evidenceLabelForQuality(protocol.quality);
+  }
+}
+
+function evidenceLabelForQuality(quality: string | undefined): string {
+  switch (quality) {
+    case "excellent":
+      return "High";
+    case "reviewed":
+      return "Moderate";
+    case "usable":
+      return "Low";
+    case "stub":
+    case undefined:
+      return "Unknown";
+    default:
+      return "Unknown";
+  }
+}
+
+function fitLabelForScore(score: number): string {
+  if (score >= 32) {
+    return "Strong";
+  }
+
+  if (score >= 24) {
+    return "Good";
+  }
+
+  if (score >= 16) {
+    return "Context";
+  }
+
+  return "Exploratory";
+}
+
+function formatExpectedSignalLabel(
+  signal: HealthCommonsExpectedSignalDescription,
+  direction: HealthCommonsBiomarkerProtocolExpectedDirection,
+): string {
+  return formatEstimatedChangeRange(signal.estimatedChange, signal)
+    ?? normalizeExpectedSignalLabel(signal.expected)
+    ?? formatExpectedDirection(direction);
+}
+
+function formatEstimatedChangeRange(
+  estimate: HealthCommonsExpectedSignalEstimate | undefined,
+  signal: HealthCommonsExpectedSignalDescription,
+): string | null {
+  if (!estimate) {
+    return null;
+  }
+
+  if (estimate.kind === "mixed_or_contextual") {
+    return normalizeExpectedSignalLabel(signal.expected) ?? "Context-dependent";
+  }
+
+  const low = formatSignedNumber(estimate.low);
+  const high = formatSignedNumber(estimate.high);
+  const unit = estimate.kind === "relative_percent" ? "%" : ` ${estimate.unit}`;
+
+  return estimate.low === estimate.high
+    ? `${low}${unit}`
+    : `${low} to ${high}${unit}`;
+}
+
+function normalizeExpectedSignalLabel(expected: string | undefined): string | null {
+  switch (expected) {
+    case "down":
+    case "down_or_stable":
+      return "Could trend lower";
+    case "up":
+    case "up_or_stable":
+      return "Could improve";
+    case "mixed_or_contextual":
+      return "Possible change";
+    case "stable":
+      return "Should stay stable";
+    case undefined:
+      return null;
+    default:
+      return expected;
   }
 }
 
@@ -718,22 +797,6 @@ function protocolSafetyPenalty(protocol: HealthCommonsEntity): number {
   }
 }
 
-function confidenceForScore(score: number): "high" | "medium" | "low" | "unknown" {
-  if (score >= 32) {
-    return "high";
-  }
-
-  if (score >= 24) {
-    return "medium";
-  }
-
-  if (score >= 14) {
-    return "low";
-  }
-
-  return "unknown";
-}
-
 function labelForPenalty(value: number): string {
   if (value >= 4) {
     return "High";
@@ -744,6 +807,23 @@ function labelForPenalty(value: number): string {
   }
 
   return "Low";
+}
+
+function formatExpectedDirection(
+  direction: HealthCommonsBiomarkerProtocolExpectedDirection,
+): string {
+  switch (direction) {
+    case "down":
+    case "down_or_stable":
+      return "lower";
+    case "up":
+    case "up_or_stable":
+      return "higher";
+    case "stable":
+      return "stable";
+    case "mixed_or_contextual":
+      return "varied";
+  }
 }
 
 function expectedDirectionForBiomarker(
@@ -767,11 +847,7 @@ function expectedDirectionForBiomarker(
 }
 
 function toProtocolExperimentRouteId(protocol: HealthCommonsEntity): string {
-  if (protocol.key === FINNISH_SAUNA_PROTOCOL_KEY) {
-    return FINNISH_SAUNA_ROUTE_ID;
-  }
-
-  return toTrailingRouteId(protocol.slug);
+  return protocol.preferredRouteId ?? toTrailingRouteId(protocol.slug);
 }
 
 function formatProtocolCategory(protocol: HealthCommonsEntity): string {
@@ -840,6 +916,18 @@ function toTrailingRouteId(slug: string): string {
 
 function normalizeRouteId(value: string): string {
   return decodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "");
+}
+
+function formatSignedNumber(value: number): string {
+  if (value > 0) {
+    return `+${formatNumber(value)}`;
+  }
+
+  return formatNumber(value);
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? value.toFixed(0) : value.toString();
 }
 
 function formatWords(value: string): string {

@@ -109,6 +109,7 @@ export interface ExperimentSignal {
   unit?: string;
   delta: string;
   direction: "up" | "down" | "neutral";
+  displayValue?: string;
   estimatedChange?: ExperimentSignalEstimatedChange;
   expected: string;
   baseline?: string;
@@ -154,11 +155,22 @@ export interface ExperimentSessionShapeSegment {
   label: string;
 }
 
+export type ExperimentSessionShapeTick =
+  | string
+  | {
+      label: string;
+      offsetMinutes: number;
+    }
+  | {
+      label: string;
+      positionPercent: number;
+    };
+
 export interface ExperimentSessionShape {
   label?: string;
   segments: ExperimentSessionShapeSegment[];
   summarySegments?: ExperimentSessionShapeSegment[];
-  ticks?: string[];
+  ticks?: ExperimentSessionShapeTick[];
 }
 
 export interface ExperimentMeasurementMethodReference {

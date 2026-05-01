@@ -78,15 +78,14 @@ protocol:
   interventionSessionsMinimum: 42
   interventionSessionsTarget: 56
   steps:
-  - 'Pick the denominator before calculating the target: actual body weight, adjusted body weight, goal body weight, or clinician-specified weight; record which one you used.'
-  - If actual body weight would create an unusually high target because of high adiposity, recent bariatric surgery, or clinician-supervised weight-loss care, do not default to actual body weight; use adjusted, goal, ideal, or clinician-specified weight and document the reason.
-  - Before choosing 1.8–2.0 g/kg/day, confirm a negative safety screen and a plan that does not rely on supplement stacking, displace fiber-rich foods, or shift heavily toward saturated-fat-heavy, red/processed-meat-heavy, seafood-heavy, or purine-heavy sources.
-  - Calculate a daily gram target. For example, target grams = chosen body weight in kg × the selected g/kg/day target.
-  - Collect 7–14 baseline days of usual protein intake if possible, plus body weight, satiety, GI comfort, fiber intake, training pattern, and weight-loss or maintenance intent.
-  - Build a food-first plan using ordinary meals you can repeat. Use protein powder, bars, or shakes only to fill documented gaps, log the product and dose, and do not use supplements to push beyond the declared target or above 2.0 g/kg/day. Supplement-heavy versions are separate protocols.
-  - During the intervention, log daily protein grams, g/kg/day, energy intake if available, fiber, saturated fat, protein source mix, satiety or hunger, digestive comfort, and training changes.
-  - Review the first two weeks for tolerability and adherence. If the target crowds out fiber, worsens GI symptoms, or requires unsustainable meal planning, lower the target or pause rather than forcing it.
-  - At the end of the window, interpret outcomes by achieved dose, energy balance, training context, source quality, and safety context—not just by the assigned target.
+    - "Pick denominator first: actual, adjusted, goal, or clinician-specified body weight; record which value you used."
+    - "Use adjusted/goal/clinician weight when actual body weight creates an unrealistic target."
+    - "Choose 1.5–1.6 g/kg/day by default; reserve 1.8–2.0 for negative safety screen and documented rationale."
+    - "Calculate daily grams: chosen body weight in kg × selected g/kg/day target."
+    - "Baseline 7–14 days: log usual protein, weight, satiety, GI comfort, fiber, training, and goal."
+    - "Build a food-first meal plan; use powders, bars, or shakes only to fill logged gaps, never above 2.0 g/kg/day."
+    - "Log protein grams, g/kg, energy if available, fiber, saturated fat, source mix, satiety, GI comfort, and training changes."
+    - "Review first 2 weeks; lower or pause if target crowds out fiber, worsens GI symptoms, or feels unsustainable."
   tips:
   - Start at the lower end of the band when baseline intake is unknown.
   - Spread protein across meals only if it helps adherence or satiety — distribution is not mandatory.

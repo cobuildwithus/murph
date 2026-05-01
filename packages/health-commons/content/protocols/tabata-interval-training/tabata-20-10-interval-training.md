@@ -447,14 +447,14 @@ protocol:
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:
-    - Before each session, confirm no avoid/ask-clinician item or stop-condition symptom is present. Cancel the session if you are ill, unusually symptomatic, heat-stressed, dehydrated, or not recovered from a prior hard session.
-    - For the first exposure, prefer a stationary bike, elliptical, rower, or another low-impact setup that can be stopped instantly. Do not use road running, traffic-exposed routes, stairs, treadmill sprinting without an emergency-stop setup, heavy or complex lifts, Olympic-style lifts, burpees, jump squats, or loaded/plyometric circuits in this starter protocol.
-    - Warm up for 5-10 minutes at easy-to-moderate effort. If chest, breathing, neurologic, heat, joint, or severe muscle symptoms appear during warm-up, stop and do not start the intervals.
-    - Set a timer for up to eight rounds of 20 seconds work followed by 10 seconds true rest.
-    - Work hard but controlled. The first session should be deliberately submaximal; preserve form, breathing control, and the ability to stop safely.
-    - Make each 10-second break a true rest or unloaded recovery. Do not add extra movements during the rest.
-    - Stop immediately if any stop condition occurs. Do not restart that day after a stop-condition symptom.
-    - Cool down only if safe, then log symptoms, rounds completed, modality, environment, intensity, and delayed recovery or red flags over the next 24-72 hours.
+    - "Screen before each session; cancel if ill, symptomatic, heat-stressed, dehydrated, or unrecovered from prior hard work."
+    - "Use a low-impact setup that stops instantly: bike, rower, elliptical, or similar for first exposure."
+    - "Avoid traffic routes, stairs, unsafe treadmill sprints, heavy/complex lifts, burpees, jump squats, and loaded/plyometric circuits."
+    - "Warm up 5–10 min easy-to-moderate; stop if chest, breathing, neurologic, heat, joint, or severe muscle symptoms appear."
+    - "Set timer for up to 8 rounds: 20 sec work, 10 sec true rest."
+    - "Work hard but controlled; first session stays submaximal with safe form, breathing, and stop ability."
+    - "Keep every 10-sec break true rest or unloaded recovery; add no extra movements."
+    - "Stop for any stop condition; log rounds, modality, intensity, symptoms, environment, and 24–72h recovery."
   tips:
     - At least 48 hours between sessions in the first experiment.
     - One block only — no stacked WODs, circuits, or finishers in the first run.

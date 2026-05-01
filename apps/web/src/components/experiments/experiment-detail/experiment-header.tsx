@@ -4,9 +4,6 @@ import { StartExperimentButton } from "@/src/components/experiments/experiment-d
 import type { ExperimentStartContactChannels } from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentStatus } from "@/src/types/experiments";
 
-const UNWANTED_BRYAN_JOHNSON_DESCRIPTION_PHRASE =
-  " best read as personal context rather than expected outcomes.";
-
 interface ExperimentHeaderProps {
   title: string;
   category: string;
@@ -44,7 +41,6 @@ export function ExperimentHeader({
   showStartAction = true,
   startAction,
 }: ExperimentHeaderProps) {
-  const sanitizedDescription = sanitizeExperimentDescription(description);
   const isActive = status === "active";
   const isPaused = status === "paused";
   const isFinished = status === "finished";
@@ -132,9 +128,9 @@ export function ExperimentHeader({
             {title}
           </h1>
 
-          {sanitizedDescription && (
+          {description && (
             <p className="text-[16px] leading-[160%] text-muted-foreground">
-              {sanitizedDescription}
+              {description}
             </p>
           )}
         </div>
@@ -182,12 +178,4 @@ export function ExperimentHeader({
 
 function formatProtocolDays(durationDays: number, baselineDays: number): number {
   return Math.max(1, durationDays - baselineDays);
-}
-
-function sanitizeExperimentDescription(description: string | undefined): string | undefined {
-  if (!description) {
-    return description;
-  }
-
-  return description.replace(UNWANTED_BRYAN_JOHNSON_DESCRIPTION_PHRASE, ".");
 }

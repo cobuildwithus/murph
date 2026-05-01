@@ -529,16 +529,14 @@ protocol:
   interventionSessionsMinimum: 20
   interventionSessionsTarget: 30
   steps:
-  - Pick one primary target area before starting, such as posterior-chain/hamstrings, calf/ankle dorsiflexion, hip flexors, or a shoulder reach pattern.
-  - Pick one matched measurement and record it during a 7-day baseline without changing your usual stretching routine.
-  - For each session, use stable support such as the floor, wall, doorway, chair, or countertop so balance is not part of the test.
-  - Move slowly into the stretch until you feel mild tension or slight discomfort, not pain. Do not chase a higher intensity score, deeper end range, or longer hold to force progress.
-  - Use self-applied force only. Do not let another person push or manually force the joint, and do not add weights, straps, orthoses, or aggressive end-range leverage unless this is a separate clinician-guided variant.
-  - Hold for about 30 seconds, breathe normally, come out slowly, and repeat for 2–3 total holds for the target area. Adherence targets never override stop rules.
-  - 'Keep the target-muscle exposure visible: 2 holds equals about 60 seconds per target area; 3 holds equals about 90 seconds per target area.'
-  - Repeat on about 5 days per week for 6 weeks, keeping the same target area, measurement setup, and general routine as consistent as practical.
-  - Measure the chosen ROM test at the same time of day and in the same warm-up state at least weekly, and preferably 2–3 times per week if the measure is quick.
-  - Log completed holds, total hold seconds, intensity, whether the sensation stayed mild and non-painful, symptoms during and after the session, whether symptoms settled after stopping, support/position used, recent or unusually strenuous exercise, severe soreness/swelling/weakness, illness, pain/injury/rehab changes, and any measurement setup changes.
+    - "Choose 1 primary target: hamstrings/posterior chain, calves/ankles, hip flexors, or shoulder reach."
+    - "Choose 1 matched ROM measure; record 7 baseline days without changing usual stretching."
+    - "Use stable support—floor, wall, chair, doorway, or countertop—so balance is not the test."
+    - "Move slowly to mild tension; avoid pain, forced range, partner pushing, weights, straps, or aggressive leverage."
+    - "Hold ~30 sec, breathe normally, exit slowly; repeat 2–3 holds for the target area."
+    - "Repeat ~5 days/week for 6 weeks; keep target, stretch position, and measurement setup stable."
+    - "Measure same time, side, warm-up state, footwear, and setup at least weekly."
+    - "Log holds, seconds, intensity, symptoms, recent exercise, soreness, pain/injury changes, and measurement changes."
   tips:
   - One target area at a time; too many areas blur attribution and raise burden.
   - Same stretch position each session — do not mix techniques mid-run.
@@ -693,17 +691,14 @@ expectedSignalDescriptions:
     basis: "Source-backed anchor: source_artifact:pmid-17416125 and source_artifact:doi-10.3928/19425864-20100524-01 support shoulder ROM changes, but home scores use different directions and scales such as back-scratch gap, hand-behind-back reach, or wall-slide height."
 -
   biomarkerKey: biomarker:perceived-stiffness
-  expected: May feel less stiff
+  expected: Less stiff
   protocolProminence: context
   description: Repeated mild holds recalibrate stretch sensation, making the target area feel less tight as tolerance improves.
   estimatedChange:
-    kind: absolute
-    low: -2
-    high: 0
-    unit: 0-10 score points
+    kind: mixed_or_contextual
     window: 6 weeks
     confidence: low
-    basis: "Source-backed anchor: source_artifact:pmid-37231582 supports objective stiffness reduction after long-term static stretching, but user-rated stiffness is not the main pooled endpoint; a 0-2 point decrease is a practical low-confidence sensation range."
+    basis: "Source-backed anchor: source_artifact:pmid-37231582 supports objective stiffness reduction after long-term static stretching, but user-rated stiffness is not the main pooled endpoint and does not map cleanly to a simple check-in."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

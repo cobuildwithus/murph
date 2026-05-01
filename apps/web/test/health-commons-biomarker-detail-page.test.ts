@@ -156,8 +156,8 @@ describe("BiomarkerPage", () => {
         title: "Norwegian 4x4",
       },
       {
-        href: "/experiments/finnish-sauna",
-        title: "Finnish Dry Sauna",
+        href: "/experiments/zone-2-aerobic-base-block",
+        title: "Zone 2 Cardio",
       },
     ]);
     expect(markup).toContain('data-biomarker-id="estimated-vo2max"');
@@ -475,12 +475,12 @@ describe("BiomarkerPage", () => {
       })).slice(0, 2),
     ).toEqual([
       {
-        href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4",
+        href: "/experiments/whole-body-red-and-near-infrared-light-exposure",
+        title: "Red Light Therapy",
       },
       {
-        href: "/experiments/finnish-sauna",
-        title: "Finnish Dry Sauna",
+        href: "/experiments/bryan-johnson-blueprint",
+        title: "Bryan Johnson Sauna",
       },
     ]);
     expect(markup).toContain('data-biomarker-id="hrv-rmssd"');
@@ -509,7 +509,7 @@ describe("BiomarkerPage", () => {
           title: "Why people care",
         },
         {
-          body: "Compare same-device overnight or quiet-morning trends. Use multi-day medians, not one-off readings.",
+          body: "Typical adult range: 60-100 bpm; lower trends matter when sleep, recovery, and training load are stable.",
           iconKey: "howToMeasure",
           title: "How to read it",
         },
@@ -539,16 +539,16 @@ describe("BiomarkerPage", () => {
       })).slice(0, 3),
     ).toEqual([
       {
-        href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4",
+        href: "/experiments/daily-step-floor",
+        title: "Daily Step Floor",
       },
       {
-        href: "/experiments/finnish-sauna",
-        title: "Finnish Dry Sauna",
+        href: "/experiments/whole-body-red-and-near-infrared-light-exposure",
+        title: "Red Light Therapy",
       },
       {
-        href: "/experiments/red-light-glasses-before-bed",
-        title: "Red Light Glasses Before Bed",
+        href: "/experiments/bryan-johnson-blueprint",
+        title: "Bryan Johnson Sauna",
       },
     ]);
     expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
@@ -581,7 +581,7 @@ describe("BiomarkerPage", () => {
       "Reflects aerobic fitness, recovery load, stress, illness, alcohol, sleep disruption, and whether an experiment adds strain.",
     );
     expect(markup).toContain(
-      "Compare same-device overnight or quiet-morning trends. Use multi-day medians, not one-off readings.",
+      "Typical adult range: 60-100 bpm; lower trends matter when sleep, recovery, and training load are stable.",
     );
     expect(markup).toContain(
       "Cardio training, sleep, alcohol, heat, illness, hard training, travel, dehydration, medications, stress, and device changes.",
@@ -652,39 +652,40 @@ describe("BiomarkerPage", () => {
     })).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
-  it("preserves authored explicit candidate order ahead of computed score", () => {
-    const catalog = createFixtureCatalog();
-    const biomarkerIndex = catalog.entities.findIndex(
-      (entity) => entity.key === "biomarker:resting-heart-rate",
-    );
-    const biomarker = catalog.entities[biomarkerIndex];
+  it("derives biomarker protocol rankings from protocol expected signals", () => {
+    const detail = resolveHealthCommonsBiomarkerDetail("estimated-vo2max");
 
-    expect(biomarkerIndex).toBeGreaterThanOrEqual(0);
-    expect(biomarker?.entityType).toBe("biomarker");
-    expect(biomarker?.protocolRanking?.candidates).toHaveLength(3);
-
-    if (!biomarker || biomarker.entityType !== "biomarker" || !biomarker.protocolRanking?.candidates) {
-      throw new Error("Expected the resting-heart-rate biomarker fixture.");
-    }
-
-    const [first, second, third] = biomarker.protocolRanking.candidates;
-
-    catalog.entities[biomarkerIndex] = {
-      ...biomarker,
-      protocolRanking: {
-        ...biomarker.protocolRanking,
-        candidates: [third, first, second],
-      },
-    };
-
-    const reader = createHealthCommonsCatalogReader(catalog);
-    const detail = resolveHealthCommonsBiomarkerDetail("resting-heart-rate", reader);
-
-    expect(detail?.protocolRankings.slice(0, 3).map((protocol) => protocol.title)).toEqual([
-      "Red Light Glasses Before Bed",
+    expect(detail?.protocolRankings.slice(0, 4).map((protocol) => protocol.title)).toEqual([
       "Norwegian 4x4",
-      "Finnish Dry Sauna",
+      "Zone 2 Cardio",
+      "Tabata 20/10 Interval Training",
+      "Daily Step Floor",
     ]);
+
+    const saunaIndex = detail?.protocolRankings.findIndex((protocol) =>
+      protocol.title === "Finnish Dry Sauna"
+    ) ?? -1;
+    const zone2Index = detail?.protocolRankings.findIndex((protocol) =>
+      protocol.title === "Zone 2 Cardio"
+    ) ?? -1;
+
+    expect(zone2Index).toBeGreaterThanOrEqual(0);
+    expect(saunaIndex).toBeGreaterThan(zone2Index);
+    expect(detail?.protocolRankings[0]).toEqual(expect.objectContaining({
+      evidenceLabel: "Moderate",
+      fitLabel: "Strong",
+      mechanism: expect.stringContaining("Sustained intervals"),
+    }));
+    expect(detail?.protocolRankings[0]).not.toHaveProperty("rankScore");
+    expect(
+      resolveHealthCommonsBiomarkerDetail("hrv-rmssd")?.protocolRankings.map((protocol) =>
+        protocol.expectedSignalLabel
+      ),
+    ).not.toEqual(expect.arrayContaining([
+      "mixed_or_contextual",
+      "down_or_stable",
+      "up_or_stable",
+    ]));
   });
 
   it("keeps incomplete biomarker pages unpublished without requiring private metric bindings", () => {
@@ -705,7 +706,6 @@ describe("BiomarkerPage", () => {
       slug: "biomarkers/incomplete-rhr-fixture",
       title: "Incomplete RHR Fixture",
       communityOutcomeSummary: undefined,
-      protocolRanking: undefined,
       revision: {
         ...biomarker.revision,
         pageRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -720,7 +720,8 @@ describe("BiomarkerPage", () => {
 
     const reader = createHealthCommonsCatalogReader(catalog);
 
-    expect(listHealthCommonsBiomarkerRoutes(reader)).toEqual([
+    const routeIds = listHealthCommonsBiomarkerRoutes(reader);
+    expect(routeIds).toEqual(expect.arrayContaining([
       "blood-glucose",
       "blood-oxygen-spo2",
       "deep-sleep-minutes",
@@ -729,8 +730,29 @@ describe("BiomarkerPage", () => {
       "rem-sleep-minutes",
       "resting-heart-rate",
       "sleep-quality",
-    ]);
+    ]));
+    expect(routeIds).not.toContain("incomplete-rhr-fixture");
     expect(resolveHealthCommonsBiomarkerDetail("sleep-quality", reader)?.privateMetricBindings).toEqual([]);
     expect(resolveHealthCommonsBiomarkerDetail("incomplete-rhr-fixture", reader)).toBeNull();
+  });
+
+  it("does not directly resolve hidden biomarker pages with protocol signals", () => {
+    const catalog = createFixtureCatalog();
+    const biomarker = catalog.entities.find(
+      (entity) => entity.key === "biomarker:resting-heart-rate",
+    );
+
+    expect(biomarker?.entityType).toBe("biomarker");
+
+    if (!biomarker || biomarker.entityType !== "biomarker") {
+      throw new Error("Expected the resting-heart-rate biomarker fixture.");
+    }
+
+    biomarker.hidden = true;
+
+    const reader = createHealthCommonsCatalogReader(catalog);
+
+    expect(listHealthCommonsBiomarkerRoutes(reader)).not.toContain("resting-heart-rate");
+    expect(resolveHealthCommonsBiomarkerDetail("resting-heart-rate", reader)).toBeNull();
   });
 });

@@ -435,16 +435,29 @@ protocol:
   durationMinutes:
     min: 10
     max: 15
+  sessionShape:
+    label: One post-meal walk
+    segments:
+    - label: post-meal walk
+      kind: stimulus
+      durationMinutes: 15
+    ticks:
+    - label: "0"
+      offsetMinutes: 0
+    - label: "10 min minimum"
+      offsetMinutes: 10
+    - label: "15 min"
+      offsetMinutes: 15
   interventionSessionsMinimum: 28
   interventionSessionsTarget: 36
   steps:
-  - During the 7-day baseline, keep normal post-meal habits and log meal time, rough meal content, glucose data if available, and any usual post-meal activity.
-  - During the intervention, after each main meal choose a safe indoor loop, outdoor route, treadmill, hallway, or similar walking option.
-  - Begin when practical and comfortable after eating; pick a consistent start delay, usually within the first hour of the meal when safe. Direct studies used immediate walking, ~15-minute starts, ~30-minute starts, and other meal-adjacent timing, so do not treat one exact minute as proven best for everyone.
-  - Walk for 10–15 minutes at an easy-to-moderate pace that lets you talk. Avoid jogging, stair sprints, intense intervals, traffic-dodging, or bending-heavy activity right after eating.
-  - Cover breakfast, lunch, and dinner when realistic. When all meals are not possible, prioritize dinner as the fallback meal window and log missed or partial sessions instead of hiding them.
-  - If using CGM, mark meal start and walk start; if using fingerstick, use the same standardized sampling times for comparable meals. Do not change medication or diet to force a better graph.
-  - Log start delay, duration, pace or perceived effort, route or modality, meal context, glucose signals, symptoms, lows or rescue carbs, reflux or dizziness, foot issues, and reasons for missed walks.
+    - "Baseline 7 days: keep normal post-meal habits; log meal time, rough meal content, glucose if available, and usual activity."
+    - "After each main meal, choose a safe indoor loop, outdoor route, treadmill, hallway, or similar walking option."
+    - "Begin when practical after eating; keep start delay consistent, usually within the first hour when safe."
+    - "Walk 10–15 min at easy-to-moderate talkable pace; avoid jogging, stair sprints, traffic, and bending-heavy tasks."
+    - "Cover breakfast, lunch, and dinner when realistic; prioritize dinner when all meals are not possible."
+    - "With CGM, mark meal and walk start; with fingerstick, repeat the same sampling times for comparable meals."
+    - "Log start delay, duration, pace, route, meal context, glucose, symptoms, lows/rescue carbs, reflux, dizziness, foot issues, and misses."
   safetyNotes:
   - People using insulin, sulfonylureas, meglitinides, or other glucose-lowering medication with low-glucose risk should only use this as an individualized, clinician-guided behavior and should have a low-glucose plan before starting.
   - Pregnancy, gestational diabetes, type 1 diabetes, recurrent hypoglycemia, frailty, falls, meal-related dizziness, suspected postprandial hypotension, neuropathy or foot ulcers, and unstable cardiac or respiratory symptoms are clinician-guidance contexts rather than routine Murph self-experiment contexts.
