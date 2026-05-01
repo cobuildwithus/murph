@@ -365,11 +365,15 @@ function createTurnReceipt(
     ReturnType<typeof assistantTurnReceiptSchema.parse>
   > & {
     captureIds?: readonly string[]
+    inputIds?: readonly string[]
     primaryCaptureId?: string
+    primaryInputId?: string
   } = {},
 ) {
   const captureIds = overrides.captureIds ?? ['capture-1']
   const primaryCaptureId = overrides.primaryCaptureId ?? captureIds[0] ?? 'capture-1'
+  const inputIds = overrides.inputIds ?? []
+  const primaryInputId = overrides.primaryInputId ?? inputIds[0] ?? null
 
   return assistantTurnReceiptSchema.parse({
     schema: 'murph.assistant-turn-receipt.v1',
@@ -404,6 +408,16 @@ function createTurnReceipt(
         kind: 'turn.started',
         detail: null,
         metadata: {
+          ...(primaryInputId
+            ? {
+                autoReplyInputId: primaryInputId,
+              }
+            : {}),
+          ...(inputIds.length > 0
+            ? {
+                autoReplyInputIds: inputIds.join(','),
+              }
+            : {}),
           autoReplyCaptureId: primaryCaptureId,
           autoReplyCaptureIds: captureIds.join(','),
         },
@@ -731,7 +745,7 @@ async function stageInboxCaptureAssistantInputEvent(input: {
   capture: InboxShowResult['capture'] | ReturnType<typeof createCaptureSummary>
   vault: string
 }) {
-  await upsertAssistantInputEvent({
+  return upsertAssistantInputEvent({
     vault: input.vault,
     event: {
       content: {
@@ -5748,7 +5762,7 @@ describe('assistant auto-reply receipt recovery', () => {
     const capture = createCaptureDetail({
       captureId: 'capture-1',
     })
-    await stageInboxCaptureAssistantInputEvent({
+    const stored = await stageInboxCaptureAssistantInputEvent({
       capture,
       vault: context.vaultRoot,
     })
@@ -5756,6 +5770,8 @@ describe('assistant auto-reply receipt recovery', () => {
       createTurnReceipt({
         primaryCaptureId: 'capture-1',
         captureIds: ['capture-1'],
+        primaryInputId: stored.inputId,
+        inputIds: [stored.inputId],
       }),
     ])
     const inboxServices = createInboxServices({
@@ -5778,7 +5794,7 @@ describe('assistant auto-reply receipt recovery', () => {
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
       autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: 'capture-1',
+        inputId: stored.inputId,
         occurredAt: '2026-04-08T00:00:00.000Z',
       })),
       inboxServices,
@@ -5850,6 +5866,8 @@ describe('assistant auto-reply receipt recovery', () => {
       createTurnReceipt({
         primaryCaptureId: stored.inputId,
         captureIds: [stored.inputId],
+        primaryInputId: stored.inputId,
+        inputIds: [stored.inputId],
       }),
     ])
     const inboxServices = createInboxServices({
@@ -5911,16 +5929,28 @@ describe('assistant auto-reply receipt recovery', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T00:00:10.000Z'))
     try {
+      const context = await createTempVaultContext('assistant-recovery-retry-at-')
+      tempRoots.push(context.parentRoot)
+      const stored = await stageInboxCaptureAssistantInputEvent({
+        capture: createCaptureDetail({
+          captureId: 'capture-1',
+        }),
+        vault: context.vaultRoot,
+      })
       replyMocks.listAssistantTurnReceipts.mockResolvedValue([
         createTurnReceipt({
           primaryCaptureId: 'capture-1',
           captureIds: ['capture-1'],
+          primaryInputId: stored.inputId,
+          inputIds: [stored.inputId],
           timeline: [
             {
               at: '2026-04-08T00:00:00.000Z',
               kind: 'turn.started',
               detail: null,
               metadata: {
+                autoReplyInputId: stored.inputId,
+                autoReplyInputIds: stored.inputId,
                 autoReplyCaptureId: 'capture-1',
                 autoReplyCaptureIds: 'capture-1',
               },
@@ -5943,11 +5973,11 @@ describe('assistant auto-reply receipt recovery', () => {
       const result = await recovery.recoverAssistantAutoReplies({
         allowSelfAuthored: false,
         autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-          inputId: 'capture-1',
+          inputId: stored.inputId,
           occurredAt: '2026-04-08T00:00:00.000Z',
         })),
         inboxServices: createInboxServices(),
-        vault: '/tmp/assistant-automation-vault',
+        vault: context.vaultRoot,
       })
 
       expect(result).toEqual({
@@ -5965,11 +5995,29 @@ describe('assistant auto-reply receipt recovery', () => {
   })
 
   it('skips receipt recovery for terminal provider request validation failures', async () => {
+    const invalidToolOutputInputId = createAssistantInputEventId({
+      sourceRef: {
+        captureId: 'capture-invalid-tool-output',
+        kind: 'inbox-capture',
+        source: 'telegram',
+        version: null,
+      },
+    })
+    const invalidPreviousResponseInputId = createAssistantInputEventId({
+      sourceRef: {
+        captureId: 'capture-invalid-previous-response',
+        kind: 'inbox-capture',
+        source: 'telegram',
+        version: null,
+      },
+    })
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         turnId: 'turn-invalid-tool-output',
         primaryCaptureId: 'capture-invalid-tool-output',
         captureIds: ['capture-invalid-tool-output'],
+        primaryInputId: invalidToolOutputInputId,
+        inputIds: [invalidToolOutputInputId],
         lastError: {
           code: 'ASSISTANT_PROVIDER_FAILED',
           message: 'input.3.output: Invalid input',
@@ -5979,6 +6027,8 @@ describe('assistant auto-reply receipt recovery', () => {
         turnId: 'turn-invalid-previous-response',
         primaryCaptureId: 'capture-invalid-previous-response',
         captureIds: ['capture-invalid-previous-response'],
+        primaryInputId: invalidPreviousResponseInputId,
+        inputIds: [invalidPreviousResponseInputId],
         lastError: {
           code: 'ASSISTANT_PROVIDER_FAILED',
           message: 'assistant provider failed',
@@ -5989,6 +6039,8 @@ describe('assistant auto-reply receipt recovery', () => {
             kind: 'turn.started',
             detail: null,
             metadata: {
+              autoReplyInputId: invalidPreviousResponseInputId,
+              autoReplyInputIds: invalidPreviousResponseInputId,
               autoReplyCaptureId: 'capture-invalid-previous-response',
               autoReplyCaptureIds: 'capture-invalid-previous-response',
             },
@@ -6009,7 +6061,7 @@ describe('assistant auto-reply receipt recovery', () => {
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
       autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: 'capture-invalid-previous-response',
+        inputId: invalidPreviousResponseInputId,
         occurredAt: '2026-04-08T00:00:00.000Z',
       })),
       inboxServices: createInboxServices(),
@@ -6050,11 +6102,26 @@ describe('assistant auto-reply receipt recovery', () => {
         vault: context.vaultRoot,
       })
     }
+    const inputIdByCaptureId = new Map(
+      [...captureDetailsById.entries()].map(([captureId, capture]) => [
+        captureId,
+        createAssistantInputEventId({
+          sourceRef: {
+            captureId,
+            kind: 'inbox-capture',
+            source: capture.source,
+            version: null,
+          },
+        }),
+      ]),
+    )
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         turnId: 'turn-4',
         primaryCaptureId: 'capture-4',
         captureIds: ['capture-4'],
+        primaryInputId: inputIdByCaptureId.get('capture-4')!,
+        inputIds: [inputIdByCaptureId.get('capture-4')!],
         updatedAt: '2026-04-08T00:00:08.000Z',
         responsePreview: 'drafted response',
       }),
@@ -6062,6 +6129,8 @@ describe('assistant auto-reply receipt recovery', () => {
         turnId: 'turn-5',
         primaryCaptureId: 'capture-5',
         captureIds: ['capture-5'],
+        primaryInputId: inputIdByCaptureId.get('capture-5')!,
+        inputIds: [inputIdByCaptureId.get('capture-5')!],
         updatedAt: '2026-04-08T00:00:07.000Z',
         timeline: [
           {
@@ -6069,6 +6138,8 @@ describe('assistant auto-reply receipt recovery', () => {
             kind: 'turn.started',
             detail: null,
             metadata: {
+              autoReplyInputId: inputIdByCaptureId.get('capture-5')!,
+              autoReplyInputIds: inputIdByCaptureId.get('capture-5')!,
               autoReplyCaptureId: 'capture-5',
               autoReplyCaptureIds: 'capture-5',
             },
@@ -6085,6 +6156,8 @@ describe('assistant auto-reply receipt recovery', () => {
         turnId: 'turn-3',
         primaryCaptureId: 'capture-3',
         captureIds: ['capture-3'],
+        primaryInputId: inputIdByCaptureId.get('capture-3')!,
+        inputIds: [inputIdByCaptureId.get('capture-3')!],
         updatedAt: '2026-04-08T00:00:06.000Z',
       }),
     ])
@@ -6103,7 +6176,7 @@ describe('assistant auto-reply receipt recovery', () => {
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
       autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: 'capture-5',
+        inputId: inputIdByCaptureId.get('capture-5')!,
         occurredAt: '2026-04-08T00:00:02.000Z',
       })),
       inboxServices,
@@ -6128,7 +6201,7 @@ describe('assistant auto-reply receipt recovery', () => {
       captureId: 'capture-2',
       occurredAt: '2026-04-08T00:00:02.000Z',
     })
-    await stageInboxCaptureAssistantInputEvent({
+    const stored = await stageInboxCaptureAssistantInputEvent({
       capture,
       vault: context.vaultRoot,
     })
@@ -6136,6 +6209,8 @@ describe('assistant auto-reply receipt recovery', () => {
       createTurnReceipt({
         primaryCaptureId: 'capture-2',
         captureIds: ['capture-2'],
+        primaryInputId: stored.inputId,
+        inputIds: [stored.inputId],
       }),
     ])
     const inboxServices = createInboxServices({
@@ -6150,7 +6225,14 @@ describe('assistant auto-reply receipt recovery', () => {
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
       autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: 'capture-1',
+        inputId: createAssistantInputEventId({
+          sourceRef: {
+            captureId: 'capture-1',
+            kind: 'inbox-capture',
+            source: 'telegram',
+            version: null,
+          },
+        }),
         occurredAt: '2026-04-08T00:00:00.000Z',
       })),
       inboxServices,
@@ -6168,7 +6250,7 @@ describe('assistant auto-reply receipt recovery', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })
 
-  it('skips receipt recovery when the persisted primary capture is missing', async () => {
+  it('ignores legacy-only capture receipts without reading inbox captures', async () => {
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         primaryCaptureId: 'capture-missing',
@@ -6197,7 +6279,14 @@ describe('assistant auto-reply receipt recovery', () => {
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
       autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: 'capture-later',
+        inputId: createAssistantInputEventId({
+          sourceRef: {
+            captureId: 'capture-later',
+            kind: 'inbox-capture',
+            source: 'telegram',
+            version: null,
+          },
+        }),
         occurredAt: '2026-04-08T00:00:01.000Z',
       })),
       inboxServices,
@@ -6212,6 +6301,126 @@ describe('assistant auto-reply receipt recovery', () => {
       replied: 0,
       skipped: 0,
     })
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+  })
+
+  it('ignores malformed or missing assistant input event receipt ids without reading inbox captures', async () => {
+    const missingInputId = createAssistantInputEventId({
+      sourceRef: {
+        captureId: 'capture-missing-event',
+        kind: 'inbox-capture',
+        source: 'telegram',
+        version: null,
+      },
+    })
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        turnId: 'turn-missing-event',
+        primaryCaptureId: 'capture-missing-event',
+        captureIds: ['capture-missing-event'],
+        primaryInputId: missingInputId,
+        inputIds: [missingInputId],
+        updatedAt: '2026-04-08T00:00:08.000Z',
+      }),
+      createTurnReceipt({
+        turnId: 'turn-malformed-input-id',
+        timeline: [
+          {
+            at: '2026-04-08T00:00:00.000Z',
+            kind: 'turn.started',
+            detail: null,
+            metadata: {
+              autoReplyInputId: 'capture-1',
+              autoReplyInputIds: 'capture-1',
+            },
+          },
+        ],
+        updatedAt: '2026-04-08T00:00:07.000Z',
+      }),
+    ])
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const recovery = await vi.importActual<
+      typeof import('../src/assistant/automation/startup-recovery.ts')
+    >('../src/assistant/automation/startup-recovery.ts')
+
+    const result = await recovery.recoverAssistantAutoReplies({
+      allowSelfAuthored: false,
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: missingInputId,
+        occurredAt: '2026-04-08T00:00:00.000Z',
+      })),
+      inboxServices,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toEqual({
+      considered: 0,
+      failed: 0,
+      nextWakeAt: null,
+      progressed: false,
+      replied: 0,
+      skipped: 0,
+    })
+    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+  })
+
+  it('ignores grouped receipt recovery when any assistant input event is missing', async () => {
+    const context = await createTempVaultContext('assistant-recovery-missing-group-')
+    tempRoots.push(context.parentRoot)
+    const primary = await stageInboxCaptureAssistantInputEvent({
+      capture: createCaptureDetail({
+        captureId: 'capture-primary',
+      }),
+      vault: context.vaultRoot,
+    })
+    const missingSecondaryInputId = createAssistantInputEventId({
+      sourceRef: {
+        captureId: 'capture-secondary',
+        kind: 'inbox-capture',
+        source: 'telegram',
+        version: null,
+      },
+    })
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        turnId: 'turn-missing-group-member',
+        primaryCaptureId: 'capture-primary',
+        captureIds: ['capture-primary', 'capture-secondary'],
+        primaryInputId: primary.inputId,
+        inputIds: [primary.inputId, missingSecondaryInputId],
+        updatedAt: '2026-04-08T00:00:08.000Z',
+      }),
+    ])
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const recovery = await vi.importActual<
+      typeof import('../src/assistant/automation/startup-recovery.ts')
+    >('../src/assistant/automation/startup-recovery.ts')
+
+    const result = await recovery.recoverAssistantAutoReplies({
+      allowSelfAuthored: false,
+      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
+        inputId: primary.inputId,
+        occurredAt: '2026-04-08T00:00:00.000Z',
+      })),
+      inboxServices,
+      vault: context.vaultRoot,
+    })
+
+    expect(result).toEqual({
+      considered: 0,
+      failed: 0,
+      nextWakeAt: null,
+      progressed: false,
+      replied: 0,
+      skipped: 0,
+    })
+    expect(inboxServices.show).not.toHaveBeenCalled()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
   })
 
@@ -6230,11 +6439,13 @@ describe('assistant auto-reply receipt recovery', () => {
         return [captureId, capture] as const
       }),
     )
+    const inputIdByCaptureId = new Map<string, string>()
     for (const capture of captureDetailsById.values()) {
-      await stageInboxCaptureAssistantInputEvent({
+      const stored = await stageInboxCaptureAssistantInputEvent({
         capture,
         vault: context.vaultRoot,
       })
+      inputIdByCaptureId.set(capture.captureId, stored.inputId)
     }
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
@@ -6263,25 +6474,31 @@ describe('assistant auto-reply receipt recovery', () => {
         turnId: 'turn-handled',
         primaryCaptureId: 'capture-handled',
         captureIds: ['capture-handled'],
+        primaryInputId: inputIdByCaptureId.get('capture-handled')!,
+        inputIds: [inputIdByCaptureId.get('capture-handled')!],
         updatedAt: '2026-04-08T00:00:08.000Z',
       }),
       createTurnReceipt({
         turnId: 'turn-recover',
         primaryCaptureId: 'capture-recover',
         captureIds: ['capture-recover'],
+        primaryInputId: inputIdByCaptureId.get('capture-recover')!,
+        inputIds: [inputIdByCaptureId.get('capture-recover')!],
         updatedAt: '2026-04-08T00:00:07.000Z',
       }),
       createTurnReceipt({
         turnId: 'turn-later',
         primaryCaptureId: 'capture-later',
         captureIds: ['capture-later'],
+        primaryInputId: inputIdByCaptureId.get('capture-later')!,
+        inputIds: [inputIdByCaptureId.get('capture-later')!],
         updatedAt: '2026-04-08T00:00:06.000Z',
       }),
     ])
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockImplementation(
-      async (_vault: string, captureId: string) =>
-        captureId === 'capture-handled'
-          ? createTerminalEvidence({ captureId })
+      async (_vault: string, inputId: string) =>
+        inputId === inputIdByCaptureId.get('capture-handled')
+          ? createTerminalEvidence({ captureId: 'capture-handled' })
           : null,
     )
     scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValue({
@@ -6306,7 +6523,7 @@ describe('assistant auto-reply receipt recovery', () => {
     const result = await recovery.recoverAssistantAutoReplies({
       allowSelfAuthored: false,
       autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: 'capture-later',
+        inputId: inputIdByCaptureId.get('capture-later')!,
         occurredAt: '2026-04-08T00:00:01.000Z',
       })),
       inboxServices,
@@ -6326,7 +6543,8 @@ describe('assistant auto-reply receipt recovery', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
-          projectionCaptureIds: ['capture-recover'],
+          inputIds: [inputIdByCaptureId.get('capture-recover')!],
+          projectionCaptureIds: [],
         }),
       }),
     )
