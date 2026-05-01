@@ -15,8 +15,10 @@ import type {
 } from "./prisma-store";
 import type { HostedStoredTokenBundle } from "./agent-session-token-bundle";
 
+type ProviderTokenRefresh = NonNullable<DeviceSyncProvider["refreshTokens"]>;
+
 export type HostedProviderTokenRefreshResult =
-  | { status: "success"; tokens: Awaited<ReturnType<DeviceSyncProvider["refreshTokens"]>> }
+  | { status: "success"; tokens: Awaited<ReturnType<ProviderTokenRefresh>> }
   | { status: "error"; error: unknown };
 
 export async function refreshProviderTokensWithStatusHandling(input: {
@@ -29,9 +31,15 @@ export async function refreshProviderTokensWithStatusHandling(input: {
   userId: string;
 }): Promise<HostedProviderTokenRefreshResult> {
   try {
+    const refreshTokens = input.provider.connectionHandler?.refreshTokens ?? input.provider.refreshTokens;
+
+    if (!refreshTokens) {
+      throw new Error(`Device sync provider ${input.provider.provider} does not support token refresh.`);
+    }
+
     return {
       status: "success",
-      tokens: await input.provider.refreshTokens(input.account),
+      tokens: await refreshTokens(input.account),
     };
   } catch (error) {
     if (isDeviceSyncError(error) && error.accountStatus) {

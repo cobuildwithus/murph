@@ -55,6 +55,21 @@ describe("device-sync providers", () => {
       expect(descriptor?.provider).toBe(provider.provider);
       expect(provider.descriptor.provider).toBe(provider.provider);
       expect(provider.descriptor.displayName).toBe(descriptor?.displayName);
+      expect(provider.jobExecutor).toBeDefined();
+    }
+
+    const junction = providers.find((provider) => provider.provider === "junction");
+    expect(junction?.connectionHandler).toBeDefined();
+    expect(junction?.webhookHandler).toBeDefined();
+    expect(junction?.buildConnectUrl).toBeUndefined();
+    expect(junction?.exchangeAuthorizationCode).toBeUndefined();
+    expect(junction?.refreshTokens).toBeUndefined();
+
+    for (const provider of providers.filter((entry) => entry.provider !== "junction")) {
+      expect(provider.connectionHandler).toBeDefined();
+      expect(provider.buildConnectUrl).toBeDefined();
+      expect(provider.exchangeAuthorizationCode).toBeDefined();
+      expect(provider.refreshTokens).toBeDefined();
     }
   });
 
