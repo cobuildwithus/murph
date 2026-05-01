@@ -158,19 +158,69 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: Silent meditation may lower rumination and sleep effort before bed. If the mind is less busy, falling asleep can feel easier.
+    expected: May fall asleep sooner
+    description: Silent attention gives planning and worry a neutral place to land before lights-out. If that lowers pre-sleep arousal and sleep effort, diary or wearable sleep-onset latency can shorten.
+    estimatedChange:
+      kind: absolute
+      low: -8
+      high: -2
+      unit: minutes
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "Best evidence is adjacent and mixed: a small app-guided bedtime pilot improved pre-sleep arousal and insomnia symptoms without a control, an introductory mindfulness course lowered pre-sleep cognitive arousal but not actigraphy sleep-onset latency, and an insomnia mindfulness meta-analysis found no significant overall sleep-onset-latency effect. This range is a small same-person estimate when rumination is the main driver."
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: If meditation reduces the restless start of the night or bedtime rumination, more time in bed may be spent asleep.
+    expected: Could improve slightly
+    description: If the practice trims the awake stretch at the start of the night, more of the time in bed becomes sleep. Same-device sleep efficiency may rise a little if sleep onset improves.
+    estimatedChange:
+      kind: absolute
+      low: 0
+      high: 2
+      unit: percentage points
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "Objective sleep-continuity findings are inconsistent: the mindfulness-course source did not change actigraphy sleep efficiency, the app-based worry trial found no Fitbit sleep-efficiency difference, and mindfulness reviews are stronger for self-reported sleep quality or symptoms than objective continuity. A small gain is plausible only if wake time falls."
+    protocolProminence: context
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: Silent meditation would affect deep sleep only indirectly: first by reducing rumination, then by making early-night sleep less broken.
+    expected: Likely unchanged or slightly higher
+    description: The practice does not directly create deep sleep. Any wearable deep-sleep change would come indirectly from a calmer, less fragmented first part of the night.
+    estimatedChange:
+      kind: absolute
+      low: 0
+      high: 5
+      unit: minutes
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "No extracted source gives a clean deep-sleep effect for silent bedtime meditation, and consumer sleep stages are exploratory. This is a cautious same-device guess tied to a possible small improvement in early-night continuity, not a target to optimize."
+    protocolProminence: context
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: Lower pre-sleep arousal may ease overnight strain. HRV could rise or stabilize if the practice helps recovery rather than adding effort.
+    expected: Could rise modestly
+    description: Lower pre-sleep threat-checking can reduce sympathetic load and leave more room for overnight recovery. Same-device RMSSD may rise if the session feels calming rather than effortful.
+    estimatedChange:
+      kind: relative_percent
+      low: 0
+      high: 5
+      unit: "%"
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "The direct silent-bedtime evidence does not provide an overnight RMSSD estimate. Adjacent app-guided and wearable mindfulness sources support possible recovery-signal changes, while objective sleep effects are mixed; treat this as a small same-device relative shift."
+    protocolProminence: context
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: A calmer pre-bed state may lower overnight load. Resting heart rate might drift lower if sleep becomes less effortful and more settled.
+    expected: Could trend lower
+    description: If the routine lowers mental arousal before sleep, the heart may enter the night from a lower stress set point. Overnight resting heart rate can dip slightly when sleep is less effortful.
+    estimatedChange:
+      kind: absolute
+      low: -2
+      high: 0
+      unit: bpm
+      window: 14 nights vs 7-night baseline
+      confidence: low
+      basis: "No extracted source establishes a resting-heart-rate effect for unguided bedtime silent meditation. The estimate follows the arousal-to-recovery pathway and the mixed objective wearable evidence, so expect a small same-device shift at most."
+    protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
