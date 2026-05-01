@@ -6,12 +6,22 @@ import type {
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedAssistantRuntimeManagedAutoReplyChannel,
+  HostedAssistantRuntimeParserToolchainConfig,
+  HostedAssistantRuntimeParserToolConfig,
+  HostedAssistantRuntimeParserToolName,
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
   createDefaultHostedManagedAutoReplyChannels,
 } from "./managed-auto-reply.ts";
+
+const hostedParserToolNames = [
+  "ffmpeg",
+  "pdfinfo",
+  "pdftotext",
+  "whisper",
+] as const satisfies readonly HostedAssistantRuntimeParserToolName[];
 
 export function parseHostedAssistantWorkspaceRuntimeJobInput(
   value: unknown,
@@ -120,6 +130,16 @@ export function parseHostedAssistantRuntimeConfig(
             "Hosted assistant runtime config.forwardedEnv",
           ),
         }),
+    ...(record.parserToolchain === undefined || record.parserToolchain === null
+      ? record.parserToolchain === null
+        ? { parserToolchain: null }
+        : {}
+      : {
+          parserToolchain: parseHostedAssistantRuntimeParserToolchainConfig(
+            record.parserToolchain,
+            "Hosted assistant runtime config.parserToolchain",
+          ),
+        }),
     ...(record.platformEnv === undefined
       ? {}
       : {
@@ -145,6 +165,58 @@ export function parseHostedAssistantRuntimeConfig(
           ),
         }),
   };
+}
+
+function parseHostedAssistantRuntimeParserToolchainConfig(
+  value: unknown,
+  label: string,
+): HostedAssistantRuntimeParserToolchainConfig {
+  const record = requireObject(value, label);
+  const rawTools = requireObject(record.tools, `${label}.tools`);
+  const tools: HostedAssistantRuntimeParserToolchainConfig["tools"] = {};
+
+  for (const toolName of hostedParserToolNames) {
+    if (rawTools[toolName] === undefined) {
+      continue;
+    }
+
+    tools[toolName] = parseHostedAssistantRuntimeParserToolConfig(
+      rawTools[toolName],
+      `${label}.tools.${toolName}`,
+    );
+  }
+
+  return { tools };
+}
+
+function parseHostedAssistantRuntimeParserToolConfig(
+  value: unknown,
+  label: string,
+): HostedAssistantRuntimeParserToolConfig {
+  const record = requireObject(value, label);
+  const config: HostedAssistantRuntimeParserToolConfig = {};
+
+  if (record.command !== undefined) {
+    config.command = parseAbsoluteToolPathOrNull(record.command, `${label}.command`);
+  }
+  if (record.modelPath !== undefined) {
+    config.modelPath = parseAbsoluteToolPathOrNull(record.modelPath, `${label}.modelPath`);
+  }
+
+  return config;
+}
+
+function parseAbsoluteToolPathOrNull(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = requireString(value, label).trim();
+  if (!parsed.startsWith("/")) {
+    throw new TypeError(`${label} must be an absolute path.`);
+  }
+
+  return parsed;
 }
 
 function parseHostedAssistantRuntimeResolvedConfig(

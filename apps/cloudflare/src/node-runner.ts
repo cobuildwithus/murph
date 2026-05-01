@@ -81,6 +81,7 @@ export function buildHostedExecutionJobRuntime(
     commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
     configSource,
     forwardedEnv,
+    parserToolchain: requestedRuntime.parserToolchain,
     platformEnv,
     resolvedConfig: requestedRuntime.resolvedConfig,
     runnerSecrets: requestedRuntime.userEnv ?? {},

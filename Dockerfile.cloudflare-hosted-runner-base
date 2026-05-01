@@ -53,15 +53,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     XDG_CACHE_HOME=/home/runner/.cache \
     HOSTED_HOME=/home/runner/.murph \
     HOSTED_MODELS_ROOT=/home/runner/.murph/models \
-    FFMPEG_COMMAND=/usr/bin/ffmpeg \
-    FILE_COMMAND=/usr/bin/file \
-    PDFINFO_COMMAND=/usr/bin/pdfinfo \
-    PDFTOTEXT_COMMAND=/usr/bin/pdftotext \
-    PDFTOPPM_COMMAND=/usr/bin/pdftoppm \
-    QPDF_COMMAND=/usr/bin/qpdf \
-    MUTOOL_COMMAND=/usr/bin/mutool \
-    WHISPER_COMMAND=/usr/local/bin/whisper-cli \
-    WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE} \
     HF_HOME=/home/runner/.cache/huggingface
 
 RUN apt-get update \

@@ -8,6 +8,9 @@ import {
 
 import type {
   HostedAssistantRuntimeManagedAutoReplyChannel,
+  HostedAssistantRuntimeParserToolchainConfig,
+  HostedAssistantRuntimeParserToolConfig,
+  HostedAssistantRuntimeParserToolName,
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
@@ -66,7 +69,6 @@ const HOSTED_RUNTIME_OPERATOR_TOOL_SELECTOR_ENV_NAMES = [
   "WHISPER_MODEL_PATH",
 ] as const;
 const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
-  ...HOSTED_RUNTIME_OPERATOR_TOOL_SELECTOR_ENV_NAMES,
   "LANG",
   "LANGUAGE",
   "LC_ALL",
@@ -110,6 +112,7 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
     ...HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES,
+    ...HOSTED_RUNTIME_OPERATOR_TOOL_SELECTOR_ENV_NAMES,
     ...HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES,
     ...HOSTED_RUNTIME_USER_PROCESS_ENV_OVERRIDE_NAMES,
     HOSTED_RUNTIME_PROCESS_ENV_MARKER,
@@ -168,6 +171,13 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES = [
 ] as const;
 let hostedProcessEnvironmentQueue: Promise<void> = Promise.resolve();
 
+const hostedParserToolNames = [
+  "ffmpeg",
+  "pdfinfo",
+  "pdftotext",
+  "whisper",
+] as const satisfies readonly HostedAssistantRuntimeParserToolName[];
+
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
   platform: HostedRuntimePlatform | null | undefined,
@@ -189,6 +199,9 @@ export function normalizeHostedAssistantRuntimeConfig(
   return {
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
     forwardedEnv,
+    parserToolchain: cloneHostedAssistantRuntimeParserToolchain(
+      input?.parserToolchain,
+    ),
     platform: normalizedPlatform,
     platformEnv,
     resolvedConfig: cloneHostedAssistantRuntimeResolvedConfig(input?.resolvedConfig),
@@ -286,6 +299,33 @@ function cloneHostedAssistantRuntimeResolvedConfig(
     managedAutoReplyChannels: (input?.managedAutoReplyChannels
       ?? createDefaultHostedManagedAutoReplyChannels(channelCapabilities))
       .map(cloneHostedManagedAutoReplyChannel),
+  };
+}
+
+function cloneHostedAssistantRuntimeParserToolchain(
+  input: HostedAssistantRuntimeParserToolchainConfig | null | undefined,
+): HostedAssistantRuntimeParserToolchainConfig | null {
+  if (!input) {
+    return null;
+  }
+
+  const tools: HostedAssistantRuntimeParserToolchainConfig["tools"] = {};
+  for (const toolName of hostedParserToolNames) {
+    const toolConfig = input.tools[toolName];
+    if (toolConfig) {
+      tools[toolName] = cloneHostedAssistantRuntimeParserToolConfig(toolConfig);
+    }
+  }
+
+  return { tools };
+}
+
+function cloneHostedAssistantRuntimeParserToolConfig(
+  input: HostedAssistantRuntimeParserToolConfig,
+): HostedAssistantRuntimeParserToolConfig {
+  return {
+    ...(input.command === undefined ? {} : { command: input.command }),
+    ...(input.modelPath === undefined ? {} : { modelPath: input.modelPath }),
   };
 }
 

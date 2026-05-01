@@ -13,13 +13,19 @@ import type {
   ParserToolName,
   ParserToolchainConfig,
   ParserToolchainToolConfig,
+  ParserToolchainTools,
 } from "./config.js";
 import {
   getParserToolchainPaths,
   readParserToolchainConfig,
 } from "./config.js";
 
-export type ParserToolDiscoverySource = "config" | "env" | "system" | "missing";
+export type ParserToolDiscoverySource = "config" | "env" | "platform" | "system" | "missing";
+
+export interface ParserToolchainRuntimeConfig {
+  source: "config" | "platform";
+  tools: ParserToolchainTools;
+}
 
 export interface ParserToolDiscovery {
   available: boolean;
@@ -36,8 +42,11 @@ export interface ParserDoctorReport {
 }
 
 interface ParserToolchainContext {
+  allowEnvToolchain: boolean;
+  allowSystemToolchainLookup: boolean;
   config: ParserToolchainConfig | null;
   configPath: string;
+  configSource: "config" | "platform";
 }
 
 interface ResolvedWhisperToolDiscovery extends ParserToolDiscovery {
@@ -45,20 +54,30 @@ interface ResolvedWhisperToolDiscovery extends ParserToolDiscovery {
 }
 
 export async function discoverParserToolchain(input: {
+  allowEnvToolchain?: boolean;
+  allowSystemToolchainLookup?: boolean;
+  readVaultToolchainConfig?: boolean;
+  toolchain?: ParserToolchainRuntimeConfig;
   vaultRoot: string;
 }): Promise<ParserDoctorReport> {
-  const context = await loadParserToolchainContext(input.vaultRoot);
+  const context = await loadParserToolchainContext(input);
 
   return discoverParserToolchainFromContext({
+    allowEnvToolchain: context.allowEnvToolchain,
+    allowSystemToolchainLookup: context.allowSystemToolchainLookup,
     config: context.config,
     configPath: context.configPath,
+    configSource: context.configSource,
     vaultRoot: input.vaultRoot,
   });
 }
 
 async function discoverParserToolchainFromContext(input: {
+  allowEnvToolchain: boolean;
+  allowSystemToolchainLookup: boolean;
   config: ParserToolchainConfig | null;
   configPath: string;
+  configSource: "config" | "platform";
   vaultRoot: string;
 }): Promise<ParserDoctorReport> {
   const state = await discoverParserToolchainStateFromContext(input);
@@ -66,38 +85,59 @@ async function discoverParserToolchainFromContext(input: {
 }
 
 async function discoverParserToolchainStateFromContext(input: {
+  allowEnvToolchain: boolean;
+  allowSystemToolchainLookup: boolean;
   config: ParserToolchainConfig | null;
   configPath: string;
+  configSource: "config" | "platform";
   vaultRoot: string;
 }): Promise<{
   doctor: ParserDoctorReport;
   whisper: ResolvedWhisperToolDiscovery;
 }> {
   const ffmpeg = await discoverCommandTool({
+    allowSystemToolchainLookup: input.allowSystemToolchainLookup,
     config: input.config?.tools.ffmpeg,
+    configSource: input.configSource,
     vaultRoot: input.vaultRoot,
-    envValue: readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND"]),
+    envValue: input.allowEnvToolchain
+      ? readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND"])
+      : null,
     fallbackCommands: ["ffmpeg"],
     availableReason: "ffmpeg CLI available.",
     missingReason: "ffmpeg CLI not found.",
   });
   const pdfinfo = await discoverCommandTool({
+    allowSystemToolchainLookup: input.allowSystemToolchainLookup,
     config: input.config?.tools.pdfinfo,
+    configSource: input.configSource,
     vaultRoot: input.vaultRoot,
-    envValue: readConfiguredEnvValue(process.env, ["PDFINFO_COMMAND"]),
+    envValue: input.allowEnvToolchain
+      ? readConfiguredEnvValue(process.env, ["PDFINFO_COMMAND"])
+      : null,
     fallbackCommands: ["pdfinfo"],
     availableReason: "pdfinfo CLI available.",
     missingReason: "pdfinfo CLI not found.",
   });
   const pdftotext = await discoverCommandTool({
+    allowSystemToolchainLookup: input.allowSystemToolchainLookup,
     config: input.config?.tools.pdftotext,
+    configSource: input.configSource,
     vaultRoot: input.vaultRoot,
-    envValue: readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND"]),
+    envValue: input.allowEnvToolchain
+      ? readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND"])
+      : null,
     fallbackCommands: ["pdftotext"],
     availableReason: "pdftotext CLI available.",
     missingReason: "pdftotext CLI not found.",
   });
-  const whisper = await discoverWhisperTool(input.config, input.vaultRoot);
+  const whisper = await discoverWhisperTool({
+    allowEnvToolchain: input.allowEnvToolchain,
+    allowSystemToolchainLookup: input.allowSystemToolchainLookup,
+    config: input.config,
+    configSource: input.configSource,
+    vaultRoot: input.vaultRoot,
+  });
 
   return {
     doctor: {
@@ -115,16 +155,23 @@ async function discoverParserToolchainStateFromContext(input: {
 }
 
 export async function createConfiguredParserRegistry(input: {
+  allowEnvToolchain?: boolean;
+  allowSystemToolchainLookup?: boolean;
+  readVaultToolchainConfig?: boolean;
+  toolchain?: ParserToolchainRuntimeConfig;
   vaultRoot: string;
 }): Promise<{
   doctor: ParserDoctorReport;
   registry: ParserRegistry;
   ffmpeg: FfmpegToolOptions | undefined;
 }> {
-  const context = await loadParserToolchainContext(input.vaultRoot);
+  const context = await loadParserToolchainContext(input);
   const state = await discoverParserToolchainStateFromContext({
+    allowEnvToolchain: context.allowEnvToolchain,
+    allowSystemToolchainLookup: context.allowSystemToolchainLookup,
     config: context.config,
     configPath: context.configPath,
+    configSource: context.configSource,
     vaultRoot: input.vaultRoot,
   });
 
@@ -142,15 +189,37 @@ export async function createConfiguredParserRegistry(input: {
   };
 }
 
-async function loadParserToolchainContext(
-  vaultRoot: string,
-): Promise<ParserToolchainContext> {
-  const paths = getParserToolchainPaths(vaultRoot);
-  const loadedConfig = await readParserToolchainConfig(vaultRoot);
+async function loadParserToolchainContext(input: {
+  allowEnvToolchain?: boolean;
+  allowSystemToolchainLookup?: boolean;
+  readVaultToolchainConfig?: boolean;
+  toolchain?: ParserToolchainRuntimeConfig;
+  vaultRoot: string;
+}): Promise<ParserToolchainContext> {
+  const paths = getParserToolchainPaths(input.vaultRoot);
+  if (input.toolchain) {
+    return {
+      allowEnvToolchain: input.allowEnvToolchain ?? false,
+      allowSystemToolchainLookup: input.allowSystemToolchainLookup ?? false,
+      config: {
+        updatedAt: new Date(0).toISOString(),
+        tools: input.toolchain.tools,
+      },
+      configPath: paths.configPath,
+      configSource: input.toolchain.source,
+    };
+  }
+
+  const loadedConfig = input.readVaultToolchainConfig === false
+    ? null
+    : await readParserToolchainConfig(input.vaultRoot);
 
   return {
+    allowEnvToolchain: input.allowEnvToolchain ?? true,
+    allowSystemToolchainLookup: input.allowSystemToolchainLookup ?? true,
     config: loadedConfig?.config ?? null,
     configPath: paths.configPath,
+    configSource: "config",
   };
 }
 
@@ -164,7 +233,9 @@ export function ffmpegOptionsFromDoctor(
 
   return {
     commandCandidates: [command],
-    allowSystemLookup: doctor.tools.ffmpeg.source !== "config",
+    allowSystemLookup:
+      doctor.tools.ffmpeg.source !== "config"
+      && doctor.tools.ffmpeg.source !== "platform",
   };
 }
 
@@ -194,24 +265,34 @@ export function popplerPdfOptionsFromDoctor(
   };
 }
 
-async function discoverWhisperTool(
-  config: ParserToolchainConfig | null,
-  vaultRoot: string,
-): Promise<ResolvedWhisperToolDiscovery> {
-  const toolConfig = config?.tools.whisper;
+async function discoverWhisperTool(input: {
+  allowEnvToolchain: boolean;
+  allowSystemToolchainLookup: boolean;
+  config: ParserToolchainConfig | null;
+  configSource: "config" | "platform";
+  vaultRoot: string;
+}): Promise<ResolvedWhisperToolDiscovery> {
+  const toolConfig = input.config?.tools.whisper;
   const commandResolution = await resolveCommand({
+    allowSystemToolchainLookup: input.allowSystemToolchainLookup,
     configCommand: toolConfig?.command,
-    vaultRoot,
-    envValue: readConfiguredEnvValue(process.env, ["WHISPER_COMMAND"]),
+    configSource: input.configSource,
+    vaultRoot: input.vaultRoot,
+    envValue: input.allowEnvToolchain
+      ? readConfiguredEnvValue(process.env, ["WHISPER_COMMAND"])
+      : null,
     fallbackCommands: ["whisper-cli", "whisper-cpp"],
   });
   const modelResolution = resolveModelPath(
     toolConfig?.modelPath,
-    readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH"]),
+    input.configSource,
+    input.allowEnvToolchain
+      ? readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH"])
+      : null,
   );
   const source = selectCompositeSource(commandResolution.source, modelResolution.source);
   const absoluteModelPath = modelResolution.modelPath
-    ? resolveModelPathAbsolute(vaultRoot, modelResolution)
+    ? resolveModelPathAbsolute(input.vaultRoot, modelResolution)
     : null;
 
   if (!commandResolution.command) {
@@ -258,7 +339,9 @@ async function discoverWhisperTool(
 }
 
 async function discoverCommandTool(input: {
+  allowSystemToolchainLookup: boolean;
   config?: ParserToolchainToolConfig;
+  configSource: "config" | "platform";
   vaultRoot: string;
   envValue?: string | null;
   fallbackCommands: string[];
@@ -266,7 +349,9 @@ async function discoverCommandTool(input: {
   missingReason: string;
 }): Promise<ParserToolDiscovery> {
   const resolution = await resolveCommand({
+    allowSystemToolchainLookup: input.allowSystemToolchainLookup,
     configCommand: input.config?.command,
+    configSource: input.configSource,
     vaultRoot: input.vaultRoot,
     envValue: input.envValue,
     fallbackCommands: input.fallbackCommands,
@@ -281,7 +366,9 @@ async function discoverCommandTool(input: {
 }
 
 async function resolveCommand(input: {
+  allowSystemToolchainLookup: boolean;
   configCommand?: string | null;
+  configSource: "config" | "platform";
   vaultRoot: string;
   envValue?: string | null;
   fallbackCommands: string[];
@@ -290,9 +377,9 @@ async function resolveCommand(input: {
   if (normalizedConfigCommand) {
     return {
       command: await resolveExecutable([
-      resolveConfigCommandCandidate(input.vaultRoot, normalizedConfigCommand),
+        resolveConfigCommandCandidate(input.vaultRoot, normalizedConfigCommand),
       ]),
-      source: "config",
+      source: input.configSource,
     };
   }
 
@@ -307,7 +394,9 @@ async function resolveCommand(input: {
     }
   }
 
-  const command = await resolveExecutable(input.fallbackCommands);
+  const command = input.allowSystemToolchainLookup
+    ? await resolveExecutable(input.fallbackCommands)
+    : null;
   if (command) {
     return {
       command,
@@ -318,7 +407,7 @@ async function resolveCommand(input: {
   if (normalizedConfigCommand) {
     return {
       command: null,
-      source: "config",
+      source: input.configSource,
     };
   }
 
@@ -337,13 +426,14 @@ async function resolveCommand(input: {
 
 function resolveModelPath(
   configModelPath?: string | null,
+  configSource: "config" | "platform" = "config",
   envValue?: string | null,
 ): { modelPath: string | null; source: ParserToolDiscoverySource } {
   const normalizedConfigModelPath = normalizeNullableString(configModelPath);
   if (normalizedConfigModelPath) {
     return {
       modelPath: normalizedConfigModelPath,
-      source: "config",
+      source: configSource,
     };
   }
 
@@ -365,6 +455,10 @@ function selectCompositeSource(
   commandSource: ParserToolDiscoverySource,
   modelSource: ParserToolDiscoverySource,
 ): ParserToolDiscoverySource {
+  if (commandSource === "platform" || modelSource === "platform") {
+    return "platform";
+  }
+
   if (commandSource === "config" || modelSource === "config") {
     return "config";
   }

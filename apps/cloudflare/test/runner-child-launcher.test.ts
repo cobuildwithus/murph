@@ -73,29 +73,23 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   });
 
   assert.deepEqual(env, {
-    FFMPEG_COMMAND: "/usr/bin/ffmpeg",
-    FILE_COMMAND: "/usr/bin/file",
     HF_HOME: launcherDirectories.huggingFaceRoot,
     HOME: launcherDirectories.homeRoot,
     LANG: "en_US.UTF-8",
-    MUTOOL_COMMAND: "/usr/bin/mutool",
     VERCEL_AI_API_KEY: "secret",
     PATH: "/usr/bin:/bin",
-    PDFINFO_COMMAND: "/usr/bin/pdfinfo",
-    PDFTOPPM_COMMAND: "/usr/bin/pdftoppm",
-    PDFTOTEXT_COMMAND: "/usr/bin/pdftotext",
-    QPDF_COMMAND: "/usr/bin/qpdf",
     SSL_CERT_FILE: "/etc/ssl/cert.pem",
     TEMP: launcherDirectories.tempRoot,
     TMP: launcherDirectories.tempRoot,
     TMPDIR: launcherDirectories.tempRoot,
     TSX_TSCONFIG_PATH: resolveHostedRunnerTsconfigPath(),
     TZ: "UTC",
-    WHISPER_COMMAND: "/usr/local/bin/whisper-cli",
-    WHISPER_MODEL_PATH: "/opt/murph/models/whisper/ggml-base.en.bin",
     XDG_CACHE_HOME: launcherDirectories.cacheRoot,
   });
   assert.equal("HTTPS_PROXY" in env, false);
+  assert.equal("FFMPEG_COMMAND" in env, false);
+  assert.equal("WHISPER_COMMAND" in env, false);
+  assert.equal("WHISPER_MODEL_PATH" in env, false);
   assert.equal(env.PATH, "/usr/bin:/bin");
 });
 

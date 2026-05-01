@@ -24,6 +24,23 @@ export interface HostedAssistantRuntimeManagedAutoReplyChannel {
   memberChannel?: string | null;
 }
 
+export type HostedAssistantRuntimeParserToolName =
+  | "ffmpeg"
+  | "pdfinfo"
+  | "pdftotext"
+  | "whisper";
+
+export interface HostedAssistantRuntimeParserToolConfig {
+  command?: string | null;
+  modelPath?: string | null;
+}
+
+export interface HostedAssistantRuntimeParserToolchainConfig {
+  tools: Partial<
+    Record<HostedAssistantRuntimeParserToolName, HostedAssistantRuntimeParserToolConfig>
+  >;
+}
+
 export type HostedAssistantRuntimeDeviceSyncConfig = ConfiguredDeviceSyncRuntimeConfig;
 
 export interface HostedAssistantRuntimeResolvedConfig {
@@ -35,6 +52,7 @@ export interface HostedAssistantRuntimeResolvedConfig {
 export interface HostedAssistantRuntimeConfig {
   commitTimeoutMs?: number | null;
   forwardedEnv?: Readonly<Record<string, string>>;
+  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
   platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   userEnv?: Readonly<Record<string, string>>;
@@ -66,6 +84,7 @@ export interface HostedBootstrapResult {
 export interface NormalizedHostedAssistantRuntimeConfig {
   commitTimeoutMs: number | null;
   forwardedEnv: Record<string, string>;
+  parserToolchain: HostedAssistantRuntimeParserToolchainConfig | null;
   platform: HostedRuntimePlatform;
   platformEnv: Record<string, string>;
   resolvedConfig: HostedAssistantRuntimeResolvedConfig;

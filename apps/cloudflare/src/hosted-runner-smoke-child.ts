@@ -27,6 +27,9 @@ import type {
 } from "@murphai/parsers";
 
 import {
+  createHostedRunnerNativeParserToolchain,
+} from "./runner-native-parser-toolchain.ts";
+import {
   HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
   parseHostedRunnerSmokeInput,
   type HostedRunnerSmokeResult,
@@ -254,7 +257,8 @@ async function transcribeNormalizedAudio(input: {
 }): Promise<SmokeParseResult> {
   await ensureScratchDirectory(input.scratchRoot);
   const mp3Path = path.join(input.scratchRoot, "hosted-runner.mp3");
-  const ffmpegCommand = process.env.FFMPEG_COMMAND?.trim() || "ffmpeg";
+  const ffmpegCommand =
+    createHostedRunnerNativeParserToolchain().tools.ffmpeg?.command ?? "ffmpeg";
   await runCommand(ffmpegCommand, [
     "-y",
     "-loglevel",
@@ -558,13 +562,11 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
   if (
     !/^include_only\s*=\s*\[/mu.test(config)
     || !/"PATH"/u.test(config)
-    || !/"PDFTOTEXT_COMMAND"/u.test(config)
     || !/"VAULT"/u.test(config)
-    || !/"WHISPER_COMMAND"/u.test(config)
     || /include_only\s*=\s*\[[^\]]*"VERCEL_AI_API_KEY"/mu.test(config)
   ) {
     throw new Error(
-      "Hosted runner smoke Codex config must allowlist PATH, VAULT, parser tool env, and WHISPER_COMMAND without provider credentials.",
+      "Hosted runner smoke Codex config must allowlist PATH and VAULT without provider credentials.",
     );
   }
 
@@ -576,10 +578,8 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
     codexHome,
     runtimeEnv: {
       PATH: process.env.PATH ?? "",
-      PDFTOTEXT_COMMAND: process.env.PDFTOTEXT_COMMAND ?? "hosted-runner-smoke-pdftotext",
       VAULT: process.env.VAULT ?? "",
       VERCEL_AI_API_KEY: "hosted-runner-smoke-secret",
-      WHISPER_COMMAND: process.env.WHISPER_COMMAND ?? "hosted-runner-smoke-whisper",
     },
     vaultRoot: process.env.VAULT ?? "",
   });
@@ -608,7 +608,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "",
     "[shell_environment_policy]",
     'inherit = "all"',
-    'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FFMPEG_COMMAND", "FILE_COMMAND", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "MUTOOL_COMMAND", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "PDFINFO_COMMAND", "PDFTOPPM_COMMAND", "PDFTOTEXT_COMMAND", "QPDF_COMMAND", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT", "WHISPER_COMMAND", "WHISPER_MODEL_PATH"]',
+    'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
     "",
   ].join("\n");
 }
@@ -763,8 +763,6 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
             "printf '%s\\n' \"${#murph_help}\"",
             "printf '%s\\n' \"$python_version\"",
             "printf '%s\\n' \"${VAULT:-}\"",
-            "printf '%s\\n' \"${PDFTOTEXT_COMMAND:-}\"",
-            "printf '%s\\n' \"${WHISPER_COMMAND:-}\"",
             "printf '%s\\n' \"${VERCEL_AI_API_KEY:-}\"",
           ].join("; "),
         ],
@@ -832,8 +830,6 @@ function assertCodexShellEnvironmentProbeResult(input: {
     murphHelpBytesText,
     pythonVersion,
     vaultRoot,
-    pdfToTextCommand,
-    whisperCommand,
     providerCredential,
     ...extra
   ] =
@@ -859,14 +855,6 @@ function assertCodexShellEnvironmentProbeResult(input: {
 
   if (vaultRoot !== input.vaultRoot) {
     throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
-  }
-
-  if (pdfToTextCommand !== (process.env.PDFTOTEXT_COMMAND ?? "hosted-runner-smoke-pdftotext")) {
-    throw new Error("Codex app-server shell env probe did not inherit the PDF parser command env.");
-  }
-
-  if (whisperCommand !== (process.env.WHISPER_COMMAND ?? "hosted-runner-smoke-whisper")) {
-    throw new Error("Codex app-server shell env probe did not inherit the parser command env.");
   }
 
   if (providerCredential && providerCredential.trim().length > 0) {
@@ -977,10 +965,15 @@ async function loadParsersRuntime(): Promise<{
 
 async function createSmokeParserRegistry(): Promise<ParserRegistry> {
   const { createDefaultParserRegistry } = await loadParsersRuntime();
+  const nativeToolchain = createHostedRunnerNativeParserToolchain();
 
   return createDefaultParserRegistry({
     whisper: {
+      commandCandidates: nativeToolchain.tools.whisper?.command
+        ? [nativeToolchain.tools.whisper.command]
+        : undefined,
       language: "en",
+      modelPath: nativeToolchain.tools.whisper?.modelPath ?? undefined,
     },
   });
 }

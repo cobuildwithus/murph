@@ -38,17 +38,6 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
     "LINQ_API_BASE_URL",
     "LINQ_API_TOKEN",
   ],
-  parserToolingConfigured: [
-    "FFMPEG_COMMAND",
-    "FILE_COMMAND",
-    "MUTOOL_COMMAND",
-    "PDFINFO_COMMAND",
-    "PDFTOPPM_COMMAND",
-    "PDFTOTEXT_COMMAND",
-    "QPDF_COMMAND",
-    "WHISPER_COMMAND",
-    "WHISPER_MODEL_PATH",
-  ],
   telegramConfigured: [
     "TELEGRAM_API_BASE_URL",
     "TELEGRAM_BOT_USERNAME",

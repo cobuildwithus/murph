@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-04-28
-Updated: 2026-04-28
+Updated: 2026-05-01
 
 ## Goal
 
@@ -62,6 +62,16 @@ Updated: 2026-04-28
    before the first worker wake.
 4. Run focused unit and hosted Linq E2E checks.
 5. Run required completion audits and scoped repo verification.
+
+## 2026-05-01 debug note
+
+- Added the missing bridge from system-mailbox assistant-notification
+  `redactedLogEntries` into the existing durable `assistant.automation_detail`
+  runtime log path.
+- Focused proof now covers a skipped first-contact-style notification failure
+  and verifies disallowed local path previews are not persisted.
+- This is observability for the current no-outreach repro; it does not by itself
+  prove the hosted-local Linq E2E or production welcome delivery is fixed.
 
 ## Decisions
 

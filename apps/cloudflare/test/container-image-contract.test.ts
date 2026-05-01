@@ -391,16 +391,10 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       "'export PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'",
     );
-    expect(baseDockerfile).toContain("WHISPER_COMMAND=/usr/local/bin/whisper-cli");
-    expect(baseDockerfile).toContain(
-      "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
-    );
-    expect(baseDockerfile).toContain("FILE_COMMAND=/usr/bin/file");
-    expect(baseDockerfile).toContain("MUTOOL_COMMAND=/usr/bin/mutool");
-    expect(baseDockerfile).toContain("PDFINFO_COMMAND=/usr/bin/pdfinfo");
-    expect(baseDockerfile).toContain("PDFTOPPM_COMMAND=/usr/bin/pdftoppm");
-    expect(baseDockerfile).toContain("PDFTOTEXT_COMMAND=/usr/bin/pdftotext");
-    expect(baseDockerfile).toContain("QPDF_COMMAND=/usr/bin/qpdf");
+    expect(baseDockerfile).not.toContain("WHISPER_COMMAND=");
+    expect(baseDockerfile).not.toContain("WHISPER_MODEL_PATH=");
+    expect(baseDockerfile).not.toContain("FFMPEG_COMMAND=");
+    expect(baseDockerfile).not.toContain("PDFTOTEXT_COMMAND=");
     expect(baseDockerfile).toContain("file \\");
     expect(baseDockerfile).toContain("mupdf-tools \\");
     expect(baseDockerfile).toContain("poppler-utils \\");

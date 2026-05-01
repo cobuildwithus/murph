@@ -551,10 +551,6 @@ function resolveHostedRuntimeDeviceSyncProviderConfigs(
   // hydrated through an explicit runtime secret channel before provider
   // instantiation instead of being reconstructed from this envelope.
 
-  if (providerConfigs.garmin) {
-    runtimeProviderConfigs.garmin = providerConfigs.garmin;
-  }
-
   if (providerConfigs.oura) {
     runtimeProviderConfigs.oura = providerConfigs.oura;
   }

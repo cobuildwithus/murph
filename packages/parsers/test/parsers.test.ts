@@ -483,6 +483,128 @@ test("configured parser registry keeps the discovered whisper model snapshot pin
   }
 });
 
+test("configured parser registry accepts a platform toolchain without env or system lookup", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-platform");
+  const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-platform-bin");
+  const modelPath = path.join(vaultRoot, "models", "platform.bin");
+  const driftedModelPath = path.join(vaultRoot, "models", "drifted.bin");
+  await fs.mkdir(path.dirname(modelPath), { recursive: true });
+  await fs.writeFile(modelPath, "model", "utf8");
+  await fs.writeFile(driftedModelPath, "drifted-model", "utf8");
+  const platformWhisperCommandPath = await writeExecutableFile(
+    toolsDirectory,
+    "fake-platform-whisper",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const modelPath = args[args.indexOf('-m') + 1];",
+      `if (modelPath !== ${JSON.stringify(modelPath)}) {`,
+      "  console.error(`unexpected model path: ${modelPath}`);",
+      "  process.exit(1);",
+      "}",
+      "const outputBase = args[args.indexOf('-of') + 1];",
+      "fs.writeFileSync(`${outputBase}.txt`, 'platform toolchain pinned\\n', 'utf8');",
+    ].join("\n"),
+  );
+  const driftedWhisperCommandPath = await writeExecutableFile(
+    toolsDirectory,
+    "fake-drifted-whisper",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const outputBase = args[args.indexOf('-of') + 1];",
+      "fs.writeFileSync(`${outputBase}.txt`, 'drifted env command used\\n', 'utf8');",
+    ].join("\n"),
+  );
+  const fakeFfmpegPath = await writeExecutableFile(
+    toolsDirectory,
+    "fake-platform-ffmpeg",
+    "#!/usr/bin/env node\nprocess.exit(0);\n",
+  );
+  const audioPath = await writeExternalFile(toolsDirectory, "voice.wav", "wav-placeholder");
+  const previousWhisperCommand = process.env.WHISPER_COMMAND;
+  const previousWhisperModelPath = process.env.WHISPER_MODEL_PATH;
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  try {
+    process.env.WHISPER_COMMAND = driftedWhisperCommandPath;
+    process.env.WHISPER_MODEL_PATH = driftedModelPath;
+    const configured = await createConfiguredParserRegistry({
+      readVaultToolchainConfig: false,
+      toolchain: {
+        source: "platform",
+        tools: {
+          ffmpeg: {
+            command: fakeFfmpegPath,
+          },
+          whisper: {
+            command: platformWhisperCommandPath,
+            modelPath,
+          },
+        },
+      },
+      vaultRoot,
+    });
+
+    assert.deepEqual(configured.doctor.tools.ffmpeg, {
+      available: true,
+      command: fakeFfmpegPath,
+      source: "platform",
+      reason: "ffmpeg CLI available.",
+    });
+    assert.deepEqual(configured.ffmpeg, {
+      commandCandidates: [fakeFfmpegPath],
+      allowSystemLookup: false,
+    });
+    assert.deepEqual(configured.doctor.tools.whisper, {
+      available: true,
+      command: platformWhisperCommandPath,
+      modelPath,
+      source: "platform",
+      reason: "whisper.cpp CLI and model path configured.",
+    });
+
+    const run = await configured.registry.run({
+      intent: "attachment_text",
+      artifact: {
+        captureId: "cap_whisper_platform_toolchain",
+        attachmentId: "att_whisper_platform_toolchain",
+        kind: "audio",
+        fileName: "voice.wav",
+        mime: "audio/wav",
+        storedPath: "raw/inbox/example/voice.wav",
+        absolutePath: audioPath,
+      },
+      inputPath: audioPath,
+      scratchDirectory: toolsDirectory,
+    });
+
+    assert.equal(run.selection.provider.id, "whisper.cpp");
+    assert.equal(run.selection.availability.executablePath, platformWhisperCommandPath);
+    assert.equal(run.selection.availability.details?.modelPath, modelPath);
+    assert.equal(run.result.text, "platform toolchain pinned");
+  } finally {
+    if (previousWhisperCommand === undefined) {
+      delete process.env.WHISPER_COMMAND;
+    } else {
+      process.env.WHISPER_COMMAND = previousWhisperCommand;
+    }
+    if (previousWhisperModelPath === undefined) {
+      delete process.env.WHISPER_MODEL_PATH;
+    } else {
+      process.env.WHISPER_MODEL_PATH = previousWhisperModelPath;
+    }
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+    await fs.rm(toolsDirectory, { recursive: true, force: true });
+  }
+});
+
 test("configured parser registry resolves config-relative whisper model paths against the vault root", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-toolchain-runtime-model");
   const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-runtime-bin");

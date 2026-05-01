@@ -18,6 +18,8 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
   junction?: { providerFilter?: string[] };
 };
 
+const JUNCTION_PREFERRED_CONNECT_TARGETS = new Set(["oura", "strava"]);
+
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value
     .trim()
@@ -52,12 +54,18 @@ export function listConfiguredDeviceSyncConnectTargets(
         continue;
       }
 
-      addDeviceSyncConnectTarget(targetsByKey, {
-        connectTarget: sourceProviderSlug,
-        label: formatDeviceSyncProviderLabel(sourceProviderSlug),
-        provider: "junction",
-        sourceProviderSlug,
-      });
+      addDeviceSyncConnectTarget(
+        targetsByKey,
+        {
+          connectTarget: sourceProviderSlug,
+          label: formatDeviceSyncProviderLabel(sourceProviderSlug),
+          provider: "junction",
+          sourceProviderSlug,
+        },
+        {
+          replaceExisting: shouldPreferJunctionConnectTarget(sourceProviderSlug),
+        },
+      );
     }
   }
 
@@ -81,9 +89,10 @@ export function resolveConfiguredDeviceSyncConnectTarget(
 function addDeviceSyncConnectTarget(
   targetsByKey: Map<string, DeviceSyncConnectTarget>,
   target: DeviceSyncConnectTarget,
+  options: { replaceExisting?: boolean } = {},
 ): void {
   const connectTarget = normalizeDeviceSyncConnectTargetKey(target.connectTarget);
-  if (!connectTarget || targetsByKey.has(connectTarget)) {
+  if (!connectTarget || (targetsByKey.has(connectTarget) && !options.replaceExisting)) {
     return;
   }
 
@@ -97,4 +106,10 @@ function addDeviceSyncConnectTarget(
     provider: target.provider,
     ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
   });
+}
+
+function shouldPreferJunctionConnectTarget(sourceProviderSlug: string): boolean {
+  const connectTarget = normalizeDeviceSyncConnectTargetKey(sourceProviderSlug);
+
+  return connectTarget ? JUNCTION_PREFERRED_CONNECT_TARGETS.has(connectTarget) : false;
 }

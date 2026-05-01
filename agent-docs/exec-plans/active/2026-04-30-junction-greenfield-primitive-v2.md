@@ -4,6 +4,10 @@ Status: active
 Created: 2026-04-30
 Updated: 2026-05-01
 
+## Current Follow-Up
+
+- 2026-05-01: Fix timeseries chunk over-fetch/import duplication by deduping chunk results before snapshot import. Adjacent Junction chunks are converted to date-only API params, so date-inclusive provider behavior can return the same sample in neighboring chunks. Focused Junction provider test and package-local device-syncd typecheck passed; full package/root checks remain blocked by unrelated dirty-tree failures recorded in handoff.
+
 ## Purpose
 
 This active plan supersedes the completed snapshot at `agent-docs/exec-plans/completed/2026-04-30-add-junction-greenfield-primitive-update.md` for future Junction work. The completed file remains immutable history. This revision folds in the latest review feedback before the next implementation wave.
@@ -271,6 +275,7 @@ sandbox + eu    -> sk_eu_* and api.sandbox.eu.junction.com
 ```
 
 Junction API requests use the canonical base URL for the selected environment and region. Tests and mocks should inject `fetchImpl` rather than configuring an alternate runtime host.
+
 
 Keep these secrets separate because they have different lifetimes and blast radius:
 

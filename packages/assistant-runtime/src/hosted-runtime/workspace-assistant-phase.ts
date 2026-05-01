@@ -1,6 +1,7 @@
 import {
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
+  type HostedExecutionRedactedLogEntry,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeRedactedJson,
@@ -169,6 +170,12 @@ export async function runHostedWorkspaceAssistantPhase(
       const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
         || systemMailboxPreparation.status === "recording";
       const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox || providerCleanupDue;
+      if ("metrics" in systemMailboxPreparation) {
+        await writeHostedAssistantAutomationDetailRuntimeLogs({
+          assistantMetrics: systemMailboxPreparation.metrics,
+          input,
+        });
+      }
       await writeHostedSystemMailboxRuntimeLog({
         input,
         nextWakeAt,
@@ -586,7 +593,9 @@ async function writeHostedAssistantPassRuntimeLog(input: {
 }
 
 async function writeHostedAssistantAutomationDetailRuntimeLogs(input: {
-  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+  assistantMetrics: {
+    redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
+  };
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<void> {
   const entries = input.assistantMetrics.redactedLogEntries ?? [];

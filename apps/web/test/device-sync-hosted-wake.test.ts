@@ -687,6 +687,26 @@ describe("appendHostedDeviceSyncWake", () => {
         displayName: "Oura acct_sensitive",
       }),
     ]);
+    mocks.listConnectionSources.mockResolvedValueOnce([
+      {
+        id: "src_123",
+        connectionId: "dsc_123",
+        sourceInstanceKey: "jxn_hidden",
+        sourceProviderSlug: "oura",
+        displayName: null,
+        status: "connected",
+        resourceAvailabilitySummary: {
+          heartrate: true,
+          sourceInstanceKeyFallback: true,
+        },
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        firstSeenAt: "2026-03-26T12:00:00.000Z",
+        lastSeenAt: "2026-03-26T12:00:00.000Z",
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+    ]);
 
     await expect(controlPlane.listConnections("user-123")).resolves.toEqual({
       providers: [],
@@ -713,7 +733,16 @@ describe("appendHostedDeviceSyncWake", () => {
           updatedAt: "2026-03-26T12:00:00.000Z",
         },
       ],
-      connectionSources: [],
+      connectionSources: [
+        {
+          connectionId: buildPublicConnectionId("dsc_123"),
+          firstSeenAt: "2026-03-26T12:00:00.000Z",
+          lastSeenAt: "2026-03-26T12:00:00.000Z",
+          resourceCount: 1,
+          sourceProviderSlug: "oura",
+          status: "connected",
+        },
+      ],
     });
   });
 

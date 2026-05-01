@@ -8,6 +8,7 @@ import {
   DEFAULT_STRIPE_ENV_FILE,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
   WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES,
@@ -125,7 +126,9 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
-  if (!input.config.localCodexBridge) {
+  if (input.config.localCodexBridge) {
+    stripHostedLocalCodexAppServerStubEnv(resolvedExisting);
+  } else {
     stripHostedLocalCodexBridgeProxyEnv(resolvedExisting);
   }
 
@@ -203,6 +206,10 @@ function normalizeOptionalEnvOverrides(
 function stripHostedLocalCodexBridgeProxyEnv(env: Record<string, string | undefined>): void {
   delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV];
   delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV];
+}
+
+function stripHostedLocalCodexAppServerStubEnv(env: Record<string, string | undefined>): void {
+  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV];
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
@@ -439,6 +446,7 @@ export function buildWranglerLocalDevConfig(
   const requiredSecrets = [
     ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
     ...HOSTED_WORKER_OPTIONAL_SECRET_NAMES.filter((key) => Boolean(resolveWranglerEnvValue(key, source))),
+    ...WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES.filter((key) => Boolean(resolveWranglerEnvValue(key, source))),
   ];
 
   return {
