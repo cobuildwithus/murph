@@ -47,17 +47,17 @@ export interface AssistantAutoReplyTerminalEvidence {
 
 export async function assistantAutoReplyTerminalEvidenceExists(
   vault: string,
-  captureId: string,
+  evidenceId: string,
 ): Promise<boolean> {
-  return (await readAssistantAutoReplyTerminalEvidence(vault, captureId)) !== null
+  return (await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, evidenceId)) !== null
 }
 
-export async function readAssistantAutoReplyTerminalEvidence(
+export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(
   vault: string,
-  captureId: string,
+  evidenceId: string,
 ): Promise<AssistantAutoReplyTerminalEvidence | null> {
   try {
-    const raw = await readFile(resolveAssistantAutoReplyEvidencePath(vault, captureId), 'utf8')
+    const raw = await readFile(resolveAssistantAutoReplyEvidencePath(vault, evidenceId), 'utf8')
     return parseAssistantAutoReplyTerminalEvidence(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error) || error instanceof SyntaxError) {
@@ -245,7 +245,7 @@ export async function markAssistantAutoReplyLinqCleanupQueued(input: {
   const queuedAt = input.queuedAt ?? new Date().toISOString()
   await Promise.all(
     input.captureIds.map(async (captureId) => {
-      const evidence = await readAssistantAutoReplyTerminalEvidence(input.vault, captureId)
+      const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, captureId)
       if (!evidence || evidence.providerCleanup.queuedAt) {
         return
       }
@@ -303,10 +303,10 @@ function createProviderCleanupState(messageIds: readonly string[]): AssistantAut
 
 async function writeAssistantAutoReplyTerminalEvidence(
   vault: string,
-  captureId: string,
+  evidenceId: string,
   evidence: AssistantAutoReplyTerminalEvidence,
 ): Promise<void> {
-  const filePath = resolveAssistantAutoReplyEvidencePath(vault, captureId)
+  const filePath = resolveAssistantAutoReplyEvidencePath(vault, evidenceId)
   await ensureAssistantStateDir(path.dirname(filePath))
   await writeAssistantStateJson(filePath, evidence)
 }
@@ -319,10 +319,10 @@ function resolveAssistantAutoReplyEvidenceDirectory(vault: string): string {
   )
 }
 
-function resolveAssistantAutoReplyEvidencePath(vault: string, captureId: string): string {
+function resolveAssistantAutoReplyEvidencePath(vault: string, evidenceId: string): string {
   return path.join(
     resolveAssistantAutoReplyEvidenceDirectory(vault),
-    `${encodeURIComponent(captureId)}.json`,
+    `${encodeURIComponent(evidenceId)}.json`,
   )
 }
 

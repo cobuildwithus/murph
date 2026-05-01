@@ -48,6 +48,7 @@ const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
+const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -398,6 +399,10 @@ function createHostedConversationAssistantInputEvent(input: {
     replyTarget: createHostedConversationAssistantInputReplyTarget(
       input.wake,
     ),
+    sourceMetadata: createHostedConversationAssistantInputSourceMetadata(
+      input.wake,
+      identifierBlind,
+    ),
     sourceRef: {
       dedupeKey: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -620,6 +625,45 @@ function normalizeHostedAssistantInputReplyTargetIdentifier(
   return normalized.length > 0 ? normalized : null;
 }
 
+function createHostedConversationAssistantInputSourceMetadata(
+  wake: HostedExecutionConversationMessageWake,
+  identifierBlind: HostedAssistantConversationIdentifierBlind,
+): UpsertAssistantInputEventInput["sourceMetadata"] {
+  if (!isHostedTelegramConversationMessageWake(wake)) {
+    return null;
+  }
+
+  const mediaGroupId = hashHostedAssistantInputTelegramMediaGroupId(
+    identifierBlind,
+    wake.message.telegramMessage.mediaGroupId,
+  );
+  const replyContext = sanitizeHostedAssistantInputMetadataText(
+    wake.message.telegramMessage.replyContextPreview ?? "",
+  );
+  if (!mediaGroupId && !replyContext) {
+    return null;
+  }
+
+  return {
+    kind: "telegram",
+    mediaGroupId,
+    replyContext,
+  };
+}
+
+function hashHostedAssistantInputTelegramMediaGroupId(
+  identifierBlind: HostedAssistantConversationIdentifierBlind,
+  value: string | null | undefined,
+): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized
+    ? hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        `telegram-media-group:${normalized}`,
+      )
+    : null;
+}
+
 function createHostedConversationAssistantInputAttachmentDescriptors(
   wake: HostedExecutionConversationMessageWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
@@ -719,6 +763,7 @@ function sanitizeHostedAssistantInputText(value: string): string | null {
     .replace(/https?:\/\/[^\s"'<>]+/giu, "[link omitted]")
     .replace(/file:\/\/[^\s"'<>]+/giu, "[path omitted]")
     .replace(/(^|[\s("'=])(?:[A-Za-z]:[\\/]|\/[^\s"'<>]+|~\/|\.\.\/|\.\.\\)[^\s"'<>]*/gu, "$1[path omitted]")
+    .replace(/^\s*(authorization|cookie|set-cookie|x-api-key)\s*:.*$/gimu, "[secret omitted]")
     .trim();
 
   if (sanitized.length === 0) {
@@ -726,6 +771,17 @@ function sanitizeHostedAssistantInputText(value: string): string | null {
   }
 
   return sanitized.length > 20_000 ? sanitized.slice(0, 20_000) : sanitized;
+}
+
+function sanitizeHostedAssistantInputMetadataText(value: string): string | null {
+  const sanitized = sanitizeHostedAssistantInputText(value);
+  if (!sanitized) {
+    return null;
+  }
+
+  return sanitized.length > ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH
+    ? sanitized.slice(0, ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH)
+    : sanitized;
 }
 
 function normalizeHostedAssistantInputMimeType(value: string | null | undefined): string | null {

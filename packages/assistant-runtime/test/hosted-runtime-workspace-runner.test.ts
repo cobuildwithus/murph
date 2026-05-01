@@ -75,7 +75,7 @@ type SyntheticInputSource = {
       threadId: string | null;
       threadIsDirect: boolean | null;
     };
-    knownCaptureIds?: readonly string[];
+    knownProjectionCaptureIds?: readonly string[];
   }): Promise<{
     inputs: unknown[];
     nextCursor: SyntheticConversationCursor;
@@ -1158,7 +1158,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 threadId: "thread_synthetic",
                 threadIsDirect: true,
               },
-              knownCaptureIds: ["capture_synthetic_initial"],
+              knownProjectionCaptureIds: ["capture_synthetic_initial"],
             });
             assert.equal(lateInputs.inputs.length, 1);
             return {

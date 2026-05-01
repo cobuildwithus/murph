@@ -104,9 +104,9 @@ test('assistant CLI foreground logging resolves unsafe logging flags and stable 
 
 test('assistant CLI foreground logging redacts provider turn details by default', () => {
   const event: Parameters<typeof formatAssistantRunEventForTerminal>[0] = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'telegram -> +15550001111',
-    type: 'capture.replied',
+    type: 'input.replied',
   }
 
   const safeMessage = formatAssistantRunEventForTerminal(event)
@@ -114,27 +114,27 @@ test('assistant CLI foreground logging redacts provider turn details by default'
     unsafeDetails: true,
   })
 
-  assert.equal(safeMessage, 'replied cap_safe_123')
+  assert.equal(safeMessage, 'replied ain_safe_123')
   assert.doesNotMatch(safeMessage ?? '', /\+15550001111/u)
-  assert.equal(unsafeMessage, 'replied cap_safe_123: telegram -> +15550001111')
+  assert.equal(unsafeMessage, 'replied ain_safe_123: telegram -> +15550001111')
 })
 
 test('assistant CLI foreground logging keeps safe auto-reply summaries while hiding raw search progress', () => {
   const event: Parameters<typeof formatAssistantRunEventForTerminal>[0] = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'Web: treehouse menu',
     providerKind: 'search',
     providerState: 'running',
-    type: 'capture.reply-progress',
+    type: 'input.reply-progress',
   }
 
   assert.equal(
     formatAssistantRunEventForTerminal(event),
-    'reply-progress cap_safe_123: searching the web',
+    'reply-progress ain_safe_123: searching the web',
   )
   assert.equal(
     formatAssistantRunEventForTerminal(event, { unsafeDetails: true }),
-    'reply-progress cap_safe_123: Web: treehouse menu',
+    'reply-progress ain_safe_123: Web: treehouse menu',
   )
 })
 
@@ -193,11 +193,11 @@ test('assistant CLI foreground logging skips empty scans and summarizes routing 
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_start_123',
+      inputId: 'ain_start_123',
       details: 'provider startup',
-      type: 'capture.reply-started',
+      type: 'input.reply-started',
     }),
-    'reply-started cap_start_123: assistant provider turn started',
+    'reply-started ain_start_123: assistant provider turn started',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
@@ -219,196 +219,196 @@ test('assistant CLI foreground logging preserves safe details and stable fallbac
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_skip_retry',
+      inputId: 'ain_skip_retry',
       details:
-        'temporary network issue. Will retry this capture after the provider reconnects.',
-      type: 'capture.reply-skipped',
+        'temporary network issue. Will retry this input after the provider reconnects.',
+      type: 'input.reply-skipped',
     }),
-    'reply-skipped cap_skip_retry: waiting for provider reconnect',
+    'reply-skipped ain_skip_retry: waiting for provider reconnect',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_failed_safe',
+      inputId: 'ain_failed_safe',
       details: 'provider raw error',
       errorCode: 'network_timeout',
       safeDetails: 'assistant provider timed out safely',
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     }),
-    'reply-failed cap_failed_safe: assistant provider timed out safely',
+    'reply-failed ain_failed_safe: assistant provider timed out safely',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_failed_fallback',
+      inputId: 'ain_failed_fallback',
       errorCode: 'network_timeout',
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     }),
-    'reply-failed cap_failed_fallback: assistant reply failed (network_timeout)',
+    'reply-failed ain_failed_fallback: assistant reply failed (network_timeout)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_gateway_auth',
+      inputId: 'ain_gateway_auth',
       details:
         'Authentication failed. Create an API key and set in AI_GATEWAY_API_KEY environment variable: https://example.invalid/key',
       safeDetails: 'assistant provider failed',
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     }),
-    'reply-failed cap_gateway_auth: Authentication failed. Set AI_GATEWAY_API_KEY for the assistant provider.',
+    'reply-failed ain_gateway_auth: Authentication failed. Set AI_GATEWAY_API_KEY for the assistant provider.',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_network_safe',
+      inputId: 'ain_network_safe',
       details: 'network error while processing message: private inbox text',
       safeDetails: 'assistant provider failed',
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     }),
-    'reply-failed cap_network_safe: assistant provider failed',
+    'reply-failed ain_network_safe: assistant provider failed',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_auth_token',
+      inputId: 'ain_auth_token',
       details: 'Authentication failed for ABC_DEF_GHI',
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     }),
-    'reply-failed cap_auth_token: Authentication failed. Check assistant provider credentials.',
+    'reply-failed ain_auth_token: Authentication failed. Check assistant provider credentials.',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_auth_lower_token',
+      inputId: 'ain_auth_lower_token',
       details: 'Authentication failed. env var lowercase_token_value',
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     }),
-    'reply-failed cap_auth_lower_token: Authentication failed. Check assistant provider credentials.',
+    'reply-failed ain_auth_lower_token: Authentication failed. Check assistant provider credentials.',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_failed_unsafe',
+      inputId: 'ain_failed_unsafe',
       details: 'provider raw error',
       safeDetails: 'assistant provider timed out safely',
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     }, {
       unsafeDetails: true,
     }),
-    'reply-failed cap_failed_unsafe: provider raw error',
+    'reply-failed ain_failed_unsafe: provider raw error',
   )
 })
 
 test('assistant CLI foreground logging summarizes provider progress for each top-level provider kind', () => {
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_command_running',
+      inputId: 'ain_command_running',
       providerKind: 'command',
       providerState: 'running',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_command_running: running assistant command',
+    'reply-progress ain_command_running: running assistant command',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_command_safe',
+      inputId: 'ain_command_safe',
       providerKind: 'command',
       providerState: 'completed',
       safeDetails: 'assistant command ended cleanly',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_command_safe: assistant command ended cleanly',
+    'reply-progress ain_command_safe: assistant command ended cleanly',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_file_done',
+      inputId: 'ain_file_done',
       providerKind: 'file',
       providerState: 'completed',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_file_done: file update finished',
+    'reply-progress ain_file_done: file update finished',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_plan_running',
+      inputId: 'ain_plan_running',
       providerKind: 'plan',
       providerState: 'running',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_plan_running: updating plan',
+    'reply-progress ain_plan_running: updating plan',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_reasoning_done',
+      inputId: 'ain_reasoning_done',
       providerKind: 'reasoning',
       providerState: 'completed',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_reasoning_done: thinking step completed',
+    'reply-progress ain_reasoning_done: thinking step completed',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_search_done',
+      inputId: 'ain_search_done',
       providerKind: 'search',
       providerState: 'completed',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_search_done: web search finished',
+    'reply-progress ain_search_done: web search finished',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_status_safe',
+      inputId: 'ain_status_safe',
       details: 'assistant still running after 45s',
       providerKind: 'status',
       providerState: 'running',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_status_safe: assistant still running after 45s',
+    'reply-progress ain_status_safe: assistant still running after 45s',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_status_revision',
-      details: 'new input queued for active turn with 1 additional capture(s)',
+      inputId: 'ain_status_revision',
+      details: 'new input queued for active turn with 1 additional input(s)',
       providerKind: 'status',
       providerState: 'running',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_status_revision: new input queued for active turn with 1 additional capture(s)',
+    'reply-progress ain_status_revision: new input queued for active turn with 1 additional input(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_status_revision_group',
-      details: 'new input committed to active turn with 3 additional capture(s)',
+      inputId: 'ain_status_revision_group',
+      details: 'new input committed to active turn with 3 additional input(s)',
       providerKind: 'status',
       providerState: 'running',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_status_revision_group: new input committed to active turn with 3 additional capture(s)',
+    'reply-progress ain_status_revision_group: new input committed to active turn with 3 additional input(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_status_waiting',
+      inputId: 'ain_status_waiting',
       details: 'status payload with private text',
       providerKind: 'status',
       providerState: 'running',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_status_waiting: waiting on assistant provider',
+    'reply-progress ain_status_waiting: waiting on assistant provider',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_tool_done',
+      inputId: 'ain_tool_done',
       providerKind: 'tool',
       providerState: 'completed',
       safeDetails: 'tool completed safely',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }),
-    'reply-progress cap_tool_done: tool completed safely',
+    'reply-progress ain_tool_done: tool completed safely',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      captureId: 'cap_other_unsafe',
+      inputId: 'ain_other_unsafe',
       details: 'raw custom provider detail',
       providerKind: 'unknown' as never,
       providerState: 'running',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     }, {
       unsafeDetails: true,
     }),
-    'reply-progress cap_other_unsafe: raw custom provider detail',
+    'reply-progress ain_other_unsafe: raw custom provider detail',
   )
 })
 

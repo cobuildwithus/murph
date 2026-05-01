@@ -16,6 +16,7 @@ import {
   type InboxListResult,
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
+import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
 import {
   assistantResultArtifactExists,
   writeAssistantChatErrorArtifacts,
@@ -29,7 +30,7 @@ import {
   buildAssistantAutoReplyPrompt,
   loadTelegramAutoReplyMetadata,
   prepareAssistantAutoReplyInput,
-  type AssistantAutoReplyPromptCapture,
+  type AssistantAutoReplyPromptInput,
   type TelegramAutoReplyMetadata,
 } from '../src/assistant/automation/prompt-builder.ts'
 import {
@@ -132,6 +133,84 @@ function createListCapture(
   }).items[0]
 }
 
+function createTelegramAssistantInputCandidate(input: {
+  inputId: string
+  mediaGroupId: string | null
+  messageId: string | null
+  replyContext: string | null
+}): AssistantInputCandidate {
+  return {
+    acceptedInput: {
+      id: input.inputId,
+      source: 'assistant-input',
+      captureIds: [],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: input.inputId,
+        version: 'murph.assistant-input-event.v1',
+      },
+    },
+    event: {
+      attachmentCount: 0,
+      attachmentDescriptors: [],
+      conversation: {
+        accountId: 'account-1',
+        actorId: 'actor-1',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+      },
+      cursor: {
+        createdAt: '2026-04-08T00:00:01.000Z',
+        inputId: input.inputId,
+        occurredAt: '2026-04-08T00:00:00.000Z',
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: 'hosted-mailbox:conversation:1:item-1',
+      },
+      inputId: input.inputId,
+      occurredAt: '2026-04-08T00:00:00.000Z',
+      receivedAt: '2026-04-08T00:00:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: input.messageId,
+        threadId: 'thread-1',
+      },
+      source: 'telegram',
+      sourceMetadata: {
+        kind: 'telegram',
+        mediaGroupId: input.mediaGroupId,
+        replyContext: input.replyContext,
+      },
+      sourceRef: {
+        dedupeKey: null,
+        eventId: 'event-1',
+        itemId: 'item-1',
+        kind: 'hosted-mailbox',
+        lane: 'conversation',
+        laneSeq: '1',
+        payloadSchema: 'murph.hosted-mailbox-item-payload.v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-execution-wake.v1',
+      },
+      text: 'hello',
+      transcriptText: 'hello',
+      userMessageContent: [
+        {
+          text: 'hello',
+          type: 'text',
+        },
+      ],
+    },
+    projection: {
+      captureId: null,
+      reasonCode: null,
+      status: 'pending',
+    },
+  }
+}
+
 function createAttachment(
   overrides: Partial<InboxShowResult['capture']['attachments'][number]> = {},
 ): InboxShowResult['capture']['attachments'][number] {
@@ -179,11 +258,11 @@ function createAttachment(
   }).capture.attachments[0]
 }
 
-function createPromptCapture(input: {
+function createPromptInput(input: {
   attachments?: readonly InboxShowResult['capture']['attachments'][number][]
   captureOverrides?: Partial<InboxShowResult['capture']>
   telegramMetadata?: TelegramAutoReplyMetadata | null
-} = {}): AssistantAutoReplyPromptCapture {
+} = {}): AssistantAutoReplyPromptInput {
   const attachments = [...(input.attachments ?? [])]
   const resolvedAttachments = input.captureOverrides?.attachments ?? attachments
   const capture = {
@@ -557,16 +636,48 @@ describe('assistant auto-reply grouping', () => {
     ])
     expect(result.items.map((item) => item.telegramMetadata)).toEqual([
       {
-        mediaGroupId: 'group-1',
+        mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
         messageId: '101',
         replyContext: 'Replying to: Shared venue Coffee Shop',
       },
       {
-        mediaGroupId: 'group-2',
+        mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
         messageId: '102',
         replyContext: null,
       },
     ])
+  })
+
+  it('uses assistant input Telegram metadata before synthetic envelope fallback', async () => {
+    const inputId = 'ain_0123456789abcdef0123456789abcdef'
+    const candidate = createTelegramAssistantInputCandidate({
+      inputId,
+      mediaGroupId: 'event-group-1',
+      messageId: '777',
+      replyContext: 'Replying to: earlier assistant input',
+    })
+
+    const result = await collectAssistantAutoReplyGroup({
+      captures: [
+        createListCapture({
+          captureId: inputId,
+          envelopePath: `assistant-input-events/${inputId}.json`,
+          eventId: inputId,
+          externalId: inputId,
+          text: 'hello',
+        }),
+      ],
+      inputCandidatesByCaptureId: new Map([[inputId, candidate]]),
+      startIndex: 0,
+      vault: '/tmp/automation-support-vault',
+    })
+
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]?.telegramMetadata).toEqual({
+      mediaGroupId: 'event-group-1',
+      messageId: '777',
+      replyContext: 'Replying to: earlier assistant input',
+    })
   })
 })
 
@@ -581,7 +692,7 @@ describe('assistant provider watchdog', () => {
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 3_000,
       providerLongRunningCommandStallTimeoutMs: 5_000,
-      replyCaptureId: 'capture-1',
+      replyInputId: 'input-1',
     })
 
     watchdog.onProviderEvent({
@@ -603,12 +714,12 @@ describe('assistant provider watchdog', () => {
 
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({
-      captureId: 'capture-1',
       details: '$ murph research inbox grouping',
+      inputId: 'input-1',
       providerKind: 'command',
       providerState: 'running',
       safeDetails: 'researching',
-      type: 'capture.reply-progress',
+      type: 'input.reply-progress',
     })
 
     vi.advanceTimersByTime(1_000)
@@ -636,7 +747,7 @@ describe('assistant provider watchdog', () => {
     const abortedWatchdog = createAssistantProviderWatchdog({
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 1_000,
-      replyCaptureId: 'capture-1',
+      replyInputId: 'input-1',
       signal: upstream.signal,
     })
     expect(abortedWatchdog.signal.aborted).toBe(true)
@@ -650,7 +761,7 @@ describe('assistant provider watchdog', () => {
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 1_000,
       providerLongRunningCommandStallTimeoutMs: 2_000,
-      replyCaptureId: 'capture-2',
+      replyInputId: 'input-2',
     })
 
     watchdog.onProviderEvent({
@@ -693,7 +804,7 @@ describe('assistant provider watchdog', () => {
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 2_000,
       providerLongRunningCommandStallTimeoutMs: 3_000,
-      replyCaptureId: 'capture-3',
+      replyInputId: 'input-3',
     })
 
     watchdog.onProviderEvent({
@@ -717,7 +828,7 @@ describe('assistant provider watchdog', () => {
     })
     vi.advanceTimersByTime(1_000)
     expect(events.at(-1)).toMatchObject({
-      captureId: 'capture-3',
+      inputId: 'input-3',
       providerKind: 'status',
       providerState: 'running',
     })
@@ -741,7 +852,7 @@ describe('assistant provider watchdog', () => {
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 4_000,
       providerLongRunningCommandStallTimeoutMs: 4_000,
-      replyCaptureId: 'capture-4',
+      replyInputId: 'input-4',
     })
 
     watchdog.onProviderEvent({
@@ -791,7 +902,7 @@ describe('assistant provider watchdog', () => {
       providerHeartbeatMs: 60_000,
       providerStallTimeoutMs: 5 * 60_000,
       providerLongRunningCommandStallTimeoutMs: 5 * 60_000,
-      replyCaptureId: 'capture-5',
+      replyInputId: 'input-5',
     })
 
     watchdog.onProviderEvent({
@@ -832,7 +943,7 @@ describe('assistant provider watchdog', () => {
       providerHeartbeatMs: 61_000,
       providerStallTimeoutMs: 5 * 61_000,
       providerLongRunningCommandStallTimeoutMs: 5 * 61_000,
-      replyCaptureId: 'capture-6',
+      replyInputId: 'input-6',
     })
     laterWatchdog.onProviderEvent({
       id: null,
@@ -854,7 +965,7 @@ describe('assistant auto-reply prompt builder support', () => {
   it('renders pending attachment status and skips prompts that never produce usable text', () => {
     expect(
       buildAssistantAutoReplyPrompt([
-        createPromptCapture({
+        createPromptInput({
           attachments: [
             createAttachment({
               parseState: 'pending',
@@ -871,17 +982,17 @@ describe('assistant auto-reply prompt builder support', () => {
 
     expect(
       buildAssistantAutoReplyPrompt([
-        createPromptCapture(),
+        createPromptInput(),
       ]),
     ).toEqual({
       kind: 'skip',
-      reason: 'capture has no text or parsed attachment content',
+      reason: 'input has no text or parsed attachment content',
     })
   })
 
   it('builds a single-capture prompt without grouped capture prefixes', () => {
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         attachments: [
           createAttachment({
             extractedText: 'Attachment excerpt',
@@ -905,14 +1016,14 @@ describe('assistant auto-reply prompt builder support', () => {
     expect(result.prompt).toContain('Reply context:\nReplying to Jordan: Can you review this?')
     expect(result.prompt).toContain('Message text:\nPlease summarize this.')
     expect(result.prompt).toContain('Extracted text:\nAttachment excerpt')
-    expect(result.prompt).not.toContain('Capture 1:')
+    expect(result.prompt).not.toContain('Input 1:')
   })
 
   it('builds grouped prompts with attachment excerpts and shared capture context', () => {
     const longTranscript = 'T'.repeat(2_050)
     const longExtractedText = 'E'.repeat(2_050)
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         attachments: [
           createAttachment({
             derivedPath: 'derived/attachments/capture-1.txt',
@@ -931,7 +1042,7 @@ describe('assistant auto-reply prompt builder support', () => {
           replyContext: null,
         },
       }),
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           actorName: 'Jordan',
           captureId: 'capture-2',
@@ -954,10 +1065,11 @@ describe('assistant auto-reply prompt builder support', () => {
     expect(result.prompt).toContain(
       'Occurred at: 2026-04-08T00:00:00.000Z -> 2026-04-08T00:00:05.000Z',
     )
-    expect(result.prompt).toContain('Grouped captures: 2')
-    expect(result.prompt).toContain('Telegram media group: group-1')
-    expect(result.prompt).toContain('Capture 1:')
-    expect(result.prompt).toContain('Capture 2:')
+    expect(result.prompt).toContain('Grouped inputs: 2')
+    expect(result.prompt).toContain('Telegram media group: present')
+    expect(result.prompt).not.toContain('group-1')
+    expect(result.prompt).toContain('Input 1:')
+    expect(result.prompt).toContain('Input 2:')
     expect(result.prompt).toContain('Transcript excerpt:')
     expect(result.prompt).toContain('Extracted text excerpt:')
     expect(result.prompt).toContain('[truncated 1450 characters]')
@@ -997,7 +1109,7 @@ describe('assistant auto-reply prompt builder support', () => {
 
     const result = await prepareAssistantAutoReplyInput(
       [
-        createPromptCapture({
+        createPromptInput({
           attachments: [createAttachment()],
         }),
       ],
@@ -1006,7 +1118,7 @@ describe('assistant auto-reply prompt builder support', () => {
 
     expect(result).toEqual({
       kind: 'skip',
-      reason: 'capture has no text or parsed attachment content',
+      reason: 'input has no text or parsed attachment content',
     })
   })
 
@@ -1054,7 +1166,7 @@ describe('assistant auto-reply prompt builder support', () => {
 
     const result = await prepareAssistantAutoReplyInput(
       [
-        createPromptCapture({
+        createPromptInput({
           attachments: [createAttachment()],
         }),
       ],
@@ -1163,7 +1275,7 @@ describe('assistant auto-reply prompt builder support', () => {
     await expect(
       loadTelegramAutoReplyMetadata(vaultRoot, 'telegram-minimal.json'),
     ).resolves.toEqual({
-      mediaGroupId: 'group-42',
+      mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
       messageId: '42',
       replyContext: null,
     })

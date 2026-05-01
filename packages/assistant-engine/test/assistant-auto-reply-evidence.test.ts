@@ -6,7 +6,7 @@ import { test } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   listPendingAssistantAutoReplyLinqCleanupEvidence,
-  readAssistantAutoReplyTerminalEvidence,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
 
@@ -33,7 +33,10 @@ test('auto-reply terminal evidence readers ignore malformed evidence files', asy
     )
 
     assert.equal(
-      await readAssistantAutoReplyTerminalEvidence(vaultRoot, 'cap_malformed_cleanup'),
+      await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        vaultRoot,
+        'cap_malformed_cleanup',
+      ),
       null,
     )
     assert.deepEqual(

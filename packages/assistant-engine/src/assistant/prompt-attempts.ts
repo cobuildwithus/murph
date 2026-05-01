@@ -59,7 +59,7 @@ export function buildFailedAssistantPromptAttemptText(input: {
 export function extractAssistantAutoReplyFailedPromptText(prompt: string): string {
   const matched = Array.from(
     prompt.matchAll(
-      /(?:^|\n)(?:Capture \d+:\n)?(?:Reply context:\n[\s\S]*?\n\n)?Message text:\n([\s\S]*?)(?=\n\n(?:Capture \d+:|Attachment context:|Reply context:|$)|$)/gu,
+      /(?:^|\n)(?:(?:Input|Capture) \d+:\n)?(?:Reply context:\n[\s\S]*?\n\n)?Message text:\n([\s\S]*?)(?=\n\n(?:(?:Input|Capture) \d+:|Attachment context:|Reply context:|$)|$)/gu,
     ),
     (match) => match[1]?.trim() ?? '',
   ).filter((value) => value.length > 0)

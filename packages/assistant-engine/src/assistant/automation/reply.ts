@@ -45,7 +45,7 @@ import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
-  readAssistantAutoReplyTerminalEvidence,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence,
@@ -71,7 +71,9 @@ import {
 } from './provider-watchdog.js'
 import {
   prepareAssistantAutoReplyInput,
-  type AssistantAutoReplyPromptCapture,
+  readTelegramAutoReplyMetadataFromAssistantInput,
+  renderAssistantInputAttachmentDescriptorPromptSection,
+  type AssistantAutoReplyPromptInput,
 } from './prompt-builder.js'
 import {
   computeAssistantAutomationRetryAt,
@@ -154,7 +156,7 @@ type AssistantAutoReplyOutcomeEvent =
       details: string
       errorCode?: string
       safeDetails?: string
-      type: 'capture.reply-failed' | 'capture.reply-skipped' | 'capture.replied'
+      type: 'input.reply-failed' | 'input.reply-skipped' | 'input.replied'
     }
   | null
 
@@ -349,8 +351,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
 
   let acceptedContext = input.context
   input.onEvent?.({
-    type: 'capture.reply-started',
-    captureId: input.context.firstCaptureId,
+    type: 'input.reply-started',
+    inputId: primaryAutoReplyInputId(input.context),
     details: 'assistant provider turn started',
   })
   const activeTurnHooks = input.inputSource
@@ -389,7 +391,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     operatorAuthority: decision.operatorAuthority,
     primaryCapture: decision.primaryCapture,
     prompt: decision.prompt,
-    replyCaptureId: input.context.firstCaptureId,
+    replyInputId: primaryAutoReplyInputId(input.context),
     activeTurnInput: activeTurnHooks?.admit,
     activeTurnCheckpoint: activeTurnHooks?.checkpoint,
     userMessageContent: decision.userMessageContent,
@@ -509,11 +511,17 @@ function emitAssistantAutoReplyOutcomeEvent(input: {
 
   input.onEvent?.({
     type: input.outcome.event.type,
-    captureId: input.context.firstCaptureId,
+    inputId: primaryAutoReplyInputId(input.context),
     details: input.outcome.event.details,
     errorCode: input.outcome.event.errorCode,
     safeDetails: input.outcome.event.safeDetails,
   })
+}
+
+function primaryAutoReplyInputId(
+  context: AssistantAutoReplyGroupContext,
+): string {
+  return context.inputIds[0] ?? context.firstCaptureId
 }
 
 function createIgnoredGroupOutcome(): AssistantAutoReplyGroupOutcome {
@@ -567,7 +575,7 @@ function createSkippedGroupOutcome(input: {
     artifact: { kind: 'none' },
     event: {
       details: input.reason,
-      type: 'capture.reply-skipped',
+      type: 'input.reply-skipped',
     },
     kind: 'skipped',
     nextWakeAt: input.nextWakeAt ?? null,
@@ -590,7 +598,7 @@ function createDeferredGroupOutcome(input: {
     artifact: { kind: 'none' },
     event: {
       details: input.reason,
-      type: 'capture.reply-skipped',
+      type: 'input.reply-skipped',
     },
     kind: 'deferred',
     nextWakeAt: input.nextWakeAt ?? null,
@@ -616,7 +624,7 @@ function createDeferredDeliveryGroupOutcome(
         ? `delivery queued for retry as ${result.deliveryIntentId}`
         : 'delivery queued for retry',
       safeDetails: 'delivery queued for retry',
-      type: 'capture.replied',
+      type: 'input.replied',
     },
     kind: 'deferred',
     nextWakeAt: null,
@@ -647,7 +655,7 @@ function createSuccessfulReplyGroupOutcome(
     event: {
       details: 'delivery confirmed',
       safeDetails: 'delivery confirmed',
-      type: 'capture.replied',
+      type: 'input.replied',
     },
     kind: 'replied',
     nextWakeAt: null,
@@ -678,7 +686,7 @@ function createFailedGroupOutcome(input: {
       details: failure.message,
       errorCode: failure.code ?? undefined,
       safeDetails: failure.safeSummary,
-      type: 'capture.reply-failed',
+      type: 'input.reply-failed',
     },
     kind: 'failed',
     nextWakeAt: input.nextWakeAt ?? null,
@@ -720,10 +728,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   const existingTerminalEvidence = await Promise.all(
     input.group.inputIds.map((inputId, index) =>
-      readAssistantAutoReplyTerminalEvidence(input.vault, inputId).then(
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, inputId).then(
         (evidence) =>
           evidence ??
-          readAssistantAutoReplyTerminalEvidence(
+          readAssistantAutoReplyTerminalEvidenceByEvidenceId(
             input.vault,
             input.group.captureIds[index] ?? inputId,
           ),
@@ -766,17 +774,17 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   if (existingTerminalEvidence.some((evidence) => evidence !== null)) {
     return createDeferredSkipDecision(
-      'assistant reply terminal evidence is incomplete; will retry this capture after evidence is rebuilt.',
+      'assistant reply terminal evidence is incomplete; will retry this input after evidence is rebuilt.',
     )
   }
 
-  const shownGroup = await loadAssistantAutoReplyCaptures({
+  const promptInputs = await loadAssistantAutoReplyPromptInputs({
     group: input.group,
     inboxServices: input.inboxServices,
     requestId: input.requestId,
     vault: input.vault,
   })
-  const primaryCapture = shownGroup[0]?.capture
+  const primaryCapture = promptInputs[0]?.capture
   if (!primaryCapture) {
     return { kind: 'ignore' }
   }
@@ -804,7 +812,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
 
   const preparedInput = await prepareAssistantAutoReplyInput(
-    shownGroup,
+    promptInputs,
     input.vault,
   )
   if (preparedInput.kind === 'defer') {
@@ -829,7 +837,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   return {
     deliveryTarget: readAutoReplyDeliveryTarget(input.group),
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
-      captures: shownGroup,
+      inputs: promptInputs,
       context: input.group,
     }),
     kind: 'reply',
@@ -840,16 +848,16 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
 }
 
-async function loadAssistantAutoReplyCaptures(input: {
+async function loadAssistantAutoReplyPromptInputs(input: {
   group: AssistantAutoReplyGroupContext
   inboxServices: InboxServices
   requestId: string | null
   vault: string
-}): Promise<AssistantAutoReplyPromptCapture[]> {
+}): Promise<AssistantAutoReplyPromptInput[]> {
   return Promise.all(
     input.group.items.map(async (item) => {
       if (item.inputCandidate) {
-        return createAssistantAutoReplyPromptCaptureFromInput(item)
+        return createAssistantAutoReplyPromptInputFromInput(item)
       }
 
       return {
@@ -866,11 +874,12 @@ async function loadAssistantAutoReplyCaptures(input: {
   )
 }
 
-function createAssistantAutoReplyPromptCaptureFromInput(
+function createAssistantAutoReplyPromptInputFromInput(
   item: AssistantAutoReplyGroupItem,
-): AssistantAutoReplyPromptCapture {
+): AssistantAutoReplyPromptInput {
   const candidate = item.inputCandidate
   return {
+    attachmentDescriptors: candidate?.event.attachmentDescriptors ?? [],
     capture: {
       ...item.summary,
       attachments: [],
@@ -883,7 +892,16 @@ function createAssistantAutoReplyPromptCaptureFromInput(
         candidate?.event.text ??
         item.summary.text,
     },
-    telegramMetadata: item.telegramMetadata,
+    projectionReasonCode: candidate?.projection.reasonCode ?? null,
+    projectionStatus: candidate?.projection.status ?? null,
+    telegramMetadata:
+      item.telegramMetadata ??
+      (candidate
+        ? readTelegramAutoReplyMetadataFromAssistantInput({
+            replyTarget: candidate.event.replyTarget,
+            sourceMetadata: candidate.event.sourceMetadata,
+          })
+        : null),
   }
 }
 
@@ -907,7 +925,7 @@ async function executeAssistantAutoReply(input: {
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
-  replyCaptureId: string
+  replyInputId: string
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
@@ -936,7 +954,8 @@ async function executeAssistantAutoReply(input: {
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
-        [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]: input.replyCaptureId,
+        [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]:
+          input.captureIds[0] ?? input.replyInputId,
         [AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]: input.captureIds.join(','),
       },
       turnTrigger: 'automation-auto-reply',
@@ -946,7 +965,7 @@ async function executeAssistantAutoReply(input: {
     })
     return resolveAssistantAutoReplySendResult({
       onEvent: input.onEvent,
-      replyCaptureId: input.replyCaptureId,
+      replyInputId: input.replyInputId,
       result,
     })
   } catch (error) {
@@ -989,10 +1008,10 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       )
     }
 
-    const knownCaptureIds = [
+    const knownProjectionCaptureIds = [
       ...context.captureIds,
       ...pendingAcceptances.flatMap((pending) => pending.captureIds),
-      ...(admissionInput.knownCaptureIds ?? []),
+      ...(admissionInput.knownProjectionCaptureIds ?? []),
     ]
     const knownInputIds = [
       ...context.inputIds,
@@ -1004,7 +1023,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       conversation,
       context,
       inputSource: input.inputSource,
-      knownCaptureIds,
+      knownProjectionCaptureIds,
       knownInputIds,
       signal: admissionInput.signal,
     })
@@ -1072,7 +1091,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         'new same-conversation input could not be materialized into the active turn; will retry later.',
       )
     }
-    const shownAcceptedInput = await loadAssistantAutoReplyCaptures({
+    const shownAcceptedInput = await loadAssistantAutoReplyPromptInputs({
       group: acceptedInputContext,
       inboxServices: input.inboxServices,
       requestId: input.requestId,
@@ -1088,7 +1107,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       )
     }
 
-    const shownFinalGroup = await loadAssistantAutoReplyCaptures({
+    const shownFinalGroup = await loadAssistantAutoReplyPromptInputs({
       group: nextContext,
       inboxServices: input.inboxServices,
       requestId: input.requestId,
@@ -1112,8 +1131,8 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         expectedChannel: context.firstItem.summary.source,
       })
     input.onEvent?.({
-      type: 'capture.reply-progress',
-      captureId: context.firstCaptureId,
+      type: 'input.reply-progress',
+      inputId: primaryAutoReplyInputId(context),
       details: `new input queued for active turn with ${lateInputs.inputs.length} additional input(s)`,
       providerKind: 'status',
       providerState: 'running',
@@ -1135,8 +1154,8 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         conversation = readAutoReplyConversationCaptureRef(context)
         input.onAcceptedContext(context)
         input.onEvent?.({
-          type: 'capture.reply-progress',
-          captureId: context.firstCaptureId,
+          type: 'input.reply-progress',
+          inputId: primaryAutoReplyInputId(context),
           details: `new input committed to active turn with ${lateInputs.inputs.length} additional input(s)`,
           providerKind: 'status',
           providerState: 'running',
@@ -1149,12 +1168,12 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       deliveryReplyToMessageId:
         acceptedInputReplyToMessageId ??
         readAutoReplyDeliveryReplyToMessageId({
-          captures: shownFinalGroup,
+          inputs: shownFinalGroup,
           context: nextContext,
         }),
       kind: 'accepted',
       prompt: appendCapturelessAssistantInputPrompt({
-        capturePrompt: preparedInput.prompt,
+        basePrompt: preparedInput.prompt,
         capturelessInputs: lateCapturelessCandidates,
       }),
       receiptMetadata: {
@@ -1189,14 +1208,14 @@ async function listAutoReplyActiveTurnInputs(input: {
   context: AssistantAutoReplyGroupContext
   conversation: AssistantConversationCaptureRef
   inputSource: AssistantActiveTurnInputSource
-  knownCaptureIds: readonly string[]
+  knownProjectionCaptureIds: readonly string[]
   knownInputIds: readonly string[]
   signal?: AbortSignal
 }): Promise<AssistantInputCandidateBatch> {
   const strict = await input.inputSource.listNewConversationInputs({
     afterCursor: input.afterCursor,
     conversation: input.conversation,
-    knownCaptureIds: input.knownCaptureIds,
+    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
     knownInputIds: input.knownInputIds,
     signal: input.signal,
   })
@@ -1216,11 +1235,11 @@ async function listAutoReplyActiveTurnInputs(input: {
     signal: input.signal,
     sourceId: expectedChannel,
   })
-  const knownCaptureIds = new Set(input.knownCaptureIds)
+  const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
   const routeInputs = routeListed.inputs
     .filter((candidate) =>
       candidate.projection.captureId
-        ? !knownCaptureIds.has(candidate.projection.captureId)
+        ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
         : true,
     )
     .filter((candidate) =>
@@ -1377,7 +1396,10 @@ function assistantAutoReplyGroupItemFromInputCandidate(
       threadIsDirect: conversation?.threadIsDirect ?? false,
       threadTitle: null,
     },
-    telegramMetadata: null,
+    telegramMetadata: readTelegramAutoReplyMetadataFromAssistantInput({
+      replyTarget: candidate.event.replyTarget,
+      sourceMetadata: candidate.event.sourceMetadata,
+    }),
   }
 }
 
@@ -1400,8 +1422,8 @@ function admitCapturelessAssistantInputs(input: {
   const acceptedInputIds = acceptedInputs.map((item) => item.id)
 
   input.onEvent?.({
-    type: 'capture.reply-progress',
-    captureId: queuedContext.firstCaptureId,
+    type: 'input.reply-progress',
+    inputId: primaryAutoReplyInputId(queuedContext),
     details: `new input queued for active turn with ${acceptedInputIds.length} additional input(s)`,
     providerKind: 'status',
     providerState: 'running',
@@ -1418,8 +1440,8 @@ function admitCapturelessAssistantInputs(input: {
       })
       input.onAcceptedContext(nextContext)
       input.onEvent?.({
-        type: 'capture.reply-progress',
-        captureId: nextContext.firstCaptureId,
+        type: 'input.reply-progress',
+        inputId: primaryAutoReplyInputId(nextContext),
         details: `new input committed to active turn with ${acceptedInputIds.length} additional input(s)`,
         providerKind: 'status',
         providerState: 'running',
@@ -1474,15 +1496,28 @@ function buildCapturelessAssistantInputPrompt(
   const sections = candidates
     .map((candidate, index) => {
       const transcript = buildAssistantInputCandidateTranscriptText(candidate)
-      if (!transcript) {
+      const attachmentContext = renderAssistantInputAttachmentDescriptorPromptSection({
+        descriptors: candidate.event.attachmentDescriptors,
+        projectionReasonCode: candidate.projection.reasonCode,
+        projectionStatus: candidate.projection.status,
+      })
+      const sections = [
+        `Source: ${candidate.event.source}
+Occurred at: ${candidate.event.occurredAt}`,
+        transcript
+          ? `Message text:
+${transcript}`
+          : null,
+        attachmentContext
+          ? `Attachment context:
+${attachmentContext}`
+          : null,
+      ].filter((section): section is string => section !== null)
+      if (sections.length <= 1) {
         return null
       }
       const prefix = candidates.length > 1 ? `Input ${index + 1}:\n` : ''
-      return `${prefix}Source: ${candidate.event.source}
-Occurred at: ${candidate.event.occurredAt}
-
-Message text:
-${transcript}`
+      return `${prefix}${sections.join('\n\n')}`
     })
     .filter((section): section is string => section !== null)
 
@@ -1490,15 +1525,15 @@ ${transcript}`
 }
 
 function appendCapturelessAssistantInputPrompt(input: {
-  capturePrompt: string
+  basePrompt: string
   capturelessInputs: readonly AssistantInputCandidate[]
 }): string {
   const capturelessPrompt = buildCapturelessAssistantInputPrompt(
     input.capturelessInputs,
   )
   return capturelessPrompt
-    ? `${input.capturePrompt}\n\nAdditional same-conversation input:\n${capturelessPrompt}`
-    : input.capturePrompt
+    ? `${input.basePrompt}\n\nAdditional same-conversation input:\n${capturelessPrompt}`
+    : input.basePrompt
 }
 
 function mergeAssistantUserMessageContent(
@@ -1679,7 +1714,7 @@ async function createAssistantAutoReplyContextForCaptures(input: {
 }
 
 function readAutoReplyDeliveryReplyToMessageId(input: {
-  captures: readonly AssistantAutoReplyPromptCapture[]
+  inputs: readonly AssistantAutoReplyPromptInput[]
   context: AssistantAutoReplyGroupContext
 }): string | null {
   const inputReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
@@ -1690,14 +1725,14 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
     return inputReplyToMessageId
   }
 
-  const primaryCapture = input.captures[0]?.capture
+  const primaryCapture = input.inputs[0]?.capture
   if (!primaryCapture) {
     return null
   }
 
   if (primaryCapture.source === 'linq') {
-    for (let index = input.captures.length - 1; index >= 0; index -= 1) {
-      const messageId = readLinqReplyToMessageId(input.captures[index]?.capture)
+    for (let index = input.inputs.length - 1; index >= 0; index -= 1) {
+      const messageId = readLinqReplyToMessageId(input.inputs[index]?.capture)
       if (messageId) {
         return messageId
       }
@@ -1709,9 +1744,9 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
     return null
   }
 
-  for (let index = input.captures.length - 1; index >= 0; index -= 1) {
+  for (let index = input.inputs.length - 1; index >= 0; index -= 1) {
     const messageId = normalizeNullableString(
-      input.captures[index]?.telegramMetadata?.messageId,
+      input.inputs[index]?.telegramMetadata?.messageId,
     )
     if (messageId) {
       return messageId
@@ -1835,13 +1870,13 @@ function readLinqReplyToMessageId(capture: InboxShowResult['capture']): string |
 
 function resolveAssistantAutoReplySendResult(input: {
   onEvent?: (event: AssistantRunEvent) => void
-  replyCaptureId: string
+  replyInputId: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
 }): Awaited<ReturnType<typeof sendAssistantMessage>> {
   if (input.result.deliveryDeferred) {
     input.onEvent?.({
-      type: 'capture.reply-progress',
-      captureId: input.replyCaptureId,
+      type: 'input.reply-progress',
+      inputId: input.replyInputId,
       details: input.result.deliveryIntentId
         ? `assistant queued outbound delivery for retry as ${input.result.deliveryIntentId}`
         : 'assistant queued outbound delivery for retry',
@@ -1888,7 +1923,7 @@ function classifyAssistantAutoReplyFailure(input: {
     return createDeferredGroupOutcome({
       captureCount: input.captureCount,
       nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
-      reason: `${detail} Will retry this capture after the provider reconnects.`,
+      reason: `${detail} Will retry this input after the provider reconnects.`,
       stopScanning: true,
     })
   }
@@ -2013,7 +2048,7 @@ async function terminalEvidenceExistsForEveryCapture(
 ): Promise<boolean> {
   const evidence = await Promise.all(
     captureIds.map((captureId) =>
-      readAssistantAutoReplyTerminalEvidence(vault, captureId),
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, captureId),
     ),
   )
   return evidence.every((item) => item !== null)

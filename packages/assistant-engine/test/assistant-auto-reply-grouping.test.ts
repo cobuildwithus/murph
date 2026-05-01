@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import { shouldGroupAdjacentConversationCapture } from '../src/assistant/automation/grouping.ts'
 
-type AssistantInboxCaptureSummary = InboxListResult['items'][number]
+type AssistantAutomationInputSummary = InboxListResult['items'][number]
 
 function createCaptureSummary(
-  overrides: Partial<AssistantInboxCaptureSummary> = {},
-): AssistantInboxCaptureSummary {
+  overrides: Partial<AssistantAutomationInputSummary> = {},
+): AssistantAutomationInputSummary {
   return {
     captureId: overrides.captureId ?? 'cap_1',
     source: overrides.source ?? 'telegram',

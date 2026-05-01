@@ -37,6 +37,7 @@ import {
 import {
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
+  type UpsertAssistantInputEventInput,
 } from '../input-store.js'
 import { notifyAssistantActiveTurnInputAvailable } from '../active-turn-input-controller.js'
 import {
@@ -355,6 +356,10 @@ async function stageImportedCaptureAssistantInputEvent(input: {
       occurredAt: input.capture.occurredAt,
       receivedAt: input.persisted.createdAt,
       replyTarget: createLocalCaptureAssistantInputReplyTarget(input.capture),
+      sourceMetadata: createLocalCaptureAssistantInputSourceMetadata(
+        input.vault,
+        input.capture,
+      ),
       sourceRef: {
         captureId: input.persisted.captureId,
         kind: 'inbox-capture',
@@ -402,6 +407,13 @@ function createLocalCaptureAssistantInputReplyTarget(
 function readLocalCaptureReplyToMessageId(
   capture: NonNullable<InboxRunEvent['capture']>,
 ): string | null {
+  if (capture.source === 'telegram') {
+    const raw = asRecord(capture.raw)
+    if (raw?.schema === 'murph.telegram-capture.v1') {
+      return normalizeLocalAssistantInputReplyTargetIdentifier(raw.message_id)
+    }
+  }
+
   const externalId = normalizeLocalAssistantInputReplyTargetIdentifier(
     capture.externalId,
   )
@@ -417,9 +429,45 @@ function readLocalCaptureReplyToMessageId(
   return messageId
 }
 
+function createLocalCaptureAssistantInputSourceMetadata(
+  vault: string,
+  capture: NonNullable<InboxRunEvent['capture']>,
+): UpsertAssistantInputEventInput['sourceMetadata'] {
+  if (capture.source !== 'telegram') {
+    return null
+  }
+
+  const raw = asRecord(capture.raw)
+  if (raw?.schema !== 'murph.telegram-capture.v1') {
+    return null
+  }
+
+  const mediaGroupId = hashNullableLocalAssistantInputIdentifier(
+    vault,
+    'telegram-media-group',
+    raw.media_group_id,
+  )
+  const replyContext = sanitizeLocalAssistantInputMetadataText(
+    raw.reply_context_preview,
+  )
+  if (!mediaGroupId && !replyContext) {
+    return null
+  }
+
+  return {
+    kind: 'telegram',
+    mediaGroupId,
+    replyContext,
+  }
+}
+
 function normalizeLocalAssistantInputReplyTargetIdentifier(
   value: unknown,
 ): string | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return String(value)
+  }
+
   const normalized = typeof value === 'string' ? value.trim() : ''
   return normalized.length > 0 ? normalized : null
 }
@@ -467,6 +515,26 @@ function normalizeLocalAssistantInputToken(
     return normalized
   }
   return fallback
+}
+
+function sanitizeLocalAssistantInputMetadataText(value: unknown): string | null {
+  const text = typeof value === 'string' ? value : ''
+  const sanitized = text
+    .replace(/https?:\/\/[^\s"'<>]+/giu, '[link omitted]')
+    .replace(/file:\/\/[^\s"'<>]+/giu, '[path omitted]')
+    .replace(/(^|[\s("'=])(?:[A-Za-z]:[\\/]|\/[^\s"'<>]+|~\/|\.\.\/|\.\.\\)[^\s"'<>]*/gu, '$1[path omitted]')
+    .replace(/^\s*(authorization|cookie|set-cookie|x-api-key)\s*:.*$/gimu, '[secret omitted]')
+    .trim()
+  if (!sanitized) {
+    return null
+  }
+  return sanitized.length > 512 ? sanitized.slice(0, 512) : sanitized
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : null
 }
 
 function hashLocalAssistantInputIdentifier(

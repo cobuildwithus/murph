@@ -16,7 +16,7 @@ import {
   readAssistantInputEvent,
 } from '../input-store.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
-import { readAssistantAutoReplyTerminalEvidence } from './evidence.js'
+import { readAssistantAutoReplyTerminalEvidenceByEvidenceId } from './evidence.js'
 import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
 import {
   type AssistantAutoReplyGroupItem,
@@ -478,7 +478,7 @@ async function hasTerminalHandlingEvidence(
 ): Promise<boolean> {
   const existingEvidence = await Promise.all(
     captureIds.map((captureId) =>
-      readAssistantAutoReplyTerminalEvidence(vault, captureId),
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, captureId),
     ),
   )
   return existingEvidence.every((evidence) => evidence !== null)

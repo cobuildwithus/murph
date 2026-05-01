@@ -5,11 +5,11 @@ import {
   isSameAssistantConversationCapture,
 } from '../src/assistant/conversation-ref.ts'
 
-type AssistantInboxCaptureSummary = InboxListResult['items'][number]
+type AssistantAutomationInputSummary = InboxListResult['items'][number]
 
 function createCaptureSummary(
-  overrides: Partial<AssistantInboxCaptureSummary> = {},
-): AssistantInboxCaptureSummary {
+  overrides: Partial<AssistantAutomationInputSummary> = {},
+): AssistantAutomationInputSummary {
   return {
     captureId: overrides.captureId ?? 'cap_1',
     source: overrides.source ?? 'telegram',

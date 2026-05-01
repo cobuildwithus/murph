@@ -12,6 +12,10 @@ import {
 } from '../src/inbox-model-contracts.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 import type { AssistantUserMessageContentPart } from '../src/assistant/content-types.ts'
+import type {
+  AssistantInputAttachmentDescriptor,
+  AssistantInputProjectionStatus,
+} from '../src/assistant/input-store.ts'
 
 const promptBuilderMocks = vi.hoisted(() => ({
   buildInboxModelAttachmentBundles: vi.fn(),
@@ -39,7 +43,7 @@ import {
   buildAssistantAutoReplyPrompt,
   loadTelegramAutoReplyMetadata,
   prepareAssistantAutoReplyInput,
-  type AssistantAutoReplyPromptCapture,
+  type AssistantAutoReplyPromptInput,
   type TelegramAutoReplyMetadata,
 } from '../src/assistant/automation/prompt-builder.ts'
 
@@ -105,11 +109,14 @@ function createAttachment(
   }).capture.attachments[0]
 }
 
-function createPromptCapture(input: {
+function createPromptInput(input: {
+  attachmentDescriptors?: readonly AssistantInputAttachmentDescriptor[]
   attachments?: readonly InboxShowResult['capture']['attachments'][number][]
   captureOverrides?: Partial<InboxShowResult['capture']>
+  projectionReasonCode?: string | null
+  projectionStatus?: AssistantInputProjectionStatus | null
   telegramMetadata?: TelegramAutoReplyMetadata | null
-} = {}): AssistantAutoReplyPromptCapture {
+} = {}): AssistantAutoReplyPromptInput {
   const attachments = [...(input.attachments ?? [])]
   const resolvedAttachments = input.captureOverrides?.attachments ?? attachments
   const capture = {
@@ -133,6 +140,7 @@ function createPromptCapture(input: {
     ...input.captureOverrides,
   }
   return {
+    attachmentDescriptors: input.attachmentDescriptors ?? [],
     capture: inboxShowResultSchema.parse({
       vault: '/tmp/assistant-engine-prompt-builder-vault',
       capture: {
@@ -142,6 +150,8 @@ function createPromptCapture(input: {
         attachments: resolvedAttachments,
       },
     }).capture,
+    projectionReasonCode: input.projectionReasonCode ?? null,
+    projectionStatus: input.projectionStatus ?? null,
     telegramMetadata: input.telegramMetadata ?? null,
   }
 }
@@ -192,7 +202,7 @@ function createRichUserMessageContent(
 describe('buildAssistantAutoReplyPrompt', () => {
   it('renders parser status instead of deferring pending attachments', () => {
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         attachments: [
           createAttachment({
             parseState: 'running',
@@ -211,7 +221,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
 
   it('skips captures with no message text or parsed attachment content', () => {
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         attachments: [
           createAttachment({
             extractedText: null,
@@ -223,13 +233,59 @@ describe('buildAssistantAutoReplyPrompt', () => {
 
     expect(result).toEqual({
       kind: 'skip',
-      reason: 'capture has no text or parsed attachment content',
+      reason: 'input has no text or parsed attachment content',
     })
+  })
+
+  it('renders minimized assistant-input attachment descriptors without inbox projection', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        attachmentDescriptors: [
+          {
+            attachmentId: 'att_photo_1',
+            contentType: 'image/jpeg',
+            fileName: 'private-photo.jpg',
+            kind: 'photo',
+            sizeBytes: 1024,
+          },
+          {
+            attachmentId: 'att_voice_1',
+            contentType: 'audio/ogg',
+            fileName: 'private-voice.ogg',
+            kind: 'voice',
+            sizeBytes: 2048,
+          },
+        ],
+        captureOverrides: {
+          attachmentCount: 2,
+          attachments: [],
+          text: null,
+        },
+        projectionReasonCode: 'conversation-import.projection-failed',
+        projectionStatus: 'failed',
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Attachment context:\n2 attachments')
+    expect(result.prompt).toContain('kinds: image, voice_memo')
+    expect(result.prompt).toContain('mime types: audio/ogg, image/jpeg')
+    expect(result.prompt).toContain('total size: 3072 bytes')
+    expect(result.prompt).toContain(
+      'parser/search enrichment: failed (conversation-import.projection-failed)',
+    )
+    expect(result.prompt).not.toContain('private-photo.jpg')
+    expect(result.prompt).not.toContain('private-voice.ogg')
+    expect(result.prompt).not.toContain('att_photo_1')
+    expect(result.prompt).not.toContain('att_voice_1')
   })
 
   it('keeps telegram reply context as sufficient textual evidence on its own', () => {
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           text: null,
         },
@@ -254,7 +310,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
   it('builds grouped prompt text with reply context and attachment excerpts', () => {
     const transcript = 'T'.repeat(2_005)
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         attachments: [
           createAttachment({
             fileName: 'voice-note.m4a',
@@ -276,7 +332,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
           replyContext: 'Replying to Alex: Please review the attachment.',
         },
       }),
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           captureId: 'capture-2',
           occurredAt: '2026-04-08T10:03:00.000Z',
@@ -298,9 +354,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
     )
     expect(result.prompt).toContain('Thread: thread-1 (Family)')
     expect(result.prompt).toContain('Actor: telegram-user-42 | self=false')
-    expect(result.prompt).toContain('Grouped captures: 2')
-    expect(result.prompt).toContain('Telegram media group: media-group-7')
-    expect(result.prompt).toContain('Capture 1:')
+    expect(result.prompt).toContain('Grouped inputs: 2')
+    expect(result.prompt).toContain('Telegram media group: present')
+    expect(result.prompt).not.toContain('media-group-7')
+    expect(result.prompt).toContain('Input 1:')
     expect(result.prompt).toContain(
       'Reply context:\nReplying to Alex: Please review the attachment.',
     )
@@ -312,12 +369,12 @@ describe('buildAssistantAutoReplyPrompt', () => {
     )
     expect(result.prompt).toContain('[truncated 1405 characters]')
     expect(result.prompt).toContain('Extracted text:\nShort extracted text')
-    expect(result.prompt).toContain('Capture 2:\nMessage text:\nSecond message')
+    expect(result.prompt).toContain('Input 2:\nMessage text:\nSecond message')
   })
 
   it('omits telegram media-group context when grouped captures span different albums', () => {
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           text: 'First message',
         },
@@ -327,7 +384,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
           replyContext: null,
         },
       }),
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           captureId: 'capture-2',
           occurredAt: '2026-04-08T10:03:00.000Z',
@@ -345,18 +402,18 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain('Grouped captures: 2')
+    expect(result.prompt).toContain('Grouped inputs: 2')
     expect(result.prompt).not.toContain('Telegram media group:')
   })
 
   it('keeps telegram media-group context when the first grouped capture lacks metadata but later captures agree', () => {
     const result = buildAssistantAutoReplyPrompt([
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           text: 'First message',
         },
       }),
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           captureId: 'capture-2',
           occurredAt: '2026-04-08T10:03:00.000Z',
@@ -368,7 +425,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
           replyContext: null,
         },
       }),
-      createPromptCapture({
+      createPromptInput({
         captureOverrides: {
           captureId: 'capture-3',
           occurredAt: '2026-04-08T10:04:00.000Z',
@@ -386,12 +443,65 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain('Grouped captures: 3')
-    expect(result.prompt).toContain('Telegram media group: media-group-7')
+    expect(result.prompt).toContain('Grouped inputs: 3')
+    expect(result.prompt).toContain('Telegram media group: present')
+    expect(result.prompt).not.toContain('media-group-7')
   })
 })
 
 describe('prepareAssistantAutoReplyInput', () => {
+  it('prepares descriptor-only attachment context without inbox projection', async () => {
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachmentDescriptors: [
+            {
+              attachmentId: 'att_photo_1',
+              contentType: 'image/jpeg',
+              fileName: 'private-photo.jpg',
+              kind: 'photo',
+              sizeBytes: 1024,
+            },
+            {
+              attachmentId: 'att_voice_1',
+              contentType: 'audio/ogg',
+              fileName: 'private-voice.ogg',
+              kind: 'voice',
+              sizeBytes: null,
+            },
+          ],
+          captureOverrides: {
+            attachmentCount: 2,
+            attachments: [],
+            text: null,
+          },
+          projectionStatus: 'pending',
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('Attachment context:\n2 attachments')
+    expect(result.prompt).toContain('kinds: image, voice_memo')
+    expect(result.prompt).toContain('mime types: audio/ogg, image/jpeg')
+    expect(result.prompt).toContain(
+      'known total size: 1024 bytes (some sizes unknown)',
+    )
+    expect(result.prompt).toContain('parser/search enrichment: pending')
+    expect(result.prompt).not.toContain('private-photo.jpg')
+    expect(result.prompt).not.toContain('private-voice.ogg')
+    expect(result.userMessageContent).toBeNull()
+    expect(promptBuilderMocks.buildInboxModelAttachmentBundles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [],
+      }),
+    )
+  })
+
   it('prepares metadata/status input when parser work is still pending', async () => {
     promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
       createAttachmentBundle({
@@ -400,7 +510,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     ])
     const result = await prepareAssistantAutoReplyInput(
       [
-        createPromptCapture({
+        createPromptInput({
           attachments: [
             createAttachment({
               parseState: 'pending',
@@ -440,7 +550,7 @@ describe('prepareAssistantAutoReplyInput', () => {
 
     const result = await prepareAssistantAutoReplyInput(
       [
-        createPromptCapture({
+        createPromptInput({
           attachments: [createAttachment()],
         }),
       ],
@@ -499,7 +609,7 @@ describe('prepareAssistantAutoReplyInput', () => {
 
     const result = await prepareAssistantAutoReplyInput(
       [
-        createPromptCapture({
+        createPromptInput({
           attachments: [createAttachment()],
         }),
       ],
@@ -550,7 +660,7 @@ describe('prepareAssistantAutoReplyInput', () => {
 
     const result = await prepareAssistantAutoReplyInput(
       [
-        createPromptCapture({
+        createPromptInput({
           attachments: [createAttachment()],
         }),
       ],
@@ -582,7 +692,7 @@ describe('prepareAssistantAutoReplyInput', () => {
 
     const result = await prepareAssistantAutoReplyInput(
       [
-        createPromptCapture({
+        createPromptInput({
           captureOverrides: {
             text: 'Summarize this incoming message.',
           },
@@ -642,7 +752,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
     await expect(
       loadTelegramAutoReplyMetadata(vaultRoot, relativeEnvelopePath),
     ).resolves.toEqual({
-      mediaGroupId: 'media-group-42',
+      mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
       messageId: '98765',
       replyContext:
         'Replying to: Shared contact card\nQuoted text: Need the file when you can.',
@@ -725,7 +835,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
     await expect(
       loadTelegramAutoReplyMetadata(vaultRoot, absoluteEnvelopePath),
     ).resolves.toEqual({
-      mediaGroupId: 'venue-group',
+      mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
       messageId: '445',
       replyContext:
         'Replying to Cafe Bot: Shared venue Coffee Shop | 1 Main St | Shared location 40.7128, -74.006',

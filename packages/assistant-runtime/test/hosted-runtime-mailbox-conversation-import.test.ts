@@ -190,7 +190,18 @@ describe("hosted mailbox conversation import adapter", () => {
       message: {
         channel: "telegram",
         telegramMessage: {
+          attachments: [
+            {
+              fileId: "telegram_voice_file_1",
+              fileName: "private-voice.ogg",
+              fileSize: 4096,
+              kind: "voice",
+              mimeType: "audio/ogg",
+            },
+          ],
+          mediaGroupId: "album_7",
           messageId: "777",
+          replyContextPreview: "Replying to: earlier Telegram message",
           schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
           text: "telegram hello",
           threadId: "123456789",
@@ -232,6 +243,33 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.ok(replyTarget);
     assert.equal(replyTarget.messageId?.startsWith("hid_"), false);
     assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
+    assert.deepEqual(event.sourceMetadata, {
+      kind: "telegram",
+      mediaGroupId: event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.mediaGroupId
+        : null,
+      replyContext: "Replying to: earlier Telegram message",
+    });
+    assert.match(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.mediaGroupId ?? ""
+        : "",
+      HASHED_IDENTIFIER_PATTERN,
+    );
+    assert.equal(event.content.attachmentDescriptors.length, 1);
+    assert.deepEqual(event.content.attachmentDescriptors[0], {
+      attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
+      contentType: "audio/ogg",
+      fileName: null,
+      kind: "voice",
+      sizeBytes: 4096,
+    });
+    assert.match(
+      event.content.attachmentDescriptors[0]?.attachmentId ?? "",
+      HASHED_IDENTIFIER_PATTERN,
+    );
+    assert.equal(JSON.stringify(event).includes("private-voice.ogg"), false);
+    assert.equal(JSON.stringify(event).includes("album_7"), false);
   });
 
   test("caps staged assistant input text at the shared message budget", async () => {
@@ -1024,7 +1062,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const activeTurnInputs = await source.listNewConversationInputs({
       afterCursor: null,
       conversation,
-      knownCaptureIds: [],
+      knownProjectionCaptureIds: [],
     });
     assert.deepEqual(
       activeTurnInputs.inputs.map((input) => input.event.text),

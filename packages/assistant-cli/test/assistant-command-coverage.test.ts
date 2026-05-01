@@ -717,6 +717,7 @@ test('assistant run forwards automation options and emits formatted foreground l
     async (input: {
       onEvent?: (event: {
         captureId?: string
+        inputId?: string
         details?: string
         type: string
       }) => void
@@ -730,9 +731,9 @@ test('assistant run forwards automation options and emits formatted foreground l
       }) => void
     }) => {
     input.onEvent?.({
-      captureId: 'cap_123',
+      inputId: 'ain_123',
       details: 'raw provider output',
-      type: 'capture.replied',
+      type: 'input.replied',
     })
     input.onInboxEvent?.({
       capture: {
@@ -781,7 +782,7 @@ test('assistant run forwards automation options and emits formatted foreground l
       commandMocks.runAssistantAutomation.mock.calls[0]?.[0].onInboxEvent,
   })
   assert.equal(consoleError.mock.calls.length, 2)
-  assert.match(String(consoleError.mock.calls[0]?.[0]), /^\[assistant \d{2}:\d{2}:\d{2}\] replied cap_123$/u)
+  assert.match(String(consoleError.mock.calls[0]?.[0]), /^\[assistant \d{2}:\d{2}:\d{2}\] replied ain_123$/u)
   assert.match(
     String(consoleError.mock.calls[1]?.[0]),
     /^\[assistant \d{2}:\d{2}:\d{2}\] new Telegram capture imported: text$/u,

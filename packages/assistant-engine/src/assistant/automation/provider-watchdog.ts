@@ -7,7 +7,7 @@ export const AUTO_REPLY_PROVIDER_STALL_TIMEOUT_MS = 10 * 60 * 1000
 export const AUTO_REPLY_PROVIDER_LONG_RUNNING_COMMAND_STALL_TIMEOUT_MS =
   150 * 60 * 1000
 export const AUTO_REPLY_PROVIDER_STALLED_DETAIL =
-  'assistant provider stalled without progress; will retry this capture.'
+  'assistant provider stalled without progress; will retry this input.'
 
 interface AssistantAutoReplyLongRunningOperation {
   key: string
@@ -27,7 +27,7 @@ export function createAssistantProviderWatchdog(input: {
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
-  replyCaptureId: string
+  replyInputId: string
   signal?: AbortSignal
 }): AssistantProviderWatchdog {
   const abortController = new AbortController()
@@ -88,8 +88,8 @@ export function createAssistantProviderWatchdog(input: {
         ? ` during ${activeLongRunningOperation.label}`
         : ''
       input.onEvent?.({
-        type: 'capture.reply-progress',
-        captureId: input.replyCaptureId,
+        type: 'input.reply-progress',
+        inputId: input.replyInputId,
         details: `assistant provider stalled after ${formatAutoReplyDuration(
           Date.now() - startedAtMs,
         )}${stalledDetailSuffix}; last provider activity ${formatAutoReplyDuration(
@@ -116,8 +116,8 @@ export function createAssistantProviderWatchdog(input: {
       now,
     )
     input.onEvent?.({
-      type: 'capture.reply-progress',
-      captureId: input.replyCaptureId,
+      type: 'input.reply-progress',
+      inputId: input.replyInputId,
       details: `assistant still running after ${formatAutoReplyDuration(
         now - startedAtMs,
       )}${longRunningDetail}; last provider activity ${formatAutoReplyDuration(
@@ -142,7 +142,7 @@ export function createAssistantProviderWatchdog(input: {
       resetStallTimer()
 
       const runEvent = createAssistantAutoReplyProgressEvent(
-        input.replyCaptureId,
+        input.replyInputId,
         event,
       )
       if (runEvent) {
@@ -159,7 +159,7 @@ export function createAssistantProviderWatchdog(input: {
 }
 
 function createAssistantAutoReplyProgressEvent(
-  captureId: string,
+  inputId: string,
   event: AssistantProviderProgressEvent,
 ): AssistantRunEvent | null {
   if (event.kind === 'message') {
@@ -167,8 +167,8 @@ function createAssistantAutoReplyProgressEvent(
   }
 
   return {
-    type: 'capture.reply-progress',
-    captureId,
+    type: 'input.reply-progress',
+    inputId,
     details: event.text,
     providerKind: event.kind,
     providerState: event.state,

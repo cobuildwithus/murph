@@ -85,6 +85,8 @@ const replyMocks = vi.hoisted(() => ({
   listAssistantTurnReceipts: vi.fn(),
   normalizeNullableString: vi.fn(),
   prepareAssistantAutoReplyInput: vi.fn(),
+  readTelegramAutoReplyMetadataFromAssistantInput: vi.fn(),
+  renderAssistantInputAttachmentDescriptorPromptSection: vi.fn(),
   resolveAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
   writeAssistantChatErrorArtifacts: vi.fn(),
@@ -92,7 +94,7 @@ const replyMocks = vi.hoisted(() => ({
 
 const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
-  readAssistantAutoReplyTerminalEvidence: vi.fn(),
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
@@ -107,8 +109,8 @@ vi.mock('../src/assistant/automation/artifacts.ts', () => ({
 vi.mock('../src/assistant/automation/evidence.ts', () => ({
   assistantAutoReplyTerminalEvidenceExists:
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
-  readAssistantAutoReplyTerminalEvidence:
-    evidenceMocks.readAssistantAutoReplyTerminalEvidence,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId:
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplyReplyIntentEvidence:
     evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence:
@@ -241,13 +243,17 @@ vi.mock('../src/assistant/automation/failure-observability.ts', () => ({
 
 vi.mock('../src/assistant/automation/provider-watchdog.ts', () => ({
   AUTO_REPLY_PROVIDER_STALLED_DETAIL:
-    'assistant provider stalled; will retry this capture once it becomes responsive again.',
+    'assistant provider stalled; will retry this input once it becomes responsive again.',
   createAssistantProviderWatchdog: replyMocks.createAssistantProviderWatchdog,
 }))
 
 vi.mock('../src/assistant/automation/prompt-builder.ts', () => ({
   loadTelegramAutoReplyMetadata: vi.fn().mockResolvedValue(null),
   prepareAssistantAutoReplyInput: replyMocks.prepareAssistantAutoReplyInput,
+  readTelegramAutoReplyMetadataFromAssistantInput:
+    replyMocks.readTelegramAutoReplyMetadataFromAssistantInput,
+  renderAssistantInputAttachmentDescriptorPromptSection:
+    replyMocks.renderAssistantInputAttachmentDescriptorPromptSection,
 }))
 
 function createCaptureSummary(
@@ -601,6 +607,7 @@ function assistantInputCandidateFromInboxCapture(
     },
     event: {
       attachmentCount: capture.attachmentCount,
+      attachmentDescriptors: [],
       conversation: {
         accountId: capture.accountId,
         actorId: capture.actorId,
@@ -621,6 +628,7 @@ function assistantInputCandidateFromInboxCapture(
       receivedAt: capture.receivedAt,
       replyTarget: null,
       source: capture.source,
+      sourceMetadata: null,
       sourceRef,
       text: capture.text,
       transcriptText: capture.text,
@@ -659,6 +667,7 @@ function createCapturelessAssistantInputCandidate(input: {
     },
     event: {
       attachmentCount: 0,
+      attachmentDescriptors: [],
       conversation: {
         accountId: 'safe_acct_1',
         actorId: 'safe_actor_1',
@@ -679,6 +688,7 @@ function createCapturelessAssistantInputCandidate(input: {
       receivedAt: input.receivedAt ?? null,
       replyTarget: input.replyTarget ?? null,
       source,
+      sourceMetadata: null,
       sourceRef: {
         dedupeKey: `dedupe_${input.inputId}`,
         eventId: `event_${input.inputId}`,
@@ -1011,7 +1021,7 @@ beforeEach(() => {
   evidenceMocks.assistantAutoReplyTerminalEvidenceExists
     .mockReset()
     .mockResolvedValue(false)
-  evidenceMocks.readAssistantAutoReplyTerminalEvidence
+  evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
     .mockReset()
     .mockResolvedValue(null)
   evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence
@@ -1362,7 +1372,7 @@ describe('assistant automation scanner', () => {
       captureId: 'capture-1',
       groupCaptureIds: ['capture-1', 'capture-2'],
     })
-    evidenceMocks.readAssistantAutoReplyTerminalEvidence.mockImplementation(
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockImplementation(
       async (_vault: string, captureId: string) =>
         captureId === 'capture-1' ? firstEvidence : null,
     )
@@ -1435,6 +1445,7 @@ describe('assistant automation scanner', () => {
       },
       event: {
         attachmentCount: 0,
+        attachmentDescriptors: [],
         conversation: {
           accountId: 'acct_1',
           actorId: 'actor_1',
@@ -1459,6 +1470,7 @@ describe('assistant automation scanner', () => {
           threadId: 'thread_1',
         },
         source: 'linq',
+        sourceMetadata: null,
         sourceRef: {
           dedupeKey: 'dedupe_1',
           eventId: 'evt_1',
@@ -1677,14 +1689,14 @@ describe('assistant automation scanner', () => {
         skipped: 0,
       },
     })
-    expect(events).toContainEqual({
-      type: 'capture.reply-progress',
-      captureId: 'capture-1',
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'input.reply-progress',
+      inputId: expect.stringMatching(/^ain_/u),
       details: 'nonblocking document preservation failed',
       providerKind: 'status',
       providerState: 'completed',
       safeDetails: 'document_preservation_failed_nonblocking',
-    })
+    }))
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })
 
@@ -1944,7 +1956,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('defers when terminal evidence is only partially written', async () => {
-    evidenceMocks.readAssistantAutoReplyTerminalEvidence
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
       .mockResolvedValueOnce(createTerminalEvidence({
         captureId: 'capture-1',
       }))
@@ -1987,18 +1999,18 @@ describe('assistant auto-reply runtime', () => {
       skipped: 2,
       stopScanning: true,
     })
-    expect(events).toContainEqual({
-      type: 'capture.reply-skipped',
-      captureId: 'capture-1',
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'input.reply-skipped',
+      inputId: expect.stringMatching(/^ain_/u),
       details:
-        'assistant reply terminal evidence is incomplete; will retry this capture after evidence is rebuilt.',
+        'assistant reply terminal evidence is incomplete; will retry this input after evidence is rebuilt.',
       errorCode: undefined,
       safeDetails: undefined,
-    })
+    }))
   })
 
   it('marks groups handled when terminal evidence already exists in full', async () => {
-    evidenceMocks.readAssistantAutoReplyTerminalEvidence.mockResolvedValue(
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockResolvedValue(
       createTerminalEvidence(),
     )
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
@@ -2036,7 +2048,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('repairs the full terminal evidence group from one evidenced candidate', async () => {
-    evidenceMocks.readAssistantAutoReplyTerminalEvidence
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
       .mockResolvedValueOnce(createTerminalEvidence({
         captureId: 'capture-1',
         groupCaptureIds: ['capture-1', 'capture-2'],
@@ -2239,18 +2251,18 @@ describe('assistant auto-reply runtime', () => {
         vault: '/tmp/assistant-automation-vault',
       }),
     )
-    expect(events).toContainEqual({
-      type: 'capture.reply-started',
-      captureId: 'capture-1',
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'input.reply-started',
+      inputId: expect.stringMatching(/^ain_/u),
       details: 'assistant provider turn started',
-    })
-    expect(events).toContainEqual({
-      type: 'capture.replied',
-      captureId: 'capture-1',
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'input.replied',
+      inputId: expect.stringMatching(/^ain_/u),
       details: 'delivery confirmed',
       errorCode: undefined,
       safeDetails: 'delivery confirmed',
-    })
+    }))
   })
 
   it('writes deferred delivery artifacts when outbound delivery is queued', async () => {
@@ -2346,13 +2358,13 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(events).toContainEqual({
-      type: 'capture.reply-progress',
-      captureId: 'capture-1',
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'input.reply-progress',
+      inputId: expect.stringMatching(/^ain_/u),
       details: 'assistant queued outbound delivery for retry',
       providerKind: 'status',
       providerState: 'completed',
-    })
+    }))
   })
 
   it('treats provider stalls as deferred skips that stop scanning', async () => {
@@ -2802,7 +2814,7 @@ describe('assistant auto-reply runtime', () => {
       },
       async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
         listNewCallCount += 1
-        expect(input.knownCaptureIds).toEqual(
+        expect(input.knownProjectionCaptureIds).toEqual(
           listNewCallCount === 1
             ? ['capture-1']
             : ['capture-1', 'capture-late'],
@@ -2817,7 +2829,7 @@ describe('assistant auto-reply runtime', () => {
             threadIsDirect: true,
           }),
         )
-        if (input.knownCaptureIds?.includes('capture-late')) {
+        if (input.knownProjectionCaptureIds?.includes('capture-late')) {
           return {
             inputs: [],
             nextCursor: input.afterCursor ?? null,
@@ -2957,16 +2969,16 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.activeTurnInput).toBeTypeOf(
       'function',
     )
-    expect(events).toContainEqual({
-      type: 'capture.reply-progress',
-      captureId: 'capture-1',
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'input.reply-progress',
+      inputId: expect.stringMatching(/^ain_/u),
       details: 'new input queued for active turn with 1 additional input(s)',
       providerKind: 'status',
       providerState: 'running',
-    })
+    }))
     expect(events).toContainEqual(
       expect.objectContaining({
-        type: 'capture.reply-progress',
+        type: 'input.reply-progress',
         details: 'new input committed to active turn with 1 additional input(s)',
         providerKind: 'status',
         providerState: 'running',
@@ -3037,6 +3049,7 @@ describe('assistant auto-reply runtime', () => {
       },
       event: {
         attachmentCount: 0,
+        attachmentDescriptors: [],
         conversation: context.firstItem.summary,
         cursor: {
           createdAt: '2026-04-08T00:00:04.000Z',
@@ -3054,6 +3067,7 @@ describe('assistant auto-reply runtime', () => {
           threadId: 'thread_4',
         },
         source: 'telegram',
+        sourceMetadata: null,
         sourceRef: {
           dedupeKey: 'dedupe-4',
           eventId: 'event-4',
@@ -3785,8 +3799,8 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     expect(events.at(-1)).toMatchObject({
-      type: 'capture.reply-skipped',
-      captureId: 'capture-1',
+      type: 'input.reply-skipped',
+      inputId: expect.stringMatching(/^ain_/u),
     })
   })
 
@@ -4198,7 +4212,7 @@ describe('assistant auto-reply runtime', () => {
   it('skips the group when prompt preparation produces no replyable content', async () => {
     replyMocks.prepareAssistantAutoReplyInput.mockResolvedValue({
       kind: 'skip',
-      reason: 'capture has no text or parsed attachment content',
+      reason: 'input has no text or parsed attachment content',
     })
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
@@ -5775,7 +5789,7 @@ describe('assistant auto-reply receipt recovery', () => {
         updatedAt: '2026-04-08T00:00:06.000Z',
       }),
     ])
-    evidenceMocks.readAssistantAutoReplyTerminalEvidence.mockImplementation(
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockImplementation(
       async (_vault: string, captureId: string) =>
         captureId === 'capture-handled'
           ? createTerminalEvidence({ captureId })
@@ -6086,7 +6100,7 @@ describe('assistant automation run loop', () => {
     const context = await createTempVaultContext('assistant-local-input-stage-')
     tempRoots.push(context.parentRoot)
     const externalAbort = new AbortController()
-    const stagedTexts: string[] = []
+    const stagedInputs: AssistantInputCandidate[] = []
     const scanStartedAt: number[] = []
     const inboxServices = createInboxServices({
       run: vi.fn().mockImplementation(
@@ -6105,10 +6119,23 @@ describe('assistant automation run loop', () => {
                   id: 'actor-local',
                   isSelf: false,
                 },
-                attachments: [],
+                attachments: [
+                  {
+                    byteSize: 2048,
+                    externalId: 'photo-local',
+                    fileName: 'private-photo.jpg',
+                    kind: 'image',
+                    mime: 'image/jpeg',
+                  },
+                ],
                 externalId: 'msg-local',
                 occurredAt: '2026-04-09T00:00:10.000Z',
-                raw: {},
+                raw: {
+                  media_group_id: 'group-local-1',
+                  message_id: 101,
+                  reply_context_preview: 'Replying to: earlier Telegram message',
+                  schema: 'murph.telegram-capture.v1',
+                },
                 source: 'telegram',
                 text: 'local input staged from inbox import',
                 thread: {
@@ -6144,11 +6171,7 @@ describe('assistant automation run loop', () => {
           afterCursor: null,
           limit: 10,
         })
-        stagedTexts.push(
-          ...batch.inputs.map((candidate: AssistantInputCandidate) =>
-            candidate.event.text ?? '',
-          ),
-        )
+        stagedInputs.push(...batch.inputs)
         externalAbort.abort()
       }
       return {
@@ -6186,7 +6209,34 @@ describe('assistant automation run loop', () => {
 
     expect(result.reason).toBe('signal')
     expect(scanStartedAt).toHaveLength(2)
-    expect(stagedTexts).toEqual(['local input staged from inbox import'])
+    expect(stagedInputs.map((candidate) => candidate.event.text)).toEqual([
+      'local input staged from inbox import',
+    ])
+    expect(stagedInputs[0]?.event.attachmentDescriptors).toEqual([
+      {
+        attachmentId: expect.stringMatching(/^lid_[0-9a-f]{32}$/u),
+        contentType: 'image/jpeg',
+        fileName: null,
+        kind: 'image',
+        sizeBytes: 2048,
+      },
+    ])
+    expect(stagedInputs[0]?.event.replyTarget).toEqual({
+      channel: 'telegram',
+      messageId: '101',
+      threadId: 'thread-local',
+    })
+    expect(stagedInputs[0]?.event.sourceMetadata).toEqual({
+      kind: 'telegram',
+      mediaGroupId: expect.stringMatching(/^lid_[0-9a-f]{32}$/u),
+      replyContext: 'Replying to: earlier Telegram message',
+    })
+    expect(JSON.stringify(stagedInputs[0]?.event)).not.toContain(
+      'private-photo.jpg',
+    )
+    expect(JSON.stringify(stagedInputs[0]?.event)).not.toContain(
+      'group-local-1',
+    )
   })
 
   it('wakes immediately on self-authored imported captures when allowSelfAuthored is enabled', async () => {
