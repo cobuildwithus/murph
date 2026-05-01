@@ -1,6 +1,9 @@
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedCryptoDomain,
+} from "@murphai/runtime-state";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
@@ -58,6 +61,7 @@ const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
 
 export async function resolveRunnerOutboundUserCryptoContext(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  domain: Extract<HostedCryptoDomain, "ingress" | "runtime">;
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   userId: string;
@@ -66,6 +70,7 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 
   return requireHostedUserCryptoContextFromEnvironment({
     bucket: input.bucket,
+    domain: input.domain,
     environment: input.environment,
     reason: "runner-outbound-access",
     userId: input.userId,

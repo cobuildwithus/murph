@@ -56,6 +56,20 @@ test("hosted crypto env rejects private components in public recipient keys", ()
   ).toThrow(/must be a public P-256 EC JWK/u);
 });
 
+test("hosted crypto env rejects static GCP access tokens in production by default", () => {
+  expect(() =>
+    getHostedWebCryptoConfig(buildEnv({
+      NODE_ENV: "production",
+    })),
+  ).toThrow(/HOSTED_CRYPTO_GCP_ACCESS_TOKEN is only allowed in production/u);
+
+  const config = getHostedWebCryptoConfig(buildEnv({
+    HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN: "1",
+    NODE_ENV: "production",
+  }));
+  assert.equal(config.env, "test");
+});
+
 function buildEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "test",

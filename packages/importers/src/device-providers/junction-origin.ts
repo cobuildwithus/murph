@@ -22,16 +22,61 @@ export interface JunctionOriginFallback extends PlainObject {
 const SOURCE_PROVIDER_SLUG_PATHS = Object.freeze([
   "sourceProviderSlug",
   "source_provider_slug",
+  "sourceProvider",
+  "source_provider",
   "source.provider",
+  "source.providerSlug",
   "source.provider_slug",
   "source.slug",
+  "providerSlug",
   "provider.slug",
-  "provider_slug",
-  "source.providerSlug",
-  "provider.provider_slug",
+  "provider.provider",
   "provider.providerSlug",
+  "provider.provider_slug",
+  "provider_slug",
   "provider",
 ] as const);
+
+const PROVIDER_NAME_SOURCE_PROVIDER_SLUG_PATHS = Object.freeze([
+  "provider.name",
+] as const);
+
+const KNOWN_JUNCTION_PROVIDER_NAME_SLUGS = new Set([
+  "abbott-libreview",
+  "accuchek-ble",
+  "apple-health-kit",
+  "beurer-api",
+  "contour-ble",
+  "cronometer",
+  "dexcom",
+  "dexcom-v3",
+  "eight-sleep",
+  "fitbit",
+  "freestyle-libre",
+  "freestyle-libre-ble",
+  "garmin",
+  "google-fit",
+  "hammerhead",
+  "health-connect",
+  "ihealth",
+  "kardia",
+  "map-my-fitness",
+  "omron",
+  "onetouch-ble",
+  "oura",
+  "peloton",
+  "polar",
+  "renpho",
+  "runkeeper",
+  "samsung-health",
+  "strava",
+  "tandem-source",
+  "ultrahuman",
+  "wahoo",
+  "whoop",
+  "withings",
+  "zwift",
+]);
 
 const SOURCE_TYPE_PATHS = Object.freeze([
   "sourceType",
@@ -126,7 +171,9 @@ export function readJunctionSourceProviderSlug(
   connection: PlainObject | undefined,
 ): string | undefined {
   return firstSourceProviderSlugFromPaths(entry, SOURCE_PROVIDER_SLUG_PATHS)
-    ?? firstSourceProviderSlugFromPaths(connection, SOURCE_PROVIDER_SLUG_PATHS);
+    ?? firstKnownProviderNameSlugFromPaths(entry, PROVIDER_NAME_SOURCE_PROVIDER_SLUG_PATHS)
+    ?? firstSourceProviderSlugFromPaths(connection, SOURCE_PROVIDER_SLUG_PATHS)
+    ?? firstKnownProviderNameSlugFromPaths(connection, PROVIDER_NAME_SOURCE_PROVIDER_SLUG_PATHS);
 }
 
 function resolveSourceProviderSlug(
@@ -141,6 +188,17 @@ function firstSourceProviderSlugFromPaths(source: PlainObject | undefined, paths
   for (const path of paths) {
     const slug = normalizeJunctionSourceProviderSlug(readPath(source, path));
     if (slug) {
+      return slug;
+    }
+  }
+
+  return undefined;
+}
+
+function firstKnownProviderNameSlugFromPaths(source: PlainObject | undefined, paths: readonly string[]): string | undefined {
+  for (const path of paths) {
+    const slug = normalizeJunctionSourceProviderSlug(readPath(source, path));
+    if (slug && KNOWN_JUNCTION_PROVIDER_NAME_SLUGS.has(slug)) {
       return slug;
     }
   }

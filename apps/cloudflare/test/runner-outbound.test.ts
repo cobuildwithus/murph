@@ -5,6 +5,9 @@ import {
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
+  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+} from "../src/hosted-crypto/routes.ts";
+import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
@@ -97,6 +100,11 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted workspace checkpoint",
     path: "/api/internal/hosted-workspace/checkpoint",
+  },
+  {
+    body: undefined,
+    name: "hosted runtime crypto context",
+    path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   },
   {
     body: {

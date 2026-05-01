@@ -24,6 +24,7 @@ In scope:
 - `packages/device-syncd/src/providers/junction.ts`
 - `packages/importers/src/device-providers/junction.ts`
 - Focused tests under `packages/device-syncd/test/**` and `packages/importers/test/**` if coverage is missing.
+- A device-syncd webhook-trace test fixture date may be hardened if the required package test suite is blocked by the May 2026 retention cutoff.
 
 Out of scope:
 
@@ -66,3 +67,4 @@ Libre/Freestyle floating timestamps
 - Active Junction primitive/polling/source plans already exist and must be preserved.
 - The current worktree has unrelated active dirty files outside this cleanup.
 - The two target Junction files are clean before this plan starts.
+- `pnpm --dir packages/device-syncd test` exposed a date-sensitive unrelated store test that used `2026-04-01`, which now falls outside the 30-day processed-webhook retention window; the fixture date was moved forward without changing production store behavior.

@@ -69,10 +69,6 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
-const ACTIVE_INVOCATION_DRAIN_WAIT_MS = 10_000;
-const ACTIVE_INVOCATION_DRAIN_RETRY_MS = 1_000;
-const MAX_CONSECUTIVE_INVOCATION_PASSES = 3;
-const MAX_CONSECUTIVE_INVOCATION_DRAIN_MS = 30_000;
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -120,6 +116,10 @@ export class HostedUserRunner {
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
+  private pendingRunnerDriveAfterInvocation: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  } | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -228,7 +228,7 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId,
       });
-      await this.runWhenIdleOrBudget({
+      await this.runUntilIdleOrBudget({
         dueWake: alarmWakeWasDue,
         reason: "alarm",
       });
@@ -449,29 +449,6 @@ export class HostedUserRunner {
     return { recorded: result.recorded };
   }
 
-  async runWhenIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
-    const activeInvocation = this.invocationLock;
-    if (activeInvocation) {
-      const staleAlarmResult = await this.skipStaleAlarmDrainIfNoWork(input);
-      if (staleAlarmResult) {
-        return staleAlarmResult;
-      }
-      const rescheduledDrain = await this.rescheduleActiveInvocationDrainIfStillRunning(
-        activeInvocation,
-        input,
-      );
-      if (rescheduledDrain) {
-        return rescheduledDrain;
-      }
-      const idleResult = await this.skipAlarmDrainIfActiveInvocationConsumedWork(input);
-      if (idleResult) {
-        return idleResult;
-      }
-    }
-
-    return this.runUntilIdleOrBudget(input);
-  }
-
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
       const runningRecord = await this.stateStore.readState();
@@ -491,77 +468,7 @@ export class HostedUserRunner {
       };
     }
 
-    return this.withInvocationLock(async () => this.runUntilIdleOrBudgetDrainLoop(input));
-  }
-
-  private async runUntilIdleOrBudgetDrainLoop(
-    input: RunnerDrainInput,
-  ): Promise<HostedWorkspaceInvocationResult> {
-    const startedAtMs = Date.now();
-
-    for (let passIndex = 0; passIndex < MAX_CONSECUTIVE_INVOCATION_PASSES; passIndex += 1) {
-      const result = await this.runUntilIdleOrBudgetInternal({
-        dueWake: passIndex === 0 ? input.dueWake === true : false,
-        reason: input.reason,
-      });
-      const record = await this.stateStore.readState();
-
-      if (result.status === "scheduled" && (!record.pendingNudge || record.inFlight)) {
-        return result;
-      }
-
-      if (record.pendingNudge) {
-        const drainElapsedMs = Date.now() - startedAtMs;
-        if (
-          passIndex + 1 >= MAX_CONSECUTIVE_INVOCATION_PASSES
-          || drainElapsedMs >= MAX_CONSECUTIVE_INVOCATION_DRAIN_MS
-          || result.status === "budget_exhausted"
-        ) {
-          const scheduled = await this.runtimeAlarmScheduler.syncNextWake({
-            preferredWakeAt: new Date().toISOString(),
-          });
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            details: {
-              drainElapsedMs,
-              maxConsecutiveInvocationPasses: MAX_CONSECUTIVE_INVOCATION_PASSES,
-              pendingNudge: true,
-            },
-            message: "Hosted runner drain budget reached with pending nudge; scheduled continuation.",
-            phase: "scheduled",
-            userId: record.userId,
-          });
-          return {
-            ...(result.redactedStatus === undefined ? {} : { redactedStatus: result.redactedStatus }),
-            nextWakeAt: scheduled.nextWakeAt,
-            status: "scheduled",
-          };
-        }
-
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            drainElapsedMs,
-            nextPassIndex: passIndex + 2,
-            pendingNudge: true,
-          },
-          message: "Hosted runner continuing immediately for pending nudge.",
-          phase: "wake.running",
-          userId: record.userId,
-        });
-        continue;
-      }
-
-      return result;
-    }
-
-    const record = await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: new Date().toISOString(),
-    });
-    return {
-      nextWakeAt: record.nextWakeAt,
-      status: "scheduled",
-    };
+    return this.withInvocationLock(async () => this.runUntilIdleOrBudgetInternal(input));
   }
 
   private async runUntilIdleOrBudgetInternal(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
@@ -641,7 +548,7 @@ export class HostedUserRunner {
         finishedAt: new Date().toISOString(),
         lease,
       });
-      if (completion.completed && !completion.record.pendingNudge) {
+      if (completion.completed) {
         await this.scheduleNextWorkspaceAlarm({
           fallbackNextWakeAt: result.nextWakeAt ?? null,
           userId: initialRecord.userId,
@@ -945,15 +852,20 @@ export class HostedUserRunner {
   }): Promise<void> {
     const record = await this.stateStore.readState();
     if (record.pendingNudge) {
+      this.pendingRunnerDriveAfterInvocation = {
+        reason: "nudge",
+        userId: input.userId,
+      };
+
       await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: new Date().toISOString(),
+        preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           pendingNudge: true,
         },
-        message: "Hosted runner scheduled immediate alarm for pending nudge.",
+        message: "Hosted runner queued follow-up drive for pending nudge and synced watchdog alarm.",
         phase: "scheduled",
         userId: input.userId,
       });
@@ -978,121 +890,6 @@ export class HostedUserRunner {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
     });
-  }
-
-  private async rescheduleActiveInvocationDrainIfStillRunning(
-    activeInvocation: Promise<void>,
-    input: {
-      reason: HostedWorkspaceInvocationReason;
-    },
-  ): Promise<HostedWorkspaceInvocationResult | null> {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const settled = await new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => {
-        resolve(false);
-      }, ACTIVE_INVOCATION_DRAIN_WAIT_MS);
-      void activeInvocation.then(
-        () => resolve(true),
-        () => resolve(true),
-      );
-    });
-    if (timer) {
-      clearTimeout(timer);
-    }
-    if (settled) {
-      return null;
-    }
-
-    const record = await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: new Date(Date.now() + ACTIVE_INVOCATION_DRAIN_RETRY_MS).toISOString(),
-    });
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        activeInvocationDrainWaitMs: ACTIVE_INVOCATION_DRAIN_WAIT_MS,
-        pendingNudge: record.pendingNudge,
-        reason: input.reason,
-        runnerNextWakePresent: record.nextWakeAt !== null,
-      },
-      message: "Hosted runner active invocation still running; rescheduled wake drain.",
-      phase: "scheduled",
-      userId: record.userId,
-    });
-
-    return {
-      nextWakeAt: record.nextWakeAt,
-      status: "scheduled",
-    };
-  }
-
-  private async skipStaleAlarmDrainIfNoWork(
-    input: RunnerDrainInput,
-  ): Promise<HostedWorkspaceInvocationResult | null> {
-    if (input.reason !== "alarm" || input.dueWake === true) {
-      return null;
-    }
-
-    const record = await this.stateStore.readState();
-    if (record.pendingNudge || isWakeDue(record.nextWakeAt, Date.now())) {
-      return null;
-    }
-
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        pendingNudge: false,
-        runnerNextWakePresent: record.nextWakeAt !== null,
-      },
-      message: "Hosted runner stale alarm skipped because no work is pending.",
-      phase: "wake.running",
-      userId: record.userId,
-    });
-
-    if (record.nextWakeAt) {
-      await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: record.nextWakeAt,
-      });
-    }
-
-    return {
-      nextWakeAt: record.nextWakeAt,
-      status: "idle",
-    };
-  }
-
-  private async skipAlarmDrainIfActiveInvocationConsumedWork(input: {
-    reason: HostedWorkspaceInvocationReason;
-  }): Promise<HostedWorkspaceInvocationResult | null> {
-    if (input.reason !== "alarm") {
-      return null;
-    }
-
-    const record = await this.stateStore.readState();
-    if (record.pendingNudge || isWakeDue(record.nextWakeAt, Date.now())) {
-      return null;
-    }
-
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        pendingNudge: false,
-        runnerNextWakePresent: record.nextWakeAt !== null,
-      },
-      message: "Hosted runner alarm skipped after active invocation consumed pending work.",
-      phase: "wake.running",
-      userId: record.userId,
-    });
-
-    if (record.nextWakeAt) {
-      await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: record.nextWakeAt,
-      });
-    }
-
-    return {
-      nextWakeAt: record.nextWakeAt,
-      status: "idle",
-    };
   }
 
   private startDetachedRunnerDrive(input: {
@@ -1185,15 +982,28 @@ export class HostedUserRunner {
   }
 
   private async withInvocationLock<T>(run: () => Promise<T>): Promise<T> {
-    return withSerializedLock(
-      {
-        get: () => this.invocationLock,
-        set: (value) => {
-          this.invocationLock = value;
+    try {
+      return await withSerializedLock(
+        {
+          get: () => this.invocationLock,
+          set: (value) => {
+            this.invocationLock = value;
+          },
         },
-      },
-      run,
-    );
+        run,
+      );
+    } finally {
+      const pendingDrive = this.pendingRunnerDriveAfterInvocation;
+
+      if (pendingDrive && this.invocationLock === null) {
+        this.pendingRunnerDriveAfterInvocation = null;
+
+        const started = this.startDetachedRunnerDrive(pendingDrive);
+        if (!started) {
+          this.pendingRunnerDriveAfterInvocation = pendingDrive;
+        }
+      }
+    }
   }
 
 }

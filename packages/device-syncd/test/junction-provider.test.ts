@@ -123,6 +123,7 @@ function createJunctionSvixWebhook(input: {
   body: Record<string, unknown>;
   messageId?: string;
   secret?: string;
+  signatureHeader?: (signature: string) => string;
   timestamp?: string;
 }): { headers: Headers; rawBody: Buffer } {
   const messageId = input.messageId ?? "msg_test_123";
@@ -138,7 +139,7 @@ function createJunctionSvixWebhook(input: {
     headers: new Headers({
       "svix-id": messageId,
       "svix-timestamp": timestamp,
-      "svix-signature": `v1,${signature}`,
+      "svix-signature": input.signatureHeader?.(signature) ?? `v1,${signature}`,
     }),
     rawBody,
   };
@@ -633,6 +634,112 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
     },
   ]);
   assert.equal(typeof parsed.jobs[0]?.dedupeKey, "string");
+});
+
+test("Junction accepts nested webhook user ids and comma-delivered Svix signatures", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.heartrate.created",
+      data: {
+        id: "heart-rate-1",
+        timestamp: "2026-04-02T12:00:00.000Z",
+        sourceProvider: "fitbit",
+        user: {
+          id: "junction-user-nested",
+        },
+      },
+    },
+    messageId: "msg_heartrate_nested",
+    signatureHeader: (signature) =>
+      `v1,invalid,v1,${signature.replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "")}`,
+    timestamp: "1775174400",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.externalAccountId, "junction-user-nested");
+  assert.equal(parsed.resourceCategory, "timeseries");
+  assert.equal(parsed.jobs[0]?.kind, "resource");
+  assert.deepEqual(parsed.jobs[0]?.payload, {
+    eventType: "daily.data.heartrate.created",
+    objectId: "heart-rate-1",
+    occurredAt: "2026-04-02T12:00:00.000Z",
+    resource: "heartrate",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "fitbit",
+    windowStart: "2026-04-01T12:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+});
+
+test("Junction rejects webhooks with conflicting signed payload user ids", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "provider.connection.created",
+      user_id: "junction-user-top",
+      data: {
+        user_id: "junction-user-data",
+      },
+    },
+    timestamp: "1775174400",
+  });
+
+  await assert.rejects(
+    requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    }),
+    (error) => error instanceof DeviceSyncError && error.code === "JUNCTION_WEBHOOK_USER_ID_CONFLICT",
+  );
+});
+
+test("Junction rejects malformed whsec webhook secrets", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_not-base64!",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "provider.connection.created",
+      user_id: "junction-user-1",
+      data: {},
+    },
+    timestamp: "1775174400",
+  });
+
+  await assert.rejects(
+    requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    }),
+    (error) => error instanceof DeviceSyncError && error.code === "JUNCTION_WEBHOOK_SECRET_INVALID",
+  );
 });
 
 test("Junction rejects webhooks with invalid Svix signatures", async () => {

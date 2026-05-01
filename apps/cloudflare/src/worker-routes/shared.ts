@@ -4,6 +4,9 @@ import type {
   HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedCryptoDomain,
+} from "@murphai/runtime-state";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
@@ -53,7 +56,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
-  runWhenIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runnerStatus(): Promise<HostedRunnerStatusResponse>;
 }
 
@@ -81,11 +83,13 @@ export async function resolveUserRunnerStub(
 
 export async function resolveHostedExecutionUserCryptoContext(input: {
   bucket: WorkerEnvironmentSource["BUNDLES"];
+  domain: Extract<HostedCryptoDomain, "ingress" | "runtime">;
   environment: WorkerRouteContext["environment"];
   userId: string;
 }) {
   return requireHostedUserCryptoContextFromEnvironment({
     bucket: input.bucket,
+    domain: input.domain,
     environment: input.environment,
     reason: "worker-route-access",
     userId: input.userId,

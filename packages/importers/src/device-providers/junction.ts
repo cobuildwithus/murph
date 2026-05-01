@@ -835,17 +835,22 @@ function resolveRecordTimestamp(
     "start_at",
   ]);
   const explicitSemantics = firstTimestampSemantics(entry);
-  const timestampSemantics = hasFloatingTimestampSourceProvider(sourceProviderSlug)
+  const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
+  const timestampSemantics = hasSourceSpecificFloatingTime
     ? "floating"
     : explicitSemantics ?? inferTimestampSemantics(rawObservedAt);
-  const occurredAt = timestampSemantics === "floating"
-    ? context.windowEnd ?? context.windowStart ?? context.importedAt
-    : resolveSafeTimestamp(rawObservedAt, sourceProviderSlug) ?? context.windowEnd ?? context.windowStart ?? context.importedAt;
-  const recordedAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]),
-    sourceProviderSlug,
-  )
-    ?? occurredAt;
+  const occurredAt = hasSourceSpecificFloatingTime
+    ? undefined
+    : timestampSemantics === "floating"
+      ? context.windowEnd ?? context.windowStart ?? context.importedAt
+      : resolveSafeTimestamp(rawObservedAt, sourceProviderSlug) ?? context.windowEnd ?? context.windowStart ?? context.importedAt;
+  const recordedAt = hasSourceSpecificFloatingTime
+    ? context.importedAt
+    : resolveSafeTimestamp(
+      firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]),
+      sourceProviderSlug,
+    )
+      ?? occurredAt;
 
   return stripUndefined({
     occurredAt,

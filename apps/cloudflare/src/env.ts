@@ -23,6 +23,9 @@ import {
   readHostedMailboxEncryptionEnvironment,
   type HostedMailboxEncryptionEnvironment,
 } from "./hosted-mailbox-encryption.ts";
+import type {
+  HostedWorkerCryptoEnv,
+} from "./hosted-crypto/runtime-crypto-context.ts";
 import {
   assertHostedLocalInternalProxyEnvironment,
 } from "./local-loopback-proxy.ts";
@@ -44,6 +47,7 @@ export type HostedExecutionEnvironment = Omit<
   automationRecipientPrivateKey: HostedUserRecipientPrivateKeyJwk;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
   hostedWebBaseUrl: string;
+  hostedCrypto: HostedWorkerCryptoEnv | null;
   hostedMailboxEncryption: HostedMailboxEncryptionEnvironment;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   platformEnvelopeKey: Uint8Array;
@@ -102,6 +106,7 @@ export function readHostedExecutionEnvironment(
       keyringJson: automationRecipientPrivateKeyringJson,
     }),
     automationRecipientPublicKey,
+    hostedCrypto: readOptionalHostedWorkerCryptoEnvironment(source),
     hostedMailboxEncryption: readHostedMailboxEncryptionEnvironment({
       HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: hostedWakeEncryptionKeyringJson ?? undefined,
@@ -125,6 +130,53 @@ export function readHostedExecutionEnvironment(
       : null,
     vercelOidcValidation: requireHostedExecutionVercelOidcValidationEnvironment(source),
     webCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
+  };
+}
+
+function readOptionalHostedWorkerCryptoEnvironment(
+  source: StringEnvSource,
+): HostedWorkerCryptoEnv | null {
+  const authoritySignKeyVersion = normalizeHostedExecutionString(
+    source.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+  );
+  const authoritySignPublicKeyPem = normalizeHostedExecutionString(
+    source.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+  );
+  const cloudflareAutomationKeyId = normalizeHostedExecutionString(
+    source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
+  );
+  const cloudflareAutomationPrivateJwk = normalizeHostedExecutionString(
+    source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+  );
+  const env = normalizeHostedExecutionString(source.HOSTED_CRYPTO_ENV);
+
+  if (
+    !authoritySignKeyVersion
+    && !authoritySignPublicKeyPem
+    && !cloudflareAutomationKeyId
+    && !cloudflareAutomationPrivateJwk
+    && !env
+  ) {
+    return null;
+  }
+
+  return {
+    ...(authoritySignKeyVersion
+      ? { HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion }
+      : {}),
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: requireHostedExecutionString(
+      authoritySignPublicKeyPem,
+      "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+    ),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: requireHostedExecutionString(
+      cloudflareAutomationKeyId,
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+    ),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: requireHostedExecutionString(
+      cloudflareAutomationPrivateJwk,
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
+    ),
+    HOSTED_CRYPTO_ENV: requireHostedExecutionString(env, "HOSTED_CRYPTO_ENV"),
   };
 }
 

@@ -357,8 +357,8 @@ export function createJunctionDeviceSyncProvider(
       timestampToleranceMs: webhookTimestampToleranceMs,
     });
     const eventType = requireJunctionWebhookEventType(verified.payload);
-    const externalAccountId = requireJunctionWebhookUserId(verified.payload);
     const data = readPlainObject(verified.payload.data);
+    const externalAccountId = requireJunctionWebhookUserId(verified.payload, data);
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
@@ -1175,36 +1175,82 @@ function verifySvixSignature(input: {
 function decodeSvixWebhookSecret(secret: string): Buffer {
   const normalized = secret.trim();
   if (normalized.startsWith("whsec_")) {
-    return Buffer.from(normalized.slice("whsec_".length), "base64");
+    const decoded = decodeBase64LikeStrict(normalized.slice("whsec_".length));
+    if (decoded.length > 0) {
+      return decoded;
+    }
+
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_SECRET_INVALID",
+      message: "Junction webhook secret must be valid whsec_ base64.",
+      retryable: false,
+      httpStatus: 500,
+    });
   }
 
   return Buffer.from(normalized, "utf8");
 }
 
 function readSvixV1Signatures(signatureHeader: string): Buffer[] {
-  return signatureHeader
-    .split(/\s+/u)
-    .map((part) => part.trim())
-    .map((part) => {
-      if (part.startsWith("v1,")) {
-        return part.slice(3);
-      }
+  const signatureValues: string[] = [];
+  const parts = signatureHeader.split(/[\s,]+/u).map((part) => part.trim()).filter(Boolean);
 
-      if (part.startsWith("v1=") || part.startsWith("v1:")) {
-        return part.slice(3);
-      }
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (!part) {
+      continue;
+    }
 
-      return "";
-    })
-    .filter((signature) => signature.length > 0)
-    .map((signature) => {
-      try {
-        return Buffer.from(signature, "base64");
-      } catch {
-        return Buffer.alloc(0);
-      }
-    })
+    if (part === "v1" && parts[index + 1]) {
+      signatureValues.push(parts[index + 1] ?? "");
+      index += 1;
+      continue;
+    }
+
+    if (part.startsWith("v1=") || part.startsWith("v1:")) {
+      signatureValues.push(part.slice(3));
+    }
+  }
+
+  return signatureValues
+    .map(decodeBase64Like)
     .filter((signature) => signature.length > 0);
+}
+
+function decodeBase64Like(value: string): Buffer {
+  const normalized = value.trim().replace(/-/gu, "+").replace(/_/gu, "/");
+  if (!normalized) {
+    return Buffer.alloc(0);
+  }
+
+  const padding = (4 - (normalized.length % 4)) % 4;
+  const padded = `${normalized}${"=".repeat(padding)}`;
+  try {
+    return Buffer.from(padded, "base64");
+  } catch {
+    return Buffer.alloc(0);
+  }
+}
+
+function decodeBase64LikeStrict(value: string): Buffer {
+  const normalized = value.trim().replace(/-/gu, "+").replace(/_/gu, "/");
+  if (!normalized || normalized.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(normalized)) {
+    return Buffer.alloc(0);
+  }
+
+  const firstPadding = normalized.indexOf("=");
+  if (firstPadding >= 0 && !/^=+$/u.test(normalized.slice(firstPadding))) {
+    return Buffer.alloc(0);
+  }
+
+  const padding = (4 - (normalized.length % 4)) % 4;
+  const padded = `${normalized}${"=".repeat(padding)}`;
+  try {
+    const decoded = Buffer.from(padded, "base64");
+    return decoded.length > 0 ? decoded : Buffer.alloc(0);
+  } catch {
+    return Buffer.alloc(0);
+  }
 }
 
 function parseWebhookJsonBody(rawBody: Buffer): Record<string, unknown> {
@@ -1248,8 +1294,11 @@ function requireJunctionWebhookEventType(payload: Record<string, unknown>): stri
   });
 }
 
-function requireJunctionWebhookUserId(payload: Record<string, unknown>): string {
-  const userId = normalizeString(payload.user_id) ?? normalizeString(payload.userId);
+function requireJunctionWebhookUserId(
+  payload: Record<string, unknown>,
+  data: Record<string, unknown> | null,
+): string {
+  const userId = readJunctionWebhookUserId(payload, data);
   if (userId) {
     return userId;
   }
@@ -1260,6 +1309,46 @@ function requireJunctionWebhookUserId(payload: Record<string, unknown>): string 
     retryable: false,
     httpStatus: 400,
   });
+}
+
+function readJunctionWebhookUserId(
+  payload: Record<string, unknown>,
+  data: Record<string, unknown> | null,
+): string | null {
+  const nestedPayload = readPlainObject(data?.payload);
+  const nestedEvent = readPlainObject(data?.event);
+  const nestedMessage = readPlainObject(data?.message);
+  const nestedUser = readPlainObject(data?.user);
+  const userIds = [
+    payload.user_id,
+    payload.userId,
+    data?.user_id,
+    data?.userId,
+    nestedPayload?.user_id,
+    nestedPayload?.userId,
+    nestedEvent?.user_id,
+    nestedEvent?.userId,
+    nestedMessage?.user_id,
+    nestedMessage?.userId,
+    nestedUser?.id,
+    nestedUser?.user_id,
+    nestedUser?.userId,
+  ].flatMap((value) => {
+    const userId = normalizeString(value);
+    return userId ? [userId] : [];
+  });
+
+  const distinctUserIds = new Set(userIds);
+  if (distinctUserIds.size > 1) {
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_USER_ID_CONFLICT",
+      message: "Junction webhook payload contains conflicting user_id values.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return userIds[0] ?? null;
 }
 
 async function projectJunctionSources(

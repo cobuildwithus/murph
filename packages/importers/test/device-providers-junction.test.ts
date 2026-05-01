@@ -13,11 +13,17 @@ test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   const slugCases: Array<[string, Record<string, unknown>]> = [
     ["sourceProviderSlug", { sourceProviderSlug: "oura" }],
     ["source_provider_slug", { source_provider_slug: "oura" }],
+    ["sourceProvider", { sourceProvider: "oura" }],
+    ["source_provider", { source_provider: "oura" }],
     ["provider", { provider: "oura" }],
+    ["providerSlug", { providerSlug: "oura" }],
     ["provider_slug", { provider_slug: "oura" }],
     ["source.provider", { source: { provider: "oura" } }],
     ["source.slug", { source: { slug: "oura" } }],
     ["source.provider_slug", { source: { provider_slug: "oura" } }],
+    ["source.providerSlug", { source: { providerSlug: "oura" } }],
+    ["provider.provider", { provider: { provider: "oura" } }],
+    ["provider.name", { provider: { name: "oura" } }],
   ];
 
   for (const [label, record] of slugCases) {
@@ -33,6 +39,7 @@ test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   );
 
   assert.equal(resolveJunctionOrigin({}, { groupedSourceSlug: "polar" }).sourceProviderSlug, "polar");
+  assert.equal(resolveJunctionOrigin({ provider: { name: "Oura Ring" } }).sourceProviderSlug, undefined);
 
   const origin = resolveJunctionOrigin({
     source_type: "ring",
@@ -759,6 +766,25 @@ test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until tim
   assert.deepEqual(canonicalArtifactContent?.records, []);
 });
 
+test("Junction normalizer does not use source-specific floating timestamps as window times", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2023-09-27T12:00:00.000Z",
+    windowStart: "2023-09-27T00:00:00.000Z",
+    windowEnd: "2023-09-27T23:59:59.000Z",
+    timeseries: {
+      weight: [{
+        sourceProviderSlug: "abbott_libreview",
+        timestamp: "2023-09-27T07:48:00+00:00",
+        value: 82,
+      }],
+    },
+  });
+
+  assert.equal(payload.events?.some((event) => event.fields?.metric === "weight"), false);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["weight"]);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-weight"));
+});
+
 test("Junction normalizer resolves nested source and provider slug origin fields", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
@@ -925,7 +951,7 @@ test("Junction normalizer treats day-only timestamps as floating wall dates", ()
   assert.equal(stepSample, undefined);
 });
 
-test("Junction normalizer ignores ambiguous provider and type provenance fields", () => {
+test("Junction normalizer ignores aggregator provider and ambiguous type provenance fields", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -960,6 +986,7 @@ test("Junction normalizer ignores ambiguous provider and type provenance fields"
 
   const profileArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-profile");
   assert.deepEqual(profileArtifact?.content, {
+    sourceProviderSlug: "oura",
     sourceType: "cloud-provider",
   });
 });

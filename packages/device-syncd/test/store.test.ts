@@ -55,8 +55,8 @@ test("device sync store minimizes webhook trace payload retention without changi
         traceId: "trace-1",
         externalAccountId: "acct-1",
         eventType: "sleep.updated",
-        receivedAt: "2026-04-01T00:00:00.000Z",
-        processingExpiresAt: "2026-04-01T00:01:00.000Z",
+        receivedAt: "2099-04-01T00:00:00.000Z",
+        processingExpiresAt: "2099-04-01T00:01:00.000Z",
       }),
       "claimed",
     );
@@ -64,7 +64,7 @@ test("device sync store minimizes webhook trace payload retention without changi
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRowForTesting(store, "oura", "trace-1")), {
       external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
-      processing_expires_at: "2026-04-01T00:01:00.000Z",
+      processing_expires_at: "2099-04-01T00:01:00.000Z",
       status: "processing",
     });
 
@@ -74,8 +74,8 @@ test("device sync store minimizes webhook trace payload retention without changi
         traceId: "trace-1",
         externalAccountId: "acct-1",
         eventType: "sleep.updated",
-        receivedAt: "2026-04-01T00:02:00.000Z",
-        processingExpiresAt: "2026-04-01T00:03:00.000Z",
+        receivedAt: "2099-04-01T00:02:00.000Z",
+        processingExpiresAt: "2099-04-01T00:03:00.000Z",
       }),
       "claimed",
     );
@@ -83,7 +83,7 @@ test("device sync store minimizes webhook trace payload retention without changi
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRowForTesting(store, "oura", "trace-1")), {
       external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
-      processing_expires_at: "2026-04-01T00:03:00.000Z",
+      processing_expires_at: "2099-04-01T00:03:00.000Z",
       status: "processing",
     });
 
