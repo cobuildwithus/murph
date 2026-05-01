@@ -138,6 +138,7 @@ async function handleRunnerArtifactRequest(input: {
 }): Promise<Response> {
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
+    domain: "runtime",
     env: input.env,
     environment: input.environment,
     userId: input.userId,

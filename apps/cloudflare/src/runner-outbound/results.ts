@@ -69,6 +69,7 @@ async function handleRunnerEmailMessageReadRequest(input: {
 }): Promise<Response> {
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
+    domain: "ingress",
     env: input.env,
     environment: input.environment,
     userId: input.userId,

@@ -345,7 +345,7 @@ async function driveRunnerNudgeForTest(
   runner: HostedUserRunner,
 ): Promise<void> {
   await runner.nudgeHostedRunner();
-  await runner.runWhenIdleOrBudget({ reason: "nudge" });
+  await runner.runUntilIdleOrBudget({ reason: "nudge" });
 }
 
 function hostedRunnerStatusIsIdle(status: HostedRunnerStatusResponse): boolean {

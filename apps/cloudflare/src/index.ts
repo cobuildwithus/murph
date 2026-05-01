@@ -294,12 +294,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.runUntilIdleOrBudget(input);
   }
 
-  async runWhenIdleOrBudget(input: {
-    reason: HostedWorkspaceInvocationReason;
-  }): Promise<HostedWorkspaceInvocationResult> {
-    return this.runner.runWhenIdleOrBudget(input);
-  }
-
   async fetch(): Promise<Response> {
     return notFound();
   }
@@ -586,6 +580,7 @@ async function handleBrowserVaultSessionRoute(
   }
   const crypto = await resolveHostedExecutionUserCryptoContext({
     bucket: context.env.BUNDLES,
+    domain: "runtime",
     environment: context.environment,
     userId,
   });

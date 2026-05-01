@@ -130,6 +130,7 @@ export async function handleHostedEmailIngress(
 
   const userCrypto = await resolveHostedExecutionUserCryptoContext({
     bucket: env.BUNDLES,
+    domain: "ingress",
     environment,
     userId: route.userId,
   });

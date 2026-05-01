@@ -12,16 +12,21 @@ import {
   type HostedUserRootKeyEnvelope,
   type HostedUserRootKeyEnvelopeRecipientInput,
   type HostedUserRootKeyRecipientKind,
+  type HostedCryptoDomain,
+  type HostedDomainRootKeyEnvelopeV1,
 } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";
 import { readEncryptedR2Payload, writeEncryptedR2Json } from "./crypto.js";
 import type { HostedExecutionEnvironment } from "./env.ts";
+import {
+  fetchHostedWorkerRuntimeRoots,
+} from "./hosted-crypto/runtime-crypto-context.ts";
 import { hostedUserRootKeyEnvelopeObjectKey } from "./storage-paths.js";
 
 export interface HostedUserCryptoContext {
-  envelope: HostedUserRootKeyEnvelope;
+  envelope: HostedUserRootKeyEnvelope | HostedDomainRootKeyEnvelopeV1;
   rootKey: Uint8Array;
   rootKeyId: string;
   keysById: Readonly<Record<string, Uint8Array>>;
@@ -181,10 +186,16 @@ export function createHostedUserKeyStoreFromEnvironment(input: {
 export function requireHostedUserCryptoContextFromEnvironment(input: {
   auditLog?: ((record: HostedUserKeyAuditRecord) => Promise<void> | void) | null;
   bucket: R2BucketLike;
+  domain?: Extract<HostedCryptoDomain, "ingress" | "runtime">;
   environment: HostedExecutionEnvironment;
+  fetchImpl?: typeof fetch;
   reason: string;
   userId: string;
 }): Promise<HostedUserCryptoContext> {
+  if (input.environment.hostedCrypto) {
+    return requireHostedUserCryptoContextFromWeb(input);
+  }
+
   return createHostedUserKeyStoreFromEnvironment({
     auditLog: input.auditLog ?? null,
     bucket: input.bucket,
@@ -192,6 +203,35 @@ export function requireHostedUserCryptoContextFromEnvironment(input: {
   }).requireUserCryptoContext(input.userId, {
     reason: input.reason,
   });
+}
+
+async function requireHostedUserCryptoContextFromWeb(input: {
+  domain?: Extract<HostedCryptoDomain, "ingress" | "runtime">;
+  environment: HostedExecutionEnvironment;
+  fetchImpl?: typeof fetch;
+  userId: string;
+}): Promise<HostedUserCryptoContext> {
+  if (!input.environment.hostedCrypto) {
+    throw new TypeError("Hosted runtime crypto context is not configured.");
+  }
+  const roots = await fetchHostedWorkerRuntimeRoots({
+    baseUrl: input.environment.hostedWebBaseUrl,
+    callbackSigning: input.environment.webCallbackSigning,
+    cryptoEnv: input.environment.hostedCrypto,
+    fetchImpl: input.fetchImpl,
+    timeoutMs: input.environment.webControlTimeoutMs,
+    userId: input.userId,
+  });
+  const domain = input.domain ?? "runtime";
+  const selected = domain === "ingress" ? roots.ingress : roots.runtime;
+  return {
+    envelope: selected.envelope,
+    rootKey: selected.rootKey,
+    rootKeyId: selected.envelope.rootKeyId,
+    keysById: {
+      [selected.envelope.rootKeyId]: selected.rootKey,
+    },
+  };
 }
 
 async function resolveHostedUserCryptoContext(input: {

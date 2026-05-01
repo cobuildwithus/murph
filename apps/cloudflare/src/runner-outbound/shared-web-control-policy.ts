@@ -9,6 +9,9 @@ import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+} from "../hosted-crypto/routes.ts";
 
 export {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -48,6 +51,7 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
   return path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH
     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     || path === HOSTED_RUNTIME_LOG_PATH
+    || path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH
     || path === HOSTED_RUNTIME_MAILBOX_FETCH_PATH
     || path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
     || path === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH

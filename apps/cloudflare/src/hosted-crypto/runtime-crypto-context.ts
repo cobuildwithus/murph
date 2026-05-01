@@ -8,6 +8,16 @@ import {
   type HostedDomainRootKeyEnvelopeV1,
 } from "@murphai/runtime-state";
 
+import {
+  fetchHostedExecutionWebControlPlaneResponse,
+} from "../web-control-plane.ts";
+import type {
+  HostedWebCallbackSigningEnvironment,
+} from "../web-callback-auth.ts";
+import {
+  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+} from "./routes.ts";
+
 export interface HostedWorkerCryptoEnv {
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION?: string;
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: string;
@@ -35,6 +45,33 @@ export interface UnwrappedHostedWorkerRuntimeRoots {
     envelope: HostedDomainRootKeyEnvelopeV1;
     rootKey: Uint8Array;
   };
+}
+
+export async function fetchHostedWorkerRuntimeRoots(input: {
+  baseUrl: string;
+  callbackSigning: HostedWebCallbackSigningEnvironment;
+  cryptoEnv: HostedWorkerCryptoEnv;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+  userId: string;
+}): Promise<UnwrappedHostedWorkerRuntimeRoots> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    boundUserId: input.userId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+  if (!response.ok) {
+    throw new Error(`Hosted runtime crypto context fetch failed with HTTP ${response.status}.`);
+  }
+  const context = await response.json() as HostedRuntimeCryptoContextResponse;
+  return unwrapHostedWorkerRuntimeRoots({
+    context,
+    env: input.cryptoEnv,
+  });
 }
 
 export async function unwrapHostedWorkerRuntimeRoots(input: {
