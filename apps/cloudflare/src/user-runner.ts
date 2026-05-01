@@ -35,6 +35,7 @@ import { toStringEnvSource } from "./string-env.js";
 import {
   createHostedUserKeyStoreFromEnvironment,
   HostedUserCryptoRepairNeededError,
+  requireHostedUserCryptoContextFromEnvironment,
   type HostedUserCryptoContext,
   type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
@@ -160,8 +161,12 @@ export class HostedUserRunner {
   }
 
   private async refreshRunnerStores(userId: string): Promise<RunnerUserStores> {
-    const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
+    const crypto = await requireHostedUserCryptoContextFromEnvironment({
+      bucket: this.bucket,
+      domain: "runtime",
+      environment: this.env,
       reason: "runner-store-refresh",
+      userId,
     });
 
     const stores: RunnerUserStores = {
@@ -597,8 +602,12 @@ export class HostedUserRunner {
     let userScopedSkipReason: string | null = null;
 
     try {
-      userCrypto = await this.userKeyStore.requireUserCryptoContext(userId, {
+      userCrypto = await requireHostedUserCryptoContextFromEnvironment({
+        bucket: this.bucket,
+        domain: "runtime",
+        environment: this.env,
         reason: "account-data-deletion",
+        userId,
       });
     } catch (error) {
       if (!(error instanceof HostedUserCryptoRepairNeededError)) {
@@ -763,6 +772,9 @@ export class HostedUserRunner {
     workspace: HostedWorkspaceState | null;
   }): Promise<void> {
     if (!hostedWorkspaceNeedsActivationBootstrapCrypto(input.workspace)) {
+      return;
+    }
+    if (this.env.hostedCrypto) {
       return;
     }
 
