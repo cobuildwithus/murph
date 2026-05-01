@@ -439,12 +439,11 @@ describe("appendHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "device-sync.wake",
-      timeoutMs: 5_000,
-      userId: "user-123",
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+      source: "device-sync",
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("uses the webhook trace id for a stable wake event id when one is available", async () => {
@@ -492,17 +491,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
   });
 
-  it("starts a pointer-only durable nudge workflow when the direct runner nudge is not accepted", async () => {
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: false,
-      alarmScheduled: null,
-      alreadyRunning: null,
-      configured: false,
-      errorCode: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
-    });
-
+  it("starts a pointer-only durable nudge workflow after appending the wake", async () => {
     await expect(appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
@@ -513,11 +502,7 @@ describe("appendHostedDeviceSyncWake", () => {
       wakeAppended: true,
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "device-sync.wake",
-      timeoutMs: 5_000,
-      userId: "user-123",
-    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
       source: "device-sync",
@@ -525,15 +510,6 @@ describe("appendHostedDeviceSyncWake", () => {
   });
 
   it("maps device-sync nudge workflow start failures to a retryable device-sync error", async () => {
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: false,
-      alarmScheduled: null,
-      alreadyRunning: null,
-      configured: false,
-      errorCode: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
-    });
     mocks.startHostedWebhookNudgeWorkflow.mockRejectedValue(new Error("workflow unavailable"));
 
     await expect(appendHostedDeviceSyncWake({
@@ -591,12 +567,11 @@ describe("appendHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "device-sync.wake",
-      timeoutMs: 5_000,
-      userId: "user-123",
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+      source: "device-sync",
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("queues a disconnected signal and wake together inside the disconnect flow", async () => {
@@ -984,9 +959,9 @@ describe("appendHostedDeviceSyncWake", () => {
       mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.nudgeHostedRunnerUserBestEffortResult.mock.invocationCallOrder[0],
+      mocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0],
     );
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.completeWebhookTrace.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -1020,16 +995,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
   });
 
-  it("completes hosted webhook traces only after the workflow fallback is durable", async () => {
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: false,
-      alarmScheduled: null,
-      alreadyRunning: null,
-      configured: false,
-      errorCode: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
-    });
+  it("completes hosted webhook traces only after the workflow handoff is durable", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -1054,16 +1020,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123");
   });
 
-  it("leaves hosted webhook traces retryable when workflow fallback enqueue fails", async () => {
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: false,
-      alarmScheduled: null,
-      alreadyRunning: null,
-      configured: false,
-      errorCode: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
-    });
+  it("leaves hosted webhook traces retryable when workflow handoff enqueue fails", async () => {
     mocks.startHostedWebhookNudgeWorkflow
       .mockRejectedValueOnce(new Error("workflow unavailable"))
       .mockResolvedValueOnce({ runId: "workflow_retry_123" });

@@ -313,7 +313,12 @@ describe("hosted email worker ingress", () => {
       boundUserId: "user_123",
       timeoutMs: 30_000,
     });
-    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mailboxItemId: "mailbox_item_123",
+      }),
+    );
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
@@ -534,20 +539,18 @@ describe("hosted email worker ingress", () => {
       }),
       boundUserId: "user_456",
     }));
-    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mailboxItemId: "mailbox_item_123",
+      }),
+    );
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
-  it("returns after nudging when the hosted email runner is already running", async () => {
+  it("starts the durable email nudge workflow after appending the mailbox item", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    mocks.nudgeHostedRunner.mockResolvedValueOnce({
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: true,
-      inFlight: true,
-      nextAlarmAt: null,
-    });
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
         userId: "user_456",
@@ -571,39 +574,9 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, env);
 
-    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-  });
-
-  it("accepts email ingress when the post-append Durable Object nudge fails", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-
-    mocks.nudgeHostedRunner.mockRejectedValueOnce(new Error("nudge failed"));
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({
-        userId: "user_456",
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
-    const env = createWorkerEnv(bucket);
-
-    await handleHostedEmailIngress({
-      authenticatedSender: AUTHENTICATED_SENDER,
-      from: "owner@example.com",
-      raw: buildRawEmail({
-        from: "Owner <owner@example.com>",
-        to: "assistant@mail.example.test",
-      }),
-      to: "assistant@mail.example.test",
-    }, env);
-
-    expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith({
       baseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
       boundUserId: "user_456",
@@ -612,28 +585,11 @@ describe("hosted email worker ingress", () => {
       mailboxItemId: "mailbox_item_123",
       timeoutMs: TEST_ENVIRONMENT.webControlTimeoutMs,
     });
-    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.email",
-        details: expect.objectContaining({
-          reason: "runner-nudge-failed",
-        }),
-        level: "warn",
-        message: "Hosted email runner nudge failed after appending the canonical ingress event.",
-      }),
-    );
   });
 
-  it("starts the durable email nudge workflow when the direct nudge is not accepted", async () => {
+  it("does not use a direct Durable Object nudge on the email handoff path", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
 
-    mocks.nudgeHostedRunner.mockResolvedValueOnce({
-      accepted: false,
-      alarmScheduled: false,
-      alreadyRunning: false,
-      inFlight: false,
-      nextAlarmAt: null,
-    });
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
         userId: "user_456",
@@ -657,27 +613,57 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, env);
 
-    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith({
+      baseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+      boundUserId: "user_456",
+      callbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      fetchImpl: fetch,
+      mailboxItemId: "mailbox_item_123",
+      timeoutMs: TEST_ENVIRONMENT.webControlTimeoutMs,
+    });
+  });
+
+  it("does not branch on direct nudge acceptance before starting the email workflow", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const env = createWorkerEnv(bucket);
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      to: "assistant@mail.example.test",
+    }, env);
+
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
       expect.objectContaining({
         mailboxItemId: "mailbox_item_123",
       }),
     );
-    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.email",
-        details: expect.objectContaining({
-          reason: "runner-nudge-not-accepted",
-        }),
-        level: "warn",
-      }),
-    );
   });
 
-  it("fails email ingress when both direct nudge and durable workflow handoff fail", async () => {
+  it("fails email ingress when the durable workflow handoff fails", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
 
-    mocks.nudgeHostedRunner.mockRejectedValueOnce(new Error("nudge failed"));
     mocks.startHostedEmailIngressNudgeWorkflowInWeb.mockRejectedValueOnce(
       new Error("workflow unavailable"),
     );
@@ -704,7 +690,8 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, env)).rejects.toThrow("workflow unavailable");
 
-    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledTimes(1);
     expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -713,7 +700,7 @@ describe("hosted email worker ingress", () => {
           reason: "runner-nudge-workflow-start-failed",
         }),
         level: "warn",
-        message: "Hosted email runner nudge workflow failed to start after direct nudge failure.",
+        message: "Hosted email runner nudge workflow failed to start after appending the canonical ingress event.",
       }),
     );
   });
