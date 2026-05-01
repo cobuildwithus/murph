@@ -506,6 +506,30 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     }));
   });
 
+  it("projects Daily Step Floor safety outcomes into protocol signal cards", () => {
+    const protocolTab = loadGeneratedHealthCommonsWebExperimentProtocolTab({
+      routeId: "daily-step-floor",
+    });
+
+    expect(protocolTab?.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual([
+      "resting-heart-rate",
+      "estimated-vo2max",
+      "sleep-efficiency",
+      "walking-cadence",
+      "moderate-to-vigorous-activity-minutes",
+      "morning-blood-pressure",
+      "sedentary-time",
+      "walking-bout-minutes",
+      "musculoskeletal-pain",
+      "walking-safety-events",
+    ]);
+    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
+      biomarkerRouteId: "walking-safety-events",
+      expected: "Could trend lower",
+      protocolProminence: "focus",
+    }));
+  });
+
   it("rejects route-index projection paths that do not match the route bundle id", async () => {
     const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
     const finnishRoute = routeIndex.routes.find((entry) =>

@@ -1083,10 +1083,11 @@ function listProtocolBiomarkers(
   entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
 ): HealthCommonsCatalogEntity[] {
   const testPlan = protocol.testPlans?.[0];
-  const orderedKeys = [
+  const orderedKeys = Array.from(new Set([
     testPlan?.primaryBiomarkerKey,
     ...(testPlan?.secondaryBiomarkerKeys ?? []),
-  ].filter((key): key is string => typeof key === "string");
+    ...(testPlan?.safetyOutcomeKeys ?? []),
+  ].filter((key): key is string => typeof key === "string")));
   const fromTestPlan = orderedKeys.flatMap((key) => {
     const entity = entitiesByKey.get(stripRevision(key));
     return entity?.entityType === "biomarker" ? [entity] : [];
