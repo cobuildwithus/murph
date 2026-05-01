@@ -264,8 +264,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   windowStart: "isoTimestamp",
 });
 
-export function buildHostedExecutionDeviceSyncConnectLinkPath(provider: string): string {
-  return `/api/internal/device-sync/providers/${encodeURIComponent(provider)}/connect-link`;
+export function buildHostedExecutionDeviceSyncConnectLinkPath(connectTarget: string): string {
+  return `/api/internal/device-sync/connect-targets/${encodeURIComponent(connectTarget)}/connect-link`;
 }
 
 export function parseHostedExecutionDeviceSyncConnectLinkResponse(

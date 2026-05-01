@@ -14,10 +14,12 @@ import {
   deviceConnectResultSchema,
   deviceDaemonStatusResultSchema,
   deviceProviderListResultSchema,
+  deviceSyncConnectTargetSchema,
   deviceSyncAccountStatusSchema,
   deviceSyncProviderKeySchema,
   deviceSyncProviderKeyValues,
   formatDeviceSyncProviderKeyList,
+  normalizeDeviceSyncConnectTargetKey,
   normalizeDeviceSyncProviderKey,
 } from '../src/device-cli-contracts.ts'
 import {
@@ -170,6 +172,12 @@ test('device CLI contracts normalize provider keys and parse result payloads', (
   assert.throws(
     () => deviceSyncProviderKeySchema.parse('unsupported-provider'),
     /Unsupported device-sync provider/u,
+  )
+  assert.equal(normalizeDeviceSyncConnectTargetKey('  Fitbit Alta  '), 'fitbit_alta')
+  assert.equal(deviceSyncConnectTargetSchema.parse('Fitbit Alta'), 'Fitbit Alta')
+  assert.throws(
+    () => deviceSyncConnectTargetSchema.parse('junction'),
+    /Expected a device connect target/u,
   )
   assert.ok(formatDeviceSyncProviderKeyList().includes(provider))
 

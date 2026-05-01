@@ -57,7 +57,7 @@ vault-cli automation show <lookup> --vault <path>
 vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]
 vault-cli automation import-json --vault <path> --input @payload.json|-
 vault-cli device provider list --vault <path> [--baseUrl <url>]
-vault-cli device connect <provider> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]
+vault-cli device connect <target> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]
 vault-cli device account list --vault <path> [--baseUrl <url>] [--provider <provider>]
 vault-cli device account show <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device account reconcile <accountId> --vault <path> [--baseUrl <url>]

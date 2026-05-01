@@ -446,7 +446,7 @@ Local-agent routes:
 
 Internal hosted maintenance and Cloudflare callback routes:
 
-- `POST /api/internal/device-sync/providers/:provider/connect-link`
+- `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link`
 - `POST /api/internal/device-sync/runtime/snapshot`
 - `POST /api/internal/device-sync/runtime/apply`
 - `GET /api/internal/hosted-execution/usage/cron`

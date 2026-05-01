@@ -89,8 +89,13 @@ export class HostedDeviceSyncControlPlane {
     return this.connections.getConnectionStatus(userId, publicConnectionId);
   }
 
-  async startConnection(userId: string, provider: string, returnTo: string | null) {
-    return this.connections.startConnection(userId, provider, returnTo);
+  async startConnection(
+    userId: string,
+    provider: string,
+    returnTo: string | null,
+    options: { sourceProviderSlug?: string | null } = {},
+  ) {
+    return this.connections.startConnection(userId, provider, returnTo, options);
   }
 
   async handleOAuthCallback(provider: string) {

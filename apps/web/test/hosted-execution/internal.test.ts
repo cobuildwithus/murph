@@ -186,7 +186,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     const request = await createSignedCallbackRequest({
       body: "",
       nonce: "abcdef0123456789abcdef0123456789",
-      path: "/api/internal/device-sync/providers/whoop/connect-link",
+      path: "/api/internal/device-sync/connect-targets/whoop/connect-link",
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     });

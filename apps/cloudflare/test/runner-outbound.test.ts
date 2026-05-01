@@ -60,8 +60,8 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
       provider: "google",
       returnPath: "/settings/sync",
     },
-    name: "device-sync provider connect-link",
-    path: "/api/internal/device-sync/providers/google/connect-link",
+    name: "device-sync connect-target connect-link",
+    path: "/api/internal/device-sync/connect-targets/google/connect-link",
   },
   {
     body: {
@@ -364,7 +364,7 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request("http://device-sync.worker/api/internal/device-sync/providers/whoop/connect-link", {
+      new Request("http://device-sync.worker/api/internal/device-sync/connect-targets/whoop/connect-link", {
         headers: createRunnerProxyHeaders(),
         method: "POST",
       }),

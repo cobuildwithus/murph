@@ -6,18 +6,23 @@ import {
   deviceAccountReconcileResultSchema,
   deviceAccountShowResultSchema,
   deviceConnectResultSchema,
+  deviceSyncConnectTargetSchema,
   deviceDaemonStartResultSchema,
   deviceDaemonStatusResultSchema,
   deviceDaemonStopResultSchema,
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
   deviceSyncProviderKeySchema,
+  normalizeDeviceSyncConnectTargetKey,
   normalizeDeviceSyncProviderKey,
 } from '@murphai/operator-config/device-cli-contracts'
 import type { DeviceSyncServices } from '../device-services.js'
 
 const providerNameSchema = deviceSyncProviderKeySchema
   .describe('Live device-sync provider key such as garmin, whoop, or oura.')
+
+const connectTargetNameSchema = deviceSyncConnectTargetSchema
+  .describe('Device connect target returned by device provider list, such as fitbit, garmin, whoop, or oura.')
 
 const accountIdSchema = z
   .string()
@@ -26,6 +31,17 @@ const accountIdSchema = z
 
 function normalizeProviderName(value: string): string {
   return normalizeDeviceSyncProviderKey(value) ?? value.trim().toLowerCase()
+}
+
+function normalizeConnectTargetName(value: string): string {
+  const normalized = normalizeDeviceSyncConnectTargetKey(value)
+  if (normalized === 'junction') {
+    throw new Error(
+      'Expected a device connect target such as garmin, whoop, oura, or fitbit.',
+    )
+  }
+
+  return normalized ?? normalizeProviderName(value)
 }
 
 const invalidReturnToCharacterPattern = /[\u0000-\u001F\u007F]/u
@@ -99,9 +115,9 @@ export function registerDeviceCommands(
 
   device.command('connect', {
     description:
-      'Start a browser-based OAuth connection for one device provider through the Murph-managed device daemon.',
+      'Start a browser-based OAuth connection for one device connect target through the Murph-managed device daemon.',
     args: z.object({
-      provider: providerNameSchema,
+      provider: connectTargetNameSchema,
     }),
     options: deviceControlOptionsSchema.extend({
       returnTo: z
@@ -126,7 +142,7 @@ export function registerDeviceCommands(
     async run({ args, options }) {
       return services.connect({
         vault: options.vault,
-        provider: normalizeProviderName(args.provider),
+        provider: normalizeConnectTargetName(args.provider),
         baseUrl: options.baseUrl,
         returnTo: options.returnTo,
         open: options.open,

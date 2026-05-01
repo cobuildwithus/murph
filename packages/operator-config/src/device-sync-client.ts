@@ -113,6 +113,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
       provider: string
       returnTo?: string
       open?: boolean
+      sourceProviderSlug?: string | null
     }): Promise<{
       provider: string
       state: string
@@ -126,7 +127,12 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
         },
-        body: JSON.stringify(input.returnTo ? { returnTo: input.returnTo } : {}),
+        body: JSON.stringify({
+          ...(input.returnTo ? { returnTo: input.returnTo } : {}),
+          ...(input.sourceProviderSlug
+            ? { sourceProviderSlug: input.sourceProviderSlug }
+            : {}),
+        }),
       })
       const parsedPayload =
         deviceSyncBeginConnectionResponseSchema.safeParse(responsePayload)

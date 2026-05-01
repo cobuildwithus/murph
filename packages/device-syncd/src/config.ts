@@ -175,12 +175,20 @@ export {
   parseConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncRuntimeConfig,
 } from "./config/runtime-config.ts";
+export {
+  listConfiguredDeviceSyncConnectTargets,
+  normalizeDeviceSyncConnectTargetKey,
+  resolveConfiguredDeviceSyncConnectTarget,
+} from "./config/connect-targets.ts";
 
 export type {
   ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
 } from "./config/provider-configs.ts";
+export type {
+  DeviceSyncConnectTarget,
+} from "./config/connect-targets.ts";
 export type {
   ConfiguredDeviceSyncProviderCapabilities,
   DeviceSyncProviderCatalogEntry,

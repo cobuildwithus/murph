@@ -205,9 +205,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async createConnectLink(request) {
         connectLinkRequests.push(request);
         return {
-          authorizationUrl: `https://connect.example.test/${request.provider}`,
+          authorizationUrl: `https://connect.example.test/${request.connectTarget}`,
           expiresAt: "2026-04-29T00:05:00.000Z",
-          provider: request.provider,
+          provider: request.connectTarget,
           providerLabel: "WHOOP",
         };
       },
@@ -224,6 +224,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
       resolvedDeviceSync: {
         providerConfigs: {
+          junction: {
+            apiKey: "synthetic-junction-key",
+            clientUserIdSecret: "synthetic-junction-secret",
+            environment: "sandbox",
+            providerFilter: ["fitbit", "junction"],
+            region: "us",
+          },
           whoop: {
             clientId: "synthetic-whoop-client",
             clientSecret: "synthetic-whoop-secret",
@@ -240,6 +247,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       hosted: expect.objectContaining({
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
+          { label: "Fitbit", provider: "fitbit" },
         ],
         issueDeviceConnectLink: expect.any(Function),
         memberId: "member_synthetic_phase",
@@ -257,7 +265,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       providerLabel: "WHOOP",
     });
     expect(connectLinkRequests).toEqual([
-      { messagingReturnTarget: "telegram", provider: "whoop" },
+      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
     ]);
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -266,8 +274,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 1,
-        deviceConnectProviders: ["whoop"],
+        deviceConnectProviderCount: 2,
+        deviceConnectProviders: ["whoop", "fitbit"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -286,6 +294,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
+    expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-junction-secret");
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
   });
 

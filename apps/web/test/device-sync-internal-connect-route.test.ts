@@ -17,7 +17,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 type InternalDeviceSyncConnectLinkRouteModule = typeof import(
-  "../app/api/internal/device-sync/providers/[provider]/connect-link/route"
+  "../app/api/internal/device-sync/connect-targets/[connectTarget]/connect-link/route"
 );
 
 let internalDeviceSyncConnectLinkRoute: InternalDeviceSyncConnectLinkRouteModule;
@@ -25,12 +25,24 @@ let internalDeviceSyncConnectLinkRoute: InternalDeviceSyncConnectLinkRouteModule
 describe("device sync internal connect-link route", () => {
   beforeAll(async () => {
     internalDeviceSyncConnectLinkRoute = await import(
-      "../app/api/internal/device-sync/providers/[provider]/connect-link/route"
+      "../app/api/internal/device-sync/connect-targets/[connectTarget]/connect-link/route"
     );
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("GARMIN_CLIENT_ID", "");
+    vi.stubEnv("GARMIN_CLIENT_SECRET", "");
+    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
+    vi.stubEnv("JUNCTION_ENV", "");
+    vi.stubEnv("JUNCTION_REGION", "");
+    vi.stubEnv("OURA_CLIENT_ID", "");
+    vi.stubEnv("OURA_CLIENT_SECRET", "");
+    vi.stubEnv("STRAVA_CLIENT_ID", "");
+    vi.stubEnv("STRAVA_CLIENT_SECRET", "");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       startConnection: mocks.startConnection,
@@ -45,18 +57,19 @@ describe("device sync internal connect-link route", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("creates a hosted device connect link for the verified Cloudflare callback principal", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
         method: "POST",
       }),
       {
         params: Promise.resolve({
-          provider: "whoop",
+          connectTarget: "whoop",
         }),
       },
     );
@@ -67,6 +80,7 @@ describe("device sync internal connect-link route", () => {
       "member_123",
       "whoop",
       "/settings?tab=wearables",
+      { sourceProviderSlug: null },
     );
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
@@ -88,6 +102,47 @@ describe("device sync internal connect-link route", () => {
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
   });
 
+  it("resolves Junction-backed public connect targets at the web boundary", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret-value");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit,whoop,junction");
+    vi.stubEnv("JUNCTION_REGION", "us");
+    mocks.startConnection.mockResolvedValueOnce({
+      authorizationUrl: "https://link.junction.example.test/session/link-token",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "junction",
+      state: "opaque-state",
+    });
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/fitbit/connect-link", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          connectTarget: "fitbit",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "junction",
+      "/settings?tab=wearables",
+      { sourceProviderSlug: "fitbit" },
+    );
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl: "https://link.junction.example.test/session/link-token",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "fitbit",
+      providerLabel: "Fitbit",
+    });
+  });
+
   it.each([
     {
       expectedReturnTo: "/api/device-sync/messaging-return?target=imessage",
@@ -101,7 +156,7 @@ describe("device sync internal connect-link route", () => {
     "uses the $messagingReturnTarget messaging return route when requested by the signed callback",
     async ({ expectedReturnTo, messagingReturnTarget }) => {
       const response = await internalDeviceSyncConnectLinkRoute.POST(
-        new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
           body: JSON.stringify({ messagingReturnTarget }),
           headers: {
             "content-type": "application/json",
@@ -110,7 +165,7 @@ describe("device sync internal connect-link route", () => {
         }),
         {
           params: Promise.resolve({
-            provider: "whoop",
+            connectTarget: "whoop",
           }),
         },
       );
@@ -120,6 +175,7 @@ describe("device sync internal connect-link route", () => {
         "member_123",
         "whoop",
         expectedReturnTo,
+        { sourceProviderSlug: null },
       );
     },
   );
@@ -128,7 +184,7 @@ describe("device sync internal connect-link route", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
         body: JSON.stringify({ messagingReturnTarget: "sms://open" }),
         headers: {
           "content-type": "application/json",
@@ -137,7 +193,7 @@ describe("device sync internal connect-link route", () => {
       }),
       {
         params: Promise.resolve({
-          provider: "whoop",
+          connectTarget: "whoop",
         }),
       },
     );
@@ -188,12 +244,12 @@ describe("device sync internal connect-link route", () => {
     }));
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
         method: "POST",
       }),
       {
         params: Promise.resolve({
-          provider: "whoop",
+          connectTarget: "whoop",
         }),
       },
     );
@@ -237,12 +293,12 @@ describe("device sync internal connect-link route", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/%E0%A4%A/connect-link", {
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/%E0%A4%A/connect-link", {
         method: "POST",
       }),
       {
         params: Promise.resolve({
-          provider: "%E0%A4%A",
+          connectTarget: "%E0%A4%A",
         }),
       },
     );
@@ -262,7 +318,7 @@ describe("device sync internal connect-link route", () => {
       expect.objectContaining({
         messagingReturnTarget: null,
         provider: null,
-        stage: "provider_param",
+        stage: "connect_target_param",
         status: "failed",
       }),
     );
@@ -283,12 +339,12 @@ describe("device sync internal connect-link route", () => {
     );
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
         method: "POST",
       }),
       {
         params: Promise.resolve({
-          provider: "whoop",
+          connectTarget: "whoop",
         }),
       },
     );
@@ -348,12 +404,12 @@ describe("device sync internal connect-link route", () => {
     });
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
         method: "POST",
       }),
       {
         params: Promise.resolve({
-          provider: "whoop",
+          connectTarget: "whoop",
         }),
       },
     );
@@ -407,50 +463,35 @@ describe("device sync internal connect-link route", () => {
   it("omits unsafe provider and error code values from diagnostics", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const unsafeError = new Error("Synthetic route failure.");
-    Object.defineProperty(unsafeError, "code", {
-      enumerable: true,
-      value: "sk_live_SYNTHETICSECRET",
-    });
-    Object.defineProperty(unsafeError, "status", {
-      enumerable: true,
-      value: 500,
-    });
-    mocks.startConnection.mockRejectedValueOnce(unsafeError);
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
-      new Request("https://join.example.test/api/internal/device-sync/providers/https%3A%2F%2Fsecret.example%2Foauth%3Fstate%3Dopaque-secret/connect-link", {
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/https%3A%2F%2Fsecret.example%2Foauth%3Fstate%3Dopaque-secret/connect-link", {
         method: "POST",
       }),
       {
         params: Promise.resolve({
-          provider: "https%3A%2F%2Fsecret.example%2Foauth%3Fstate%3Dopaque-secret",
+          connectTarget: "https%3A%2F%2Fsecret.example%2Foauth%3Fstate%3Dopaque-secret",
         }),
       },
     );
 
-    expect(response.status).toBe(500);
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_123",
-      "https://secret.example/oauth?state=opaque-secret",
-      "/settings?tab=wearables",
-    );
+    expect(response.status).toBe(404);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted internal device-sync connect-link diagnostic.",
-      {
-        errorHttpStatus: 500,
+      expect.objectContaining({
+        errorCode: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+        errorHttpStatus: 404,
         messagingReturnTarget: null,
         provider: null,
-        stage: "control_plane",
+        stage: "connect_target_resolution",
         status: "failed",
-      },
+      }),
     );
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("secret.example");
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("opaque-secret");
-    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("sk_live_SYNTHETICSECRET");
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret.example");
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("opaque-secret");
-    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("sk_live_SYNTHETICSECRET");
   });
 
   it("rejects GET requests on the internal connect-link route", async () => {

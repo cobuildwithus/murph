@@ -1,10 +1,14 @@
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
-import { configuredDeviceSyncProviderKeys } from "@murphai/device-syncd/config";
+import {
+  configuredDeviceSyncProviderKeys,
+  listConfiguredDeviceSyncConnectTargets,
+  readConfiguredDeviceSyncProviderConfigs,
+  resolveConfiguredDeviceSyncConnectTarget,
+} from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http";
-import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/provider-label";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -32,6 +36,7 @@ const HOSTED_DEVICE_CONNECT_DIAGNOSTIC_ERROR_CODE_MAX_LENGTH = 96;
 
 type HostedDeviceConnectLinkSetupPhase =
   | "callback_verification_setup"
+  | "connect_target_setup"
   | "control_plane_setup";
 
 class HostedDeviceConnectLinkBackendSetupError extends Error {
@@ -63,31 +68,34 @@ export async function GET(): Promise<Response> {
 
 export const POST = withJsonError(async (
   request: Request,
-  context: { params: Promise<{ provider: string }> },
+  context: { params: Promise<{ connectTarget: string }> },
 ) => {
   let stage: HostedDeviceConnectLinkRouteStage = "callback_verification";
-  let provider: string | null = null;
+  let connectTarget: string | null = null;
   let messagingReturnTarget: HostedAssistantDeviceConnectMessagingReturnTarget | null = null;
 
   try {
     const userId = await requireHostedDeviceConnectCallbackRequest(request);
-    stage = "provider_param";
-    provider = await resolveDecodedRouteParam(context.params, "provider");
+    stage = "connect_target_param";
+    connectTarget = await resolveDecodedRouteParam(context.params, "connectTarget");
     stage = "request_body";
     const body = await readHostedDeviceConnectRequestBody(request);
     stage = "messaging_return_target";
     messagingReturnTarget = readHostedDeviceConnectMessagingReturnTarget(body);
+    stage = "connect_target_resolution";
+    const target = resolveHostedDeviceConnectTarget(connectTarget);
     stage = "control_plane";
     const result = await startHostedDeviceConnection(
       request,
       userId,
-      provider,
+      target.provider,
+      target.sourceProviderSlug ?? null,
       messagingReturnTarget,
     );
     logHostedDeviceConnectRouteDiagnostic({
       expiresAtPresent: Boolean(result.expiresAt),
       messagingReturnTarget,
-      provider: result.provider,
+      provider: target.connectTarget,
       stage: "control_plane",
       status: "issued",
     });
@@ -95,14 +103,14 @@ export const POST = withJsonError(async (
     return jsonOk({
       authorizationUrl: result.authorizationUrl,
       expiresAt: result.expiresAt,
-      provider: result.provider,
-      providerLabel: formatHostedDeviceSyncProviderLabel(result.provider),
+      provider: target.connectTarget,
+      providerLabel: target.label,
     });
   } catch (error) {
     logHostedDeviceConnectRouteDiagnostic({
       error,
       messagingReturnTarget,
-      provider,
+      provider: connectTarget,
       stage,
       status: "failed",
     });
@@ -112,9 +120,10 @@ export const POST = withJsonError(async (
 
 type HostedDeviceConnectLinkRouteStage =
   | "callback_verification"
+  | "connect_target_param"
+  | "connect_target_resolution"
   | "control_plane"
   | "messaging_return_target"
-  | "provider_param"
   | "request_body";
 
 async function requireHostedDeviceConnectCallbackRequest(request: Request): Promise<string> {
@@ -129,6 +138,7 @@ async function startHostedDeviceConnection(
   request: Request,
   userId: string,
   provider: string,
+  sourceProviderSlug: string | null,
   messagingReturnTarget: HostedAssistantDeviceConnectMessagingReturnTarget | null,
 ) {
   try {
@@ -137,10 +147,34 @@ async function startHostedDeviceConnection(
       userId,
       provider,
       resolveHostedDeviceConnectReturnTo(messagingReturnTarget),
+      { sourceProviderSlug },
     );
   } catch (error) {
     remapHostedDeviceConnectBackendSetupError(error, "control_plane_setup");
   }
+}
+
+function resolveHostedDeviceConnectTarget(connectTarget: string) {
+  let target: ReturnType<typeof resolveConfiguredDeviceSyncConnectTarget> = null;
+  try {
+    target = resolveConfiguredDeviceSyncConnectTarget(
+      readConfiguredDeviceSyncProviderConfigs(process.env),
+      connectTarget,
+    );
+  } catch (error) {
+    remapHostedDeviceConnectBackendSetupError(error, "connect_target_setup");
+  }
+
+  if (!target) {
+    throw deviceSyncError({
+      code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+      httpStatus: 404,
+      message: "Hosted device connect target is not configured.",
+      retryable: false,
+    });
+  }
+
+  return target;
 }
 
 async function readHostedDeviceConnectRequestBody(
@@ -301,5 +335,21 @@ function readHostedDeviceConnectRouteProvider(provider: string | null): string |
   }
 
   const normalized = provider.trim().toLowerCase();
-  return HOSTED_DEVICE_CONNECT_DIAGNOSTIC_PROVIDER_IDS.has(normalized) ? normalized : null;
+  return readHostedDeviceConnectDiagnosticProviderIds().has(normalized) ? normalized : null;
+}
+
+function readHostedDeviceConnectDiagnosticProviderIds(): Set<string> {
+  const providerIds = new Set(HOSTED_DEVICE_CONNECT_DIAGNOSTIC_PROVIDER_IDS);
+
+  try {
+    for (const target of listConfiguredDeviceSyncConnectTargets(
+      readConfiguredDeviceSyncProviderConfigs(process.env),
+    )) {
+      providerIds.add(target.connectTarget);
+    }
+  } catch {
+    return providerIds;
+  }
+
+  return providerIds;
 }

@@ -250,6 +250,7 @@ export interface ProviderBeginConnectionContext {
   now: string;
   scopes: string[];
   ownerId?: string | null;
+  sourceProviderSlug?: string | null;
 }
 
 export interface ProviderBeginConnectionResult {
@@ -428,6 +429,7 @@ export interface StartConnectionInput {
   provider: string;
   returnTo?: string | null;
   ownerId?: string | null;
+  sourceProviderSlug?: string | null;
 }
 
 export interface BeginConnectionResult {

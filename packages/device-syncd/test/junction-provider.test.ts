@@ -220,6 +220,62 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.equal(requests.every((request) => request.headers.get("x-vital-api-key") === "sk_us_test_123"), true);
 });
 
+test("Junction beginConnection narrows Link to the requested source provider", async () => {
+  const requests: Array<{ body: unknown; url: string }> = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    const url = readUrl(input);
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
+    requests.push({ body, url });
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+      return createJsonResponse({ id: "junction-user-1" });
+    }
+
+    if (url === "https://api.sandbox.us.junction.com/v2/link/token") {
+      return createJsonResponse({ link_web_url: "https://link.junction.com/session/link-token-1" });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  await requireValue(provider.beginConnection)({
+    state: "state-1",
+    callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    now: "2026-04-03T00:00:00.000Z",
+    scopes: [],
+    ownerId: "owner-internal-id-123",
+    sourceProviderSlug: "fitbit",
+  });
+
+  const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
+  assert.deepEqual(
+    typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody
+      ? linkBody.filter_on_providers
+      : null,
+    ["fitbit"],
+  );
+});
+
+test("Junction beginConnection rejects disabled source providers before external calls", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+
+  await assert.rejects(
+    () => requireValue(provider.beginConnection)({
+      state: "state-1",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      now: "2026-04-03T00:00:00.000Z",
+      scopes: [],
+      ownerId: "owner-internal-id-123",
+      sourceProviderSlug: "apple_health_kit",
+    }),
+    /Junction source provider is not enabled/u,
+  );
+});
+
 test("Junction completeConnection treats Link callback as weak and enqueues scalar polling windows", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

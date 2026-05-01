@@ -20,7 +20,7 @@ export const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issu
 export const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
   "/api/internal/hosted-execution/billing/stripe/customer/resolve";
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
-  /^\/api\/internal\/device-sync\/providers\/[^/]+\/connect-link$/u;
+  /^\/api\/internal\/device-sync\/connect-targets\/[^/]+\/connect-link$/u;
 
 export function isAllowedHostedRunnerWebControlPath(path: string): boolean {
   return isAllowedHostedRunnerWebControlRequest({

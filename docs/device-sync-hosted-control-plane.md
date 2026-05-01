@@ -43,7 +43,7 @@ It does not own canonical health-data import, token authority, or canonical host
 - durable Postgres-owned connection summaries, webhook traces, token-audit history, sparse wake signals, and agent-session state
 - token export and refresh flows for the local agent
 - disconnect, pairing, and other hosted operational control flows
-- the signed internal runtime snapshot, runtime apply, and provider connect-link routes consumed by hosted execution
+- the signed internal runtime snapshot, runtime apply, and connect-target link routes consumed by hosted execution
 
 `apps/web` must not:
 
@@ -187,7 +187,7 @@ These are authenticated by local-agent credentials, not browser cookies.
 
 - `POST /api/internal/device-sync/runtime/snapshot` on `apps/web`
 - `POST /api/internal/device-sync/runtime/apply` on `apps/web`
-- `POST /api/internal/device-sync/providers/:provider/connect-link` on `apps/web`
+- `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link` on `apps/web`
 
 These routes are authenticated by signed server-to-server traffic that never reaches the browser. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution.
 

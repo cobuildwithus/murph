@@ -17,7 +17,7 @@ import {
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {
     expect(buildHostedExecutionDeviceSyncConnectLinkPath("oura/webhook")).toBe(
-      "/api/internal/device-sync/providers/oura%2Fwebhook/connect-link",
+      "/api/internal/device-sync/connect-targets/oura%2Fwebhook/connect-link",
     );
     expect(
       parseHostedExecutionDeviceSyncConnectLinkResponse({
