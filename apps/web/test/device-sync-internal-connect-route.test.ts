@@ -48,6 +48,8 @@ describe("device sync internal connect-link route", () => {
   });
 
   it("creates a hosted device connect link for the verified Cloudflare callback principal", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
         method: "POST",
@@ -72,6 +74,18 @@ describe("device sync internal connect-link route", () => {
       provider: "whoop",
       providerLabel: "WHOOP",
     });
+    expect(infoSpy).toHaveBeenCalledWith(
+      "Hosted internal device-sync connect-link diagnostic.",
+      {
+        expiresAtPresent: true,
+        messagingReturnTarget: null,
+        provider: "whoop",
+        stage: "control_plane",
+        status: "issued",
+      },
+    );
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("provider.example.test");
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
   });
 
   it.each([
@@ -138,6 +152,18 @@ describe("device sync internal connect-link route", () => {
       },
     });
     expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted internal device-sync connect-link diagnostic.",
+      expect.objectContaining({
+        errorCode: "HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET",
+        errorHttpStatus: 400,
+        errorRetryable: false,
+        messagingReturnTarget: null,
+        provider: "whoop",
+        stage: "messaging_return_target",
+        status: "failed",
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
       "Hosted device-sync settings route failed.",
       expect.objectContaining({
         errorClass: "client_request",
@@ -182,6 +208,18 @@ describe("device sync internal connect-link route", () => {
       },
     });
     expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted internal device-sync connect-link diagnostic.",
+      expect.objectContaining({
+        errorCode: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+        errorHttpStatus: 401,
+        errorRetryable: false,
+        messagingReturnTarget: null,
+        provider: null,
+        stage: "callback_verification",
+        status: "failed",
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
       "Hosted device-sync settings route failed.",
       expect.objectContaining({
         errorClass: "authorization",
@@ -220,6 +258,15 @@ describe("device sync internal connect-link route", () => {
       },
     });
     expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted internal device-sync connect-link diagnostic.",
+      expect.objectContaining({
+        messagingReturnTarget: null,
+        provider: null,
+        stage: "provider_param",
+        status: "failed",
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
       "Hosted device-sync settings route failed.",
       expect.objectContaining({
         errorType: "InvalidRouteParamEncodingError",
@@ -229,6 +276,7 @@ describe("device sync internal connect-link route", () => {
 
   it("maps callback verification setup failures to a retryable unavailable response", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     mocks.requireHostedCloudflareCallbackRequest.mockRejectedValue(
       new TypeError("Callback verification is not configured."),
@@ -274,10 +322,26 @@ describe("device sync internal connect-link route", () => {
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
       "Callback verification is not configured",
     );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted internal device-sync connect-link diagnostic.",
+      expect.objectContaining({
+        errorCode: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
+        errorHttpStatus: 503,
+        errorRetryable: true,
+        messagingReturnTarget: null,
+        provider: null,
+        stage: "callback_verification",
+        status: "failed",
+      }),
+    );
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(
+      "Callback verification is not configured",
+    );
   });
 
   it("maps control-plane setup failures to a retryable unavailable response", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     mocks.createHostedDeviceSyncControlPlane.mockImplementation(() => {
       throw new TypeError("Provider configuration is incomplete.");
@@ -323,6 +387,70 @@ describe("device sync internal connect-link route", () => {
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
       "Provider configuration is incomplete",
     );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted internal device-sync connect-link diagnostic.",
+      expect.objectContaining({
+        errorCode: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
+        errorHttpStatus: 503,
+        errorRetryable: true,
+        messagingReturnTarget: null,
+        provider: "whoop",
+        stage: "control_plane",
+        status: "failed",
+      }),
+    );
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(
+      "Provider configuration is incomplete",
+    );
+  });
+
+  it("omits unsafe provider and error code values from diagnostics", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unsafeError = new Error("Synthetic route failure.");
+    Object.defineProperty(unsafeError, "code", {
+      enumerable: true,
+      value: "sk_live_SYNTHETICSECRET",
+    });
+    Object.defineProperty(unsafeError, "status", {
+      enumerable: true,
+      value: 500,
+    });
+    mocks.startConnection.mockRejectedValueOnce(unsafeError);
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/https%3A%2F%2Fsecret.example%2Foauth%3Fstate%3Dopaque-secret/connect-link", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "https%3A%2F%2Fsecret.example%2Foauth%3Fstate%3Dopaque-secret",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(500);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "https://secret.example/oauth?state=opaque-secret",
+      "/settings?tab=wearables",
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted internal device-sync connect-link diagnostic.",
+      {
+        errorHttpStatus: 500,
+        messagingReturnTarget: null,
+        provider: null,
+        stage: "control_plane",
+        status: "failed",
+      },
+    );
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("secret.example");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("opaque-secret");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("sk_live_SYNTHETICSECRET");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret.example");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("opaque-secret");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("sk_live_SYNTHETICSECRET");
   });
 
   it("rejects GET requests on the internal connect-link route", async () => {

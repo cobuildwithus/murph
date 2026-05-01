@@ -1,5 +1,6 @@
 import {
   buildHostedExecutionRuntimeTimerWake,
+  deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeRedactedJson,
@@ -100,8 +101,17 @@ export async function runHostedWorkspaceAssistantPhase(
   const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
   const issueDeviceConnectLink = resolveHostedWorkspaceIssueDeviceConnectLink({
     deviceConnectProviders,
-    runtime: input.runtime,
+    input,
   });
+  if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
+    await writeHostedDeviceConnectRuntimeLog({
+      deviceConnectProviders,
+      input,
+      issueLinkAvailable: issueDeviceConnectLink !== undefined,
+      stage: "context",
+      status: issueDeviceConnectLink ? "available" : "unavailable",
+    });
+  }
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget({
     hosted: {
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
@@ -748,17 +758,138 @@ function resolveHostedWorkspaceDeviceConnectProviders(
 
 function resolveHostedWorkspaceIssueDeviceConnectLink(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): NonNullable<AssistantExecutionContext["hosted"]>["issueDeviceConnectLink"] | undefined {
-  const deviceSyncPort = input.runtime.platform.deviceSyncPort ?? null;
+  const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
   if (!deviceSyncPort || input.deviceConnectProviders.length === 0) {
     return undefined;
   }
 
-  return ({ messagingReturnTarget, provider }) => deviceSyncPort.createConnectLink({
-    ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
-    provider,
+  return async ({ messagingReturnTarget, provider }) => {
+    await writeHostedDeviceConnectRuntimeLog({
+      deviceConnectProviders: input.deviceConnectProviders,
+      input: input.input,
+      issueLinkAvailable: true,
+      messagingReturnTarget,
+      provider,
+      stage: "request",
+      status: "requested",
+    });
+
+    try {
+      const result = await deviceSyncPort.createConnectLink({
+        ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+        provider,
+      });
+      await writeHostedDeviceConnectRuntimeLog({
+        deviceConnectProviders: input.deviceConnectProviders,
+        expiresAtPresent: Boolean(result.expiresAt),
+        input: input.input,
+        issueLinkAvailable: true,
+        messagingReturnTarget,
+        provider: result.provider,
+        stage: "request",
+        status: "issued",
+      });
+      return result;
+    } catch (error) {
+      await writeHostedDeviceConnectRuntimeLog({
+        deviceConnectProviders: input.deviceConnectProviders,
+        error,
+        input: input.input,
+        issueLinkAvailable: true,
+        messagingReturnTarget,
+        provider,
+        stage: "request",
+        status: "failed",
+      });
+      throw error;
+    }
+  };
+}
+
+function shouldWriteHostedDeviceConnectContextLog(input: {
+  deviceConnectProviders: readonly { label: string; provider: string }[];
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): boolean {
+  return input.deviceConnectProviders.length > 0
+    || input.input.runtime.platform.deviceSyncPort != null
+    || input.input.runtime.resolvedConfig.deviceSync !== null;
+}
+
+async function writeHostedDeviceConnectRuntimeLog(input: {
+  deviceConnectProviders: readonly { label: string; provider: string }[];
+  error?: unknown;
+  expiresAtPresent?: boolean;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  issueLinkAvailable: boolean;
+  messagingReturnTarget?: string | null;
+  provider?: string | null;
+  stage: "context" | "request";
+  status: "available" | "failed" | "issued" | "requested" | "unavailable";
+}): Promise<void> {
+  const errorCode = input.error === undefined
+    ? null
+    : deriveHostedExecutionErrorCode(input.error);
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      ...(errorCode ? { errorCode } : {}),
+      component: "assistant",
+      eventCode: "assistant.device_connect",
+      level: input.status === "failed" ? "warn" : "info",
+      phase: "invoke",
+      redactedJson: {
+        deviceConnectIssueLinkAvailable: input.issueLinkAvailable,
+        deviceConnectPortPresent: input.input.runtime.platform.deviceSyncPort != null,
+        deviceConnectProviderCount: input.deviceConnectProviders.length,
+        deviceConnectProviders: input.deviceConnectProviders
+          .map((provider) => toHostedRuntimeLogCode(provider.provider))
+          .filter((provider) => provider !== "unclassified")
+          .slice(0, 16),
+        deviceConnectStage: input.stage,
+        deviceConnectStatus: input.status,
+        ...(errorCode ? { errorCode } : {}),
+        ...(input.error === undefined
+          ? {}
+          : { errorStatus: readHostedDeviceConnectErrorStatus(input.error) }),
+        ...(input.expiresAtPresent === undefined
+          ? {}
+          : { expiresAtPresent: input.expiresAtPresent }),
+        ...(input.messagingReturnTarget
+          ? { deviceConnectReturnTarget: toHostedRuntimeLogCode(input.messagingReturnTarget) }
+          : {}),
+        ...(input.provider
+          ? { provider: toHostedRuntimeLogCode(input.provider) }
+          : {}),
+      },
+    },
+    platform: input.input.platform,
   });
+}
+
+function readHostedDeviceConnectErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  for (const property of ["status", "statusCode", "responseStatus"] as const) {
+    const value = Reflect.get(error, property);
+    if (
+      typeof value === "number"
+      && Number.isInteger(value)
+      && value >= 100
+      && value <= 599
+    ) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 function assistantMetricsProgressed(

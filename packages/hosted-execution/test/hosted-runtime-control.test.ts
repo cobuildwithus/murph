@@ -79,6 +79,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.imported");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.appended");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.dedupe_conflict");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("assistant.device_connect");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.usage_export_finished");
@@ -669,6 +670,26 @@ describe("hosted runtime control contracts", () => {
       level: "info",
       phase: "invoke",
     }).eventCode).toBe("assistant.pass_finished");
+    expect(parseHostedRuntimeLogRequest({
+      entries: [{
+        at: "2026-04-26T00:00:04.500Z",
+        component: "assistant",
+        eventCode: "assistant.device_connect",
+        level: "info",
+        phase: "invoke",
+        redactedJson: {
+          deviceConnectIssueLinkAvailable: true,
+          deviceConnectPortPresent: true,
+          deviceConnectProviderCount: 1,
+          deviceConnectProviders: ["whoop"],
+          deviceConnectReturnTarget: "telegram",
+          deviceConnectStage: "request",
+          deviceConnectStatus: "issued",
+          expiresAtPresent: true,
+          provider: "whoop",
+        },
+      }],
+    }).entries[0]?.eventCode).toBe("assistant.device_connect");
     expect(parseHostedRuntimeLogEntry({
       at: "2026-04-26T00:00:05.000Z",
       component: "mailbox",
