@@ -231,6 +231,17 @@ test("Junction provider filters non-Link routes from hosted web Link", () => {
   );
 });
 
+test("Junction provider rejects filters with no hosted Link providers", () => {
+  assert.throws(
+    () => createJunctionProvider(async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    }, {
+      providerFilter: ["accuchek_ble", "health_connect"],
+    }),
+    /must include at least one hosted Link provider/u,
+  );
+});
+
 function resolveJunctionTarget(providerSlug: string) {
   return JUNCTION_CONNECT_SOURCE_TARGETS.find((target) => target.providerSlug === providerSlug);
 }
