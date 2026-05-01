@@ -545,6 +545,14 @@ test("public ingress rejects callback-required connection starts without callbac
         authorizationUrl: "https://provider.example/connect",
       };
     },
+    async completeConnection() {
+      return {
+        externalAccountId: "callback-required-account",
+        credential: {
+          kind: "none",
+        },
+      };
+    },
   });
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -615,6 +623,15 @@ test("public ingress persists validated provider-config connection seeds before 
         },
         stateMetadata: {
           clientUserIdHash: "client-hash-1",
+        },
+      };
+    },
+    async completeConnection() {
+      return {
+        externalAccountId: "external-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
         },
       };
     },
@@ -1257,6 +1274,15 @@ test("public ingress rejects provider-config connection seeds with the wrong pro
         },
       };
     },
+    async completeConnection() {
+      return {
+        externalAccountId: "external-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+      };
+    },
   });
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -1310,6 +1336,15 @@ test("configured provider manifests own credential policy over provider instance
             kind: "provider_config",
             providerConfigKey: "junction",
           },
+        },
+      };
+    },
+    async completeConnection() {
+      return {
+        externalAccountId: "oura-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
         },
       };
     },
