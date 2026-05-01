@@ -6,8 +6,14 @@ import { DeviceSyncError } from "../src/errors.ts";
 import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
-  normalizeJunctionProviderFilter,
 } from "../src/providers/junction.ts";
+import {
+  JUNCTION_CONNECT_SOURCE_TARGETS,
+  JUNCTION_DEFAULT_PROVIDER_FILTER,
+  normalizeJunctionProviderFilter,
+  resolveJunctionConnectSourceLabel,
+  resolveJunctionConnectTargetForSourceId,
+} from "../src/providers/junction-connect-sources.ts";
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
@@ -165,7 +171,20 @@ test("Junction provider exposes primitive handlers without OAuth compatibility m
   assert.equal(provider.refreshTokens, undefined);
 });
 
-test("Junction provider filters SDK-only web Link providers", () => {
+test("Junction default provider filter covers every shared connect source", () => {
+  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 32);
+  assert.deepEqual(
+    JUNCTION_DEFAULT_PROVIDER_FILTER,
+    JUNCTION_CONNECT_SOURCE_TARGETS.map((target) => target.providerSlug),
+  );
+  assert.deepEqual(normalizeJunctionProviderFilter(undefined), JUNCTION_DEFAULT_PROVIDER_FILTER);
+  assert.equal(resolveJunctionConnectTargetForSourceId("dexcom-g6-and-older"), "dexcom");
+  assert.equal(resolveJunctionConnectTargetForSourceId("dexcom"), "dexcom_v3");
+  assert.equal(resolveJunctionConnectTargetForSourceId("mapmyfitness"), "map_my_fitness");
+  assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
+});
+
+test("Junction provider filters mobile OS web Link providers", () => {
   assert.deepEqual(
     normalizeJunctionProviderFilter([
       "oura",
@@ -175,7 +194,7 @@ test("Junction provider filters SDK-only web Link providers", () => {
       "samsung_health",
       "withings",
     ]),
-    ["oura", "withings"],
+    ["oura", "samsung_health", "withings"],
   );
 });
 
@@ -345,21 +364,9 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
     typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody
       ? linkBody.filter_on_providers
       : null,
-    [
-      "oura",
-      "fitbit",
-      "garmin",
-      "whoop",
-      "strava",
-      "withings",
-      "dexcom_v3",
-      "freestyle_libre",
-      "abbott_libreview",
-      "eight_sleep",
-      "renpho",
-    ],
+    JUNCTION_DEFAULT_PROVIDER_FILTER,
   );
-  assert.doesNotMatch(JSON.stringify(linkBody), /apple|health_connect|samsung/u);
+  assert.doesNotMatch(JSON.stringify(linkBody), /apple|health_connect/u);
   assert.equal(requests.every((request) => request.headers.get("x-vital-api-key") === "sk_us_test_123"), true);
 });
 

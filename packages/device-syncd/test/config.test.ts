@@ -25,6 +25,7 @@ import {
   readConfiguredStravaDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "../src/config.ts";
+import { JUNCTION_DEFAULT_PROVIDER_FILTER } from "../src/providers/junction-connect-sources.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
 
@@ -147,6 +148,20 @@ test("connect targets expose direct providers plus Junction-backed sources", () 
     "junction",
   );
   assert.equal(resolveConfiguredDeviceSyncConnectTarget(configs, "junction"), null);
+});
+
+test("Junction default connect targets cover the shared provider filter", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_REGION: "us",
+  });
+
+  assert.deepEqual(
+    listConfiguredDeviceSyncConnectTargets(configs).map((target) => target.connectTarget),
+    JUNCTION_DEFAULT_PROVIDER_FILTER,
+  );
 });
 
 test("shared provider runtime env key lists stay aligned with the configured providers", () => {

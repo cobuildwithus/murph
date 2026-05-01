@@ -3,10 +3,12 @@
 ## Goal
 
 Make the Junction default provider list cover every source shown on `/connect`, and have the backend plus `/connect` consume one shared Junction connect-source mapping.
+Keep provider-filter normalization with that shared mapping so config/connect-target code does not import the full Junction provider module.
 
 ## Scope
 
 - `packages/device-syncd` Junction provider/config exports.
+- `packages/device-syncd` Junction connect-source/default-filter normalization.
 - `apps/web` `/connect` page source availability mapping.
 - Focused tests for Junction defaults and connect-page availability.
 
