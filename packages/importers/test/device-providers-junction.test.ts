@@ -289,6 +289,52 @@ test("Junction normalizer accepts real nested source provider fields on timeseri
   assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("oura-cloud"), false);
 });
 
+test("Junction normalizer keeps grouped fallback source slugs when provider metadata is object-valued", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    connections: [{
+      id: "source-oura",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      sourceDeviceId: "raw-oura-ring",
+    }],
+    timeseries: {
+      heartrate: {
+        groups: {
+          polar: [{
+            provider: {
+              id: "raw-provider-object",
+            },
+            source: {
+              type: "watch",
+              device_id: "raw-polar-watch",
+            },
+            data: [{
+              connectionId: "source-oura",
+              timestamp: "2026-04-22T12:45:00Z",
+              value: 61,
+            }],
+          }],
+        },
+      },
+    },
+  });
+
+  const sample = payload.samples?.find((entry) => entry.stream === "heart_rate");
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["heartrate"]);
+  assert.equal(payload.samples?.length, 1);
+  assert.equal(sample?.externalRef?.system, "junction");
+  assert.equal(sample?.externalRef?.resourceType, "junction-polar-heartrate");
+  assert.equal(sample?.dataOrigin?.sourceProviderSlug, "polar");
+  assert.equal(sample?.dataOrigin?.sourceType, "watch");
+  assert.match(sample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("raw-provider-object"), false);
+  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("raw-polar-watch"), false);
+  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("raw-oura-ring"), false);
+  assert.equal(sample?.externalRef?.resourceType.includes("object-object"), false);
+});
+
 test("Junction summary resource id stays stable when a same-id summary value changes", () => {
   const buildPayload = (steps: number) => normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",

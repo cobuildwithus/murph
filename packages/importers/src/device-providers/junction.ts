@@ -684,17 +684,32 @@ function buildJunctionOriginFallback(
   originFallback: JunctionOriginFallback | undefined,
 ): JunctionOriginFallback {
   if (!connection) {
-    return originFallback ?? {};
+    return withGroupedSourceProviderFallback(originFallback ?? {});
   }
 
   if (!originFallback) {
     return connection;
   }
 
+  const groupedFallback = withGroupedSourceProviderFallback(originFallback);
+  return stripUndefined({
+    ...connection,
+    ...groupedFallback,
+    groupedSourceSlug: groupedFallback.groupedSourceSlug,
+  });
+}
+
+function withGroupedSourceProviderFallback(
+  originFallback: JunctionOriginFallback,
+): JunctionOriginFallback {
+  const groupedSourceProviderSlug = readJunctionSourceProviderSlug(undefined, originFallback)
+    ?? normalizeJunctionSourceProviderSlug(originFallback.groupedSourceSlug);
+  const groupedSourceType = firstStringFromPaths(originFallback, ["sourceType", "source_type", "source.type"]);
+
   return stripUndefined({
     ...originFallback,
-    ...connection,
-    groupedSourceSlug: originFallback.groupedSourceSlug,
+    sourceProviderSlug: groupedSourceProviderSlug,
+    sourceType: groupedSourceType,
   });
 }
 
