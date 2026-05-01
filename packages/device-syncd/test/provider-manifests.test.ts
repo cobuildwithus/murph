@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
   configuredDeviceSyncProviderKeys,
   createConfiguredDeviceSyncProvidersFromConfigs,
@@ -349,6 +350,44 @@ describe("deviceSyncProviderManifests", () => {
         "runtime.providerConfigs",
       ),
     ).toThrow(/provider-owned webhook secret/);
+  });
+
+  it("rejects Junction provider-owned secrets when cloning serializable runtime config", () => {
+    const createRuntimeConfig = () => ({
+      providerConfigs: {
+        junction: {
+          environment: "sandbox",
+          providerFilter: ["fitbit"],
+          region: "us",
+        },
+      },
+      publicBaseUrl: "https://device-sync.example.test",
+      secret: "secret_123",
+    } satisfies Parameters<typeof cloneConfiguredDeviceSyncRuntimeConfig>[0]);
+
+    const apiKeyConfig = createRuntimeConfig();
+    Object.assign(apiKeyConfig.providerConfigs.junction, {
+      apiKey: "sk_us_test_runtime",
+    });
+    expect(() => cloneConfiguredDeviceSyncRuntimeConfig(apiKeyConfig)).toThrow(
+      /provider-owned API secret/,
+    );
+
+    const clientUserIdSecretConfig = createRuntimeConfig();
+    Object.assign(clientUserIdSecretConfig.providerConfigs.junction, {
+      clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+    });
+    expect(() => cloneConfiguredDeviceSyncRuntimeConfig(clientUserIdSecretConfig)).toThrow(
+      /provider-owned HMAC secret/,
+    );
+
+    const webhookSecretConfig = createRuntimeConfig();
+    Object.assign(webhookSecretConfig.providerConfigs.junction, {
+      webhookSecret: "<REDACTED_WEBHOOK_SECRET>",
+    });
+    expect(() => cloneConfiguredDeviceSyncRuntimeConfig(webhookSecretConfig)).toThrow(
+      /provider-owned webhook secret/,
+    );
   });
 
   it("shapes hosted hint payloads from the provider manifest", () => {

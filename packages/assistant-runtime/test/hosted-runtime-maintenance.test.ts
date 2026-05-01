@@ -658,6 +658,45 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
+  it("does not instantiate Junction from serializable hosted runtime hints", async () => {
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue([]);
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => [],
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_junction_serializable_hints",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["fitbit"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+      null,
+      45_000,
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: null,
+      processedJobs: 0,
+      skipped: true,
+    });
+    expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
+    expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
+  });
+
   it("skips device sync when the hosted runtime resolved config disables device sync", async () => {
     const result = await runHostedDeviceSyncPass(
       {
