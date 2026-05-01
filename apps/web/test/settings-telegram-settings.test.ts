@@ -181,9 +181,6 @@ describe("ConnectTelegram", () => {
       createElement(ConnectTelegram, {
         authenticated: true,
         initialTelegramAccount: {
-          firstName: null,
-          lastName: null,
-          photoUrl: null,
           telegramUserId: "telegram-test-user",
           username: "murph_test",
         },

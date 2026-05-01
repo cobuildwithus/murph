@@ -198,9 +198,6 @@ test("JoinInvitePageView renders messaging setup before checkout pricing", () =>
           stage: "checkout",
         }),
         telegramAccountForMessagingSetup: {
-          firstName: null,
-          lastName: null,
-          photoUrl: null,
           telegramUserId: "telegram-test-user",
           username: "murph_test",
         },
