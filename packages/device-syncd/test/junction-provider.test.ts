@@ -527,7 +527,7 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   assert.equal(parsed.eventType, "daily.data.activity.created");
   assert.equal(parsed.traceId, "msg_activity_1");
   assert.equal(parsed.resourceCategory, "summary");
-  assert.equal(parsed.unknownAccountAction, "accept");
+  assert.equal(parsed.unknownAccountAction, "retry");
   assert.deepEqual(parsed.jobs, [
     {
       kind: "resource",
