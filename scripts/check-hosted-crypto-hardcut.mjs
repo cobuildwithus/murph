@@ -37,30 +37,50 @@ const allowedPathSegments = new Set([
   "tests",
 ]);
 
-const allowedRuntimeFiles = new Set([
-  // Runtime env projection keeps these legacy names on deny lists only.
-  "packages/assistant-runtime/src/hosted-runtime/environment.ts",
-  // The Cloudflare mailbox module intentionally throws a migration error if
-  // callers try to read the removed HOSTED_WAKE_ENCRYPTION_KEY path.
-  "apps/cloudflare/src/hosted-mailbox-encryption.ts",
-  // Legacy shared codec definitions can remain only as quarantine/test
-  // support; normal runtime imports are forbidden below.
-  "apps/web/src/lib/hosted-encryption-shared.ts",
-  // Device-sync env validation rejects removed key names but does not use
-  // them as encryption material.
-  "apps/web/src/lib/device-sync/env.ts",
-  // This file is a legacy codec definition kept only for tests/backfill while
-  // the guard below prevents normal runtime imports from it.
-  "apps/web/src/lib/device-sync/crypto.ts",
-  // Contact privacy still uses the shared key decoder for HOSTED_CONTACT_PRIVACY_KEYS.
-  "apps/web/src/lib/hosted-onboarding/env.ts",
-  // Local/runtime package compatibility keeps the old local device-sync codec
-  // until the hosted runtime mirror is cut separately; this guard targets the
-  // hosted web control-plane hard cut.
-  "packages/assistant-runtime/src/hosted-device-sync-runtime.ts",
-  "packages/device-syncd/src/crypto.ts",
-  "packages/device-syncd/src/index.ts",
-  "packages/device-syncd/src/service.ts",
+const allowedFindingLabelsByFile = new Map([
+  [
+    "packages/assistant-runtime/src/hosted-runtime/environment.ts",
+    new Set([
+      "legacy hosted wake/mailbox data-encryption env",
+    ]),
+  ],
+  [
+    "apps/cloudflare/src/hosted-mailbox-encryption.ts",
+    new Set([
+      "legacy hosted wake/mailbox data-encryption env",
+    ]),
+  ],
+  [
+    "apps/web/src/lib/hosted-encryption-shared.ts",
+    new Set([
+      "legacy device-sync secret codec import",
+      "legacy hosted shared secret codec factory",
+    ]),
+  ],
+  [
+    "apps/web/src/lib/device-sync/env.ts",
+    new Set([
+      "legacy device-sync data-encryption env",
+    ]),
+  ],
+  [
+    "apps/web/src/lib/device-sync/crypto.ts",
+    new Set([
+      "legacy hosted shared secret codec factory",
+    ]),
+  ],
+  [
+    "apps/web/src/lib/hosted-onboarding/env.ts",
+    new Set([
+      "legacy device-sync secret codec import",
+    ]),
+  ],
+  [
+    "packages/assistant-runtime/src/hosted-device-sync-runtime.ts",
+    new Set([
+      "legacy packaged device-sync secret codec import",
+    ]),
+  ],
 ]);
 
 const textFileExtensions = new Set([
@@ -163,10 +183,6 @@ function checkFile(absolutePath) {
     return;
   }
 
-  if (allowedRuntimeFiles.has(relativePath)) {
-    return;
-  }
-
   let contents;
   try {
     if (statSync(absolutePath).size > 2_000_000) {
@@ -184,6 +200,9 @@ function checkFile(absolutePath) {
       if (!pattern.test(line)) {
         continue;
       }
+      if (isAllowedFinding(relativePath, label)) {
+        continue;
+      }
       findings.push({
         file: relativePath,
         label,
@@ -192,6 +211,10 @@ function checkFile(absolutePath) {
       });
     }
   }
+}
+
+function isAllowedFinding(relativePath, label) {
+  return allowedFindingLabelsByFile.get(relativePath)?.has(label) === true;
 }
 
 function shouldIgnoreDirectory(name) {
