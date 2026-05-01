@@ -59,7 +59,7 @@ describe("hosted mailbox secure-box encryption", () => {
 
   it("rejects legacy environment reads after HOSTED_WAKE_ENCRYPTION_KEY removal", () => {
     expect(() => readHostedMailboxEncryptionEnvironment()).toThrow(
-      /HOSTED_WAKE_ENCRYPTION_KEY has been removed/u,
+      "Legacy hosted wake mailbox encryption has been removed. Use createHostedMailboxEncryptionEnvironmentFromIngressRoot with the unwrapped ingress runtime root.",
     );
   });
 });

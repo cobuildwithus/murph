@@ -86,7 +86,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
 
     spawnMock.mockImplementation((_command, _args, options) => {
       expect(options?.env).toMatchObject({
-        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         VERCEL_AI_API_KEY: "vercel-key",
       });
       expect(options?.env?.CODEX_HOME).toBeUndefined();
@@ -96,6 +95,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG).toBeUndefined();
+      expect(options?.env?.HOSTED_WEB_BASE_URL).toBeUndefined();
       expect(options?.env?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
 
       const child = new EventEmitter() as EventEmitter & {

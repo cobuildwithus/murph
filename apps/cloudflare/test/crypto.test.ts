@@ -149,7 +149,7 @@ describe("hosted storage object keys", () => {
     const bundlePlaintext = new TextEncoder().encode("bundle-plaintext");
     const bundleRef = await bundleStore.writeBundle("vault", bundlePlaintext);
 
-    expect(bundleRef.key).toMatch(/^users\/bundles\//u);
+    expect(bundleRef.key).toMatch(/^users\/hsn_[0-9a-f]{24}\/bundles\/vault\//u);
     expectOpaqueStrings([bundleRef.key], ["user_bundle_123", bundleRef.hash]);
 
     const artifactStore = createHostedArtifactStore({
@@ -191,7 +191,7 @@ describe("hosted storage object keys", () => {
       scope: "runner-secrets",
     });
     const storedRunnerSecretsKey = findStoredObjectKey(bucket, (key) =>
-      key.startsWith("users/runner-secrets/")
+      /^users\/hsn_[0-9a-f]{24}\/runner-secrets\.json$/u.test(key)
     );
     expectOpaqueStrings([storedRunnerSecretsKey], [runnerSecretsUserId]);
 
