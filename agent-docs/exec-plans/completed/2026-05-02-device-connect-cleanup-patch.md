@@ -1,6 +1,6 @@
 # Land device connect source cleanup patch
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -47,8 +47,22 @@ Updated: 2026-05-02
 
 - Use a plan-bearing high-risk path because the patch touches OAuth state, public routes, and user-facing hosted UI.
 - Do not use a simplify pass because this is a bounded externally supplied patch landing.
+- Preserve source intent on callback error redirects after state consumption so Junction-backed source failures keep the user-facing source label instead of falling back to the internal provider label.
 
 ## Verification
 
-- Commands to run: focused hosted web/device-sync tests, `pnpm typecheck`, and the truthful app/package diff or acceptance lane as feasible in the dirty checkout.
-- Expected outcomes: focused tests and typecheck pass; any broader failures are attributed to unrelated pre-existing dirty work only when directly evidenced.
+- Passed: `pnpm exec vitest run apps/web/test/device-sync-callback-route.test.ts apps/web/test/connect-page.test.ts apps/web/test/device-sync-settings-routes.test.ts --config apps/web/vitest.config.ts --no-coverage`
+- Passed: `pnpm exec vitest run test/connect-targets.test.ts test/public-ingress.test.ts test/config.test.ts --config vitest.config.ts --no-coverage` from `packages/device-syncd`
+- Passed: `pnpm typecheck`
+- Passed: `pnpm --dir apps/web lint`
+- Passed: `pnpm --dir packages/device-syncd test:coverage`
+- Passed: `git diff --check`
+- Attempted before the final source-intent fix: `pnpm verify:acceptance`; failed on unrelated repo-wide issues already present outside this task lane: missing core audit fixture `audit/2026/2026-04.jsonl`, hosted-execution export-list drift, setup-cli WHOOP callback wording, and documented scenario manifest mismatch for `vault-cli device connect` syntax.
+
+## Review
+
+- Security/privacy review: no blocking findings.
+- Frontend review: found callback error redirects for Junction-backed sources could show the internal provider label; fixed by carrying `connectSourceId` / `connectTarget` through callback error details and redirect params.
+- Coverage-write: added connected callback render and source-id target lookup assertions.
+- Task-finish review: no blocking findings; residual risk is that source intent cannot be recovered when failure happens before a valid OAuth state is consumed.
+Completed: 2026-05-02

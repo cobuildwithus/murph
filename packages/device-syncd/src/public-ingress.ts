@@ -696,6 +696,8 @@ export class DeviceSyncPublicIngress {
           }
         } catch (cleanupError) {
           throw attachOAuthCallbackContext(cleanupError, {
+            connectSourceId,
+            connectTarget,
             provider: provider.provider,
             returnTo,
           });
@@ -705,6 +707,8 @@ export class DeviceSyncPublicIngress {
           await this.markSeededConnectionSetupFailed(provider, seededAccountId, null, now, error);
         } catch (cleanupError) {
           throw attachOAuthCallbackContext(cleanupError, {
+            connectSourceId,
+            connectTarget,
             provider: provider.provider,
             returnTo,
           });
@@ -712,6 +716,8 @@ export class DeviceSyncPublicIngress {
       }
 
       throw attachOAuthCallbackContext(error, {
+        connectSourceId,
+        connectTarget,
         provider: provider.provider,
         returnTo,
       });
@@ -1161,6 +1167,8 @@ function summarizeOAuthSetupFailure(error: unknown): { code: string; message: st
 function attachOAuthCallbackContext(
   error: unknown,
   context: {
+    connectSourceId: string | null;
+    connectTarget: string | null;
     provider: string;
     returnTo: string | null;
   },
@@ -1177,6 +1185,8 @@ function attachOAuthCallbackContext(
     accountStatus: error.accountStatus,
     details: {
       ...(error.details ?? {}),
+      ...(context.connectSourceId ? { connectSourceId: context.connectSourceId } : {}),
+      ...(context.connectTarget ? { connectTarget: context.connectTarget } : {}),
       provider: context.provider,
       returnTo: context.returnTo,
     },

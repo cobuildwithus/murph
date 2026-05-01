@@ -1,3 +1,4 @@
+import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRouteContext } from "./route-test-helpers";
@@ -79,6 +80,34 @@ describe("hosted device-sync callback route", () => {
     expect(location).toContain("deviceSyncStatus=connected");
     expect(location).toContain("deviceSyncProvider=junction");
     expect(location).not.toContain("dsc_junction");
+  });
+
+  it("preserves source intent on generic connect callback error redirects", async () => {
+    mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
+      code: "OAUTH_CALLBACK_REJECTED",
+      message: "OAuth authorization was denied or canceled.",
+      retryable: false,
+      httpStatus: 400,
+      details: {
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        provider: "junction",
+        returnTo: "https://app.example.test/connect",
+      },
+    }));
+
+    const response = await connectCallbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz&result=error"),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location");
+    expect(location).toContain("deviceSyncStatus=error");
+    expect(location).toContain("deviceSyncProvider=junction");
+    expect(location).toContain("deviceSyncError=OAUTH_CALLBACK_REJECTED");
+    expect(location).toContain("connectSource=garmin");
+    expect(location).toContain("connectTarget=garmin");
   });
 
   it("does not include the raw connection id in the fallback callback html", async () => {

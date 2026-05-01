@@ -720,6 +720,8 @@ test("ConnectPage shows callback success with the original source label", async 
   }));
 
   assert.match(markup, /Connected Oura\./);
+  assert.match(markup, /data-connection-state="connected"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
 });
 
 test("ConnectPage shows callback errors with the original source label", async () => {
