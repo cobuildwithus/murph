@@ -4,6 +4,7 @@ import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-lin
 export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
   response: TResult;
+  wakeMailboxItemId?: string;
   wakeUserId?: string;
 };
 

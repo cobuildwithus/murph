@@ -19,6 +19,7 @@ import {
 
 import {
   buildHostedCodexConfigToml,
+  buildHostedLocalCodexConfigToml,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
 
@@ -215,7 +216,7 @@ test("hosted Codex runtime local dev app-server proxy bridges JSON-RPC without p
     const result = await prepareHostedCodexRuntimeEnvironment({
       operatorHomeRoot,
       runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "local-codex",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: proxyToken,
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]:
           `tcp://127.0.0.1:${readServerTcpPort(server)}`,
@@ -226,12 +227,17 @@ test("hosted Codex runtime local dev app-server proxy bridges JSON-RPC without p
     const shimBinDir = path.join(result.codexHome!, "bin");
     const shimPath = path.join(shimBinDir, "codex");
     const shimSource = await readFile(shimPath, "utf8");
+    const config = await readFile(result.codexConfigPath!, "utf8");
     const proxyConfigPath = readHostedLocalCodexProxyConfigPath(result.codexHome!);
     const proxyConfig = await readHostedLocalCodexProxyConfig(result.codexHome!);
     const proxyConfigMode = (await stat(proxyConfigPath)).mode & 0o777;
+    assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER, "local-codex");
     assert.equal(result.runtimeEnv.VERCEL_AI_API_KEY, undefined);
     assert.equal(result.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV], undefined);
     assert.equal(result.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV], undefined);
+    assert.doesNotMatch(config, /model_provider/u);
+    assert.doesNotMatch(config, /\[model_providers/u);
+    assert.doesNotMatch(config, /VERCEL_AI_API_KEY/u);
     assert.equal(shimSource.includes(proxyToken), false);
     assert.equal(shimSource.includes(proxyConfig.url), false);
     assert.equal(proxyConfig.token, proxyToken);
@@ -266,6 +272,25 @@ test("hosted Codex runtime local dev app-server proxy bridges JSON-RPC without p
   } finally {
     await closeNetServer(server);
   }
+});
+
+test("hosted Codex runtime config rejects local Codex provider without local dev proxy", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "local-codex",
+          NODE_ENV: "development",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_REQUIRED"
+      && error.message.includes(HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV),
+  );
 });
 
 test("hosted Codex runtime config rejects the local E2E app-server stub for non-local hosts", async () => {
@@ -499,6 +524,31 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       "",
     ].join("\n"),
   );
+});
+
+test("hosted local Codex config TOML omits explicit model provider config", () => {
+  const config = buildHostedLocalCodexConfigToml({
+    model: "gpt-5.5",
+    reasoningEffort: "medium",
+  });
+
+  assert.equal(
+    config,
+    [
+      'model = "gpt-5.5"',
+      'model_reasoning_effort = "medium"',
+      'approval_policy = "never"',
+      'sandbox_mode = "danger-full-access"',
+      "",
+      "[shell_environment_policy]",
+      'inherit = "all"',
+      'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      "",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(config, /model_provider/u);
+  assert.doesNotMatch(config, /model_providers/u);
+  assert.doesNotMatch(config, /VERCEL_AI_API_KEY/u);
 });
 
 async function createTemporaryDirectory(): Promise<string> {

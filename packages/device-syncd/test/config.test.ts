@@ -859,7 +859,7 @@ test("loadDeviceSyncEnvironment wires Oura webhook timestamp tolerance into the 
   });
   const providers = requireValue(loaded.service.providers);
   const provider = requireValue(providers.find((entry) => entry.provider === "oura"));
-  const verifyAndParseWebhook = requireValue(provider.verifyAndParseWebhook);
+  const verifyAndParseWebhook = requireValue(provider.webhookHandler?.verifyAndParseWebhook);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "delete",

@@ -230,6 +230,35 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBeUndefined();
   });
 
+  it("drops stale local OIDC JWKS overrides inherited from existing dev vars", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
+      },
+      oidcIdentity,
+    });
+
+    expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL).toBeUndefined();
+  });
+
+  it("preserves a current local OIDC JWKS override supplied by this run", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
+      },
+      oidcIdentity,
+      overrides: {
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:5020/.well-known/jwks",
+      },
+    });
+
+    expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL).toBe(
+      "http://127.0.0.1:5020/.well-known/jwks",
+    );
+  });
+
   it("preserves an explicit current worker bridge override instead of resetting to the listen host", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,

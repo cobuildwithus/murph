@@ -10,6 +10,7 @@ const config = [
       ".next-dev/**",
       ".next-smoke/**",
       ".next-smoke-e2e*/**",
+      "app/.well-known/workflow/**",
       "out/**",
       "build/**",
       "next-env.d.ts",

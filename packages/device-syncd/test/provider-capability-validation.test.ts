@@ -40,62 +40,35 @@ function provider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvid
       callbackPath: "/oauth/demo/callback",
       defaultScopes: ["offline"],
     }),
-    buildConnectUrl: () => "https://provider.example/connect",
-    async exchangeAuthorizationCode() {
-      return {
-        externalAccountId: "external-account",
-        credential: {
-          kind: "oauth_tokens",
-          tokens: {
-            accessToken: "<REDACTED_ACCESS_TOKEN>",
+    connectionHandler: {
+      async beginConnection() {
+        return {
+          authorizationUrl: "https://provider.example/connect",
+        };
+      },
+      async completeConnection() {
+        return {
+          externalAccountId: "external-account",
+          credential: {
+            kind: "oauth_tokens",
+            tokens: {
+              accessToken: "<REDACTED_ACCESS_TOKEN>",
+            },
           },
-        },
-      };
-    },
-    async refreshTokens() {
-      return {
-        accessToken: "<REDACTED_ACCESS_TOKEN_2>",
-      };
+        };
+      },
+      async refreshTokens() {
+        return {
+          accessToken: "<REDACTED_ACCESS_TOKEN_2>",
+        };
+      },
     },
     ...overrides,
   };
 }
 
-test("device sync registry accepts OAuth compatibility and generic connection handlers", () => {
+test("device sync registry accepts OAuth providers with generic connection handlers", () => {
   assert.doesNotThrow(() => createDeviceSyncRegistry([provider()]));
-
-  assert.doesNotThrow(() =>
-    createDeviceSyncRegistry([
-      provider({
-        buildConnectUrl: undefined,
-        exchangeAuthorizationCode: undefined,
-        refreshTokens: undefined,
-        connectionHandler: {
-          async beginConnection() {
-            return {
-              authorizationUrl: "https://provider.example/connect",
-            };
-          },
-          async completeConnection() {
-            return {
-              externalAccountId: "external-account",
-              credential: {
-                kind: "oauth_tokens",
-                tokens: {
-                  accessToken: "<REDACTED_ACCESS_TOKEN>",
-                },
-              },
-            };
-          },
-          async refreshTokens() {
-            return {
-              accessToken: "<REDACTED_ACCESS_TOKEN_2>",
-            };
-          },
-        },
-      }),
-    ])
-  );
 });
 
 test("device sync registry requires OAuth providers to expose a connection path", () => {
@@ -103,8 +76,7 @@ test("device sync registry requires OAuth providers to expose a connection path"
     () =>
       createDeviceSyncRegistry([
         provider({
-          buildConnectUrl: undefined,
-          exchangeAuthorizationCode: undefined,
+          connectionHandler: undefined,
         }),
       ]),
     /declares oauth2 connection support/u,
@@ -124,6 +96,7 @@ test("device sync registry requires external-link providers to expose generic co
             kind: "provider_config",
             providerConfigKey: "junction",
           },
+          connectionHandler: undefined,
         }),
       ]),
     /declares external_link connection support/u,
@@ -140,9 +113,6 @@ test("device sync registry requires external-link providers to expose generic co
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        buildConnectUrl: undefined,
-        exchangeAuthorizationCode: undefined,
-        refreshTokens: undefined,
         connectionHandler: {
           async beginConnection() {
             return {
@@ -169,7 +139,24 @@ test("device sync registry requires refresh support for refreshable OAuth creden
     () =>
       createDeviceSyncRegistry([
         provider({
-          refreshTokens: undefined,
+          connectionHandler: {
+            async beginConnection() {
+              return {
+                authorizationUrl: "https://provider.example/connect",
+              };
+            },
+            async completeConnection() {
+              return {
+                externalAccountId: "external-account",
+                credential: {
+                  kind: "oauth_tokens",
+                  tokens: {
+                    accessToken: "<REDACTED_ACCESS_TOKEN>",
+                  },
+                },
+              };
+            },
+          },
         }),
       ]),
     /declares oauth_tokens credentials/u,
@@ -178,7 +165,6 @@ test("device sync registry requires refresh support for refreshable OAuth creden
   assert.doesNotThrow(() =>
     createDeviceSyncRegistry([
       provider({
-        refreshTokens: undefined,
         descriptor: {
           ...descriptor("demo", {
             kind: "oauth2",

@@ -73,10 +73,19 @@ export { SqliteDeviceSyncStore } from "./store.ts";
 export {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
-  normalizeJunctionProviderFilter,
 } from "./providers/junction.ts";
+export {
+  JUNCTION_CONNECT_SOURCE_TARGETS,
+  JUNCTION_DEFAULT_PROVIDER_FILTER,
+  normalizeJunctionProviderFilter,
+  resolveJunctionConnectSourceLabel,
+  resolveJunctionConnectTargetForSourceId,
+} from "./providers/junction-connect-sources.ts";
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
-export type { JunctionDeviceSyncProviderConfig } from "./providers/junction.ts";
+export type {
+  JunctionDeviceSyncProviderConfig,
+} from "./providers/junction.ts";
+export type { JunctionConnectSourceTarget } from "./providers/junction-connect-sources.ts";
 export {
   assertValidJunctionClientConfig,
   isAllowedJunctionLinkHost,

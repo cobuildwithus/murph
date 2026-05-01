@@ -1,13 +1,19 @@
 import type { Metadata } from "next";
 import {
   listConfiguredDeviceSyncConnectTargets,
+  normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncProviderConfigs,
+  resolveJunctionConnectTargetForSourceId,
 } from "@murphai/device-syncd/config";
 
 import { PageHeader } from "@/src/components/ui/page-header";
+import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
+import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
+import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-import { ConnectSourcesGrid } from "./connect-page-client";
+import { ConnectSourcesGrid, type ConnectCallbackInput } from "./connect-page-client";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Connect Devices — Murph",
@@ -29,6 +35,12 @@ type ConnectSource = {
   logo: LogoAsset;
   name: string;
 };
+
+type ConnectPageInitialLoadError = {
+  message: string;
+};
+
+type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
 
 const CONNECT_SOURCES: readonly ConnectSource[] = [
   {
@@ -225,8 +237,38 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
   },
 ] as const;
 
-export default function ConnectPage() {
-  const sources = resolveConfiguredConnectSources(CONNECT_SOURCES);
+export default async function ConnectPage({
+  searchParams,
+}: {
+  searchParams?: Promise<ConnectPageSearchParams>;
+} = {}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const auth = await getHostedPageAuthSnapshot();
+  const connectedSourceIds = new Set<string>();
+  let initialLoadError: ConnectPageInitialLoadError | null = null;
+
+  if (auth.authenticatedMember) {
+    try {
+      const response = await buildHostedDeviceSyncSettingsResponse({
+        member: auth.authenticatedMember,
+      });
+      for (const sourceId of resolveConnectedConnectSourceIds(CONNECT_SOURCES, response.sources)) {
+        connectedSourceIds.add(sourceId);
+      }
+    } catch (error) {
+      initialLoadError = isHostedOnboardingError(error)
+        ? {
+            message: error.message,
+          }
+        : {
+            message: "Could not load your connected sources right now.",
+          };
+    }
+  }
+
+  const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
+    connectedSourceIds,
+  });
 
   return (
     <div className="flex w-full min-w-0 max-w-[calc(100vw-3rem)] flex-col gap-8 md:max-w-full">
@@ -236,13 +278,19 @@ export default function ConnectPage() {
         description="Bring in sleep, activity, recovery, glucose, and device context from the tools you already use."
       />
 
-      <ConnectSourcesGrid sources={sources} />
+      <ConnectSourcesGrid
+        authenticated={Boolean(auth.authenticatedMember)}
+        initialCallback={resolveInitialConnectCallback(resolvedSearchParams)}
+        initialLoadError={initialLoadError}
+        sources={sources}
+      />
     </div>
   );
 }
 
 export function resolveConfiguredConnectSources(
   sources: readonly ConnectSource[],
+  options: { connectedSourceIds?: ReadonlySet<string> } = {},
 ): ConnectSource[] {
   const targets = new Set(
     listConfiguredDeviceSyncConnectTargets(
@@ -251,11 +299,99 @@ export function resolveConfiguredConnectSources(
   );
 
   return sources.map((source) => {
-    const connectTarget = source.id.replace(/-/gu, "_");
-    return targets.has(connectTarget)
-      ? { ...source, connectTarget }
-      : source;
+    const connectTarget =
+      resolveJunctionConnectTargetForSourceId(source.id) ?? source.id.replace(/-/gu, "_");
+    const configured = targets.has(connectTarget);
+    const connected = options.connectedSourceIds?.has(source.id) === true;
+
+    return {
+      ...source,
+      ...(configured ? { connectTarget } : {}),
+      ...(connected ? { connected } : {}),
+    };
   });
+}
+
+export function resolveConnectedConnectSourceIds(
+  sources: readonly Pick<ConnectSource, "id">[],
+  settingsSources: readonly Pick<
+    HostedDeviceSyncSettingsSource,
+    "provider" | "state" | "upstreamSources"
+  >[],
+): Set<string> {
+  const connectedSourceIds = new Set<string>();
+  const sourceIdByDirectProvider = new Map<string, string>();
+  const sourceIdByJunctionTarget = new Map<string, string>();
+
+  for (const source of sources) {
+    const directProvider = normalizeDeviceSyncConnectTargetKey(source.id);
+    if (directProvider) {
+      sourceIdByDirectProvider.set(directProvider, source.id);
+    }
+
+    const junctionTarget = resolveJunctionConnectTargetForSourceId(source.id);
+    if (junctionTarget) {
+      sourceIdByJunctionTarget.set(junctionTarget, source.id);
+    }
+  }
+
+  for (const source of settingsSources) {
+    const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
+    if (source.state === "active" && provider) {
+      const sourceId = sourceIdByDirectProvider.get(provider);
+      if (sourceId) {
+        connectedSourceIds.add(sourceId);
+      }
+    }
+
+    if (provider !== "junction" || source.state !== "active") {
+      continue;
+    }
+
+    for (const upstreamSource of source.upstreamSources) {
+      if (upstreamSource.status !== "connected") {
+        continue;
+      }
+
+      const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(upstreamSource.sourceProviderSlug);
+      const sourceId = sourceProviderSlug
+        ? sourceIdByJunctionTarget.get(sourceProviderSlug)
+        : null;
+      if (sourceId) {
+        connectedSourceIds.add(sourceId);
+      }
+    }
+  }
+
+  return connectedSourceIds;
+}
+
+function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): ConnectCallbackInput {
+  const status = readSearchParamString(searchParams, "deviceSyncStatus");
+
+  if (status !== "connected" && status !== "error") {
+    return null;
+  }
+
+  return {
+    connectTarget: readSearchParamString(searchParams, "connectTarget"),
+    errorCode: readSearchParamString(searchParams, "deviceSyncError"),
+    provider: readSearchParamString(searchParams, "deviceSyncProvider"),
+    status,
+  };
+}
+
+function readSearchParamString(
+  searchParams: ConnectPageSearchParams,
+  key: string,
+): string | null {
+  const value = searchParams[key];
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return value?.[0] ?? null;
 }
 
 function logoAsset(

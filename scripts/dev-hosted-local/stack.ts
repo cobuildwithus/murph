@@ -76,6 +76,8 @@ const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
   path.join(webDir, "src", "lib", "health-commons", "generated-experiment-artifacts.ts"),
   path.join(webDir, "src", "lib", "health-commons", "measurement-method-detail.ts"),
 ];
+const HOSTED_LOCAL_CODEX_PROVIDER_ID = "local-codex";
+const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
 
 export interface HostedLocalDevStack {
   config: HostedLocalDevConfig;
@@ -742,8 +744,8 @@ function buildHostedLocalCodexBridgeWorkerEnv(input: {
 
   return {
     HOSTED_ASSISTANT_MODEL:
-      input.mergedEnv.HOSTED_ASSISTANT_MODEL?.trim() || "gpt-5.5",
-    HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      input.mergedEnv.HOSTED_ASSISTANT_MODEL?.trim() || DEFAULT_HOSTED_CODEX_MODEL,
+    HOSTED_ASSISTANT_PROVIDER: HOSTED_LOCAL_CODEX_PROVIDER_ID,
     [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: input.bridge.proxyToken,
     [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: input.bridge.proxyUrl,
     NODE_ENV: "development",

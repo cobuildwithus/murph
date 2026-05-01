@@ -44,6 +44,7 @@ export interface HostedDeviceSyncSettingsSource {
 export interface HostedDeviceSyncSettingsUpstreamSource {
   providerLabel: string;
   resourceCount: number;
+  sourceProviderSlug: string;
   status: HostedBrowserDeviceSyncConnectionSource["status"];
 }
 
@@ -556,6 +557,7 @@ function toSettingsUpstreamSource(
   return {
     providerLabel: formatPublicUpstreamSourceLabel(source.sourceProviderSlug),
     resourceCount: source.resourceCount,
+    sourceProviderSlug: source.sourceProviderSlug,
     status: source.status,
   };
 }

@@ -61,7 +61,7 @@ HTTP/env shapes.
 - optional webhook fan-in
 - normalized snapshot import through `@murphai/importers`
 
-Garmin connects through Junction Link. Configure Junction credentials and include `garmin` in `JUNCTION_PROVIDER_FILTER`; Murph no longer owns direct Garmin OAuth credentials.
+Garmin and the hosted `/connect` catalog connect through Junction Link when Junction credentials are configured. Leave `JUNCTION_PROVIDER_FILTER` unset or empty to use the shared default list that matches `/connect`; set it only to narrow the enabled Junction targets for an environment.
 
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.

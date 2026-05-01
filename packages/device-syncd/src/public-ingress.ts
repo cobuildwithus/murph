@@ -33,6 +33,7 @@ import type {
   DeviceSyncPublicIngressConnectionEstablishedInput,
   DeviceSyncPublicIngressHooks,
   DeviceSyncPublicIngressStore,
+  DeviceWebhookHandler,
   DeviceSyncRegistry,
   HandleConnectionCallbackInput,
   HandleOAuthCallbackInput,
@@ -83,15 +84,7 @@ async function beginProviderConnection(
   provider: DeviceSyncProvider,
   input: Parameters<DeviceConnectionHandler["beginConnection"]>[0],
 ): Promise<ProviderBeginConnectionResult> {
-  if (provider.connectionHandler) {
-    return provider.connectionHandler.beginConnection(input);
-  }
-
-  if (provider.beginConnection) {
-    return provider.beginConnection(input);
-  }
-
-  if (!provider.buildConnectUrl) {
+  if (!provider.connectionHandler) {
     throw deviceSyncError({
       code: "CONNECTION_FLOW_NOT_SUPPORTED",
       message: `Device sync provider ${provider.provider} does not support connection start.`,
@@ -100,29 +93,14 @@ async function beginProviderConnection(
     });
   }
 
-  return {
-    authorizationUrl: provider.buildConnectUrl({
-      state: input.state,
-      callbackUrl: input.callbackUrl,
-      scopes: input.scopes,
-      now: input.now,
-    }),
-  };
+  return provider.connectionHandler.beginConnection(input);
 }
 
 async function completeProviderConnection(
   provider: DeviceSyncProvider,
   input: Parameters<DeviceConnectionHandler["completeConnection"]>[0],
 ): Promise<ProviderConnectionResult> {
-  if (provider.connectionHandler) {
-    return provider.connectionHandler.completeConnection(input);
-  }
-
-  if (provider.completeConnection) {
-    return provider.completeConnection(input);
-  }
-
-  if (!provider.exchangeAuthorizationCode) {
+  if (!provider.connectionHandler) {
     throw deviceSyncError({
       code: "CONNECTION_CALLBACK_NOT_SUPPORTED",
       message: `Device sync provider ${provider.provider} does not support connection callbacks.`,
@@ -131,37 +109,7 @@ async function completeProviderConnection(
     });
   }
 
-  const callbackError = normalizeString(input.query.get("error"));
-
-  if (callbackError) {
-    throw deviceSyncError({
-      code: "OAUTH_CALLBACK_REJECTED",
-      message: "OAuth authorization was denied or canceled.",
-      retryable: false,
-      httpStatus: 400,
-    });
-  }
-
-  const code = normalizeString(input.query.get("code"));
-
-  if (!code) {
-    throw deviceSyncError({
-      code: "OAUTH_CODE_MISSING",
-      message: "OAuth callback is missing the authorization code.",
-      retryable: false,
-      httpStatus: 400,
-    });
-  }
-
-  const connection = await provider.exchangeAuthorizationCode(
-    {
-      callbackUrl: input.callbackUrl,
-      state: input.state,
-      now: input.now,
-      grantedScopes: input.grantedScopes,
-    },
-    code,
-  );
+  const connection = await provider.connectionHandler.completeConnection(input);
   const { tokens: _legacyTokens, ...connectionWithoutLegacyTokens } = connection;
 
   return {
@@ -984,12 +932,14 @@ export class DeviceSyncPublicIngress {
       return;
     }
 
-    if (!provider.revokeAccess || credential?.kind !== "oauth_tokens") {
+    const revokeAccess = provider.connectionHandler?.revokeAccess;
+
+    if (!revokeAccess || credential?.kind !== "oauth_tokens") {
       return;
     }
 
     try {
-      await provider.revokeAccess(buildPendingOAuthCleanupAccount(provider.provider, connection, now));
+      await revokeAccess(buildPendingOAuthCleanupAccount(provider.provider, connection, now));
     } catch (error) {
       this.logger.warn?.("Failed to revoke provider access after OAuth callback setup failed.", {
         provider: provider.provider,
@@ -1200,8 +1150,8 @@ function attachOAuthCallbackContext(
 
 function resolveProviderWebhookVerifier(
   provider: DeviceSyncProvider,
-): DeviceSyncProvider["verifyAndParseWebhook"] {
-  return provider.webhookHandler?.verifyAndParseWebhook ?? provider.verifyAndParseWebhook;
+): DeviceWebhookHandler["verifyAndParseWebhook"] | undefined {
+  return provider.webhookHandler?.verifyAndParseWebhook;
 }
 
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";
@@ -1224,6 +1174,7 @@ export type {
   ClaimDeviceSyncWebhookTraceInput,
   CompleteConnectionResult,
   ConsumeOAuthStateResult,
+  DeviceConnectionHandler,
   DeviceSyncAccount,
   DeviceSyncAccountStatus,
   DeviceSyncIngressWebhook,

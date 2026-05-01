@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
 
 import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
-import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
-import {
-  buildJoinInvitePreviewStatus,
-  parseJoinInvitePreviewStage,
-} from "@/src/components/hosted-onboarding/join-invite-preview";
-import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { buildJoinInvitePageModel } from "@/src/components/hosted-onboarding/join-invite-page-model";
+import { JoinInvitePageView } from "@/src/components/hosted-onboarding/join-invite-page-view";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 const JOIN_INVITE_METADATA_DESCRIPTION =
@@ -20,42 +15,19 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 export default async function JoinInvitePage(input: {
   params: Promise<{ inviteCode: string }>;
-  searchParams: Promise<{ preview?: string }>;
+  searchParams: Promise<{ preview?: string | string[] }>;
 }) {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
-  const previewStage =
-    process.env.NODE_ENV !== "production"
-      ? parseJoinInvitePreviewStage(searchParams.preview)
-      : null;
-
-  if (previewStage) {
-    return (
-      <HostedPhoneCountryCodeBoundary>
-        <JoinInviteClient
-          initialLinkedAccounts={[]}
-          inviteCode={decodedInviteCode}
-          initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
-          preview
-        />
-      </HostedPhoneCountryCodeBoundary>
-    );
-  }
-
-  const { authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
-  const initialStatus = await buildHostedInvitePageData({
-    authenticatedMember,
+  const model = await buildJoinInvitePageModel({
     inviteCode: decodedInviteCode,
+    preview: searchParams.preview,
   });
 
   return (
     <HostedPhoneCountryCodeBoundary>
-      <JoinInviteClient
-        initialLinkedAccounts={linkedAccounts}
-        inviteCode={decodedInviteCode}
-        initialStatus={initialStatus}
-      />
+      <JoinInvitePageView model={model} />
     </HostedPhoneCountryCodeBoundary>
   );
 }

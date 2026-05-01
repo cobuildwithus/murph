@@ -57,6 +57,30 @@ test("HostedLegalConsentCard uses tokenized flat card styling while loading", ()
   expect(panelMarkup).not.toContain("#fefdf8");
 });
 
+test("HostedLegalConsentCard can render server-provided launch consent status without refetching", async () => {
+  const initialStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: false,
+  });
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      initialStatus,
+      mode: "compact",
+      source: "join-invite-phone-verify",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Terms of Service");
+    expect(container.textContent).toContain("Consumer Health Data Notice");
+  });
+
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+});
+
 test("HostedLegalConsentCard gates acceptance on the checkbox and posts current settings consent versions", async () => {
   const currentStatus = createConsentStatus({
     connectedHealthGranted: false,

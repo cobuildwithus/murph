@@ -160,6 +160,13 @@ function buildStoredConnection(
   return {
     ...connection,
     accessToken: "access-token",
+    credential: {
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+      },
+    },
     disconnectGeneration: 0,
     keyVersion: "v1",
     refreshToken: "refresh-token",
@@ -610,7 +617,9 @@ describe("appendHostedDeviceSyncWake", () => {
       throw new Error("authorization=Bearer secret-token refresh_token=refresh-secret");
     });
     mocks.registryGet.mockReturnValue({
-      revokeAccess,
+      connectionHandler: {
+        revokeAccess,
+      },
     });
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
     mocks.getConnectionForUser

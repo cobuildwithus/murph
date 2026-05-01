@@ -101,7 +101,7 @@ describe("Strava device-sync provider", () => {
       scopes: ["activity:read", "activity:read_all"],
     });
     const connectUrl = new URL(
-      provider.buildConnectUrl({
+      provider.oauthAdapter.buildConnectUrl({
         state: "state-token",
         callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
         scopes: [],
@@ -121,7 +121,7 @@ describe("Strava device-sync provider", () => {
       clientId: "strava-client-id",
       clientSecret: "strava-client-secret",
     });
-    const createScheduledJobs = provider.createScheduledJobs;
+    const createScheduledJobs = provider.jobExecutor.createScheduledJobs;
 
     expect(createScheduledJobs).toBeTypeOf("function");
 
@@ -194,7 +194,7 @@ describe("Strava device-sync provider", () => {
       fetchImpl,
     });
 
-    const result = await provider.exchangeAuthorizationCode(
+    const result = await provider.oauthAdapter.exchangeAuthorizationCode(
       {
         callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
         state: "state-token",
@@ -268,7 +268,7 @@ describe("Strava device-sync provider", () => {
     });
 
     await expect(
-      provider.exchangeAuthorizationCode(
+      provider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
           state: "state-token",
@@ -324,7 +324,7 @@ describe("Strava device-sync provider", () => {
     });
 
     await expect(
-      provider.exchangeAuthorizationCode(
+      provider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
           state: "state-token",
@@ -360,7 +360,7 @@ describe("Strava device-sync provider", () => {
     });
 
     await expect(
-      provider.exchangeAuthorizationCode(
+      provider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
           state: "state-token",
@@ -453,7 +453,7 @@ describe("Strava device-sync provider", () => {
       clientSecret: "strava-client-secret",
     });
 
-    const createResult = await provider.verifyAndParseWebhook?.({
+    const createResult = await provider.webhookHandler?.verifyAndParseWebhook?.({
       headers: new Headers(),
       rawBody: Buffer.from(JSON.stringify({
         aspect_type: "create",
@@ -482,7 +482,7 @@ describe("Strava device-sync provider", () => {
       },
     ]);
 
-    const deleteResult = await provider.verifyAndParseWebhook?.({
+    const deleteResult = await provider.webhookHandler?.verifyAndParseWebhook?.({
       headers: new Headers(),
       rawBody: Buffer.from(JSON.stringify({
         aspect_type: "delete",
@@ -516,7 +516,7 @@ describe("Strava device-sync provider", () => {
       clientSecret: "strava-client-secret",
     });
 
-    const result = await provider.verifyAndParseWebhook?.({
+    const result = await provider.webhookHandler?.verifyAndParseWebhook?.({
       headers: new Headers(),
       rawBody: Buffer.from(JSON.stringify({
         aspect_type: "update",
@@ -558,7 +558,7 @@ describe("Strava device-sync provider", () => {
     const disconnectAccount = vi.fn(async () => undefined);
 
     await expect(
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: buildStravaAccount({
             displayName: "Runner",
@@ -624,7 +624,7 @@ describe("Strava device-sync provider", () => {
     });
 
     await expect(
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: buildStravaAccount({
             displayName: "Runner",
@@ -735,7 +735,7 @@ describe("Strava device-sync provider", () => {
     });
 
     const refreshAccountTokens = vi.fn(async () => {
-      const refreshed = await provider.refreshTokens(expiringAccount);
+      const refreshed = await provider.oauthAdapter.refreshTokens(expiringAccount);
       return buildStravaAccount({
         accessToken: refreshed.accessToken,
         refreshToken: refreshed.refreshToken ?? requireStravaOAuthTokens(expiringAccount).refreshToken,
@@ -745,7 +745,7 @@ describe("Strava device-sync provider", () => {
     });
 
     await expect(
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: expiringAccount,
           now: "2026-04-16T00:00:00.000Z",
@@ -795,7 +795,7 @@ describe("Strava device-sync provider", () => {
     importSnapshot.mockClear();
 
     await expect(
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: buildStravaAccount(),
           now: "2026-04-16T00:00:00.000Z",
@@ -902,7 +902,7 @@ describe("Strava device-sync provider", () => {
       clientId: "12345",
       clientSecret: "secret",
       fetchImpl: vi.fn(async () => new Response("", { status: 404 })),
-    }).revokeAccess;
+    }).connectionHandler.revokeAccess;
 
     if (!revokeAccess) {
       throw new TypeError("Strava provider must define revokeAccess.");
@@ -938,14 +938,14 @@ describe("Strava device-sync provider", () => {
     });
 
     const importSnapshot = vi.fn(async () => undefined);
-    const revokeAccess = provider.revokeAccess;
+    const revokeAccess = provider.connectionHandler.revokeAccess;
 
     if (!revokeAccess) {
       throw new TypeError("Strava provider must define revokeAccess.");
     }
 
     await expect(
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: buildStravaAccount(),
           now: "2026-04-16T00:00:00.000Z",
@@ -994,7 +994,7 @@ describe("Strava device-sync provider", () => {
     );
 
     await expect(
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: buildStravaAccount(),
           now: "2026-04-16T00:00:00.000Z",
@@ -1031,7 +1031,7 @@ describe("Strava device-sync provider", () => {
     });
 
     await expect(
-      provider.verifyAndParseWebhook?.({
+      provider.webhookHandler?.verifyAndParseWebhook?.({
         headers: new Headers(),
         rawBody: Buffer.from("{not-json"),
         now: "2026-04-16T00:00:00.000Z",
@@ -1041,7 +1041,7 @@ describe("Strava device-sync provider", () => {
     });
 
     await expect(
-      provider.verifyAndParseWebhook?.({
+      provider.webhookHandler?.verifyAndParseWebhook?.({
         headers: new Headers(),
         rawBody: Buffer.from(JSON.stringify({
           aspect_type: "update",

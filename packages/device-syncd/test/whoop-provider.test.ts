@@ -9,8 +9,10 @@ import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
 import type {
   DeviceSyncAccount,
+  DeviceConnectionHandler,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
+  DeviceWebhookHandler,
   ProviderAuthTokens,
   ProviderConnectionResult,
   ProviderJobContext,
@@ -155,12 +157,12 @@ function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timest
 
 function requireVerifyAndParseWebhook(
   provider: DeviceSyncProvider,
-): NonNullable<DeviceSyncProvider["verifyAndParseWebhook"]> {
-  return requireValue(provider.verifyAndParseWebhook);
+): NonNullable<DeviceWebhookHandler["verifyAndParseWebhook"]> {
+  return requireValue(provider.webhookHandler?.verifyAndParseWebhook);
 }
 
-function requireRevokeAccess(provider: DeviceSyncProvider): NonNullable<DeviceSyncProvider["revokeAccess"]> {
-  return requireValue(provider.revokeAccess);
+function requireRevokeAccess(provider: DeviceSyncProvider): NonNullable<DeviceConnectionHandler["revokeAccess"]> {
+  return requireValue(provider.connectionHandler?.revokeAccess);
 }
 
 test("WHOOP provider builds a connect URL and exchanges an auth code into a refreshable connection", async () => {
@@ -195,7 +197,7 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
   });
 
   assert.equal(
-    provider.buildConnectUrl({
+    provider.oauthAdapter.buildConnectUrl({
       state: "state-1",
       callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
       scopes: ["offline", "read:profile"],
@@ -204,7 +206,7 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
     "https://api.prod.whoop.com/oauth/oauth2/auth?client_id=whoop-client-id&response_type=code&redirect_uri=https%3A%2F%2Fsync.example.test%2Fdevice-sync%2Foauth%2Fwhoop%2Fcallback&scope=offline+read%3Aprofile&state=state-1",
   );
 
-  const connection = await provider.exchangeAuthorizationCode(
+  const connection = await provider.oauthAdapter.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
       state: "state-1",
@@ -266,7 +268,7 @@ test("WHOOP provider avoids persisting connect-time profile or body measurement 
     },
   });
 
-  const connection = await provider.exchangeAuthorizationCode(
+  const connection = await provider.oauthAdapter.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
       state: "state-1",
@@ -304,7 +306,7 @@ test("WHOOP provider rejects refresh responses that omit the rotated refresh tok
   });
 
   await assert.rejects(
-    provider.refreshTokens(
+    provider.oauthAdapter.refreshTokens(
       createAccount(["offline"], {
         refreshToken: "persisted-refresh-token",
       }),
@@ -331,7 +333,7 @@ test("WHOOP provider requires an existing refresh token before attempting refres
   });
 
   await assert.rejects(
-    provider.refreshTokens(
+    provider.oauthAdapter.refreshTokens(
       createAccount(["offline"], {
         refreshToken: null,
       }),
@@ -365,7 +367,7 @@ test("WHOOP provider rejects auth exchanges without a refresh token", async () =
 
   await assert.rejects(
     () =>
-      provider.exchangeAuthorizationCode(
+      provider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
           state: "state-missing-refresh",
@@ -509,7 +511,7 @@ test("WHOOP provider backfills snapshot windows and refreshes once after a 401",
     },
   };
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     context,
     createJob("backfill", {
       windowStart,
@@ -553,7 +555,7 @@ test("WHOOP provider schedules reconcile jobs without profile/body-measurement s
     clientSecret: "whoop-client-secret",
   });
   const now = "2026-03-16T10:00:00.000Z";
-  const scheduled = provider.createScheduledJobs?.(
+  const scheduled = provider.jobExecutor.createScheduledJobs?.(
     createStoredAccount(["offline"], {
       nextReconcileAt: "2026-03-16T04:00:00.000Z",
     }),
@@ -626,7 +628,7 @@ test("WHOOP provider skips body measurement fetches when the account did not gra
     },
   };
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     context,
     createJob("reconcile", {
       windowStart,
@@ -857,7 +859,7 @@ test("WHOOP provider does not synthesize delete snapshots when an updated resour
   for (const testCase of cases) {
     const importedSnapshots: unknown[] = [];
 
-    await provider.executeJob(
+    await provider.jobExecutor.executeJob(
       {
         account: createAccount([...testCase.scopes]),
         now: "2026-03-16T10:00:00.000Z",
@@ -913,7 +915,7 @@ test("WHOOP provider skips resource imports when the account did not grant the r
       },
     });
 
-    await provider.executeJob(
+    await provider.jobExecutor.executeJob(
       {
         account: createAccount([...testCase.scopes]),
         now: "2026-03-16T10:00:00.000Z",
@@ -1050,7 +1052,7 @@ test("WHOOP provider rejects profile responses without a stable user id and tole
 
   await assert.rejects(
     () =>
-      provider.exchangeAuthorizationCode(
+      provider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
           state: "state-missing-profile-id",
@@ -1148,7 +1150,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
   );
   await assert.rejects(
     () =>
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: createAccount(["offline"]),
           now: "2026-03-16T10:00:00.000Z",
@@ -1169,7 +1171,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
       error.code === "WHOOP_JOB_INVALID",
   );
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     {
       account: createAccount(["offline"]),
       now: "2026-03-16T10:00:00.000Z",
@@ -1239,7 +1241,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
     },
   });
 
-  await importProvider.executeJob(
+  await importProvider.jobExecutor.executeJob(
     {
       account: createAccount(["offline", "read:workout"]),
       now: "2026-03-16T10:00:00.000Z",
@@ -1257,7 +1259,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
       resourceId: "workout-77",
     }),
   );
-  await importProvider.executeJob(
+  await importProvider.jobExecutor.executeJob(
     {
       account: createAccount(["offline", "read:sleep", "read:recovery", "read:cycles", "read:workout"]),
       now: "2026-03-16T10:00:00.000Z",
@@ -1295,7 +1297,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
   ]);
   await assert.rejects(
     () =>
-      importProvider.executeJob(
+      importProvider.jobExecutor.executeJob(
         {
           account: createAccount(["offline"]),
           now: "2026-03-16T10:00:00.000Z",
@@ -1319,7 +1321,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
 
   await assert.rejects(
     () =>
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: createAccount(["offline"]),
           now: "2026-03-16T10:00:00.000Z",
@@ -1370,7 +1372,7 @@ test("WHOOP provider imports sleep-related resources with linked cycle and recov
     },
   });
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     {
       account: createAccount(["offline", "read:sleep", "read:recovery", "read:cycles"]),
       now: "2026-03-16T10:00:00.000Z",

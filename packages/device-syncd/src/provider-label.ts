@@ -1,10 +1,17 @@
 import { resolveDeviceProviderDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 
+import { resolveJunctionConnectSourceLabel } from "./providers/junction-connect-sources.ts";
+
 export function formatDeviceSyncProviderLabel(provider: string): string {
   const descriptor = resolveDeviceProviderDescriptor(provider);
 
   if (descriptor?.displayName) {
     return descriptor.displayName;
+  }
+
+  const junctionLabel = resolveJunctionConnectSourceLabel(provider);
+  if (junctionLabel) {
+    return junctionLabel;
   }
 
   const normalized = provider.trim().toLowerCase();

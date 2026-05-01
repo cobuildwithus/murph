@@ -11,6 +11,9 @@ blockExoticSubdeps: true
 engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
+overrides:
+  '@workflow/world-local>undici': 7.24.8
+  '@workflow/world-vercel>undici': 7.24.8
 minimumReleaseAgeExclude:
   - incur@0.4.4
   - '@cobuild/review-gpt@0.5.86'

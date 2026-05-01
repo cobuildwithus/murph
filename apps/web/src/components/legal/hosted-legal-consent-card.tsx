@@ -20,6 +20,7 @@ type HostedLegalConsentCardMode = "compact" | "panel";
 
 interface HostedLegalConsentCardProps {
   className?: string;
+  initialStatus?: HostedConsentStatus | null;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
   onRequirementChange?: (required: boolean) => void;
@@ -29,15 +30,16 @@ interface HostedLegalConsentCardProps {
 
 export function HostedLegalConsentCard({
   className,
+  initialStatus = null,
   mode = "panel",
   onAccepted,
   onRequirementChange,
   preferredScope = "launch.legal",
   source,
 }: HostedLegalConsentCardProps) {
-  const [status, setStatus] = useState<HostedConsentStatus | null>(null);
+  const [status, setStatus] = useState<HostedConsentStatus | null>(initialStatus);
   const [pending, setPending] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -56,8 +58,15 @@ export function HostedLegalConsentCard({
   }, []);
 
   useEffect(() => {
+    if (initialStatus) {
+      setStatus(initialStatus);
+      setLoading(false);
+      setErrorMessage(null);
+      return;
+    }
+
     void loadStatus();
-  }, [loadStatus]);
+  }, [initialStatus, loadStatus]);
 
   const pendingScopes = useMemo(() => {
     if (!status) return [];

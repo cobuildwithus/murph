@@ -1,0 +1,590 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+import {
+  ArrowRightIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  DiamondIcon,
+  LoaderCircleIcon,
+  LockIcon,
+  RefreshCwIcon,
+  ShieldCheckIcon,
+  SparkleIcon,
+} from "lucide-react";
+
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
+import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
+import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
+
+import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
+import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
+import type { JoinInvitePageModel } from "./join-invite-page-model";
+import {
+  JoinInviteCheckoutPlanButtonIsland,
+  JoinInviteLegalConsentIsland,
+  JoinInviteMessagingSetupIsland,
+  JoinInvitePhoneVerificationIsland,
+  JoinInviteRefreshButtonIsland,
+  JoinInviteSignOutButtonIsland,
+} from "./join-invite-islands";
+
+const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
+const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
+
+const FREE_FEATURES = [
+  "Bring your own API keys",
+  "Self-host or run locally",
+  "Own your data, export anytime",
+  "Community-supported setup",
+];
+
+const PULSE_FEATURES = [
+  "Everything in Free and:",
+  "Access to frontier models",
+  "Wearable data sync",
+  "Before/after outcome cards",
+  "Chat via iMessage, Telegram, or email",
+  "Guided experiment setup",
+];
+
+const EDGE_FEATURES = [
+  "Everything in Pulse and:",
+  "More usage on latest OpenAI, Claude, Gemini models",
+  "Longer experiment context",
+  "Deeper outcome analysis",
+  "Detailed biomarker deltas",
+  "Richer protocol recommendations",
+  "Early access to new features",
+];
+
+export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
+  const { status } = model;
+
+  return (
+    <>
+      {status.session.authenticated && !status.session.matchesInvite ? (
+        <JoinInviteSignedInMismatchAlert />
+      ) : null}
+
+      {model.launchConsent.gateActive ? (
+        <JoinInviteLaunchLegalConsentPanel model={model} />
+      ) : null}
+
+      {!model.launchConsent.gateActive && status.stage === "verify" ? (
+        <JoinInvitePhoneVerificationPanel
+          awaitingInviteSessionResolution={model.awaitingInviteSessionResolution}
+          inviteCode={model.inviteCode}
+          phoneAuthTarget={status.invite?.phoneAuthTarget ?? null}
+          phoneHint={status.invite?.phoneHint ?? null}
+          verificationMode={status.invite?.verificationMode ?? "manual_phone"}
+        />
+      ) : null}
+
+      {!model.launchConsent.gateActive && status.stage === "blocked" ? (
+        <div className="text-sm leading-relaxed text-muted-foreground">
+          Email{" "}
+          <a href="mailto:support@withmurph.ai" className="font-semibold text-olive underline-offset-4 hover:underline">
+            support@withmurph.ai
+          </a>{" "}
+          to restore access.
+        </div>
+      ) : null}
+
+      {!model.launchConsent.gateActive && status.stage === "checkout" && status.messagingSetupRequired ? (
+        <JoinInviteMessagingSetupPanel
+          authenticated={status.session.authenticated}
+          initialTelegramAccount={model.telegramAccountForMessagingSetup}
+        />
+      ) : null}
+
+      {!model.launchConsent.gateActive && status.stage === "checkout" && !status.messagingSetupRequired ? (
+        <JoinInviteCheckoutPanel
+          billingReady={status.capabilities.billingReady}
+          billingPlans={status.billing.plans}
+          inviteCode={model.inviteCode}
+        />
+      ) : null}
+
+      {!model.launchConsent.gateActive && isHostedOnboardingAccessibleStage(status.stage) ? (
+        <JoinInviteActivePanel
+          launchLegalConsentSatisfied={model.launchConsent.status === "granted" || model.preview}
+          murphPhoneNumber={status.murphPhoneNumber ?? null}
+          stage={status.stage}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function JoinInviteSignedInMismatchAlert() {
+  return (
+    <Alert className="border-sienna/20 bg-sienna/5 text-sienna">
+      <AlertTitle>
+        This browser is signed in with a different Murph account.
+      </AlertTitle>
+      <AlertDescription>
+        This browser is already signed in with a different Murph account. Sign
+        out first to continue with this invite.
+      </AlertDescription>
+      <div className="mt-3">
+        <JoinInviteSignOutButtonIsland />
+      </div>
+    </Alert>
+  );
+}
+
+function JoinInvitePanelCard({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-2xl border border-border bg-card/80 p-6">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function JoinInvitePhoneVerificationPanel({
+  awaitingInviteSessionResolution,
+  inviteCode,
+  phoneAuthTarget,
+  phoneHint,
+  verificationMode,
+}: {
+  awaitingInviteSessionResolution: boolean;
+  inviteCode: string;
+  phoneAuthTarget: NonNullable<HostedInviteStatusPayload["invite"]>["phoneAuthTarget"] | null;
+  phoneHint: string | null;
+  verificationMode: NonNullable<HostedInviteStatusPayload["invite"]>["verificationMode"];
+}) {
+  if (awaitingInviteSessionResolution) {
+    return (
+      <Alert className="border-amber/20 bg-cream/40">
+        <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
+        <AlertTitle>Checking your signup state</AlertTitle>
+        <AlertDescription>
+          One moment while we pick up your session.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <JoinInvitePanelCard>
+      <JoinInvitePhoneVerificationIsland
+        inviteCode={inviteCode}
+        phoneAuthTarget={phoneAuthTarget}
+        phoneHint={phoneHint}
+        verificationMode={verificationMode}
+      />
+    </JoinInvitePanelCard>
+  );
+}
+
+function JoinInviteLaunchLegalConsentPanel({
+  model,
+}: {
+  model: JoinInvitePageModel;
+}) {
+  if (model.launchConsent.status === "error") {
+    return (
+      <div className="space-y-4">
+        <Alert variant="destructive">
+          <AlertTitle>Unable to load Murph legal consent</AlertTitle>
+          <AlertDescription>
+            {model.launchConsent.errorMessage ?? "Could not load Murph legal consent right now."}
+          </AlertDescription>
+        </Alert>
+        <JoinInviteRefreshButtonIsland />
+      </div>
+    );
+  }
+
+  return (
+    <JoinInviteLegalConsentIsland initialStatus={model.launchConsent.initialStatus} />
+  );
+}
+
+function JoinInviteMessagingSetupPanel({
+  authenticated,
+  initialTelegramAccount,
+}: {
+  authenticated: boolean;
+  initialTelegramAccount: HostedPrivyTelegramAccount | null;
+}) {
+  return (
+    <JoinInvitePanelCard>
+      <JoinInviteMessagingSetupIsland
+        authenticated={authenticated}
+        initialTelegramAccount={initialTelegramAccount}
+      />
+    </JoinInvitePanelCard>
+  );
+}
+
+function JoinInviteCheckoutPanel({
+  billingReady,
+  billingPlans,
+  inviteCode,
+}: {
+  billingReady: boolean;
+  billingPlans: HostedInviteStatusPayload["billing"]["plans"];
+  inviteCode: string;
+}) {
+  const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly") ?? null;
+  const edgePlan = billingPlans.find((p) => p.code === "launch_edge_monthly") ?? null;
+  const buttonClassName =
+    "h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90";
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
+        <PricingTierCard
+          tier="free"
+          name="Free"
+          description="Open-source, self-hosted Murph."
+          price="$0"
+          priceUnit="/ month"
+          features={FREE_FEATURES}
+          cta={
+            <Button
+              size="lg"
+              className={buttonClassName}
+              render={
+                <Link
+                  href={MURPH_GITHUB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
+            >
+              <span className="flex-1 text-center">View on GitHub</span>
+              <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
+                <ArrowRightIcon className="size-4" />
+              </span>
+            </Button>
+          }
+        />
+
+        <PricingTierCard
+          tier="go"
+          name="Pulse"
+          description="Private experiments for one person."
+          price={pulsePlan ? `$${Math.round(pulsePlan.recurringAmountUsdCents / 100)}` : "$8"}
+          priceUnit="/ month"
+          features={PULSE_FEATURES}
+          cta={
+            <JoinInviteCheckoutPlanButtonIsland
+              billingReady={billingReady}
+              className={buttonClassName}
+              idleLabel="Get Pulse"
+              inviteCode={inviteCode}
+              planCode={pulsePlan?.code ?? null}
+            />
+          }
+        />
+
+        <PricingTierCard
+          tier="plus"
+          name="Edge"
+          description="More guidance and deeper research."
+          price={edgePlan ? `$${Math.round(edgePlan.recurringAmountUsdCents / 100)}` : "$20"}
+          priceUnit="/ month"
+          features={EDGE_FEATURES}
+          cta={
+            <JoinInviteCheckoutPlanButtonIsland
+              billingReady={billingReady}
+              className={buttonClassName}
+              disabledLabel="Coming soon"
+              idleLabel="Get Edge"
+              inviteCode={inviteCode}
+              planCode={edgePlan?.code ?? null}
+            />
+          }
+        />
+      </div>
+
+      <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-0">
+          <CheckoutTrustItem
+            icon={LockIcon}
+            label="Private by default"
+            sublabel="Your data stays yours."
+          />
+          <CheckoutTrustItem
+            icon={ShieldCheckIcon}
+            label="No data sold"
+            sublabel="Ever. That’s our promise."
+            divider
+          />
+          <CheckoutTrustItem
+            icon={RefreshCwIcon}
+            label="Full data access"
+            sublabel="Export or delete anytime."
+            divider
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PricingTierCard({
+  name,
+  description,
+  price,
+  priceUnit,
+  features,
+  cta,
+  tier,
+}: {
+  name: string;
+  description: string;
+  price: string;
+  priceUnit: string;
+  features: readonly string[];
+  cta: ReactNode;
+  tier: "free" | "go" | "plus";
+}) {
+  return (
+    <div className="flex min-w-0 flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
+      <div className="flex items-center gap-3">
+        <PricingDots tier={tier} />
+        <h3 className="font-serif text-3xl font-normal tracking-tight text-foreground">
+          {name}
+        </h3>
+      </div>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        {description}
+      </p>
+
+      <div className="mt-6 border-t border-border pt-6">
+        <div className="flex items-baseline gap-1">
+          <span className="font-serif text-5xl font-normal leading-none tracking-tight text-foreground">
+            {price}
+          </span>
+          <span className="text-sm text-muted-foreground">{priceUnit}</span>
+        </div>
+      </div>
+
+      <div className="mt-6">{cta}</div>
+
+      <ul className="mt-6 flex flex-col gap-3">
+        {features.map((feature, i) => (
+          <li key={feature} className="text-sm">
+            {i === 0 && feature.endsWith(":") ? (
+              <div className="flex flex-col gap-3">
+                <span className="flex items-center gap-2 font-semibold text-foreground">
+                  {tier === "plus" ? (
+                    <DiamondIcon className="size-4 text-olive" />
+                  ) : (
+                    <SparkleIcon className="size-4 text-olive" />
+                  )}
+                  {feature}
+                </span>
+                <hr className="border-border" />
+              </div>
+            ) : (
+              <div className="flex items-start gap-3">
+                <span aria-hidden className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-olive/15">
+                  <CheckIcon className="size-3 text-olive" strokeWidth={2.5} />
+                </span>
+                <span className="text-foreground">{feature}</span>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PricingDots({ tier }: { tier: "free" | "go" | "plus" }) {
+  const width = tier === "plus" ? 32 : 28;
+  const columns = tier === "plus" ? [6, 14, 22, 30] : [7, 17, 27, 37];
+  const rows = [6, 16, 27, 38];
+
+  return (
+    <svg width={width} height="28" viewBox="0 0 44 44" fill="none" aria-hidden>
+      {rows.flatMap((cy, rowIndex) =>
+        columns.map((cx, columnIndex) => {
+          const emphasized =
+            tier === "go"
+              ? columnIndex === 2 && rowIndex >= 1
+              : tier === "plus"
+                ? columnIndex >= 1 && columnIndex <= 2 && rowIndex >= 1
+                : columnIndex === rowIndex % columns.length;
+          return (
+            <circle
+              key={`${cx}-${cy}`}
+              cx={cx}
+              cy={cy}
+              r={emphasized ? 3 : 2}
+              fill={emphasized ? "#8b6840" : "#b5c4a1"}
+              fillOpacity={emphasized ? 0.85 : 0.32}
+            />
+          );
+        }),
+      )}
+    </svg>
+  );
+}
+
+function CheckoutTrustItem({
+  icon: Icon,
+  label,
+  sublabel,
+  divider,
+}: {
+  icon: typeof LockIcon;
+  label: string;
+  sublabel: string;
+  divider?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "flex items-center gap-3 py-1",
+        divider ? "lg:border-l lg:border-border lg:pl-6" : "",
+      ].join(" ")}
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40">
+        <Icon className="size-[18px] text-muted-foreground" />
+      </span>
+      <div>
+        <p className="text-sm font-semibold text-foreground">{label}</p>
+        <p className="text-xs text-muted-foreground">{sublabel}</p>
+      </div>
+    </div>
+  );
+}
+
+function JoinInviteActivePanel({
+  launchLegalConsentSatisfied,
+  murphPhoneNumber,
+  stage,
+}: {
+  launchLegalConsentSatisfied: boolean;
+  murphPhoneNumber: string | null;
+  stage: HostedAccessibleOnboardingStage;
+}) {
+  const activationPending = stage === "activating";
+
+  return (
+    <div className="flex flex-col gap-8">
+      {activationPending ? (
+        <div className="flex items-start gap-3 text-sm text-olive">
+          <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
+          <div className="space-y-1">
+            <p className="font-semibold">
+              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}
+            </p>
+            <p className="leading-relaxed text-olive/85">
+              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2.5 text-sm text-olive">
+          <CheckCircleIcon className="size-4 shrink-0" />
+          <p className="leading-relaxed">
+            Murph will text you shortly. Reply to start.
+          </p>
+        </div>
+      )}
+
+      {launchLegalConsentSatisfied ? (
+        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
+      ) : null}
+
+      <div className="border-t border-amber/25 pt-6">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          What Murph can help with
+        </p>
+        <div className="mt-4 grid gap-x-6 gap-y-5 sm:grid-cols-2">
+          {JOIN_INVITE_ACTIVE_FEATURE_CARDS.map((item) => (
+            <div key={item.title} className="flex gap-3">
+              <item.icon className="mt-0.5 size-4 shrink-0 text-olive-light" />
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {item.title}
+                </p>
+                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
+                  {item.body}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Button
+        render={<Link href="/experiments" />}
+        nativeButton={false}
+        variant="link"
+        size="sm"
+        className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
+      >
+        View experiments
+      </Button>
+    </div>
+  );
+}
+
+function JoinInviteMurphContactActions({
+  murphPhoneNumber,
+}: {
+  murphPhoneNumber: string | null;
+}) {
+  if (!murphPhoneNumber) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
+      <Button
+        render={<a href={buildMurphSmsHref(murphPhoneNumber)} />}
+        nativeButton={false}
+        size="lg"
+      >
+        Text Murph
+      </Button>
+      <Button
+        render={
+          <a
+            download={MURPH_CONTACT_DOWNLOAD_FILENAME}
+            href={buildMurphVcardHref(murphPhoneNumber)}
+          />
+        }
+        nativeButton={false}
+        variant="outline"
+        size="lg"
+      >
+        Add Murph to Contacts
+      </Button>
+    </div>
+  );
+}
+
+function buildMurphSmsHref(phoneNumber: string): string {
+  return `sms:${phoneNumber}`;
+}
+
+function buildMurphVcardHref(phoneNumber: string): string {
+  return `data:text/vcard;charset=utf-8,${encodeURIComponent(
+    buildMurphVcard(phoneNumber),
+  )}`;
+}
+
+function buildMurphVcard(phoneNumber: string): string {
+  return [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "FN:Murph",
+    `TEL;TYPE=CELL:${phoneNumber}`,
+    "END:VCARD",
+    "",
+  ].join("\r\n");
+}

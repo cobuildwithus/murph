@@ -137,6 +137,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       {
         providerLabel: "Dexcom",
         resourceCount: 3,
+        sourceProviderSlug: "dexcom_v3",
         status: "connected",
       },
     ]);

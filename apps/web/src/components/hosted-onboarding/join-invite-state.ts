@@ -2,6 +2,15 @@ import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/type
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 
+export interface JoinInviteStatusRefreshSnapshot {
+  fingerprint: string;
+  session: {
+    authenticated: boolean;
+    matchesInvite: boolean;
+  };
+  stage: HostedInviteStatusPayload["stage"];
+}
+
 export function hasResolvedHostedInviteVerification(
   status: HostedInviteStatusPayload,
 ): boolean {
@@ -34,6 +43,98 @@ export function shouldAwaitHostedInviteSessionResolution(input: {
   status: HostedInviteStatusPayload;
 }): boolean {
   return !input.hasCompletedInitialRefresh && !hasResolvedHostedInviteVerification(input.status);
+}
+
+export function shouldGateJoinInviteStatusWithLaunchConsent(
+  status: HostedInviteStatusPayload,
+): boolean {
+  if (!status.session.authenticated || !status.session.matchesInvite) {
+    return false;
+  }
+
+  return (
+    status.stage === "checkout"
+    || status.stage === "activating"
+    || status.stage === "active"
+  );
+}
+
+export function buildJoinInviteStatusRefreshSnapshot(
+  status: HostedInviteStatusPayload,
+): JoinInviteStatusRefreshSnapshot {
+  return {
+    fingerprint: buildJoinInviteStatusRefreshFingerprint(status),
+    session: {
+      authenticated: status.session.authenticated,
+      matchesInvite: status.session.matchesInvite,
+    },
+    stage: status.stage,
+  };
+}
+
+export function shouldRefreshJoinInviteStatusFromPayload(input: {
+  current: JoinInviteStatusRefreshSnapshot;
+  nextStatus: HostedInviteStatusPayload;
+}): boolean {
+  if (isStaleHostedInviteVerifyRefresh(input)) {
+    return false;
+  }
+
+  return input.current.fingerprint !== buildJoinInviteStatusRefreshFingerprint(input.nextStatus);
+}
+
+function isStaleHostedInviteVerifyRefresh(input: {
+  current: JoinInviteStatusRefreshSnapshot;
+  nextStatus: HostedInviteStatusPayload;
+}): boolean {
+  return (
+    input.current.stage !== "verify"
+    && input.current.session.authenticated
+    && input.current.session.matchesInvite
+    && input.nextStatus.stage === "verify"
+    && input.nextStatus.session.authenticated
+    && input.nextStatus.session.matchesInvite
+  );
+}
+
+function buildJoinInviteStatusRefreshFingerprint(
+  status: HostedInviteStatusPayload,
+): string {
+  return hashJoinInviteRefreshPayload(JSON.stringify({
+    billing: {
+      defaultPlanCode: status.billing.defaultPlanCode,
+      plans: status.billing.plans.map((plan) => ({
+        code: plan.code,
+        recurringAmountUsdCents: plan.recurringAmountUsdCents,
+      })),
+    },
+    capabilities: status.capabilities,
+    invite: status.invite
+      ? {
+          phoneAuthTarget: status.invite.phoneAuthTarget,
+          phoneHint: status.invite.phoneHint,
+          verificationMode: status.invite.verificationMode,
+        }
+      : null,
+    messagingSetupRequired: status.messagingSetupRequired,
+    murphPhoneNumber: status.murphPhoneNumber ?? null,
+    session: {
+      authenticated: status.session.authenticated,
+      matchesInvite: status.session.matchesInvite,
+    },
+    stage: status.stage,
+  }));
+}
+
+function hashJoinInviteRefreshPayload(payload: string): string {
+  let hash = 0x811c9dc5;
+
+  for (let i = 0; i < payload.length; i += 1) {
+    hash ^= payload.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(36);
 }
 
 export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): string {

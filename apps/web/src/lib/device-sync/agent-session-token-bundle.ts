@@ -36,7 +36,12 @@ export function buildTokenExport(
 export function buildStoredTokenBundle(
   account: HostedStoredDeviceSyncAccount | null,
 ): HostedStoredTokenBundle | null {
-  if (!account || account.credential.kind !== "oauth_tokens") {
+  if (
+    !account
+    || account.credential.kind !== "oauth_tokens"
+    || !account.keyVersion
+    || typeof account.tokenVersion !== "number"
+  ) {
     return null;
   }
 

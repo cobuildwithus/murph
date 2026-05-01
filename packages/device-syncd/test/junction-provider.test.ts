@@ -166,9 +166,9 @@ test("Junction provider exposes primitive handlers without OAuth compatibility m
   assert.ok(provider.connectionHandler);
   assert.ok(provider.webhookHandler);
   assert.ok(provider.jobExecutor);
-  assert.equal(provider.buildConnectUrl, undefined);
-  assert.equal(provider.exchangeAuthorizationCode, undefined);
-  assert.equal(provider.refreshTokens, undefined);
+  assert.equal("buildConnectUrl" in provider, false);
+  assert.equal("exchangeAuthorizationCode" in provider, false);
+  assert.equal("refreshTokens" in provider, false);
 });
 
 test("Junction default provider filter covers every shared connect source", () => {

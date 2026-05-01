@@ -451,6 +451,17 @@ export interface DeviceJobExecutor {
   executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
 }
 
+export interface DeviceSyncOAuthAdapter {
+  buildConnectUrl(input: {
+    state: string;
+    callbackUrl: string;
+    scopes: string[];
+    now: string;
+  }): string;
+  exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
+  refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
+}
+
 export interface DeviceSyncProvider {
   provider: string;
   descriptor: DeviceProviderDescriptor;
@@ -459,29 +470,14 @@ export interface DeviceSyncProvider {
   webhookHandler?: DeviceWebhookHandler;
   jobExecutor?: DeviceJobExecutor;
   webhookAdmin?: ProviderWebhookAdminCapability;
-  // Compatibility methods for legacy OAuth-shaped providers. New providers should expose
-  // connectionHandler, webhookHandler, and jobExecutor instead.
-  beginConnection?(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
-  completeConnection?(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
-  buildConnectUrl?(input: {
-    state: string;
-    callbackUrl: string;
-    scopes: string[];
-    now: string;
-  }): string;
-  exchangeAuthorizationCode?(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
-  refreshTokens?(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
-  revokeAccess?(account: DeviceSyncAccount): Promise<void>;
-  createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
-  verifyAndParseWebhook?(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
-  executeJob?(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
 }
 
-export interface DeviceSyncOAuthCompatibilityProvider extends DeviceSyncProvider {
-  buildConnectUrl: NonNullable<DeviceSyncProvider["buildConnectUrl"]>;
-  exchangeAuthorizationCode: NonNullable<DeviceSyncProvider["exchangeAuthorizationCode"]>;
-  refreshTokens: NonNullable<DeviceSyncProvider["refreshTokens"]>;
-  executeJob: NonNullable<DeviceSyncProvider["executeJob"]>;
+export interface DeviceSyncOAuthProvider extends DeviceSyncProvider {
+  connectionHandler: DeviceConnectionHandler & {
+    refreshTokens: NonNullable<DeviceConnectionHandler["refreshTokens"]>;
+  };
+  jobExecutor: DeviceJobExecutor;
+  oauthAdapter: DeviceSyncOAuthAdapter;
 }
 
 export interface DeviceSyncRegistry extends NamedDeviceProviderRegistry<DeviceSyncProvider> {

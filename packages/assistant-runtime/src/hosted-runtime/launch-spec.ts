@@ -42,6 +42,7 @@ export const HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV =
   "MURPH_DEV_CODEX_APP_SERVER_PROXY_URL";
 export const HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV =
   "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN";
+const HOSTED_LOCAL_CODEX_MODEL_PROVIDER_ID = "local-codex";
 
 export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   assistant: [
@@ -185,7 +186,9 @@ function isHostedAssistantConfigEnvKey(key: string): boolean {
 }
 
 function shouldForwardHostedCodexAssistantConfigEnv(source: UnknownEnvSource): boolean {
-  return source[HOSTED_ASSISTANT_PROVIDER_ENV] === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID;
+  const provider = source[HOSTED_ASSISTANT_PROVIDER_ENV];
+  return provider === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID
+    || provider === HOSTED_LOCAL_CODEX_MODEL_PROVIDER_ID;
 }
 
 export function buildHostedRuntimeChildEnv(input: {

@@ -11,6 +11,12 @@ test("formatDeviceSyncProviderLabel prefers the registered descriptor display na
   assert.equal(formatDeviceSyncProviderLabel("whoop"), "WHOOP");
 });
 
+test("formatDeviceSyncProviderLabel uses shared Junction source labels", () => {
+  assert.equal(formatDeviceSyncProviderLabel("map_my_fitness"), "MapMyFitness");
+  assert.equal(formatDeviceSyncProviderLabel("accuchek_ble"), "Accu-Chek");
+  assert.equal(formatDeviceSyncProviderLabel("dexcom_v3"), "Dexcom");
+});
+
 test("formatDeviceSyncProviderLabel title-cases unknown provider identifiers", () => {
   assert.equal(
     formatDeviceSyncProviderLabel("  custom_provider-name  "),

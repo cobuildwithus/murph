@@ -159,7 +159,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await appendHostedMailboxEnvelopeTx({
+    const mailboxAppend = await appendHostedMailboxEnvelopeTx({
       envelope: buildHostedExecutionLinqConversationMessageWake({
         eventId: input.event.event_id,
         linqMessage: {
@@ -206,6 +206,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           ignored: false,
           reason: "wake-appended-active-member",
         },
+        wakeMailboxItemId: mailboxAppend.item.id,
         wakeUserId: existingMember.id,
       }),
       ingressReadReceiptChatId: summary.chatId,

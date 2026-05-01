@@ -30,6 +30,7 @@ import {
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
+  DeviceConnectionHandler,
   DeviceJobExecutor,
   DeviceSyncAccountCredential,
   DeviceSyncAccount,
@@ -339,7 +340,7 @@ class DeviceSyncServiceController {
     if (account.status !== "disconnected") {
       try {
         const decrypted = this.toDecryptedAccount(account);
-        await provider.revokeAccess?.(decrypted);
+        await provider.connectionHandler?.revokeAccess?.(decrypted);
       } catch (error) {
         this.logger.warn?.("Provider revoke access failed during disconnect; continuing local disconnect.", {
           provider: provider.provider,
@@ -941,22 +942,13 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
 }
 
 function resolveProviderJobExecutor(provider: DeviceSyncProvider): DeviceJobExecutor | undefined {
-  if (provider.jobExecutor) {
-    return provider.jobExecutor;
-  }
-
-  return provider.executeJob
-    ? {
-        ...(provider.createScheduledJobs ? { createScheduledJobs: provider.createScheduledJobs } : {}),
-        executeJob: provider.executeJob,
-      }
-    : undefined;
+  return provider.jobExecutor;
 }
 
 function resolveProviderTokenRefresher(
   provider: DeviceSyncProvider,
-): DeviceSyncProvider["refreshTokens"] {
-  return provider.connectionHandler?.refreshTokens ?? provider.refreshTokens;
+): DeviceConnectionHandler["refreshTokens"] {
+  return provider.connectionHandler?.refreshTokens;
 }
 
 function normalizeExecutionError(error: unknown): {

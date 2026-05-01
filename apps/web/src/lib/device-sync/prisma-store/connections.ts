@@ -524,29 +524,62 @@ export class PrismaHostedConnectionStore {
   private buildStoredConnectionAccount(record: HostedConnectionRecord): HostedStoredDeviceSyncAccount | null {
     const mappedRecord = mapHostedConnectionRecord(record);
     mappedRecord.externalAccountId = readHostedStoredExternalAccountId(record, this.codec);
+
     const publicConnection = buildHostedPublicDeviceSyncAccount({
       record: mappedRecord,
     });
-    const tokenBundle = readHostedStoredTokenBundle(record, this.codec);
 
-    if (!tokenBundle) {
-      return null;
+    switch (mappedRecord.credentialKind) {
+      case "oauth_tokens": {
+        const tokenBundle = readHostedStoredTokenBundle(record, this.codec);
+
+        if (!tokenBundle) {
+          return null;
+        }
+
+        return {
+          ...publicConnection,
+          credential: {
+            kind: "oauth_tokens",
+            tokens: {
+              accessToken: tokenBundle.accessToken,
+              accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt ?? null,
+              refreshToken: tokenBundle.refreshToken,
+            },
+          },
+          disconnectGeneration: 0,
+          keyVersion: tokenBundle.keyVersion,
+          tokenVersion: tokenBundle.tokenVersion,
+        } satisfies HostedStoredDeviceSyncAccount;
+      }
+      case "provider_config":
+        if (!mappedRecord.providerConfigKey) {
+          return null;
+        }
+
+        return {
+          ...publicConnection,
+          credential: {
+            kind: "provider_config",
+            credentialMetadata: mappedRecord.credentialMetadata,
+            providerConfigKey: mappedRecord.providerConfigKey,
+          },
+          disconnectGeneration: 0,
+          keyVersion: null,
+          tokenVersion: null,
+        } satisfies HostedStoredDeviceSyncAccount;
+      case "none":
+        return {
+          ...publicConnection,
+          credential: {
+            kind: "none",
+            credentialMetadata: mappedRecord.credentialMetadata,
+          },
+          disconnectGeneration: 0,
+          keyVersion: null,
+          tokenVersion: null,
+        } satisfies HostedStoredDeviceSyncAccount;
     }
-
-    return {
-      ...publicConnection,
-      credential: {
-        kind: "oauth_tokens",
-        tokens: {
-          accessToken: tokenBundle.accessToken,
-          accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt ?? null,
-          refreshToken: tokenBundle.refreshToken,
-        },
-      },
-      disconnectGeneration: 0,
-      keyVersion: tokenBundle.keyVersion,
-      tokenVersion: tokenBundle.tokenVersion,
-    } satisfies HostedStoredDeviceSyncAccount;
   }
 }
 

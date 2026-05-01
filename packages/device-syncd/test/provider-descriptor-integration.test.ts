@@ -12,6 +12,7 @@ import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
 import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import type { DeviceSyncOAuthAdapter } from "../src/types.ts";
 
 describe("device-sync providers", () => {
   it("keeps the built-in runtime providers aligned with the shared descriptor registry", () => {
@@ -55,15 +56,19 @@ describe("device-sync providers", () => {
     const junction = providers.find((provider) => provider.provider === "junction");
     expect(junction?.connectionHandler).toBeDefined();
     expect(junction?.webhookHandler).toBeDefined();
-    expect(junction?.buildConnectUrl).toBeUndefined();
-    expect(junction?.exchangeAuthorizationCode).toBeUndefined();
-    expect(junction?.refreshTokens).toBeUndefined();
+    expect(hasProviderMember(junction, "buildConnectUrl")).toBe(false);
+    expect(hasProviderMember(junction, "exchangeAuthorizationCode")).toBe(false);
+    expect(hasProviderMember(junction, "refreshTokens")).toBe(false);
 
     for (const provider of providers.filter((entry) => entry.provider !== "junction")) {
       expect(provider.connectionHandler).toBeDefined();
-      expect(provider.buildConnectUrl).toBeDefined();
-      expect(provider.exchangeAuthorizationCode).toBeDefined();
-      expect(provider.refreshTokens).toBeDefined();
+      const oauthAdapter = getProviderMember(provider, "oauthAdapter") as DeviceSyncOAuthAdapter | undefined;
+      expect(oauthAdapter?.buildConnectUrl).toBeDefined();
+      expect(oauthAdapter?.exchangeAuthorizationCode).toBeDefined();
+      expect(oauthAdapter?.refreshTokens).toBeDefined();
+      expect(hasProviderMember(provider, "buildConnectUrl")).toBe(false);
+      expect(hasProviderMember(provider, "exchangeAuthorizationCode")).toBe(false);
+      expect(hasProviderMember(provider, "refreshTokens")).toBe(false);
     }
   });
 
@@ -108,7 +113,7 @@ describe("device-sync providers", () => {
       reconcileDays: 5,
       reconcileIntervalMs: 123_000,
     });
-    expect(Boolean(provider.revokeAccess)).toBe(
+    expect(Boolean(provider.connectionHandler.revokeAccess)).toBe(
       OURA_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
     );
     expect(OURA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
@@ -136,7 +141,7 @@ describe("device-sync providers", () => {
       reconcileDays: 4,
       reconcileIntervalMs: 456_000,
     });
-    expect(Boolean(provider.revokeAccess)).toBe(
+    expect(Boolean(provider.connectionHandler.revokeAccess)).toBe(
       WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
     );
     expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
@@ -174,10 +179,21 @@ describe("device-sync providers", () => {
       reconcileDays: 6,
       reconcileIntervalMs: 789_000,
     });
-    expect(Boolean(provider.revokeAccess)).toBe(
+    expect(Boolean(provider.connectionHandler.revokeAccess)).toBe(
       STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
     );
     expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
     expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
   });
 });
+
+function hasProviderMember(
+  provider: object | null | undefined,
+  member: string,
+): boolean {
+  return Boolean(provider && member in provider);
+}
+
+function getProviderMember(provider: object, member: string): unknown {
+  return (provider as Record<string, unknown>)[member];
+}

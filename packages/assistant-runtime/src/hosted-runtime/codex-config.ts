@@ -25,6 +25,7 @@ const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const HOSTED_CODEX_PROXY_CONFIG_FILE_NAME = "app-server-proxy.json";
 const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
+const HOSTED_LOCAL_CODEX_PROVIDER_ID = "local-codex";
 const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
@@ -79,21 +80,32 @@ export async function prepareHostedCodexRuntimeEnvironment(
   input: HostedCodexRuntimeEnvironmentInput,
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
   const provider = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER);
+  const hasLocalCodexAppServerProxy = normalizeHostedCodexEnvString(
+    input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV],
+  ) !== null;
+  const usesLocalCodexProvider = provider === HOSTED_LOCAL_CODEX_PROVIDER_ID;
 
-  if (provider !== VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id) {
+  if (
+    provider !== VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id
+    && !usesLocalCodexProvider
+  ) {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id}.`,
+      `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id}, or ${HOSTED_LOCAL_CODEX_PROVIDER_ID} with the local Codex app-server bridge.`,
     );
   }
 
   const providerConfig = VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
-  const hasLocalCodexAppServerProxy = normalizeHostedCodexEnvString(
-    input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV],
-  ) !== null;
 
-  if (!apiKeyValue && !hasLocalCodexAppServerProxy) {
+  if (usesLocalCodexProvider && !hasLocalCodexAppServerProxy) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+      `${HOSTED_LOCAL_CODEX_PROVIDER_ID} requires ${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV}.`,
+    );
+  }
+
+  if (!usesLocalCodexProvider && !apiKeyValue && !hasLocalCodexAppServerProxy) {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_REQUIRED",
       `Hosted assistant provider ${providerConfig.id} requires ${providerConfig.envKey} in the isolated runtime environment.`,
@@ -126,11 +138,16 @@ export async function prepareHostedCodexRuntimeEnvironment(
   await chmod(codexHome, 0o700);
   await writeFile(
     codexConfigPath,
-    buildHostedCodexConfigToml({
-      model: runtimeEnv.HOSTED_ASSISTANT_MODEL,
-      provider: providerConfig,
-      reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
-    }),
+    usesLocalCodexProvider
+      ? buildHostedLocalCodexConfigToml({
+          model: runtimeEnv.HOSTED_ASSISTANT_MODEL,
+          reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+        })
+      : buildHostedCodexConfigToml({
+          model: runtimeEnv.HOSTED_ASSISTANT_MODEL,
+          provider: providerConfig,
+          reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+        }),
     {
       encoding: "utf8",
       mode: 0o600,
@@ -730,6 +747,23 @@ export function buildHostedCodexConfigToml(input: {
     `base_url = ${tomlString(input.provider.baseUrl)}`,
     `env_key = ${tomlString(input.provider.envKey)}`,
     `wire_api = ${tomlString(input.provider.wireApi)}`,
+    "",
+    "[shell_environment_policy]",
+    `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    `include_only = ${tomlStringArray(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
+    "",
+  ].join("\n");
+}
+
+export function buildHostedLocalCodexConfigToml(input: {
+  model: string;
+  reasoningEffort: string;
+}): string {
+  return [
+    `model = ${tomlString(input.model)}`,
+    `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
+    `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
+    `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "",
     "[shell_environment_policy]",
     `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,

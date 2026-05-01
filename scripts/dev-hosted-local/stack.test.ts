@@ -123,7 +123,19 @@ const spawnSync = vi.fn(() => ({
   stdout: "",
 }));
 const stopHostedLocalCodexBridge = vi.fn(async () => {});
-const startHostedLocalCodexBridge = vi.fn(async () => ({
+const startHostedLocalCodexBridge = vi.fn<
+  (input: {
+    codexCommand: string;
+    env: NodeJS.ProcessEnv;
+    listenHost: string;
+    listenPort: number;
+    stderrTarget?: NodeJS.WritableStream;
+  }) => Promise<{
+    proxyToken: string;
+    proxyUrl: string;
+    stop: typeof stopHostedLocalCodexBridge;
+  }>
+>(async () => ({
   proxyToken: "local-codex-bridge-token",
   proxyUrl: "tcp://127.0.0.1:41234",
   stop: stopHostedLocalCodexBridge,
@@ -309,7 +321,7 @@ describe("hosted local dev stack", () => {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "local-codex",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
         TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
@@ -579,12 +591,19 @@ describe("hosted local dev stack", () => {
         MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:9999",
       }),
     }));
+    const codexBridgeInput = startHostedLocalCodexBridge.mock.calls.at(-1)?.[0];
+    expect(codexBridgeInput?.env.CODEX_HOME).toBe("/tmp/local-codex-home");
+    expect(codexBridgeInput?.env.VERCEL_AI_API_KEY).toBe("local-vercel-key");
+    expect(codexBridgeInput?.env.OPENAI_API_KEY).toBe("local-openai-key");
+    expect(codexBridgeInput?.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
+    expect(codexBridgeInput?.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
 
     const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBeUndefined();
     expect(envFileSource.VERCEL_AI_API_KEY).toBeUndefined();
+    expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("local-codex");
     expect(envFileSource.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBe(
       "local-codex-bridge-token",
     );
