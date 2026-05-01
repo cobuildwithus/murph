@@ -296,7 +296,7 @@ export function JoinInviteLaunchLegalConsentPanel({
 }) {
   return (
     <HostedLegalConsentCard
-      mode="panel"
+      mode="compact"
       onAccepted={onLaunchLegalConsentSatisfied}
       onRequirementChange={(required) => {
         if (!required) {

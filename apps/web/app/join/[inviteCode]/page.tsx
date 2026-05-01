@@ -6,7 +6,6 @@ import {
   buildJoinInvitePreviewStatus,
   parseJoinInvitePreviewStage,
 } from "@/src/components/hosted-onboarding/join-invite-preview";
-import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-shell";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -34,14 +33,12 @@ export default async function JoinInvitePage(input: {
   if (previewStage) {
     return (
       <HostedPhoneCountryCodeBoundary>
-        <JoinInviteShell>
-          <JoinInviteClient
-            initialLinkedAccounts={[]}
-            inviteCode={decodedInviteCode}
-            initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
-            preview
-          />
-        </JoinInviteShell>
+        <JoinInviteClient
+          initialLinkedAccounts={[]}
+          inviteCode={decodedInviteCode}
+          initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
+          preview
+        />
       </HostedPhoneCountryCodeBoundary>
     );
   }
@@ -54,13 +51,11 @@ export default async function JoinInvitePage(input: {
 
   return (
     <HostedPhoneCountryCodeBoundary>
-      <JoinInviteShell>
-        <JoinInviteClient
-          initialLinkedAccounts={linkedAccounts}
-          inviteCode={decodedInviteCode}
-          initialStatus={initialStatus}
-        />
-      </JoinInviteShell>
+      <JoinInviteClient
+        initialLinkedAccounts={linkedAccounts}
+        inviteCode={decodedInviteCode}
+        initialStatus={initialStatus}
+      />
     </HostedPhoneCountryCodeBoundary>
   );
 }
