@@ -645,12 +645,6 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
 
 const MAX_FOCUS_SIGNAL_CARDS = 3;
 
-const signalDirectionArrows: Record<ExperimentSignal["direction"], string> = {
-  down: "↓",
-  neutral: "→",
-  up: "↑",
-};
-
 function groupExpectedSignals(signals: readonly ExperimentSignal[]): {
   contextSignals: ExperimentSignal[];
   focusSignals: ExperimentSignal[];

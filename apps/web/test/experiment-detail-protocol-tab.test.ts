@@ -76,7 +76,10 @@ describe("ProtocolTab", () => {
       privateRun: null,
     });
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
-    const summaryParagraph = experiment.whyItWorks.split("\n\n")[0]?.trim();
+    const summaryParagraph = experiment.whyItWorks
+      .split("\n\n")
+      .find((block) => !block.trimStart().startsWith("#"))
+      ?.trim();
 
     expect(markup).toContain("Run the protocol");
     expect(markup).toContain("Why it works");
