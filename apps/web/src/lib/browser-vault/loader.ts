@@ -18,6 +18,8 @@ import {
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/browser-vault";
 
+import { browserVaultReplicaRefsMatch } from "./ref";
+
 export type BrowserVaultSessionLoadResult =
   | { state: "empty" }
   | { replicaRef: HostedBrowserVaultReplicaRef; state: "not_modified" }
@@ -29,6 +31,8 @@ export interface LoadBrowserVaultReplicaInput {
   knownReplicaRef: HostedBrowserVaultReplicaRef | null;
   signal?: AbortSignal;
 }
+
+const textDecoder = new TextDecoder();
 
 export async function loadBrowserVaultReplica({
   endpoint = "/api/browser-vault/session",
@@ -63,7 +67,9 @@ export async function loadBrowserVaultReplica({
   }
 
   assertNotAborted(signal);
-  const session = parseBrowserVaultSessionResponse(await response.json());
+  const sessionValue: unknown = await response.json();
+  assertNotAborted(signal);
+  const session = parseBrowserVaultSessionResponse(sessionValue);
 
   if (session.state === "empty") {
     return { state: "empty" };
@@ -110,7 +116,7 @@ export async function loadBrowserVaultReplica({
   assertNotAborted(signal);
 
   const replica = parseBrowserVaultReplica(
-    JSON.parse(new TextDecoder().decode(plaintext)),
+    JSON.parse(textDecoder.decode(plaintext)),
   );
 
   if (replica.source.dataVersion !== session.replicaRef.dataVersion) {
@@ -147,7 +153,11 @@ export function normalizeBrowserVaultError(error: unknown): string {
 }
 
 export function isBrowserVaultAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return Reflect.get(error, "name") === "AbortError";
 }
 
 export type BrowserVaultSessionResponse =
@@ -178,6 +188,9 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
   const state = requireNonEmptyString(record.state, "Browser vault session response state");
 
   if (state === "empty") {
+    assertBrowserVaultSessionPayloadFieldsNull(record, "Browser vault session response");
+    requireNull(record.replicaRef, "Browser vault session response.replicaRef");
+
     return {
       encryptedReplica: null,
       replicaAad: null,
@@ -188,6 +201,8 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
   }
 
   if (state === "not_modified") {
+    assertBrowserVaultSessionPayloadFieldsNull(record, "Browser vault session response");
+
     return {
       encryptedReplica: null,
       replicaAad: null,
@@ -243,21 +258,6 @@ function assertBrowserVaultReplicaAadMatchesRef(input: {
   if (input.aad.sourceBundleHash !== input.ref.sourceBundleHash) {
     throw new Error("Browser vault replica AAD sourceBundleHash did not match its session ref.");
   }
-}
-
-export function browserVaultReplicaRefsMatch(
-  left: HostedBrowserVaultReplicaRef | null,
-  right: HostedBrowserVaultReplicaRef | null,
-): boolean {
-  return Boolean(left && right)
-    && left?.byteLength === right?.byteLength
-    && left?.dataVersion === right?.dataVersion
-    && left?.generatedAt === right?.generatedAt
-    && left?.keyId === right?.keyId
-    && left?.objectKey === right?.objectKey
-    && left?.replicaSchema === right?.replicaSchema
-    && left?.schema === right?.schema
-    && left?.sourceBundleHash === right?.sourceBundleHash;
 }
 
 function assertBrowserVaultReplicaRefsMatch(input: {
@@ -333,6 +333,23 @@ function assertNotAborted(signal: AbortSignal | undefined): void {
   const error = new Error("Browser vault load was aborted.");
   error.name = "AbortError";
   throw error;
+}
+
+function assertBrowserVaultSessionPayloadFieldsNull(
+  record: Record<string, unknown>,
+  label: string,
+): void {
+  requireNull(record.encryptedReplica, `${label}.encryptedReplica`);
+  requireNull(record.replicaAad, `${label}.replicaAad`);
+  requireNull(record.replicaKeyEnvelope, `${label}.replicaKeyEnvelope`);
+}
+
+function requireNull(value: unknown, label: string): null {
+  if (value !== null) {
+    throw new TypeError(`${label} must be null.`);
+  }
+
+  return null;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

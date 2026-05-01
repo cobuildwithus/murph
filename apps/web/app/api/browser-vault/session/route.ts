@@ -1,6 +1,7 @@
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 
+import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -93,21 +94,6 @@ function emptyBrowserVaultSession() {
     replicaRef: null,
     state: "empty" as const,
   });
-}
-
-function browserVaultReplicaRefsMatch(
-  left: ReturnType<typeof parseHostedBrowserVaultReplicaRef>,
-  right: NonNullable<ReturnType<typeof parseHostedBrowserVaultReplicaRef>>,
-): boolean {
-  return Boolean(left)
-    && left?.byteLength === right.byteLength
-    && left?.dataVersion === right.dataVersion
-    && left?.generatedAt === right.generatedAt
-    && left?.keyId === right.keyId
-    && left?.objectKey === right.objectKey
-    && left?.replicaSchema === right.replicaSchema
-    && left?.schema === right.schema
-    && left?.sourceBundleHash === right.sourceBundleHash;
 }
 
 function readHostedWorkspaceSnapshotHash(value: unknown): string | null {
