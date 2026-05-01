@@ -211,7 +211,6 @@ const prompt = [
     `Repository context: ${contextUrl}`,
     "Use the linked Murph GitHub repository as the source context for this review.",
     "No repo snapshot, repomix, patch, or other local file is attached by this local review:gpt configuration.",
-    baseCommit ? `Base commit: ${baseCommit}` : "",
   ].filter(Boolean).join("\n"),
 ].filter(Boolean).join("\n\n");
 
