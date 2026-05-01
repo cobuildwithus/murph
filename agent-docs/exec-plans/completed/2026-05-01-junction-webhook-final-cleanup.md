@@ -1,6 +1,6 @@
 # Junction Webhook Final Cleanup
 
-Status: active
+Status: completed
 Created: 2026-05-01
 Updated: 2026-05-01
 
@@ -68,3 +68,7 @@ Libre/Freestyle floating timestamps
 - The current worktree has unrelated active dirty files outside this cleanup.
 - The two target Junction files are clean before this plan starts.
 - `pnpm --dir packages/device-syncd test` exposed a date-sensitive unrelated store test that used `2026-04-01`, which now falls outside the 30-day processed-webhook retention window; the fixture date was moved forward without changing production store behavior.
+- Final review found one remaining nested webhook user-id gap. The parser now walks bounded Junction envelope containers and only accepts generic `id` from `user` objects, so event/resource ids are not treated as user ids.
+- Focused tests cover root `payload.user.id`, `data.payload.user.id`, `data.event.message.user.id`, comma-delivered Svix signatures, and top-level-vs-deep user-id conflicts.
+- Required focused checks passed for `device-syncd` and `importers`; repo acceptance remains red on unrelated Cloudflare alarm timing, core audit-month rollover, and CLI timeout lanes, plus existing scenario-manifest drift warnings.
+Completed: 2026-05-01

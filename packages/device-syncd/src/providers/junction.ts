@@ -1315,28 +1315,41 @@ function readJunctionWebhookUserId(
   payload: Record<string, unknown>,
   data: Record<string, unknown> | null,
 ): string | null {
-  const nestedPayload = readPlainObject(data?.payload);
-  const nestedEvent = readPlainObject(data?.event);
-  const nestedMessage = readPlainObject(data?.message);
-  const nestedUser = readPlainObject(data?.user);
-  const userIds = [
-    payload.user_id,
-    payload.userId,
-    data?.user_id,
-    data?.userId,
-    nestedPayload?.user_id,
-    nestedPayload?.userId,
-    nestedEvent?.user_id,
-    nestedEvent?.userId,
-    nestedMessage?.user_id,
-    nestedMessage?.userId,
-    nestedUser?.id,
-    nestedUser?.user_id,
-    nestedUser?.userId,
-  ].flatMap((value) => {
-    const userId = normalizeString(value);
-    return userId ? [userId] : [];
-  });
+  const userIds: string[] = [];
+  const seenContainers = new Set<Record<string, unknown>>();
+
+  const collectUserIds = (
+    container: Record<string, unknown> | null,
+    depth: number,
+    allowGenericUserId: boolean,
+  ): void => {
+    if (!container || depth > 5 || seenContainers.has(container)) {
+      return;
+    }
+
+    seenContainers.add(container);
+
+    for (const key of ["user_id", "userId"] as const) {
+      const userId = normalizeString(container[key]);
+      if (userId) {
+        userIds.push(userId);
+      }
+    }
+
+    if (allowGenericUserId) {
+      const userId = normalizeString(container.id);
+      if (userId) {
+        userIds.push(userId);
+      }
+    }
+
+    for (const key of ["data", "payload", "event", "message", "user"] as const) {
+      collectUserIds(readPlainObject(container[key]), depth + 1, key === "user");
+    }
+  };
+
+  collectUserIds(payload, 0, false);
+  collectUserIds(data, 0, false);
 
   const distinctUserIds = new Set(userIds);
   if (distinctUserIds.size > 1) {
