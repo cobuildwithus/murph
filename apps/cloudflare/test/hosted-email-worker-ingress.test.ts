@@ -82,11 +82,7 @@ import {
   MemoryEncryptedR2Bucket,
 } from "./test-helpers.js";
 
-type HostedEmailWorkerTestEnv = WorkerEnvironmentSource & {
-  RUNNER_WAKE_QUEUE: {
-    send: ReturnType<typeof vi.fn<(message: unknown) => Promise<void>>>;
-  };
-};
+type HostedEmailWorkerTestEnv = WorkerEnvironmentSource;
 
 const TEST_KEY = createTestRootKey(21);
 const TEST_ENVIRONMENT = {
@@ -301,16 +297,19 @@ describe("hosted email worker ingress", () => {
     expect(appendInput).toMatchObject({
       body: {
         eventId: expect.any(String),
+        from: "Owner <owner@example.com>",
         identityId: "assistant@mail.example.test",
         occurredAt: expect.any(String),
         selfAddress: replyAliasAddress,
+        subject: "hello",
+        textPreview: "hello from murph",
+        to: [replyAliasAddress],
       },
       boundUserId: "user_123",
       timeoutMs: 30_000,
     });
     expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
     expect(typeof rawMessageKey).toBe("string");
@@ -437,7 +436,6 @@ describe("hosted email worker ingress", () => {
     }));
     expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
@@ -475,7 +473,6 @@ describe("hosted email worker ingress", () => {
 
     expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
   });
 
   it("accepts email ingress when the post-append Durable Object nudge fails", async () => {
@@ -507,7 +504,6 @@ describe("hosted email worker ingress", () => {
 
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
-    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
     expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.email",
@@ -747,9 +743,6 @@ function createWorkerEnv(bucket: MemoryEncryptedR2Bucket): HostedEmailWorkerTest
     HOSTED_EMAIL_LOCAL_PART: "assistant",
     HOSTED_EMAIL_SIGNING_SECRET: "super-secret-signing-key",
     HOSTED_WEB_BASE_URL: "https://web.example.test",
-    RUNNER_WAKE_QUEUE: {
-      send: vi.fn(async () => {}),
-    },
     RUNNER_CONTAINER: {
       getByName() {
         throw new Error("RUNNER_CONTAINER should not be used in hosted-email worker-ingress tests.");

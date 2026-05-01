@@ -54,23 +54,6 @@
       "preview_bucket_name": "murph-hosted-bundles-preview"
     }
   ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "RUNNER_WAKE_QUEUE",
-        "queue": "murph-hosted-runner-wake"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "murph-hosted-runner-wake",
-        "max_batch_size": 1,
-        "max_batch_timeout": 1,
-        "max_retries": 10,
-        "retry_delay": 30
-      }
-    ]
-  },
   "send_email": [
     {
       "name": "HOSTED_EMAIL"

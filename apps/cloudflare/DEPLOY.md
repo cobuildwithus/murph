@@ -30,9 +30,8 @@ Hosted assistant delivery recovery now relies on committed side-effect state ins
 Before the first deploy:
 
 1. Create the Worker service and the two R2 buckets used for encrypted hosted bundles.
-2. Create the runner wake queue for legacy queued wake drain and operational fallback. The checked-in scaffold uses `murph-hosted-runner-wake`; generated deploy config uses `CF_RUNNER_WAKE_QUEUE` or defaults to `${CF_WORKER_NAME}-runner-wake`.
-3. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
-4. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
+2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
+3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
 The checked-in lifecycle file now contains one narrow backstop rule for `hosted-email/messages/`: delete raw hosted-email blobs after 1 hour if eager cleanup missed them. Runner cleanup after terminal completion or quarantine remains the normal path, and the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
@@ -85,7 +84,6 @@ Core execution tuning:
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_RUNNER_TIMEOUT_MS` defaults to `600000`
-- `CF_RUNNER_WAKE_QUEUE` defaults to `${CF_WORKER_NAME}-runner-wake` and remains a fallback/legacy drain binding rather than the normal nudge hot path
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
