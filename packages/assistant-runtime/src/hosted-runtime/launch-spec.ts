@@ -94,7 +94,7 @@ export interface HostedRuntimeLaunchSpecInput {
   commitTimeoutMs?: number | null;
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
-  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
+  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig;
   platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   userEnv?: Readonly<Record<string, string>>;
@@ -107,6 +107,7 @@ export function buildHostedRuntimeLaunchSpec(
     forwardedEnv: input.forwardedEnv,
     platformEnv: input.platformEnv,
   });
+  const parserToolchain = readHostedRuntimeLaunchParserToolchain(input.parserToolchain);
   const resolvedConfigSource = {
     ...(input.configSource ?? input.forwardedEnv),
     ...splitEnv.platformEnv,
@@ -116,9 +117,9 @@ export function buildHostedRuntimeLaunchSpec(
     runtime: {
       commitTimeoutMs: readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null),
       forwardedEnv: splitEnv.forwardedEnv,
-      ...(input.parserToolchain === undefined
+      ...(parserToolchain === undefined
         ? {}
-        : { parserToolchain: input.parserToolchain }),
+        : { parserToolchain }),
       ...(Object.keys(splitEnv.platformEnv).length === 0
         ? {}
         : { platformEnv: splitEnv.platformEnv }),
@@ -131,6 +132,18 @@ export function buildHostedRuntimeLaunchSpec(
       }),
     },
   };
+}
+
+function readHostedRuntimeLaunchParserToolchain(
+  parserToolchain: HostedAssistantRuntimeParserToolchainConfig | null | undefined,
+): HostedAssistantRuntimeParserToolchainConfig | undefined {
+  if (parserToolchain === null) {
+    throw new TypeError(
+      "Hosted runtime parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
+    );
+  }
+
+  return parserToolchain;
 }
 
 export function buildHostedRuntimeForwardedEnv(

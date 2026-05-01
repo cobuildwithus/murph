@@ -1,5 +1,10 @@
 import { formatDeviceSyncProviderLabel } from "../provider-label.ts";
-import { normalizeJunctionProviderFilter } from "../providers/junction-connect-sources.ts";
+import {
+  normalizeDeviceConnectSourceId,
+  normalizeJunctionLinkProviderFilter,
+  resolveDirectDeviceConnectRouteByProvider,
+  resolveJunctionLinkDeviceConnectRouteByProviderSlug,
+} from "./connect-routes.ts";
 import { listConfiguredDeviceSyncProviderNames } from "./provider-configs.ts";
 
 import type {
@@ -8,6 +13,7 @@ import type {
 } from "./provider-types.ts";
 
 export interface DeviceSyncConnectTarget {
+  connectSourceId: string;
   connectTarget: string;
   label: string;
   provider: ConfiguredDeviceSyncProviderKey;
@@ -18,7 +24,7 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
   junction?: { providerFilter?: string[] };
 };
 
-const JUNCTION_PREFERRED_CONNECT_TARGETS = new Set(["oura", "strava"]);
+const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["oura", "strava"]);
 
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value
@@ -33,43 +39,47 @@ export function normalizeDeviceSyncConnectTargetKey(value: string): string | nul
 export function listConfiguredDeviceSyncConnectTargets(
   providerConfigs: DeviceSyncConnectTargetProviderConfigs,
 ): DeviceSyncConnectTarget[] {
-  const targetsByKey = new Map<string, DeviceSyncConnectTarget>();
+  const targetsBySourceId = new Map<string, DeviceSyncConnectTarget>();
 
   for (const provider of listConfiguredDeviceSyncProviderNames(providerConfigs)) {
     if (provider === "junction") {
       continue;
     }
 
-    addDeviceSyncConnectTarget(targetsByKey, {
-      connectTarget: provider,
-      label: formatDeviceSyncProviderLabel(provider),
+    const directRoute = resolveDirectDeviceConnectRouteByProvider(provider);
+    addDeviceSyncConnectTarget(targetsBySourceId, {
+      connectSourceId: directRoute?.source.connectSourceId ?? provider,
+      connectTarget: directRoute?.route.connectTarget ?? provider,
+      label: directRoute?.source.label ?? formatDeviceSyncProviderLabel(provider),
       provider,
     });
   }
 
   const junctionConfig = providerConfigs.junction;
   if (junctionConfig) {
-    for (const sourceProviderSlug of normalizeJunctionProviderFilter(junctionConfig.providerFilter)) {
-      if (sourceProviderSlug === "junction") {
+    for (const sourceProviderSlug of normalizeJunctionLinkProviderFilter(junctionConfig.providerFilter)) {
+      const junctionRoute = resolveJunctionLinkDeviceConnectRouteByProviderSlug(sourceProviderSlug);
+      if (!junctionRoute) {
         continue;
       }
 
       addDeviceSyncConnectTarget(
-        targetsByKey,
+        targetsBySourceId,
         {
-          connectTarget: sourceProviderSlug,
-          label: formatDeviceSyncProviderLabel(sourceProviderSlug),
+          connectSourceId: junctionRoute.source.connectSourceId,
+          connectTarget: junctionRoute.route.connectTarget,
+          label: junctionRoute.source.label,
           provider: "junction",
-          sourceProviderSlug,
+          sourceProviderSlug: junctionRoute.route.sourceProviderSlug,
         },
         {
-          replaceExisting: shouldPreferJunctionConnectTarget(sourceProviderSlug),
+          replaceExisting: shouldPreferJunctionConnectSource(junctionRoute.source.connectSourceId),
         },
       );
     }
   }
 
-  return [...targetsByKey.values()];
+  return [...targetsBySourceId.values()];
 }
 
 export function resolveConfiguredDeviceSyncConnectTarget(
@@ -87,12 +97,17 @@ export function resolveConfiguredDeviceSyncConnectTarget(
 }
 
 function addDeviceSyncConnectTarget(
-  targetsByKey: Map<string, DeviceSyncConnectTarget>,
+  targetsBySourceId: Map<string, DeviceSyncConnectTarget>,
   target: DeviceSyncConnectTarget,
   options: { replaceExisting?: boolean } = {},
 ): void {
+  const connectSourceId = normalizeDeviceConnectSourceId(target.connectSourceId);
   const connectTarget = normalizeDeviceSyncConnectTargetKey(target.connectTarget);
-  if (!connectTarget || (targetsByKey.has(connectTarget) && !options.replaceExisting)) {
+  if (
+    !connectSourceId
+    || !connectTarget
+    || (targetsBySourceId.has(connectSourceId) && !options.replaceExisting)
+  ) {
     return;
   }
 
@@ -100,7 +115,8 @@ function addDeviceSyncConnectTarget(
     ? normalizeDeviceSyncConnectTargetKey(target.sourceProviderSlug)
     : null;
 
-  targetsByKey.set(connectTarget, {
+  targetsBySourceId.set(connectSourceId, {
+    connectSourceId,
     connectTarget,
     label: target.label,
     provider: target.provider,
@@ -108,8 +124,10 @@ function addDeviceSyncConnectTarget(
   });
 }
 
-function shouldPreferJunctionConnectTarget(sourceProviderSlug: string): boolean {
-  const connectTarget = normalizeDeviceSyncConnectTargetKey(sourceProviderSlug);
+function shouldPreferJunctionConnectSource(connectSourceId: string): boolean {
+  const normalizedConnectSourceId = normalizeDeviceConnectSourceId(connectSourceId);
 
-  return connectTarget ? JUNCTION_PREFERRED_CONNECT_TARGETS.has(connectTarget) : false;
+  return normalizedConnectSourceId
+    ? JUNCTION_PREFERRED_CONNECT_SOURCE_IDS.has(normalizedConnectSourceId)
+    : false;
 }

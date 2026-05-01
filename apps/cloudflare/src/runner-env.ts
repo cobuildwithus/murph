@@ -46,9 +46,7 @@ export function buildHostedRunnerJobRuntime(input: {
     ...buildHostedRuntimePlatformEnv(input.platformEnv ?? input.forwardedEnv),
   };
   const parserToolchain =
-    input.parserToolchain === undefined
-      ? createHostedRunnerNativeParserToolchain(input.configSource ?? {})
-      : input.parserToolchain;
+    resolveHostedRunnerParserToolchain(input.parserToolchain);
 
   return buildHostedRuntimeLaunchSpec({
     commitTimeoutMs: input.commitTimeoutMs ?? null,
@@ -113,7 +111,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const parserToolchain = createHostedRunnerNativeParserToolchain(input.configSource ?? {});
+  const parserToolchain = createHostedRunnerNativeParserToolchain();
   const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
@@ -129,4 +127,19 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: input.runnerSecrets,
   });
+}
+
+function resolveHostedRunnerParserToolchain(
+  parserToolchain:
+    | HostedAssistantRuntimeParserToolchainConfig
+    | null
+    | undefined,
+): HostedAssistantRuntimeParserToolchainConfig {
+  if (parserToolchain === null) {
+    throw new TypeError(
+      "Hosted runner parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
+    );
+  }
+
+  return parserToolchain ?? createHostedRunnerNativeParserToolchain();
 }

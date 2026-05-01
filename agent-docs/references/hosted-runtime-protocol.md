@@ -17,6 +17,10 @@ The live ownership split is:
   Email ingress appends the same canonical mailbox item through a signed web
   callback and uses a signed pointer-only web callback to start that same
   durable nudge workflow when its direct Durable Object nudge is not accepted.
+  Stripe webhook ingress verifies the raw Stripe request locally, records only
+  minimal receipt state in Postgres, and may start a separate Vercel Workflow
+  with only the Stripe event id to retry reconciliation plus any activation
+  runner nudge.
 - `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
@@ -78,6 +82,17 @@ response or the email handler fails the ingress attempt after the mailbox append
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and runner
 nudges only coalesce pending work.
+
+Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
+the route/service verification path only. After verification, web stores the
+minimal `HostedStripeEvent` receipt and starts a Stripe-specific Vercel Workflow
+with `{ eventId }`. The workflow re-fetches the Stripe event through the
+existing Stripe API reconciliation path, applies billing and activation mailbox
+facts behind the hosted Stripe receipt claim, then retries the Cloudflare runner
+nudge from the reconciliation result when activation appended runtime work. Raw
+Stripe payloads, signatures, customer objects, invoice objects, provider
+headers, and mailbox payloads must not be Workflow inputs. The minute cron drain
+remains a receipt retry fallback for due Stripe rows.
 
 Cloudflare does not acquire a web run row. A runner nudge only asks the
 per-user Durable Object to invoke the container if needed. The Durable Object
@@ -174,14 +189,15 @@ assistant channel enablement state, outbox truth, or durable queue history.
 ### Vercel Workflow Owns
 
 - pointer-only nudge workflow run state for Linq, Telegram, and Cloudflare Email ingress handoff
-- workflow event logs for opaque mailbox item ids, channel source labels, retry status, and step errors
+- Stripe event-id reconciliation workflow run state after local Stripe signature verification and receipt recording
+- workflow event logs for opaque mailbox item ids, Stripe event ids, channel/source labels, retry status, and step errors
 - retry state for runner nudge handoff after web-owned verification and mailbox append have committed
 
 Vercel Workflow does not own raw webhook payloads, provider verification
-headers, provider secrets, canonical product facts, mailbox payload content,
-mailbox state after Postgres commit, message-processing completion, outbox
-truth, or per-user runner coordination. Treat workflow state as durable
-execution state, not as queryable product truth.
+headers, Stripe request bodies, provider secrets, canonical product facts,
+mailbox payload content, mailbox state after Postgres commit, message-processing
+completion, outbox truth, or per-user runner coordination. Treat workflow state
+as durable execution state, not as queryable product truth.
 
 ## Runtime Timers
 

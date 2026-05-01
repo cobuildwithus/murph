@@ -374,6 +374,10 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
     );
+    expect(baseDockerfile).toContain(
+      "COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/model.bin",
+    );
+    expect(baseDockerfile).not.toContain("/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}");
     expect(baseDockerfile).not.toContain(
       "COPY --chown=root:root .deploy/runner-bundle/ /app/",
     );

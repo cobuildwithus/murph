@@ -1,23 +1,20 @@
-import { HostedStripeEventStatus, type PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
-import {
-  nudgeHostedRunnerUserBestEffortResult,
-} from "../hosted-runner/control";
 import { hostedOnboardingError } from "./errors";
-import {
-  finishHostedOnboardingTiming,
-  startHostedOnboardingTiming,
-  toHostedOnboardingLogIdSuffix,
-} from "./logging";
 import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
 import {
-  reconcileHostedStripeEventById,
   recordHostedStripeEvent,
 } from "./stripe-event-reconciliation";
+import {
+  prepareDuplicateHostedStripeWebhookEventForWorkflowRetry,
+} from "./stripe-webhook-reconciliation";
+import {
+  startHostedStripeWebhookReconciliationWorkflow,
+} from "./stripe-webhook-workflow-start";
 import type { HostedStripeWebhookResponse } from "./webhook-service-types";
 
 export async function handleHostedStripeWebhook(input: {
@@ -56,10 +53,9 @@ export async function handleHostedStripeWebhook(input: {
     prisma,
   });
 
-  await reconcileHostedStripeWebhookEvent({
+  await handoffHostedStripeWebhookReconciliation({
     duplicate: recorded.duplicate,
     eventId: event.id,
-    eventType: recorded.type,
     prisma,
   });
 
@@ -70,14 +66,13 @@ export async function handleHostedStripeWebhook(input: {
   };
 }
 
-async function reconcileHostedStripeWebhookEvent(input: {
+async function handoffHostedStripeWebhookReconciliation(input: {
   duplicate: boolean;
   eventId: string;
-  eventType: string;
   prisma: PrismaClient;
 }): Promise<void> {
   if (input.duplicate) {
-    const shouldSkip = await prepareDuplicateHostedStripeWebhookEventForInlineRetry(
+    const shouldSkip = await prepareDuplicateHostedStripeWebhookEventForWorkflowRetry(
       input.eventId,
       input.prisma,
     );
@@ -87,203 +82,9 @@ async function reconcileHostedStripeWebhookEvent(input: {
     }
   }
 
-  let reconciled;
-
-  try {
-    reconciled = await reconcileHostedStripeEventById({
-      eventId: input.eventId,
-      prisma: input.prisma,
-    });
-  } catch (error) {
-    throw buildHostedStripeWebhookReconcileError(input.eventId, error);
-  }
-
-  if (!reconciled) {
-    if (await shouldAcknowledgeHostedStripeWebhookDuplicate(input.eventId, input.prisma)) {
-      return;
-    }
-
-    throw buildHostedStripeWebhookReconcileError(input.eventId);
-  }
-
-  if (reconciled.status !== "completed") {
-    throw buildHostedStripeWebhookReconcileError(input.eventId);
-  }
-
-  const hostedExecutionEventId = reconciled.hostedExecutionEventId ?? null;
-  const hostedExecutionMemberId = reconciled.activatedMemberId ?? null;
-
-  if (!hostedExecutionEventId || !hostedExecutionMemberId) {
-    return;
-  }
-
-  const nudgeTiming = startHostedOnboardingTiming(
-    "hosted-onboarding.stripe.runner-nudge",
-    {
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-      eventType: input.eventType,
-      hostedExecutionEventIdPresent: true,
-      hostedExecutionEventIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionEventId),
-      hostedExecutionMemberIdPresent: true,
-      hostedExecutionMemberIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionMemberId),
-    },
-  );
-  const result = await nudgeHostedRunnerUserBestEffortResult({
-    context: "stripe.webhook",
-    userId: hostedExecutionMemberId,
+  await startHostedStripeWebhookReconciliationWorkflow({
+    eventId: input.eventId,
   });
-  finishHostedOnboardingTiming(nudgeTiming, result.accepted ? "accepted" : "not-accepted", {
-    accepted: result.accepted,
-    alarmScheduled: result.alarmScheduled,
-    alreadyRunning: result.alreadyRunning,
-    configured: result.configured,
-    errorCode: result.errorCode,
-    inFlight: result.inFlight,
-    nextAlarmAtPresent: result.nextAlarmAtPresent,
-  });
-}
-
-async function prepareDuplicateHostedStripeWebhookEventForInlineRetry(
-  eventId: string,
-  prisma: PrismaClient,
-): Promise<boolean> {
-  const now = new Date();
-  const storedEvent = await readHostedStripeWebhookEventReceipt(eventId, prisma);
-
-  if (!storedEvent) {
-    return false;
-  }
-
-  if (shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(storedEvent, now)) {
-    return true;
-  }
-
-  if (!requiresHostedStripeWebhookInlineRetryReset(storedEvent, now)) {
-    return false;
-  }
-
-  const reset = await prisma.hostedStripeEvent.updateMany({
-    data: buildHostedStripeWebhookInlineRetryReset(storedEvent.status, now),
-    where: {
-      eventId,
-      updatedAt: storedEvent.updatedAt,
-    },
-  });
-
-  if (reset.count === 1) {
-    return false;
-  }
-
-  const refreshedEvent = await readHostedStripeWebhookEventReceipt(eventId, prisma);
-
-  return Boolean(
-    refreshedEvent
-    && shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(refreshedEvent, new Date()),
-  );
-}
-
-async function shouldAcknowledgeHostedStripeWebhookDuplicate(
-  eventId: string,
-  prisma: PrismaClient,
-): Promise<boolean> {
-  const storedEvent = await readHostedStripeWebhookEventReceipt(eventId, prisma);
-
-  return Boolean(
-    storedEvent
-    && shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(storedEvent, new Date()),
-  );
-}
-
-async function readHostedStripeWebhookEventReceipt(
-  eventId: string,
-  prisma: PrismaClient,
-) {
-  return prisma.hostedStripeEvent.findUnique({
-    select: {
-      claimExpiresAt: true,
-      nextAttemptAt: true,
-      status: true,
-      updatedAt: true,
-    },
-    where: {
-      eventId,
-    },
-  });
-}
-
-function shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(
-  storedEvent: NonNullable<
-    Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
-  >,
-  now: Date,
-): boolean {
-  return storedEvent.status === HostedStripeEventStatus.completed
-    || isHostedStripeWebhookReceiptFreshlyProcessing(storedEvent, now);
-}
-
-function isHostedStripeWebhookReceiptFreshlyProcessing(
-  storedEvent: NonNullable<
-    Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
-  >,
-  now: Date,
-): boolean {
-  return storedEvent.status === HostedStripeEventStatus.processing
-    && storedEvent.claimExpiresAt instanceof Date
-    && storedEvent.claimExpiresAt.getTime() > now.getTime();
-}
-
-function requiresHostedStripeWebhookInlineRetryReset(
-  storedEvent: NonNullable<
-    Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
-  >,
-  now: Date,
-): boolean {
-  switch (storedEvent.status) {
-    case HostedStripeEventStatus.pending:
-    case HostedStripeEventStatus.failed:
-      return storedEvent.nextAttemptAt.getTime() > now.getTime();
-    case HostedStripeEventStatus.processing:
-      return storedEvent.claimExpiresAt === null;
-    case HostedStripeEventStatus.poisoned:
-      return true;
-    default:
-      return false;
-  }
-}
-
-function buildHostedStripeWebhookInlineRetryReset(
-  status: HostedStripeEventStatus,
-  now: Date,
-) {
-  return {
-    claimExpiresAt: null,
-    nextAttemptAt: now,
-    ...(status === HostedStripeEventStatus.poisoned
-      || status === HostedStripeEventStatus.processing
-      ? { status: HostedStripeEventStatus.failed }
-      : {}),
-  };
-}
-
-function buildHostedStripeWebhookReconcileError(
-  eventId: string,
-  cause?: unknown,
-) {
-  const error = hostedOnboardingError({
-    code: "STRIPE_WEBHOOK_RECONCILE_FAILED",
-    details: {
-      eventId,
-    },
-    httpStatus: 500,
-    message: "Stripe webhook reconciliation did not complete. Retry later.",
-    retryable: true,
-  });
-
-  if (cause !== undefined) {
-    error.cause = cause;
-  }
-
-  return error;
 }
 
 function constructStripeWebhookEvent(input: {

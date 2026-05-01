@@ -95,6 +95,17 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.userEnv, userEnv);
 });
 
+test("hosted runtime config rejects parserToolchain:null", () => {
+  assert.throws(
+    () =>
+      normalizeHostedAssistantRuntimeConfig(
+        JSON.parse('{"parserToolchain":null}'),
+        createHostedRuntimePlatformStub(),
+      ),
+    /Hosted runtime parserToolchain:null is not supported/u,
+  );
+});
+
 test("hosted runtime launch spec owns semantic env split and runtime config", () => {
   const spec = buildHostedRuntimeLaunchSpec({
     commitTimeoutMs: 45_000,
@@ -174,7 +185,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
   });
 });
 
-test("hosted runtime child env projects typed parser toolchain after sanitized forwarded env", () => {
+test("hosted runtime child env does not project typed parser toolchain into process env", () => {
   const childEnv = projectHostedRuntimeToChildEnv({
     ambientEnv: {
       HOME: "/ambient/home",
@@ -188,36 +199,19 @@ test("hosted runtime child env projects typed parser toolchain after sanitized f
       WHISPER_COMMAND: "/stale/whisper-cli",
       WHISPER_MODEL_PATH: "/stale/model.bin",
     },
-    parserToolchain: {
-      tools: {
-        ffmpeg: {
-          command: "/runner/bin/ffmpeg",
-        },
-        pdfinfo: {
-          command: "/runner/bin/pdfinfo",
-        },
-        pdftotext: {
-          command: "/runner/bin/pdftotext",
-        },
-        whisper: {
-          command: "/runner/bin/whisper-cli",
-          modelPath: "/runner/models/whisper/model.bin",
-        },
-      },
-    },
   });
 
   assert.deepEqual(childEnv, {
-    FFMPEG_COMMAND: "/runner/bin/ffmpeg",
     NODE_ENV: "production",
     PATH: "/usr/bin:/bin",
-    PDFINFO_COMMAND: "/runner/bin/pdfinfo",
-    PDFTOTEXT_COMMAND: "/runner/bin/pdftotext",
     VERCEL_AI_API_KEY: "worker-vercel-secret",
-    WHISPER_COMMAND: "/runner/bin/whisper-cli",
-    WHISPER_MODEL_PATH: "/runner/models/whisper/model.bin",
   });
+  assert.equal("FFMPEG_COMMAND" in childEnv, false);
   assert.equal("HOME" in childEnv, false);
+  assert.equal("PDFINFO_COMMAND" in childEnv, false);
+  assert.equal("PDFTOTEXT_COMMAND" in childEnv, false);
+  assert.equal("WHISPER_COMMAND" in childEnv, false);
+  assert.equal("WHISPER_MODEL_PATH" in childEnv, false);
 });
 
 test("hosted runtime child env omits parser path env when no typed toolchain is present", () => {
@@ -252,6 +246,17 @@ test("hosted runtime launch spec derives platform env from forwarded env only wh
   assert.deepEqual(spec.runtime.platformEnv, {
     TELEGRAM_BOT_TOKEN: "telegram-token",
   });
+});
+
+test("hosted runtime launch spec rejects parserToolchain:null", () => {
+  assert.throws(
+    () =>
+      buildHostedRuntimeLaunchSpec({
+        forwardedEnv: {},
+        parserToolchain: JSON.parse("null"),
+      }),
+    /Hosted runtime parserToolchain:null is not supported/u,
+  );
 });
 
 test("hosted runtime forwarded env profiles are runtime-owned and transport-mappable", () => {

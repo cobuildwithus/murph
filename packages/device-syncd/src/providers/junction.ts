@@ -45,6 +45,7 @@ export {
   JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS,
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
+  JUNCTION_LINK_PROVIDER_SLUGS,
   normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,

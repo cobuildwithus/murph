@@ -89,7 +89,7 @@ WORKDIR /app
 COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper-builder /opt/whisper/bin/libggml-cpu*.so /usr/local/bin/
 COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/
-COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}
+COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/model.bin
 
 RUN ldconfig
 

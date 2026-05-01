@@ -78,7 +78,6 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
           }),
           isTypeScriptChild,
           launcherDirectories,
-          parserToolchain: input.job.runtime?.parserToolchain ?? null,
         }),
         stdio: ["pipe", "pipe", "pipe"],
       },

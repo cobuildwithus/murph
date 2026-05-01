@@ -45,6 +45,16 @@ describe("parseHostedAssistantRuntimeConfig", () => {
       })).toThrow(/parserToolchain\.tools\.whisper\.command must be an absolute path/u);
   });
 
+  it("rejects parserToolchain:null", () => {
+    expect(() =>
+      parseHostedAssistantRuntimeConfig({
+        parserToolchain: null,
+      })
+    ).toThrow(
+      "Hosted assistant runtime config.parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
+    );
+  });
+
   it("parses hosted device-sync runtime config through the shared device-sync parser", () => {
     const parsed = parseHostedAssistantRuntimeConfig({
       resolvedConfig: {

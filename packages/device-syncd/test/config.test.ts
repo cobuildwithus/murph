@@ -25,7 +25,10 @@ import {
   readConfiguredStravaDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "../src/config.ts";
-import { JUNCTION_DEFAULT_PROVIDER_FILTER } from "../src/providers/junction-connect-sources.ts";
+import {
+  JUNCTION_DEFAULT_PROVIDER_FILTER,
+  normalizeJunctionProviderFilter,
+} from "../src/providers/junction-connect-sources.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
 
@@ -127,26 +130,49 @@ test("connect targets expose direct providers plus Junction-backed sources", () 
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
     JUNCTION_ENV: "sandbox",
-    JUNCTION_PROVIDER_FILTER: "fitbit,garmin,junction,dexcom_v3",
+    JUNCTION_PROVIDER_FILTER: "fitbit,map_my_fitness,garmin,junction,dexcom_v3,accuchek_ble",
     JUNCTION_REGION: "us",
   });
 
   assert.deepEqual(
     listConfiguredDeviceSyncConnectTargets(configs).map((target) => ({
+      connectSourceId: target.connectSourceId,
       connectTarget: target.connectTarget,
       provider: target.provider,
       sourceProviderSlug: target.sourceProviderSlug ?? null,
     })),
     [
-      { connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
-      { connectTarget: "garmin", provider: "junction", sourceProviderSlug: "garmin" },
-      { connectTarget: "dexcom_v3", provider: "junction", sourceProviderSlug: "dexcom_v3" },
+      {
+        connectSourceId: "fitbit",
+        connectTarget: "fitbit",
+        provider: "junction",
+        sourceProviderSlug: "fitbit",
+      },
+      {
+        connectSourceId: "mapmyfitness",
+        connectTarget: "map_my_fitness",
+        provider: "junction",
+        sourceProviderSlug: "map_my_fitness",
+      },
+      {
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        provider: "junction",
+        sourceProviderSlug: "garmin",
+      },
+      {
+        connectSourceId: "dexcom",
+        connectTarget: "dexcom_v3",
+        provider: "junction",
+        sourceProviderSlug: "dexcom_v3",
+      },
     ],
   );
   assert.equal(
     resolveConfiguredDeviceSyncConnectTarget(configs, "Fitbit")?.provider,
     "junction",
   );
+  assert.equal(resolveConfiguredDeviceSyncConnectTarget(configs, "dexcom_v3")?.connectSourceId, "dexcom");
   assert.equal(resolveConfiguredDeviceSyncConnectTarget(configs, "junction"), null);
 });
 
@@ -161,6 +187,38 @@ test("Junction default connect targets cover the shared provider filter", () => 
   assert.deepEqual(
     listConfiguredDeviceSyncConnectTargets(configs).map((target) => target.connectTarget),
     JUNCTION_DEFAULT_PROVIDER_FILTER,
+  );
+});
+
+test("Junction default provider filter excludes non-Link connect routes", () => {
+  for (const providerSlug of [
+    "freestyle_libre_ble",
+    "accuchek_ble",
+    "contour_ble",
+    "onetouch_ble",
+    "apple_health",
+    "health_connect",
+    "samsung_health",
+  ]) {
+    assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes(providerSlug), false);
+  }
+
+  assert.deepEqual(
+    normalizeJunctionProviderFilter(["accuchek_ble", "fitbit", "health_connect"]),
+    ["fitbit"],
+  );
+
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "accuchek_ble,fitbit",
+    JUNCTION_REGION: "us",
+  });
+
+  assert.deepEqual(
+    listConfiguredDeviceSyncConnectTargets(configs).map((target) => target.connectSourceId),
+    ["fitbit"],
   );
 });
 

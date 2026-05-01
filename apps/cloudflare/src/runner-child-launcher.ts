@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
-  type HostedAssistantRuntimeParserToolchainConfig,
   projectHostedRuntimeToChildEnv,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
@@ -48,7 +47,6 @@ export function createHostedRunnerChildProcessEnv(input: {
   forwardedEnv: Record<string, string>;
   isTypeScriptChild: boolean;
   launcherDirectories: HostedRunnerChildLauncherDirectories;
-  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
 }): Record<string, string> {
   const ambientEnv = input.ambientEnv ?? process.env;
   const env = projectHostedRuntimeToChildEnv({
@@ -56,7 +54,6 @@ export function createHostedRunnerChildProcessEnv(input: {
       HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS.map((key) => [key, ambientEnv[key]]),
     ),
     forwardedEnv: input.forwardedEnv,
-    parserToolchain: input.parserToolchain ?? null,
   });
 
   Object.assign(env, {
