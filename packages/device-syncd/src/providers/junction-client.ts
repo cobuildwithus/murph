@@ -1,5 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 
+import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
+
 import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
 
@@ -10,7 +12,7 @@ export interface JunctionClientConfig {
   apiKey: string;
   environment: JunctionEnvironment;
   region: JunctionRegion;
-  baseUrl?: string;
+  allowedLinkHosts?: readonly string[];
   requestTimeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
@@ -23,10 +25,23 @@ export interface JunctionLinkToken {
   linkWebUrl: string;
 }
 
+export interface JunctionProviderConnectionSource {
+  deviceId: string | null;
+  appId: string | null;
+}
+
+export interface JunctionProviderConnectionOrigin {
+  sourceProviderSlug?: string;
+  sourceInstanceId?: string | null;
+}
+
 export interface JunctionProviderConnection {
+  id: string | null;
   slug: string;
   name: string | null;
   status: string;
+  source: JunctionProviderConnectionSource | null;
+  origin: JunctionProviderConnectionOrigin;
   resourceAvailability: Record<string, unknown>;
 }
 
@@ -43,6 +58,11 @@ const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
+
+export const JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS = Object.freeze([
+  "junction.com",
+  "tryvital.io",
+] as const);
 
 const JUNCTION_ENVIRONMENT_MATRIX: Readonly<Record<
   `${JunctionEnvironment}:${JunctionRegion}`,
@@ -66,10 +86,11 @@ const JUNCTION_ENVIRONMENT_MATRIX: Readonly<Record<
   },
 });
 
-export function resolveJunctionBaseUrl(config: Pick<JunctionClientConfig, "baseUrl" | "environment" | "region">): string {
+export function resolveJunctionBaseUrl(
+  config: Pick<JunctionClientConfig, "environment" | "region">,
+): string {
   const expected = requireJunctionEnvironmentProfile(config.environment, config.region);
-  const baseUrl = normalizeString(config.baseUrl) ?? expected.baseUrl;
-  return normalizeJunctionBaseUrl(baseUrl);
+  return normalizeJunctionBaseUrl(expected.baseUrl);
 }
 
 export function assertValidJunctionClientConfig(config: JunctionClientConfig): void {
@@ -86,16 +107,11 @@ export function assertValidJunctionClientConfig(config: JunctionClientConfig): v
     );
   }
 
-  const baseUrl = resolveJunctionBaseUrl(config);
-  const expectedBaseUrl = normalizeJunctionBaseUrl(profile.baseUrl);
-  if (baseUrl !== expectedBaseUrl) {
-    throw new TypeError(
-      `JUNCTION_BASE_URL must be ${expectedBaseUrl} for ${config.environment}/${config.region}.`,
-    );
-  }
+  resolveJunctionBaseUrl(config);
 }
 
 export class JunctionClient {
+  private readonly allowedLinkHosts: readonly string[];
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -103,6 +119,7 @@ export class JunctionClient {
 
   constructor(config: JunctionClientConfig) {
     assertValidJunctionClientConfig(config);
+    this.allowedLinkHosts = normalizeAllowedJunctionLinkHosts(config.allowedLinkHosts);
     this.apiKey = config.apiKey;
     this.baseUrl = resolveJunctionBaseUrl(config);
     this.fetchImpl = config.fetchImpl ?? fetch;
@@ -171,7 +188,7 @@ export class JunctionClient {
       });
     }
 
-    assertValidJunctionLinkWebUrl(linkWebUrl);
+    assertValidJunctionLinkWebUrl(linkWebUrl, this.allowedLinkHosts);
     return { linkWebUrl };
   }
 
@@ -192,18 +209,23 @@ export class JunctionClient {
 
   async listTimeseries(input: JunctionWindowInput): Promise<unknown[]> {
     return this.fetchWindowedCollection(
-      `/v2/timeseries/${encodeURIComponent(input.userId)}/${encodeURIComponent(input.resource)}`,
+      `/v2/timeseries/${encodeURIComponent(input.userId)}/${encodeURIComponent(input.resource)}/grouped`,
       input,
+      { extractRecords: extractTimeseriesRecords },
     );
   }
 
   private async fetchWindowedCollection(
     path: string,
     input: JunctionWindowInput,
+    options: {
+      extractRecords?: (payload: unknown, resource: string) => unknown[];
+    } = {},
   ): Promise<unknown[]> {
     const records: unknown[] = [];
     let cursor: string | null = null;
     let pages = 0;
+    const extractRecords = options.extractRecords ?? extractCollectionRecords;
 
     do {
       if (pages >= MAX_COLLECTION_PAGES) {
@@ -225,7 +247,7 @@ export class JunctionClient {
       }
 
       const payload = await this.requestJson<unknown>("GET", `${path}?${search.toString()}`);
-      records.push(...extractCollectionRecords(payload, input.resource));
+      records.push(...extractRecords(payload, input.resource));
       pages += 1;
 
       if (records.length > MAX_COLLECTION_RECORDS) {
@@ -328,14 +350,38 @@ function requireJunctionEnvironmentProfile(environment: JunctionEnvironment, reg
 }
 
 function normalizeJunctionBaseUrl(value: string): string {
-  const url = new URL(value);
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch (error) {
+    throw new TypeError("Junction API base URL must be a valid absolute URL.", { cause: error });
+  }
+
+  if (url.search || url.hash) {
+    throw new TypeError("Junction API base URL must not include a query string or fragment.");
+  }
+
   url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
-  url.search = "";
-  url.hash = "";
   return url.toString();
 }
 
-function assertValidJunctionLinkWebUrl(value: string): void {
+export function isAllowedJunctionLinkHost(
+  hostname: string,
+  allowedLinkHosts: readonly string[] = JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
+): boolean {
+  const normalizedHostname = normalizeJunctionLinkHostname(hostname);
+  if (!isJunctionLinkDnsHostname(normalizedHostname)) {
+    return false;
+  }
+
+  return normalizeAllowedJunctionLinkHosts(allowedLinkHosts).some(
+    (allowedHost) => normalizedHostname === allowedHost
+      || normalizedHostname.endsWith(`.${allowedHost}`),
+  );
+}
+
+function assertValidJunctionLinkWebUrl(value: string, allowedLinkHosts: readonly string[]): void {
   let url: URL;
 
   try {
@@ -350,7 +396,7 @@ function assertValidJunctionLinkWebUrl(value: string): void {
     });
   }
 
-  if (url.protocol !== "https:" || !url.hostname.endsWith(".junction.com")) {
+  if (url.protocol !== "https:" || !isAllowedJunctionLinkHost(url.hostname, allowedLinkHosts)) {
     throw deviceSyncError({
       code: "JUNCTION_LINK_TOKEN_INVALID",
       message: "Junction Link token response included an unexpected link_web_url host.",
@@ -358,6 +404,36 @@ function assertValidJunctionLinkWebUrl(value: string): void {
       httpStatus: 502,
     });
   }
+}
+
+function normalizeAllowedJunctionLinkHosts(value: readonly string[] | undefined): readonly string[] {
+  const hosts = value ?? JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS;
+  const normalizedHosts = [...new Set(hosts.map(normalizeJunctionLinkHostConfig))];
+
+  if (normalizedHosts.length === 0) {
+    throw new TypeError("Junction allowedLinkHosts must include at least one host.");
+  }
+
+  return Object.freeze(normalizedHosts);
+}
+
+function normalizeJunctionLinkHostConfig(value: string): string {
+  const normalized = normalizeJunctionLinkHostname(value);
+
+  if (!isJunctionLinkDnsHostname(normalized)) {
+    throw new TypeError("Junction allowedLinkHosts entries must be DNS hostnames.");
+  }
+
+  return normalized;
+}
+
+function normalizeJunctionLinkHostname(value: string): string {
+  return value.toLowerCase().replace(/\.+$/u, "");
+}
+
+function isJunctionLinkDnsHostname(value: string): boolean {
+  const label = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
+  return new RegExp(`^${label}(?:\\.${label})+$`, "u").test(value);
 }
 
 function parseJunctionUser(payload: Record<string, unknown>, label: string): JunctionUser {
@@ -390,21 +466,75 @@ function parseJunctionProviderConnection(value: unknown): JunctionProviderConnec
   }
 
   const record = value as Record<string, unknown>;
+  const origin = resolveJunctionOrigin(record);
   const slug =
     normalizeSourceSlug(record.slug)
+    ?? normalizeSourceSlug(record.sourceProviderSlug)
+    ?? normalizeSourceSlug(record.source_provider_slug)
     ?? normalizeSourceSlug(record.provider_slug)
-    ?? normalizeSourceSlug(record.provider);
+    ?? normalizeSourceSlug(record.provider)
+    ?? normalizeSourceSlug(origin.sourceProviderSlug);
 
   if (!slug) {
     return null;
   }
 
   return {
+    id: readJunctionProviderConnectionId(record),
     slug,
     name: normalizeString(record.name) ?? normalizeString(record.display_name) ?? null,
     status: normalizeString(record.status) ?? "unknown",
+    source: readJunctionProviderConnectionSource(record),
+    origin: {
+      sourceProviderSlug: origin.sourceProviderSlug,
+      sourceInstanceId: origin.sourceInstanceId,
+    },
     resourceAvailability: readResourceAvailability(record),
   };
+}
+
+function readJunctionProviderConnectionId(record: Record<string, unknown>): string | null {
+  return (
+    normalizeString(record.id)
+    ?? normalizeString(record.provider_connection_id)
+    ?? normalizeString(record.providerConnectionId)
+    ?? normalizeString(record.connection_id)
+    ?? normalizeString(record.connectionId)
+    ?? normalizeString(record.source_id)
+    ?? normalizeString(record.sourceId)
+    ?? null
+  );
+}
+
+function readJunctionProviderConnectionSource(
+  record: Record<string, unknown>,
+): JunctionProviderConnectionSource | null {
+  const source = readPlainObject(record.source);
+  const deviceId = (
+    normalizeString(source?.device_id)
+    ?? normalizeString(source?.deviceId)
+    ?? normalizeString(record.source_device_id)
+    ?? normalizeString(record.sourceDeviceId)
+    ?? normalizeString(record.device_id)
+    ?? normalizeString(record.deviceId)
+    ?? null
+  );
+  const appId = (
+    normalizeString(source?.app_id)
+    ?? normalizeString(source?.appId)
+    ?? normalizeString(record.source_app_id)
+    ?? normalizeString(record.sourceAppId)
+    ?? normalizeString(record.app_id)
+    ?? normalizeString(record.appId)
+    ?? null
+  );
+
+  return deviceId || appId
+    ? {
+        deviceId,
+        appId,
+      }
+    : null;
 }
 
 function readResourceAvailability(record: Record<string, unknown>): Record<string, unknown> {
@@ -412,6 +542,12 @@ function readResourceAvailability(record: Record<string, unknown>): Record<strin
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function readPlainObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function normalizeSourceSlug(value: unknown): string | null {
@@ -449,6 +585,65 @@ function extractCollectionRecords(payload: unknown, resource?: string): unknown[
   }
 
   return resource ? [record] : [];
+}
+
+function extractTimeseriesRecords(payload: unknown, resource: string): unknown[] {
+  const groupedRecords = flattenGroupedTimeseries(resource, payload);
+  return groupedRecords ?? extractCollectionRecords(payload, resource);
+}
+
+function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[] | null {
+  const envelope = readPlainObject(payload);
+  const groups = readPlainObject(envelope?.groups);
+  if (!groups) {
+    return null;
+  }
+
+  const records: unknown[] = [];
+
+  for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
+    for (const rawGroup of asArray(rawGroups)) {
+      const group = readPlainObject(rawGroup);
+      if (!group) {
+        continue;
+      }
+
+      for (const rawSample of asArray(group.data)) {
+        const sample = readPlainObject(rawSample);
+        if (!sample) {
+          continue;
+        }
+
+        const origin = resolveJunctionOrigin(sample, {
+          ...group,
+          groupedSourceSlug: sourceSlug,
+        });
+        records.push(stripUndefinedRecord({
+          ...sample,
+          sourceProviderSlug: normalizeSourceSlug(origin.sourceProviderSlug) ?? undefined,
+          sourceType: origin.sourceType,
+          sourceInstanceId: origin.sourceInstanceId,
+          junctionResource: resource,
+        }));
+      }
+    }
+  }
+
+  return records;
+}
+
+function asArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  return value === undefined || value === null ? [] : [value];
+}
+
+function stripUndefinedRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  );
 }
 
 function extractNextCursor(payload: unknown): string | null {

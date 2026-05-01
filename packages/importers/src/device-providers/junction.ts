@@ -16,6 +16,12 @@ import {
   stringId,
   trimToLength,
 } from "./shared-normalization.ts";
+import {
+  normalizeJunctionSourceProviderSlug,
+  readJunctionSourceProviderSlug,
+  resolveJunctionOrigin,
+  type JunctionOriginFallback,
+} from "./junction-origin.ts";
 
 import type {
   DeviceDataOrigin,
@@ -46,6 +52,7 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
 ] as const);
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
+  "distance",
   "glucose",
 ] as const);
 
@@ -60,12 +67,13 @@ export interface JunctionSnapshotInput {
 }
 
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
-type OriginConfidence = NonNullable<DeviceDataOrigin["originConfidence"]>;
 
 interface ResourceContext {
   resource: string;
   resourceSlug: string;
+  identityKind: "summary" | "timeseries";
   sourceProviderSlug: string;
+  origin: DeviceDataOrigin;
   externalRefResourceType: string;
   artifactRole: string;
   artifactFileName: string;
@@ -81,6 +89,11 @@ interface NormalizationContext {
   rawArtifacts: DeviceRawArtifactPayload[];
   events: DeviceEventPayload[];
   samples: DeviceSamplePayload[];
+}
+
+interface JunctionResourceEntry {
+  entry: PlainObject;
+  originFallback?: JunctionOriginFallback;
 }
 
 interface MetricDescriptor {
@@ -115,6 +128,33 @@ const FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "abbott-libreview",
   "freestyle-libre",
 ]);
+const RAW_SOURCE_IDENTIFIER_KEYS = new Set([
+  "sourceName",
+  "source_name",
+  "sourceDeviceId",
+  "source_device_id",
+  "sourceAppId",
+  "source_app_id",
+  "deviceId",
+  "device_id",
+  "appId",
+  "app_id",
+]);
+const RAW_SOURCE_NAME_KEYS = new Set([
+  "displayName",
+  "display_name",
+  "name",
+]);
+const RAW_SOURCE_LINKAGE_KEY_PARTS = [
+  "connectionid",
+  "providerconnectionid",
+  "sourceid",
+  "sourceinstanceid",
+] as const;
+const RAW_SOURCE_CONTAINER_LINKAGE_KEY_PARTS = [
+  "id",
+  "uuid",
+] as const;
 
 const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
@@ -157,6 +197,7 @@ const TIMESERIES_STREAMS: Readonly<Record<string, SampleStreamDescriptor>> = Obj
 });
 
 const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>> = Object.freeze({
+  distance: { metric: "distance", unit: "m", title: "Junction distance", paths: ["value", "distance", "distanceMeters", "distance_meters"] },
   weight: { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["value", "weightKg", "weight_kg", "weight"] },
 });
 
@@ -219,15 +260,17 @@ function normalizeSummaries(
       createRawArtifact(
         `junction-summary-${resourceSlug}`,
         `junction-summary-${resourceSlug}.json`,
-        buildRawResourcePayload(resource, payload),
+        buildRawResourcePayload(resource, payload, context.connectionsByKey),
       ),
     );
 
-    entries.forEach((entry, index) => {
+    entries.forEach(({ entry, originFallback }, index) => {
       const resourceContext = buildResourceContext({
         entry,
+        originFallback,
         resource,
         resourceSlug,
+        identityKind: "summary",
         index,
         fallbackArtifactRole: `junction-summary-${resourceSlug}`,
         context,
@@ -262,7 +305,7 @@ function normalizeTimeseries(
   context: NormalizationContext,
 ): void {
   for (const [resource, payload] of allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)) {
-    const entries = resourceEntries(payload);
+    const entries = timeseriesResourceEntries(resource, payload);
     const resourceSlug = slugify(resource, "timeseries");
     const streamDescriptor = TIMESERIES_STREAMS[resource];
     const observationDescriptor = TIMESERIES_OBSERVATION_METRICS[resource];
@@ -271,7 +314,7 @@ function normalizeTimeseries(
       createRawArtifact(
         `junction-timeseries-${resourceSlug}`,
         `junction-timeseries-${resourceSlug}.json`,
-        buildRawResourcePayload(resource, payload),
+        buildRawResourcePayload(resource, payload, context.connectionsByKey),
       ),
     );
 
@@ -279,11 +322,13 @@ function normalizeTimeseries(
       continue;
     }
 
-    entries.forEach((entry, index) => {
+    entries.forEach(({ entry, originFallback }, index) => {
       const resourceContext = buildResourceContext({
         entry,
+        originFallback,
         resource,
         resourceSlug,
+        identityKind: "timeseries",
         index,
         fallbackArtifactRole: `junction-timeseries-${resourceSlug}`,
         context,
@@ -308,8 +353,8 @@ function normalizeTimeseries(
           timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
           source: "device",
           quality: "normalized",
-          unit: firstStringFromPaths(entry, ["unit"]) ?? streamDescriptor.unit,
-          externalRef: makeJunctionExternalRef(resourceContext, entry, "sample"),
+          unit: normalizeTimeseriesUnit(resource, firstStringFromPaths(entry, ["unit"]), streamDescriptor.unit),
+          externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "sample"),
           dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
           sample: {
             recordedAt: timestamp.occurredAt,
@@ -329,7 +374,7 @@ function normalizeTimeseries(
           source: "device",
           title: observationDescriptor.title,
           rawArtifactRoles: resourceContext.rawArtifactRoles,
-          externalRef: makeJunctionExternalRef(resourceContext, entry, observationDescriptor.metric),
+          externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, observationDescriptor.metric),
           dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
           fields: {
             metric: observationDescriptor.metric,
@@ -342,30 +387,134 @@ function normalizeTimeseries(
   }
 }
 
-function buildRawResourcePayload(resource: string, payload: unknown): unknown {
+function buildRawResourcePayload(
+  resource: string,
+  payload: unknown,
+  connectionsByKey?: ReadonlyMap<string, PlainObject>,
+): unknown {
   if (resource !== "profile") {
-    return payload;
+    return sanitizeJunctionRawPayload(payload);
   }
 
   if (Array.isArray(payload)) {
     return payload.flatMap((entry) => {
-      const sanitized = sanitizeProfilePayload(entry);
+      const profile = asPlainObject(entry);
+      const sanitized = sanitizeProfilePayload(
+        entry,
+        profile && connectionsByKey ? resolveEntryConnection(profile, connectionsByKey) : undefined,
+      );
       return sanitized ? [sanitized] : [];
     });
   }
 
-  return sanitizeProfilePayload(payload);
+  const profile = asPlainObject(payload);
+  return sanitizeProfilePayload(
+    payload,
+    profile && connectionsByKey ? resolveEntryConnection(profile, connectionsByKey) : undefined,
+  );
 }
 
-function sanitizeProfilePayload(payload: unknown): PlainObject | undefined {
+function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
+  const sanitized = asPlainObject(sanitizeJunctionRawPayload(snapshot));
+  if (!sanitized) {
+    return sanitized;
+  }
+  const connections = asArray(snapshot.connections).flatMap((connection) => {
+    const normalized = asPlainObject(connection);
+    return normalized ? [normalized] : [];
+  });
+  const connectionsByKey = buildConnectionsByKey(connections);
+
+  return stripUndefined({
+    ...sanitized,
+    connections: sanitizeJunctionRawConnections(snapshot.connections),
+    summaries: sanitizeJunctionRawResourceMap(snapshot.summaries, connectionsByKey),
+    timeseries: sanitizeJunctionRawResourceMap(snapshot.timeseries, connectionsByKey),
+  });
+}
+
+function sanitizeJunctionRawPayload(payload: unknown): unknown {
+  return sanitizeJunctionRawValue(payload, false);
+}
+
+function sanitizeJunctionRawConnections(connections: unknown[] | undefined): unknown[] | undefined {
+  if (!connections) {
+    return undefined;
+  }
+
+  return connections.flatMap((connection) => {
+    const sanitized = sanitizeProfilePayload(connection);
+    return sanitized ? [sanitized] : [];
+  });
+}
+
+function sanitizeJunctionRawResourceMap(
+  resources: Record<string, unknown> | undefined,
+  connectionsByKey?: ReadonlyMap<string, PlainObject>,
+): Record<string, unknown> | undefined {
+  if (!resources) {
+    return undefined;
+  }
+
+  const entries = Object.entries(resources)
+    .map(([resource, payload]) => [resource, buildRawResourcePayload(resource, payload, connectionsByKey)] as const)
+    .filter(([, payload]) => payload !== undefined);
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function sanitizeJunctionRawValue(value: unknown, inSourceObject: boolean): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeJunctionRawValue(entry, inSourceObject));
+  }
+
+  if (!isPlainRecord(value)) {
+    return value;
+  }
+
+  const sanitized: PlainObject = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (shouldDropJunctionRawSourceKey(key, inSourceObject)) {
+      continue;
+    }
+
+    sanitized[key] = sanitizeJunctionRawValue(entry, inSourceObject || key === "source" || key === "provider");
+  }
+
+  return stripUndefined(sanitized);
+}
+
+function shouldDropJunctionRawSourceKey(key: string, inSourceObject: boolean): boolean {
+  const normalized = normalizeJunctionRawSourceKey(key);
+  return RAW_SOURCE_IDENTIFIER_KEYS.has(key)
+    || RAW_SOURCE_LINKAGE_KEY_PARTS.some((part) => normalized === part)
+    || (inSourceObject && RAW_SOURCE_CONTAINER_LINKAGE_KEY_PARTS.some((part) => normalized === part))
+    || (inSourceObject && RAW_SOURCE_NAME_KEYS.has(key));
+}
+
+function normalizeJunctionRawSourceKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+}
+
+function isPlainRecord(value: unknown): value is PlainObject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): PlainObject | undefined {
   const profile = asPlainObject(payload);
   if (!profile) {
     return undefined;
   }
 
+  const origin = resolveJunctionOrigin(profile, connection);
   const sanitized = stripUndefined({
-    sourceProviderSlug: normalizeSourceProviderSlug(firstStringFromPaths(profile, ["sourceProviderSlug", "source_provider_slug"])),
-    sourceType: firstStringFromPaths(profile, ["sourceType", "source_type", "source.type"]),
+    sourceProviderSlug: readJunctionSourceProviderSlug(profile, connection) ?? origin.sourceProviderSlug,
+    sourceType: origin.sourceType,
   });
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
@@ -399,7 +548,7 @@ function pushSleepSummary(
         source: "device",
         title: "Junction sleep",
         rawArtifactRoles: resourceContext.rawArtifactRoles,
-        externalRef: makeJunctionExternalRef(resourceContext, entry, "session"),
+        externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
         dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
         fields: stripUndefined({
           startAt,
@@ -442,7 +591,7 @@ function pushWorkoutSummary(
     source: "device",
     title: trimToLength(firstStringFromPaths(entry, ["title", "name", "sport", "activityType", "activity_type"]) ?? "Junction workout", 160),
     rawArtifactRoles: resourceContext.rawArtifactRoles,
-    externalRef: makeJunctionExternalRef(resourceContext, entry, "session"),
+    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: stripUndefined({
       startAt,
@@ -484,7 +633,7 @@ function pushObservationMetrics(
       source: "device",
       title: metric.title,
       rawArtifactRoles: resourceContext.rawArtifactRoles,
-      externalRef: makeJunctionExternalRef(resourceContext, entry, metric.metric),
+      externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
         metric: metric.metric,
@@ -497,22 +646,19 @@ function pushObservationMetrics(
 
 function buildResourceContext(input: {
   entry: PlainObject;
+  originFallback?: JunctionOriginFallback;
   resource: string;
   resourceSlug: string;
+  identityKind: "summary" | "timeseries";
   index: number;
   fallbackArtifactRole: string;
   context: NormalizationContext;
 }): ResourceContext | null {
   const connection = resolveEntryConnection(input.entry, input.context.connectionsByKey);
-  const sourceProviderSlug = normalizeSourceProviderSlug(
-    firstStringFromPaths(input.entry, [
-      "sourceProviderSlug",
-      "source_provider_slug",
-    ]) ?? firstStringFromPaths(connection, [
-      "sourceProviderSlug",
-      "source_provider_slug",
-    ]),
-  );
+  const originFallback = buildJunctionOriginFallback(connection, input.originFallback);
+  const origin = resolveJunctionOrigin(input.entry, originFallback);
+  const sourceProviderSlug = readJunctionSourceProviderSlug(input.entry, originFallback)
+    ?? origin.sourceProviderSlug;
 
   if (!sourceProviderSlug) {
     return null;
@@ -522,7 +668,9 @@ function buildResourceContext(input: {
   return {
     resource: input.resource,
     resourceSlug: input.resourceSlug,
+    identityKind: input.identityKind,
     sourceProviderSlug,
+    origin,
     externalRefResourceType: resourceType,
     artifactRole: input.fallbackArtifactRole,
     artifactFileName: `${input.fallbackArtifactRole}.json`,
@@ -531,63 +679,49 @@ function buildResourceContext(input: {
   };
 }
 
+function buildJunctionOriginFallback(
+  connection: PlainObject | undefined,
+  originFallback: JunctionOriginFallback | undefined,
+): JunctionOriginFallback {
+  if (!connection) {
+    return originFallback ?? {};
+  }
+
+  if (!originFallback) {
+    return connection;
+  }
+
+  return stripUndefined({
+    ...originFallback,
+    ...connection,
+    groupedSourceSlug: originFallback.groupedSourceSlug,
+  });
+}
+
 function buildDataOrigin(
   entry: PlainObject,
   resourceContext: ResourceContext,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): DeviceDataOrigin {
   return stripUndefined({
-    version: 1 as const,
-    aggregatorProvider: "junction",
-    sourceProviderSlug: resourceContext.sourceProviderSlug,
-    sourceType: firstStringFromPaths(entry, ["sourceType", "source_type", "source.type"])
-      ?? firstStringFromPaths(resourceContext.connection, ["sourceType", "source_type", "source.type"]),
-    sourceInstanceId: buildSourceInstanceId(entry, resourceContext),
+    ...resourceContext.origin,
     observedAtRaw: timestamp.observedAtRaw,
     timeZoneOffsetMinutes: firstNullableNumberFromPaths(entry, ["timeZoneOffsetMinutes", "time_zone_offset_minutes", "utcOffsetMinutes", "utc_offset_minutes"]),
     timestampSemantics: timestamp.timestampSemantics,
-    originConfidence: firstOriginConfidence(entry, resourceContext.connection),
     normalizerVersion: "junction-normalizer.v1",
   });
-}
-
-function buildSourceInstanceId(
-  entry: PlainObject,
-  resourceContext: ResourceContext,
-): string | undefined {
-  const values = [
-    firstStringFromPaths(entry, ["sourceId", "source_id", "connectionId", "connection_id"]),
-    firstStringFromPaths(resourceContext.connection, ["sourceId", "source_id", "id", "connectionId", "connection_id"]),
-    firstStringFromPaths(entry, ["sourceDeviceId", "source_device_id", "deviceId", "device_id", "source.device_id", "source.deviceId"]),
-    firstStringFromPaths(resourceContext.connection, ["sourceDeviceId", "source_device_id", "deviceId", "device_id", "source.device_id", "source.deviceId"]),
-    firstStringFromPaths(entry, ["sourceAppId", "source_app_id", "appId", "app_id", "source.app_id", "source.appId"]),
-    firstStringFromPaths(resourceContext.connection, ["sourceAppId", "source_app_id", "appId", "app_id", "source.app_id", "source.appId"]),
-  ].filter((value): value is string => Boolean(value));
-
-  if (values.length === 0) {
-    return undefined;
-  }
-
-  const digest = createHash("sha256")
-    .update(JSON.stringify({
-      sourceProviderSlug: resourceContext.sourceProviderSlug,
-      values,
-    }))
-    .digest("hex")
-    .slice(0, 24);
-
-  return `source-${digest}`;
 }
 
 function makeJunctionExternalRef(
   resourceContext: ResourceContext,
   entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
   facet: string,
 ): DeviceExternalRefPayload {
   return makeProviderExternalRef(
     "junction",
     resourceContext.externalRefResourceType,
-    buildStableResourceId(resourceContext, entry),
+    buildStableResourceId(resourceContext, entry, timestamp),
     undefined,
     slugify(facet, "value"),
   );
@@ -597,20 +731,56 @@ function buildJunctionResourceType(sourceProviderSlug: string, resourceSlug: str
   return `junction-${slugify(sourceProviderSlug, "source")}-${slugify(resourceSlug, "resource")}`;
 }
 
-function buildStableResourceId(resourceContext: ResourceContext, entry: PlainObject): string {
+function buildStableResourceId(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string {
+  if (resourceContext.identityKind === "timeseries") {
+    return buildStableTimeseriesResourceId(resourceContext, timestamp);
+  }
+
+  return buildStableSummaryResourceId(resourceContext, entry, timestamp);
+}
+
+function buildStableSummaryResourceId(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string {
   const explicitId = firstStringFromPaths(entry, ["id", "resourceId", "resource_id", "externalId", "external_id"]);
-  const observedAt = firstStringFromPaths(entry, ["observedAt", "observed_at", "timestamp", "time", "date", "day"]);
-  const digest = createHash("sha256")
-    .update(JSON.stringify({
-      resource: resourceContext.resource,
-      sourceProviderSlug: resourceContext.sourceProviderSlug,
-      explicitId,
-      observedAt,
-      entry,
-    }))
+
+  if (explicitId) {
+    return `${resourceContext.resourceSlug}-${slugify(explicitId, "id")}`;
+  }
+
+  return `${resourceContext.resourceSlug}-${shortHash([
+    resourceContext.resourceSlug,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    timestamp.observedAtRaw ?? timestamp.occurredAt,
+  ])}`;
+}
+
+function buildStableTimeseriesResourceId(
+  resourceContext: ResourceContext,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string {
+  return `${resourceContext.resourceSlug}-${shortHash([
+    resourceContext.resourceSlug,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    timestamp.observedAtRaw ?? timestamp.occurredAt,
+  ])}`;
+}
+
+function shortHash(parts: readonly unknown[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify(parts))
     .digest("hex")
     .slice(0, 16);
-  return `${resourceContext.resourceSlug}-${digest}`;
 }
 
 function resolveRecordTimestamp(
@@ -633,6 +803,12 @@ function resolveRecordTimestamp(
     "time",
     "date",
     "day",
+    "end",
+    "endAt",
+    "end_at",
+    "start",
+    "startAt",
+    "start_at",
   ]);
   const explicitSemantics = firstTimestampSemantics(entry);
   const timestampSemantics = hasFloatingTimestampSourceProvider(sourceProviderSlug)
@@ -704,16 +880,95 @@ function allowedResourceEntries(
   });
 }
 
-function resourceEntries(payload: unknown): PlainObject[] {
+function resourceEntries(payload: unknown): JunctionResourceEntry[] {
   if (Array.isArray(payload)) {
-    return payload.flatMap((entry) => {
-      const normalized = asPlainObject(entry);
-      return normalized ? [normalized] : [];
-    });
+    return payload.flatMap((entry) => expandResourceEntry(entry));
   }
 
   const normalized = asPlainObject(payload);
-  return normalized ? [normalized] : [];
+  return normalized ? expandResourceEntry(normalized) : [];
+}
+
+function timeseriesResourceEntries(resource: string, payload: unknown): JunctionResourceEntry[] {
+  const grouped = flattenGroupedTimeseriesEntries(resource, payload);
+  return grouped ?? resourceEntries(payload);
+}
+
+function flattenGroupedTimeseriesEntries(resource: string, payload: unknown): JunctionResourceEntry[] | null {
+  const envelope = asPlainObject(payload);
+  const groups = asPlainObject(envelope?.groups);
+  if (!groups) {
+    return null;
+  }
+
+  const entries: JunctionResourceEntry[] = [];
+
+  for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
+    for (const rawGroup of asArray(rawGroups)) {
+      const group = asPlainObject(rawGroup);
+      if (!group) {
+        continue;
+      }
+
+      for (const rawSample of asArray(group.data)) {
+        const sample = asPlainObject(rawSample);
+        if (!sample) {
+          continue;
+        }
+
+        entries.push({
+          entry: sample,
+          originFallback: {
+            ...group,
+            groupedSourceSlug: sourceSlug,
+            junctionResource: resource,
+          },
+        });
+      }
+    }
+  }
+
+  return entries;
+}
+
+function expandResourceEntry(value: unknown): JunctionResourceEntry[] {
+  const entry = asPlainObject(value);
+  if (!entry) {
+    return [];
+  }
+
+  const nestedEntries = readNestedResourceEntries(entry);
+  if (!nestedEntries) {
+    return [{ entry }];
+  }
+
+  return nestedEntries.map((nestedEntry) => ({
+    entry: nestedEntry,
+    originFallback: entry,
+  }));
+}
+
+function readNestedResourceEntries(envelope: PlainObject): PlainObject[] | null {
+  for (const key of ["data", "results", "items", "records"]) {
+    const entries = asArray(envelope[key]).flatMap((entry) => {
+      const normalized = asPlainObject(entry);
+      return normalized ? [normalized] : [];
+    });
+    if (entries.length > 0) {
+      return entries;
+    }
+  }
+
+  return null;
+}
+
+function normalizeTimeseriesUnit(resource: string, rawUnit: string | undefined, fallbackUnit: string): string {
+  const normalized = rawUnit?.trim().toLowerCase();
+  if (resource === "hrv" && normalized === "rmssd") {
+    return fallbackUnit;
+  }
+
+  return rawUnit ?? fallbackUnit;
 }
 
 function listAllowedResourceKeys(
@@ -732,15 +987,6 @@ function normalizeResourceKey(value: string): string | undefined {
     return "blood_oxygen";
   }
   return key.length > 0 ? key : undefined;
-}
-
-function normalizeSourceProviderSlug(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const slug = slugify(value, "");
-  return slug && slug !== "junction" ? slug : undefined;
 }
 
 function normalizeTimestamp(value: unknown): string | undefined {
@@ -775,7 +1021,7 @@ function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): stri
 }
 
 function hasFloatingTimestampSourceProvider(sourceProviderSlug: string | undefined): boolean {
-  const normalized = normalizeSourceProviderSlug(sourceProviderSlug);
+  const normalized = normalizeJunctionSourceProviderSlug(sourceProviderSlug);
   return normalized ? FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS.has(normalized) : false;
 }
 
@@ -803,17 +1049,6 @@ function inferTimestampSemantics(value: string | undefined): TimestampSemantics 
 function firstTimestampSemantics(entry: PlainObject): TimestampSemantics | undefined {
   const value = firstStringFromPaths(entry, ["timestampSemantics", "timestamp_semantics"]);
   return value === "utc" || value === "offset" || value === "floating" || value === "unknown"
-    ? value
-    : undefined;
-}
-
-function firstOriginConfidence(
-  entry: PlainObject,
-  connection: PlainObject | undefined,
-): OriginConfidence | undefined {
-  const value = firstStringFromPaths(entry, ["originConfidence", "origin_confidence"])
-    ?? firstStringFromPaths(connection, ["originConfidence", "origin_confidence"]);
-  return value === "high" || value === "medium" || value === "low" || value === "unknown"
     ? value
     : undefined;
 }
@@ -857,22 +1092,6 @@ function firstStringFromPaths(source: PlainObject | undefined, paths: readonly s
   return undefined;
 }
 
-function firstNullableStringFromPaths(source: PlainObject | undefined, paths: readonly string[]): string | null | undefined {
-  for (const path of paths) {
-    const value = readPath(source, path);
-    if (value === null) {
-      return null;
-    }
-
-    const id = stringId(value);
-    if (id) {
-      return id;
-    }
-  }
-
-  return undefined;
-}
-
 function firstValueFromPaths(source: PlainObject | undefined, paths: readonly string[]): unknown {
   for (const path of paths) {
     const value = readPath(source, path);
@@ -898,5 +1117,6 @@ function readPath(source: PlainObject | undefined, path: string): unknown {
 export const junctionProviderAdapter: DeviceProviderAdapter<JunctionSnapshotInput> = {
   ...JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   parseSnapshot: parseJunctionSnapshot,
+  sanitizeRawSnapshot: sanitizeJunctionRawSnapshot,
   normalizeSnapshot: normalizeJunctionSnapshot,
 };

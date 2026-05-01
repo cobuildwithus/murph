@@ -3,6 +3,7 @@ import {
   getConfiguredDeviceSyncProviderManifest,
   listConfiguredDeviceSyncProviderNames,
   type DeviceSyncConfiguredProviderManifest,
+  type SerializableConfigFieldKind,
 } from "./provider-manifests.ts";
 
 import type {
@@ -140,7 +141,7 @@ function parseSerializableProviderConfig(
     }
 
     parsed[key] = parseSerializableFieldValue(
-      kind as "number" | "string" | "string[]",
+      kind as SerializableConfigFieldKind,
       fieldValue,
       `${label}.${key}`,
     );
@@ -189,11 +190,13 @@ function requireSerializableProviderConfigRecord(
 }
 
 function parseSerializableFieldValue(
-  kind: "number" | "string" | "string[]",
+  kind: SerializableConfigFieldKind,
   value: unknown,
   label: string,
-): number | string | string[] {
+): boolean | number | string | string[] {
   switch (kind) {
+    case "boolean":
+      return requireSerializableBoolean(value, label);
     case "number":
       return requireSerializableNumber(value, label);
     case "string":
@@ -201,6 +204,14 @@ function parseSerializableFieldValue(
     case "string[]":
       return requireSerializableStringArray(value, label);
   }
+}
+
+function requireSerializableBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+
+  return value;
 }
 
 function requireSerializableNumber(value: unknown, label: string): number {

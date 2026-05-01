@@ -10,6 +10,7 @@ export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "v
 
 export interface DeviceProviderAdapter<TSnapshot = unknown> extends DeviceProviderDescriptor {
   parseSnapshot?(snapshot: unknown): TSnapshot;
+  sanitizeRawSnapshot?(snapshot: TSnapshot): unknown;
   normalizeSnapshot(snapshot: TSnapshot): Promise<NormalizedDeviceBatch> | NormalizedDeviceBatch;
 }
 

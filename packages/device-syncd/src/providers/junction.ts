@@ -1,5 +1,6 @@
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 
+import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError } from "../errors.ts";
@@ -42,7 +43,7 @@ export interface JunctionDeviceSyncProviderConfig {
   clientUserIdSecret: string;
   environment: JunctionEnvironment;
   region: JunctionRegion;
-  baseUrl?: string;
+  allowedLinkHosts?: readonly string[];
   providerFilter?: string[];
   summaryResources?: string[];
   timeseriesResources?: string[];
@@ -73,6 +74,7 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "weight",
 ] as const);
 const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
+  "distance",
   "glucose",
 ] as const);
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
@@ -260,14 +262,14 @@ export function createJunctionDeviceSyncProvider(
 
     await context.importSnapshot({
       provider: "junction",
-      accountId: context.account.externalAccountId,
+      accountId: buildJunctionImportAccountId(context.account.id),
       connectionId: context.account.id,
       importedAt: context.now,
       windowStart: window.windowStart,
       windowEnd: window.windowEnd,
-      connections: sourceProviders,
-      summaries,
-      timeseries,
+      connections: sanitizeJunctionImportConnections(sourceProviders),
+      summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
+      timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
     });
 
     return {
@@ -316,14 +318,14 @@ export function createJunctionDeviceSyncProvider(
 
     await context.importSnapshot({
       provider: "junction",
-      accountId: context.account.externalAccountId,
+      accountId: buildJunctionImportAccountId(context.account.id),
       connectionId: context.account.id,
       importedAt: context.now,
       windowStart: window.windowStart,
       windowEnd: window.windowEnd,
-      connections: sourceProviders,
-      summaries,
-      timeseries,
+      connections: sanitizeJunctionImportConnections(sourceProviders),
+      summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
+      timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
     });
 
     return {
@@ -449,7 +451,7 @@ export function createJunctionDeviceSyncProvider(
       chunkStart = chunkEnd;
     }
 
-    return records;
+    return dedupeJunctionTimeseriesRecords(resource, records);
   }
 
   function buildInitialJobs(now: string): DeviceSyncJobInput[] {
@@ -476,35 +478,17 @@ export function createJunctionDeviceSyncProvider(
       kind: "provider_config",
       providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
     },
-    beginConnection,
-    completeConnection,
-    buildConnectUrl() {
-      throw deviceSyncError({
-        code: "JUNCTION_LEGACY_CONNECT_UNSUPPORTED",
-        message: "Junction uses the provider beginConnection external-link flow.",
-        retryable: false,
-        httpStatus: 500,
-      });
+    connectionHandler: {
+      beginConnection,
+      completeConnection,
     },
-    async exchangeAuthorizationCode() {
-      throw deviceSyncError({
-        code: "JUNCTION_OAUTH_UNSUPPORTED",
-        message: "Junction does not support OAuth authorization-code exchange.",
-        retryable: false,
-        httpStatus: 500,
-      });
+    webhookHandler: {
+      verifyAndParseWebhook,
     },
-    async refreshTokens() {
-      throw deviceSyncError({
-        code: "JUNCTION_TOKEN_REFRESH_UNSUPPORTED",
-        message: "Junction uses provider-config credentials and does not refresh OAuth tokens.",
-        retryable: false,
-        httpStatus: 409,
-      });
+    jobExecutor: {
+      createScheduledJobs,
+      executeJob,
     },
-    createScheduledJobs,
-    verifyAndParseWebhook,
-    executeJob,
   };
 }
 
@@ -545,7 +529,7 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
     apiKey: config.apiKey,
     environment: config.environment,
     region: config.region,
-    baseUrl: config.baseUrl,
+    allowedLinkHosts: config.allowedLinkHosts,
     requestTimeoutMs: config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     fetchImpl: config.fetchImpl,
   };
@@ -581,6 +565,236 @@ function normalizeResourceList(
 function normalizeProviderSlug(value: unknown): string | null {
   const normalized = normalizeString(value)?.toLowerCase().replace(/[^a-z0-9_]+/gu, "_").replace(/^_+|_+$/gu, "");
   return normalized || null;
+}
+
+function stripUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  );
+}
+
+function sanitizeJunctionImportConnections(
+  providers: readonly JunctionProviderConnection[],
+): Array<Record<string, unknown>> {
+  return providers.map((provider) => stripUndefined({
+    sourceProviderSlug: provider.origin.sourceProviderSlug ?? provider.slug,
+    sourceInstanceId: provider.origin.sourceInstanceId,
+  }));
+}
+
+function sanitizeJunctionImportSnapshots(
+  snapshots: Record<string, unknown[]>,
+  providers: readonly JunctionProviderConnection[],
+): Record<string, unknown[]> {
+  const sourceReferences = buildJunctionSourceReferenceMap(providers);
+
+  return Object.fromEntries(
+    Object.entries(snapshots).map(([resource, records]) => [
+      resource,
+      records.map((record) => sanitizeJunctionImportSnapshotValue(record, sourceReferences)),
+    ]),
+  );
+}
+
+function buildJunctionSourceReferenceMap(
+  providers: readonly JunctionProviderConnection[],
+): ReadonlyMap<string, Record<string, unknown>> {
+  const references = new Map<string, Record<string, unknown>>();
+
+  for (const provider of providers) {
+    const sourceProviderSlug = provider.origin.sourceProviderSlug ?? provider.slug;
+    const reference = stripUndefined({
+      sourceProviderSlug,
+      sourceInstanceId: provider.origin.sourceInstanceId,
+    });
+
+    for (const rawKey of [
+      provider.id,
+      provider.origin.sourceInstanceId,
+    ]) {
+      const key = normalizeString(rawKey);
+      if (key) {
+        references.set(key, reference);
+      }
+    }
+  }
+
+  return references;
+}
+
+function sanitizeJunctionImportSnapshotValue(
+  value: unknown,
+  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeJunctionImportSnapshotValue(entry, sourceReferences));
+  }
+
+  const record = readPlainObject(value);
+  if (!record) {
+    return value;
+  }
+
+  const fallback = readJunctionSourceReference(record, sourceReferences);
+  const origin = resolveJunctionOrigin(record, fallback);
+  const sanitized = stripJunctionRawSourceIdentityFields(record, sourceReferences);
+
+  return stripUndefined({
+    ...sanitized,
+    sourceProviderSlug: normalizeProviderSlug(origin.sourceProviderSlug) ?? sanitized.sourceProviderSlug,
+    sourceType: origin.sourceType ?? sanitized.sourceType,
+    sourceInstanceId: origin.sourceInstanceId ?? sanitized.sourceInstanceId,
+  });
+}
+
+function readJunctionSourceReference(
+  record: Record<string, unknown>,
+  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  for (const key of [
+    normalizeString(record.connectionId),
+    normalizeString(record.connection_id),
+    normalizeString(record.providerConnectionId),
+    normalizeString(record.provider_connection_id),
+    normalizeString(record.sourceId),
+    normalizeString(record.source_id),
+    normalizeString(record.sourceInstanceId),
+    normalizeString(record.source_instance_id),
+  ]) {
+    const reference = key ? sourceReferences.get(key) : undefined;
+    if (reference) {
+      return reference;
+    }
+  }
+
+  return {};
+}
+
+function stripJunctionRawSourceIdentityFields(
+  record: Record<string, unknown>,
+  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(record)) {
+    if (
+      isBlockedJunctionImportSourceIdentityKey(key)
+      || isBlockedJunctionImportSourceIdentityContainerKey(key)
+    ) {
+      continue;
+    }
+
+    sanitized[key] = sanitizeJunctionImportSnapshotValue(value, sourceReferences);
+  }
+
+  return sanitized;
+}
+
+function normalizeJunctionImportSourceIdentityKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+}
+
+function isBlockedJunctionImportSourceIdentityKey(key: string): boolean {
+  const normalized = normalizeJunctionImportSourceIdentityKey(key);
+
+  return normalized.includes("connectionid")
+    || normalized.includes("providerconnectionid")
+    || normalized.includes("sourceid")
+    || normalized.includes("sourceinstanceid")
+    || normalized.includes("sourcedeviceid")
+    || normalized.includes("sourceappid")
+    || normalized.includes("deviceid")
+    || normalized.includes("appid")
+    || normalized.includes("userid")
+    || normalized.includes("accountid")
+    || normalized.includes("clientuserid")
+    || normalized.includes("ownerid")
+    || normalized.includes("sourcename")
+    || normalized.includes("providername")
+    || normalized.includes("devicename")
+    || normalized.includes("appname");
+}
+
+function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean {
+  const normalized = normalizeJunctionImportSourceIdentityKey(key);
+
+  return normalized === "source"
+    || normalized === "provider"
+    || normalized === "device"
+    || normalized === "app"
+    || normalized === "account"
+    || normalized === "user"
+    || normalized === "client"
+    || normalized === "owner";
+}
+
+function dedupeJunctionTimeseriesRecords(resource: string, records: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  const deduped: unknown[] = [];
+
+  for (const record of records) {
+    const key = buildJunctionTimeseriesRecordKey(resource, record);
+    if (key && seen.has(key)) {
+      continue;
+    }
+
+    if (key) {
+      seen.add(key);
+    }
+    deduped.push(record);
+  }
+
+  return deduped;
+}
+
+function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): string | null {
+  const entry = readPlainObject(record);
+  if (!entry) {
+    return null;
+  }
+
+  const origin = resolveJunctionOrigin(entry);
+  const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
+  const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+  if (!sourceProviderSlug || !timestamp) {
+    return null;
+  }
+
+  return JSON.stringify([
+    "junction-timeseries",
+    resource,
+    sourceProviderSlug,
+    normalizeString(origin.sourceType) ?? "",
+    normalizeString(origin.sourceInstanceId) ?? "",
+    timestamp,
+  ]);
+}
+
+function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
+  for (const key of [
+    "observedAt",
+    "observed_at",
+    "observed_at_utc",
+    "timestamp",
+    "time",
+    "date",
+    "day",
+    "end",
+    "endAt",
+    "end_at",
+    "start",
+    "startAt",
+    "start_at",
+  ]) {
+    const normalized = normalizeString(record[key]);
+    if (!normalized) {
+      continue;
+    }
+
+    return toIsoTimestampIfValid(normalized) ?? normalized;
+  }
+
+  return null;
 }
 
 function buildJunctionRedirectUrl(callbackUrl: string, state: string): string {
@@ -815,17 +1029,7 @@ function readJunctionWebhookResourceFromEventType(eventType: string): string | n
 }
 
 function extractJunctionWebhookSourceProviderSlug(data: Record<string, unknown> | null): string | null {
-  const source = readPlainObject(data?.source);
-  const provider = readPlainObject(data?.provider);
-
-  return (
-    normalizeProviderSlug(source?.slug)
-    ?? normalizeProviderSlug(source?.provider_slug)
-    ?? normalizeProviderSlug(provider?.slug)
-    ?? normalizeProviderSlug(data?.source_provider_slug)
-    ?? normalizeProviderSlug(data?.provider_slug)
-    ?? null
-  );
+  return normalizeProviderSlug(resolveJunctionOrigin(data ?? undefined).sourceProviderSlug) ?? null;
 }
 
 function extractJunctionWebhookObjectId(data: Record<string, unknown> | null): string | null {
@@ -1091,19 +1295,78 @@ async function projectJunctionSources(
   }
 
   for (const provider of providers) {
+    const origin = resolveJunctionOrigin(
+      {
+        sourceProviderSlug: provider.slug,
+        source: provider.source
+          ? {
+              device_id: provider.source.deviceId,
+              app_id: provider.source.appId,
+            }
+          : undefined,
+      },
+      {
+        sourceProviderSlug: provider.origin.sourceProviderSlug,
+        sourceInstanceId: provider.origin.sourceInstanceId,
+      },
+    );
+    const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug) ?? provider.slug;
+    const sourceInstance = buildJunctionSourceInstance(provider, context.account.externalAccountId, sourceProviderSlug);
+    const resourceAvailabilitySummary = sanitizeJunctionResourceAvailabilitySummary(provider.resourceAvailability);
+    if (sourceInstance.usedFallback) {
+      resourceAvailabilitySummary.sourceInstanceKeyFallback = true;
+    }
+
     await context.upsertConnectionSource({
-      sourceInstanceKey: buildJunctionSourceInstanceKey(context.account.externalAccountId, provider.slug),
-      sourceProviderSlug: provider.slug,
+      sourceInstanceKey: sourceInstance.key,
+      sourceProviderSlug,
       displayName: null,
       status: mapJunctionSourceStatus(provider.status),
-      resourceAvailabilitySummary: sanitizeJunctionResourceAvailabilitySummary(provider.resourceAvailability),
+      resourceAvailabilitySummary,
       lastSeenAt: context.now,
     });
   }
 }
 
-function buildJunctionSourceInstanceKey(userId: string, slug: string): string {
-  return `jxn_${createHash("sha256").update(JSON.stringify(["junction-source", userId, slug])).digest("hex").slice(0, 32)}`;
+function buildJunctionSourceInstance(
+  provider: JunctionProviderConnection,
+  userId: string,
+  sourceProviderSlug: string,
+): { key: string; usedFallback: boolean } {
+  const originSourceInstanceId = normalizeString(provider.origin.sourceInstanceId);
+  const providerId = normalizeString(provider.id);
+  const sourceDeviceId = normalizeString(provider.source?.deviceId);
+  const sourceAppId = normalizeString(provider.source?.appId);
+  const hasInstanceId = Boolean(originSourceInstanceId || providerId || sourceDeviceId || sourceAppId);
+  const hashInput = hasInstanceId
+    ? [
+        "junction-source",
+        userId,
+        originSourceInstanceId,
+        providerId,
+        sourceProviderSlug,
+        sourceDeviceId,
+        sourceAppId,
+      ]
+    : [
+        "junction-source",
+        userId,
+        sourceProviderSlug,
+      ];
+
+  return {
+    key: `jxn_${createHash("sha256").update(JSON.stringify(hashInput)).digest("hex").slice(0, 32)}`,
+    usedFallback: !hasInstanceId,
+  };
+}
+
+function buildJunctionImportAccountId(connectionId: string): string {
+  return `jxn_acct_${
+    createHash("sha256")
+      .update(JSON.stringify(["junction-import-account", connectionId]))
+      .digest("hex")
+      .slice(0, 32)
+  }`;
 }
 
 function mapJunctionSourceStatus(status: string): DeviceConnectionSourceStatus {
@@ -1166,6 +1429,26 @@ function isBlockedJunctionSourceAvailabilityKey(key: string): boolean {
   return normalized.includes("userid")
     || normalized.includes("accountid")
     || normalized.includes("clientuserid")
+    || normalized === "owner"
+    || normalized === "provider"
+    || normalized === "source"
+    || normalized === "device"
+    || normalized === "app"
+    || normalized === "account"
+    || normalized === "user"
+    || normalized === "client"
+    || normalized.includes("providerconnectionid")
+    || normalized.includes("connectionid")
+    || normalized.includes("sourceid")
+    || normalized.includes("sourceinstanceid")
+    || normalized.includes("sourcedeviceid")
+    || normalized.includes("sourceappid")
+    || normalized.includes("deviceid")
+    || normalized.includes("appid")
+    || normalized.includes("sourcename")
+    || normalized.includes("providername")
+    || normalized.includes("devicename")
+    || normalized.includes("appname")
     || normalized.includes("token")
     || normalized.includes("secret")
     || normalized.includes("authorization")

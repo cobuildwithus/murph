@@ -82,6 +82,8 @@ export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 export type { JunctionDeviceSyncProviderConfig } from "./providers/junction.ts";
 export {
   assertValidJunctionClientConfig,
+  isAllowedJunctionLinkHost,
+  JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
   JunctionClient,
   resolveJunctionBaseUrl,
 } from "./providers/junction-client.ts";

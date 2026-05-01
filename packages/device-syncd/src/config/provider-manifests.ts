@@ -45,7 +45,6 @@ import {
   GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS,
   GARMIN_TOKEN_BASE_URL_ENV_KEYS,
   JUNCTION_API_KEY_ENV_KEYS,
-  JUNCTION_BASE_URL_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   JUNCTION_ENV_ENV_KEYS,
@@ -108,7 +107,7 @@ import type {
 } from "./provider-types.ts";
 import type { DeviceSyncProviderCredentialPolicy } from "../types.ts";
 
-export type SerializableConfigFieldKind = "number" | "string" | "string[]";
+export type SerializableConfigFieldKind = "boolean" | "number" | "string" | "string[]";
 export type DeviceSyncJobPayloadFieldKind = "boolean" | "number" | "string" | "string[]";
 export type HostedHintFieldKind = Exclude<DeviceSyncJobPayloadFieldKind, "string[]">;
 
@@ -328,7 +327,6 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
       clientUserIdSecret,
       environment: parseJunctionEnvironment(environment),
       region: parseJunctionRegion(region),
-      baseUrl: optionalEnv(env, JUNCTION_BASE_URL_ENV_KEYS),
       providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
       summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
       timeseriesResources: parseCsvEnv(env, JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS),
@@ -346,9 +344,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   },
   createProvider: createJunctionDeviceSyncProvider,
   serializableFields: {
-    apiKey: "string",
-    baseUrl: "string",
-    clientUserIdSecret: "string",
+    allowedLinkHosts: "string[]",
     environment: "string",
     providerFilter: "string[]",
     reconcileDays: "number",
@@ -363,6 +359,10 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   },
   disallowedSerializableFields: {
     ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
+    apiKey:
+      "is a provider-owned API secret and is not supported in serialized runtime config.",
+    clientUserIdSecret:
+      "is a provider-owned HMAC secret and is not supported in serialized runtime config.",
     webhookSecret:
       "is a provider-owned webhook secret and is not supported in serialized runtime config.",
   },

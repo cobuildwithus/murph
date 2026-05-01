@@ -31,6 +31,12 @@ export {
   type JunctionSnapshotInput,
 } from "./junction.ts";
 export {
+  normalizeJunctionSourceProviderSlug,
+  readJunctionSourceProviderSlug,
+  resolveJunctionOrigin,
+  type JunctionOriginFallback,
+} from "./junction-origin.ts";
+export {
   normalizeOuraSnapshot,
   ouraProviderAdapter,
   type OuraSnapshotInput,
