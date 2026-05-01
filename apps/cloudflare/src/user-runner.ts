@@ -70,6 +70,7 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
+const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -870,14 +871,16 @@ export class HostedUserRunner {
       };
 
       await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
+        preferredWakeAt: new Date(
+          Date.now() + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
+        ).toISOString(),
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           pendingNudge: true,
         },
-        message: "Hosted runner queued follow-up drive for pending nudge and synced watchdog alarm.",
+        message: "Hosted runner queued follow-up drive for pending nudge and scheduled delayed continuation alarm.",
         phase: "scheduled",
         userId: input.userId,
       });
