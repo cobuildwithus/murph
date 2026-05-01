@@ -564,6 +564,50 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     );
   });
 
+  it("reschedules an alarm drain instead of waiting unbounded behind a long active invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+    });
+    await runner.bindUser("member_123");
+
+    await runner.nudgeHostedRunner();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const expectedRetryAlarm = new Date(Date.now() + 30_000 + 10_000 + 1_000).toISOString();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    const alarmRun = runner.alarm();
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(alarmRun).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:30.000Z",
+      expectedRetryAlarm,
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          activeInvocationDrainWaitMs: 10_000,
+          pendingNudge: false,
+          runnerNextWakePresent: true,
+        }),
+        message: "Hosted runner active invocation still running; rescheduled wake drain.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+  });
+
   it("reapplies a future wake alarm before skipping after an active invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

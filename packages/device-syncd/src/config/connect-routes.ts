@@ -312,13 +312,33 @@ export function listDefaultJunctionLinkProviderSlugs(): string[] {
 }
 
 export function normalizeJunctionLinkProviderFilter(value: readonly string[] | undefined): string[] {
-  const requested = value && value.length > 0 ? value : listDefaultJunctionLinkProviderSlugs();
+  const usingDefault = !value || value.length === 0;
+  const requested = usingDefault ? listDefaultJunctionLinkProviderSlugs() : value;
+  const normalizedProviderSlugs: string[] = [];
+  const unsupportedProviderSlugs: string[] = [];
 
-  return [...new Set(
-    requested
-      .map(normalizeJunctionProviderSlug)
-      .filter((entry): entry is string => entry !== null && JUNCTION_LINK_ROUTE_ENTRY_BY_PROVIDER_SLUG.has(entry)),
-  )];
+  for (const entry of requested) {
+    const providerSlug = normalizeJunctionProviderSlug(entry);
+
+    if (!providerSlug || !JUNCTION_LINK_ROUTE_ENTRY_BY_PROVIDER_SLUG.has(providerSlug)) {
+      if (!usingDefault) {
+        unsupportedProviderSlugs.push(providerSlug ?? String(entry));
+      }
+      continue;
+    }
+
+    normalizedProviderSlugs.push(providerSlug);
+  }
+
+  if (!usingDefault && unsupportedProviderSlugs.length > 0) {
+    throw new TypeError(
+      `JUNCTION_PROVIDER_FILTER includes unsupported Junction Link provider slugs: ${[
+        ...new Set(unsupportedProviderSlugs),
+      ].join(", ")}. Only Junction Link routes can be used in the web Link provider filter; SDK-only and unavailable routes require a separate connection flow.`,
+    );
+  }
+
+  return [...new Set(normalizedProviderSlugs)];
 }
 
 export function resolveDirectDeviceConnectRouteByProvider(

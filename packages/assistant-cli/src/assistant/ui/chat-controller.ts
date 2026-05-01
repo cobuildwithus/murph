@@ -421,6 +421,7 @@ export function useAssistantChatController(
       createModelSwitcherState({
         activeModel,
         activeReasoningEffort,
+        defaultReasoningOptions: modelCatalog.reasoningOptions,
         models: modelCatalog.models,
         modelOptions: modelCatalog.modelOptions,
       }),

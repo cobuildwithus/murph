@@ -248,7 +248,6 @@ vi.mock('../src/assistant/automation/provider-watchdog.ts', () => ({
 }))
 
 vi.mock('../src/assistant/automation/prompt-builder.ts', () => ({
-  loadTelegramAutoReplyMetadata: vi.fn().mockResolvedValue(null),
   prepareAssistantAutoReplyInput: replyMocks.prepareAssistantAutoReplyInput,
   readTelegramAutoReplyMetadataFromAssistantInput:
     replyMocks.readTelegramAutoReplyMetadataFromAssistantInput,

@@ -45,6 +45,32 @@ describe("parseHostedAssistantRuntimeConfig", () => {
       })).toThrow(/parserToolchain\.tools\.whisper\.command must be an absolute path/u);
   });
 
+  it("rejects null and empty hosted parser toolchain paths", () => {
+    expect(() =>
+      parseHostedAssistantRuntimeConfig({
+        parserToolchain: {
+          tools: {
+            whisper: {
+              command: null,
+            },
+          },
+        },
+      })).toThrow(/parserToolchain\.tools\.whisper\.command must be a non-empty string/u);
+
+    expect(() =>
+      parseHostedAssistantRuntimeConfig({
+        parserToolchain: {
+          tools: {
+            whisper: {
+              modelPath: "   ",
+            },
+          },
+        },
+      })).toThrow(
+        /parserToolchain\.tools\.whisper\.modelPath must be a non-empty absolute path/u,
+      );
+  });
+
   it("rejects parserToolchain:null", () => {
     expect(() =>
       parseHostedAssistantRuntimeConfig({

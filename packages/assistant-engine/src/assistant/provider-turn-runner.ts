@@ -14,9 +14,6 @@ import {
   recordAssistantToolFailureRuntimeIssues,
 } from './issue-reporting.js'
 import {
-  maybeHandleAssistantHostedDeviceConnect,
-} from './hosted-device-connect.js'
-import {
   type CodexThreadIdentity,
 } from './provider-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
@@ -243,54 +240,6 @@ async function executeAssistantProviderAttempt(input: {
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
-    const hostedDeviceConnect =
-      await maybeHandleAssistantHostedDeviceConnect({
-        channel: executionPlan.input.channel,
-        executionContext: executionPlan.executionContext,
-        onboardingGuidanceInjected:
-          attemptPlan.routePlan.onboardingGuidanceInjected,
-        prompt: executionPlan.input.prompt,
-      })
-    if (hostedDeviceConnect.kind === 'handled') {
-      attemptMetadata = {
-        activityLabels: ['hosted-device-connect'],
-        executedToolCount: 0,
-        providerActionCount: hostedDeviceConnect.providerActionCount,
-        rawToolEvents: [],
-      }
-      await recordProviderAttemptSucceeded({
-        activityLabels: attemptMetadata.activityLabels,
-        attemptCount: attemptPlan.attemptCount,
-        route: attemptPlan.route,
-        turnId: executionPlan.turnId,
-        vault: executionPlan.input.vault,
-      })
-      return {
-        kind: 'succeeded',
-        result: {
-          attemptCount: attemptPlan.attemptCount,
-          nonReplayableProviderWork:
-            hostedDeviceConnect.providerActionCount > 0,
-          onboardingCompletionFallbackReason:
-            attemptPlan.routePlan.onboardingCompletionFallbackReason,
-          onboardingGuidanceInjected:
-            attemptPlan.routePlan.onboardingGuidanceInjected,
-          provider: attemptPlan.route.provider,
-          providerContinuation: effectiveProviderContinuation,
-          providerOptions: attemptPlan.route.providerOptions,
-          providerSessionId: null,
-          rawEvents: [],
-          response: hostedDeviceConnect.response,
-          route: attemptPlan.route,
-          session: attemptPlan.session,
-          stderr: '',
-          stdout: '',
-          usage: null,
-          usageAttribution,
-          workingDirectory: attemptPlan.routePlan.workingDirectory,
-        },
-      }
-    }
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       abortSignal: executionPlan.input.abortSignal,
       activeTurnId: executionPlan.turnId,

@@ -20,9 +20,7 @@ import type {
 
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
 import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
-import { HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS } from "../hosted-onboarding/webhook-nudge-policy";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
@@ -358,17 +356,6 @@ async function persistHostedDeviceSyncWake(input: {
       message: "Hosted device-sync wake could not be queued for runner handoff.",
       retryable: true,
     });
-  }
-
-  const nudgeResult = await nudgeHostedRunnerUserBestEffortResult({
-    context: "device-sync.wake",
-    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-    userId: input.wake.userId,
-  });
-
-  if (nudgeResult.accepted) {
-    await input.complete?.();
-    return;
   }
 
   try {

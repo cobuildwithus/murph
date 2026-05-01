@@ -201,21 +201,20 @@ function parseHostedAssistantRuntimeParserToolConfig(
   const config: HostedAssistantRuntimeParserToolConfig = {};
 
   if (record.command !== undefined) {
-    config.command = parseAbsoluteToolPathOrNull(record.command, `${label}.command`);
+    config.command = parseAbsoluteToolPath(record.command, `${label}.command`);
   }
   if (record.modelPath !== undefined) {
-    config.modelPath = parseAbsoluteToolPathOrNull(record.modelPath, `${label}.modelPath`);
+    config.modelPath = parseAbsoluteToolPath(record.modelPath, `${label}.modelPath`);
   }
 
   return config;
 }
 
-function parseAbsoluteToolPathOrNull(value: unknown, label: string): string | null {
-  if (value === null) {
-    return null;
-  }
-
+function parseAbsoluteToolPath(value: unknown, label: string): string {
   const parsed = requireString(value, label).trim();
+  if (parsed.length === 0) {
+    throw new TypeError(`${label} must be a non-empty absolute path.`);
+  }
   if (!parsed.startsWith("/")) {
     throw new TypeError(`${label} must be an absolute path.`);
   }

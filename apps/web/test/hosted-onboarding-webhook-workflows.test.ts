@@ -103,6 +103,12 @@ describe("hosted onboarding webhook workflows", () => {
     });
   });
 
+  it("keeps the durable nudge retry window long enough for short outages", () => {
+    expect(
+      Object.getOwnPropertyDescriptor(nudgeHostedWebhookMailboxItemStep, "maxRetries")?.value,
+    ).toBe(120);
+  });
+
   it("uses the device-sync wake context for device-sync workflow nudges", async () => {
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",

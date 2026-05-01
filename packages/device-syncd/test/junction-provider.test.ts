@@ -8,7 +8,6 @@ import {
   createJunctionDeviceSyncProvider,
 } from "../src/providers/junction.ts";
 import {
-  JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS,
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   JUNCTION_LINK_PROVIDER_SLUGS,
@@ -183,12 +182,6 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
       .map((target) => target.providerSlug),
   );
   assert.deepEqual(JUNCTION_DEFAULT_PROVIDER_FILTER, JUNCTION_LINK_PROVIDER_SLUGS);
-  assert.deepEqual(
-    JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS,
-    JUNCTION_CONNECT_SOURCE_TARGETS
-      .filter((target) => target.connectMode !== "junction_link")
-      .map((target) => target.providerSlug),
-  );
   assert.deepEqual(normalizeJunctionProviderFilter(undefined), JUNCTION_DEFAULT_PROVIDER_FILTER);
   assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("map_my_fitness"), true);
   assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("dexcom_v3"), true);
@@ -216,9 +209,11 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
   assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
 });
 
-test("Junction provider filters non-Link routes from hosted web Link", () => {
-  assert.deepEqual(
-    normalizeJunctionProviderFilter([
+test("Junction provider rejects non-Link routes from hosted web Link", () => {
+  assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
+
+  assert.throws(
+    () => normalizeJunctionProviderFilter([
       "oura",
       "apple_health_kit",
       "apple_healthkit",
@@ -227,18 +222,18 @@ test("Junction provider filters non-Link routes from hosted web Link", () => {
       "accuchek_ble",
       "withings",
     ]),
-    ["oura", "withings"],
+    /unsupported Junction Link provider slugs: apple_health_kit, apple_healthkit, health_connect, samsung_health, accuchek_ble/u,
   );
 });
 
-test("Junction provider rejects filters with no hosted Link providers", () => {
+test("Junction provider rejects explicit filters with no hosted Link providers", () => {
   assert.throws(
     () => createJunctionProvider(async (input) => {
       throw new Error(`Unexpected request: ${readUrl(input)}`);
     }, {
       providerFilter: ["accuchek_ble", "health_connect"],
     }),
-    /must include at least one hosted Link provider/u,
+    /unsupported Junction Link provider slugs: accuchek_ble, health_connect/u,
   );
 });
 
@@ -471,6 +466,25 @@ test("Junction beginConnection rejects disabled source providers before external
       sourceProviderSlug: "apple_health_kit",
     }),
     /Junction source provider is not enabled/u,
+  );
+});
+
+test("Junction beginConnection rejects SDK-only source providers before external calls", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+
+  await assert.rejects(
+    () => requireJunctionConnectionHandler(provider).beginConnection({
+      state: "state-1",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      now: "2026-04-03T00:00:00.000Z",
+      scopes: [],
+      ownerId: "owner-internal-id-123",
+      sourceProviderSlug: "accuchek_ble",
+    }),
+    (error) => error instanceof DeviceSyncError && error.code === "JUNCTION_SOURCE_PROVIDER_NOT_CONFIGURED",
   );
 });
 

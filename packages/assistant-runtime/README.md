@@ -9,7 +9,7 @@ Current responsibilities:
 - run one-shot hosted assistant/inbox/device-sync passes behind an explicit runtime context object
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
-  explicit parser toolchain config, commit timeout, and child-env projection helpers
+  typed parser toolchain validation, commit timeout, and child-env projection helpers
 - keep hosted execution local-runtime-first: hosted mailbox decode writes minimized assistant input and checkpoints it before inbox capture, parser draining, and attachment/file materialization run as best-effort projections outside the Codex admission path
 - collect due hosted side effects before the durable commit, then resume their post-commit delivery from committed state
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker

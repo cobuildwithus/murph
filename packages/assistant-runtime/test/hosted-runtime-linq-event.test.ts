@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeHostedLinqConversationCapture } from "@murphai/inboxd/connectors/hosted-conversation";
 
@@ -29,6 +30,17 @@ function setFetch(value: typeof globalThis.fetch | undefined) {
     value,
     writable: true,
   });
+}
+
+function createLogPlatform(logRequests: HostedRuntimeLogRequest[]) {
+  return {
+    logPort: {
+      async write(request: HostedRuntimeLogRequest) {
+        logRequests.push(request);
+        return { loggedCount: request.entries.length };
+      },
+    },
+  };
 }
 
 afterEach(() => {
@@ -179,6 +191,106 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
 
     await expect(driver.downloadUrl("https://example.com/not-linq", undefined)).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("logs direct hosted Linq attachment downloads without raw locators", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const fetchMock = vi.fn(async () =>
+      new Response(Uint8Array.from([7, 8, 9]), { status: 200 }));
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: createLogPlatform(logRequests),
+    });
+    assert.ok(driver);
+
+    await expect(
+      driver.downloadUrl("https://cdn.linqapp.com/files/ok.bin", undefined),
+    ).resolves.toEqual(Uint8Array.from([7, 8, 9]));
+
+    expect(logRequests).toHaveLength(1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
+    expect(entry.level).toBe("info");
+    expect(entry.redactedJson).toMatchObject({
+      byteCountBucket: "1-99k",
+      cdnBaseKind: "default",
+      directFetchAttempted: true,
+      directFetchSucceeded: true,
+      directLocatorAllowed: true,
+      directLocatorPresent: true,
+      operation: "downloadUrl",
+      result: "succeeded",
+    });
+    const serializedLog = JSON.stringify(entry.redactedJson);
+    expect(serializedLog).not.toContain("cdn.linqapp.com");
+    expect(serializedLog).not.toContain("ok.bin");
+  });
+
+  it("logs local override metadata failures without raw attachment identifiers", async () => {
+    process.env.LINQ_API_BASE_URL = "http://127.0.0.1:4011";
+    process.env.LINQ_API_TOKEN = "linq-token";
+    process.env.LINQ_ATTACHMENT_CDN_BASE_URL = "http://127.0.0.1:4011/attachment-downloads";
+
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(String(input), "http://127.0.0.1:4011/attachments/att_voice_private");
+      assert.equal(
+        (init?.headers as Record<string, string> | undefined)?.authorization,
+        "Bearer linq-token",
+      );
+      throw new TypeError("fetch failed");
+    });
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: createLogPlatform(logRequests),
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart({
+      attachmentId: "att_voice_private",
+      mimeType: "audio/mp4",
+      size: 38_000,
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/voice.m4a",
+    }, undefined)).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(logRequests).toHaveLength(1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
+    expect(entry.errorCode).toBe("metadata_fetch_failed");
+    expect(entry.level).toBe("warn");
+    expect(entry.redactedJson).toMatchObject({
+      apiBaseKind: "local",
+      apiConfigured: true,
+      attachmentKeyPresent: true,
+      cdnBaseKind: "local_override",
+      declaredSizeBucket: "1-99k",
+      directFetchAttempted: false,
+      directFetchSucceeded: false,
+      directLocatorAllowed: false,
+      directLocatorPresent: true,
+      failureCode: "metadata_fetch_failed",
+      metadataLocatorAllowed: false,
+      metadataLocatorPresent: false,
+      metadataLookupAttempted: true,
+      metadataStatus: null,
+      mimeCategory: "audio/mp4",
+      operation: "downloadPart",
+      partKind: "voice_memo",
+      result: "not_downloaded",
+    });
+    const serializedLog = JSON.stringify(entry.redactedJson);
+    expect(serializedLog).not.toContain("att_voice_private");
+    expect(serializedLog).not.toContain("cdn.linqapp.com");
+    expect(serializedLog).not.toContain("4011");
+    expect(serializedLog).not.toContain("voice.m4a");
+    expect(serializedLog).not.toContain("linq-token");
   });
 
   it("downloads bytes from the Linq CDN and surfaces fetch failures", async () => {

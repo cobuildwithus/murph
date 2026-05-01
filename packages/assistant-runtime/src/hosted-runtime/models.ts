@@ -31,8 +31,8 @@ export type HostedAssistantRuntimeParserToolName =
   | "whisper";
 
 export interface HostedAssistantRuntimeParserToolConfig {
-  command?: string | null;
-  modelPath?: string | null;
+  command?: string;
+  modelPath?: string;
 }
 
 export interface HostedAssistantRuntimeParserToolchainConfig {

@@ -167,6 +167,24 @@ describe("buildHostedExecutionJobRuntime", () => {
     expect(runtime.parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
   });
 
+  it("rebases stale requested parser toolchain onto runner image defaults", () => {
+    const runtime = buildHostedExecutionJobRuntime({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-test",
+      },
+      parserToolchain: {
+        tools: {
+          whisper: {
+            command: "/stale/whisper-cli",
+            modelPath: "/stale/model.bin",
+          },
+        },
+      },
+    });
+
+    expect(runtime.parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+  });
+
   it("rejects parserToolchain:null instead of falling back to ambient discovery", () => {
     expect(() =>
       buildHostedExecutionJobRuntime(JSON.parse(

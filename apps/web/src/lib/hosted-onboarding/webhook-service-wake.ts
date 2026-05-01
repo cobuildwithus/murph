@@ -1,6 +1,3 @@
-import {
-  nudgeHostedRunnerUserBestEffortResult,
-} from "../hosted-runner/control";
 import { hostedOnboardingError } from "./errors";
 import {
   startHostedWebhookNudgeWorkflow,
@@ -12,9 +9,6 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
-import {
-  HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-} from "./webhook-nudge-policy";
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   eventId: string;
@@ -27,35 +21,17 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     return;
   }
 
-  const memberId = input.userId ?? null;
-
-  if (!memberId) {
-    return;
-  }
-
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       responseReason: input.response.reason,
-      userIdPresent: true,
-      userIdSuffix: toHostedOnboardingLogIdSuffix(memberId),
+      userIdPresent: Boolean(input.userId),
+      userIdSuffix: input.userId ? toHostedOnboardingLogIdSuffix(input.userId) : null,
     },
   );
 
   try {
-    const nudgeResult = await nudgeHostedExecutionWebhookWake({
-      eventId: input.eventId,
-      responseReason: input.response.reason,
-      source: input.source,
-      userId: memberId,
-    });
-
-    if (nudgeResult.accepted) {
-      finishHostedOnboardingTiming(handoffTiming, "completed");
-      return;
-    }
-
     if (!input.mailboxItemId) {
       throw buildHostedRunnerNudgeRetryError();
     }
@@ -64,7 +40,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       mailboxItemId: input.mailboxItemId,
       source: input.source,
     });
-    finishHostedOnboardingTiming(handoffTiming, "fallback-enqueued", {
+    finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
       workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
     });
   } catch (error) {
@@ -73,40 +49,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     });
     throw error;
   }
-}
-
-async function nudgeHostedExecutionWebhookWake(input: {
-  eventId: string;
-  responseReason: string | undefined;
-  source: "linq" | "telegram";
-  userId: string;
-}): Promise<Awaited<ReturnType<typeof nudgeHostedRunnerUserBestEffortResult>>> {
-  const nudgeTiming = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.wake-nudge`,
-    {
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-      responseReason: input.responseReason,
-      timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-      userIdPresent: true,
-      userIdSuffix: toHostedOnboardingLogIdSuffix(input.userId),
-    },
-  );
-  const result = await nudgeHostedRunnerUserBestEffortResult({
-    context: `webhook:${input.source}`,
-    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-    userId: input.userId,
-  });
-  finishHostedOnboardingTiming(nudgeTiming, result.accepted ? "accepted" : "not-accepted", {
-    accepted: result.accepted,
-    alarmScheduled: result.alarmScheduled,
-    alreadyRunning: result.alreadyRunning,
-    configured: result.configured,
-    errorCode: result.errorCode,
-    inFlight: result.inFlight,
-    nextAlarmAtPresent: result.nextAlarmAtPresent,
-  });
-
-  return result;
 }
 
 function buildHostedRunnerNudgeRetryError() {
