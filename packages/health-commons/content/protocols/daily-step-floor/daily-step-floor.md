@@ -87,7 +87,7 @@ protocol:
   keepInMind:
   - A 10,000-step floor is an example, not the default requirement or a universal threshold.
   - 'Baseline-plus, 8,000, 10,000+, and other fixed floors are commitment tiers, not evidence-equivalent thresholds; interpret them through baseline capacity, safety limits, and burden. Source keys: source_artifact:pmid-14715035; source_artifact:pmid-21798044; source_artifact:pmid-35247352; source_artifact:pmid-40713949.'
-  - Step-count gains are the primary expected signal; blood pressure, glucose, weight, mood, sleep, resting heart rate, and wearable fitness estimates are exploratory and confounded.
+  - Step-count gains show exposure and adherence; the outcome win is downstream improvement or stability in resting heart rate, blood pressure, fitness, sleep, pain, safety, and sedentary-time context.
   - Walking volume can become unsafe or counterproductive when the user has very low baseline activity, frailty, injury recovery, acute illness, heat exposure, foot wounds, neuropathy, cardiopulmonary symptoms, meaningful fall risk, pregnancy/postpartum restrictions, or worsening pain.
   - Support features such as reminders, social accountability, incentives, or coaching can be useful, but log them because they may become the real active ingredient.
   logFields:
@@ -149,19 +149,120 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:resting-heart-rate
   expected: down_or_stable
   protocolProminence: focus
-  description: 'Resting heart rate is an objective wearable signal that may stay stable or ease if the added walking fits recovery, sleep, and overall load.'
+  description: 'Easy extra walking can improve aerobic efficiency; if the dose is recoverable, the heart may need slightly fewer beats at true rest.'
+  estimatedChange:
+    kind: absolute
+    low: -2
+    high: 0
+    unit: bpm
+    window: 4 weeks
+    confidence: low
+    basis: 'Broad exercise evidence shows larger average resting-heart-rate drops, but a plain step floor is lower intensity and the 28-day window is short. Source keys: source_artifact:pmid-30513777; source_artifact:pmid-21088304.'
+- biomarkerKey: biomarker:estimated-vo2max
+  expected: up_or_stable
+  protocolProminence: focus
+  description: 'More daily walking can add a small aerobic training stimulus; same-device wearable cardio fitness or a field test may rise most in low-baseline users.'
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 1
+    unit: ml/kg/min
+    window: 4-8 weeks
+    confidence: low
+    basis: 'Structured aerobic training often produces larger VO2max gains, while step-floor evidence is lower-intensity and mixed. Source keys: source_artifact:pmid-23802053; source_artifact:pmid-24128075; source_artifact:pmid-20484759.'
+- biomarkerKey: biomarker:morning-blood-pressure
+  expected: down_or_stable
+  protocolProminence: focus
+  description: 'Repeated easy walking can improve vascular tone and replace sitting; morning systolic pressure may drift down, especially when baseline pressure is high.'
+  estimatedChange:
+    kind: absolute
+    low: -4
+    high: 0
+    unit: mmHg systolic
+    window: 4-12 weeks
+    confidence: low
+    basis: 'Pedometer reviews and step-goal studies report modest systolic-pressure reductions, but effects are smaller or absent in normotensive users. Source keys: source_artifact:pmid-18029834; source_artifact:pmid-37623330; source_artifact:pmid-23802053.'
+- biomarkerKey: biomarker:sleep-efficiency
+  expected: mixed_or_contextual
+  protocolProminence: context
+  description: 'Daytime movement can build sleep pressure, but late or too-large step gaps can also leave the body activated; treat sleep efficiency as context.'
+  estimatedChange:
+    kind: absolute
+    low: -1
+    high: 2
+    unit: percentage points
+    window: 4 weeks
+    confidence: low
+    basis: 'Daily-step and walking-intervention sleep evidence is mixed, with stronger signals for self-reported sleep quality than wearable sleep efficiency. Source keys: source_artifact:pmid-41352200; source_artifact:pmid-31358470; source_artifact:pmid-26100101.'
 - biomarkerKey: biomarker:musculoskeletal-pain
   expected: down_or_stable
-  protocolProminence: context
-  description: 'Pain should stay stable or improve as the floor rises; worsening pain overrides step-count success.'
+  protocolProminence: focus
+  description: 'A modest ramp can build tissue tolerance; rising foot, shin, knee, hip, or back pain means the floor is too steep.'
+  estimatedChange:
+    kind: absolute
+    low: -1
+    high: 0
+    unit: points
+    window: 4 weeks
+    confidence: low
+    basis: 'Pain is mainly a safety/tolerability signal for this protocol; walking studies report musculoskeletal complaints when load is too high. Source keys: source_artifact:pmid-22843637; source_artifact:pmid-26289360; source_artifact:daily-step-floor-pmid-17521443.'
 - biomarkerKey: biomarker:walking-safety-events
   expected: down_or_stable
   protocolProminence: focus
-  description: 'Safety events should stay at zero or decrease; any concerning symptom overrides step-count success. Source keys: source_artifact:pmid-15921486; source_artifact:daily-step-floor-pmid-17521443; source_artifact:pmid-26289360; source_artifact:doi-10.1016-j.bjpt.2023.100500.'
+  description: 'The dose is only working if falls, near-falls, chest symptoms, heat symptoms, and foot or skin problems stay at zero.'
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 0
+    unit: new events
+    window: 4 weeks
+    confidence: moderate
+    basis: 'Activity trials report few intervention-attributed serious events when screening and monitoring are used, but high-risk users still need conservative rules. Source keys: source_artifact:pmid-15921486; source_artifact:daily-step-floor-pmid-17521443; source_artifact:doi-10.1016-j.bjpt.2023.100500.'
+- biomarkerKey: biomarker:sedentary-time
+  expected: down_or_stable
+  protocolProminence: context
+  description: 'Filling the floor from sitting replaces chair time with light movement; if steps come from already-active chores, sedentary time may barely move.'
+  estimatedChange:
+    kind: absolute
+    low: -30
+    high: 0
+    unit: min/day
+    window: 4 weeks
+    confidence: low
+    basis: 'Step-counter meta-analysis estimated about 23 fewer sedentary minutes per day, but effects depend on goals, reminders, and baseline sitting. Source keys: source_artifact:pmid-26334900; source_artifact:pmid-33036635; source_artifact:pmid-22843637.'
+- biomarkerKey: biomarker:moderate-to-vigorous-activity-minutes
+  expected: mixed_or_contextual
+  protocolProminence: context
+  description: 'The floor becomes moderate activity only when the added steps are brisk enough; easy or fragmented steps add movement without much MVPA.'
+  estimatedChange:
+    kind: absolute
+    low: 0
+    high: 60
+    unit: minutes/week
+    window: 4 weeks
+    confidence: low
+    basis: 'A 1,000-2,000-step gap could equal roughly 10-20 brisk minutes/day at cadence thresholds, but many step-floor minutes will be easy. Source keys: source_artifact:pmid-28459099; source_artifact:pmid-30654810; source_artifact:pmid-33168018.'
 - biomarkerKey: biomarker:walking-cadence
   expected: mixed_or_contextual
   protocolProminence: context
-  description: 'Cadence helps interpret intensity but is not part of the canonical dose. Source keys: source_artifact:pmid-28459099; source_artifact:pmid-30654810; source_artifact:pmid-33168018.'
+  description: 'Cadence only shows how the step gap was filled: brisk walks raise it, while errands and short breaks may leave it unchanged.'
+  estimatedChange:
+    kind: mixed_or_contextual
+    window: 4 weeks
+    confidence: low
+    basis: 'Cadence thresholds help interpret intensity, but this protocol deliberately does not prescribe cadence. Source keys: source_artifact:pmid-28459099; source_artifact:pmid-30654810; source_artifact:pmid-33168018.'
+- biomarkerKey: biomarker:walking-bout-minutes
+  expected: mixed_or_contextual
+  protocolProminence: context
+  description: 'A higher floor often creates more intentional or detected walking bouts, but bout minutes are dose context, not the health outcome.'
+  estimatedChange:
+    kind: absolute
+    low: 5
+    high: 20
+    unit: min/day
+    window: 4 weeks
+    confidence: low
+    basis: 'Common baseline-plus floors add about 1,000-2,000 steps/day; converted to easy walking, that is usually a small bout-minute increase. Source keys: source_artifact:pmid-33036635; source_artifact:pmid-18029834; source_artifact:pmid-28459099.'
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -730,7 +831,7 @@ Cadence prescriptions, MVPA minutes, structured exercise sessions, post-meal wal
 
 ## How to read the result
 
-The primary outcome is daily step count plus floor-hit days. A good result means the step trend rises or stays meaningfully above baseline **and** safety, pain, recovery, sleep, and life friction stay acceptable. Blood pressure, glucose, weight, wearable fitness estimates, mood, sleep, and sedentary-time changes are secondary and exploratory because the extracted evidence is mixed, population-specific, or indirect for those endpoints [source_artifact:pmid-16979410; source_artifact:pmid-21453540; source_artifact:pmid-30127487; source_artifact:pmid-33036635; source_artifact:doi-10.1136-bmjopen-2024-088524].
+Daily step count plus floor-hit days show whether the dose happened; they are not the outcome win. A good result means the step trend rises or stays meaningfully above baseline **and** downstream signals such as resting heart rate, blood pressure, wearable fitness estimates or field-test performance, pain, safety, sleep/recovery, and sedentary time improve or stay acceptable. These endpoints remain exploratory because the extracted evidence is mixed, population-specific, or indirect for those outcomes [source_artifact:pmid-16979410; source_artifact:pmid-21453540; source_artifact:pmid-30127487; source_artifact:pmid-33036635; source_artifact:doi-10.1136-bmjopen-2024-088524].
 
 ## Measurement rule
 

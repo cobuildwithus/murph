@@ -285,24 +285,53 @@ describe("Health Commons experiment protocol metadata", () => {
       throw new Error("Daily Step Floor projections should resolve for public routes.");
     }
 
-    const rawSignalWithSourceKeys = rawProtocolTab.expectedSignals.find((signal) =>
-      signal.description?.includes("source_artifact:")
+    const expectedSignalRouteIds = [
+      "resting-heart-rate",
+      "estimated-vo2max",
+      "sleep-efficiency",
+      "walking-cadence",
+      "moderate-to-vigorous-activity-minutes",
+      "morning-blood-pressure",
+      "sedentary-time",
+      "walking-bout-minutes",
+      "musculoskeletal-pain",
+      "walking-safety-events",
+    ];
+    expect(fullProtocol.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
+      expectedSignalRouteIds,
+    );
+    expect(protocolTab.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
+      expectedSignalRouteIds,
     );
 
-    if (!rawSignalWithSourceKeys?.description) {
+    const rawSignalWithSourceKeys = rawProtocolTab.expectedSignals.find((signal) =>
+      signal.description?.includes("source_artifact:")
+      || signal.estimatedChange?.basis?.includes("source_artifact:")
+    );
+    const rawSourceBearingCopy = [
+      rawSignalWithSourceKeys?.description,
+      rawSignalWithSourceKeys?.estimatedChange?.basis,
+    ].filter((value): value is string => typeof value === "string").join("\n");
+
+    if (!rawSignalWithSourceKeys || !rawSourceBearingCopy) {
       throw new Error("Daily Step Floor fixture should include raw source keys before projection.");
     }
 
-    expect(rawSignalWithSourceKeys.description).toMatch(/\bsource\s*keys?\s*:/iu);
+    expect(rawSourceBearingCopy).toMatch(/\bsource\s*keys?\s*:/iu);
     const scrubbedSignal = protocolTab.expectedSignals.find((signal) =>
       signal.label === rawSignalWithSourceKeys.label
     );
+    const scrubbedSourceBearingCopy = [
+      scrubbedSignal?.description,
+      scrubbedSignal?.estimatedChange?.basis,
+    ].filter((value): value is string => typeof value === "string").join("\n");
 
-    if (!scrubbedSignal?.description) {
+    if (!scrubbedSignal || !scrubbedSourceBearingCopy) {
       throw new Error("Daily Step Floor scrubbed signal should retain public copy.");
     }
 
-    expect(scrubbedSignal.description).not.toContain("source_artifact:");
+    expect(scrubbedSourceBearingCopy).not.toContain("source_artifact:");
+    expect(scrubbedSourceBearingCopy).not.toMatch(/\bsource\s*keys?\s*:/iu);
 
     const publicCopy = [
       fullProtocol.title,
@@ -450,6 +479,11 @@ function collectExperimentProtocolCopy(
       signal.expected,
       signal.baseline ?? "",
       signal.description ?? "",
+      signal.estimatedChange?.basis ?? "",
+      signal.estimatedChange && "unit" in signal.estimatedChange
+        ? signal.estimatedChange.unit
+        : "",
+      signal.estimatedChange?.window ?? "",
       signal.unit ?? "",
     ]),
     ...protocol.measurementPaths.flatMap((path) => [

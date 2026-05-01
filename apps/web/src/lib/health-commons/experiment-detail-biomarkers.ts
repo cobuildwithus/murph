@@ -15,6 +15,8 @@ type BiomarkerSignalDirection =
 type BiomarkerSignalProminence = NonNullable<
   ExperimentProtocol["expectedSignals"][number]["protocolProminence"]
 >;
+type BiomarkerSignalEstimatedChange =
+  ExperimentProtocol["expectedSignals"][number]["estimatedChange"];
 
 interface BiomarkerDisplayHint {
   description?: string;
@@ -165,10 +167,11 @@ export function listProtocolBiomarkers(
   catalog: HealthCommonsCatalogReader,
 ): HealthCommonsEntity[] {
   const testPlan = protocol.testPlans?.[0];
-  const orderedKeys = [
+  const orderedKeys = Array.from(new Set([
     testPlan?.primaryBiomarkerKey,
     ...(testPlan?.secondaryBiomarkerKeys ?? []),
-  ].filter((key): key is string => typeof key === "string");
+    ...(testPlan?.safetyOutcomeKeys ?? []),
+  ].filter((key): key is string => typeof key === "string")));
   const fromTestPlan = orderedKeys.flatMap((key) => {
     const entity = catalog.findByKey(key);
     return entity?.entityType === "biomarker" ? [entity] : [];
@@ -202,14 +205,15 @@ export function toExpectedSignal(
   const expected = cleanHealthCommonsUserFacingCopy(
     normalizeExpectedSignalLabel(protocolSignal?.expected ?? hint.expected),
   );
+  const estimatedChange = cleanExpectedSignalEstimate(protocolSignal?.estimatedChange);
 
   return {
     label: cleanHealthCommonsUserFacingCopy(biomarker.title),
     value: "",
     delta: "",
     direction: hint.direction,
-    ...(protocolSignal?.estimatedChange
-      ? { estimatedChange: protocolSignal.estimatedChange }
+    ...(estimatedChange
+      ? { estimatedChange }
       : {}),
     expected,
     biomarkerRouteId: biomarker.key.replace(/^biomarker:/u, ""),
@@ -217,6 +221,36 @@ export function toExpectedSignal(
     ...(protocolProminence
       ? { protocolProminence }
       : {}),
+  };
+}
+
+function cleanExpectedSignalEstimate(
+  estimate: BiomarkerSignalEstimatedChange | undefined,
+): BiomarkerSignalEstimatedChange | undefined {
+  if (!estimate) {
+    return undefined;
+  }
+
+  const cleanBasis = cleanOptionalHealthCommonsUserFacingCopy(estimate.basis);
+  const cleanWindow = cleanOptionalHealthCommonsUserFacingCopy(estimate.window);
+
+  if (estimate.kind === "mixed_or_contextual") {
+    return {
+      kind: estimate.kind,
+      ...(estimate.confidence ? { confidence: estimate.confidence } : {}),
+      ...(cleanWindow ? { window: cleanWindow } : {}),
+      ...(cleanBasis ? { basis: cleanBasis } : {}),
+    };
+  }
+
+  return {
+    high: estimate.high,
+    kind: estimate.kind,
+    low: estimate.low,
+    unit: cleanHealthCommonsUserFacingCopy(estimate.unit),
+    ...(estimate.confidence ? { confidence: estimate.confidence } : {}),
+    ...(cleanWindow ? { window: cleanWindow } : {}),
+    ...(cleanBasis ? { basis: cleanBasis } : {}),
   };
 }
 
