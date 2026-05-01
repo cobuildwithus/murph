@@ -18,6 +18,7 @@ export {
   markAssistantAutoReplyLinqCleanupQueued,
 } from './automation/evidence.js'
 export {
+  ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   createAssistantInputEventId,
   listAssistantInputEvents,
   listAssistantInputProjectionAttempts,

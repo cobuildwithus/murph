@@ -130,6 +130,9 @@ describe("hosted runner container image contract", () => {
       "await mapWithConcurrency(",
     );
     expect(workspaceArtifactsScript).toContain(
+      "await runWorkspacePackagePackPreflights(packageNames, input);",
+    );
+    expect(workspaceArtifactsScript).toContain(
       '"MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY"',
     );
     expect(workspaceArtifactsScript).toContain(
@@ -401,8 +404,12 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("file \\");
     expect(baseDockerfile).toContain("mupdf-tools \\");
     expect(baseDockerfile).toContain("poppler-utils \\");
+    expect(baseDockerfile).toContain("python-is-python3 \\");
+    expect(baseDockerfile).toContain("python3 \\");
     expect(baseDockerfile).toContain("qpdf \\");
     expect(baseDockerfile).toContain("RUN ldconfig");
+    expect(baseDockerfile).toContain("python3 --version");
+    expect(baseDockerfile).toContain("python --version");
     expect(baseDockerfile).toContain("codex --version");
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
     expect(baseDockerfile).toContain("tini");
@@ -502,6 +509,10 @@ describe("hosted runner container image contract", () => {
       new URL("../scripts/runner-docker-smoke.ts", import.meta.url),
       "utf8",
     );
+    const runnerPythonPathScript = await readFile(
+      new URL("../scripts/runner-python-path-e2e.ts", import.meta.url),
+      "utf8",
+    );
     const hostedRunnerSmokeChild = await readFile(
       new URL("../src/hosted-runner-smoke-child.ts", import.meta.url),
       "utf8",
@@ -519,7 +530,10 @@ describe("hosted runner container image contract", () => {
       `docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-base -t ${hostedRunnerBaseImageTag} ../..`,
     );
     expect(packageJson.scripts?.["runner:docker:build"]).toBe(
-      "pnpm runner:bundle && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
+      "pnpm runner:bundle && pnpm runner:docker:base && docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
+    );
+    expect(packageJson.scripts?.["runner:docker:python-path"]).toBe(
+      "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-python-path-e2e.ts",
     );
     expect(packageJson.scripts?.["runner:docker:smoke"]).toBe(
       "pnpm runner:bundle && pnpm runner:docker:base && pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
@@ -546,7 +560,38 @@ describe("hosted runner container image contract", () => {
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
     expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphHelpBytes=");
+    expect(runnerDockerSmokeScript).toContain("codexHostedShellPythonVersion=");
+    expect(runnerDockerSmokeScript).toContain("pythonVersion=");
+    expect(runnerPythonPathScript).toContain('const IMAGE_TAG = "murph-cloudflare-runner"');
+    expect(runnerPythonPathScript).toContain('"--detach"');
+    expect(runnerPythonPathScript).toContain('"--platform",\n    "linux/amd64"');
+    expect(runnerPythonPathScript).toContain('"--network",\n    "none"');
+    expect(runnerPythonPathScript).not.toContain("--entrypoint");
+    expect(runnerPythonPathScript).toContain('"exec",\n      containerId,\n      "node"');
+    expect(runnerPythonPathScript).toContain("cloudflare-hosted-runner-node");
+    expect(runnerPythonPathScript).toContain("await removeContainer(containerId)");
+    expect(runnerPythonPathScript).toContain('test "$(pwd)" = "/app"');
+    expect(runnerPythonPathScript).toContain('test "$(id -un)" = "runner"');
+    expect(runnerPythonPathScript).toContain('test "$HOME" = "/home/runner"');
+    expect(runnerPythonPathScript).toContain('test "$NODE_ENV" = "production"');
+    expect(runnerPythonPathScript).toContain('test "$PORT" = "8080"');
+    expect(runnerPythonPathScript).toContain('test "$HOSTED_HOME" = "/home/runner/.murph"');
+    expect(runnerPythonPathScript).toContain('test "$HOSTED_MODELS_ROOT" = "/home/runner/.murph/models"');
+    expect(runnerPythonPathScript).toContain('case "$PATH" in /app/node_modules/.bin:*');
+    expect(runnerPythonPathScript).toContain("test ! -w /app");
+    expect(runnerPythonPathScript).toContain("command -v python >/dev/null");
+    expect(runnerPythonPathScript).toContain("command -v python3 >/dev/null");
+    expect(runnerPythonPathScript).toContain("python -c");
+    expect(runnerPythonPathScript).toContain("python3 -c");
+    expect(runnerPythonPathScript).not.toContain("console.log(output)");
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("file")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python3")');
+    expect(hostedRunnerSmokeChild).toContain('runTextCommand("python3", ["--version"])');
+    expect(hostedRunnerSmokeChild).toContain("probe_step_failed:resolve-python");
+    expect(hostedRunnerSmokeChild).toContain("probe_step_failed:resolve-python3");
+    expect(hostedRunnerSmokeChild).toContain("probe_step_failed:python-major");
+    expect(hostedRunnerSmokeChild).toContain("codexHostedShellPythonVersion");
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("mutool")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdfinfo")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdftotext")');
@@ -588,6 +633,9 @@ describe("hosted runner container image contract", () => {
       "pnpm runner:bundle:hosted-local &&",
     );
     expect(packageJson.scripts?.["test:e2e:device-connect:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
+    expect(packageJson.scripts?.["test:e2e:runner-python:local"]).toBe(
+      "pnpm runner:docker:build && pnpm runner:docker:python-path",
+    );
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.instance_type).toEqual({

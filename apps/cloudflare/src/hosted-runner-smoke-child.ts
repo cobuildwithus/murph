@@ -104,6 +104,7 @@ async function runSmokeChecks(input: {
   const codexPreflight = await runCodexPreflight();
   const hostedCodexConfig =
     await runHostedCodexConfigShellEnvironmentPolicySmoke(input.workspaceRoot);
+  const pythonVersion = await runPythonToolchainSmoke();
 
   const vaultShowOutput = await runTextCommand("vault-cli", [
     "vault",
@@ -159,6 +160,7 @@ async function runSmokeChecks(input: {
     codexHostedConfigShellEnvironmentPolicyAllowlisted:
       hostedCodexConfig.shellEnvironmentPolicyAllowlisted,
     codexHostedShellMurphHelpBytes: hostedCodexConfig.murphHelpBytes,
+    codexHostedShellPythonVersion: hostedCodexConfig.pythonVersion,
     codexHostedShellVaultCliLlmsBytes: hostedCodexConfig.vaultCliLlmsBytes,
     codexVersion: codexPreflight.version,
     healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
@@ -177,6 +179,7 @@ async function runSmokeChecks(input: {
     operatorHomeRebound: true,
     pdfParserProviderId: pdfParse.providerId,
     pdfTextSha256: sha256Hex(pdfParse.text),
+    pythonVersion,
     reportedVaultId,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliCommandDiscovered: true,
@@ -500,10 +503,33 @@ async function runCodexPreflight(): Promise<{
   }
 }
 
+async function runPythonToolchainSmoke(): Promise<string> {
+  await resolveCommandPath("python");
+  await resolveCommandPath("python3");
+
+  const pythonVersion = await runTextCommand("python3", ["--version"]);
+  if (!/^Python\s+3\./u.test(pythonVersion)) {
+    throw new Error(
+      `Hosted runner smoke expected python3 to report Python 3.x, got ${pythonVersion}.`,
+    );
+  }
+
+  const pythonAliasVersion = await runTextCommand("python", [
+    "-c",
+    "import sys; print(sys.version_info.major)",
+  ]);
+  if (pythonAliasVersion.trim() !== "3") {
+    throw new Error("Hosted runner smoke expected python to resolve to Python 3.");
+  }
+
+  return pythonVersion;
+}
+
 async function runHostedCodexConfigShellEnvironmentPolicySmoke(
   workspaceRoot: string,
 ): Promise<{
   murphHelpBytes: number;
+  pythonVersion: string;
   shellEnvironmentPolicyAllowlisted: boolean;
   vaultCliLlmsBytes: number;
 }> {
@@ -560,6 +586,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
 
   return {
     murphHelpBytes: shellProbe.murphHelpBytes,
+    pythonVersion: shellProbe.pythonVersion,
     shellEnvironmentPolicyAllowlisted: true,
     vaultCliLlmsBytes: shellProbe.vaultCliLlmsBytes,
   };
@@ -592,6 +619,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   vaultRoot: string;
 }): Promise<{
   murphHelpBytes: number;
+  pythonVersion: string;
   vaultCliLlmsBytes: number;
 }> {
   const child = spawn("codex", ["app-server"], {
@@ -618,6 +646,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
 
   const completed = new Promise<{
     murphHelpBytes: number;
+    pythonVersion: string;
     vaultCliLlmsBytes: number;
   }>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -630,6 +659,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       error?: Error,
       result?: {
         murphHelpBytes: number;
+        pythonVersion: string;
         vaultCliLlmsBytes: number;
       },
     ): void => {
@@ -715,14 +745,23 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
           [
             "vault_cli_path=$(command -v vault-cli || true)",
             "murph_path=$(command -v murph || true)",
+            "python_path=$(command -v python || true)",
+            "python3_path=$(command -v python3 || true)",
             "if [ -z \"$vault_cli_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-vault-cli'; exit 127; fi",
             "if [ -z \"$murph_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-murph'; exit 127; fi",
+            "if [ -z \"$python_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-python'; exit 127; fi",
+            "if [ -z \"$python3_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-python3'; exit 127; fi",
             "vault_cli_manifest=$(\"$vault_cli_path\" --llms --format json) || { status=$?; printf '%s\\n' 'probe_step_failed:vault-cli-llms'; exit \"$status\"; }",
             "murph_help=$(\"$murph_path\" --help) || { status=$?; printf '%s\\n' 'probe_step_failed:murph-help'; exit \"$status\"; }",
+            "python_version=$(\"$python3_path\" --version) || { status=$?; printf '%s\\n' 'probe_step_failed:python3-version'; exit \"$status\"; }",
+            "\"$python_path\" -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' || { status=$?; printf '%s\\n' 'probe_step_failed:python-major'; exit \"$status\"; }",
             "printf '%s\\n' \"$vault_cli_path\"",
             "printf '%s\\n' \"$murph_path\"",
+            "printf '%s\\n' \"$python_path\"",
+            "printf '%s\\n' \"$python3_path\"",
             "printf '%s\\n' \"${#vault_cli_manifest}\"",
             "printf '%s\\n' \"${#murph_help}\"",
+            "printf '%s\\n' \"$python_version\"",
             "printf '%s\\n' \"${VAULT:-}\"",
             "printf '%s\\n' \"${PDFTOTEXT_COMMAND:-}\"",
             "printf '%s\\n' \"${WHISPER_COMMAND:-}\"",
@@ -773,6 +812,7 @@ function assertCodexShellEnvironmentProbeResult(input: {
   vaultRoot: string;
 }): {
   murphHelpBytes: number;
+  pythonVersion: string;
   vaultCliLlmsBytes: number;
 } {
   if (input.result.exitCode !== 0) {
@@ -786,8 +826,11 @@ function assertCodexShellEnvironmentProbeResult(input: {
   const [
     vaultCliPath,
     murphPath,
+    pythonPath,
+    python3Path,
     vaultCliLlmsBytesText,
     murphHelpBytesText,
+    pythonVersion,
     vaultRoot,
     pdfToTextCommand,
     whisperCommand,
@@ -795,8 +838,14 @@ function assertCodexShellEnvironmentProbeResult(input: {
     ...extra
   ] =
     input.result.stdout.split(/\r?\n/u);
-  if (!vaultCliPath || !murphPath || extra.some((line) => line.trim().length > 0)) {
-    throw new Error("Codex app-server shell env probe did not resolve vault-cli and murph cleanly.");
+  if (
+    !vaultCliPath
+    || !murphPath
+    || !pythonPath
+    || !python3Path
+    || extra.some((line) => line.trim().length > 0)
+  ) {
+    throw new Error("Codex app-server shell env probe did not resolve expected commands cleanly.");
   }
 
   const vaultCliLlmsBytes = parsePositiveByteCount(
@@ -804,6 +853,9 @@ function assertCodexShellEnvironmentProbeResult(input: {
     "vault-cli --llms --format json",
   );
   const murphHelpBytes = parsePositiveByteCount(murphHelpBytesText, "murph --help");
+  if (!pythonVersion || !/^Python\s+3\./u.test(pythonVersion)) {
+    throw new Error("Codex app-server shell env probe did not execute python3 --version.");
+  }
 
   if (vaultRoot !== input.vaultRoot) {
     throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
@@ -823,6 +875,7 @@ function assertCodexShellEnvironmentProbeResult(input: {
 
   return {
     murphHelpBytes,
+    pythonVersion,
     vaultCliLlmsBytes,
   };
 }

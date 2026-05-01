@@ -43,6 +43,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexCommandDiscovered: true,
             codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
             codexHostedShellMurphHelpBytes: 1536,
+            codexHostedShellPythonVersion: "Python 3.11.2",
             codexHostedShellVaultCliLlmsBytes: 4096,
             codexVersion: "codex-cli 0.125.0",
             healthCommonsCatalogHash: "sha256:catalog",
@@ -62,6 +63,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             operatorHomeRebound: true,
             pdfParserProviderId: "poppler.pdf",
             pdfTextSha256: "pdf-hash",
+            pythonVersion: "Python 3.11.2",
             reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
             schema: "murph.cloudflare-hosted-runner-smoke.v1",
             vaultCliCommandDiscovered: true,
@@ -90,12 +92,14 @@ describe("runHostedRunnerSmokeDetailed", () => {
     expect(result.codexCommandDiscovered).toBe(true);
     expect(result.codexHostedConfigShellEnvironmentPolicyAllowlisted).toBe(true);
     expect(result.codexHostedShellMurphHelpBytes).toBe(1536);
+    expect(result.codexHostedShellPythonVersion).toBe("Python 3.11.2");
     expect(result.codexHostedShellVaultCliLlmsBytes).toBe(4096);
     expect(result.codexVersion).toBe("codex-cli 0.125.0");
     expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
     expect(result.murphCommandDiscovered).toBe(true);
     expect(result.normalizedTranscriptSha256).toBe("normalized-hash");
     expect(result.pdfParserProviderId).toBe("poppler.pdf");
+    expect(result.pythonVersion).toBe("Python 3.11.2");
     expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
     expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
   });

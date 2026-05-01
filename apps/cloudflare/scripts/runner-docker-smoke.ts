@@ -64,6 +64,7 @@ async function main(): Promise<void> {
     console.log(`codexAppServerHelpBytes=${result.codexAppServerHelpBytes}`);
     console.log(`codexHostedShellVaultCliLlmsBytes=${result.codexHostedShellVaultCliLlmsBytes}`);
     console.log(`codexHostedShellMurphHelpBytes=${result.codexHostedShellMurphHelpBytes}`);
+    console.log(`codexHostedShellPythonVersion=${result.codexHostedShellPythonVersion}`);
     console.log(`operatorHomeRebound=${result.operatorHomeRebound}`);
     console.log(`vaultRootRebound=${result.vaultRootRebound}`);
     console.log(`reportedVaultId=${result.reportedVaultId}`);
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
     console.log(`normalizedTranscriptProviderId=${result.normalizedTranscriptProviderId}`);
     console.log(`normalizedTranscriptSha256=${result.normalizedTranscriptSha256}`);
     console.log(`normalizedTranscriptMatchesExpectedSnippet=${result.normalizedTranscriptMatchesExpectedSnippet}`);
+    console.log(`pythonVersion=${result.pythonVersion}`);
   } finally {
     await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
   }

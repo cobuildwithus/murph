@@ -108,6 +108,8 @@ export async function packWorkspacePackageArtifacts(
     repoRoot: string;
   },
 ): Promise<Map<string, string>> {
+  await runWorkspacePackagePackPreflights(packageNames, input);
+
   const packedEntries = await mapWithConcurrency(
     packageNames,
     resolveHostedRunnerPackConcurrency(),
@@ -168,11 +170,7 @@ async function packWorkspacePackage(
 ): Promise<string> {
   const before = new Set(await readdir(tarballsDir));
   const packageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
-  const preflightArgs = buildWorkspacePackagePackPreflightArgs(packageName);
 
-  if (preflightArgs) {
-    await runPnpmCommand(preflightArgs, { cwd: input.repoRoot });
-  }
   await assertWorkspacePackageRuntimeFiles(packageName, packageDir);
 
   await runNpmCommand(
@@ -191,6 +189,30 @@ async function packWorkspacePackage(
   }
 
   return path.join(tarballsDir, tarballName);
+}
+
+async function runWorkspacePackagePackPreflights(
+  packageNames: readonly string[],
+  input: {
+    repoRoot: string;
+  },
+): Promise<void> {
+  const completedPreflightKeys = new Set<string>();
+
+  for (const packageName of packageNames) {
+    const preflightArgs = buildWorkspacePackagePackPreflightArgs(packageName);
+    if (!preflightArgs) {
+      continue;
+    }
+
+    const preflightKey = preflightArgs.join("\0");
+    if (completedPreflightKeys.has(preflightKey)) {
+      continue;
+    }
+
+    await runPnpmCommand(preflightArgs, { cwd: input.repoRoot });
+    completedPreflightKeys.add(preflightKey);
+  }
 }
 
 async function assertWorkspacePackageRuntimeFiles(
