@@ -23,3 +23,6 @@ Keep hosted Link defaults to the Link-eligible subset only, while preserving SDK
 
 - Focused package/app tests covering Junction defaults and `/connect`.
 - Typecheck or diff-aware verification as time and current dirty-tree state allow.
+Status: completed
+Updated: 2026-05-01
+Completed: 2026-05-01

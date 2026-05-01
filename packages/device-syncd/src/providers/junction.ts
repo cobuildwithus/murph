@@ -120,6 +120,9 @@ export function createJunctionDeviceSyncProvider(
     "timeseries",
   );
   const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
+  if (providerFilter.length === 0) {
+    throw new TypeError("Junction provider filter must include at least one hosted Link provider.");
+  }
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
