@@ -156,6 +156,7 @@ export async function getHostedInviteStatus(input: {
   const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(
     projectHostedMemberIdentityState(inviteIdentity),
   );
+  const verificationMode = resolveHostedInviteVerificationMode(phoneAuthTarget);
 
   return {
     billing: {
@@ -171,6 +172,7 @@ export async function getHostedInviteStatus(input: {
       expiresAt: invite.expiresAt.toISOString(),
       phoneAuthTarget: toHostedInviteStatusPhoneAuthTarget(phoneAuthTarget),
       phoneHint: phoneAuthTarget.kind === "saved" ? phoneAuthTarget.phoneHint : null,
+      verificationMode,
     },
     messagingSetupRequired,
     murphPhoneNumber: resolveHostedInviteMurphPhoneNumber({
@@ -565,6 +567,12 @@ function toHostedInviteStatusPhoneAuthTarget(
     : {
         kind: "manual",
       };
+}
+
+function resolveHostedInviteVerificationMode(
+  target: HostedInvitePhoneAuthTargetWithNumber,
+): NonNullable<HostedInviteStatusPayload["invite"]>["verificationMode"] {
+  return target.kind === "saved" ? "invite_phone" : "manual_phone";
 }
 
 function resolveHostedInviteMurphPhoneNumber(input: {

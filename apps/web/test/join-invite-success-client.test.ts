@@ -375,7 +375,12 @@ function createStatus(
     invite: {
       code: "invite-code",
       expiresAt: "2026-03-27T12:00:00.000Z",
+      phoneAuthTarget: {
+        kind: "saved",
+        phoneHint: "+1 415 555 2671",
+      },
       phoneHint: "+1 415 555 2671",
+      verificationMode: "invite_phone",
     },
     session: {
       authenticated: stage !== "verify",

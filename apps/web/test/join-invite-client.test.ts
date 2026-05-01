@@ -34,6 +34,30 @@ vi.mock("@/src/components/hosted-onboarding/hosted-invite-phone-auth", () => ({
   },
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
+  HostedPhoneAuth() {
+    return createElement(
+      "div",
+      {
+        "data-hosted-phone-auth": "true",
+      },
+      "Hosted phone auth",
+    );
+  },
+}));
+
+vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
+  ConnectTelegram() {
+    return createElement(
+      "div",
+      {
+        "data-connect-telegram": "true",
+      },
+      "Connect Telegram",
+    );
+  },
+}));
+
 vi.mock("@/src/components/legal/hosted-legal-consent-card", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/src/components/legal/hosted-legal-consent-card")>();
 
@@ -58,6 +82,7 @@ import {
   resolveJoinInviteStatusFromRefresh,
   shouldAwaitHostedInviteSessionResolution,
 } from "@/src/components/hosted-onboarding/join-invite-client";
+import { JoinInviteStageContent } from "@/src/components/hosted-onboarding/join-invite-sections";
 import type { HostedLegalConsentCard as HostedLegalConsentCardComponent } from "@/src/components/legal/hosted-legal-consent-card";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
@@ -107,11 +132,82 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
 
   assert.match(markup, /Chat with Murph/);
   assert.doesNotMatch(markup, /Murph signup/);
-  assert.match(markup, /Choose a contact method for experiment check-ins and updates\./);
+  assert.match(markup, /Verify your phone/);
+  assert.match(markup, /Use the number that received this join link\./);
+  assert.doesNotMatch(markup, /Telegram/);
   assert.doesNotMatch(markup, /What happens next/);
   assert.doesNotMatch(markup, /Invite for/);
   assert.doesNotMatch(markup, /\+1 415 555 2671/);
   assert.match(markup, /data-hosted-invite-phone-auth="true"/);
+});
+
+test("verify-stage manual phone fallback still keeps Telegram out of verification", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialLinkedAccounts: [],
+      initialStatus: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+        invite: {
+          code: "invite-code",
+          expiresAt: "2026-03-27T12:00:00.000Z",
+          phoneAuthTarget: {
+            kind: "manual",
+          },
+          phoneHint: null,
+          verificationMode: "manual_phone",
+        },
+      }),
+      inviteCode: "invite-code",
+    }),
+  );
+
+  assert.match(markup, /Add your phone/);
+  assert.match(markup, /Add the phone number Murph should use for experiment check-ins\./);
+  assert.match(markup, /data-hosted-invite-phone-auth="true"/);
+  assert.doesNotMatch(markup, /Telegram/);
+});
+
+test("authenticated messaging setup keeps the phone and Telegram channel picker", () => {
+  const status = createStatus({
+    messagingSetupRequired: true,
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  });
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteStageContent, {
+      awaitingInviteSessionResolution: false,
+      initialLinkedAccounts: [],
+      inviteCode: "invite-code",
+      launchLegalConsentGateActive: false,
+      launchLegalConsentSatisfied: true,
+      status,
+      statusRefreshErrorMessage: null,
+      statusRefreshRetryPending: false,
+      onCheckout: async () => {},
+      onCheckoutError: () => {},
+      onCheckoutSuccess: () => {},
+      onLaunchLegalConsentSatisfied: async () => {},
+      onPhoneVerified: async () => {},
+      onRefreshStatus: async () => status,
+      onRetryStatusRefresh: async () => {},
+      onSelectBillingPlan: () => {},
+      onSignOut: async () => {},
+    }),
+  );
+
+  assert.match(markup, /Phone/);
+  assert.match(markup, /Telegram/);
+  assert.match(markup, /aria-pressed="true"/);
+  assert.match(markup, /aria-pressed="false"/);
+  assert.match(markup, /data-hosted-phone-auth="true"/);
+  assert.doesNotMatch(markup, /data-hosted-invite-phone-auth="true"/);
 });
 
 test("verify-stage invite passes only the masked phone hint to phone auth", () => {
@@ -126,7 +222,12 @@ test("verify-stage invite passes only the masked phone hint to phone auth", () =
         invite: {
           code: "invite-code",
           expiresAt: "2026-03-27T12:00:00.000Z",
+          phoneAuthTarget: {
+            kind: "saved",
+            phoneHint: "*** 2671",
+          },
           phoneHint: "*** 2671",
+          verificationMode: "invite_phone",
         },
       }),
       inviteCode: "invite-code",
@@ -136,6 +237,10 @@ test("verify-stage invite passes only the masked phone hint to phone auth", () =
   expect(mocks.hostedInvitePhoneAuthProps).toMatchObject({
     inviteCode: "invite-code",
     phoneHint: "*** 2671",
+    phoneAuthTarget: {
+      kind: "saved",
+      phoneHint: "*** 2671",
+    },
   });
   expect(mocks.hostedInvitePhoneAuthProps).not.toHaveProperty("initialPhoneNumber");
 });
@@ -161,6 +266,7 @@ test("verify-stage invite shows the session check while the server session is st
 
   assert.match(markup, /Checking your signup state/);
   assert.match(markup, /One moment while we pick up your session\./);
+  assert.doesNotMatch(markup, /Telegram/);
   assert.doesNotMatch(markup, /data-hosted-invite-phone-auth=/);
 });
 
@@ -513,7 +619,7 @@ test("phone verification does not apply a stale completion after consent if fres
 
   await vi.waitFor(() => {
     expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
-    assert.match(view.container.textContent ?? "", /Let Murph reach you/);
+    assert.match(view.container.textContent ?? "", /Verify your phone/);
     assert.match(view.container.textContent ?? "", /Hosted invite phone auth/);
   });
   assert.doesNotMatch(view.container.textContent ?? "", /Get Pulse/);
@@ -548,7 +654,7 @@ test("phone verification keeps checkout hidden until the server confirms invite 
   expect(fetchMock).not.toHaveBeenCalled();
   expect(view.locationAssign).not.toHaveBeenCalled();
   assert.doesNotMatch(view.container.textContent ?? "", /Get Pulse/);
-  assert.match(view.container.textContent ?? "", /Let Murph reach you/);
+  assert.match(view.container.textContent ?? "", /Verify your phone/);
   assert.match(view.container.textContent ?? "", /Hosted invite phone auth/);
 
   await view.cleanup();
@@ -902,7 +1008,7 @@ test("already-active checkout refreshes return to verify when the invite session
 
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
-  assert.match(view.container.textContent ?? "", /Let Murph reach you/);
+  assert.match(view.container.textContent ?? "", /Verify your phone/);
   assert.match(view.container.textContent ?? "", /Hosted invite phone auth/);
 
   await view.cleanup();
@@ -1179,7 +1285,12 @@ function createStatus(
     invite: {
       code: "invite-code",
       expiresAt: "2026-03-27T12:00:00.000Z",
+      phoneAuthTarget: {
+        kind: "saved",
+        phoneHint: "*** 2671",
+      },
       phoneHint: "*** 2671",
+      verificationMode: "invite_phone",
     },
     session: {
       authenticated: false,

@@ -1007,7 +1007,12 @@ function createInviteStatus(stage: "checkout") {
     invite: {
       code: "invite-code",
       expiresAt: "2026-03-27T12:00:00.000Z",
+      phoneAuthTarget: {
+        kind: "saved",
+        phoneHint: "*** 4567",
+      },
       phoneHint: "*** 4567",
+      verificationMode: "invite_phone",
     },
     messagingSetupRequired: false,
     session: {

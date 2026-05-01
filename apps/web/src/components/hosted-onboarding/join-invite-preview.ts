@@ -55,6 +55,7 @@ export function buildJoinInvitePreviewStatus(
       code: inviteCode,
       expiresAt: futureIso,
       phoneHint: "+1 (415) 555-0123",
+      verificationMode: "invite_phone",
     },
     messagingSetupRequired: false,
     murphPhoneNumber: "+14155550199",
