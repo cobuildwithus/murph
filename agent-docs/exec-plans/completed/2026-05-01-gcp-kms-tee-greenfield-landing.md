@@ -24,7 +24,7 @@ Success criteria:
 
 ## State
 
-in_progress - hosted-local crypto harness follow-up
+completed - hosted crypto landing plus hosted-local harness follow-up
 
 ## Done
 
@@ -35,20 +35,21 @@ in_progress - hosted-local crypto harness follow-up
 - Focused Cloudflare/web/runtime-state tests passed.
 - Cloudflare, hosted-web, runtime-state, and hosted-execution owner typechecks passed after a test env fix.
 - Ported the supplied hosted-local follow-up onto the partial landing: local KMS shim, generated local authority signing key, generated hosted-local crypto/wake/web encryption state, and default protection against pulled remote hosted-crypto values.
+- Addressed completion-review findings: worker env files no longer include web-only local KMS state, pulled hosted-crypto values are scrubbed by default unless `MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS=1`, local generated state is persisted into `apps/cloudflare/.dev.vars` on clean shutdown, and local KMS is rejected for production markers.
+- Verified focused hosted-local script tests, focused web KMS/domain-root tests, owner typechecks, Cloudflare tests, hosted-web lint, and root typecheck.
 
 ## Now
 
-- Run focused hosted-local/web crypto tests and repair any type/test fallout.
+- Closing the active plan with the final focused test alignment.
 
 ## Next
 
-- Address audit findings if any.
-- Run scoped/full verification as allowed by current dirty-tree state.
-- Use `scripts/finish-task` if a safe scoped commit is possible.
+- Handoff with remaining unrelated verification blockers.
 
 ## Open Questions
 
-- UNCONFIRMED: whether the current dirty tree will permit a scoped commit without overlapping active work.
+- `pnpm test:repo-tools` remains blocked by the pre-existing `scripts/research-init.test.ts` red-light Health Commons fixture expectation.
+- `pnpm --dir apps/web test` remains blocked by unrelated hosted-web active-plan failures in the Prisma migration baseline and Junction-backed device connect-link test.
 
 ## Working Set
 
@@ -69,3 +70,6 @@ in_progress - hosted-local crypto harness follow-up
 - `packages/hosted-execution/src/routes.ts`
 - `packages/runtime-state/src/hosted-domain-crypto.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+Status: completed
+Updated: 2026-05-01
+Completed: 2026-05-01

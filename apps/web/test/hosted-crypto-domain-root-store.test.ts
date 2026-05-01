@@ -42,7 +42,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-test("web runtime crypto context persists signed ingress and runtime envelopes for worker unwrap only", async () => {
+test("web runtime crypto context reads already-provisioned signed ingress and runtime envelopes", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
   const encryptCalls: GcpKmsEncryptInput[] = [];
@@ -57,10 +57,27 @@ test("web runtime crypto context persists signed ingress and runtime envelopes f
     signerPublicKeyPem: signer.publicKeyPem,
   });
 
-  const { readHostedRuntimeCryptoContextForWorker } = await import(
+  const {
+    getOrCreateActiveHostedDomainRootEnvelope,
+    readHostedRuntimeCryptoContextForWorker,
+  } = await import(
     "../src/lib/hosted-crypto/domain-root-store"
   );
   const tx = createCapturingTransaction();
+
+  await getOrCreateActiveHostedDomainRootEnvelope({
+    domain: "ingress",
+    prisma: tx.prisma,
+    reason: "test.provision",
+    userId: "member-test-1",
+  });
+  await getOrCreateActiveHostedDomainRootEnvelope({
+    domain: "runtime",
+    prisma: tx.prisma,
+    reason: "test.provision",
+    userId: "member-test-1",
+  });
+  const persistedBeforeRead = tx.persistedEnvelopes.length;
 
   const context = await readHostedRuntimeCryptoContextForWorker({
     prisma: tx.prisma,
@@ -71,6 +88,7 @@ test("web runtime crypto context persists signed ingress and runtime envelopes f
   assert.equal(context.userId, "member-test-1");
   assert.equal(context.envelopes.ingress.domain, "ingress");
   assert.equal(context.envelopes.runtime.domain, "runtime");
+  assert.equal(tx.persistedEnvelopes.length, persistedBeforeRead);
   assert.deepEqual(
     tx.persistedEnvelopes.map((envelope) => envelope.domain).sort(),
     ["ingress", "runtime"],
@@ -135,6 +153,35 @@ test("web runtime crypto context persists signed ingress and runtime envelopes f
   assert.equal(signCalls.length, 2);
 });
 
+test("web runtime crypto context fails closed instead of provisioning missing worker roots", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  gcpKmsMock.client = createLocalKmsClient({
+    encryptCalls,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const { readHostedRuntimeCryptoContextForWorker } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const tx = createCapturingTransaction();
+
+  await expect(readHostedRuntimeCryptoContextForWorker({
+    prisma: tx.prisma,
+    userId: "member-test-1",
+  })).rejects.toThrow(/ingress domain root envelope is not provisioned/u);
+  assert.equal(tx.persistedEnvelopes.length, 0);
+  assert.equal(encryptCalls.length, 0);
+  assert.equal(signCalls.length, 0);
+});
+
 function createCapturingTransaction(): {
   persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[];
   prisma: Prisma.TransactionClient;
@@ -146,8 +193,26 @@ function createCapturingTransaction(): {
       return 1;
     },
     $queryRaw: async <T = unknown>(
-      ..._args: Parameters<Prisma.TransactionClient["$queryRaw"]>
-    ): Promise<T> => [] as T,
+      ...args: Parameters<Prisma.TransactionClient["$queryRaw"]>
+    ): Promise<T> => {
+      const values = args.slice(1);
+      const userId = values.find((value): value is string =>
+        typeof value === "string" && value.startsWith("member-"));
+      const domain = values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
+        value === "control" || value === "device" || value === "ingress" || value === "runtime");
+      const envelope = persistedEnvelopes.find((candidate) =>
+        candidate.userId === userId && candidate.domain === domain);
+      return (envelope
+        ? [{
+          domain: envelope.domain,
+          id: `row-${envelope.domain}`,
+          rootKeyId: envelope.rootKeyId,
+          signedEnvelopeJson: envelope,
+          status: "active",
+          userId: envelope.userId,
+        }]
+        : []) as T;
+    },
   };
   // Narrow test double: domain-root-store only uses Prisma raw query helpers here.
   return { persistedEnvelopes, prisma: tx as Prisma.TransactionClient };
