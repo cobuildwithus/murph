@@ -124,7 +124,7 @@ type AssistantInputEvent = {
   inputId: string;
 
   sourceRef: {
-    kind: "hosted-mailbox-item";
+    kind: "hosted-mailbox";
     lane: "conversation" | "system";
     laneSeq: string;
     itemId: string;
@@ -231,14 +231,15 @@ input. It needs source/input refs rather than capture-only refs.
 
 Required changes:
 
-- add accepted input source such as `"assistant-input"` or `"hosted-mailbox"`
-- add content ref kind such as `"assistant-input-event"`
-- allow `captureIds` to be empty or optional when an inbox projection is absent
-- extend hosted mailbox cursor effects to record item/input ids, not only
-  capture ids
+- use only `source: "assistant-input"` for hosted/local assistant-input events
+- use only `contentRef.kind: "assistant-input-event"` for assistant-input refs
+- require assistant-input refs to resolve to a stored `AssistantInputEvent`
+- allow `captureIds` to be empty when an inbox projection is absent
+- keep hosted mailbox details inside `AssistantInputEvent.sourceRef`
 
 The journal should not persist plaintext prompt bodies or raw provider payloads.
-It should store refs, versions, length buckets, and source cursor effects.
+It should store refs, versions, and length buckets. Mailbox staging, projection
+state, provider requests, and accepted-input facts remain separate facts.
 
 ### 6. Assistant Handling Ledger
 
@@ -317,10 +318,11 @@ Non-responsibilities:
 ```text
 1. AssistantInputEvent is durable.
 2. Inbox projection fails or times out.
-3. Projection status records reason code and retry metadata.
+3. Projection status records reason code and last-attempt metadata.
 4. Assistant input remains listable.
 5. Codex prompt includes enough source metadata to explain that inbox/search may lag.
-6. Projection retries independently.
+6. Hosted projection is one-shot best-effort unless a future executor adds
+   minimized durable reconstruction data.
 ```
 
 Projection failure is not `source_unavailable` for Codex once the assistant
@@ -363,11 +365,12 @@ Possible terminal outcomes:
 
 Means:
 
-> Inbox/search/file/parser projection has succeeded, failed retryably, failed
-> non-retryably, or is pending.
+> Inbox/search/file/parser projection has succeeded, failed, been quarantined,
+> or is pending.
 
 Projection state must not block mailbox ingest or assistant handling unless the
-reply path explicitly depends on that projection data.
+reply path explicitly depends on projection enrichment. Hosted projection state
+is diagnostic/enrichment state, not a retry queue contract.
 
 ## Failure Boundaries
 
@@ -393,7 +396,7 @@ Fail open after assistant input event durability when:
 - inbox canonical persistence fails
 - source-specific capture normalization fails
 - attachment download/materialization fails
-- raw email fetch fails after enough safe metadata exists for a supported
+- raw email fetch fails after safe minimized metadata exists for a supported
   metadata-only assistant input
 - parser drain fails
 - search indexing fails
@@ -450,8 +453,8 @@ careful adapter for:
 - reply metadata
 - media group metadata
 - attachment descriptors
-- optional downloaded media references
-- source-specific prompt context currently loaded from inbox envelope metadata
+- optional downloaded media references in projection/enrichment only
+- minimized prompt source metadata stored on `AssistantInputEvent`
 
 Telegram should not be considered complete until late active-turn inputs and
 initial automation both use the same input-source path.
@@ -530,7 +533,7 @@ At the hosted conversation mailbox import seam:
 3. Verify wake matches mailbox item.
 4. Write `AssistantInputEvent`.
 5. Advance ingest cursor only after durable checkpoint.
-6. Attempt inbox projection best-effort.
+6. Attempt inbox projection one-shot best-effort after checkpoint.
 
 This replaces the capture-first gate.
 
@@ -587,10 +590,8 @@ Required changes:
 
 - source kind for assistant input events
 - content ref kind for assistant input events
-- source-ref cursor effects with mailbox lane/seq and input ids
 - terminal evidence paths keyed by input id or handling group id
-- backward compatibility reader for capture-keyed evidence during migration if
-  needed
+- capture ids only as projection metadata when present
 
 Exit criteria:
 
@@ -609,8 +610,8 @@ Move inbox work behind the post-checkpoint best-effort projection path:
 - parser drain
 - UI read models
 
-Projection status belongs on the assistant input event. `pending` and `failed`
-are diagnostic/enrichment state in the hosted path, not a durable retry queue.
+Projection status belongs on the assistant input event. In the hosted path,
+`pending` and `failed` are diagnostic/enrichment state, not a durable retry queue.
 
 Exit criteria:
 
@@ -624,7 +625,7 @@ After raw assistant input events are in use:
 
 - remove hosted automation dependence on runtime-only list/show semantics
 - remove active-turn dependence on runtime-only capture rows
-- keep runtime-only rows only if a debug/preview use remains
+- do not keep runtime-only rows in assistant admission code
 - otherwise delete the primitive
 
 Exit criteria:
@@ -704,7 +705,7 @@ Questions:
 - Is terminal evidence keyed by input id or source ref?
 - Can grouped handling cover multiple input ids?
 - Can capture ids be absent?
-- Are legacy capture-keyed records read only as compatibility state?
+- Are capture ids treated only as optional projection metadata?
 
 ### Inbox Projection
 
@@ -720,7 +721,7 @@ Questions:
 - Is projection allowed to fail without hiding assistant input?
 - Is text bounded only in projection records?
 - Are attachment/parser failures projection failures, not input failures?
-- Are runtime-only rows absent from reply eligibility?
+- Are runtime-only rows absent from reply eligibility and active-turn admission?
 
 ## Required Tests
 
@@ -798,8 +799,8 @@ When implementation starts, update these live docs alongside code:
 1. Should `AssistantInputStore` be JSON files, SQLite, or a small append-only
    JSONL plus index?
 
-   Recommendation: start with versioned JSON records keyed by deterministic
-   input id unless list/query performance needs SQLite. The first implementation
+   Decision: start with versioned JSON records keyed by deterministic input id.
+   Escalate to SQLite only if list/query performance requires it. The implementation
    needs correctness and snapshot portability more than complex querying.
 
 2. Should assistant input events store full text?
@@ -817,8 +818,8 @@ When implementation starts, update these live docs alongside code:
 
 4. Should existing capture-keyed evidence be migrated?
 
-   No. This cut is greenfield. New evidence is keyed by input id, and old
-   capture-keyed assistant admission state should not shape the new runtime.
+   No. This cut is greenfield. New evidence is keyed by input id. Old
+   capture-keyed assistant admission state must not shape the new runtime.
 
 ## Long-Term Shape
 
@@ -832,12 +833,13 @@ apps/cloudflare
   owns runner coordination, container invocation, and encrypted object plumbing
 
 packages/assistant-runtime
-  owns assistant input ingest, assistant input store, one-shot best-effort
-  projection after checkpoint, and hosted checkpoint timing
+  owns source adapters, hosted mailbox decode as an ingress adapter,
+  input-event staging, one-shot best-effort projection after checkpoint,
+  and hosted checkpoint timing
 
 packages/assistant-engine
-  owns source-agnostic assistant input selection, accepted input journal,
-  handling evidence, reply intent, and delivery policy
+  owns AssistantInputEvent store, AssistantInputSource, source-agnostic input
+  selection, accepted input journal, handling evidence, reply intent, and delivery policy
 
 packages/inboxd
   owns capture/search/file/parser projections for UI, audit, and query
