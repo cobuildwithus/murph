@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-04-30
+Last verified: 2026-05-01
 
 ## Decision
 
@@ -40,7 +40,9 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 ```
 
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
-row into a bounded `AssistantInputEvent` before inbox projection. Inbox capture
+row into a bounded `AssistantInputEvent`, checkpoints the mailbox staged
+watermark, and only then attempts inbox projection. Projection status and inbox
+artifacts are checkpointed separately as best-effort enrichment. Inbox capture
 and parser state remain useful projections for search, display, attachment
 enrichment, and debugging, but hosted callers must not stage hidden
 runtime-only inbox rows to make Codex admission succeed.
@@ -60,10 +62,12 @@ assistant channel enablement state, or checkpoint recovery truth.
 
 The runtime reads `HostedWorkspace`, restores the encrypted local workspace,
 fetches mailbox rows after its checkpointed per-lane watermarks, stages decoded
-conversation rows as assistant input, imports any available inbox projection
-state, and checkpoints immediately after import. Conversation import is
-discovery, not assistant handling: mailbox watermarks prove only that source
-input was staged and local projection was attempted. A conversation input remains
+conversation rows as assistant input, checkpoints immediately after staging, and
+attempts any available inbox projection as a post-checkpoint enrichment effect.
+Projection status and artifacts checkpoint separately and best-effort, so failed
+or slow projection does not delay the staged mailbox watermark. Conversation
+import is discovery, not assistant handling: mailbox watermarks prove only that
+source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
 for that input, such as committed reply intent evidence or explicit suppression
 evidence. Auto-reply channel state stores only a fixed `eligibleAfter` seed

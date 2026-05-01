@@ -10,7 +10,7 @@ Current responsibilities:
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   commit timeout, and child-env projection helpers
-- keep hosted execution local-runtime-first: hosted mailbox decode writes minimized assistant input, while inbox capture, parser draining, and attachment/file materialization remain best-effort projections outside the Codex admission path
+- keep hosted execution local-runtime-first: hosted mailbox decode writes minimized assistant input and checkpoints it before inbox capture, parser draining, and attachment/file materialization run as best-effort projections outside the Codex admission path
 - collect due hosted side effects before the durable commit, then resume their post-commit delivery from committed state
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
@@ -24,10 +24,11 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active 
 ```
 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
-stages bounded `AssistantInputEvent` records before inbox projection. Inbox
-capture, parser work, attachment materialization, and display/search indexes are
-best-effort enrichment and recovery context; they are not a hidden runtime-only
-admission path for Codex.
+stages bounded `AssistantInputEvent` records, checkpoints the mailbox staged
+watermark, and only then attempts inbox projection. Projection status and inbox
+artifacts are checkpointed separately as best-effort enrichment. Inbox capture,
+parser work, attachment materialization, and display/search indexes are recovery
+context; they are not a hidden runtime-only admission path for Codex.
 
 Current non-goals:
 

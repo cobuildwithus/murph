@@ -113,8 +113,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
-      async onCheckpoint() {
-        events.push("checkpoint:import");
+      async onCheckpoint(request) {
+        events.push(`checkpoint:${request.reason}`);
         const state = await readHostedMailboxImportState({ vaultRoot });
         assert.equal(state.watermarks.conversation, "1");
       },
@@ -176,9 +176,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "checkpoint:import",
         "assistant",
         "mailbox:afterCheckpoint",
+        "checkpoint:maintenance",
       ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(result.latestWorkspace?.version, "2");
+      assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.attemptId, "attempt_synthetic_runner_001");
       assert.equal(checkpointRequests[0]?.leaseGeneration, "1");
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
@@ -189,6 +191,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxConversationImportedSeq: "1",
         hostedMailboxFetchedCount: 1,
         hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
+      assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
+      assert.equal(checkpointRequests[1]?.reason, "maintenance");
+      assert.deepEqual(checkpointRequests[1]?.browserVaultReplicaRef, TEST_BROWSER_VAULT_REPLICA_REF);
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxProjectionCheckpoint: true,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
       });
@@ -1571,6 +1585,77 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.assistantPhaseResult, null);
       assert.equal(result.initialMailboxImport.stateChanged, false);
       assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("checkpoints mailbox post-checkpoint effects without an assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_projection_no_assistant",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_projection_no_assistant",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return {
+            afterCheckpoint: async () => {
+              events.push("mailbox:afterCheckpoint");
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_projection_no_assistant",
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(events, [
+        "import:1",
+        "mailbox:afterCheckpoint",
+      ]);
+      assert.equal(result.assistantPhaseResult, null);
+      assert.equal(result.latestWorkspace?.version, "2");
+      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointRequests[0]?.reason, "import");
+      assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
+      assert.equal(checkpointRequests[1]?.reason, "maintenance");
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxProjectionCheckpoint: true,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
     } finally {
       await rm(vaultRoot, {
         force: true,

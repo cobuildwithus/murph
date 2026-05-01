@@ -82,7 +82,7 @@ interface HostedWorkspaceCheckpointRequestSession
   latestWorkspace(): HostedWorkspaceState | null;
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
   recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
-  takeMailboxPostCheckpointEffects(): readonly (() => Promise<void>)[];
+  takeMailboxPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
 }
 
 export interface HostedWorkspaceRunnerCheckpointRequestInput
@@ -134,6 +134,8 @@ export interface HostedWorkspaceRunnerInput {
   workspace: HostedWorkspaceState | null;
   now?: () => string;
 }
+
+type HostedMailboxPostCheckpointEffect = () => Promise<void>;
 
 export interface HostedWorkspaceRunnerResult {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -233,9 +235,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       initialMailboxImport,
       input,
     });
-    await runHostedMailboxPostCheckpointEffectsBestEffort(
-      checkpointRequestSession.takeMailboxPostCheckpointEffects(),
-    );
+    await runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      expectedUserId: input.expectedUserId,
+      initialMailboxImport,
+      input,
+    });
     return {
       assistantPhaseResult: null,
       initialMailboxImport,
@@ -251,8 +256,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     input,
     platform: input.platform,
   });
+  let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   try {
-    const assistantPhaseResult = await input.runAssistantPhase({
+    assistantPhaseResult = await input.runAssistantPhase({
       initialMailboxImport,
       platform,
       workspace: input.workspace,
@@ -283,19 +289,26 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       initialMailboxImport,
       input,
     });
-
-    return {
-      assistantPhaseResult,
+    await runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      expectedUserId: input.expectedUserId,
       initialMailboxImport,
-      latestWorkspace: checkpointRequestSession.latestWorkspace()
-        ?? initialMailboxImport.checkpoint?.workspace
-        ?? input.workspace,
-    };
-  } finally {
+      input,
+    });
+  } catch (error) {
     await runHostedMailboxPostCheckpointEffectsBestEffort(
       checkpointRequestSession.takeMailboxPostCheckpointEffects(),
     );
+    throw error;
   }
+
+  return {
+    assistantPhaseResult,
+    initialMailboxImport,
+    latestWorkspace: checkpointRequestSession.latestWorkspace()
+      ?? initialMailboxImport.checkpoint?.workspace
+      ?? input.workspace,
+  };
 }
 
 async function drainHostedWorkspaceUsageExportBestEffort(input: {
@@ -644,6 +657,54 @@ async function checkpointHostedWorkspaceUsageExportCleanup(input: {
   input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
 }
 
+async function checkpointHostedWorkspaceMailboxPostCheckpointEffects(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  expectedUserId: string;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  workspacePort: HostedRuntimeWorkspacePort;
+}): Promise<void> {
+  const latestWorkspace = input.checkpointRequestBuilder.latestWorkspace();
+  if (!latestWorkspace) {
+    return;
+  }
+
+  const mailboxImport =
+    input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
+  const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
+    mailboxImport,
+    {
+      hostedMailboxProjectionCheckpoint: true,
+    },
+  );
+  const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
+    importResult: mailboxImport.importResult,
+    ...hostedWorkspaceScheduledWake(latestWorkspace),
+    previousState: mailboxImport.state,
+    reason: "maintenance",
+    redactedStatus,
+    state: mailboxImport.state,
+  });
+  const checkpoint = await input.workspacePort.checkpoint({
+    ...checkpointRequest,
+    ...hostedWorkspaceScheduledWake(latestWorkspace),
+    reason: "maintenance",
+    redactedStatus,
+  });
+
+  if (checkpoint.workspace.userId !== input.expectedUserId) {
+    throw new HostedMailboxImportCheckpointUserMismatchError({
+      actualUserId: checkpoint.workspace.userId,
+      expectedUserId: input.expectedUserId,
+    });
+  }
+
+  if (!checkpoint.checkpointed) {
+    throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+  }
+
+  input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
+}
+
 function createHostedWorkspaceCheckpointRequestSession(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder,
 ): HostedWorkspaceCheckpointRequestSession {
@@ -696,15 +757,48 @@ function createHostedWorkspaceCheckpointRequestSession(
 }
 
 async function runHostedMailboxPostCheckpointEffectsBestEffort(
-  effects: readonly (() => Promise<void>)[],
-): Promise<void> {
+  effects: readonly HostedMailboxPostCheckpointEffect[],
+): Promise<boolean> {
+  let attempted = false;
   for (const effect of effects) {
     try {
       await effect();
+      attempted = true;
     } catch {
       // Mailbox post-checkpoint effects are enrichment only. They must not roll
       // back durable mailbox or assistant checkpoints.
+      attempted = true;
     }
+  }
+  return attempted;
+}
+
+async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  expectedUserId: string;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
+  if (effects.length === 0) {
+    return;
+  }
+
+  const attempted = await runHostedMailboxPostCheckpointEffectsBestEffort(effects);
+  if (!attempted) {
+    return;
+  }
+
+  try {
+    await checkpointHostedWorkspaceMailboxPostCheckpointEffects({
+      checkpointRequestBuilder: input.checkpointRequestBuilder,
+      expectedUserId: input.expectedUserId,
+      initialMailboxImport: input.initialMailboxImport,
+      workspacePort: input.input.platform.workspacePort,
+    });
+  } catch {
+    // Projection checkpoints are best-effort. Assistant input and mailbox
+    // watermarks are already durable by the time these effects run.
   }
 }
 
