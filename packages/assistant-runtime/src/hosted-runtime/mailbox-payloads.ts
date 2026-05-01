@@ -106,7 +106,7 @@ export async function resolveHostedMailboxItemPayload(input: {
 
   return {
     payloadCiphertext: response.payload.payloadCiphertext,
-    payloadSchema: response.payload.payloadSchema,
+    payloadSchema: input.item.payloadSchema,
     requestId,
     source: "sidecar",
     status: "resolved",

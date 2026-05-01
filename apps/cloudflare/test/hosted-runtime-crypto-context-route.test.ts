@@ -53,7 +53,7 @@ test("runtime user crypto context fetches signed ingress/runtime crypto context 
     assert.equal(headers.get("x-hosted-execution-user-id"), "user-1");
     assert.equal(headers.has("x-hosted-execution-signature"), true);
     return new Response(JSON.stringify({
-      envelopes: { ingress, runtime: { intentionallyInvalidForIngressOnlyRequest: true } },
+      envelopes: { ingress },
       schema: "murph.hosted-runtime-crypto-context.v1",
       userId: "user-1",
     }), {

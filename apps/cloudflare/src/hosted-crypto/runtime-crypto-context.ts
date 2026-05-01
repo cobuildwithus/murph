@@ -28,8 +28,8 @@ export interface HostedWorkerCryptoEnv {
 
 export interface HostedRuntimeCryptoContextResponse {
   envelopes: {
-    ingress: unknown;
-    runtime: unknown;
+    ingress?: unknown;
+    runtime?: unknown;
   };
   fetchedAt?: string;
   schema: "murph.hosted-runtime-crypto-context.v1";
@@ -106,19 +106,20 @@ export async function unwrapHostedWorkerRuntimeRoots(input: {
   context: HostedRuntimeCryptoContextResponse;
   env: HostedWorkerCryptoEnv;
 }): Promise<UnwrappedHostedWorkerRuntimeRoots> {
-  assertHostedRuntimeCryptoContext(input.context);
+  const ingressEnvelope = requireHostedRuntimeCryptoContextEnvelope(input.context, "ingress");
+  const runtimeEnvelope = requireHostedRuntimeCryptoContextEnvelope(input.context, "runtime");
   const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
   const [ingress, runtime] = await Promise.all([
     unwrapWorkerDomainRoot({
       domain: "ingress",
-      envelope: parseHostedDomainRootKeyEnvelope(input.context.envelopes.ingress),
+      envelope: parseHostedDomainRootKeyEnvelope(ingressEnvelope),
       env: input.env,
       privateJwk,
       userId: input.context.userId,
     }),
     unwrapWorkerDomainRoot({
       domain: "runtime",
-      envelope: parseHostedDomainRootKeyEnvelope(input.context.envelopes.runtime),
+      envelope: parseHostedDomainRootKeyEnvelope(runtimeEnvelope),
       env: input.env,
       privateJwk,
       userId: input.context.userId,
@@ -132,11 +133,11 @@ export async function unwrapHostedWorkerRuntimeRoot(input: {
   domain: "ingress" | "runtime";
   env: HostedWorkerCryptoEnv;
 }): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
-  assertHostedRuntimeCryptoContext(input.context);
+  const envelope = requireHostedRuntimeCryptoContextEnvelope(input.context, input.domain);
   const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
   return await unwrapWorkerDomainRoot({
     domain: input.domain,
-    envelope: parseHostedDomainRootKeyEnvelope(input.context.envelopes[input.domain]),
+    envelope: parseHostedDomainRootKeyEnvelope(envelope),
     env: input.env,
     privateJwk,
     userId: input.context.userId,
@@ -226,9 +227,21 @@ function assertHostedRuntimeCryptoContext(value: HostedRuntimeCryptoContextRespo
   if (!value.userId) {
     throw new TypeError("Hosted runtime crypto context userId is required.");
   }
-  if (!value.envelopes?.ingress || !value.envelopes?.runtime) {
-    throw new TypeError("Hosted runtime crypto context must include ingress and runtime envelopes.");
+  if (!value.envelopes || typeof value.envelopes !== "object") {
+    throw new TypeError("Hosted runtime crypto context envelopes must be an object.");
   }
+}
+
+function requireHostedRuntimeCryptoContextEnvelope(
+  value: HostedRuntimeCryptoContextResponse,
+  domain: "ingress" | "runtime",
+): unknown {
+  assertHostedRuntimeCryptoContext(value);
+  const envelope = value.envelopes[domain];
+  if (!envelope) {
+    throw new TypeError(`Hosted runtime crypto context must include ${domain} envelope.`);
+  }
+  return envelope;
 }
 
 function parseP256PrivateJwk(value: string): JsonWebKey {
