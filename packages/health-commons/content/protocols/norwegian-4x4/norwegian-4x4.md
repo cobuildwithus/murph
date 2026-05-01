@@ -212,7 +212,7 @@ expectedSignalDescriptions:
       window: 4-8 weeks
       confidence: moderate
       basis: "Direct 4x4 sources include a 6-week overweight/obese adult trial reporting about a 10% VO2max gain, an 8-week trained-adult trial favoring 4x4 for lab VO2max, and broader HIIT meta-analysis support; wearable cardio-fitness proxies can lag or under-report the change."
-    description: "Four-minute hard reps keep cardiac output and muscle oxygen extraction near the top of the aerobic range. As stroke volume, capillary delivery, and mitochondrial oxygen use improve, lab VO2max or same-device cardio-fitness estimates can rise."
+    description: "Sustained intervals challenge cardiac output and muscle oxygen extraction, training the heart, capillaries, and mitochondria to move and use more oxygen."
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: down_or_stable
@@ -225,7 +225,7 @@ expectedSignalDescriptions:
       window: 4-8 weeks
       confidence: low
       basis: "The direct 4x4 evidence package centers VO2max rather than resting pulse, but improved stroke volume and autonomic balance make a small same-device resting-heart-rate drop plausible when recovery keeps up."
-    description: "If each beat pumps more blood after training, the heart can deliver resting blood flow with fewer beats. A same-device morning RHR trend may drift lower when adaptation outpaces fatigue."
+    description: "Larger stroke volume lets each beat move more blood, reducing the heart rate needed to maintain resting circulation."
   -
     biomarkerKey: biomarker:morning-blood-pressure
     expected: down_or_stable
@@ -238,7 +238,7 @@ expectedSignalDescriptions:
       window: 4-8 weeks
       confidence: low
       basis: "A supervised hypertension 4x4-lineage trial reported larger 12-week blood-pressure reductions, while normotensive or unscreened home users over 6 weeks should expect smaller or no movement."
-    description: "Repeated high-flow intervals increase vessel shear stress and nitric-oxide signaling. If vascular tone eases, standardized morning systolic pressure can drift down, especially when baseline pressure is elevated."
+    description: "Repeated high-flow intervals increase vessel shear stress and nitric-oxide signaling, relaxing vascular tone and reducing resistance against each heartbeat."
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: mixed_or_contextual
@@ -248,7 +248,7 @@ expectedSignalDescriptions:
       window: 4-8 weeks
       confidence: mixed
       basis: "The autonomic-control review found HIIT-related HRV changes small, inconsistent, and sensitive to population, dose, sleep, illness, alcohol, and total training load."
-    description: "The intervals spike sympathetic load. Recoverable training can increase overnight parasympathetic rebound; too much intensity or too little recovery can suppress RMSSD."
+    description: "Hard intervals spike sympathetic load; adequate recovery restores parasympathetic activity, while excess intensity keeps autonomic stress elevated."
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: mixed_or_contextual
@@ -258,7 +258,7 @@ expectedSignalDescriptions:
       window: 4-8 weeks
       confidence: low
       basis: "Sleep efficiency is recovery context for this protocol, not a direct 4x4 efficacy endpoint with a source-backed numeric range."
-    description: "Hard aerobic work raises sleep pressure, but late sessions, heat, soreness, or under-recovery can fragment sleep. Sleep efficiency shows whether the training dose fits the recovery window."
+    description: "Hard aerobic work builds sleep pressure; late timing, heat, soreness, and under-recovery increase arousal and fragment sleep."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
