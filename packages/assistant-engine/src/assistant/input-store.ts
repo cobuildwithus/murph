@@ -158,16 +158,19 @@ const assistantInputContentSchema = z
   .strict()
 
 const assistantInputProjectionSchema = z
-  .object({
-    captureId: safeNullableAssistantInputTokenSchema('captureId'),
-    lastAttemptedAt: safeNullableAssistantInputTimestampSchema('lastAttemptedAt'),
-    nextAttemptAfter: safeNullableAssistantInputTimestampSchema('nextAttemptAfter'),
-    reasonCode: safeNullableAssistantInputReasonCodeSchema(),
-    status: z.enum(assistantInputProjectionStatusValues),
-    updatedAt: safeNullableAssistantInputTimestampSchema('updatedAt'),
-  })
-  .strict()
-  .superRefine(assertValidAssistantInputProjection)
+  .preprocess(
+    stripLegacyAssistantInputProjectionRetryState,
+    z
+      .object({
+        captureId: safeNullableAssistantInputTokenSchema('captureId'),
+        lastAttemptedAt: safeNullableAssistantInputTimestampSchema('lastAttemptedAt'),
+        reasonCode: safeNullableAssistantInputReasonCodeSchema(),
+        status: z.enum(assistantInputProjectionStatusValues),
+        updatedAt: safeNullableAssistantInputTimestampSchema('updatedAt'),
+      })
+      .strict()
+      .superRefine(assertValidAssistantInputProjection),
+  )
 
 const assistantInputReplyTargetSchema = z
   .object({
@@ -226,9 +229,6 @@ const assistantInputProjectionUpdateSchema = z
     captureId: safeAssistantInputTokenSchema('captureId').nullable().optional(),
     lastAttemptedAt: safeAssistantInputTimestampSchema(
       'lastAttemptedAt',
-    ).nullable().optional(),
-    nextAttemptAfter: safeAssistantInputTimestampSchema(
-      'nextAttemptAfter',
     ).nullable().optional(),
     reasonCode: safeAssistantInputReasonCodeSchema().nullable().optional(),
     status: z.enum(assistantInputProjectionStatusValues),
@@ -455,44 +455,6 @@ export async function readLatestAssistantInputCursor(input: {
   return listed.events.at(-1)?.cursor ?? null
 }
 
-export async function listAssistantInputProjectionAttempts(input: {
-  afterCursor?: AssistantInputCursor | null
-  limit?: number
-  now?: Date
-  onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
-  paths?: AssistantStatePaths
-  skipInvalidRecords?: boolean
-  vault?: string
-}): Promise<{
-  events: AssistantInputEventRecord[]
-  nextCursor: AssistantInputCursor | null
-}> {
-  const now = resolveTimestamp(input.now)
-  const limit = normalizeAssistantInputEventListLimit(input.limit)
-  const listed = await listAssistantInputEvents({
-    afterCursor: input.afterCursor,
-    limit: Number.MAX_SAFE_INTEGER,
-    onInvalidRecord: input.onInvalidRecord,
-    paths: input.paths,
-    skipInvalidRecords: input.skipInvalidRecords,
-    vault: input.vault,
-  })
-
-  const events = listed.events
-    .filter((event) =>
-      isAssistantInputProjectionAttemptDue(event.projection, now),
-    )
-    .slice(0, limit)
-
-  return {
-    events,
-    // Projection retry eligibility is ordered by retry time, not by event
-    // cursor. Returning a cursor here can skip an older future-due record once
-    // it becomes due, so this scan is intentionally non-paginated.
-    nextCursor: null,
-  }
-}
-
 export async function updateAssistantInputProjection(input: {
   inputId: string
   now?: Date
@@ -626,7 +588,6 @@ function buildAssistantInputEventRecord(input: {
     projection: {
       captureId: null,
       lastAttemptedAt: null,
-      nextAttemptAfter: null,
       reasonCode: null,
       status: 'not_attempted',
       updatedAt: null,
@@ -815,9 +776,6 @@ function applyAssistantInputProjectionUpdate(input: {
     captureId: null,
     lastAttemptedAt:
       input.update.lastAttemptedAt ?? input.existing.lastAttemptedAt,
-    nextAttemptAfter: Object.hasOwn(input.update, 'nextAttemptAfter')
-      ? input.update.nextAttemptAfter ?? null
-      : input.existing.nextAttemptAfter,
     reasonCode: null,
     status: input.update.status,
     updatedAt: input.now,
@@ -826,7 +784,6 @@ function applyAssistantInputProjectionUpdate(input: {
   if (input.update.status === 'succeeded') {
     nextProjection.captureId =
       input.update.captureId ?? input.existing.captureId
-    nextProjection.nextAttemptAfter = null
   }
   if (
     input.update.status === 'failed' ||
@@ -835,28 +792,14 @@ function applyAssistantInputProjectionUpdate(input: {
     nextProjection.reasonCode =
       input.update.reasonCode ?? input.existing.reasonCode
   }
-  if (input.update.status === 'quarantined') {
-    nextProjection.nextAttemptAfter = null
-  }
 
   return assistantInputProjectionSchema.parse(nextProjection)
-}
-
-function isAssistantInputProjectionAttemptDue(
-  projection: AssistantInputEventProjection,
-  now: string,
-): boolean {
-  if (projection.status !== 'pending' && projection.status !== 'failed') {
-    return false
-  }
-  return !projection.nextAttemptAfter || projection.nextAttemptAfter <= now
 }
 
 function assertValidAssistantInputProjection(
   projection: {
     captureId: string | null
     lastAttemptedAt: string | null
-    nextAttemptAfter: string | null
     reasonCode: string | null
     status: AssistantInputProjectionStatus
     updatedAt: string | null
@@ -906,6 +849,17 @@ function assertValidAssistantInputProjection(
         'projection reasonCode is only valid for failed or quarantined status.',
     })
   }
+}
+
+function stripLegacyAssistantInputProjectionRetryState(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+  const {
+    nextAttemptAfter: _nextAttemptAfter,
+    ...projection
+  } = value as Record<string, unknown>
+  return projection
 }
 
 function safeAssistantInputTokenSchema(fieldName: string) {

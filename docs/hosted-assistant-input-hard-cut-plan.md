@@ -29,8 +29,10 @@ existing path is deleted in the same batch.
 - One terminal handling identity: input ids or input group ids.
 - Inbox capture ids are projection metadata, never the primary assistant
   identity.
-- Projection retry state lives on the input event. Do not add a separate
-  projection queue unless the input store proves insufficient.
+- Projection status lives on the input event as diagnostic/enrichment state.
+  Hosted projection is one-shot best-effort after checkpoint unless a future
+  executor adds minimized durable reconstruction data; do not add a separate
+  projection queue.
 - Hosted input does not use runtime-only inbox rows. In greenfield, that bridge
   should be removed instead of quarantined behind another flag.
 - Hosted execution is only a thin runner over the local runtime. Once a hosted
@@ -196,7 +198,6 @@ type AssistantInputEvent = {
       | "quarantined";
     reasonCode?: string | null;
     lastAttemptedAt?: string | null;
-    nextAttemptAfter?: string | null;
   };
 
   occurredAt: string;
@@ -262,11 +263,11 @@ Use the smallest cursor model that preserves correctness:
 - `mailboxStagedWatermark` per lane: highest lane seq that has either been
   durably upserted as an `AssistantInputEvent` and checkpointed, or permanently
   quarantined before input creation.
-- projection retry state: fields on each `AssistantInputEvent.projection`.
+- projection status: fields on each `AssistantInputEvent.projection`.
 
 Do not add a separate assistant-input queue. Do not add a separate projection
-queue. The input store can expose a filter such as `listProjectionAttempts`
-over events whose projection status is `pending` or retryable `failed`.
+queue. `pending` and `failed` projection states are diagnostic/enrichment state,
+not a durable retry contract.
 
 Mailbox staging and Codex turn acceptance are different facts:
 
@@ -357,7 +358,8 @@ Changes:
 - Add accepted-input journal support for
   `source: "assistant-input"` and `contentRef.kind: "assistant-input-event"`.
 - Add terminal evidence support for `inputId`, `inputGroupId`, and `inputIds`.
-- Add input-store filtering for projection retries; do not add a new queue.
+- Keep projection status on the input event without adding a retry listing or
+  queue.
 
 Required tests:
 
@@ -366,7 +368,7 @@ Required tests:
 - inbox capture can be represented as an assistant input event
 - accepted input with zero capture ids round trips
 - terminal evidence dedupes by input id and input group id
-- projection retry listing finds events by projection status
+- failed projection remains listable as diagnostic state
 - malformed assistant input refs fail closed
 
 ### Batch 2: Hard-Cut Hosted Ingest
@@ -570,7 +572,7 @@ apps/web
 packages/assistant-runtime
   owns local runtime orchestration, source adapters, hosted mailbox decode as
   an ingress adapter, trust-boundary validation, input-event staging, and inbox
-  projection attempts
+  one-shot best-effort projection after checkpoint
 
 packages/assistant-engine
   owns AssistantInputEvent store, AssistantInputSource, source-neutral

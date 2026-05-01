@@ -15,7 +15,6 @@ import {
   type HostedAssistantConversationIdentifierBlind,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import {
-  listAssistantInputProjectionAttempts,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
   type AssistantInputAttachmentDescriptor,
@@ -102,7 +101,6 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 
 export interface HostedConversationMailboxAssistantInputStageResult {
   inputId: string;
-  isProjectionAttemptDue?: (() => Promise<boolean>) | null;
   recordProjection(
     input: HostedConversationMailboxAssistantInputProjectionUpdate,
   ): Promise<void>;
@@ -264,13 +262,6 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<void> {
-  if (
-    input.stagedInput.isProjectionAttemptDue
-    && !(await input.stagedInput.isProjectionAttemptDue())
-  ) {
-    return;
-  }
-
   let imported: HostedConversationMailboxLocalImportResult;
   try {
     await input.prepareWakeContext({
@@ -343,13 +334,6 @@ async function stageHostedConversationAssistantInputEvent(input: {
 
   return {
     inputId: event.inputId,
-    async isProjectionAttemptDue() {
-      const attempts = await listAssistantInputProjectionAttempts({
-        limit: Number.MAX_SAFE_INTEGER,
-        vault: input.vaultRoot,
-      });
-      return attempts.events.some((attempt) => attempt.inputId === event.inputId);
-    },
     async recordProjection(projection) {
       await updateAssistantInputProjection({
         inputId: event.inputId,
