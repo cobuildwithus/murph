@@ -1,6 +1,6 @@
 # Land bounded hosted runner alarm wait and longer nudge workflow retry
 
-Status: verification-complete
+Status: completed
 Created: 2026-05-01
 Updated: 2026-05-01
 
@@ -79,6 +79,9 @@ Updated: 2026-05-01
   - `pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts --no-coverage test/user-runner-alarm.test.ts` passed: 28 tests.
   - `pnpm --dir apps/cloudflare verify` passed: app typecheck, 61 Node test files / 621 tests, Workers lane had no files by config.
   - `pnpm --dir apps/web typecheck` passed.
-  - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-onboarding-webhook-workflows.test.ts` passed: 7 tests.
-  - `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/web/src/lib/hosted-onboarding/webhook-workflow-types.ts agent-docs/exec-plans/active/2026-05-01-hosted-runner-bounded-nudge-retry.md` passed.
+  - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-onboarding-webhook-workflows.test.ts` passed: 8 tests.
+  - `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/web/src/lib/hosted-onboarding/webhook-workflow-types.ts apps/web/test/hosted-onboarding-webhook-workflows.test.ts agent-docs/exec-plans/active/2026-05-01-hosted-runner-bounded-nudge-retry.md` passed.
   - `pnpm typecheck` failed for unrelated active work in `packages/assistant-engine/test/assistant-automation-support.test.ts`: missing exported member `loadTelegramAutoReplyMetadata`, matching the active `2026-05-01-telegram-inbox-envelope-fallback-removal` ledger row.
+  - Security/privacy review reported no findings; residual stale mailbox deletion/revocation risk is covered by per-attempt owner lookup and missing-mailbox fatal behavior.
+  - Final completion review reported no findings; the suggested direct retry-budget assertion was added and verified.
+Completed: 2026-05-01
