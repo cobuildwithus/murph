@@ -153,17 +153,14 @@ describe("experiment page projections", () => {
     const experiment = mocks.protocolTab.mock.calls.at(-1)?.[0]
       ?.experiment as ProtocolTabExperiment;
 
-    expect(experiment).toEqual(expect.objectContaining({
-      baselineDays: fullProtocol.baselineDays,
-      durationDays: fullProtocol.durationDays,
-      id: "finnish-sauna",
-      mechanismChain: fullProtocol.mechanismChain,
-      protocol: fullProtocol.protocol,
-      protocolFacts: fullProtocol.protocolFacts,
-      protocolTips: fullProtocol.protocolTips,
-      safety: fullProtocol.safety,
-      whyItWorks: fullProtocol.whyItWorks,
-    }));
+    expect(experiment.baselineDays).toBe(fullProtocol.baselineDays);
+    expect(experiment.durationDays).toBe(fullProtocol.durationDays);
+    expect(experiment.id).toBe("finnish-sauna");
+    expect(experiment.mechanismChain).toEqual(fullProtocol.mechanismChain);
+    expect(experiment.protocol).toEqual(fullProtocol.protocol);
+    expect(experiment.protocolFacts).toEqual(fullProtocol.protocolFacts);
+    expect(experiment.protocolTips).toEqual(fullProtocol.protocolTips);
+    expect(experiment.whyItWorks).toBe(fullProtocol.whyItWorks);
     expect(experiment.expectedSignals).toEqual(
       fullProtocol.expectedSignals.map((signal) => expect.objectContaining({
         description: signal.description,

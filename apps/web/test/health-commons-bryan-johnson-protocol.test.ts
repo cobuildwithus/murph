@@ -245,17 +245,17 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Self-Reported Mood")?.description,
     ).toBe(
-      "Cold water delivers a sharp arousal jolt, then relief and challenge-appraisal after exit. Log the same mood scale before the session and 30–180 minutes after; a useful signal is a repeatable post-session lift without stop conditions or heavy rewarming burden.",
+      "Cold water creates a strong arousal surge, followed by relief after exit, shifting perceived challenge and mood state.",
     );
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "HRV / RMSSD")?.description,
     ).toBe(
-      "Cold acutely shifts the nervous system toward sympathetic drive, so RMSSD can dip around the session and should recover by overnight or morning. Use same-device RMSSD to catch recovery cost, not to score one dramatic session.",
+      "Cold shifts the nervous system toward sympathetic drive; overnight RMSSD reflects whether parasympathetic recovery returned.",
     );
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Resting Heart Rate")?.description,
     ).toBe(
-      "Immersion raises cardiac load while you are in the water; next-morning resting heart rate shows whether that stress is resolving. Compare same-device overnight or morning averages; persistent upward drift means the protocol is adding strain.",
+      "Immersion raises cardiac load; next-morning resting pulse shows whether the stress response has resolved.",
     );
   });
 
@@ -300,6 +300,10 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocolTab.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
       expectedSignalRouteIds,
     );
+    expect(protocolTab.mechanismChain).toContainEqual({
+      content: "Step floor · same source of truth · baseline-informed target",
+      label: "Daily dose",
+    });
 
     const rawSignalWithSourceKeys = rawProtocolTab.expectedSignals.find((signal) =>
       signal.description?.includes("source_artifact:")
@@ -461,6 +465,7 @@ function collectExperimentProtocolCopy(
   protocol: Pick<
     ExperimentProtocolLike,
     | "expectedSignals"
+    | "mechanismChain"
     | "measurementPaths"
     | "protocol"
     | "protocolFacts"
@@ -483,6 +488,7 @@ function collectExperimentProtocolCopy(
       signal.estimatedChange?.window ?? "",
       signal.unit ?? "",
     ]),
+    ...protocol.mechanismChain.flatMap((step) => [step.label, step.content]),
     ...protocol.measurementPaths.flatMap((path) => [
       path.label,
       ...path.notes,
