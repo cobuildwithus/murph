@@ -274,8 +274,22 @@ expectedSignalDescriptions:
     confidence: low
     basis: The closest 6-hour sleep analysis found no clear change in sleep quality, timing, duration, latency, insomnia severity, or sleep-apnea symptoms.
 whyItWorks:
-- The protocol tests whether a narrower daily eating window changes eating opportunity, total intake, and clock-time exposure. Direct 6-hour studies support possible short-term weight or selected metabolic signals, but effects are not universal and may depend on energy intake, adherence, clinical population, and whether the window is early or later in the day.
-- Mechanistic and acute controlled-feeding studies can explain why early clock-time exposure might matter for glucose, insulin, appetite, fat oxidation, and circadian markers, but they should not be converted into durable weight-loss, energy-expenditure, or long-term safety promises.
+  - "## Fasting extends low-insulin time\n\nAn 18h fast removes incoming calories long enough for insulin to drop and stored fuel to cover the gap. The body spends more of the day outside fed metabolism."
+  - "## Eating window changes timing\n\nA 6h window concentrates food into fewer circadian hours. Fuel handling improves when intake lands earlier and stays consistent."
+  - "## Intake decides weight signal\n\nWeight and glucose shift when the window reduces total energy or late eating. Cramming the same calories into 6h blunts the effect."
+mechanismChain:
+  -
+    label: "Daily rule"
+    content: "18h fast · 6h eating window · stable timing"
+  -
+    label: "Fasted block"
+    content: "Insulin falls; liver covers glucose; stored fuel use rises"
+  -
+    label: "Repeated signal"
+    content: "Longer low-insulin blocks and earlier fuel handling repeat"
+  -
+    label: "Adaptation"
+    content: "Glucose excursions flatten · weight drops if intake falls · hunger rhythm shifts"
 claims:
 - claimId: direct-six-hour-weight
   type: intervention_result

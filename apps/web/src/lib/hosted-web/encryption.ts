@@ -1,4 +1,10 @@
-import { decryptHostedWebString, encryptHostedWebString } from "../hosted-crypto/secure-box";
+import {
+  decryptHostedWebString,
+  encryptHostedWebString,
+  type HostedSecureBoxPrismaClient,
+} from "../hosted-crypto/secure-box";
+
+export type HostedWebEncryptionPrismaClient = HostedSecureBoxPrismaClient;
 
 export class HostedWebConfigurationError extends Error {
   readonly code: string;
@@ -27,14 +33,18 @@ export function isHostedWebConfigurationError(error: unknown): error is HostedWe
 export async function encryptHostedWebNullableString(input: {
   field: string;
   memberId: string;
+  prisma?: HostedWebEncryptionPrismaClient;
   value: string | null | undefined;
 }): Promise<string | null> {
   return encryptHostedWebString({
     aad: {
       field: input.field,
       purpose: "hosted-member-private-field",
+      rowId: input.memberId,
+      table: "hosted_member",
     },
     lane: "hosted-member-private-field",
+    prisma: input.prisma,
     scope: `hosted-member-private-field:${input.field}`,
     userId: input.memberId,
     value: input.value,
@@ -44,14 +54,18 @@ export async function encryptHostedWebNullableString(input: {
 export async function decryptHostedWebNullableString(input: {
   field: string;
   memberId: string;
+  prisma?: HostedWebEncryptionPrismaClient;
   value: string | null | undefined;
 }): Promise<string | null> {
   return decryptHostedWebString({
     aad: {
       field: input.field,
       purpose: "hosted-member-private-field",
+      rowId: input.memberId,
+      table: "hosted_member",
     },
     lane: "hosted-member-private-field",
+    prisma: input.prisma,
     scope: `hosted-member-private-field:${input.field}`,
     userId: input.memberId,
     value: input.value,

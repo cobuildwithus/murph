@@ -15,6 +15,7 @@ import { MarkdownView } from "@/src/components/ui/markdown-view";
 import { SectionLabel } from "@/src/components/ui/section-label";
 import type {
   Expert,
+  ExperimentMechanismChainStep,
   ExperimentMeasurementPath,
   ExperimentProtocolFact,
   ExperimentProtocolStep,
@@ -38,6 +39,7 @@ export interface ProtocolTabExperiment {
   experts: Expert[];
   id: string;
   measurementPaths: ExperimentMeasurementPath[];
+  mechanismChain: ExperimentMechanismChainStep[];
   podcastLinks?: { label: string; url: string }[];
   protocol: ExperimentProtocolStep[];
   protocolFacts: ExperimentProtocolFact[];
@@ -312,6 +314,7 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
   const {
     expectedSignals,
     measurementPaths,
+    mechanismChain,
     protocolFacts,
     protocol,
     protocolTips,
@@ -591,7 +594,7 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
               content={whyItWorksParagraphs.join("\n\n")}
               className="flex max-w-3xl flex-col gap-4 text-pretty [&>h2]:font-serif [&>h2]:text-lg/6 [&>h2]:font-normal [&>h2]:text-foreground [&>h2]:mt-1 [&>h2:first-child]:mt-0 [&>p]:text-[15px]/6 [&>p]:text-foreground"
             />
-            <MechanismCausalChain experimentId={experiment.id} />
+            <MechanismCausalChain steps={mechanismChain} />
           </div>
 
           {researchHref && (
@@ -1055,35 +1058,12 @@ function ProtocolShapeRail({
   );
 }
 
-const CAUSAL_CHAINS: Record<string, ReadonlyArray<{ label: string; content: string }>> = {
-  "norwegian-4x4": [
-    { label: "Session", content: "4 × (4′ hard · 3′ easy)" },
-    { label: "Acute physiology", content: "HR 85–95% HRmax · sustained aerobic stress" },
-    { label: "Adaptation", content: "heart pumps more per beat · more capillaries · muscles build more and stronger mitochondria" },
-  ],
-  "finnish-sauna": [
-    { label: "Session", content: "3×/week dry heat · 5–20 min · tolerable enough to cool down cleanly" },
-    { label: "Heat load", content: "Skin vessels open; heart rate rises; sweat carries heat out" },
-    { label: "Recovery", content: "Cooldown restores pressure, temperature, fluid balance, and alertness" },
-    { label: "Adaptation", content: "Earlier sweating; steadier vascular tone; lower resting strain" },
-  ],
-  "bryan-johnson-blueprint": [
-    { label: "Session", content: "93 °C dry sauna · daily · post-workout · groin ice" },
-    { label: "Acute physiology", content: "heat + exercise residue stack · sustained core-temp rise" },
-    { label: "Adaptation", content: "heat acclimation · plasma volume ↑ · less HR strain per dose" },
-    { label: "Outcome", content: "heat tolerance ↑ · fertility guardrail (groin cooling required)" },
-  ],
-  "red-light-glasses-before-bed": [
-    { label: "Session", content: "amber/red glasses · last 90–120 min before bed" },
-    { label: "Acute physiology", content: "melanopic retinal signal ↓ · alerting eases" },
-    { label: "Adaptation", content: "melatonin unsuppressed · core temp trends down" },
-    { label: "Outcome", content: "shorter sleep onset · less pre-bed wiredness" },
-  ],
-};
-
-function MechanismCausalChain({ experimentId }: { experimentId: string }) {
-  const steps = CAUSAL_CHAINS[experimentId];
-  if (!steps) {
+function MechanismCausalChain({
+  steps,
+}: {
+  steps: readonly ExperimentMechanismChainStep[];
+}) {
+  if (steps.length === 0) {
     return null;
   }
   return (

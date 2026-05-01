@@ -102,7 +102,7 @@ type StoredHostedAiUsageImmutableFields = Prisma.HostedAiUsageGetPayload<{
 export async function listHostedAiUsagePendingStripeMetering(input: {
   limit?: number;
   now?: Date | string;
-  prisma?: PrismaClient;
+  prisma?: HostedAiUsageClient;
 } = {}): Promise<HostedAiUsageStripeCandidate[]> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageDate(input.now ?? new Date().toISOString(), "now");
@@ -171,7 +171,7 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
 
   const candidates = await Promise.all(records.map(async (record) => {
     const stripeCustomerId = record.member.billingRef
-      ? (await readHostedMemberBillingPrivateState(record.member.billingRef)).stripeCustomerId
+      ? (await readHostedMemberBillingPrivateState(record.member.billingRef, prisma)).stripeCustomerId
       : null;
 
     if (!stripeCustomerId || !isAssistantUsageCredentialSource(record.credentialSource)) {
@@ -532,7 +532,7 @@ async function updateHostedAiUsageStripeMeterState(input: {
 
 export async function importHostedAiUsageRecords(input: {
   aiUsageBillingMode?: HostedAiUsageBillingMode;
-  prisma?: PrismaClient;
+  prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<ImportHostedAiUsageResult> {
@@ -792,7 +792,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
 async function resolveHostedAiUsageStripeMeterSource(input: {
   aiUsageBillingMode: HostedAiUsageBillingMode;
   memberId: string;
-  prisma: PrismaClient;
+  prisma: HostedAiUsageClient;
   record: AssistantUsageRecord;
   stripeCustomerIdCache: Map<string, Promise<string | null>>;
 }): Promise<AssistantUsageRecord["stripeMeterSource"]> {
@@ -824,7 +824,7 @@ async function resolveHostedAiUsageStripeMeterSource(input: {
 
 async function readHostedAiUsageMemberStripeCustomerId(input: {
   memberId: string;
-  prisma: PrismaClient;
+  prisma: HostedAiUsageClient;
   stripeCustomerIdCache: Map<string, Promise<string | null>>;
 }): Promise<string | null> {
   const cached = input.stripeCustomerIdCache.get(input.memberId);
@@ -844,7 +844,10 @@ async function readHostedAiUsageMemberStripeCustomerId(input: {
     },
   }).then((billingRef) =>
     billingRef
-      ? readHostedMemberBillingPrivateState(billingRef).then((privateState) => privateState.stripeCustomerId)
+      ? readHostedMemberBillingPrivateState(
+          billingRef,
+          input.prisma,
+        ).then((privateState) => privateState.stripeCustomerId)
       : null,
   );
 

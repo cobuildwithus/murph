@@ -1,4 +1,4 @@
-import { decodeHostedEncryptionKey, decodeHostedEncryptionKeyring } from "./crypto";
+import { decodeHostedDeviceRoutingIndexKey } from "./routing-index";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";
 import {
   readHostedDeviceSyncPublicBaseUrl,
@@ -8,11 +8,9 @@ import {
 export interface HostedDeviceSyncEnvironment {
   allowedMutationOrigins: string[];
   allowedReturnOrigins: string[];
-  encryptionKey: Buffer;
-  encryptionKeysByVersion: Readonly<Record<string, Buffer>>;
-  encryptionKeyVersion: string;
   isProduction: boolean;
   publicBaseUrl: string | null;
+  routingIndexKey: Buffer;
   trustedUserAssertionHeader: string;
   trustedUserSignatureHeader: string;
   trustedUserSigningSecret: string | null;
@@ -24,14 +22,8 @@ const DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS = [
 const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
   "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
 ] as const;
-const DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS = [
-  "DEVICE_SYNC_ENCRYPTION_KEY",
-] as const;
-const DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
-  "DEVICE_SYNC_ENCRYPTION_KEY_VERSION",
-] as const;
-const DEVICE_SYNC_ENCRYPTION_KEYRING_JSON_ENV_KEYS = [
-  "DEVICE_SYNC_ENCRYPTION_KEYRING_JSON",
+const HOSTED_DEVICE_ROUTING_INDEX_KEY_ENV_KEYS = [
+  "HOSTED_DEVICE_ROUTING_INDEX_KEY",
 ] as const;
 const DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER",
@@ -47,13 +39,18 @@ const REMOVED_DEVICE_SYNC_DEV_AUTH_ENV_KEYS = [
   "DEVICE_SYNC_DEV_USER_EMAIL",
   "DEVICE_SYNC_DEV_USER_NAME",
 ] as const;
+const REMOVED_DEVICE_SYNC_ENCRYPTION_ENV_KEYS = [
+  "DEVICE_SYNC_ENCRYPTION_KEY",
+  "DEVICE_SYNC_ENCRYPTION_KEY_VERSION",
+  "DEVICE_SYNC_ENCRYPTION_KEYRING_JSON",
+] as const;
 
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
   assertRemovedDeviceSyncDevAuthEnvUnset(source);
 
-  const encryptionKeyValue = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS);
-  const encryptionKeyVersion = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS) ?? "v1";
-  const encryptionKeyringJson = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEYRING_JSON_ENV_KEYS);
+  assertRemovedDeviceSyncEncryptionEnvUnset(source);
+
+  const routingIndexKeyValue = readEnv(source, HOSTED_DEVICE_ROUTING_INDEX_KEY_ENV_KEYS);
   const hasExplicitAllowedMutationOrigins = hasExplicitEnv(
     source,
     DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS,
@@ -65,11 +62,11 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
   const allowedMutationOrigins = parseCommaSeparatedList(source.DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS);
   const allowedReturnOrigins = parseCommaSeparatedList(source.DEVICE_SYNC_ALLOWED_RETURN_ORIGINS);
 
-  if (!encryptionKeyValue) {
-    throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY is required for the hosted device-sync control plane.");
+  if (!routingIndexKeyValue) {
+    throw new TypeError("HOSTED_DEVICE_ROUTING_INDEX_KEY is required for hosted device-sync routing indexes.");
   }
 
-  const encryptionKey = decodeHostedEncryptionKey(encryptionKeyValue);
+  const routingIndexKey = decodeHostedDeviceRoutingIndexKey(routingIndexKeyValue);
   const hostedPublicOrigin =
     hasExplicitAllowedMutationOrigins && hasExplicitAllowedReturnOrigins
       ? null
@@ -80,16 +77,9 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
       hasExplicitAllowedMutationOrigins ? allowedMutationOrigins : buildFallbackAllowedOrigins(hostedPublicOrigin),
     allowedReturnOrigins:
       hasExplicitAllowedReturnOrigins ? allowedReturnOrigins : buildFallbackAllowedOrigins(hostedPublicOrigin),
-    encryptionKey,
-    encryptionKeysByVersion: decodeHostedEncryptionKeyring({
-      currentKey: encryptionKey,
-      currentKeyVersion: encryptionKeyVersion,
-      keyringJson: encryptionKeyringJson,
-      label: "DEVICE_SYNC_ENCRYPTION_KEYRING_JSON",
-    }),
-    encryptionKeyVersion,
     isProduction: (source.NODE_ENV ?? "development") === "production",
     publicBaseUrl: readHostedDeviceSyncPublicBaseUrl(source),
+    routingIndexKey,
     trustedUserAssertionHeader:
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS)) ??
       "x-hosted-user-assertion",
@@ -136,6 +126,20 @@ function assertRemovedDeviceSyncDevAuthEnvUnset(source: NodeJS.ProcessEnv): void
 
   throw new TypeError(
     `${configuredKeys.join(", ")} are no longer supported. Hosted device-sync browser routes require signed hosted-user assertions.`,
+  );
+}
+
+function assertRemovedDeviceSyncEncryptionEnvUnset(source: NodeJS.ProcessEnv): void {
+  const configuredKeys = REMOVED_DEVICE_SYNC_ENCRYPTION_ENV_KEYS.filter((key) =>
+    Boolean(normalizeNullableString(source[key])),
+  );
+
+  if (configuredKeys.length === 0) {
+    return;
+  }
+
+  throw new TypeError(
+    `${configuredKeys.join(", ")} are no longer supported. Hosted device-sync credentials use hosted device secure-box roots; configure HOSTED_DEVICE_ROUTING_INDEX_KEY only for lookup HMACs.`,
   );
 }
 

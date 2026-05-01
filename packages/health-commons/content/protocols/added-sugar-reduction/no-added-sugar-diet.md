@@ -773,10 +773,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you get a chance to log yesterday's added-sugar sources? Totally fine either way — I just want the experiment record to stay accurate.
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, selected testPlanId, baseline and intervention dates, boundary rule, logging method, replacement plan, safety outcome, stop conditions, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-- 'The protocol works first as an exposure-reduction and measurement-fidelity experiment: Nutrition Facts labels make packaged-food Added Sugars observable, while food diaries, 24-hour recalls, FFQs, or label logs can capture unlabeled sources with measurement error rather than perfect consistency.'
-- 'Reducing added or free sugars is most plausible when the user identifies recurring high-frequency sources and replaces them deliberately, especially sugar-sweetened drinks and packaged snack or sweet foods.'
-- 'Downstream signals such as weight, waist, glucose, lipids, blood pressure, dental outcomes, cravings, and sweet taste can move for some people, but the evidence is mixed and often mediated by total energy intake, replacement foods, clinical context, or longer exposure windows.'
-- 'The safety mechanism is restraint: the protocol removes added sugar without removing needed calories, carbohydrates, fruit, dairy or alternatives, meals, hydration, or medically indicated fast carbohydrates.'
+  - "## Added sugar delivers fast energy with low fullness\n\nSugary drinks, desserts, sauces, and snacks add calories that disappear quickly. Removing them lowers the easiest energy surplus before changing the rest of the diet."
+  - "## Label rule cuts repeat sources\n\n0 g added sugar on labels turns a vague goal into a boundary. The mechanism is fewer fast carbohydrate hits and less insulin demand from recurring sources."
+  - "## Replacement decides the signal\n\nWeight, waist, and pressure move when removed sugar is not replaced by juice, refined starch, larger portions, or constant sweetener-driven snacking."
+mechanismChain:
+  -
+    label: "Rule"
+    content: "0 g added sugar boundary · drinks, labels, obvious sources"
+  -
+    label: "Acute effect"
+    content: "Fast sugar load drops; insulin demand falls after meals"
+  -
+    label: "Repeated signal"
+    content: "Lower liquid sugar · fewer dessert calories · less refined-snack exposure"
+  -
+    label: "Adaptation"
+    content: "Energy intake falls · weight trends down · waist changes if replacements stay light"
 claims:
 -
   claimId: dose-implementation-001-label-and-definition-guardrail

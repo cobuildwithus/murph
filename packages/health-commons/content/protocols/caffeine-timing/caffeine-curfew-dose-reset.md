@@ -448,10 +448,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you end up having any caffeine after your cutoff yesterday? Totally fine either way—I just want the experiment record to be accurate.
     confirmationPrompt: Show the safety outcome, bedtime anchor, curfew choice, 8-hour buffer, all-source logging plan, taper/off-ramp language, stop conditions, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-- Caffeine blocks adenosine signaling, and moving caffeine earlier can reduce the chance that sleep-relevant residual caffeine remains near bedtime, especially after larger doses or in slower-clearance users. This is a rationale for a personal timing test, not proof that an 8-hour buffer is sufficient for everyone.
-- 'The dose reset is a measurement move as much as an intervention: by counting all sources and limiting late exposure, the user can distinguish “caffeine was probably not the driver” from “late or high-dose caffeine may be part of the sleep pattern.”'
-- The 8-hour buffer is deliberately cautious because caffeine response and clearance vary across people. Some users may need a stricter variant, while others may find the protocol burdensome with little sleep signal.
-- Withdrawal can temporarily worsen headache, fatigue, sleepiness, mood, or perceived performance. That is why tapering, symptom tracking, and a first-few-days interpretation buffer matter.
+  - "## Caffeine blocks sleep pressure\n\nAdenosine builds across the day; caffeine blocks that signal. Late caffeine keeps the brain chemically less ready for sleep even when the clock says bedtime."
+  - "## Earlier cutoff clears the blockade\n\nMoving caffeine earlier gives clearance time. Less residual stimulant load means sleep pressure, melatonin timing, and quiet wakefulness stop fighting as hard."
+  - "## Dose reset exposes the driver\n\nLogging all sources separates timing from total intake. Coffee, tea, energy drinks, decaf, chocolate, and medicines all count because the nervous system sees caffeine, not categories."
+mechanismChain:
+  -
+    label: "Rule"
+    content: "All caffeine before late morning or ≥8h before bed"
+  -
+    label: "Acute effect"
+    content: "Less adenosine blockade; less stimulant arousal near bedtime"
+  -
+    label: "Repeated signal"
+    content: "Stronger sleep pressure · fewer night wake signals · lower arousal"
+  -
+    label: "Adaptation"
+    content: "Sleep onset shortens · sleep continuity improves · overnight pulse settles"
 claims:
 - claimId: direct-protocol-definition-all-source-eight-hour-late-morning
   type: evidence_scope

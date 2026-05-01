@@ -181,6 +181,7 @@ function toExperimentProtocolIndexEntry(
     protocolTips: [],
     protocolKeepInMind: [],
     protocolLogFields: [],
+    mechanismChain: [],
     whyItWorks: description,
     experts: [],
     researchStats: [],
@@ -340,6 +341,7 @@ function toExperimentDetail(
     ...(protocol.experimentOnboarding
       ? { experimentOnboarding: protocol.experimentOnboarding }
       : {}),
+    mechanismChain: (protocol.mechanismChain ?? []).map(cleanMechanismChainStepCopy),
     whyItWorks: cleanHealthCommonsUserFacingCopy(toWhyItWorks(protocol, claims)),
     experts: sourcePeople.map(toExpert),
     researchStats: toResearchStats({
@@ -394,6 +396,15 @@ function cleanProtocolFactCopy(
     label: cleanHealthCommonsUserFacingCopy(fact.label),
     value: cleanHealthCommonsUserFacingCopy(fact.value),
     ...(detail ? { detail } : {}),
+  };
+}
+
+function cleanMechanismChainStepCopy(
+  step: ExperimentProtocol["mechanismChain"][number],
+): ExperimentProtocol["mechanismChain"][number] {
+  return {
+    content: cleanHealthCommonsUserFacingCopy(step.content),
+    label: cleanHealthCommonsUserFacingCopy(step.label),
   };
 }
 

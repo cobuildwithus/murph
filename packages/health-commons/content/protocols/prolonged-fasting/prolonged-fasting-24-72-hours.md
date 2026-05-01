@@ -612,7 +612,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you end up continuing or ending the fast? Totally fine either way — I just want the experiment record and safety notes to be accurate.
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, selected duration, fasting type, safety-screen outcome, exact start/end/refeed windows, monitoring/logging fields, stop conditions, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-- Source-backed mechanism, measurement, mixed-evidence, and safety interpretation belongs in the `claims` entries below; do not add uncited mechanism, benefit, safety, or measurement claims here.
+  - "## Food stops; liver covers glucose\n\nAfter the meal supply ends, liver glycogen and gluconeogenesis hold blood glucose up. Insulin falls because incoming carbohydrate is gone."
+  - "## Fuel shifts toward fat and ketones\n\nAs glycogen drops, fat oxidation rises; the liver makes beta-hydroxybutyrate. Ketones mark the fuel switch, not a target to chase."
+  - "## Refeed tests the exit\n\nThe first meal turns insulin, gut load, and fluid-electrolyte shifts back on. Safe completion includes the refeed, not just the fasting hours."
+mechanismChain:
+  -
+    label: "Session"
+    content: "24–72h water-only fast · planned refeed"
+  -
+    label: "Fuel switch"
+    content: "Glycogen falls; insulin drops; fat oxidation and ketones rise"
+  -
+    label: "Strain check"
+    content: "Fluids, glucose, pulse, sleep, and symptoms show reserve"
+  -
+    label: "Refeed"
+    content: "Insulin and gut load restart; tolerance decides outcome"
 claims:
 - claimId: scope-24-72h-operational-not-consensus-prolonged
   type: evidence_scope

@@ -557,6 +557,32 @@ describe("@murphai/contracts health commons schemas", () => {
       success: false,
     });
     expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validProtocolVariantPageWithOnboarding,
+        mechanismChain: [
+          {
+            label: "Session",
+            content: "Repeat the protocol dose under stable conditions.",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      success: true,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validSourceArtifactPage,
+        mechanismChain: [
+          {
+            label: "Session",
+            content: "This field belongs on protocol_variant pages only.",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
       safeParseContract(healthCommonsArtifactPointerSchema, {
         ...validArtifactPointer,
         objectKey: undefined,

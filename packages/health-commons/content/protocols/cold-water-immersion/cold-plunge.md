@@ -546,9 +546,22 @@ experimentOnboarding:
     missedLogFollowupCopy: I can remind you to log temperature, duration, mood, symptoms, and rewarming after planned cold-plunge sessions.
     confirmationPrompt: Confirm the safety screen, measured water temperature, first-session duration, exit/rescue and gentle rewarming plan, adult-nearby first-session supervision, mood scale, and stop rules before creating the Cold Plunge experiment.
 whyItWorks:
-- Cold water is a strong sensory and autonomic stressor; acute mood changes may reflect perceived challenge, arousal, stress-hormone timing, and post-exposure appraisal rather than a settled disease mechanism.
-- Repeated exposures may reduce some cold-shock and discomfort responses, but habituation is specific and incomplete rather than proof that the protocol broadly improves health.
-- Safety matters because the same cold-shock physiology that makes the exposure salient can also create gasping, cardiovascular strain, and drowning/submersion hazards.
+  - "## Cold shock defends core\n\nCold water hits skin thermoreceptors fast. Breathing spikes, vessels clamp down, heart rate and pressure shift; blood moves inward to defend core temperature."
+  - "## Rewarming is part of the dose\n\nThe session is not over at exit. Shivering, vasoconstriction release, and rewarming decide whether the stress resolves cleanly or carries into recovery."
+  - "## Repeated exposure quiets alarm\n\nWith controlled repetition, cold shock becomes less violent: breathing steadies faster, panic drops, and rewarming gets smoother. Pushing colder or longer defeats the adaptation."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Brief head-out cold water · measured temperature · controlled exit"
+  -
+    label: "Cold shock"
+    content: "Cold receptors fire; breathing spikes; vessels constrict; blood shifts inward"
+  -
+    label: "Repeated signal"
+    content: "Noradrenaline · thermal stress · rewarming repeat"
+  -
+    label: "Adaptation"
+    content: "Cold shock quiets · breathing steadies · rewarming gets smoother"
 claims:
 - claimId: cold-plunge-scope-controlled-head-out
   type: design_guardrail

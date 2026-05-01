@@ -603,9 +603,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you get a protein log for today? Totally fine either way — I just want the experiment record to reflect what happened.
     confirmationPrompt: Show the protocol key, selected testPlanId, dose denominator, body-weight value, target g/kg/day and grams/day, baseline/intervention dates, safety-screen outcome, primary outcome, logging fields, confounders, and reminder policy before creating any private run or automation.
 whyItWorks:
-- 'A higher daily protein floor can change body-composition partitioning, satiety, and diet structure in some contexts, but the most direct favorable signals come mainly from energy-restricted trials around 1.5–1.6 g/kg/day rather than from a universal weight-loss mechanism.'
-- 'Protein can increase fullness or reduce short-term energy intake in some preload and short feeding contexts, but those mechanisms do not guarantee durable free-living weight loss; this is why satiety and calories are logged rather than assumed.'
-- 'Protein quality, source mix, fiber preservation, energy balance, and training context are part of the mechanism and interpretation because the same gram target can be implemented as lean food-first meals, supplement-assisted gaps, high-saturated-fat drift, low-fiber displacement, or a training cointervention.'
+  - "## Amino acids set repair floor\n\nProtein supplies essential amino acids, especially leucine, for muscle protein synthesis. A daily floor prevents low-intake days from starving repair."
+  - "## Protein slows the meal\n\nHigher-protein meals empty more slowly and trigger stronger satiety signals. Hunger drops when protein replaces lower-satiety calories instead of just adding more food."
+  - "## Training decides muscle signal\n\nProtein supports adaptation; resistance training creates the strongest demand. Lean-mass changes come from amino acids plus load, not protein alone."
+mechanismChain:
+  -
+    label: "Daily dose"
+    content: "Protein floor · real food · spread across meals"
+  -
+    label: "Acute effect"
+    content: "Essential amino acids reach muscle; satiety signals rise"
+  -
+    label: "Repeated signal"
+    content: "Muscle protein synthesis pulses · slower digestion · fewer low-protein days"
+  -
+    label: "Adaptation"
+    content: "Lean mass holds · hunger drops · training recovery gets substrate"
 claims:
 -
   claimId: protein-floor-target-boundary

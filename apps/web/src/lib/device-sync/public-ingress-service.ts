@@ -185,11 +185,11 @@ export class HostedDeviceSyncPublicIngressService {
   }
 
   toBrowserConnection(account: PublicDeviceSyncAccount): HostedBrowserDeviceSyncConnection {
-    return toHostedBrowserDeviceSyncConnection(account, this.context.env.encryptionKey);
+    return toHostedBrowserDeviceSyncConnection(account, this.context.env.routingIndexKey);
   }
 
   createBrowserConnectionId(connectionId: string): string {
-    return createHostedBrowserConnectionId(this.context.env.encryptionKey, connectionId);
+    return createHostedBrowserConnectionId(this.context.env.routingIndexKey, connectionId);
   }
 
   private async requireOwnedBrowserConnection(

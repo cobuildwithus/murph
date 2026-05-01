@@ -10,7 +10,7 @@ import type {
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
-import type { HostedSecretCodec } from "./crypto";
+import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
@@ -75,7 +75,11 @@ export class PrismaDeviceSyncControlPlaneStore
   private readonly localHeartbeats: PrismaHostedLocalHeartbeatStore;
   private readonly tokenAudits: PrismaHostedTokenAuditStore;
 
-  constructor(input: { prisma: PrismaClient; codec?: HostedSecretCodec; providerAccountBlindIndexKey?: Buffer | null }) {
+  constructor(input: {
+    prisma: PrismaClient;
+    codec?: HostedDeviceSyncSecretTestCodec;
+    providerAccountBlindIndexKey?: Buffer | null;
+  }) {
     this.prisma = input.prisma;
     this.oauthSessions = new PrismaHostedOAuthSessionStore(this.prisma);
     this.connections = new PrismaHostedConnectionStore({

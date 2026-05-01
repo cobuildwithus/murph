@@ -4,6 +4,7 @@ import {
 } from "@prisma/client";
 
 import { readHostedMemberRoutingPrivateState } from "./member-private-codecs";
+import type { HostedOnboardingReadClient } from "./shared";
 
 export const hostedMemberRoutingStateSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
@@ -80,8 +81,9 @@ export interface HostedMemberRoutingLookup {
 
 export async function projectHostedMemberRoutingState(
   routing: HostedMemberRoutingRecord,
+  prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberRoutingStateSnapshot> {
-  const privateState = await readHostedMemberRoutingPrivateState(routing);
+  const privateState = await readHostedMemberRoutingPrivateState(routing, prisma);
 
   return {
     linqChatId: privateState.linqChatId,
@@ -98,8 +100,9 @@ export async function projectHostedMemberRoutingState(
 export async function projectHostedMemberRoutingLookup(
   routing: HostedMemberRoutingLookupRecord,
   matchedBy: HostedMemberRoutingLookupMatch,
+  prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberRoutingLookup> {
-  const routingState = await projectHostedMemberRoutingState(routing);
+  const routingState = await projectHostedMemberRoutingState(routing, prisma);
 
   return {
     core: routing.member,

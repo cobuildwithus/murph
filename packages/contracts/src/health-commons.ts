@@ -1709,6 +1709,17 @@ export type HealthCommonsBiomarkerCommunityOutcomeSummary = z.infer<
   typeof healthCommonsBiomarkerCommunityOutcomeSummarySchema
 >;
 
+export const healthCommonsMechanismChainStepSchema = z
+  .object({
+    label: shortStringSchema,
+    content: longStringSchema,
+  })
+  .strict();
+
+export type HealthCommonsMechanismChainStep = z.infer<
+  typeof healthCommonsMechanismChainStepSchema
+>;
+
 export const healthCommonsDisambiguationOptionSchema = z
   .object({
     key: healthCommonsKeySchema,
@@ -1746,6 +1757,7 @@ export const healthCommonsPageFrontmatterSchema = z
     measurementPlan: healthCommonsMeasurementPlanSchema.optional(),
     experimentOnboarding: healthCommonsExperimentOnboardingSchema.optional(),
     whyItWorks: z.array(longStringSchema).optional(),
+    mechanismChain: z.array(healthCommonsMechanismChainStepSchema).optional(),
     claims: z.array(healthCommonsClaimSchema).optional(),
     safety: healthCommonsSafetySchema.optional(),
     sourceIdentity: healthCommonsSourceIdentitySchema.optional(),
@@ -1841,6 +1853,13 @@ export const healthCommonsPageFrontmatterSchema = z
         code: z.ZodIssueCode.custom,
         message: "measurementPlan is only valid on protocol_variant pages.",
         path: ["measurementPlan"],
+      });
+    }
+    if (page.entityType !== "protocol_variant" && page.mechanismChain) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "mechanismChain is only valid on protocol_variant pages.",
+        path: ["mechanismChain"],
       });
     }
 

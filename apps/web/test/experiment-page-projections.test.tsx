@@ -157,6 +157,7 @@ describe("experiment page projections", () => {
       baselineDays: fullProtocol.baselineDays,
       durationDays: fullProtocol.durationDays,
       id: "finnish-sauna",
+      mechanismChain: fullProtocol.mechanismChain,
       protocol: fullProtocol.protocol,
       protocolFacts: fullProtocol.protocolFacts,
       protocolTips: fullProtocol.protocolTips,

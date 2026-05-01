@@ -8,6 +8,7 @@ import {
   type HostedCryptoLane,
   type HostedSecureBoxAadFields,
 } from "@murphai/runtime-state";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "hosted-member-private-field",
@@ -32,6 +33,8 @@ type HostedSecureBoxStringTestCodec = {
   }): string;
 };
 
+export type HostedSecureBoxPrismaClient = PrismaClient | Prisma.TransactionClient;
+
 const globalForHostedSecureBoxTests = globalThis as typeof globalThis & {
   __murphHostedSecureBoxStringTestCodec?: HostedSecureBoxStringTestCodec;
 };
@@ -53,6 +56,7 @@ export function setHostedSecureBoxStringTestCodecForTests(
 export async function encryptHostedWebString(input: {
   aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
   lane: HostedCryptoLane;
+  prisma?: HostedSecureBoxPrismaClient;
   scope: string;
   userId: string;
   value: string | null | undefined;
@@ -76,6 +80,7 @@ export async function encryptHostedWebString(input: {
   const { unwrapHostedDomainRootForWeb } = await import("./domain-root-store");
   const { envelope, rootKey } = await unwrapHostedDomainRootForWeb({
     domain,
+    prisma: input.prisma,
     userId: input.userId,
   });
   try {
@@ -106,6 +111,7 @@ export async function encryptHostedWebString(input: {
 export async function decryptHostedWebString(input: {
   aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
   lane: HostedCryptoLane;
+  prisma?: HostedSecureBoxPrismaClient;
   scope: string;
   userId: string;
   value: string | null | undefined;
@@ -133,6 +139,7 @@ export async function decryptHostedWebString(input: {
   const { unwrapHostedDomainRootForWeb } = await import("./domain-root-store");
   const { envelope, rootKey } = await unwrapHostedDomainRootForWeb({
     domain,
+    prisma: input.prisma,
     userId: input.userId,
   });
   try {

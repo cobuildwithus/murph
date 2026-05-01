@@ -621,9 +621,22 @@ experimentOnboarding:
     missedLogFollowupCopy: "No problem if the log was missed. Do you want to record the wake time and whether sleep felt safe enough today?"
     confirmationPrompt: "Confirm the exact protocol key, 7-day baseline, 28-day intervention, target wake window, sleep-opportunity guardrail, measurement method, stop conditions, and reminder policy before creating the run."
 whyItWorks:
-  - "Wake time is a practical anchor for sleep timing regularity; the direct evidence base uses broader sleep-wake regularization and short regular-timing interventions rather than a pure wake-time-only trial base."
-  - "Protecting sleep opportunity is the mechanism guardrail: a stable wake window is only useful when it does not create chronic short sleep or daytime impairment."
-  - "Regularity metrics, diaries, and wearables can make the behavior visible over repeated nights, but measurement sources require diary correction and caution against diagnostic interpretations."
+  - "## Wake time anchors the clock\n\nFinal wake time sets the next circadian day. Light, movement, meals, and alertness start from that anchor; irregular wake times keep the clock sliding."
+  - "## Sleep opportunity protects the mechanism\n\nConsistency only works when bedtime leaves enough sleep. A fixed wake time that cuts sleep creates debt, not rhythm."
+  - "## Regularity reduces drift\n\nAcross weeks, the system stops re-solving timing every morning. Sleep pressure builds on schedule; evening sleep onset and daytime alertness become less chaotic."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Same wake/rise window daily · sleep opportunity protected"
+  -
+    label: "Morning cue"
+    content: "Light, movement, and meals hit the clock at the same phase"
+  -
+    label: "Repeated signal"
+    content: "Sleep pressure builds on schedule; circadian timing stops sliding"
+  -
+    label: "Adaptation"
+    content: "Less social jetlag · steadier sleep onset · lower daytime sleepiness"
 claims:
 
   -

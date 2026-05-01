@@ -191,6 +191,8 @@ export function mergeCloudflareLocalEnv(input: {
     readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEY_VERSION") ?? "v1";
   const hostedWebEncryptionKey =
     readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEY") ?? createEnvelopeKey();
+  const hostedDeviceRoutingIndexKey =
+    readHostedLocalKey("HOSTED_DEVICE_ROUTING_INDEX_KEY") ?? createEnvelopeKey();
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
   const workerOrigin =
     `${input.config.workerProtocol}://${input.config.workerHost}:${input.config.workerPort}`;
@@ -247,6 +249,7 @@ export function mergeCloudflareLocalEnv(input: {
       ? { HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: authoritySigningKey.privateJwkJson }
       : {}),
     ...(localKmsWrapKey ? { HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: localKmsWrapKey } : {}),
+    HOSTED_DEVICE_ROUTING_INDEX_KEY: hostedDeviceRoutingIndexKey,
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
@@ -462,6 +465,7 @@ export function buildHostedLocalDevOverrides(
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_DEVICE_ROUTING_INDEX_KEY"),
     ...(hostedWakeEncryptionKey
       ? {
         HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,

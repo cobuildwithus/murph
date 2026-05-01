@@ -16,11 +16,9 @@ const NOW = new Date("2026-03-25T12:00:00.000Z");
 const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   allowedMutationOrigins: [],
   allowedReturnOrigins: [],
-  encryptionKey: Buffer.alloc(32, 0),
-  encryptionKeysByVersion: { v1: Buffer.alloc(32, 0) },
-  encryptionKeyVersion: "v1",
   isProduction: false,
   publicBaseUrl: "https://control.example.test/api/device-sync",
+  routingIndexKey: Buffer.alloc(32, 0),
   trustedUserAssertionHeader: "x-hosted-user-assertion",
   trustedUserSignatureHeader: "x-hosted-user-signature",
   trustedUserSigningSecret: "test-signing-secret",

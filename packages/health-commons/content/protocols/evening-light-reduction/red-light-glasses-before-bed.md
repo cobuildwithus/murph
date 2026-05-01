@@ -400,9 +400,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you end up wearing the glasses before bed last night? Totally fine either way; I just want the experiment record to be accurate.
     confirmationPrompt: Summarize the exact protocol key, current page revision, run-spec revision, selected test plan, baseline/intervention dates, safety screen outcome, bedtime anchor, wear-window target, lens-confidence choice, logging expectations, stop conditions, and reminder policy before creating any active experiment or automation.
 whyItWorks:
-- The underlying idea is to lower short-wavelength or melanopic retinal input during the pre-bed window, when light can act as an alerting and circadian signal [source_artifact:evening-light-reduction-pmid-16842544; source_artifact:evening-light-reduction-pmid-35298459; source_artifact:evening-light-reduction-pmid-40728371].
-- High-filtering eyewear can reduce that signal only if the lens spectrum, fit, and surrounding room or screen light meaningfully reduce the dose reaching the eyes [source_artifact:evening-light-reduction-doi-10.25039-s026.2018; source_artifact:pmid-34983271; source_artifact:pmid-31696535].
-- If the reduced evening light signal matters for the user, a practical first read is feeling less wired/sleepier or falling asleep more easily; HRV, resting heart rate, and sleep stages are downstream exploratory signals [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515; source_artifact:evening-light-reduction-pmid-29991437].
+  - "## Blue-green light signals daytime\n\nEvening short-wavelength light hits melanopsin pathways and tells the clock to stay alert. Melatonin suppression is the signal glasses are trying to reduce."
+  - "## Lens blocks retinal input\n\nAmber or red lenses work only when they meaningfully reduce melanopic light reaching the eye. Color alone is not dose; spectrum and fit matter."
+  - "## Sleep onset changes when light was the driver\n\nThe glasses help when late light is keeping the system awake. If the room is already dim, screen arousal or stress may dominate instead."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Amber/red glasses · 90–120 min pre-bed"
+  -
+    label: "Retinal signal"
+    content: "Melanopic light falls; melatonin suppression drops"
+  -
+    label: "Repeated signal"
+    content: "Evening clock input stays dim while routine continues"
+  -
+    label: "Adaptation"
+    content: "Pre-bed alerting falls · sleep onset eases · efficiency improves secondarily"
 claims:
 - claimId: adult-prebed-filtering-glasses-scope
   type: evidence_scope

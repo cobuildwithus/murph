@@ -187,6 +187,23 @@ safety:
     - mobility_limitation
   stopIf:
     - chest pain, anginal-equivalent symptoms, fainting, unexplained exercise-related dizziness, severe breathlessness, palpitations, neurologic symptoms, glucose safety symptoms, pain that does not settle, or heat illness signs occur
+whyItWorks:
+  - "## Easy effort lasts long enough\n\nConversational cardio keeps oxygen demand steady without high recovery cost. The dose is volume: 35–60 min, 3x/week, repeatable."
+  - "## Mitochondria get steady demand\n\nSustained low-intensity work keeps capillary flow, fat oxidation, and oxygen use active. Muscle adapts to handle fuel aerobically instead of spiking and crashing."
+  - "## Base improves by accumulation\n\nSmall changes compound across sessions: higher stroke volume, better vascular tone, stronger mitochondrial capacity. The signal is gradual, not dramatic."
+mechanismChain:
+  -
+    label: "Session"
+    content: "3x/week conversational cardio · 35–60 min"
+  -
+    label: "Aerobic load"
+    content: "Oxygen demand stays steady; fat oxidation and capillary flow remain active"
+  -
+    label: "Repeated signal"
+    content: "Low-intensity aerobic volume accumulates without high recovery cost"
+  -
+    label: "Adaptation"
+    content: "Mitochondria improve · stroke volume rises · resting strain drops"
 claims:
 
   -

@@ -233,9 +233,22 @@ expectedSignalDescriptions:
       basis: "The bedtime app-guided mindfulness pilot reported a PSAS change of -7.7 points, and structured mindfulness insomnia trials report lower pre-sleep arousal. Mapping those scales to a simple nightly 0-10 rating is approximate, and breathing-only arousal-scale estimates were not extracted."
     protocolProminence: focus
 whyItWorks:
-  - "Gentle slow breathing near 5-6 breaths per minute can increase cardiorespiratory coupling and vagal/HRV signals, which supports a plausible calming mechanism but not a guarantee of better sleep."
-  - "Mindfulness and meditation interventions can reduce cognitive or emotional arousal in some insomnia-adjacent contexts, but the extracted evidence is mostly guided, structured, clinical, or bundled rather than silent unguided bedtime meditation."
-  - "The common practical mechanism is downshifting pre-sleep arousal and building a stable bedtime cue, not forcing sleep or optimizing sleep stages; measurement should keep arousal context visible."
+  - "## Slow breathing couples heart and lungs\n\nBreathing near 5–6 breaths/min amplifies heart-rate oscillation with each breath. The vagal brake becomes easier to engage before bed."
+  - "## Attention gets a low-threat rhythm\n\nThe breath gives the mind a simple task. Planning, threat scanning, and clock-watching lose repetition time."
+  - "## Sleep comes from lower arousal\n\nThe practice does not force sleep. It reduces pre-sleep activation so the wake-to-sleep transition has less resistance."
+mechanismChain:
+  -
+    label: "Session"
+    content: "5–10 min slow breathing before bed"
+  -
+    label: "Acute physiology"
+    content: "Breath rhythm slows; heart-rate oscillation strengthens; attention narrows"
+  -
+    label: "Repeated signal"
+    content: "Same pre-bed cue lowers arousal before lights-out"
+  -
+    label: "Adaptation"
+    content: "Vagal braking steadies · sleep onset shortens · RMSSD holds higher"
 claims:
 
   -

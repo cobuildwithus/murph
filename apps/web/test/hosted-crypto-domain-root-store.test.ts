@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 
-import { Prisma } from "@prisma/client";
+import { Prisma, type HostedMemberIdentity } from "@prisma/client";
 import {
   findHostedDomainRootWrap,
   parseHostedDomainRootKeyEnvelope,
@@ -10,6 +10,12 @@ import {
 } from "@murphai/runtime-state";
 import { afterEach, expect, test, vi } from "vitest";
 
+import { createHostedSecretCodec } from "../src/lib/device-sync/crypto";
+import {
+  decryptHostedWebNullableString,
+  encryptHostedWebNullableString,
+} from "../src/lib/hosted-web/encryption";
+import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
 import type {
   GcpKmsAsymmetricSignInput,
   GcpKmsEncryptInput,
@@ -39,6 +45,7 @@ vi.mock("../src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
 
 afterEach(() => {
   gcpKmsMock.client = null;
+  restoreHostedSecureBoxTestCodec();
   vi.unstubAllEnvs();
 });
 
@@ -182,10 +189,103 @@ test("web runtime crypto context fails closed instead of provisioning missing wo
   assert.equal(signCalls.length, 0);
 });
 
-function createCapturingTransaction(): {
+test("hosted web private-field encryption uses the supplied transaction for lazy domain roots", async () => {
+  const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture();
+
+  const ciphertext = await encryptHostedWebNullableString({
+    field: "hosted-member-identity.phone-number",
+    memberId: "member-test-transaction",
+    prisma: tx.prisma,
+    value: "redacted-phone-token",
+  });
+
+  assert.equal(tx.persistedEnvelopes.length, 1);
+  assert.equal(tx.persistedEnvelopes[0]?.domain, "control");
+  assert.equal(tx.persistedEnvelopes[0]?.userId, "member-test-transaction");
+  assert.equal(encryptCalls.length, 1);
+  assert.equal(signCalls.length, 1);
+
+  await expect(decryptHostedWebNullableString({
+    field: "hosted-member-identity.phone-number",
+    memberId: "member-test-transaction",
+    prisma: tx.prisma,
+    value: ciphertext,
+  })).resolves.toBe("redacted-phone-token");
+  assert.equal(tx.persistedEnvelopes.length, 1);
+});
+
+test("hosted member identity upsert keeps private-field crypto inside the caller transaction", async () => {
+  const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture(
+    createHostedMemberIdentityTransaction,
+  );
+  const { upsertHostedMemberIdentity } = await import(
+    "../src/lib/hosted-onboarding/hosted-member-identity-store"
+  );
+
+  await expect(upsertHostedMemberIdentity({
+    maskedPhoneNumberHint: "redacted-phone-hint",
+    memberId: "member-test-upsert",
+    phoneLookupKey: "hbidx:phone:v1:test",
+    phoneNumber: "redacted-phone-token",
+    phoneNumberVerifiedAt: null,
+    prisma: tx.prisma,
+    privyUserId: null,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: "redacted-phone-token",
+    walletAddress: null,
+    walletChainType: null,
+    walletCreatedAt: null,
+    walletProvider: null,
+  })).resolves.toMatchObject({
+    memberId: "member-test-upsert",
+    phoneNumber: "redacted-phone-token",
+    signupPhoneNumber: "redacted-phone-token",
+  });
+
+  assert.equal(tx.persistedEnvelopes.length, 1);
+  assert.equal(tx.persistedEnvelopes[0]?.domain, "control");
+  assert.equal(tx.persistedEnvelopes[0]?.userId, "member-test-upsert");
+  assert.equal(encryptCalls.length, 1);
+  assert.equal(signCalls.length, 1);
+});
+
+async function createHostedWebCryptoTransactionFixture(
+  createTransaction: () => HostedCryptoTestTransaction = createCapturingTransaction,
+): Promise<{
+  encryptCalls: GcpKmsEncryptInput[];
+  signCalls: GcpKmsAsymmetricSignInput[];
+  tx: HostedCryptoTestTransaction;
+}> {
+  setHostedSecureBoxStringTestCodecForTests(null);
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  gcpKmsMock.client = createLocalKmsClient({
+    encryptCalls,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  return {
+    encryptCalls,
+    signCalls,
+    tx: createTransaction(),
+  };
+}
+
+type HostedCryptoTestTransaction = {
   persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[];
   prisma: Prisma.TransactionClient;
-} {
+};
+
+function createCapturingTransaction(): HostedCryptoTestTransaction {
   const persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[] = [];
   const tx = {
     $executeRaw: async (...args: Parameters<Prisma.TransactionClient["$executeRaw"]>) => {
@@ -216,6 +316,61 @@ function createCapturingTransaction(): {
   };
   // Narrow test double: domain-root-store only uses Prisma raw query helpers here.
   return { persistedEnvelopes, prisma: tx as Prisma.TransactionClient };
+}
+
+function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
+  const tx = createCapturingTransaction();
+  const hostedMemberIdentity = {
+    async upsert(input: {
+      create: Prisma.HostedMemberIdentityUncheckedCreateInput;
+    }): Promise<HostedMemberIdentity> {
+      return buildHostedMemberIdentityRecord(input.create);
+    },
+  };
+
+  return {
+    persistedEnvelopes: tx.persistedEnvelopes,
+    prisma: Object.assign(tx.prisma, {
+      hostedMemberIdentity,
+    }),
+  };
+}
+
+function buildHostedMemberIdentityRecord(
+  input: Prisma.HostedMemberIdentityUncheckedCreateInput,
+): HostedMemberIdentity {
+  const now = new Date("2026-05-02T00:00:00.000Z");
+  return {
+    createdAt: now,
+    maskedPhoneNumberHint: nullableString(input.maskedPhoneNumberHint),
+    memberId: input.memberId,
+    phoneLookupKey: nullableString(input.phoneLookupKey),
+    phoneNumberEncrypted: nullableString(input.phoneNumberEncrypted),
+    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt instanceof Date
+      ? input.phoneNumberVerifiedAt
+      : null,
+    privyUserIdEncrypted: nullableString(input.privyUserIdEncrypted),
+    privyUserLookupKey: nullableString(input.privyUserLookupKey),
+    signupPhoneCodeSendAttemptId: nullableString(input.signupPhoneCodeSendAttemptId),
+    signupPhoneCodeSendAttemptStartedAt:
+      input.signupPhoneCodeSendAttemptStartedAt instanceof Date
+        ? input.signupPhoneCodeSendAttemptStartedAt
+        : null,
+    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt instanceof Date
+      ? input.signupPhoneCodeSentAt
+      : null,
+    signupPhoneNumberEncrypted: nullableString(input.signupPhoneNumberEncrypted),
+    updatedAt: now,
+    walletAddressEncrypted: nullableString(input.walletAddressEncrypted),
+    walletAddressLookupKey: nullableString(input.walletAddressLookupKey),
+    walletChainType: nullableString(input.walletChainType),
+    walletCreatedAt: input.walletCreatedAt instanceof Date ? input.walletCreatedAt : null,
+    walletProvider: nullableString(input.walletProvider),
+  };
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 function capturePersistedEnvelope(
@@ -250,8 +405,10 @@ function createLocalKmsClient(input: {
         signature: Buffer.from(new Uint8Array(signature)).toString("base64"),
       };
     },
-    async decrypt() {
-      throw new Error("Unexpected hosted crypto decrypt in runtime context test.");
+    async decrypt(decryptInput) {
+      return {
+        plaintext: Buffer.from(decryptInput.ciphertext, "base64"),
+      };
     },
     async encrypt(encryptInput) {
       input.encryptCalls.push(encryptInput);
@@ -261,6 +418,41 @@ function createLocalKmsClient(input: {
       };
     },
   };
+}
+
+function restoreHostedSecureBoxTestCodec(): void {
+  const hostedSecureBoxTestCodec = createHostedSecretCodec({
+    key: Buffer.alloc(32, 7),
+    keyVersion: "test-v1",
+  });
+
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(input) {
+      const decoded = JSON.parse(hostedSecureBoxTestCodec.decrypt(input.value)) as {
+        lane?: string;
+        scope?: string;
+        userId?: string;
+        value?: string;
+      };
+      if (
+        decoded.lane !== input.lane
+        || decoded.scope !== input.scope
+        || decoded.userId !== input.userId
+        || typeof decoded.value !== "string"
+      ) {
+        throw new Error("Hosted secure-box test codec metadata mismatch.");
+      }
+      return decoded.value;
+    },
+    encrypt(input) {
+      return hostedSecureBoxTestCodec.encrypt(JSON.stringify({
+        lane: input.lane,
+        scope: input.scope,
+        userId: input.userId,
+        value: input.value,
+      }));
+    },
+  });
 }
 
 function stubHostedCryptoEnv(input: {

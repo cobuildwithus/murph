@@ -542,10 +542,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you end up doing today's sauna session? Totally fine either way, I just want the experiment record to be accurate.
     confirmationPrompt: Show the source-attributed nature of the protocol, safety-screen outcome, chosen run variant, sauna access and temperature, schedule, hydration plan, logging fields, stop conditions, baseline/intervention dates, selected testPlanId, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-  - This routine uses the same dry-sauna engine as Finnish sauna, but with a stronger dose: 93 °C / 200 °F, daily exposure, and usually post-workout timing. Skin blood vessels open, sweating accelerates, heart rate rises, and the cardiovascular system has to support cooling while exercise residue may already be raising heat, catecholamines, and fluid loss.
-  - Johnson’s newer core-temperature framing treats air temperature and minutes as rough proxies; the proposed biological dose is how high core temperature rises and how long it stays elevated. Face or neck cooling can make the session more tolerable and change thermal feedback, but it also changes the core-temperature curve you are trying to interpret.
-  - With daily repetition, the plausible adaptation target is heat acclimation: earlier sweating, larger plasma volume, better tolerance of skin blood-flow shifts, and less heart-rate strain at the same heat exposure. The same dose can also become too much if workout load, dehydration, or poor sleep keeps the recovery side from catching up.
-  - The groin-cooling tactic is a source-specific local-temperature guardrail. Independent human sauna studies show that repeated sauna heat can temporarily affect semen and sperm markers, while Bryan Johnson reports fertility-marker problems without groin cooling and describes groin ice as part of his routine. That combination supports a fertility safety boundary, not a claim that groin ice makes the protocol fertility-safe.
+  - "## Heat stacks on workout stress\n\nPost-workout sauna is not passive rest. Exercise already raises heat, catecholamines, heart rate, and fluid loss; 93 °C dry heat adds another circulatory load before recovery is complete."
+  - "## Cooling tactics change dose\n\nGroin, face, or neck cooling changes local temperature and thermal feedback. It does not make the routine universally safe; it changes what heat signal the body receives."
+  - "## Adaptation is heat handling\n\nRepeated heat exposure trains earlier sweating, larger plasma volume, steadier skin blood flow, and lower strain at the same temperature—when sleep, hydration, and training load recover."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Daily post-workout dry sauna · 93 °C · 20 min"
+  -
+    label: "Heat load"
+    content: "Exercise residue plus heat redirects blood to skin; sweating accelerates"
+  -
+    label: "Repeated signal"
+    content: "High HR · fluid loss · heat-shock signaling · vascular shear"
+  -
+    label: "Adaptation"
+    content: "Heat tolerance improves · plasma volume expands · resting strain drops if recovered"
 claims:
 
   -

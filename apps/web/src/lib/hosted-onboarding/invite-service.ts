@@ -139,7 +139,7 @@ export async function getHostedInviteStatus(input: {
       })
     : false;
   const inviteRouting = invite.member.routing
-    ? await projectHostedMemberRoutingState(invite.member.routing)
+    ? await projectHostedMemberRoutingState(invite.member.routing, prisma)
     : null;
   const stage = deriveHostedOnboardingStage({
     activationPending,
@@ -154,7 +154,7 @@ export async function getHostedInviteStatus(input: {
     routing: inviteRouting,
   });
   const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(
-    await projectHostedMemberIdentityState(inviteIdentity),
+    await projectHostedMemberIdentityState(inviteIdentity, prisma),
   );
   const verificationMode = resolveHostedInviteVerificationMode(phoneAuthTarget);
 

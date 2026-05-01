@@ -925,9 +925,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Want to log whether yesterday’s stretching happened, or skip that entry?
     confirmationPrompt: Before I create the run, confirm the protocol reference, target area, measurement, 7-day baseline, 42-day intervention, 5-days-per-week schedule, logging fields, stop rules, safety-screen routing, and reminder preference.
 whyItWorks:
-- Repeated static holds can increase measured flexibility and ROM over acute and chronic windows, with adult static-stretching synthesis supporting ROM change while cautioning that results vary by dose, target area, and study context.
-- 'A time-under-stretch frame is more defensible than a magic-stretch frame: the extracted dose synthesis points to weekly target-muscle exposure, while classic hamstring dose trials support 30-second holds as a practical low-burden default.'
-- Some ROM gains may reflect stretch tolerance, altered sensation, or context-dependent stiffness changes rather than simple tissue lengthening, so perceived stiffness should be logged separately from the measured ROM test.
+  - "## Held tension changes tolerance\n\nStatic stretching works by repeatedly exposing 1 end range to mild, non-painful tension. The nervous system allows more range before guarding; the joint moves farther without forcing tissue."
+  - "## Tissue adapts slowly\n\nRepeated low force changes passive resistance in muscle, tendon, and surrounding connective tissue. The dose is boring by design: same position, same target, enough weeks for range to move."
+  - "## Same test keeps signal clean\n\nToe-touch, sit-and-reach, knee-to-wall, or shoulder reach only means something when setup stays identical. Flexibility improves in the trained pattern first; general mobility claims come later."
+mechanismChain:
+  -
+    label: "Session"
+    content: "1 target area · 2–3 × 30 sec mild holds"
+  -
+    label: "During hold"
+    content: "End-range tension rises; stretch receptors fire; guarding eases"
+  -
+    label: "Repeated signal"
+    content: "Same joint angle · same low force · same nervous-system exposure"
+  -
+    label: "Adaptation"
+    content: "Higher stretch tolerance · lower passive resistance · longer usable range"
 claims:
 -
   claimId: scope-static-stretching-family-rom-primary

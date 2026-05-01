@@ -55,6 +55,7 @@ readonly node_syntax_check_scripts=(
   "scripts/build-test-runtime-prepared.mjs"
   "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
+  "scripts/check-hosted-crypto-hardcut.mjs"
   "scripts/release-helpers.mjs"
   "scripts/verify-release-target.mjs"
   "scripts/pack-publishables.mjs"
@@ -710,6 +711,7 @@ run_typecheck_preflight() {
   run_timed_step "Dependency policy" run_dependency_policy_check
   run_timed_step "Workspace boundary checks" run_workspace_boundary_check
   run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
+  run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
@@ -742,6 +744,11 @@ run_typecheck_overlapped() {
   local hosted_run_guard_pid="$!"
   pids+=("$hosted_run_guard_pid")
   register_background_pid "$hosted_run_guard_pid"
+
+  run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard &
+  local hosted_crypto_guard_pid="$!"
+  pids+=("$hosted_crypto_guard_pid")
+  register_background_pid "$hosted_crypto_guard_pid"
 
   run_timed_step "Raw health log payload guard" pnpm logs:guard &
   local raw_health_log_guard_pid="$!"

@@ -836,9 +836,22 @@ experimentOnboarding:
     missedLogFollowupCopy: "Did you complete today's prescribed HBOT session, and were there any ear, sinus, vision, anxiety, glucose, blood-pressure, or other safety notes to log?"
     confirmationPrompt: "Show the protocol key, chosen testPlanId, safety-screen outcome, clinician/facility status, prescribed dose fields, baseline/intervention dates, session target/minimum, log fields, and reminder policy before creating the tracking experiment."
 whyItWorks:
-  - "The mechanistic premise is pressure-dependent oxygen delivery: clinical HBOT is defined as systemic chamber exposure with oxygen and elevated pressure rather than ordinary supplemental oxygen or local/topical devices."
-  - "Potential clinical benefit is indication- and tissue-context-specific: wound and radiation-injury rationales often invoke tissue oxygenation, fibroblast/collagen activity, angiogenesis or neovascularization, and ischemia-reperfusion biology, but mechanisms are plausibility rather than proof of outcome benefit."
-  - "The same exposure can create harm through pressure, oxygen toxicity, device/fire risk, and course burden, which is why this page treats supervision, safety screening, and adverse-event logging as core protocol elements."
+  - "## Pressure dissolves oxygen\n\nHBOT raises pressure while oxygen fraction stays high. Hemoglobin is already near full; the extra dose comes from oxygen dissolving directly into plasma."
+  - "## Gradient drives tissue delivery\n\nHigher plasma oxygen steepens the diffusion gradient into tissue. That matters most where ordinary delivery is limited, injured, or clinically targeted."
+  - "## Course effect is indication-specific\n\nRepeated sessions create intermittent hyperoxia, vascular constriction, and perfusion shifts. Blood pressure, glucose, ear pressure, and symptoms track safety; disease outcomes need clinician-defined endpoints."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Clinician-prescribed chamber · pressure + 100% oxygen"
+  -
+    label: "Acute effect"
+    content: "Plasma oxygen rises; tissue oxygen gradient increases"
+  -
+    label: "Repeated signal"
+    content: "Hyperoxia · air breaks · vasoconstriction · perfusion shifts"
+  -
+    label: "Adaptation"
+    content: "Oxygen delivery changes · vascular signaling shifts · tolerance guides safety"
 claims:
 
   -

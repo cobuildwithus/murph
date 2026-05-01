@@ -1,4 +1,10 @@
-import { decryptHostedWebString, encryptHostedWebString } from "../hosted-crypto/secure-box";
+import {
+  decryptHostedWebString,
+  encryptHostedWebString,
+  type HostedSecureBoxPrismaClient,
+} from "../hosted-crypto/secure-box";
+
+export type HostedMailboxEncryptionPrismaClient = HostedSecureBoxPrismaClient;
 
 export class HostedMailboxConfigurationError extends Error {
   readonly code: string;
@@ -26,6 +32,7 @@ export function isHostedMailboxConfigurationError(error: unknown): error is Host
 
 export async function encryptHostedMailboxNullableString(input: {
   field: string;
+  prisma?: HostedMailboxEncryptionPrismaClient;
   userId: string;
   value: string | null | undefined;
 }): Promise<string | null> {
@@ -35,6 +42,7 @@ export async function encryptHostedMailboxNullableString(input: {
       purpose: "hosted-mailbox-payload",
     },
     lane: "mailbox-payload",
+    prisma: input.prisma,
     scope: `hosted-mailbox-payload:${input.field}`,
     userId: input.userId,
     value: input.value,
@@ -43,6 +51,7 @@ export async function encryptHostedMailboxNullableString(input: {
 
 export async function decryptHostedMailboxNullableString(input: {
   field: string;
+  prisma?: HostedMailboxEncryptionPrismaClient;
   userId: string;
   value: string | null | undefined;
 }): Promise<string | null> {
@@ -52,6 +61,7 @@ export async function decryptHostedMailboxNullableString(input: {
       purpose: "hosted-mailbox-payload",
     },
     lane: "mailbox-payload",
+    prisma: input.prisma,
     scope: `hosted-mailbox-payload:${input.field}`,
     userId: input.userId,
     value: input.value,

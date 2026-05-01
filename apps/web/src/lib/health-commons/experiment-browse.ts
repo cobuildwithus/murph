@@ -64,6 +64,7 @@ function toExperimentProtocolIndexEntry(entry: GeneratedExperimentIndexEntry): E
     protocolTips: [],
     protocolKeepInMind: [],
     protocolLogFields: [],
+    mechanismChain: [],
     whyItWorks: description,
     experts: [],
     researchStats: [],
