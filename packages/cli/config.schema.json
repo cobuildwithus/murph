@@ -2916,7 +2916,7 @@
                                 "provider": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "description": "Live device-sync provider key such as garmin, whoop, or oura."
+                                  "description": "Live device-sync provider key such as junction, whoop, or oura."
                                 }
                               }
                             }

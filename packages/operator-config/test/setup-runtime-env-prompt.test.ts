@@ -25,8 +25,10 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
   const stderrWrites: string[] = []
   const answers = [
     ' telegram-token ',
-    ' garmin-id ',
-    ' garmin-secret ',
+    ' sk_us_junction-test ',
+    ' junction-user-secret ',
+    ' sandbox ',
+    ' us ',
   ]
 
   vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array) => {
@@ -53,12 +55,16 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
 
   assert.deepEqual(prompts, [
     'Enter TELEGRAM_BOT_TOKEN for this setup run (leave blank to skip): ',
-    'Enter GARMIN_CLIENT_ID for this setup run (leave blank to skip): ',
-    'Enter GARMIN_CLIENT_SECRET for this setup run (leave blank to skip): ',
+    'Enter JUNCTION_API_KEY for this setup run (leave blank to skip): ',
+    'Enter JUNCTION_CLIENT_USER_ID_SECRET for this setup run (leave blank to skip): ',
+    'Enter JUNCTION_ENV for this setup run (leave blank to skip): ',
+    'Enter JUNCTION_REGION for this setup run (leave blank to skip): ',
   ])
   assert.deepEqual(overrides, {
-    GARMIN_CLIENT_ID: 'garmin-id',
-    GARMIN_CLIENT_SECRET: 'garmin-secret',
+    JUNCTION_API_KEY: 'sk_us_junction-test',
+    JUNCTION_CLIENT_USER_ID_SECRET: 'junction-user-secret',
+    JUNCTION_ENV: 'sandbox',
+    JUNCTION_REGION: 'us',
     TELEGRAM_BOT_TOKEN: 'telegram-token',
   })
   assert.match(stderrWrites.join(''), /saved to local `\.env\.local`/u)

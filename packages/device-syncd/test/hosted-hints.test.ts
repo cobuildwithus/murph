@@ -6,17 +6,15 @@ import { shapeHostedDeviceSyncJobHintPayload } from "../src/hosted-hints.ts";
 
 test("hosted job hint payload shaping keeps only the provider-specific job-definition fields", () => {
   assert.deepEqual(
-    shapeHostedDeviceSyncJobHintPayload("garmin", {
+    shapeHostedDeviceSyncJobHintPayload("junction", {
       kind: "backfill",
       payload: {
-        includeProfile: true,
         windowEnd: "2026-04-07T01:00:00.000Z",
         windowStart: 123,
         ignored: "discarded",
       },
     }),
     {
-      includeProfile: true,
       windowEnd: "2026-04-07T01:00:00.000Z",
     },
   );
@@ -72,7 +70,7 @@ test("hosted job hint payload shaping keeps only the provider-specific job-defin
 
 test("hosted job hint payload shaping ignores unsupported kinds and empty nested webhook payloads", () => {
   assert.deepEqual(
-    shapeHostedDeviceSyncJobHintPayload("garmin", {
+    shapeHostedDeviceSyncJobHintPayload("junction", {
       kind: "delete",
       payload: {
         windowStart: "2026-04-07T00:00:00.000Z",

@@ -142,7 +142,6 @@ export {
   hasConfiguredDeviceSyncProviderConfigs,
   listConfiguredDeviceSyncProviderNames,
   readConfiguredDeviceSyncProviderConfigs,
-  readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredJunctionDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredStravaDeviceSyncProviderConfig,

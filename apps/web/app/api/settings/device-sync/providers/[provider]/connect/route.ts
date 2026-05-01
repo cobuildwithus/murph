@@ -1,4 +1,9 @@
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import {
+  readConfiguredDeviceSyncProviderConfigs,
+  resolveConfiguredDeviceSyncConnectTarget,
+} from "@murphai/device-syncd/config";
+import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
@@ -45,8 +50,32 @@ export const POST = withJsonError(async (
   });
   const body = await readOptionalJsonObject(request);
   const provider = await resolveDecodedRouteParam(context.params, "provider");
+  const target = resolveHostedSettingsDeviceConnectTarget(provider);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const returnTo = typeof body.returnTo === "string" ? body.returnTo : "/settings";
 
-  return jsonOk(await controlPlane.startConnection(auth.member.id, provider, returnTo));
+  return jsonOk(await controlPlane.startConnection(
+    auth.member.id,
+    target.provider,
+    returnTo,
+    { sourceProviderSlug: target.sourceProviderSlug ?? null },
+  ));
 });
+
+function resolveHostedSettingsDeviceConnectTarget(provider: string) {
+  const target = resolveConfiguredDeviceSyncConnectTarget(
+    readConfiguredDeviceSyncProviderConfigs(process.env),
+    provider,
+  );
+
+  if (!target) {
+    throw deviceSyncError({
+      code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+      httpStatus: 404,
+      message: "Hosted device connect target is not configured.",
+      retryable: false,
+    });
+  }
+
+  return target;
+}

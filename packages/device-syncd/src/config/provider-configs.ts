@@ -18,7 +18,6 @@ import type {
   ConfiguredDeviceSyncProviderPresence,
   DeviceSyncEnvSource,
 } from "./provider-types.ts";
-import type { GarminDeviceSyncProviderConfig } from "../providers/garmin.ts";
 import type { JunctionDeviceSyncProviderConfig } from "../providers/junction.ts";
 import type { OuraDeviceSyncProviderConfig } from "../providers/oura.ts";
 import type { StravaDeviceSyncProviderConfig } from "../providers/strava.ts";
@@ -49,12 +48,6 @@ export function readConfiguredDeviceSyncProviderConfigs(
   }
 
   return configs;
-}
-
-export function readConfiguredGarminDeviceSyncProviderConfig(
-  env: DeviceSyncEnvSource,
-): GarminDeviceSyncProviderConfig | null {
-  return getConfiguredDeviceSyncProviderManifest("garmin").readConfig(env);
 }
 
 export function readConfiguredJunctionDeviceSyncProviderConfig(

@@ -35,7 +35,7 @@ The UI receives the composed `Experiment` view model, but public protocol prose,
 
 ## Core responsibilities
 
-- Garmin, Oura, Strava, and WHOOP OAuth start/callback flows
+- Junction-backed Garmin connect plus Oura, Strava, and WHOOP OAuth start/callback flows
 - Oura, Strava, and WHOOP webhook intake
 - hosted Linq and Telegram webhook ingress plus sparse routing state
 - per-user device connection ownership mapping plus token audit history
@@ -108,8 +108,10 @@ Required:
 
 Required for the hosted device-sync lane:
 
-- `GARMIN_CLIENT_ID`
-- `GARMIN_CLIENT_SECRET`
+- `JUNCTION_API_KEY`
+- `JUNCTION_CLIENT_USER_ID_SECRET`
+- `JUNCTION_ENV`
+- `JUNCTION_REGION`
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
 - `OURA_CLIENT_ID`

@@ -27,7 +27,7 @@ What it does:
 - imports provider snapshots through `@murphai/importers`
 
 Current providers:
-- Garmin
+- Junction-backed Garmin targets
 - Oura
 - Strava
 - WHOOP
@@ -61,7 +61,7 @@ HTTP/env shapes.
 - optional webhook fan-in
 - normalized snapshot import through `@murphai/importers`
 
-Garmin uses OAuth plus scheduled polling. Once the operator configures the Garmin client ID and secret, the end-user flow is connect once and let scheduled sync keep the account fresh.
+Garmin connects through Junction Link. Configure Junction credentials and include `garmin` in `JUNCTION_PROVIDER_FILTER`; Murph no longer owns direct Garmin OAuth credentials.
 
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.
@@ -112,17 +112,6 @@ Common optional settings:
 - `DEVICE_SYNC_SESSION_TTL_MS`
 - `DEVICE_SYNC_WORKER_LEASE_MS`
 - `DEVICE_SYNC_PUBLIC_HOST` plus `DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
-
-Garmin settings:
-- `GARMIN_CLIENT_ID`
-- `GARMIN_CLIENT_SECRET`
-- `GARMIN_AUTH_BASE_URL`
-- `GARMIN_TOKEN_BASE_URL`
-- `GARMIN_API_BASE_URL`
-- `GARMIN_BACKFILL_DAYS`
-- `GARMIN_RECONCILE_DAYS`
-- `GARMIN_RECONCILE_INTERVAL_MS`
-- `GARMIN_REQUEST_TIMEOUT_MS`
 
 WHOOP settings:
 - `WHOOP_CLIENT_ID`

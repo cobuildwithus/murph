@@ -103,12 +103,14 @@ test('setup runtime resolver clones process env and surfaces ready channel and w
   })
   assert.deepEqual(
     describeSetupWearableStatus('garmin', {
-      GARMIN_CLIENT_ID: 'garmin-id',
-      GARMIN_CLIENT_SECRET: 'garmin-secret',
+      JUNCTION_API_KEY: 'sk_us_junction-test',
+      JUNCTION_CLIENT_USER_ID_SECRET: 'junction-user-secret',
+      JUNCTION_ENV: 'sandbox',
+      JUNCTION_REGION: 'us',
     }),
     {
       badge: 'ready',
-      detail: 'OAuth connect can open after setup.',
+      detail: 'Junction Link can open Garmin connect after setup.',
       missingEnv: [],
       ready: true,
     },

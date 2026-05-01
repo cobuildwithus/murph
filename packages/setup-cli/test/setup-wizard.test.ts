@@ -439,9 +439,9 @@ test('setup wizard public URL guidance keeps callbacks local and webhooks public
     ]),
     [
       [
-        'Garmin callback',
-        'http://127.0.0.1:8788/oauth/garmin/callback',
-        'http://127.0.0.1:8788/oauth/garmin/callback',
+        'Junction callback',
+        'http://127.0.0.1:8788/connect/junction/callback',
+        'http://127.0.0.1:8788/connect/junction/callback',
         'required',
       ],
       [
@@ -459,7 +459,7 @@ test('setup wizard public URL guidance keeps callbacks local and webhooks public
     ],
   )
   assert.deepEqual(review.providerDocs.map((link) => link.label), [
-    'Garmin setup docs',
+    'Junction dashboard',
     'Oura auth docs',
   ])
   assert.deepEqual(review.tunnelCommands, [
@@ -675,7 +675,7 @@ test('setup wizard public URL guidance handles invalid public URLs and tunnel co
   assert.equal(invalidPublicBaseReview.enabled, true)
   assert.equal(
     invalidPublicBaseReview.targets[0]?.providerUrl,
-    'http://localhost:8788/oauth/garmin/callback',
+    'http://localhost:8788/connect/junction/callback',
   )
 
   const ipv6LoopbackReview = buildSetupWizardPublicUrlReview({

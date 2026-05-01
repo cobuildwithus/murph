@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { test, vi } from "vitest";
+import { afterEach, test, vi } from "vitest";
+
+import { renderClientComponent } from "./render-client-component";
 
 vi.mock("next/image", () => ({
   default: (props: {
@@ -22,6 +24,11 @@ vi.mock("next/image", () => ({
       width: props.width,
   }),
 }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 test("ConnectPage renders source search, source names, and logo marks", async () => {
   const { default: ConnectPage, metadata } = await import("../app/(dashboard)/connect/page");
@@ -203,7 +210,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
 
   assert.equal(sources.length, 32);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
-  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, sources.length);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length);
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Oura not connected/);
@@ -285,6 +292,66 @@ test("ConnectSourcesGrid shows an empty-state alert when no sources are availabl
   assert.match(markup, /No sources matched/);
   assert.match(markup, /Try a different search to get back to the full source list\./);
   assert.doesNotMatch(markup, />Connect<\/button>/u);
+});
+
+test("ConnectPage enables Garmin when Junction exposes Garmin as a connect target", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
+  vi.stubEnv("JUNCTION_REGION", "us");
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(createElement(ConnectPage));
+
+  assert.match(markup, /aria-label="Connect Garmin"/u);
+  assert.match(markup, />Connect<\/button>/u);
+  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 1);
+});
+
+test("ConnectSourcesGrid starts a configured Garmin target and redirects to the returned link", async () => {
+  const fetch = vi.fn(async (..._args: Parameters<typeof globalThis.fetch>) =>
+    Response.json({
+      authorizationUrl: "https://junction.example.test/link/garmin",
+    }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "garmin",
+        description: "Workouts, sleep, stress, heart rate, and body battery.",
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+      },
+    ],
+  }));
+
+  assert.equal(rendered.button.disabled, false);
+  assert.equal(rendered.button.textContent, "Connect");
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/providers/garmin/connect");
+  assert.deepEqual(fetch.mock.calls[0]?.[1], {
+    body: JSON.stringify({ returnTo: "/connect" }),
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+  });
+  assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/garmin");
+
+  await rendered.cleanup();
 });
 
 function escapeRegExp(value: string): string {

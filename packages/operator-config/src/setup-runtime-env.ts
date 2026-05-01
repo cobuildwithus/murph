@@ -14,9 +14,16 @@ type HiddenPromptReadline = ReturnType<typeof createInterface> & {
 
 const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
 const EMAIL_API_KEY_KEYS = ['AGENTMAIL_API_KEY'] as const
-const GARMIN_CLIENT_ID_KEYS = ['GARMIN_CLIENT_ID'] as const
-const GARMIN_CLIENT_SECRET_KEYS = ['GARMIN_CLIENT_SECRET'] as const
-const GARMIN_CLIENT_KEY_GROUPS = [GARMIN_CLIENT_ID_KEYS, GARMIN_CLIENT_SECRET_KEYS] as const
+const JUNCTION_API_KEY_KEYS = ['JUNCTION_API_KEY'] as const
+const JUNCTION_CLIENT_USER_ID_SECRET_KEYS = ['JUNCTION_CLIENT_USER_ID_SECRET'] as const
+const JUNCTION_ENV_KEYS = ['JUNCTION_ENV'] as const
+const JUNCTION_REGION_KEYS = ['JUNCTION_REGION'] as const
+const JUNCTION_CLIENT_KEY_GROUPS = [
+  JUNCTION_API_KEY_KEYS,
+  JUNCTION_CLIENT_USER_ID_SECRET_KEYS,
+  JUNCTION_ENV_KEYS,
+  JUNCTION_REGION_KEYS,
+] as const
 const WHOOP_CLIENT_ID_KEYS = ['WHOOP_CLIENT_ID'] as const
 const WHOOP_CLIENT_SECRET_KEYS = ['WHOOP_CLIENT_SECRET'] as const
 const WHOOP_CLIENT_KEY_GROUPS = [WHOOP_CLIENT_ID_KEYS, WHOOP_CLIENT_SECRET_KEYS] as const
@@ -120,7 +127,7 @@ export function resolveSetupWearableMissingEnv(
 ): string[] {
   switch (wearable) {
     case 'garmin':
-      return resolvePreferredEnvKeys(env, GARMIN_CLIENT_KEY_GROUPS)
+      return resolvePreferredEnvKeys(env, JUNCTION_CLIENT_KEY_GROUPS)
     case 'oura':
       return resolvePreferredEnvKeys(env, OURA_CLIENT_KEY_GROUPS)
     case 'strava':
@@ -184,14 +191,14 @@ export function describeSetupWearableStatus(
       return missingEnv.length === 0
         ? {
             badge: 'ready',
-            detail: 'OAuth connect can open after setup.',
+            detail: 'Junction Link can open Garmin connect after setup.',
             missingEnv,
             ready: true,
           }
         : {
-            badge: 'needs client keys',
+            badge: 'needs Junction',
             detail:
-              'Add GARMIN_CLIENT_ID and GARMIN_CLIENT_SECRET to the current environment to enable Garmin connect.',
+              'Add Junction credentials to the current environment to enable Garmin connect.',
             missingEnv,
             ready: false,
           }

@@ -371,25 +371,9 @@ const JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
 export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "garmin",
   displayName: "Garmin",
-  transportModes: ["oauth_callback", "scheduled_poll"],
+  transportModes: ["async_export"],
   connection: {
-    kind: "oauth2",
-    callbackPath: "/oauth/garmin/callback",
-    defaultScopes: [],
-  },
-  oauth: {
-    callbackPath: "/oauth/garmin/callback",
-    defaultScopes: [],
-  },
-  sync: {
-    windows: {
-      backfillDays: 30,
-      reconcileDays: 7,
-      reconcileIntervalMs: 6 * 60 * 60_000,
-    },
-    jobKinds: ["backfill", "reconcile"],
-    supportsRemoteDisconnect: true,
-    supportsTokenRefresh: true,
+    kind: "none",
   },
   normalization: {
     metricFamilies: [

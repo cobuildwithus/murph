@@ -19,7 +19,7 @@ import {
 import type { DeviceSyncServices } from '../device-services.js'
 
 const providerNameSchema = deviceSyncProviderKeySchema
-  .describe('Live device-sync provider key such as garmin, whoop, or oura.')
+  .describe('Live device-sync provider key such as junction, whoop, or oura.')
 
 const connectTargetNameSchema = deviceSyncConnectTargetSchema
   .describe('Device connect target returned by device provider list, such as fitbit, garmin, whoop, or oura.')

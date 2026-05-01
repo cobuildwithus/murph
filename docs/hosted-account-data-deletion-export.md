@@ -60,7 +60,7 @@ The export explicitly omits:
 `deleteHostedAccountData` performs deletion in this order:
 
 1. Load the hosted member and device connection identities.
-2. Best-effort revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook, currently covering configured Oura, WHOOP, Garmin, and Strava connectors.
+2. Best-effort revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook, currently covering configured Oura, WHOOP, and Strava connectors. Garmin connections routed through Junction are deleted locally; provider-side retention remains controlled by Junction/Garmin until Junction revocation is implemented.
 3. Delete Prisma-hosted account rows in a transaction.
 4. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
 5. Return schema `murph.hosted-account-data-deletion-result.v1` with deletion counts, provider revocation outcomes, Cloudflare cleanup status, and retention notes.
@@ -94,7 +94,7 @@ The export explicitly omits:
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
 | `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and root-key-envelope objects when derivation keys are available. |
-| `providers.oura_whoop_garmin_strava` | Best-effort delete | Metadata/counts | Existing provider revocation hooks run before local token deletion. Provider-side retention remains provider-controlled. |
+| `providers.oura_whoop_strava` | Best-effort delete | Metadata/counts | Existing provider revocation hooks run before local token deletion. Provider-side retention remains provider-controlled. |
 | `providers.linq_telegram_email_messages` | Local reference delete | Metadata/counts | Deletes Murph-hosted mailbox and routing records; external carrier, Telegram, Linq, and email-provider copies are outside this endpoint. |
 | `providers.stripe_privy` | Documented retention | Documented only | Deletes local references only. Vendor account records need Stripe/Privy/legal workflows. |
 | `backups` | Documented retention | Documented only | Live data is deleted immediately. Backup copies age out under infrastructure retention and must not be restored except under documented recovery controls. |
@@ -120,7 +120,7 @@ Container workspace artifacts are covered to the extent they are persisted throu
 
 Deletion cannot guarantee immediate erasure in systems Murph does not control. The deletion/export result therefore always carries retention notes for:
 
-- Oura, WHOOP, Garmin, Strava, and other provider-side data after revocation;
+- Oura, WHOOP, Strava, and other provider-side data after revocation, plus Garmin data routed through Junction without provider-side revocation;
 - Linq, Telegram, carrier, and email-provider copies of messages or routing events;
 - Stripe billing/accounting records;
 - Privy identity/session records;

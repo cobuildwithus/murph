@@ -15,6 +15,7 @@ type LogoAsset = {
 };
 
 type ConnectSource = {
+  connectTarget?: string;
   connected?: boolean;
   description: string;
   id: string;
@@ -90,6 +91,48 @@ export function filterConnectSourcesForSearch(
 }
 
 function SourceCard({ source }: { source: ConnectSource }) {
+  const [pending, setPending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const isAvailable = Boolean(source.connectTarget);
+
+  async function startConnection() {
+    if (!source.connectTarget) {
+      return;
+    }
+
+    setPending(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(
+        `/api/settings/device-sync/providers/${encodeURIComponent(source.connectTarget)}/connect`,
+        {
+          body: JSON.stringify({ returnTo: "/connect" }),
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+      const payload = await response.json() as {
+        authorizationUrl?: unknown;
+        error?: { message?: unknown };
+      };
+
+      if (!response.ok || typeof payload.authorizationUrl !== "string") {
+        const message = typeof payload.error?.message === "string"
+          ? payload.error.message
+          : "Connection could not be started.";
+        throw new Error(message);
+      }
+
+      window.location.assign(payload.authorizationUrl);
+    } catch (error) {
+      setPending(false);
+      setErrorMessage(error instanceof Error ? error.message : "Connection could not be started.");
+    }
+  }
+
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-5">
       <div className="absolute top-4 right-4">
@@ -110,14 +153,22 @@ function SourceCard({ source }: { source: ConnectSource }) {
       </div>
 
       {source.connected ? null : (
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-start gap-2">
           <Button
             type="button"
-            disabled
-            aria-label={`${source.name} connection is not available yet`}
+            disabled={!isAvailable || pending}
+            aria-label={isAvailable
+              ? `Connect ${source.name}`
+              : `${source.name} connection is not available yet`}
+            onClick={startConnection}
           >
-            Connect
+            {pending ? "Opening..." : isAvailable ? "Connect" : "Not available"}
           </Button>
+          {errorMessage ? (
+            <p role="alert" className="text-xs leading-snug text-destructive">
+              {errorMessage}
+            </p>
+          ) : null}
         </div>
       )}
     </div>

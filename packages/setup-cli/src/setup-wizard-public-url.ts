@@ -14,8 +14,8 @@ const DEFAULT_SETUP_DEVICE_SYNC_TUNNEL_COMMANDS = [
 const SETUP_PROVIDER_DOCS = {
   garmin: [
     {
-      label: 'Garmin setup docs',
-      url: 'https://developer.garmin.com/gc-developer-program/overview/',
+      label: 'Junction dashboard',
+      url: 'https://app.junction.com/',
     },
   ],
   oura: [
@@ -228,13 +228,13 @@ function buildSetupWizardPublicUrlTargets(input: {
 
   if (input.wearables.includes('garmin')) {
     const localReceiverUrl = new URL(
-      '/oauth/garmin/callback',
+      '/connect/junction/callback',
       input.deviceSyncLocalBaseUrl,
     ).toString()
     targets.push({
       detail:
-        'Required. Register this localhost callback URL in your Garmin app setup before you connect Garmin.',
-      label: 'Garmin callback',
+        'Required. Register this Junction Link callback URL before you connect Garmin.',
+      label: 'Junction callback',
       localReceiverUrl,
       providerUrl: localReceiverUrl,
       requirement: 'required',

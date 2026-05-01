@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  defaultDeviceProviderDescriptors,
-  GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
@@ -10,7 +8,6 @@ import {
   resolveDeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
-import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
 import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
@@ -19,10 +16,6 @@ import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 describe("device-sync providers", () => {
   it("keeps the built-in runtime providers aligned with the shared descriptor registry", () => {
     const providers = [
-      createGarminDeviceSyncProvider({
-        clientId: "garmin-client",
-        clientSecret: "garmin-secret",
-      }),
       createJunctionDeviceSyncProvider({
         apiKey: "sk_us_junction-test",
         clientUserIdSecret: "junction-client-user-id-secret",
@@ -43,11 +36,12 @@ describe("device-sync providers", () => {
       }),
     ];
 
-    expect(
-      [...providers.map((provider) => provider.provider)].sort(),
-    ).toEqual(
-      [...defaultDeviceProviderDescriptors.map((descriptor) => descriptor.provider)].sort(),
-    );
+    expect([...providers.map((provider) => provider.provider)].sort()).toEqual([
+      "junction",
+      "oura",
+      "strava",
+      "whoop",
+    ]);
 
     for (const provider of providers) {
       const descriptor = resolveDeviceProviderDescriptor(provider.provider);
@@ -91,23 +85,6 @@ describe("device-sync providers", () => {
       kind: "provider_config",
       providerConfigKey: "junction",
     });
-  });
-
-  it("hydrates Garmin provider defaults from the shared descriptor", () => {
-    const provider = createGarminDeviceSyncProvider({
-      clientId: "garmin-client",
-      clientSecret: "garmin-secret",
-    });
-
-    expect(provider.provider).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.provider);
-    expect(provider.descriptor.displayName).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.displayName);
-    expect(provider.descriptor.transportModes).toEqual(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.transportModes);
-    expect(provider.descriptor.oauth?.callbackPath).toBe(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.oauth?.callbackPath);
-    expect(provider.descriptor.oauth?.defaultScopes).toEqual([...GARMIN_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []]);
-    expect(provider.descriptor.sync?.windows).toEqual(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows);
-    expect(Boolean(provider.revokeAccess)).toBe(
-      GARMIN_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
-    );
   });
 
   it("applies Oura runtime overrides onto the shared descriptor shape", () => {

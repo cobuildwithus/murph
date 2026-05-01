@@ -215,11 +215,11 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Best-effort hosted execution control deletes opaque per-user R2 prefixes and the user root-key envelope when derivation keys are available.",
   },
   {
-    slug: "providers.oura_whoop_garmin_strava",
-    label: "Oura, WHOOP, Garmin, and Strava provider revocation",
+    slug: "providers.oura_whoop_strava",
+    label: "Oura, WHOOP, and Strava provider revocation",
     deletion: "best-effort-delete",
     export: "metadata-and-counts",
-    note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Provider-side retention remains provider-controlled.",
+    note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Garmin routed through Junction is deleted locally without provider-side revocation until Junction revocation is implemented.",
   },
   {
     slug: "providers.linq_telegram_email_messages",
@@ -326,7 +326,7 @@ const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Live Prisma, hosted mailbox, device, runtime, and workspace rows are deleted immediately by this workflow.",
   "Cloudflare Durable Object/R2 cleanup is best effort and reported in the deletion result when hosted execution control is configured.",
-  "Provider-side data deletion is limited to revocation hooks and external provider retention controls.",
+  "Provider-side data deletion is limited to revocation hooks and external provider retention controls; Garmin routed through Junction is local-reference deletion unless Junction revocation is implemented.",
   "Stripe, Privy, carrier/email/Telegram/Linq provider records, and infrastructure backups follow their documented retention/legal processes.",
 ] as const;
 

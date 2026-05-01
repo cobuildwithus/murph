@@ -55,7 +55,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.device_webhook_trace",
   "cloudflare.runner_durable_object",
   "cloudflare.r2_user_artifacts",
-  "providers.oura_whoop_garmin_strava",
+  "providers.oura_whoop_strava",
   "providers.linq_telegram_email_messages",
   "providers.stripe_privy",
   "backups",

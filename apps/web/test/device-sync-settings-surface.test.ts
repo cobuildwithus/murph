@@ -5,18 +5,6 @@ import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingr
 import type { HostedBrowserDeviceSyncConnection } from "@/src/lib/device-sync/public-connection";
 import { buildHostedDeviceSyncSettingsSources } from "@/src/lib/device-sync/settings-surface";
 
-const GARMIN_PROVIDER: PublicProviderDescriptor = {
-  callbackPath: "/oauth/garmin/callback",
-  callbackUrl: "https://example.com/oauth/garmin/callback",
-  connectionKind: "oauth2",
-  credentialPolicy: "oauth_tokens",
-  defaultScopes: ["activity"],
-  provider: "garmin",
-  supportsWebhooks: false,
-  webhookPath: null,
-  webhookUrl: null,
-};
-
 const STRAVA_PROVIDER: PublicProviderDescriptor = {
   callbackPath: "/oauth/strava/callback",
   callbackUrl: "https://example.com/oauth/strava/callback",
@@ -68,15 +56,15 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
   it("creates an available placeholder when a provider is configured but not connected", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [],
-      providers: [GARMIN_PROVIDER],
+      providers: [OURA_PROVIDER],
     });
 
     expect(source).toMatchObject({
       connectionId: null,
       headline: "Ready when you are",
       primaryAction: { kind: "connect", label: "Connect" },
-      provider: "garmin",
-      providerLabel: "Garmin",
+      provider: "oura",
+      providerLabel: "Oura",
       state: "available",
       statusLabel: "Not connected",
       tone: "muted",

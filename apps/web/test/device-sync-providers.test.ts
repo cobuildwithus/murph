@@ -8,8 +8,6 @@ describe("createHostedDeviceSyncRegistry", () => {
   it("matches the shared configured-provider registry assembly path", () => {
     const env: NodeJS.ProcessEnv = {
       NODE_ENV: "test",
-      GARMIN_CLIENT_ID: "garmin-client",
-      GARMIN_CLIENT_SECRET: "garmin-secret",
       WHOOP_CLIENT_ID: "whoop-client",
       WHOOP_CLIENT_SECRET: "whoop-secret",
       OURA_CLIENT_ID: "oura-client",
@@ -20,6 +18,6 @@ describe("createHostedDeviceSyncRegistry", () => {
     const sharedProviders = createConfiguredDeviceSyncRegistry(env).list().map((provider) => provider.provider);
 
     expect(hostedProviders).toEqual(sharedProviders);
-    expect(hostedProviders).toEqual(["garmin", "oura", "whoop"]);
+    expect(hostedProviders).toEqual(["oura", "whoop"]);
   });
 });

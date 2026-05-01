@@ -42,6 +42,15 @@ describe("device provider descriptors", () => {
     expect(registry.get("garmin")?.provider).toBe("garmin");
   });
 
+  it("keeps Garmin as import-only descriptor metadata", () => {
+    expect(GARMIN_DEVICE_PROVIDER_DESCRIPTOR.transportModes).toEqual(["async_export"]);
+    expect(resolveDeviceProviderConnectionDescriptor(GARMIN_DEVICE_PROVIDER_DESCRIPTOR)).toEqual({
+      kind: "none",
+    });
+    expect("oauth" in GARMIN_DEVICE_PROVIDER_DESCRIPTOR).toBe(false);
+    expect("sync" in GARMIN_DEVICE_PROVIDER_DESCRIPTOR).toBe(false);
+  });
+
   it("resolves metric priority from the shared descriptor policy", () => {
     expect(resolveDeviceProviderSourcePriority(OURA_DEVICE_PROVIDER_DESCRIPTOR, {
       metric: "sleepScore",

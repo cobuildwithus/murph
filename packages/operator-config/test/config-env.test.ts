@@ -99,15 +99,17 @@ test('setup env helpers trim values, report missing keys, and surface channel re
 
 test('setup wearables are deduplicated, sorted, and keyed off trimmed env values', () => {
   const env: NodeJS.ProcessEnv = {
-    GARMIN_CLIENT_ID: '  garmin-id  ',
-    GARMIN_CLIENT_SECRET: '   ',
+    JUNCTION_API_KEY: '  sk_us_junction-test  ',
+    JUNCTION_CLIENT_USER_ID_SECRET: '  junction-user-secret  ',
+    JUNCTION_ENV: 'sandbox',
+    JUNCTION_REGION: '   ',
     OURA_CLIENT_ID: '  oura-id  ',
     OURA_CLIENT_SECRET: '  oura-secret  ',
     WHOOP_CLIENT_ID: '  whoop-id  ',
     WHOOP_CLIENT_SECRET: '  whoop-secret  ',
   }
 
-  assert.deepEqual(resolveSetupWearableMissingEnv('garmin', env), ['GARMIN_CLIENT_SECRET'])
+  assert.deepEqual(resolveSetupWearableMissingEnv('garmin', env), ['JUNCTION_REGION'])
 
   const configuredWearables = describeSelectedSetupWearables({
     env,
@@ -122,7 +124,7 @@ test('setup wearables are deduplicated, sorted, and keyed off trimmed env values
     })),
     [
       {
-        missingEnv: ['GARMIN_CLIENT_SECRET'],
+        missingEnv: ['JUNCTION_REGION'],
         ready: false,
         wearable: 'garmin',
       },
@@ -140,7 +142,7 @@ test('setup wearables are deduplicated, sorted, and keyed off trimmed env values
   )
   assert.match(
     configuredWearables[0]?.detail ?? '',
-    /GARMIN_CLIENT_SECRET/u,
+    /JUNCTION_REGION/u,
   )
   assert.deepEqual(
     normalizeSetupWearables(['whoop', 'garmin', 'whoop']),

@@ -1,4 +1,8 @@
 import type { Metadata } from "next";
+import {
+  listConfiguredDeviceSyncConnectTargets,
+  readConfiguredDeviceSyncProviderConfigs,
+} from "@murphai/device-syncd/config";
 
 import { PageHeader } from "@/src/components/ui/page-header";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -18,6 +22,7 @@ type LogoAsset = {
 };
 
 type ConnectSource = {
+  connectTarget?: string;
   connected?: boolean;
   description: string;
   id: string;
@@ -221,6 +226,8 @@ const CONNECT_SOURCES: readonly ConnectSource[] = [
 ] as const;
 
 export default function ConnectPage() {
+  const sources = resolveConfiguredConnectSources(CONNECT_SOURCES);
+
   return (
     <div className="flex w-full min-w-0 max-w-[calc(100vw-3rem)] flex-col gap-8 md:max-w-full">
       <PageHeader
@@ -229,9 +236,26 @@ export default function ConnectPage() {
         description="Bring in sleep, activity, recovery, glucose, and device context from the tools you already use."
       />
 
-      <ConnectSourcesGrid sources={CONNECT_SOURCES} />
+      <ConnectSourcesGrid sources={sources} />
     </div>
   );
+}
+
+export function resolveConfiguredConnectSources(
+  sources: readonly ConnectSource[],
+): ConnectSource[] {
+  const targets = new Set(
+    listConfiguredDeviceSyncConnectTargets(
+      readConfiguredDeviceSyncProviderConfigs(process.env),
+    ).map((target) => target.connectTarget),
+  );
+
+  return sources.map((source) => {
+    const connectTarget = source.id.replace(/-/gu, "_");
+    return targets.has(connectTarget)
+      ? { ...source, connectTarget }
+      : source;
+  });
 }
 
 function logoAsset(
