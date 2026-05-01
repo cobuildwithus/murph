@@ -35,6 +35,9 @@ import {
 } from "./web-artifacts.ts";
 
 export type {
+  HealthCommonsWebBiomarkerOverview,
+  HealthCommonsWebBiomarkerResearch,
+  HealthCommonsWebBiomarkerShell,
   HealthCommonsWebExperimentProtocolTab,
   HealthCommonsWebExperimentResearchTab,
   HealthCommonsWebExperimentResultsPublic,

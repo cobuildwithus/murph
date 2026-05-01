@@ -7,9 +7,9 @@ import {
 import { BiomarkerPrivateTrendCard } from "./biomarker-private-trend-card";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import { isBrowserVaultMetricBinding } from "@/src/lib/health-commons/biomarker-bindings";
-import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
+import type { BiomarkerOverviewProjection } from "@/src/lib/health-commons/biomarker-projections";
 
-export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerPageModel }) {
+export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewProjection }) {
   const protocols = biomarker.protocolRankings;
   const heroProtocols = protocols.slice(0, 2);
   const standardProtocols = protocols.slice(2, 5);

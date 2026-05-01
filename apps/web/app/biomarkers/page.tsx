@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import {
-  getGeneratedHealthCommonsWebBiomarkerIndex,
-  loadGeneratedHealthCommonsWebRouteBundle,
-} from "@murphai/health-commons/runtime";
+import { getGeneratedHealthCommonsWebBiomarkerIndex } from "@murphai/health-commons/runtime";
 
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -21,24 +18,15 @@ export default function BiomarkersPage() {
   const index = getGeneratedHealthCommonsWebBiomarkerIndex();
   const biomarkers: BiomarkerBrowseEntry[] = index.biomarkers
     .filter((entry) => entry.published && !entry.hidden)
-    .map((entry) => {
-      const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-        entityType: "biomarker",
-        routeId: entry.routeId,
-      });
-      const entity = bundle?.entitiesByKey[`biomarker:${entry.routeId}`];
-      const shortName = entity?.biomarker?.shortName ?? entry.aliases[0] ?? entry.title;
-
-      return {
-        routeId: entry.routeId,
-        title: entry.title,
-        shortName,
-        summary: entry.summary,
-        unit: entry.unit,
-        categories: entry.categories,
-        aliases: entry.aliases,
-      };
-    })
+    .map((entry) => ({
+      routeId: entry.routeId,
+      title: entry.title,
+      shortName: entry.shortName,
+      summary: entry.summary,
+      unit: entry.unit,
+      categories: entry.categories,
+      aliases: entry.aliases,
+    }))
     .sort((a, b) => a.title.localeCompare(b.title));
 
   return <BiomarkersPageClient biomarkers={biomarkers} />;

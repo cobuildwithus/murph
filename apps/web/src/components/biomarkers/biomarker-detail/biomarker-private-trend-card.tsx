@@ -21,7 +21,7 @@ import {
   formatMetricValue,
   formatTrendDeltaSummary,
 } from "@/src/lib/browser-vault/trend-comparison";
-import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
+import type { BiomarkerOverviewProjection } from "@/src/lib/health-commons/biomarker-projections";
 import { isBrowserVaultMetricBinding } from "@/src/lib/health-commons/biomarker-bindings";
 
 interface TrendPoint {
@@ -48,7 +48,11 @@ type PrivateTrendState =
       status: "ready";
     };
 
-export function BiomarkerPrivateTrendCard({ biomarker }: { biomarker: BiomarkerPageModel }) {
+export function BiomarkerPrivateTrendCard({
+  biomarker,
+}: {
+  biomarker: BiomarkerOverviewProjection;
+}) {
   const { client, error, refresh, status } = useBrowserVault();
   const trend = useMemo(
     () => resolvePrivateTrend({ biomarker, browserVaultStatus: status, client, error }),
@@ -225,7 +229,7 @@ function TrendSparkline({ series }: { series: TrendPoint[] }) {
 }
 
 function resolvePrivateTrend(input: {
-  biomarker: BiomarkerPageModel;
+  biomarker: BiomarkerOverviewProjection;
   browserVaultStatus: BrowserVaultStatus;
   client: BrowserVaultQueryClient | null;
   error: string | null;

@@ -126,7 +126,7 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("forwards the authenticated member, known version, and replica ref to the hosted control client", async () => {
+  it("forwards the authenticated member and replica ref to the hosted control client when the known ref is stale", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
@@ -157,7 +157,10 @@ describe("browser vault session route", () => {
     const response = await browserVaultSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
-        knownDataVersion: "stale-version",
+        knownReplicaRef: {
+          ...createReplicaRef(),
+          objectKey: "users/browser-vault-replicas/opaque/stale-replica.json",
+        },
       }),
     );
 
@@ -195,7 +198,7 @@ describe("browser vault session route", () => {
     const response = await browserVaultSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
-        knownDataVersion: replicaRef.dataVersion,
+        knownReplicaRef: replicaRef,
       }),
     );
 
@@ -275,7 +278,7 @@ describe("browser vault session route", () => {
     const response = await browserVaultSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
-        knownDataVersion: replicaRef.dataVersion,
+        knownReplicaRef: replicaRef,
       }),
     );
 
@@ -287,6 +290,61 @@ describe("browser vault session route", () => {
       replicaKeyEnvelope: null,
       replicaRef: null,
       state: "empty",
+    });
+  });
+
+  it("does not return not_modified when only the dataVersion matches", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    const knownReplicaRef = {
+      ...replicaRef,
+      objectKey: "users/browser-vault-replicas/opaque/previous-replica.json",
+    };
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: {
+        hash: "a".repeat(64),
+        kind: "prepared",
+        keyId: "bundle-key",
+        schema: "murph.hosted-execution-bundle-ref.v1",
+      },
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
     });
   });
 

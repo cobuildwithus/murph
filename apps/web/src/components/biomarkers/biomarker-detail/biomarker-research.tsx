@@ -2,7 +2,7 @@ import { ExternalLinkIcon } from "lucide-react";
 import { type ReactNode } from "react";
 
 import { SectionLabel } from "@/src/components/ui/section-label";
-import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
+import type { BiomarkerResearchProjection } from "@/src/lib/health-commons/biomarker-projections";
 import { cn } from "@/src/lib/utils";
 
 import { BiomarkerEvidenceRow } from "./biomarker-evidence-row";
@@ -22,7 +22,7 @@ const DUPLICATIVE_RESEARCH_NOTE_HEADINGS = new Set([
   "protocol ranking logic",
 ]);
 
-export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel }) {
+export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerResearchProjection }) {
   const hasClaims = biomarker.claims.length > 0;
   const hasSourceHighlights = biomarker.sourceHighlights.length > 0;
   const memoSections = selectResearchNotesSections(parseBiomarkerBodySections(biomarker.body));
@@ -186,7 +186,7 @@ function SourceHighlightRow({
   source,
   first,
 }: {
-  source: BiomarkerPageModel["sourceHighlights"][number];
+  source: BiomarkerResearchProjection["sourceHighlights"][number];
   first: boolean;
 }) {
   return (

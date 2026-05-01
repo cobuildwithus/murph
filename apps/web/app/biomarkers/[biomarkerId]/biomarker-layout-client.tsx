@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail/biomarker-about-grid";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { RouteTabs } from "@/src/components/ui/route-tabs";
-import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
+import type { BiomarkerShellProjection } from "@/src/lib/health-commons/biomarker-projections";
 
 type BiomarkerDetailTab = "overview" | "research";
 
@@ -17,7 +17,7 @@ export function BiomarkerLayoutClient({
   biomarker,
   children,
 }: {
-  biomarker: BiomarkerPageModel;
+  biomarker: BiomarkerShellProjection;
   children: ReactNode;
 }) {
   const pathname = usePathname();
