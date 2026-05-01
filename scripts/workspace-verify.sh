@@ -147,7 +147,9 @@ local_concurrency_default() {
 
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
-readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-$app_verify_parallel}"
+# Package coverage uses prepared workspace artifacts that app verification can rebuild.
+# Keep early Cloudflare verification opt-in so local acceptance does not race on dist/.
+readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
 readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"

@@ -77,6 +77,31 @@ const generatedAuthorityPrivateJwkJson = JSON.stringify({
 });
 const generatedAuthorityPublicPem =
   "-----BEGIN PUBLIC KEY-----\nLOCAL_AUTHORITY_PUBLIC_KEY\n-----END PUBLIC KEY-----\n";
+const existingAuthorityPrivateJwkJson = JSON.stringify({
+  crv: "P-256",
+  d: "HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ",
+  kty: "EC",
+  x: "xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao",
+  y: "8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY",
+});
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function readRequiredSecretNames(config: Record<string, unknown>): string[] {
+  const secrets = config.secrets;
+  if (
+    !secrets ||
+    typeof secrets !== "object" ||
+    !("required" in secrets) ||
+    !isStringArray(secrets.required)
+  ) {
+    throw new Error("Expected wrangler config secrets.required to be a string array.");
+  }
+
+  return secrets.required;
+}
 
 describe("parseEnvText", () => {
   it("parses dotenv text values verbatim", () => {
@@ -303,6 +328,37 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
   });
 
+  it("regenerates local authority signing keys when persisted local state is mismatched", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_CRYPTO_ENV: "local",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nSTALE_PUBLIC\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+        HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: existingAuthorityPrivateJwkJson,
+        HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "existing-wrap-key",
+      },
+      oidcIdentity,
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
+      generatedAuthorityPublicPem,
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
+      generatedAuthorityPrivateJwkJson,
+    );
+  });
+
   it("allows explicitly opted-in remote hosted crypto keys", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -461,6 +517,7 @@ describe("buildHostedLocalDevOverrides", () => {
       HOSTED_EXECUTION_CONTROL_URL: "http://127.0.0.1:8787",
       HOSTED_EXECUTION_DISPATCH_URL: "http://127.0.0.1:8787",
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
+      HOSTED_MAILBOX_FINGERPRINT_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
       HOSTED_WEB_BASE_URL: "http://localhost:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:local",
@@ -682,6 +739,26 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL:http://127.0.0.1:4010/.well-known/jwks",
     ]);
   });
+
+  it("passes local e2e parser selectors to the worker without making them runner secrets", () => {
+    expect(
+      buildWranglerVarArgs({
+        FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+        HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+        WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+        WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+      }),
+    ).toEqual([
+      "--var",
+      "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN:1",
+      "--var",
+      "FFMPEG_COMMAND:/app/test-parser-toolchain/ffmpeg",
+      "--var",
+      "WHISPER_COMMAND:/app/test-parser-toolchain/whisper-cli",
+      "--var",
+      "WHISPER_MODEL_PATH:/app/test-parser-toolchain/ggml-test.bin",
+    ]);
+  });
 });
 
 describe("buildWranglerEnvFileText", () => {
@@ -689,11 +766,18 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
+        HOSTED_MAILBOX_FINGERPRINT_KEY: "mailbox-fingerprint-key",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
     ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,hosted-email,linq,mapbox,telegram"');
+    expect(
+      buildWranglerEnvFileText({
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
+        HOSTED_MAILBOX_FINGERPRINT_KEY: "mailbox-fingerprint-key",
+      }),
+    ).not.toContain("HOSTED_MAILBOX_FINGERPRINT_KEY");
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
@@ -834,6 +918,22 @@ describe("buildWranglerLocalDevConfig", () => {
     });
   });
 
+  it("passes local e2e parser selectors through local worker vars", () => {
+    const config = buildWranglerLocalDevConfig({
+      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+      HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+    });
+
+    expect(config.vars).toMatchObject({
+      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+      HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+    });
+  });
+
   it("declares local Codex app-server proxy env-file entries as local worker secrets", () => {
     const config = buildWranglerLocalDevConfig({
       MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
@@ -848,5 +948,17 @@ describe("buildWranglerLocalDevConfig", () => {
     });
     expect(config.vars).not.toHaveProperty("MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN");
     expect(config.vars).not.toHaveProperty("MURPH_DEV_CODEX_APP_SERVER_PROXY_URL");
+  });
+
+  it("declares each local worker secret binding only once", () => {
+    const config = buildWranglerLocalDevConfig({
+      JUNCTION_API_KEY: "sk_us_junction-test",
+      JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+      JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
+    });
+    const required = readRequiredSecretNames(config);
+
+    expect(required.filter((name) => name === "JUNCTION_API_KEY")).toHaveLength(1);
+    expect(new Set(required).size).toBe(required.length);
   });
 });

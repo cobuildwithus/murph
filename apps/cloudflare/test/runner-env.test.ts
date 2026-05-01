@@ -24,6 +24,9 @@ import {
 import {
   HOSTED_WORKER_OPTIONAL_VAR_NAMES,
 } from "../scripts/deploy-automation/worker-optional-vars.ts";
+import {
+  HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV,
+} from "../src/runner-native-parser-toolchain.ts";
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
@@ -460,6 +463,38 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     }).parserToolchain).toBeUndefined();
   });
 
+  it("serializes the local e2e parser toolchain only behind the explicit marker", () => {
+    const configSource = {
+      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+      [HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV]: "1",
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+    };
+
+    expect(buildHostedRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv: buildHostedRunnerContainerEnv(configSource),
+      runnerSecrets: {},
+    }).parserToolchain).toEqual({
+      tools: {
+        ffmpeg: {
+          command: "/app/test-parser-toolchain/ffmpeg",
+        },
+        pdfinfo: {
+          command: "/usr/bin/pdfinfo",
+        },
+        pdftotext: {
+          command: "/usr/bin/pdftotext",
+        },
+        whisper: {
+          command: "/app/test-parser-toolchain/whisper-cli",
+          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        },
+      },
+    });
+  });
+
   it("keeps parser config out of the worker runtime envelope even when platform config contains parser env", () => {
     const configSource = {
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
@@ -648,6 +683,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       configSource: {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
@@ -658,6 +694,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toMatchObject({
       forwardedEnv: {},
       platformEnv: {
+        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000/",
         TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",

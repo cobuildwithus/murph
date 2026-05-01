@@ -850,9 +850,9 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
         pendingLinqChatIdEncrypted: null,
@@ -863,9 +863,9 @@ describe("hosted-member-store", () => {
         telegramUserIdEncrypted: null,
       },
       update: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
       },
     });
@@ -923,7 +923,7 @@ describe("hosted-member-store", () => {
       create: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
-        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
         pendingLinqChatIdEncrypted: null,
@@ -936,7 +936,7 @@ describe("hosted-member-store", () => {
       update: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
-        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
@@ -1042,11 +1042,11 @@ describe("hosted-member-store", () => {
         pendingLinqChatLookupKey: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
-        telegramUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        telegramUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         telegramUserLookupKey: expect.stringMatching(/^hbidx:telegram-user:v1:/u),
       },
       update: {
-        telegramUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        telegramUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         telegramUserLookupKey: expect.stringMatching(/^hbidx:telegram-user:v1:/u),
       },
     });
@@ -1290,16 +1290,16 @@ describe("hosted-member-store", () => {
         maskedPhoneNumberHint: "*** 4567",
         memberId: "member_123",
         phoneLookupKey: "hbidx:phone:v1:abc123",
-        phoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
+        phoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
         phoneNumberVerifiedAt: null,
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
         walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
         walletChainType: "ethereum",
         walletCreatedAt: null,
         walletProvider: "privy",
@@ -1307,16 +1307,16 @@ describe("hosted-member-store", () => {
       update: {
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: "hbidx:phone:v1:abc123",
-        phoneNumberEncrypted: expect.stringMatching(/^hbds:/u),
+        phoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
         phoneNumberVerifiedAt: null,
         privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hbds:/u),
+        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
         walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hbds:/u),
+        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
         walletChainType: "ethereum",
         walletCreatedAt: null,
         walletProvider: "privy",
@@ -1558,15 +1558,15 @@ describe("hosted-member-store", () => {
       },
       create: {
         memberId: "member_123",
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       },
       update: {
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       },
     });
@@ -1697,16 +1697,16 @@ describe("hosted-member-store", () => {
       create: {
         lastStripeEventCreatedAt: freshnessAt,
         memberId: "member_123",
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       },
       update: {
         lastStripeEventCreatedAt: freshnessAt,
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       },
     });
@@ -1773,13 +1773,13 @@ describe("hosted-member-store", () => {
       },
       create: {
         memberId: "member_123",
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeSubscriptionIdEncrypted: null,
         stripeSubscriptionLookupKey: null,
       },
       update: expect.objectContaining({
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
       }),
     });
@@ -1846,7 +1846,7 @@ describe("hosted-member-store", () => {
 
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: {
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hbds:/u),
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
       },
     }));

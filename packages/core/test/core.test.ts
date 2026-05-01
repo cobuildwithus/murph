@@ -941,10 +941,27 @@ test("public raw, jsonl, and batchless audit writes persist canonical operation 
       readStoredWriteOperation(vaultRoot, relativePath),
     ),
   );
-  const genericAuditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: "audit/2026/2026-04.jsonl",
-  });
+  const auditRecordPaths = [
+    ...new Set(
+      operations.flatMap((operation) =>
+        operation.actions.flatMap((action) =>
+          action.kind === "jsonl_append" && action.targetRelativePath.startsWith("audit/")
+            ? [action.targetRelativePath]
+            : [],
+        ),
+      ),
+    ),
+  ].sort();
+  const genericAuditRecords = (
+    await Promise.all(
+      auditRecordPaths.map((relativePath) =>
+        readJsonlRecords({
+          vaultRoot,
+          relativePath,
+        }),
+      ),
+    )
+  ).flat();
 
   assert.ok(operations.some((operation) => operation.operationType === "raw_copy"));
   assert.ok(
@@ -5091,7 +5108,7 @@ test("high-level canonical mutation ports own provider, event, and vault summary
   assert.match(coreDocument.body, /^# Health Ops Vault/mu);
   const summaryAuditRecords = await readJsonlRecords({
     vaultRoot,
-    relativePath: "audit/2026/2026-04.jsonl",
+    relativePath: toMonthlyShardRelativePath("audit", summary.updatedAt, "occurredAt"),
   });
   assert.ok(
     summaryAuditRecords.some(

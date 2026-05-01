@@ -8,7 +8,10 @@ import {
   buildHostedRunnerJobRuntimeConfig,
 } from "../src/runner-env.js";
 import {
+  TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+  TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+  TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
 } from "./hosted-execution-fixtures.js";
 import {
   startHostedLocalFullStackScenario,
@@ -23,6 +26,8 @@ const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-syn
 const whoopBaseUrl = "https://whoop-oauth.example.test";
 const whoopClientId = "synthetic-whoop-client";
 const whoopClientSecret = "synthetic-whoop-secret";
+const hostedWebCallbackPublicKeyringJson =
+  `{"v1":${TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON}}`;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 
@@ -30,12 +35,19 @@ describe("hosted local device connect e2e", () => {
   beforeAll(async () => {
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        DEVICE_SYNC_ENCRYPTION_KEY:
-          "0101010101010101010101010101010101010101010101010101010101010101",
-        DEVICE_SYNC_ENCRYPTION_KEY_VERSION: "v1",
         DEVICE_SYNC_PUBLIC_BASE_URL: deviceSyncPublicBaseUrl,
         DEVICE_SYNC_SECRET: "synthetic-device-sync-runtime-secret",
+        HOSTED_CRYPTO_ENV: "test",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+          TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/test/locations/global/keyRings/ring/cryptoKeys/web-wrap",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: hostedWebCallbackPublicKeyringJson,
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
+        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "1",
         WHOOP_BASE_URL: whoopBaseUrl,
         WHOOP_CLIENT_ID: whoopClientId,
         WHOOP_CLIENT_SECRET: whoopClientSecret,

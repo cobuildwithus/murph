@@ -3,6 +3,10 @@ import { createServer as createNetServer } from "node:net";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  deviceSyncProviderRuntimeSecretEnvKeys,
+  deviceSyncProviderRuntimeVariableEnvKeys,
+} from "@murphai/device-syncd/config";
 
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
@@ -38,6 +42,10 @@ export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "HOSTED_ASSISTANT_OSS",
   "HOSTED_ASSISTANT_PROFILE",
   "HOSTED_ASSISTANT_PROVIDER_NAME",
+] as const;
+export const HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS = [
+  ...deviceSyncProviderRuntimeSecretEnvKeys,
+  ...deviceSyncProviderRuntimeVariableEnvKeys,
 ] as const;
 
 export type HostedLocalAssistantProviderMode = "stub" | "live";
@@ -310,6 +318,14 @@ export function resolveHostedAssistantLocalDevEnv(
 function buildHostedAssistantStubEnvClearances(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS) {
+    env[key] = undefined;
+  }
+  return env;
+}
+
+export function buildHostedLocalDeviceSyncProviderEnvClearances(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS) {
     env[key] = undefined;
   }
   return env;

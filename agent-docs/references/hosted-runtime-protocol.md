@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-01
+Last verified: 2026-05-02
 
 ## Decision
 
@@ -42,6 +42,7 @@ nudge runner
 restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
 checkpoint after import
+run best-effort local inbox projection/parser enrichment and checkpoint it
 run local runtime work until idle or budget
 checkpoint final runtime state
 project redacted status/logs
@@ -115,10 +116,12 @@ active path does not consume or commit them.
 The runtime reads `HostedWorkspace`, restores the encrypted local workspace,
 fetches mailbox rows after its checkpointed per-lane watermarks, stages decoded
 conversation rows as assistant input, checkpoints immediately after staging, and
-attempts inbox projection once as a post-checkpoint enrichment effect. Projection
-status and artifacts checkpoint separately and best-effort, so failed or slow
-projection does not delay the staged mailbox watermark and does not imply a
-durable retry queue. Conversation import is discovery, not assistant handling:
+attempts inbox projection once as a post-checkpoint enrichment effect before
+assistant admission. Projection status and artifacts checkpoint separately and
+best-effort, so failed or slow projection does not delay the staged mailbox
+watermark and does not imply a durable retry queue. Successful projection may
+make parsed or bounded attachment evidence available to the same assistant turn.
+Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
 for that input, such as committed reply intent evidence or explicit suppression
@@ -138,13 +141,16 @@ mailbox watermark and no new fetched items. That must still run the assistant
 phase, because replay authority comes from staged assistant input plus missing
 terminal auto-reply evidence, not from mailbox import progress.
 
-Mailbox import has no pre-assistant side-effect phase. Provider-visible cleanup,
-read acknowledgement, parser drain, and other enrichment work must not run
-between import checkpoint and assistant admission. Linq inbound message deletion
-is still eventual, but it is queued only after terminal handling evidence is
-durable under `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json`
-and is drained through the hosted provider-cleanup retry state after the next
-workspace checkpoint.
+Mailbox import has no provider-visible pre-assistant side-effect phase.
+Provider-visible cleanup and read acknowledgement must not run between import
+checkpoint and assistant admission. Local inbox projection and parser enrichment
+may run after the import checkpoint and before assistant admission because they
+only update vault projection artifacts and `AssistantInputEvent` projection
+state. Linq inbound message deletion is still eventual, but it is queued only
+after terminal handling evidence is durable under
+`.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
+drained through the hosted provider-cleanup retry state after the next workspace
+checkpoint.
 
 The hosted workspace snapshot preserves durable operational runtime continuity
 under `vault/.runtime/operations/**` by default, excluding explicit

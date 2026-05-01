@@ -11,7 +11,10 @@ import {
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 
-import { buildHostedExecutionRuntimePlatform } from "./runtime-platform.js";
+import {
+  buildHostedExecutionRuntimePlatform,
+  createCloudflareHostedRuntimeFetch,
+} from "./runtime-platform.js";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
@@ -26,6 +29,13 @@ import {
   redactHostedRuntimeDiagnosticDetails,
   redactHostedRuntimeDiagnosticText,
 } from "./hosted-runtime-redaction.js";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.js";
+import {
+  LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+} from "./web-control-plane.js";
 
 interface HostedExecutionChildDependencies {
   emitLog?: typeof emitHostedExecutionStructuredLog;
@@ -129,8 +139,9 @@ async function runWorkspaceChildJob(input: {
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
 }) {
   let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request);
+  const boundUserId = readHostedExecutionRunnerJobUserId(input.job);
   const platform = buildHostedExecutionRuntimePlatform({
-    boundUserId: readHostedExecutionRunnerJobUserId(input.job),
+    boundUserId,
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
     internalWorkerProxyToken: input.internalWorkerProxyToken,
     localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
@@ -144,6 +155,14 @@ async function runWorkspaceChildJob(input: {
       },
     },
   });
+  const webControlFetch = input.internalWorkerProxyToken && input.localInternalProxyBaseUrl
+    ? createCloudflareHostedRuntimeFetch(
+        boundUserId,
+        input.internalWorkerProxyToken,
+        input.localInternalProxyBaseUrl,
+        fetch,
+      )
+    : undefined;
 
   return await input.runWorkspaceInProcess(
     input.job,
@@ -151,6 +170,16 @@ async function runWorkspaceChildJob(input: {
       platform,
       request: input.job.request,
       runtime: input.job.runtime ?? {},
+      ...(webControlFetch
+        ? {
+            webControlAllowHttpHosts: [
+              CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+              ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+            ],
+            webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+            webControlFetch,
+          }
+        : {}),
     }),
   );
 }

@@ -5048,6 +5048,133 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
+  it('loads projected capture attachments for hosted assistant input prompts', async () => {
+    const projectionCaptureId = 'cap_projected_attachment'
+    const baseHostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_thread_projected',
+      inputId: 'ain_abcdabcdabcdabcdabcdabcdabcdabcd',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_projected',
+        threadId: 'real_thread_projected',
+      },
+      source: 'linq',
+      text: 'Received a Linq message with 1 attachment.',
+    })
+    const hostedInput: AssistantInputCandidate = {
+      ...baseHostedInput,
+      acceptedInput: {
+        ...baseHostedInput.acceptedInput,
+        captureIds: [projectionCaptureId],
+      },
+      event: {
+        ...baseHostedInput.event,
+        attachmentCount: 1,
+        attachmentDescriptors: [
+          {
+            attachmentId: 'safe_attachment_descriptor',
+            contentType: 'application/pdf',
+            fileName: null,
+            kind: 'document',
+            sizeBytes: 128,
+          },
+        ],
+      },
+      projection: {
+        captureId: projectionCaptureId,
+        reasonCode: null,
+        status: 'succeeded',
+      },
+    }
+    const projectedCapture = createCaptureDetail({
+      captureId: projectionCaptureId,
+      source: 'linq',
+      accountId: 'safe_acct_1',
+      actorId: 'safe_actor_1',
+      actorIsSelf: false,
+      attachmentCount: 1,
+      attachments: [
+        {
+          attachmentId: 'attachment-1',
+          ordinal: 1,
+          externalId: null,
+          kind: 'document',
+          mime: 'application/pdf',
+          originalPath: null,
+          storedPath: 'raw/inbox/linq/cap_projected_attachment/attachments/lab-results.pdf',
+          fileName: 'lab-results.pdf',
+          byteSize: 128,
+          sha256: null,
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: null,
+          parseState: 'succeeded',
+        },
+      ],
+      externalId: 'linq:real_msg_projected',
+      text: 'Received a Linq message with 1 attachment.',
+      threadId: 'real_thread_projected',
+      threadIsDirect: true,
+    })
+    const show = vi.fn(async () => ({
+      capture: projectedCapture,
+      vault: '/tmp/assistant-automation-vault',
+    }))
+    const inboxServices = createInboxServices({
+      show,
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const groupItem = createCapturelessReplyGroupItem(hostedInput)
+    const context = reply.createAssistantAutoReplyGroupContext([
+      {
+        ...groupItem,
+        summary: {
+        ...groupItem.summary,
+          projectionCaptureId,
+        },
+      },
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(show).toHaveBeenCalledWith({
+      captureId: projectionCaptureId,
+      requestId: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          attachmentDescriptors: hostedInput.event.attachmentDescriptors,
+          capture: expect.objectContaining({
+            attachments: projectedCapture.attachments,
+            captureId: projectionCaptureId,
+          }),
+          projectionReasonCode: null,
+          projectionStatus: 'succeeded',
+        }),
+      ],
+      '/tmp/assistant-automation-vault',
+    )
+  })
+
   it.each([
     [
       'assistant input id',

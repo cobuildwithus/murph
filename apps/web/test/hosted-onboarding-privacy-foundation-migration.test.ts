@@ -86,6 +86,8 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMailboxPayload",
   "HostedRuntimeLog",
   "HostedWorkspace",
+  "HostedUserCryptoAudit",
+  "HostedUserCryptoEnvelope",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -160,6 +162,8 @@ describe("hosted Prisma baseline migration", () => {
       "2026042700_hosted_runtime_hard_cut",
       "20260428010000_drop_hosted_share_tables",
       "20260429020000_hosted_legal_consent",
+      "20260501000000_hosted_user_crypto_envelopes",
+      "20260501000001_hosted_user_crypto_envelope_hardening",
       "2026050100_device_connection_credentials_setup",
       "2026050101_device_connection_sources",
       "migration_lock.toml",

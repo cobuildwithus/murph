@@ -24,6 +24,7 @@ import {
 } from "./hosted-local-oidc-support.js";
 import {
   buildHostLoopbackStubBaseUrl,
+  buildHostedLocalDeviceSyncProviderEnvClearances,
   mergeRequiredEnvProfile,
   reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv,
@@ -162,6 +163,7 @@ export async function startHostedLocalFullStackScenario(input: {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...baseEnvironment,
       ...hostedAssistantDevEnv,
+      ...buildHostedLocalDeviceSyncProviderEnvClearances(),
       ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       ...(input.additionalEnv ?? {}),

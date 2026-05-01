@@ -45,9 +45,9 @@ interface HostedMemberStoreModule {
 }
 
 interface HostedCryptoDomainRootStoreModule {
-  provisionHostedCryptoDomainRootsForUser(input: {
-    prisma: HostedMemberSeedPrismaClient;
+  provisionHostedCryptoDomainRootsForUserTx(input: {
     reason?: string;
+    tx: unknown;
     userId: string;
   }): Promise<void>;
 }
@@ -97,8 +97,8 @@ interface HostedMemberSeedModules {
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
   createHostedPhoneLookupKey: ContactPrivacyModule["createHostedPhoneLookupKey"];
   getPrisma: HostedMemberSeedPrismaModule["getPrisma"];
-  provisionHostedCryptoDomainRootsForUser:
-    HostedCryptoDomainRootStoreModule["provisionHostedCryptoDomainRootsForUser"];
+  provisionHostedCryptoDomainRootsForUserTx:
+    HostedCryptoDomainRootStoreModule["provisionHostedCryptoDomainRootsForUserTx"];
   readHostedPhoneHint: ContactPrivacyModule["readHostedPhoneHint"];
   upsertHostedMemberHomeLinqBindingTx:
     HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqBindingTx"];
@@ -126,11 +126,11 @@ export async function seedHostedActiveMember(
         memberId: input.memberId,
         prisma: tx,
       });
-    });
-    await modules.provisionHostedCryptoDomainRootsForUser({
-      prisma,
-      reason: "hosted-member.test-seed",
-      userId: input.memberId,
+      await modules.provisionHostedCryptoDomainRootsForUserTx({
+        reason: "hosted-member.test-seed",
+        tx,
+        userId: input.memberId,
+      });
     });
   } finally {
     await prisma.$disconnect();
@@ -161,6 +161,11 @@ export async function seedHostedActiveLinqMember(
         memberId: input.memberId,
         prisma: tx,
       });
+      await modules.provisionHostedCryptoDomainRootsForUserTx({
+        reason: "hosted-member.test-seed",
+        tx,
+        userId: input.memberId,
+      });
       await modules.upsertHostedMemberIdentity({
         maskedPhoneNumberHint: modules.readHostedPhoneHint(input.memberPhone),
         memberId: input.memberId,
@@ -184,11 +189,6 @@ export async function seedHostedActiveLinqMember(
         prisma: tx,
         recipientPhone: input.homePhone,
       });
-    });
-    await modules.provisionHostedCryptoDomainRootsForUser({
-      prisma,
-      reason: "hosted-member.test-seed",
-      userId: input.memberId,
     });
   } finally {
     await prisma.$disconnect();
@@ -273,8 +273,8 @@ async function loadHostedMemberSeedModules(
     createHostedMember: typedHostedMemberStoreModule.createHostedMember,
     createHostedPhoneLookupKey: typedContactPrivacyModule.createHostedPhoneLookupKey,
     getPrisma: typedPrismaModule.getPrisma,
-    provisionHostedCryptoDomainRootsForUser:
-      typedHostedCryptoDomainRootStoreModule.provisionHostedCryptoDomainRootsForUser,
+    provisionHostedCryptoDomainRootsForUserTx:
+      typedHostedCryptoDomainRootStoreModule.provisionHostedCryptoDomainRootsForUserTx,
     readHostedPhoneHint: typedContactPrivacyModule.readHostedPhoneHint,
     upsertHostedMemberHomeLinqBindingTx:
       typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqBindingTx,

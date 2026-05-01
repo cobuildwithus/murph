@@ -5,7 +5,10 @@ import {
   isHostedRunnerSecretKeyAllowed,
 } from "../src/hosted-env-policy.js";
 import { readHostedExecutionEnvironment } from "../src/env.js";
+import { readHostedExecutionWorkerEnvironment } from "../src/hosted-execution-worker-env.js";
 import { toStringEnvSource } from "../src/string-env.js";
+import { normalizeHostedWebControlBaseUrl } from "../src/web-control-plane.js";
+import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.js";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 
 const REMOVED_BUNDLE_KEY_ALIAS = ["HB", "HOSTED", "BUNDLE", "KEY"].join("_");
@@ -46,6 +49,46 @@ describe("readHostedExecutionEnvironment", () => {
     }));
 
     expect(environment.hostedWebBaseUrl).toBe("http://[::1]:3000");
+  });
+
+  it("keeps the Docker bridge host limited to local child web-control normalization", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000",
+      })),
+    ).toThrow(/HTTPS unless the host is explicitly allowlisted/u);
+
+    expect(
+      () => normalizeHostedWebControlBaseUrl("http://host.docker.internal:3000"),
+    ).toThrow(/HTTPS unless the host is explicitly allowlisted/u);
+    expect(
+      normalizeHostedWebControlBaseUrl("http://host.docker.internal:3000", {
+        allowHttpHosts: ["host.docker.internal"],
+      }),
+    ).toBe("http://host.docker.internal:3000");
+    expect(() =>
+      normalizeHostedWebControlBaseUrl(
+        `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane}`,
+      ),
+    ).toThrow(/HTTPS unless the host is explicitly allowlisted/u);
+    expect(
+      normalizeHostedWebControlBaseUrl(
+        `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane}`,
+        {
+          allowHttpHosts: [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane],
+        },
+      ),
+    ).toBe(`http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane}`);
+    expect(
+      readHostedExecutionWorkerEnvironment(
+        createHostedExecutionTestEnv({
+          HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000",
+        }),
+        {
+          allowHostedWebHttpHosts: ["host.docker.internal"],
+        },
+      ).hostedWebBaseUrl,
+    ).toBe("http://host.docker.internal:3000");
   });
 
   it("reads the configured Vercel OIDC environment when provided", () => {

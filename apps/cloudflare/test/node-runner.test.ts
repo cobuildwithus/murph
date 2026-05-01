@@ -185,6 +185,62 @@ describe("buildHostedExecutionJobRuntime", () => {
     expect(runtime.parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
   });
 
+  it("preserves the worker-serialized local e2e parser toolchain", () => {
+    const parserToolchain = {
+      tools: {
+        ffmpeg: {
+          command: "/app/test-parser-toolchain/ffmpeg",
+        },
+        pdfinfo: {
+          command: "/usr/bin/pdfinfo",
+        },
+        pdftotext: {
+          command: "/usr/bin/pdftotext",
+        },
+        whisper: {
+          command: "/app/test-parser-toolchain/whisper-cli",
+          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        },
+      },
+    };
+
+    const runtime = buildHostedExecutionJobRuntime({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-test",
+      },
+      parserToolchain,
+    });
+
+    expect(runtime.parserToolchain).toEqual(parserToolchain);
+  });
+
+  it("rebases malformed local e2e parser toolchain paths onto runner image defaults", () => {
+    const runtime = buildHostedExecutionJobRuntime({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-test",
+      },
+      parserToolchain: {
+        tools: {
+          ffmpeg: {
+            command: "/app/test-parser-toolchain/../other-bin/ffmpeg",
+          },
+          pdfinfo: {
+            command: "/stale/pdfinfo",
+          },
+          pdftotext: {
+            command: "/usr/bin/pdftotext",
+          },
+          whisper: {
+            command: "/app/test-parser-toolchain/whisper-cli",
+            modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+          },
+        },
+      },
+    });
+
+    expect(runtime.parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+  });
+
   it("rejects parserToolchain:null instead of falling back to ambient discovery", () => {
     expect(() =>
       buildHostedExecutionJobRuntime(JSON.parse(

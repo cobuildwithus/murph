@@ -174,9 +174,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(events, [
         "import:1",
         "checkpoint:import",
-        "assistant",
         "mailbox:afterCheckpoint",
         "checkpoint:maintenance",
+        "assistant",
       ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestWorkspace?.version, "2");
@@ -606,7 +606,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runs mailbox post-checkpoint effects when the assistant phase throws", async () => {
+  test("runs mailbox post-checkpoint effects before assistant admission when the assistant phase throws", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({
@@ -660,11 +660,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "assistant",
         "mailbox:afterCheckpoint",
+        "assistant",
       ]);
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "import");
+      assert.equal(checkpointRequests[1]?.reason, "maintenance");
     } finally {
       await rm(vaultRoot, {
         force: true,
