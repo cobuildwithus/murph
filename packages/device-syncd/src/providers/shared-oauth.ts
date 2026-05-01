@@ -1,8 +1,19 @@
 import { deviceSyncError } from "../errors.ts";
 import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, splitScopeList, subtractDays } from "../shared.ts";
+import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
 
 import type { DeviceSyncErrorOptions } from "../errors.ts";
-import type { DeviceSyncAccount, ProviderAuthTokens, ProviderJobContext, ProviderScheduleResult } from "../types.ts";
+import type {
+  DeviceConnectionHandler,
+  DeviceJobExecutor,
+  DeviceSyncAccount,
+  DeviceSyncOAuthCompatibilityProvider,
+  DeviceSyncProvider,
+  DeviceWebhookHandler,
+  ProviderAuthTokens,
+  ProviderJobContext,
+  ProviderScheduleResult,
+} from "../types.ts";
 
 export async function parseResponseBody(response: Response): Promise<string> {
   try {
@@ -166,6 +177,69 @@ export function requireRefreshToken(refreshToken: unknown, buildMissingRefreshTo
   return normalized;
 }
 
+export function withOAuthCompatibilityHandlers<T extends DeviceSyncOAuthCompatibilityProvider>(provider: T): T {
+  const connectionHandler: DeviceConnectionHandler = provider.connectionHandler ?? {
+    beginConnection: async (input) => ({
+      authorizationUrl: provider.buildConnectUrl({
+        state: input.state,
+        callbackUrl: input.callbackUrl,
+        scopes: input.scopes,
+        now: input.now,
+      }),
+    }),
+    completeConnection: async (input) => {
+      const callbackError = normalizeString(input.query.get("error"));
+
+      if (callbackError) {
+        throw deviceSyncError({
+          code: "OAUTH_CALLBACK_REJECTED",
+          message: "OAuth authorization was denied or canceled.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const code = normalizeString(input.query.get("code"));
+
+      if (!code) {
+        throw deviceSyncError({
+          code: "OAUTH_CODE_MISSING",
+          message: "OAuth callback is missing the authorization code.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      return provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: input.callbackUrl,
+          state: input.state,
+          now: input.now,
+          grantedScopes: input.grantedScopes,
+        },
+        code,
+      );
+    },
+    refreshTokens: provider.refreshTokens,
+    ...(provider.revokeAccess ? { revokeAccess: provider.revokeAccess } : {}),
+  };
+  const webhookHandler: DeviceWebhookHandler | undefined = provider.webhookHandler
+    ?? (provider.verifyAndParseWebhook
+      ? { verifyAndParseWebhook: provider.verifyAndParseWebhook }
+      : undefined);
+  const jobExecutor: DeviceJobExecutor = provider.jobExecutor ?? {
+    ...(provider.createScheduledJobs ? { createScheduledJobs: provider.createScheduledJobs } : {}),
+    executeJob: provider.executeJob,
+  };
+
+  return {
+    ...provider,
+    connectionHandler,
+    ...(webhookHandler ? { webhookHandler } : {}),
+    jobExecutor,
+  };
+}
+
 export async function exchangeOAuthAuthorizationCode<T extends {
   access_token?: unknown;
   expires_in?: unknown;
@@ -206,7 +280,7 @@ export async function refreshOAuthTokens<T extends {
   refresh_token?: unknown;
 }>(input: {
   postTokenRequest: (parameters: Record<string, string>) => Promise<T>;
-  account: Pick<DeviceSyncAccount, "refreshToken">;
+  account: Pick<DeviceSyncAccount, "credential">;
   clientId: string;
   clientSecret: string;
   tokenResponseToAuthTokens: (payload: T) => ProviderAuthTokens;
@@ -217,7 +291,10 @@ export async function refreshOAuthTokens<T extends {
   }) => string;
   extraParameters?: Record<string, string>;
 }): Promise<ProviderAuthTokens> {
-  const currentRefreshToken = requireRefreshToken(input.account.refreshToken, input.buildMissingRefreshTokenError);
+  const currentRefreshToken = requireRefreshToken(
+    getDeviceSyncAccountOAuthTokens(input.account)?.refreshToken,
+    input.buildMissingRefreshTokenError,
+  );
   const tokenPayload = await input.postTokenRequest({
     grant_type: "refresh_token",
     refresh_token: currentRefreshToken,
@@ -259,7 +336,19 @@ export function createRefreshingApiSession(input: {
     return requestWithRefreshAndRetry({
       shouldRefresh: () => (input.shouldRefresh ?? isTokenNearExpiry)(currentAccount),
       refresh,
-      request: () => input.requestJsonWithAccessToken<T>(currentAccount.accessToken, path, options),
+      request: () => {
+        const tokens = getDeviceSyncAccountOAuthTokens(currentAccount);
+        if (!tokens?.accessToken) {
+          throw deviceSyncError({
+            code: "DEVICE_SYNC_OAUTH_TOKENS_REQUIRED",
+            message: "Device sync OAuth account is missing access token credentials.",
+            retryable: false,
+            accountStatus: "reauthorization_required",
+          });
+        }
+
+        return input.requestJsonWithAccessToken<T>(tokens.accessToken, path, options);
+      },
     });
   }
 

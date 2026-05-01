@@ -15,6 +15,7 @@ import type {
   DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
   ProviderAuthTokens,
+  StoredDeviceSyncAccountCredential,
   StoredDeviceSyncAccount,
 } from "../types.ts";
 
@@ -413,13 +414,13 @@ function resolveAccountCredentialInput(input: AccountUpsertInput): ResolvedAccou
 
 function validateStoredCredentialRow(row: StoredAccountRow): void {
   if (row.credential_kind === "oauth_tokens") {
-    if (row.provider_config_key !== null || row.access_token_encrypted === null) {
+    if (row.provider_config_key !== null || !row.access_token_encrypted) {
       throw new TypeError("Stored OAuth token credential rows require an access token and no provider config key.");
     }
     return;
   }
 
-  if (row.access_token_encrypted !== null && row.access_token_encrypted !== "") {
+  if (row.access_token_encrypted !== null) {
     throw new TypeError("Stored non-token credential rows must not contain access tokens.");
   }
 
@@ -437,6 +438,41 @@ function validateStoredCredentialRow(row: StoredAccountRow): void {
   if (row.provider_config_key !== null) {
     throw new TypeError("Stored none credential rows must not contain provider_config_key.");
   }
+}
+
+function buildStoredAccountCredential(row: StoredAccountRow): StoredDeviceSyncAccountCredential {
+  const credentialMetadata = parseCredentialMetadataJson(row.credential_metadata_json);
+
+  if (row.credential_kind === "oauth_tokens") {
+    if (!row.access_token_encrypted) {
+      throw new TypeError("Stored OAuth token credential rows require an access token.");
+    }
+
+    return {
+      kind: "oauth_tokens",
+      accessTokenEncrypted: row.access_token_encrypted,
+      refreshTokenEncrypted: row.refresh_token_encrypted,
+      accessTokenExpiresAt: row.access_token_expires_at,
+      credentialMetadata,
+    };
+  }
+
+  if (row.credential_kind === "provider_config") {
+    if (!row.provider_config_key) {
+      throw new TypeError("Stored provider-config credential rows require provider_config_key.");
+    }
+
+    return {
+      kind: "provider_config",
+      providerConfigKey: row.provider_config_key,
+      credentialMetadata,
+    };
+  }
+
+  return {
+    kind: "none",
+    credentialMetadata,
+  };
 }
 
 function parseStoredStringArray(value: string | null, field: string): string[] {
@@ -603,17 +639,13 @@ export function mapAccountRow(row: StoredAccountRow): StoredDeviceSyncAccount {
     setupExpiresAt: row.setup_expires_at,
     scopes: parseStoredStringArray(row.scopes_json, "device_connection.scopes_json"),
     disconnectGeneration: row.disconnect_generation,
-    credentialKind: row.credential_kind,
-    providerConfigKey: row.provider_config_key,
-    credentialMetadata: parseCredentialMetadataJson(row.credential_metadata_json),
-    accessTokenEncrypted: row.access_token_encrypted ?? "",
+    credential: buildStoredAccountCredential(row),
     hostedObservedConnectionRevision: row.hosted_observed_connection_revision,
     hostedObservedTokenRevision: row.hosted_observed_token_revision,
     hostedObservedTokenVersion: row.hosted_observed_token_version,
     hostedObservedUpdatedAt: row.hosted_observed_updated_at,
     localConnectionRevision: row.local_connection_revision,
     localTokenRevision: row.local_token_revision,
-    refreshTokenEncrypted: row.refresh_token_encrypted,
     accessTokenExpiresAt: row.access_token_expires_at,
     metadata: sanitizeStoredDeviceSyncAccountMetadata(maybeParseJsonObject(row.metadata_json)),
     connectedAt: row.connected_at,
@@ -987,10 +1019,15 @@ export function disconnectAccount(
 
     database.prepare(`
       update device_credential_state
-      set access_token_encrypted = case
-            when credential_kind = 'oauth_tokens' then ''
-            else null
+      set credential_kind = case
+            when credential_kind = 'oauth_tokens' then 'none'
+            else credential_kind
           end,
+          provider_config_key = case
+            when credential_kind = 'oauth_tokens' then null
+            else provider_config_key
+          end,
+          access_token_encrypted = null,
           refresh_token_encrypted = null,
           access_token_expires_at = null,
           updated_at = ?

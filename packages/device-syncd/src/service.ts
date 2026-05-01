@@ -23,11 +23,15 @@ import {
   toIsoTimestamp,
 } from "./shared.ts";
 import { SqliteDeviceSyncStore } from "./store.ts";
-import { DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED } from "./types.ts";
+import {
+  DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
+} from "./types.ts";
 
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
+  DeviceJobExecutor,
+  DeviceSyncAccountCredential,
   DeviceSyncAccount,
   DeviceSyncImporterPort,
   DeviceSyncJobInput,
@@ -296,7 +300,7 @@ class DeviceSyncServiceController {
 
     const provider = this.requireProvider(account.provider);
     const now = toIsoTimestamp(new Date());
-    const scheduledJobs = provider.createScheduledJobs?.(account, now).jobs ?? [];
+    const scheduledJobs = resolveProviderJobExecutor(provider)?.createScheduledJobs?.(account, now).jobs ?? [];
     const jobs = scheduledJobs.length > 0 ? scheduledJobs : [{ kind: "reconcile", priority: 80 }];
     const queuedJobs = this.enqueueJobs(
       account,
@@ -381,11 +385,13 @@ class DeviceSyncServiceController {
 
         const provider = this.registry.get(account.provider);
 
-        if (!provider?.createScheduledJobs) {
+        const jobExecutor = provider ? resolveProviderJobExecutor(provider) : undefined;
+
+        if (!jobExecutor?.createScheduledJobs) {
           continue;
         }
 
-        const schedule = provider.createScheduledJobs(account, now);
+        const schedule = jobExecutor.createScheduledJobs(account, now);
         this.enqueueJobs(account, schedule.jobs);
         this.store.patchAccount(account.id, {
           nextReconcileAt: schedule.nextReconcileAt ?? null,
@@ -465,6 +471,18 @@ class DeviceSyncServiceController {
     this.store.markSyncStarted(storedAccount.id, now);
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
+    const jobExecutor = resolveProviderJobExecutor(provider);
+
+    if (!jobExecutor) {
+      failClaimedJob(
+        "JOB_EXECUTOR_NOT_SUPPORTED",
+        `Device sync provider ${provider.provider} does not support job execution.`,
+        null,
+        false,
+      );
+      return job;
+    }
+
     const ensureJobLeaseOwned = (): void => {
       const fenceNow = currentNow();
       const currentJob = this.store.getJobById(job.id);
@@ -500,7 +518,7 @@ class DeviceSyncServiceController {
     try {
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      const result = await provider.executeJob(
+      const result = await jobExecutor.executeJob(
         {
           account: currentAccount,
           now,
@@ -528,7 +546,7 @@ class DeviceSyncServiceController {
           },
           refreshAccountTokens: async () => {
             ensureExecutionActive();
-            if (currentAccount.credentialKind && currentAccount.credentialKind !== "oauth_tokens") {
+            if (currentAccount.credential.kind !== "oauth_tokens") {
               throw deviceSyncError({
                 code: "DEVICE_SYNC_CREDENTIAL_REFRESH_UNSUPPORTED",
                 message: "Provider-config device sync credentials cannot be refreshed as OAuth tokens.",
@@ -537,7 +555,9 @@ class DeviceSyncServiceController {
               });
             }
 
-            if (!provider.refreshTokens) {
+            const refreshTokens = resolveProviderTokenRefresher(provider);
+
+            if (!refreshTokens) {
               throw deviceSyncError({
                 code: "TOKEN_REFRESH_NOT_SUPPORTED",
                 message: `Device sync provider ${provider.provider} does not support account token refresh.`,
@@ -545,7 +565,7 @@ class DeviceSyncServiceController {
                 httpStatus: 409,
               });
             }
-            const refreshed = await provider.refreshTokens(currentAccount);
+            const refreshed = await refreshTokens(currentAccount);
             ensureExecutionActive();
             const updated = this.store.updateAccountTokens(
               currentAccount.id,
@@ -694,11 +714,10 @@ class DeviceSyncServiceController {
 
   private toInternalAccountRecord(account: StoredDeviceSyncAccount): PublicDeviceSyncAccount {
     const {
-      accessTokenEncrypted: _accessTokenEncrypted,
+      credential: _credential,
       disconnectGeneration: _disconnectGeneration,
       hostedObservedTokenVersion: _hostedObservedTokenVersion,
       hostedObservedUpdatedAt: _hostedObservedUpdatedAt,
-      refreshTokenEncrypted: _refreshTokenEncrypted,
       ...internalAccount
     } = account;
     return internalAccount;
@@ -708,12 +727,43 @@ class DeviceSyncServiceController {
     return {
       disconnectGeneration: account.disconnectGeneration,
       ...this.toInternalAccountRecord(account),
-      accessToken: account.accessTokenEncrypted
-        ? this.decryptStoredToken(account, account.accessTokenEncrypted, "device-sync-access-token")
-        : "",
-      refreshToken: account.refreshTokenEncrypted
-        ? this.decryptStoredToken(account, account.refreshTokenEncrypted, "device-sync-refresh-token")
-        : null,
+      credential: this.toDecryptedAccountCredential(account),
+    };
+  }
+
+  private toDecryptedAccountCredential(account: StoredDeviceSyncAccount): DeviceSyncAccountCredential {
+    if (account.credential.kind === "oauth_tokens") {
+      return {
+        kind: "oauth_tokens",
+        tokens: {
+          accessToken: this.decryptStoredToken(
+            account,
+            account.credential.accessTokenEncrypted,
+            "device-sync-access-token",
+          ),
+          refreshToken: account.credential.refreshTokenEncrypted
+            ? this.decryptStoredToken(
+              account,
+              account.credential.refreshTokenEncrypted,
+              "device-sync-refresh-token",
+            )
+            : null,
+          accessTokenExpiresAt: account.credential.accessTokenExpiresAt,
+        },
+      };
+    }
+
+    if (account.credential.kind === "provider_config") {
+      return {
+        kind: "provider_config",
+        providerConfigKey: account.credential.providerConfigKey,
+        credentialMetadata: { ...account.credential.credentialMetadata },
+      };
+    }
+
+    return {
+      kind: "none",
+      credentialMetadata: { ...account.credential.credentialMetadata },
     };
   }
 
@@ -888,6 +938,25 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function resolveProviderJobExecutor(provider: DeviceSyncProvider): DeviceJobExecutor | undefined {
+  if (provider.jobExecutor) {
+    return provider.jobExecutor;
+  }
+
+  return provider.executeJob
+    ? {
+        ...(provider.createScheduledJobs ? { createScheduledJobs: provider.createScheduledJobs } : {}),
+        executeJob: provider.executeJob,
+      }
+    : undefined;
+}
+
+function resolveProviderTokenRefresher(
+  provider: DeviceSyncProvider,
+): DeviceSyncProvider["refreshTokens"] {
+  return provider.connectionHandler?.refreshTokens ?? provider.refreshTokens;
 }
 
 function normalizeExecutionError(error: unknown): {

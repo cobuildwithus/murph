@@ -80,33 +80,25 @@ export type StoredDeviceConnectionSource = PublicDeviceConnectionSource;
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
   disconnectGeneration: number;
-  credentialKind?: DeviceAccountCredentialKind;
-  providerConfigKey?: string | null;
-  credentialMetadata?: Record<string, unknown>;
-  accessTokenEncrypted: string;
+  credential: StoredDeviceSyncAccountCredential;
   hostedObservedConnectionRevision: number;
   hostedObservedTokenRevision: number;
   hostedObservedTokenVersion: number | null;
   hostedObservedUpdatedAt: string | null;
   localConnectionRevision: number;
   localTokenRevision: number;
-  refreshTokenEncrypted: string | null;
 }
 
 export interface DeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
   disconnectGeneration: number;
-  credentialKind?: DeviceAccountCredentialKind;
-  providerConfigKey?: string | null;
-  credentialMetadata?: Record<string, unknown>;
-  accessToken: string;
-  refreshToken: string | null;
+  credential: DeviceSyncAccountCredential;
 }
 
 export interface ProviderAuthTokens {
   accessToken: string;
   refreshToken?: string | null;
-  accessTokenExpiresAt?: string;
+  accessTokenExpiresAt?: string | null;
 }
 
 export type DeviceAccountCredentialKind =
@@ -127,6 +119,51 @@ export type DeviceAccountCredential =
   | {
       kind: "none";
     };
+
+export type StoredDeviceSyncAccountCredential =
+  | {
+      kind: "oauth_tokens";
+      accessTokenEncrypted: string;
+      refreshTokenEncrypted: string | null;
+      accessTokenExpiresAt: string | null;
+      credentialMetadata: Record<string, unknown>;
+    }
+  | {
+      kind: "provider_config";
+      providerConfigKey: string;
+      credentialMetadata: Record<string, unknown>;
+    }
+  | {
+      kind: "none";
+      credentialMetadata: Record<string, unknown>;
+    };
+
+export type DeviceSyncAccountCredential =
+  | {
+      kind: "oauth_tokens";
+      tokens: ProviderAuthTokens;
+    }
+  | {
+      kind: "provider_config";
+      providerConfigKey: string;
+      credentialMetadata: Record<string, unknown>;
+    }
+  | {
+      kind: "none";
+      credentialMetadata: Record<string, unknown>;
+    };
+
+export function getDeviceSyncAccountOAuthTokens(
+  account: Pick<DeviceSyncAccount, "credential">,
+): ProviderAuthTokens | null {
+  return account.credential.kind === "oauth_tokens" ? account.credential.tokens : null;
+}
+
+export function getStoredDeviceSyncAccountOAuthCredential(
+  account: Pick<StoredDeviceSyncAccount, "credential">,
+): Extract<StoredDeviceSyncAccountCredential, { kind: "oauth_tokens" }> | null {
+  return account.credential.kind === "oauth_tokens" ? account.credential : null;
+}
 
 export type DeviceSyncProviderCredentialPolicy =
   | {
@@ -398,25 +435,53 @@ export interface ProviderJobResult {
   nextReconcileAt?: string | null;
 }
 
+export interface DeviceConnectionHandler {
+  beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
+  completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
+  refreshTokens?(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
+  revokeAccess?(account: DeviceSyncAccount): Promise<void>;
+}
+
+export interface DeviceWebhookHandler {
+  verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
+}
+
+export interface DeviceJobExecutor {
+  createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
+  executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
+}
+
 export interface DeviceSyncProvider {
   provider: string;
   descriptor: DeviceProviderDescriptor;
   credentialPolicy?: DeviceSyncProviderCredentialPolicy;
+  connectionHandler?: DeviceConnectionHandler;
+  webhookHandler?: DeviceWebhookHandler;
+  jobExecutor?: DeviceJobExecutor;
   webhookAdmin?: ProviderWebhookAdminCapability;
+  // Compatibility methods for legacy OAuth-shaped providers. New providers should expose
+  // connectionHandler, webhookHandler, and jobExecutor instead.
   beginConnection?(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection?(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
-  buildConnectUrl(input: {
+  buildConnectUrl?(input: {
     state: string;
     callbackUrl: string;
     scopes: string[];
     now: string;
   }): string;
-  exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
-  refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
+  exchangeAuthorizationCode?(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
+  refreshTokens?(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
   createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
   verifyAndParseWebhook?(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
-  executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
+  executeJob?(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
+}
+
+export interface DeviceSyncOAuthCompatibilityProvider extends DeviceSyncProvider {
+  buildConnectUrl: NonNullable<DeviceSyncProvider["buildConnectUrl"]>;
+  exchangeAuthorizationCode: NonNullable<DeviceSyncProvider["exchangeAuthorizationCode"]>;
+  refreshTokens: NonNullable<DeviceSyncProvider["refreshTokens"]>;
+  executeJob: NonNullable<DeviceSyncProvider["executeJob"]>;
 }
 
 export interface DeviceSyncRegistry extends NamedDeviceProviderRegistry<DeviceSyncProvider> {

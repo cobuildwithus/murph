@@ -28,6 +28,7 @@ import {
   refreshOAuthTokens,
   requireRefreshToken,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
+  withOAuthCompatibilityHandlers,
 } from "./shared-oauth.ts";
 import { createStravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
 
@@ -35,7 +36,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
-  DeviceSyncProvider,
+  DeviceSyncOAuthCompatibilityProvider,
   DeviceSyncWebhookPreflightResponse,
   ProviderAuthTokens,
   ProviderCallbackContext,
@@ -48,6 +49,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
 import type { StravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
 
 const STRAVA_AUTH_BASE_URL = "https://www.strava.com";
@@ -395,7 +397,7 @@ export function resolveStravaWebhookPreflightResponse(input: {
 
 export function createStravaDeviceSyncProvider(
   config: StravaDeviceSyncProviderConfig,
-): DeviceSyncProvider {
+): DeviceSyncOAuthCompatibilityProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = (config.authBaseUrl ?? STRAVA_AUTH_BASE_URL).replace(/\/+$/u, "");
   const apiBaseUrl = (config.apiBaseUrl ?? STRAVA_API_BASE_URL).replace(/\/+$/u, "");
@@ -736,7 +738,7 @@ export function createStravaDeviceSyncProvider(
     return {};
   }
 
-  return {
+  return withOAuthCompatibilityHandlers({
     provider: descriptor.provider,
     descriptor,
     webhookAdmin,
@@ -835,7 +837,12 @@ export function createStravaDeviceSyncProvider(
       });
     },
     async revokeAccess(account: DeviceSyncAccount): Promise<void> {
-      await deauthorize(account.accessToken);
+      const tokens = getDeviceSyncAccountOAuthTokens(account);
+      if (!tokens?.accessToken) {
+        return;
+      }
+
+      await deauthorize(tokens.accessToken);
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
       return buildScheduledReconcileJobs({
@@ -964,5 +971,5 @@ export function createStravaDeviceSyncProvider(
           });
       }
     },
-  } satisfies DeviceSyncProvider;
+  } satisfies DeviceSyncOAuthCompatibilityProvider);
 }

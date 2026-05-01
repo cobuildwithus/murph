@@ -22,7 +22,10 @@ import type {
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
 } from "../src/types.ts";
-import { DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED } from "../src/types.ts";
+import {
+  DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
+  getDeviceSyncAccountOAuthTokens,
+} from "../src/types.ts";
 
 class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly oauthStates = new Map<string, OAuthStateRecord>();
@@ -2329,8 +2332,10 @@ test("public ingress best-effort revokes pending provider access when OAuth pers
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async revokeAccess(account) {
+          const tokens = getDeviceSyncAccountOAuthTokens(account);
+          assert.ok(tokens);
           revokeCalls.push({
-            accessToken: account.accessToken,
+            accessToken: tokens.accessToken,
             externalAccountId: account.externalAccountId,
           });
           throw new Error("cleanup revoke failed");

@@ -24,6 +24,7 @@ import type {
   BeginConnectionResult,
   CompleteConnectionResult,
   DeviceAccountCredential,
+  DeviceConnectionHandler,
   DeviceSyncAccountSetupPhase,
   DeviceSyncAccount,
   DeviceSyncIngressWebhook,
@@ -80,8 +81,12 @@ function toIngressWebhook(parsed: {
 
 async function beginProviderConnection(
   provider: DeviceSyncProvider,
-  input: Parameters<NonNullable<DeviceSyncProvider["beginConnection"]>>[0],
+  input: Parameters<DeviceConnectionHandler["beginConnection"]>[0],
 ): Promise<ProviderBeginConnectionResult> {
+  if (provider.connectionHandler) {
+    return provider.connectionHandler.beginConnection(input);
+  }
+
   if (provider.beginConnection) {
     return provider.beginConnection(input);
   }
@@ -107,8 +112,12 @@ async function beginProviderConnection(
 
 async function completeProviderConnection(
   provider: DeviceSyncProvider,
-  input: Parameters<NonNullable<DeviceSyncProvider["completeConnection"]>>[0],
+  input: Parameters<DeviceConnectionHandler["completeConnection"]>[0],
 ): Promise<ProviderConnectionResult> {
+  if (provider.connectionHandler) {
+    return provider.connectionHandler.completeConnection(input);
+  }
+
   if (provider.completeConnection) {
     return provider.completeConnection(input);
   }
@@ -453,7 +462,7 @@ export class DeviceSyncPublicIngress {
       callbackUrl: callbackPath ? joinUrl(this.publicBaseUrl, callbackPath) : null,
       webhookPath,
       webhookUrl: webhookPath ? joinUrl(this.publicBaseUrl, webhookPath) : null,
-      supportsWebhooks: Boolean(webhookPath && provider.verifyAndParseWebhook),
+      supportsWebhooks: Boolean(webhookPath && resolveProviderWebhookVerifier(provider)),
       defaultScopes: [...(connection.defaultScopes ?? [])],
     };
   }
@@ -727,8 +736,9 @@ export class DeviceSyncPublicIngress {
 
   async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
     const provider = this.requireProvider(providerName);
+    const verifyAndParseWebhook = resolveProviderWebhookVerifier(provider);
 
-    if (!provider.descriptor.webhook?.path || !provider.verifyAndParseWebhook) {
+    if (!provider.descriptor.webhook?.path || !verifyAndParseWebhook) {
       throw deviceSyncError({
         code: "WEBHOOKS_NOT_SUPPORTED",
         message: `Device sync provider ${provider.provider} does not accept webhooks.`,
@@ -738,7 +748,7 @@ export class DeviceSyncPublicIngress {
     }
 
     const now = toIsoTimestamp(new Date());
-    const parsed = await provider.verifyAndParseWebhook({
+    const parsed = await verifyAndParseWebhook({
       headers,
       rawBody,
       now,
@@ -1128,8 +1138,14 @@ function buildPendingOAuthCleanupAccount(
     nextReconcileAt: connection.nextReconcileAt ?? null,
     createdAt: now,
     updatedAt: now,
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken ?? null,
+    credential: {
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken ?? null,
+        accessTokenExpiresAt: tokens.accessTokenExpiresAt ?? null,
+      },
+    },
   };
 }
 
@@ -1180,6 +1196,12 @@ function attachOAuthCallbackContext(
     },
     cause: error.cause,
   });
+}
+
+function resolveProviderWebhookVerifier(
+  provider: DeviceSyncProvider,
+): DeviceSyncProvider["verifyAndParseWebhook"] {
+  return provider.webhookHandler?.verifyAndParseWebhook ?? provider.verifyAndParseWebhook;
 }
 
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";

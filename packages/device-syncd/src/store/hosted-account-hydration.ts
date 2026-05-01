@@ -164,7 +164,7 @@ function buildCredentialMetadata(credential: HostedAccountCredentialInput): Reco
 }
 
 function readStoredCredentialKind(account: StoredDeviceSyncAccount | null): DeviceAccountCredentialKind {
-  const value = account?.credentialKind;
+  const value = account?.credential.kind;
 
   if (value === "provider_config" || value === "none" || value === "oauth_tokens") {
     return value;
@@ -174,12 +174,14 @@ function readStoredCredentialKind(account: StoredDeviceSyncAccount | null): Devi
 }
 
 function readStoredProviderConfigKey(account: StoredDeviceSyncAccount | null): string | null {
-  const value = account?.providerConfigKey;
+  const value = account?.credential.kind === "provider_config"
+    ? account.credential.providerConfigKey
+    : null;
   return typeof value === "string" && value ? value : null;
 }
 
 function readStoredCredentialMetadata(account: StoredDeviceSyncAccount | null): Record<string, unknown> {
-  const value = account?.credentialMetadata;
+  const value = account?.credential.credentialMetadata;
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
@@ -300,12 +302,23 @@ function buildCredentialColumnsFromExisting(
     };
   }
 
+  if (existing?.credential.kind === "oauth_tokens") {
+    return {
+      credentialKind: "oauth_tokens",
+      providerConfigKey: null,
+      accessTokenEncrypted: existing.credential.accessTokenEncrypted,
+      refreshTokenEncrypted: existing.credential.refreshTokenEncrypted,
+      accessTokenExpiresAt: existing.credential.accessTokenExpiresAt,
+      credentialMetadataJson,
+    };
+  }
+
   return {
-    credentialKind: "oauth_tokens",
+    credentialKind: "none",
     providerConfigKey: null,
-    accessTokenEncrypted: existing?.accessTokenEncrypted ?? "",
-    refreshTokenEncrypted: existing?.refreshTokenEncrypted ?? null,
-    accessTokenExpiresAt: existing?.accessTokenExpiresAt ?? null,
+    accessTokenEncrypted: null,
+    refreshTokenEncrypted: null,
+    accessTokenExpiresAt: null,
     credentialMetadataJson,
   };
 }
@@ -339,9 +352,9 @@ function buildClearedCredentialColumnsFromExisting(
   }
 
   return {
-    credentialKind: "oauth_tokens",
+    credentialKind: "none",
     providerConfigKey: null,
-    accessTokenEncrypted: "",
+    accessTokenEncrypted: null,
     refreshTokenEncrypted: null,
     accessTokenExpiresAt: null,
     credentialMetadataJson,
@@ -395,7 +408,7 @@ export function resolveHydratedHostedAccountTokens(input: {
   inputTokens: HostedAccountHydrationInput["tokens"];
   shouldClearTokens: boolean;
 }): {
-  accessTokenEncrypted: string;
+  accessTokenEncrypted: string | null;
   refreshTokenEncrypted: string | null;
   accessTokenExpiresAt: string | null;
 } {
@@ -409,16 +422,24 @@ export function resolveHydratedHostedAccountTokens(input: {
 
   if (input.shouldClearTokens) {
     return {
-      accessTokenEncrypted: "",
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+    };
+  }
+
+  if (input.existing?.credential.kind !== "oauth_tokens") {
+    return {
+      accessTokenEncrypted: null,
       refreshTokenEncrypted: null,
       accessTokenExpiresAt: null,
     };
   }
 
   return {
-    accessTokenEncrypted: input.existing?.accessTokenEncrypted ?? "",
-    refreshTokenEncrypted: input.existing?.refreshTokenEncrypted ?? null,
-    accessTokenExpiresAt: input.existing?.accessTokenExpiresAt ?? null,
+    accessTokenEncrypted: input.existing.credential.accessTokenEncrypted,
+    refreshTokenEncrypted: input.existing.credential.refreshTokenEncrypted,
+    accessTokenExpiresAt: input.existing.credential.accessTokenExpiresAt,
   };
 }
 

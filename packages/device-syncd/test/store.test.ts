@@ -19,6 +19,7 @@ import {
   setConnectionScopesJsonForTesting,
   setConnectionUpdatedAtForTesting,
 } from "./store-test-helpers.ts";
+import type { StoredDeviceSyncAccount } from "../src/types.ts";
 
 const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
@@ -26,6 +27,22 @@ const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
   `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
   "u",
 );
+
+function requireStoredOAuthCredential(
+  account: StoredDeviceSyncAccount | null | undefined,
+): Extract<StoredDeviceSyncAccount["credential"], { kind: "oauth_tokens" }> {
+  assert.ok(account);
+  assert.equal(account.credential.kind, "oauth_tokens");
+  return account.credential;
+}
+
+function assertStoredCredentialKind(
+  account: StoredDeviceSyncAccount | null | undefined,
+  kind: StoredDeviceSyncAccount["credential"]["kind"],
+): void {
+  assert.ok(account);
+  assert.equal(account.credential.kind, kind);
+}
 
 test("device sync store minimizes webhook trace payload retention without changing claim or completion state", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store");
@@ -205,8 +222,9 @@ test("device sync store hosted hydration preserves existing tokens until disconn
     });
 
     assert.equal(hydrated?.id, account.id);
-    assert.equal(hydrated?.accessTokenEncrypted, "enc:access-token");
-    assert.equal(hydrated?.refreshTokenEncrypted, "enc:refresh-token");
+    const hydratedOAuthCredential = requireStoredOAuthCredential(hydrated);
+    assert.equal(hydratedOAuthCredential.accessTokenEncrypted, "enc:access-token");
+    assert.equal(hydratedOAuthCredential.refreshTokenEncrypted, "enc:refresh-token");
     assert.deepEqual(hydrated?.metadata, {
       attempts: 2,
     });
@@ -239,8 +257,7 @@ test("device sync store hosted hydration preserves existing tokens until disconn
       },
     });
 
-    assert.equal(disconnected?.accessTokenEncrypted, "");
-    assert.equal(disconnected?.refreshTokenEncrypted, null);
+    assertStoredCredentialKind(disconnected, "none");
     assert.equal(disconnected?.accessTokenExpiresAt, null);
     assert.equal(disconnected?.disconnectGeneration, 1);
     assert.equal(disconnected?.hostedObservedTokenVersion, null);
@@ -283,8 +300,9 @@ test("device sync store hosted hydration preserves existing tokens until disconn
 
     assert.equal(reconnected?.status, "active");
     assert.equal(reconnected?.displayName, "Reconnected User");
-    assert.equal(reconnected?.accessTokenEncrypted, "enc:reconnected-access-token");
-    assert.equal(reconnected?.refreshTokenEncrypted, "enc:reconnected-refresh-token");
+    const reconnectedOAuthCredential = requireStoredOAuthCredential(reconnected);
+    assert.equal(reconnectedOAuthCredential.accessTokenEncrypted, "enc:reconnected-access-token");
+    assert.equal(reconnectedOAuthCredential.refreshTokenEncrypted, "enc:reconnected-refresh-token");
     assert.equal(reconnected?.hostedObservedTokenVersion, 1);
   } finally {
     store.close();
@@ -343,8 +361,7 @@ test("device sync store stores provider-config and none credentials without toke
       nextReconcileAt: "2026-04-07T01:00:00.000Z",
     });
 
-    assert.equal(providerConfigAccount.accessTokenEncrypted, "");
-    assert.equal(providerConfigAccount.refreshTokenEncrypted, null);
+    assertStoredCredentialKind(providerConfigAccount, "provider_config");
     assert.equal(providerConfigAccount.accessTokenExpiresAt, null);
     assert.deepEqual(providerConfigAccount.metadata, {
       clientUserIdHash: "drop-me-three",
@@ -495,7 +512,7 @@ test("device sync store hosted hydration can create provider-config accounts wit
 
     assert.ok(hydrated);
     assert.equal(hydrated?.provider, "junction");
-    assert.equal(hydrated?.accessTokenEncrypted, "");
+    assertStoredCredentialKind(hydrated, "provider_config");
     assert.deepEqual(hydrated?.metadata, {
       linked: true,
     });
@@ -897,8 +914,9 @@ test("device sync store applies newer hosted connection state without replaying 
     assert.deepEqual(partiallyHydrated?.scopes, ["daily"]);
     assert.equal(partiallyHydrated?.hostedObservedUpdatedAt, "2026-04-07T02:00:00.000Z");
     assert.equal(partiallyHydrated?.hostedObservedTokenVersion, 7);
-    assert.equal(partiallyHydrated?.accessTokenEncrypted, "enc:local-access-refresh");
-    assert.equal(partiallyHydrated?.refreshTokenEncrypted, "enc:local-refresh-refresh");
+    const partiallyHydratedOAuthCredential = requireStoredOAuthCredential(partiallyHydrated);
+    assert.equal(partiallyHydratedOAuthCredential.accessTokenEncrypted, "enc:local-access-refresh");
+    assert.equal(partiallyHydratedOAuthCredential.refreshTokenEncrypted, "enc:local-refresh-refresh");
     assert.equal(partiallyHydrated?.accessTokenExpiresAt, "2026-04-07T05:00:00.000Z");
   } finally {
     store.close();
@@ -1034,8 +1052,9 @@ test("device sync store rejects same-snapshot hosted replays after newer local c
     assert.deepEqual(replayed?.scopes, ["offline", "manual"]);
     assert.equal(replayed?.hostedObservedUpdatedAt, "2026-04-07T01:00:00.000Z");
     assert.equal(replayed?.hostedObservedTokenVersion, 7);
-    assert.equal(replayed?.accessTokenEncrypted, "enc:local-access-refresh");
-    assert.equal(replayed?.refreshTokenEncrypted, "enc:local-refresh-refresh");
+    const replayedOAuthCredential = requireStoredOAuthCredential(replayed);
+    assert.equal(replayedOAuthCredential.accessTokenEncrypted, "enc:local-access-refresh");
+    assert.equal(replayedOAuthCredential.refreshTokenEncrypted, "enc:local-refresh-refresh");
     assert.equal(replayed?.accessTokenExpiresAt, "2026-04-07T05:00:00.000Z");
     assert.equal(replayed?.nextReconcileAt, "2026-04-07T06:00:00.000Z");
     assert.equal(replayed?.lastErrorCode, "REPLAY_IGNORED");
@@ -1160,8 +1179,9 @@ test("device sync store preserves replayed connection state while applying fresh
     assert.deepEqual(replayedConnectionFreshToken?.scopes, ["offline", "manual"]);
     assert.equal(replayedConnectionFreshToken?.hostedObservedUpdatedAt, "2026-04-07T01:00:00.000Z");
     assert.equal(replayedConnectionFreshToken?.hostedObservedTokenVersion, 8);
-    assert.equal(replayedConnectionFreshToken?.accessTokenEncrypted, "enc:hosted-access-v8");
-    assert.equal(replayedConnectionFreshToken?.refreshTokenEncrypted, "enc:hosted-refresh-v8");
+    const replayedConnectionFreshTokenCredential = requireStoredOAuthCredential(replayedConnectionFreshToken);
+    assert.equal(replayedConnectionFreshTokenCredential.accessTokenEncrypted, "enc:hosted-access-v8");
+    assert.equal(replayedConnectionFreshTokenCredential.refreshTokenEncrypted, "enc:hosted-refresh-v8");
     assert.equal(replayedConnectionFreshToken?.accessTokenExpiresAt, "2026-04-07T05:00:00.000Z");
   } finally {
     store.close();
@@ -1265,8 +1285,9 @@ test("device sync store keeps local tokens when hosted disconnect clear requests
     });
     assert.equal(blockedClear?.hostedObservedUpdatedAt, "2026-04-07T02:00:00.000Z");
     assert.equal(blockedClear?.hostedObservedTokenVersion, 7);
-    assert.equal(blockedClear?.accessTokenEncrypted, "enc:hosted-access-v7");
-    assert.equal(blockedClear?.refreshTokenEncrypted, "enc:hosted-refresh-v7");
+    const blockedClearOAuthCredential = requireStoredOAuthCredential(blockedClear);
+    assert.equal(blockedClearOAuthCredential.accessTokenEncrypted, "enc:hosted-access-v7");
+    assert.equal(blockedClearOAuthCredential.refreshTokenEncrypted, "enc:hosted-refresh-v7");
     assert.equal(blockedClear?.accessTokenExpiresAt, "2026-04-07T04:00:00.000Z");
   } finally {
     store.close();
@@ -1734,8 +1755,9 @@ test("device sync store migrates existing token-only credential rows as oauth to
   try {
     const migrated = store.getAccountById("dsa_legacy");
     assert.ok(migrated);
-    assert.equal(migrated?.accessTokenEncrypted, "enc:legacy-access");
-    assert.equal(migrated?.refreshTokenEncrypted, "enc:legacy-refresh");
+    const migratedOAuthCredential = requireStoredOAuthCredential(migrated);
+    assert.equal(migratedOAuthCredential.accessTokenEncrypted, "enc:legacy-access");
+    assert.equal(migratedOAuthCredential.refreshTokenEncrypted, "enc:legacy-refresh");
     assert.equal(migrated?.accessTokenExpiresAt, "2026-04-07T02:00:00.000Z");
     const migratedCredential = readCredentialStateForTesting(store, "dsa_legacy");
     assert.ok(migratedCredential);
@@ -1952,8 +1974,9 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
     });
 
     assert.ok(hydrated);
-    assert.equal(hydrated?.accessTokenEncrypted, "enc:hosted-access");
-    assert.equal(hydrated?.refreshTokenEncrypted, null);
+    const hydratedOAuthCredential = requireStoredOAuthCredential(hydrated);
+    assert.equal(hydratedOAuthCredential.accessTokenEncrypted, "enc:hosted-access");
+    assert.equal(hydratedOAuthCredential.refreshTokenEncrypted, null);
     assert.equal(hydrated?.accessTokenExpiresAt, "2026-04-07T03:00:00.000Z");
     assert.equal(hydrated?.hostedObservedTokenVersion, 7);
     assert.equal(hydrated?.updatedAt, "2026-04-07T01:00:00.000Z");
@@ -2060,8 +2083,7 @@ test("device sync store clears tokens and requires reauthorization after connect
 
     assert.equal(failed?.id, account.id);
     assert.equal(failed?.status, "reauthorization_required");
-    assert.equal(failed?.accessTokenEncrypted, "");
-    assert.equal(failed?.refreshTokenEncrypted, null);
+    assertStoredCredentialKind(failed, "none");
     assert.equal(failed?.accessTokenExpiresAt, null);
     assert.equal(failed?.lastSyncErrorAt, "2026-04-07T00:30:00.000Z");
     assert.equal(failed?.lastErrorCode, "OAUTH_DENIED");
@@ -2073,9 +2095,9 @@ test("device sync store clears tokens and requires reauthorization after connect
     const credentialState = readCredentialStateForTesting(store, account.id);
     assert.ok(credentialState);
     assert.deepEqual({ ...credentialState }, {
-      access_token_encrypted: "",
+      access_token_encrypted: null,
       access_token_expires_at: null,
-      credential_kind: "oauth_tokens",
+      credential_kind: "none",
       credential_metadata_json: "{}",
       provider_config_key: null,
       refresh_token_encrypted: null,
@@ -2150,8 +2172,9 @@ test("device sync store updates existing accounts and rejects stale success writ
     assert.deepEqual(updated.metadata, {
       fresh: true,
     });
-    assert.equal(updated.accessTokenEncrypted, "enc:updated-access");
-    assert.equal(updated.refreshTokenEncrypted, null);
+    const updatedOAuthCredential = requireStoredOAuthCredential(updated);
+    assert.equal(updatedOAuthCredential.accessTokenEncrypted, "enc:updated-access");
+    assert.equal(updatedOAuthCredential.refreshTokenEncrypted, null);
     assert.equal(updated.accessTokenExpiresAt, "2026-04-07T03:00:00.000Z");
     assert.equal(updated.nextReconcileAt, "2026-04-07T04:00:00.000Z");
 
@@ -2172,8 +2195,9 @@ test("device sync store updates existing accounts and rejects stale success writ
       updated.disconnectGeneration,
     );
 
-    assert.equal(refreshed?.accessTokenEncrypted, "enc:fresh-access");
-    assert.equal(refreshed?.refreshTokenEncrypted, "enc:fresh-refresh");
+    const refreshedOAuthCredential = requireStoredOAuthCredential(refreshed);
+    assert.equal(refreshedOAuthCredential.accessTokenEncrypted, "enc:fresh-access");
+    assert.equal(refreshedOAuthCredential.refreshTokenEncrypted, "enc:fresh-refresh");
     assert.equal(
       store.markSyncSucceeded(updated.id, "2026-04-07T06:00:00.000Z", updated.disconnectGeneration + 1),
       false,

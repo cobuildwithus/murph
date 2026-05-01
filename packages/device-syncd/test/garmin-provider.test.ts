@@ -13,6 +13,18 @@ import type {
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
+type DeviceSyncAccountOverrides = Partial<Omit<DeviceSyncAccount, "credential">> & {
+  accessToken?: string;
+  refreshToken?: string | null;
+  credential?: DeviceSyncAccount["credential"];
+};
+
+type StoredDeviceSyncAccountOverrides = Partial<Omit<StoredDeviceSyncAccount, "credential">> & {
+  accessTokenEncrypted?: string;
+  refreshTokenEncrypted?: string | null;
+  credential?: StoredDeviceSyncAccount["credential"];
+};
+
 function readRequestBody(init?: RequestInit): string | null {
   if (typeof init?.body === "string") {
     return init.body;
@@ -21,7 +33,15 @@ function readRequestBody(init?: RequestInit): string | null {
   return init?.body instanceof URLSearchParams ? init.body.toString() : null;
 }
 
-function createAccount(scopes: string[], overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAccount {
+function createAccount(scopes: string[], overrides: DeviceSyncAccountOverrides = {}): DeviceSyncAccount {
+  const {
+    accessToken = "access-token",
+    refreshToken = "refresh-token",
+    credential,
+    ...accountOverrides
+  } = overrides;
+  const accessTokenExpiresAt = accountOverrides.accessTokenExpiresAt ?? null;
+
   return {
     id: "acct-garmin-1",
     provider: "garmin",
@@ -42,24 +62,43 @@ function createAccount(scopes: string[], overrides: Partial<DeviceSyncAccount> =
     nextReconcileAt: null,
     createdAt: "2026-03-16T00:00:00.000Z",
     updatedAt: "2026-03-16T00:00:00.000Z",
-    accessToken: "access-token",
-    refreshToken: "refresh-token",
-    ...overrides,
+    credential: credential ?? {
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresAt,
+      },
+    },
+    ...accountOverrides,
   };
 }
 
-function createStoredAccount(scopes: string[], overrides: Partial<StoredDeviceSyncAccount> = {}): StoredDeviceSyncAccount {
+function createStoredAccount(scopes: string[], overrides: StoredDeviceSyncAccountOverrides = {}): StoredDeviceSyncAccount {
+  const {
+    accessTokenEncrypted = "encrypted-access-token",
+    refreshTokenEncrypted = "encrypted-refresh-token",
+    credential,
+    ...accountOverrides
+  } = overrides;
+  const { credential: _decryptedCredential, ...publicAccount } = createAccount(scopes);
+
   return {
-    ...createAccount(scopes),
-    ...overrides,
-    accessTokenEncrypted: "encrypted-access-token",
+    ...publicAccount,
+    ...accountOverrides,
+    credential: credential ?? {
+      kind: "oauth_tokens",
+      accessTokenEncrypted,
+      refreshTokenEncrypted,
+      accessTokenExpiresAt: accountOverrides.accessTokenExpiresAt ?? null,
+      credentialMetadata: {},
+    },
     hostedObservedConnectionRevision: overrides.hostedObservedConnectionRevision ?? 0,
     hostedObservedTokenRevision: overrides.hostedObservedTokenRevision ?? 0,
     hostedObservedTokenVersion: null,
     hostedObservedUpdatedAt: null,
     localConnectionRevision: overrides.localConnectionRevision ?? 0,
     localTokenRevision: overrides.localTokenRevision ?? 0,
-    refreshTokenEncrypted: "encrypted-refresh-token",
   };
 }
 

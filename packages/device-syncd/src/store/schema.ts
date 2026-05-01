@@ -5,7 +5,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 4;
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 5;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -77,18 +77,19 @@ function createDeviceCredentialStateTable(database: DatabaseSync): void {
           credential_kind = 'oauth_tokens'
           and provider_config_key is null
           and access_token_encrypted is not null
+          and access_token_encrypted <> ''
         )
         or (
           credential_kind = 'provider_config'
           and provider_config_key is not null
-          and (access_token_encrypted is null or access_token_encrypted = '')
+          and access_token_encrypted is null
           and refresh_token_encrypted is null
           and access_token_expires_at is null
         )
         or (
           credential_kind = 'none'
           and provider_config_key is null
-          and (access_token_encrypted is null or access_token_encrypted = '')
+          and access_token_encrypted is null
           and refresh_token_encrypted is null
           and access_token_expires_at is null
         )
@@ -131,11 +132,23 @@ function ensureDeviceCredentialStateSchema(database: DatabaseSync): void {
     )
     select
       account_id,
-      'oauth_tokens',
+      case
+        when access_token_encrypted is null or access_token_encrypted = '' then 'none'
+        else 'oauth_tokens'
+      end,
       null,
-      access_token_encrypted,
-      refresh_token_encrypted,
-      access_token_expires_at,
+      case
+        when access_token_encrypted is null or access_token_encrypted = '' then null
+        else access_token_encrypted
+      end,
+      case
+        when access_token_encrypted is null or access_token_encrypted = '' then null
+        else refresh_token_encrypted
+      end,
+      case
+        when access_token_encrypted is null or access_token_encrypted = '' then null
+        else access_token_expires_at
+      end,
       '{}',
       created_at,
       updated_at
@@ -143,6 +156,8 @@ function ensureDeviceCredentialStateSchema(database: DatabaseSync): void {
 
     drop table ${DEVICE_CREDENTIAL_STATE_MIGRATION_TABLE};
   `);
+
+  clearLegacyEmptyTokenCredentials(database);
 }
 
 function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
@@ -155,6 +170,28 @@ function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
   if (!names.has(DEVICE_CONNECTION_SETUP_COLUMNS.setupExpiresAt)) {
     database.exec("alter table device_connection add column setup_expires_at text");
   }
+}
+
+function clearLegacyEmptyTokenCredentials(database: DatabaseSync): void {
+  if (!tableExists(database, "device_credential_state")) {
+    return;
+  }
+
+  database.exec(`
+    update device_credential_state
+    set credential_kind = 'none',
+        provider_config_key = null,
+        access_token_encrypted = null,
+        refresh_token_encrypted = null,
+        access_token_expires_at = null
+    where credential_kind = 'oauth_tokens'
+      and (access_token_encrypted is null or access_token_encrypted = '');
+
+    update device_credential_state
+    set access_token_encrypted = null
+    where credential_kind in ('provider_config', 'none')
+      and access_token_encrypted = '';
+  `);
 }
 
 export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
@@ -285,4 +322,5 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
 
   ensureDeviceCredentialStateSchema(database);
   ensureDeviceConnectionSetupColumns(database);
+  clearLegacyEmptyTokenCredentials(database);
 }
