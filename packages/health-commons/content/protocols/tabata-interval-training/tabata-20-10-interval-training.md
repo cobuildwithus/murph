@@ -451,19 +451,69 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:estimated-vo2max
-    description: "A true 20/10 block can push oxygen demand high in a short time. Repeated sessions may improve cardio fitness if enough work is completed safely."
+    expected: Could improve
+    description: "The 20/10 block creates oxygen debt quickly, forcing the heart, lungs, and working muscles to deliver and use oxygen faster; if recovery is adequate, same-device VO2max or cardio-fitness estimates may rise."
+    estimatedChange:
+      kind: absolute
+      low: 1
+      high: 3
+      unit: mL/kg/min
+      window: 6 weeks
+      confidence: low
+      basis: "Lower-dose field estimate for 8-12 starter sessions, scaled below the larger gains seen in small supervised 20/10 cycling studies and practical multi-set 20/10 trials."
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: "High-intensity aerobic work can improve how much blood the heart moves per beat. If that adaptation builds, resting pulse may drift lower."
+    expected: Could trend lower
+    description: "As aerobic power and stroke volume adapt, each beat can move a little more blood, so resting pulse may drift lower when the interval dose is recoverable."
+    estimatedChange:
+      kind: absolute
+      low: -3
+      high: 0
+      unit: bpm
+      window: 6 weeks
+      confidence: low
+      basis: "Adjacent whole-body HIIT has lowered resting heart rate, but a direct 20/10 adaptive-sport study found no clear resting-HR change; expect a small or null shift."
+    protocolProminence: focus
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: "Tabata-style work adds strong nervous-system stress. HRV may improve after adaptation, but it can dip if recovery demand stays high."
+    expected: Possible change
+    description: "The workout first pushes the stress system, then demands a recovery rebound; RMSSD can rise with adaptation or fall if the sessions outpace recovery."
+    estimatedChange:
+      kind: relative_percent
+      low: -10
+      high: 15
+      unit: "%"
+      window: 6 weeks
+      confidence: mixed
+      basis: "Adjacent HIIT studies show possible RMSSD gains, while acute hard exercise and poor recovery can suppress overnight HRV; direction is recovery-dependent."
+    protocolProminence: context
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: "Hard intervals can increase sleep pressure and recovery need. Sleep efficiency may improve when the dose fits, or stall when the workload is too much."
+    expected: Possible change
+    description: "A recoverable hard session can raise sleep pressure, but late timing or overload can keep the body activated; sleep efficiency may nudge up or dip."
+    estimatedChange:
+      kind: absolute
+      low: -2
+      high: 2
+      unit: percentage points
+      window: 6 weeks
+      confidence: low
+      basis: "Sleep is included as a recovery/context signal; wearable sleep-efficiency changes from a small twice-weekly interval dose are likely modest and bidirectional."
+    protocolProminence: context
   -
     biomarkerKey: biomarker:morning-blood-pressure
-    description: "Repeated high-intensity aerobic work may help blood vessels relax and control pressure. Morning blood pressure can move lower if the adaptation carries over."
+    expected: Could trend lower
+    description: "Repeated vigorous aerobic work can help blood vessels relax more easily, so morning systolic pressure may edge down, especially when baseline pressure is elevated."
+    estimatedChange:
+      kind: absolute
+      low: -4
+      high: 0
+      unit: mmHg SBP
+      window: 6 weeks
+      confidence: low
+      basis: "HIIT blood-pressure effects are usually small, larger in elevated BP and minimal in normotension; adolescent Tabata/HIIT data showed about a 2 mmHg SBP signal."
+    protocolProminence: context
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
