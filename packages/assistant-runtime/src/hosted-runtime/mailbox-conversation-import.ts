@@ -15,6 +15,7 @@ import {
   type HostedAssistantConversationIdentifierBlind,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import {
+  listAssistantInputProjectionAttempts,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
   type AssistantInputAttachmentDescriptor,
@@ -100,6 +101,7 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 
 export interface HostedConversationMailboxAssistantInputStageResult {
   inputId: string;
+  isProjectionAttemptDue?: (() => Promise<boolean>) | null;
   recordProjection(
     input: HostedConversationMailboxAssistantInputProjectionUpdate,
   ): Promise<void>;
@@ -233,56 +235,71 @@ export async function importHostedConversationMailboxItem(input: {
     wake: decoded.wake,
   });
 
-  let imported: HostedConversationMailboxLocalImportResult;
-  try {
-    await prepareWakeContext({
-      runtime: input.runtime,
-      vaultRoot: input.vaultRoot,
-      wake: decoded.wake,
-    });
-    imported = await importConversationWake({
-      runtime: input.runtime,
-      vaultRoot: input.vaultRoot,
-      wake: decoded.wake,
-    });
-  } catch (error) {
-    const projectionFailureReason =
-      readHostedConversationProjectionFailureReason(error);
-
-    await recordHostedConversationProjectionBestEffort(stagedInput, {
-      captureId: null,
-      reasonCode: projectionFailureReason,
-      status: "failed",
-    });
-
-    return {
-      captureId: null,
-      metrics: createEmptyHostedConversationWakeMetrics(),
-      reasonCode: projectionFailureReason,
-      status: "imported",
-    };
-  }
-  if (imported.captureId) {
-    await recordHostedConversationProjectionBestEffort(stagedInput, {
-      captureId: imported.captureId,
-      reasonCode: null,
-      status: "succeeded",
-    });
-  }
-  if (imported.deduped) {
-    return {
-      captureId: imported.captureId,
-      metrics: imported.metrics,
-      reasonCode: "capture.deduped",
-      status: "skipped",
-    };
-  }
-
   return {
-    captureId: imported.captureId,
-    metrics: imported.metrics,
+    afterCheckpoint: async () => {
+      await projectHostedConversationAssistantInputBestEffort({
+        importConversationWake,
+        prepareWakeContext,
+        runtime: input.runtime,
+        stagedInput,
+        vaultRoot: input.vaultRoot,
+        wake: decoded.wake,
+      });
+    },
+    captureId: null,
+    metrics: createEmptyHostedConversationWakeMetrics(),
     status: "imported",
   };
+}
+
+async function projectHostedConversationAssistantInputBestEffort(input: {
+  importConversationWake: HostedConversationMailboxLocalImporter;
+  prepareWakeContext: HostedConversationMailboxWakeContextPreparer;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
+  >;
+  stagedInput: HostedConversationMailboxAssistantInputStageResult;
+  vaultRoot: string;
+  wake: HostedExecutionConversationMessageWake;
+}): Promise<void> {
+  if (
+    input.stagedInput.isProjectionAttemptDue
+    && !(await input.stagedInput.isProjectionAttemptDue())
+  ) {
+    return;
+  }
+
+  let imported: HostedConversationMailboxLocalImportResult;
+  try {
+    await input.prepareWakeContext({
+      runtime: input.runtime,
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
+    });
+    imported = await input.importConversationWake({
+      runtime: input.runtime,
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
+    });
+  } catch (error) {
+    await recordHostedConversationProjectionBestEffort(input.stagedInput, {
+      captureId: null,
+      reasonCode: readHostedConversationProjectionFailureReason(error),
+      status: "failed",
+    });
+    return;
+  }
+
+  if (!imported.captureId) {
+    return;
+  }
+
+  await recordHostedConversationProjectionBestEffort(input.stagedInput, {
+    captureId: imported.captureId,
+    reasonCode: null,
+    status: "succeeded",
+  });
 }
 
 async function importHostedConversationWakeWithLocalInbox(input: {
@@ -313,9 +330,25 @@ async function stageHostedConversationAssistantInputEvent(input: {
     }),
     vault: input.vaultRoot,
   });
+  if (event.projection.status === "not_attempted") {
+    await updateAssistantInputProjection({
+      inputId: event.inputId,
+      projection: {
+        status: "pending",
+      },
+      vault: input.vaultRoot,
+    });
+  }
 
   return {
     inputId: event.inputId,
+    async isProjectionAttemptDue() {
+      const attempts = await listAssistantInputProjectionAttempts({
+        limit: Number.MAX_SAFE_INTEGER,
+        vault: input.vaultRoot,
+      });
+      return attempts.events.some((attempt) => attempt.inputId === event.inputId);
+    },
     async recordProjection(projection) {
       await updateAssistantInputProjection({
         inputId: event.inputId,
