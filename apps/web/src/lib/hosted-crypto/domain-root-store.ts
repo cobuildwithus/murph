@@ -119,16 +119,14 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   userId: string;
 }> {
   const prisma = input.prisma ?? getPrisma();
-  const ingress = await getOrCreateActiveHostedDomainRootEnvelope({
+  const ingress = await readRequiredActiveHostedDomainRootEnvelope({
     domain: "ingress",
     prisma,
-    reason: "hosted-crypto.worker-context",
     userId: input.userId,
   });
-  const runtime = await getOrCreateActiveHostedDomainRootEnvelope({
+  const runtime = await readRequiredActiveHostedDomainRootEnvelope({
     domain: "runtime",
     prisma,
-    reason: "hosted-crypto.worker-context",
     userId: input.userId,
   });
   return {
@@ -422,6 +420,22 @@ async function readActiveHostedDomainRootEnvelopeRow(input: {
     LIMIT 1
   `;
   return rows[0] ?? null;
+}
+
+async function readRequiredActiveHostedDomainRootEnvelope(input: {
+  domain: HostedCryptoDomain;
+  prisma: HostedCryptoClient;
+  userId: string;
+}): Promise<HostedDomainRootKeyEnvelopeV1> {
+  const row = await readActiveHostedDomainRootEnvelopeRow({
+    domain: input.domain,
+    tx: input.prisma,
+    userId: input.userId,
+  });
+  if (!row) {
+    throw new Error(`Hosted ${input.domain} domain root envelope is not provisioned.`);
+  }
+  return parseAssertAndVerifyEnvelope(row, input);
 }
 
 async function parseAssertAndVerifyEnvelope(
