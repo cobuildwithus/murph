@@ -64,6 +64,9 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   mapbox: [
     "MAPBOX_ACCESS_TOKEN",
   ],
+  // Parser support is a semantic runner capability. Concrete native binary and
+  // model paths are image-owned toolchain config, not forwarded runtime env.
+  parsers: [],
   telegram: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured,
 } as const;
 
