@@ -1,6 +1,6 @@
 # Land greenfield high-value cleanup patch
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -76,3 +76,4 @@ Updated: 2026-05-02
 Latest:
 
 - Not run yet.
+Completed: 2026-05-02
