@@ -13,7 +13,6 @@ import {
 
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
-import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   useBrowserVault,
   type BrowserVaultStatus,
@@ -70,6 +69,8 @@ export function BiomarkerPrivateTrendCard({ biomarker }: { biomarker: BiomarkerP
   }
 
   if (trend.status === "empty") {
+    const action = emptyStateAction(trend.panelStatus);
+
     return (
       <div className="rounded-xl border border-dashed border-border/60">
         <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
@@ -78,19 +79,19 @@ export function BiomarkerPrivateTrendCard({ biomarker }: { biomarker: BiomarkerP
             {trend.title}
           </p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            {emptyStateGuidance(trend.panelStatus)}
+            {trend.body}
           </p>
           {trend.detail ? (
             <p className="text-xs text-muted-foreground/80">
               {trend.detail}
             </p>
           ) : null}
-          {shouldShowConnectAction(trend.panelStatus) ? (
+          {action ? (
             <Link
-              href="/connect"
+              href={action.href}
               className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
             >
-              Connect a device
+              {action.label}
               <ArrowRightIcon className="size-3.5" />
             </Link>
           ) : null}
@@ -302,24 +303,22 @@ function resolvePrivateTrend(input: {
   };
 }
 
-function emptyStateGuidance(status: BrowserVaultBiomarkerPanelStatus): string {
-  if (status === "unsupported") {
-    return "Private tracking for this biomarker is not available yet.";
+function emptyStateAction(status: BrowserVaultBiomarkerPanelStatus): { href: string; label: string } | null {
+  const normalizedStatus = String(status);
+
+  if (normalizedStatus === "permission_missing") {
+    return { href: "/settings", label: "Review connection" };
   }
 
-  if (status === "no_data") {
-    return "Connect a device that tracks this biomarker to see your personal trend here.";
+  if (normalizedStatus === "syncing" || normalizedStatus === "stale") {
+    return { href: "/settings", label: "View sync status" };
   }
 
-  if (status === "insufficient_data") {
-    return "Keep wearing your device. This card updates automatically as new data arrives.";
+  if (new Set(["no_connection", "no_data", "no_private_vault"]).has(normalizedStatus)) {
+    return { href: "/connect", label: "Connect a device" };
   }
 
-  return "Connect a health device to see your personal trend here. Your data stays private.";
-}
-
-function shouldShowConnectAction(status: BrowserVaultBiomarkerPanelStatus): boolean {
-  return status === "no_private_vault" || status === "no_data";
+  return null;
 }
 
 function toSparklinePoints(series: readonly TrendPoint[]): Array<{ x: number; y: number }> {

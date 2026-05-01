@@ -687,7 +687,7 @@ describe("BiomarkerPage", () => {
     ]);
   });
 
-  it("keeps bound but incomplete biomarker pages unpublished", () => {
+  it("keeps incomplete biomarker pages unpublished without requiring private metric bindings", () => {
     const catalog = createFixtureCatalog();
     const biomarker = catalog.entities.find(
       (entity) => entity.key === "biomarker:resting-heart-rate",
@@ -728,7 +728,9 @@ describe("BiomarkerPage", () => {
       "hrv-rmssd",
       "rem-sleep-minutes",
       "resting-heart-rate",
+      "sleep-quality",
     ]);
+    expect(resolveHealthCommonsBiomarkerDetail("sleep-quality", reader)?.privateMetricBindings).toEqual([]);
     expect(resolveHealthCommonsBiomarkerDetail("incomplete-rhr-fixture", reader)).toBeNull();
   });
 });

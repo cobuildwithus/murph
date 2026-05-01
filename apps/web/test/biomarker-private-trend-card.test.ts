@@ -8,7 +8,7 @@ import {
   type BrowserVaultMetricRow,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -17,9 +17,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
+  BrowserVaultProvider: ({ children }: { children: ReactNode }) => createElement("section", { "data-browser-vault-provider": true }, children),
   useBrowserVault: mocks.useBrowserVault,
 }));
 
+import { BiomarkerOverview } from "@/src/components/biomarkers/biomarker-detail/biomarker-overview";
 import { BiomarkerPrivateTrendCard } from "@/src/components/biomarkers/biomarker-detail/biomarker-private-trend-card";
 import { resolveHealthCommonsBiomarkerDetail } from "@/src/lib/health-commons/biomarker-detail";
 
@@ -56,9 +58,42 @@ test("the biomarker overview mounts the browser-vault private card", () => {
     new URL("../src/components/biomarkers/biomarker-detail/biomarker-overview.tsx", import.meta.url),
     "utf8",
   );
+  const layoutSource = readFileSync(
+    new URL("../app/biomarkers/[biomarkerId]/biomarker-layout-client.tsx", import.meta.url),
+    "utf8",
+  );
 
   assert.match(source, /BiomarkerPrivateTrendCard/u);
+  assert.match(source, /BrowserVaultProvider/u);
+  assert.doesNotMatch(layoutSource, /BrowserVaultProvider/u);
   assert.doesNotMatch(source, /BiomarkerTrendDetail/u);
+});
+
+test("the biomarker overview skips the private card for biomarkers without browser-vault metric bindings", () => {
+  const biomarker = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+  assert.ok(biomarker);
+
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "empty",
+  });
+
+  const unsupportedBiomarker = {
+    ...biomarker,
+    privateMetricBindings: [],
+    shortName: "Mood",
+  };
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerOverview, { biomarker: unsupportedBiomarker }),
+  );
+
+  assert.doesNotMatch(markup, /data-browser-vault-provider/u);
+  assert.doesNotMatch(markup, /Biomarker unavailable/u);
+  assert.doesNotMatch(markup, /Connect a health device/u);
 });
 
 test("renders private trend values from the browser-vault selector", () => {
@@ -148,7 +183,7 @@ test("renders a no-data state when the browser-vault replica has no matching row
   );
 
   assert.match(markup, /No private values yet/u);
-  assert.match(markup, /tracks this biomarker/u);
+  assert.match(markup, /No RHR values were found in the current browser-vault snapshot/u);
   assert.match(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
 });
