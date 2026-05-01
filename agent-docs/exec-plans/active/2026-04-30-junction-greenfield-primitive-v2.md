@@ -249,7 +249,6 @@ JUNCTION_API_KEY
 JUNCTION_CLIENT_USER_ID_SECRET
 JUNCTION_ENV=sandbox | production
 JUNCTION_REGION=us | eu
-JUNCTION_BASE_URL=optional override
 JUNCTION_PROVIDER_FILTER
 JUNCTION_SUMMARY_RESOURCES
 JUNCTION_TIMESERIES_RESOURCES
@@ -262,7 +261,7 @@ JUNCTION_REQUEST_TIMEOUT_MS
 JUNCTION_WEBHOOK_SECRET
 ```
 
-Validate environment, region, API-key prefix, and base URL together:
+Validate environment, region, API-key prefix, and canonical base URL together:
 
 ```txt
 production + us -> pk_us_* and api.us.junction.com
@@ -271,7 +270,7 @@ sandbox + us    -> sk_us_* and api.sandbox.us.junction.com
 sandbox + eu    -> sk_eu_* and api.sandbox.eu.junction.com
 ```
 
-`JUNCTION_BASE_URL` is an override, not the main safety mechanism.
+Junction API requests use the canonical base URL for the selected environment and region. Tests and mocks should inject `fetchImpl` rather than configuring an alternate runtime host.
 
 Keep these secrets separate because they have different lifetimes and blast radius:
 
