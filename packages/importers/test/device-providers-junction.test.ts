@@ -206,6 +206,43 @@ test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timesta
   assert.equal(glucoseSample?.recordedAt, "2026-04-22T07:16:00.000Z");
 });
 
+test("Junction normalizer treats Libre +00:00 glucose timestamps as floating wall time", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2023-09-27T12:00:00.000Z",
+    windowStart: "2023-09-27T00:00:00.000Z",
+    windowEnd: "2023-09-27T23:59:59.000Z",
+    timeseries: {
+      glucose: [
+        {
+          sourceProviderSlug: "freestyle_libre",
+          timestamp: "2023-09-27T07:48:00+00:00",
+          value: 101,
+        },
+        {
+          sourceProviderSlug: "abbott_libreview",
+          timestamp: "2023-09-27T07:48:00+00:00",
+          value: 102,
+        },
+      ],
+    },
+  });
+
+  const glucoseSamples = payload.samples?.filter((sample) => sample.stream === "glucose") ?? [];
+
+  assert.equal(glucoseSamples.length, 2);
+  assert.deepEqual(
+    glucoseSamples.map((sample) => sample.dataOrigin?.sourceProviderSlug).sort(),
+    ["abbott-libreview", "freestyle-libre"],
+  );
+  for (const sample of glucoseSamples) {
+    assert.equal(sample.dataOrigin?.observedAtRaw, "2023-09-27T07:48:00+00:00");
+    assert.equal(sample.dataOrigin?.timestampSemantics, "floating");
+    assert.equal(sample.dayKey, "2023-09-27");
+    assert.equal(sample.recordedAt, "2023-09-27T23:59:59.000Z");
+    assert.notEqual(sample.recordedAt, "2023-09-27T07:48:00.000Z");
+  }
+});
+
 test("Junction normalizer defaults to the PR3 resource allowlist", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
