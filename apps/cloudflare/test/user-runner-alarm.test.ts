@@ -511,6 +511,93 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     await expect(alarmRun).resolves.toBeUndefined();
   });
 
+  it("keeps the idle nudge alarm as a fallback when the detached drive is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+    });
+    await runner.bindUser("member_123");
+
+    const nudge = await runner.nudgeHostedRunner();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    expect(nudge).toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      inFlight: false,
+      nextAlarmAt: "2026-04-27T00:00:30.000Z",
+    });
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    const alarmRun = runner.alarm();
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledOnce();
+
+    invocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+
+    await expect(alarmRun).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:30.000Z",
+      "deleted",
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          pendingNudge: false,
+          runnerNextWakePresent: false,
+        }),
+        message: "Hosted runner alarm skipped after active invocation consumed pending work.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("reapplies a future wake alarm before skipping after an active invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: string;
+      status: "idle";
+    }>();
+    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+    });
+    await runner.bindUser("member_123");
+
+    await runner.nudgeHostedRunner();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    const alarmRun = runner.alarm();
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledOnce();
+
+    invocation.resolve({
+      nextWakeAt: "2026-04-27T00:05:00.000Z",
+      status: "idle",
+    });
+
+    await expect(alarmRun).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:30.000Z",
+      "2026-04-27T00:05:00.000Z",
+      "2026-04-27T00:05:00.000Z",
+    ]);
+  });
+
   it("keeps a newly observed persisted-only invocation pending until the orphan grace deadline", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

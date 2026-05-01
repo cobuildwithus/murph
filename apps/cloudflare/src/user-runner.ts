@@ -333,14 +333,17 @@ export class HostedUserRunner {
     }
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
     const nowMs = Date.now();
-    const record = await this.markPendingNudgeAndApplyAlarm({
-      preferredWakeAt: activeInThisIsolate || !runningRecord.inFlight
+    const preferredWakeAt = alreadyRunning
+      ? activeInThisIsolate
         ? new Date(nowMs).toISOString()
         : resolvePendingNudgeWakeAt({
             nowMs,
             record: runningRecord,
             runnerTimeoutMs: this.env.runnerTimeoutMs,
-          }),
+          })
+      : new Date(nowMs + this.env.retryDelayMs).toISOString();
+    const record = await this.markPendingNudgeAndApplyAlarm({
+      preferredWakeAt,
     });
     const immediateDriveStarted = alreadyRunning
       ? false
@@ -440,6 +443,10 @@ export class HostedUserRunner {
     const activeInvocation = this.invocationLock;
     if (activeInvocation) {
       await activeInvocation.catch(() => undefined);
+      const idleResult = await this.skipAlarmDrainIfActiveInvocationConsumedWork(input);
+      if (idleResult) {
+        return idleResult;
+      }
     }
 
     return this.runUntilIdleOrBudget(input);
@@ -875,6 +882,41 @@ export class HostedUserRunner {
     });
   }
 
+  private async skipAlarmDrainIfActiveInvocationConsumedWork(input: {
+    reason: HostedWorkspaceInvocationReason;
+  }): Promise<HostedWorkspaceInvocationResult | null> {
+    if (input.reason !== "alarm") {
+      return null;
+    }
+
+    const record = await this.stateStore.readState();
+    if (record.pendingNudge || isWakeDue(record.nextWakeAt, Date.now())) {
+      return null;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        pendingNudge: false,
+        runnerNextWakePresent: record.nextWakeAt !== null,
+      },
+      message: "Hosted runner alarm skipped after active invocation consumed pending work.",
+      phase: "wake.running",
+      userId: record.userId,
+    });
+
+    if (record.nextWakeAt) {
+      await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: record.nextWakeAt,
+      });
+    }
+
+    return {
+      nextWakeAt: record.nextWakeAt,
+      status: "idle",
+    };
+  }
+
   private startDetachedRunnerDrive(input: {
     reason: HostedWorkspaceInvocationReason;
     userId: string;
@@ -1020,6 +1062,15 @@ async function deleteR2ObjectsWithPrefix(
 
 function safeCleanupErrorCode(error: unknown): string {
   return error instanceof Error && error.name ? error.name : "UnknownError";
+}
+
+function isWakeDue(nextWakeAt: string | null, nowMs: number): boolean {
+  if (!nextWakeAt) {
+    return false;
+  }
+
+  const wakeAtMs = Date.parse(nextWakeAt);
+  return Number.isFinite(wakeAtMs) && wakeAtMs <= nowMs;
 }
 
 function resolvePendingNudgeWakeAt(input: {
