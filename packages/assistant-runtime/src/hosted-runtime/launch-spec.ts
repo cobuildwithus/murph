@@ -143,7 +143,56 @@ function readHostedRuntimeLaunchParserToolchain(
     );
   }
 
-  return parserToolchain;
+  if (!parserToolchain) {
+    return undefined;
+  }
+
+  const tools: HostedAssistantRuntimeParserToolchainConfig["tools"] = {};
+  for (const [toolName, config] of Object.entries(parserToolchain.tools)) {
+    if (config === undefined) {
+      continue;
+    }
+
+    tools[toolName as keyof HostedAssistantRuntimeParserToolchainConfig["tools"]] = {
+      ...(config.command === undefined
+        ? {}
+        : {
+            command: normalizeHostedRuntimeLaunchParserToolPath(
+              config.command,
+              `parserToolchain.tools.${toolName}.command`,
+            ),
+          }),
+      ...(config.modelPath === undefined
+        ? {}
+        : {
+            modelPath: normalizeHostedRuntimeLaunchParserToolPath(
+              config.modelPath,
+              `parserToolchain.tools.${toolName}.modelPath`,
+            ),
+          }),
+    };
+  }
+
+  return { tools };
+}
+
+function normalizeHostedRuntimeLaunchParserToolPath(
+  value: string | null | undefined,
+  label: string,
+): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a non-empty absolute path.`);
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new TypeError(`${label} must be a non-empty absolute path.`);
+  }
+  if (!normalized.startsWith("/")) {
+    throw new TypeError(`${label} must be an absolute path.`);
+  }
+
+  return normalized;
 }
 
 export function buildHostedRuntimeForwardedEnv(
