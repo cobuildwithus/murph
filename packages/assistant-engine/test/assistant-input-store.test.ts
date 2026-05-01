@@ -362,6 +362,48 @@ describe('assistant input event store', () => {
     )
   })
 
+  it('defaults missing source metadata on older assistant input records', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-legacy-source-metadata-',
+    )
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_legacy_no_source_metadata',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: '42',
+        text: 'legacy metadata text',
+        threadId: 'chat_1',
+      }),
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const recordWithoutSourceMetadata = Object.fromEntries(
+      Object.entries(stored).filter(([key]) => key !== 'sourceMetadata'),
+    )
+    await writeFile(
+      resolveAssistantInputEventPath({
+        inputId: stored.inputId,
+        paths,
+      }),
+      `${JSON.stringify({
+        schema: 'murph.assistant-input-event.v1',
+        schemaVersion: 1,
+        value: recordWithoutSourceMetadata,
+      })}\n`,
+      { mode: 0o600 },
+    )
+
+    await expect(
+      readAssistantInputEvent({
+        inputId: stored.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      ...stored,
+      sourceMetadata: null,
+    })
+  })
+
   it('reuses legacy hosted mailbox input records after the identity cutover', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-legacy-hosted-identity-',

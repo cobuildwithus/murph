@@ -1,7 +1,14 @@
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
+import type {
+  AssistantInputAttachmentDescriptor,
+  AssistantInputProjectionStatus,
+  AssistantInputReplyTarget,
+  AssistantInputSourceMetadata,
+} from '../input-store.js'
 import {
   buildInboxModelAttachmentBundles,
   hasInboxMultimodalAttachmentEvidenceCandidate,
@@ -12,6 +19,7 @@ import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
 const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
+const MAX_TELEGRAM_REPLY_CONTEXT_CHARS = 512
 
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
@@ -19,8 +27,11 @@ export interface TelegramAutoReplyMetadata {
   replyContext: string | null
 }
 
-export interface AssistantAutoReplyPromptCapture {
+export interface AssistantAutoReplyPromptInput {
+  attachmentDescriptors?: readonly AssistantInputAttachmentDescriptor[]
   capture: InboxShowResult['capture']
+  projectionReasonCode?: string | null
+  projectionStatus?: AssistantInputProjectionStatus | null
   telegramMetadata: TelegramAutoReplyMetadata | null
 }
 
@@ -39,41 +50,48 @@ export type AssistantAutoReplyPreparedInput =
   | { kind: 'skip'; reason: string }
 
 export function buildAssistantAutoReplyPrompt(
-  captures: readonly AssistantAutoReplyPromptCapture[],
+  inputs: readonly AssistantAutoReplyPromptInput[],
 ): AssistantAutoReplyPrompt {
-  const sections = captures
+  const sections = inputs
     .map((entry, index) =>
-      renderAssistantAutoReplyCaptureSection({
-        attachmentSections: entry.capture.attachments
-          .map((attachment) => renderAttachmentPromptSection(attachment))
-          .filter((section): section is string => section !== null),
-        captureText: normalizeNullableString(entry.capture.text),
+      renderAssistantAutoReplyInputSection({
+        attachmentSections: buildAssistantAutoReplyAttachmentSections({
+          descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
+            descriptors: entry.attachmentDescriptors ?? [],
+            projectionReasonCode: entry.projectionReasonCode ?? null,
+            projectionStatus: entry.projectionStatus ?? null,
+          }),
+          renderedAttachmentSections: entry.capture.attachments
+            .map((attachment) => renderAttachmentPromptSection(attachment))
+            .filter((section): section is string => section !== null),
+        }),
+        inputText: normalizeNullableString(entry.capture.text),
         index,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
-        totalCaptures: captures.length,
+        totalInputs: inputs.length,
       }),
     )
     .filter((section): section is string => section !== null)
 
-  if (sections.length === 0 || captures.length === 0) {
+  if (sections.length === 0 || inputs.length === 0) {
     return {
       kind: 'skip',
-      reason: 'capture has no text or parsed attachment content',
+      reason: 'input has no text or parsed attachment content',
     }
   }
 
   return {
     kind: 'ready',
-    prompt: buildAssistantAutoReplyPromptText(captures, sections),
+    prompt: buildAssistantAutoReplyPromptText(inputs, sections),
   }
 }
 
 export async function prepareAssistantAutoReplyInput(
-  captures: readonly AssistantAutoReplyPromptCapture[],
+  inputs: readonly AssistantAutoReplyPromptInput[],
   vaultRoot: string,
 ): Promise<AssistantAutoReplyPreparedInput> {
-  const preparedCaptures = await Promise.all(
-    captures.map(async (entry) => ({
+  const preparedInputs = await Promise.all(
+    inputs.map(async (entry) => ({
       ...entry,
       attachmentBundles: await buildInboxModelAttachmentBundles({
         attachments: entry.capture.attachments,
@@ -82,26 +100,33 @@ export async function prepareAssistantAutoReplyInput(
       }),
     })),
   )
-  const textualSections = preparedCaptures
+  const textualSections = preparedInputs
     .map((entry, index) =>
-      renderAssistantAutoReplyCaptureSection({
-        attachmentSections: entry.attachmentBundles
-          .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
-          .filter((section): section is string => section !== null),
-        captureText: normalizeNullableString(entry.capture.text),
+      renderAssistantAutoReplyInputSection({
+        attachmentSections: buildAssistantAutoReplyAttachmentSections({
+          descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
+            descriptors: entry.attachmentDescriptors ?? [],
+            projectionReasonCode: entry.projectionReasonCode ?? null,
+            projectionStatus: entry.projectionStatus ?? null,
+          }),
+          renderedAttachmentSections: entry.attachmentBundles
+            .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
+            .filter((section): section is string => section !== null),
+        }),
+        inputText: normalizeNullableString(entry.capture.text),
         index,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
-        totalCaptures: preparedCaptures.length,
+        totalInputs: preparedInputs.length,
       }),
     )
     .filter((section): section is string => section !== null)
 
   const hasTextualContent = textualSections.length > 0
-  const nextPrompt = buildAssistantAutoReplyPromptText(captures, textualSections)
+  const nextPrompt = buildAssistantAutoReplyPromptText(inputs, textualSections)
 
   const preparedMultimodalInput =
     await prepareInboxMultimodalUserMessageContent({
-      attachmentSources: preparedCaptures.flatMap((entry) =>
+      attachmentSources: preparedInputs.flatMap((entry) =>
         entry.attachmentBundles.map((attachment) => ({
           attachment,
           captureId: entry.capture.captureId,
@@ -116,7 +141,7 @@ export async function prepareAssistantAutoReplyInput(
       kind: 'skip',
       reason:
         preparedMultimodalInput.fallbackError ??
-        'capture has no text or parsed attachment content',
+        'input has no text or parsed attachment content',
     }
   }
 
@@ -125,6 +150,74 @@ export async function prepareAssistantAutoReplyInput(
     prompt: nextPrompt,
     userMessageContent: preparedMultimodalInput.userMessageContent,
   }
+}
+
+export function readTelegramAutoReplyMetadataFromAssistantInput(input: {
+  replyTarget?: AssistantInputReplyTarget | null
+  sourceMetadata?: AssistantInputSourceMetadata | null
+}): TelegramAutoReplyMetadata | null {
+  const metadata = input.sourceMetadata
+  if (metadata?.kind !== 'telegram') {
+    return null
+  }
+
+  const messageId =
+    normalizeNullableString(input.replyTarget?.channel) === 'telegram'
+      ? normalizeNullableString(input.replyTarget?.messageId)
+      : null
+  const result: TelegramAutoReplyMetadata = {
+    mediaGroupId: normalizeNullableString(metadata.mediaGroupId),
+    messageId,
+    replyContext: normalizeNullableString(metadata.replyContext),
+  }
+
+  return result.mediaGroupId || result.messageId || result.replyContext
+    ? result
+    : null
+}
+
+export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
+  descriptors: readonly AssistantInputAttachmentDescriptor[]
+  projectionReasonCode?: string | null
+  projectionStatus?: AssistantInputProjectionStatus | null
+}): string | null {
+  if (input.descriptors.length === 0) {
+    return null
+  }
+
+  const kinds = uniqueSortedStrings(
+    input.descriptors
+      .map(normalizeAttachmentDescriptorPromptKind)
+      .filter((value): value is string => value !== null),
+  )
+  const mimeTypes = uniqueSortedStrings(
+    input.descriptors
+      .map((descriptor) => normalizeNullableString(descriptor.contentType))
+      .filter((value): value is string => value !== null)
+      .map((value) => value.toLowerCase()),
+  )
+  const sizes = input.descriptors
+    .map((descriptor) => descriptor.sizeBytes)
+    .filter((value): value is number => typeof value === 'number')
+  const totalKnownSize = sizes.reduce((total, sizeBytes) => total + sizeBytes, 0)
+  const sizeLine = sizes.length > 0
+    ? sizes.length === input.descriptors.length
+      ? `total size: ${totalKnownSize} bytes`
+      : `known total size: ${totalKnownSize} bytes (some sizes unknown)`
+    : null
+
+  return [
+    `${input.descriptors.length} attachment${input.descriptors.length === 1 ? '' : 's'}`,
+    kinds.length > 0 ? `kinds: ${kinds.join(', ')}` : null,
+    mimeTypes.length > 0 ? `mime types: ${mimeTypes.join(', ')}` : null,
+    sizeLine,
+    renderAssistantInputDescriptorEnrichmentStatus({
+      reasonCode: input.projectionReasonCode ?? null,
+      status: input.projectionStatus ?? null,
+    }),
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n')
 }
 
 export async function loadTelegramAutoReplyMetadata(
@@ -146,20 +239,23 @@ export async function loadTelegramAutoReplyMetadata(
     const envelope = asRecord(parsed)
     const input = asRecord(envelope?.input)
     const raw = asRecord(input?.raw)
-    const minimalMetadata = readMinimalTelegramMetadata(raw)
+    const minimalMetadata = readMinimalTelegramMetadata(raw, vaultRoot)
     if (minimalMetadata) {
       return minimalMetadata
     }
     const message = extractTelegramRawMessage(raw)
 
     return {
-      mediaGroupId: normalizeNullableString(
+      mediaGroupId: normalizeTelegramAutoReplyMediaGroupId(
+        vaultRoot,
         typeof message?.media_group_id === 'string'
           ? message.media_group_id
           : null,
       ),
       messageId: parseTelegramMessageId(message?.message_id),
-      replyContext: buildTelegramReplyContext(message),
+      replyContext: sanitizeTelegramAutoReplyReplyContext(
+        buildTelegramReplyContext(message),
+      ),
     }
   } catch {
     return null
@@ -168,39 +264,41 @@ export async function loadTelegramAutoReplyMetadata(
 
 function readMinimalTelegramMetadata(
   raw: Record<string, unknown> | null,
+  vaultRoot: string,
 ): TelegramAutoReplyMetadata | null {
   if (!raw || raw.schema !== 'murph.telegram-capture.v1') {
     return null
   }
 
   return {
-    mediaGroupId:
-      typeof raw.media_group_id === 'string'
-        ? normalizeNullableString(raw.media_group_id)
-        : null,
+    mediaGroupId: normalizeTelegramAutoReplyMediaGroupId(
+      vaultRoot,
+      typeof raw.media_group_id === 'string' ? raw.media_group_id : null,
+    ),
     messageId: parseTelegramMessageId(raw.message_id),
-    replyContext:
+    replyContext: sanitizeTelegramAutoReplyReplyContext(
       typeof raw.reply_context_preview === 'string'
-        ? normalizeNullableString(raw.reply_context_preview)
+        ? raw.reply_context_preview
         : null,
+    ),
   }
 }
 
-function renderAssistantAutoReplyCaptureSection(input: {
+function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
-  captureText: string | null
+  inputText: string | null
   index: number
   replyContext: string | null
-  totalCaptures: number
+  totalInputs: number
 }): string | null {
   const sections: string[] = []
   if (input.replyContext) {
     sections.push(`Reply context:
 ${input.replyContext}`)
   }
-  if (input.captureText) {
+  if (input.inputText) {
     sections.push(`Message text:
-${input.captureText}`)
+${input.inputText}`)
   }
   if (input.attachmentSections.length > 0) {
     sections.push(`Attachment context:
@@ -211,12 +309,23 @@ ${input.attachmentSections.join('\n\n')}`)
     return null
   }
 
-  if (input.totalCaptures === 1) {
+  if (input.totalInputs === 1) {
     return sections.join('\n\n')
   }
 
-  return `Capture ${input.index + 1}:
+  return `Input ${input.index + 1}:
 ${sections.join('\n\n')}`
+}
+
+function buildAssistantAutoReplyAttachmentSections(input: {
+  descriptorSection: string | null
+  renderedAttachmentSections: readonly string[]
+}): string[] {
+  if (input.renderedAttachmentSections.length > 0) {
+    return [...input.renderedAttachmentSections]
+  }
+
+  return input.descriptorSection ? [input.descriptorSection] : []
 }
 
 function renderAttachmentPromptSection(
@@ -273,34 +382,34 @@ ${buildAttachmentTextExcerpt(extractedText)}`)
 }
 
 function buildAssistantAutoReplyContextLines(
-  captures: readonly AssistantAutoReplyPromptCapture[],
+  inputs: readonly AssistantAutoReplyPromptInput[],
 ): Array<string | null> {
-  const firstCapture = captures[0]?.capture
-  const lastCapture = captures[captures.length - 1]?.capture
-  if (!firstCapture || !lastCapture) {
+  const firstInput = inputs[0]?.capture
+  const lastInput = inputs[inputs.length - 1]?.capture
+  if (!firstInput || !lastInput) {
     return []
   }
 
-  const mediaGroupId = resolveGroupedTelegramMediaGroupId(captures)
+  const mediaGroupId = resolveGroupedTelegramMediaGroupId(inputs)
   return [
-    `Source: ${firstCapture.source}`,
+    `Source: ${firstInput.source}`,
     `Occurred at: ${
-      firstCapture.occurredAt === lastCapture.occurredAt
-        ? firstCapture.occurredAt
-        : `${firstCapture.occurredAt} -> ${lastCapture.occurredAt}`
+      firstInput.occurredAt === lastInput.occurredAt
+        ? firstInput.occurredAt
+        : `${firstInput.occurredAt} -> ${lastInput.occurredAt}`
     }`,
-    `Thread: ${firstCapture.threadId}${firstCapture.threadTitle ? ` (${firstCapture.threadTitle})` : ''}`,
-    `Actor: ${firstCapture.actorName ?? firstCapture.actorId ?? 'unknown'} | self=${String(firstCapture.actorIsSelf)}`,
-    captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
-    mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
+    `Thread: ${firstInput.threadId}${firstInput.threadTitle ? ` (${firstInput.threadTitle})` : ''}`,
+    `Actor: ${firstInput.actorName ?? firstInput.actorId ?? 'unknown'} | self=${String(firstInput.actorIsSelf)}`,
+    inputs.length > 1 ? `Grouped inputs: ${inputs.length}` : null,
+    mediaGroupId ? 'Telegram media group: present' : null,
   ]
 }
 
 function resolveGroupedTelegramMediaGroupId(
-  captures: readonly AssistantAutoReplyPromptCapture[],
+  inputs: readonly AssistantAutoReplyPromptInput[],
 ): string | null {
-  const mediaGroupIds = captures
-    .map((capture) => capture.telegramMetadata?.mediaGroupId ?? null)
+  const mediaGroupIds = inputs
+    .map((input) => input.telegramMetadata?.mediaGroupId ?? null)
     .filter((mediaGroupId): mediaGroupId is string => mediaGroupId !== null)
   const firstMediaGroupId = mediaGroupIds[0] ?? null
   if (!firstMediaGroupId) {
@@ -313,10 +422,10 @@ function resolveGroupedTelegramMediaGroupId(
 }
 
 function buildAssistantAutoReplyPromptText(
-  captures: readonly AssistantAutoReplyPromptCapture[],
+  inputs: readonly AssistantAutoReplyPromptInput[],
   sections: readonly string[],
 ): string {
-  const contextLines = buildAssistantAutoReplyContextLines(captures).filter(
+  const contextLines = buildAssistantAutoReplyContextLines(inputs).filter(
     (line): line is string => line !== null,
   )
   return sections.length > 0
@@ -360,6 +469,59 @@ function renderPreparedAttachmentPromptSection(
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${sections.join('\n\n')}`
+}
+
+function normalizeAttachmentDescriptorPromptKind(
+  descriptor: AssistantInputAttachmentDescriptor,
+): string | null {
+  const kind = normalizeNullableString(descriptor.kind)?.toLowerCase() ?? null
+  const mimeType =
+    normalizeNullableString(descriptor.contentType)?.toLowerCase() ?? null
+  if (kind === 'photo' || kind === 'image') {
+    return 'image'
+  }
+  if (kind === 'voice' || kind === 'voice_memo') {
+    return 'voice_memo'
+  }
+  if (kind && kind !== 'media') {
+    return kind
+  }
+
+  if (mimeType?.startsWith('image/')) {
+    return 'image'
+  }
+  if (mimeType?.startsWith('audio/')) {
+    return 'audio'
+  }
+  if (mimeType?.startsWith('video/')) {
+    return 'video'
+  }
+  if (mimeType === 'application/pdf' || mimeType?.startsWith('text/')) {
+    return 'document'
+  }
+  return kind
+}
+
+function renderAssistantInputDescriptorEnrichmentStatus(input: {
+  reasonCode: string | null
+  status: AssistantInputProjectionStatus | null
+}): string {
+  if (input.status === 'succeeded') {
+    return 'parser/search enrichment: succeeded'
+  }
+
+  if (input.status === 'failed' || input.status === 'quarantined') {
+    const reason = normalizeNullableString(input.reasonCode)
+    return reason
+      ? `parser/search enrichment: failed (${reason})`
+      : 'parser/search enrichment: failed'
+  }
+
+  return 'parser/search enrichment: pending'
+}
+
+function uniqueSortedStrings(values: readonly string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right))
 }
 
 function hasStoredPdfAttachmentPath(attachment: InboxModelAttachmentBundle): boolean {
@@ -419,6 +581,45 @@ function parseTelegramMessageId(value: unknown): string | null {
   }
 
   return null
+}
+
+function normalizeTelegramAutoReplyMediaGroupId(
+  vaultRoot: string,
+  value: string | null,
+): string | null {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return null
+  }
+
+  return `tgmg_${createHash('sha256')
+    .update('murph.telegram-auto-reply.media-group.v1')
+    .update('\0')
+    .update(path.resolve(vaultRoot))
+    .update('\0')
+    .update(normalized)
+    .digest('hex')
+    .slice(0, 32)}`
+}
+
+function sanitizeTelegramAutoReplyReplyContext(value: string | null): string | null {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return null
+  }
+
+  const sanitized = normalized
+    .replace(/https?:\/\/[^\s"'<>]+/giu, '[link omitted]')
+    .replace(/file:\/\/[^\s"'<>]+/giu, '[path omitted]')
+    .replace(/(^|[\s("'=])(?:[A-Za-z]:[\\/]|\/[^\s"'<>]+|~\/|\.\.\/|\.\.\\)[^\s"'<>]*/gu, '$1[path omitted]')
+    .replace(/^\s*(authorization|cookie|set-cookie|x-api-key)\s*:.*$/gimu, '[secret omitted]')
+    .trim()
+
+  const bounded =
+    sanitized.length > MAX_TELEGRAM_REPLY_CONTEXT_CHARS
+      ? sanitized.slice(0, MAX_TELEGRAM_REPLY_CONTEXT_CHARS)
+      : sanitized
+  return normalizeNullableString(bounded)
 }
 
 function buildTelegramReplyContext(

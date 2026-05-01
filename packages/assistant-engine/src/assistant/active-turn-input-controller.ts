@@ -305,22 +305,22 @@ class AssistantActiveTurnInputController {
 
   private resolveKnownAdmissionInput(): Pick<
     AssistantActiveTurnInputAdmissionInput,
-    'knownCaptureIds' | 'knownInputIds'
+    'knownProjectionCaptureIds' | 'knownInputIds'
   > {
-    const knownCaptureIds = new Set<string>()
+    const knownProjectionCaptureIds = new Set<string>()
     const knownInputIds = new Set<string>()
 
     for (const item of this.pending) {
       for (const acceptedInput of item.admission.acceptedInputs) {
         knownInputIds.add(acceptedInput.id)
         for (const captureId of acceptedInput.captureIds ?? []) {
-          knownCaptureIds.add(captureId)
+          knownProjectionCaptureIds.add(captureId)
         }
       }
     }
 
     return {
-      knownCaptureIds: [...knownCaptureIds],
+      knownProjectionCaptureIds: [...knownProjectionCaptureIds],
       knownInputIds: [...knownInputIds],
     }
   }

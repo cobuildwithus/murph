@@ -80,140 +80,140 @@ afterEach(async () => {
 
 test('formatAssistantRunEventForTerminal redacts delivery targets by default', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'telegram -> +15550001111',
-    type: 'capture.replied',
+    type: 'input.replied',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
-  assert.equal(message, 'replied cap_safe_123')
+  assert.equal(message, 'replied ain_safe_123')
   assert.doesNotMatch(message ?? '', /\+15550001111/u)
 })
 
 test('formatAssistantRunEventForTerminal summarizes auto-reply provider progress by default', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'Web: treehouse menu',
     providerKind: 'search',
     providerState: 'running',
-    type: 'capture.reply-progress',
+    type: 'input.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
-  assert.equal(message, 'reply-progress cap_safe_123: searching the web')
+  assert.equal(message, 'reply-progress ain_safe_123: searching the web')
   assert.doesNotMatch(message ?? '', /treehouse menu/u)
 })
 
 test('formatAssistantRunEventForTerminal shows raw auto-reply provider progress when unsafe details are enabled', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'Web: treehouse menu',
     providerKind: 'search',
     providerState: 'running',
-    type: 'capture.reply-progress',
+    type: 'input.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event, {
     unsafeDetails: true,
   })
 
-  assert.equal(message, 'reply-progress cap_safe_123: Web: treehouse menu')
+  assert.equal(message, 'reply-progress ain_safe_123: Web: treehouse menu')
 })
 
 test('formatAssistantRunEventForTerminal shows safe command labels by default', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: '$ node /tmp/bin.js memory show --vault /tmp/vault',
     providerKind: 'command',
     providerState: 'running',
     safeDetails: 'running memory show',
-    type: 'capture.reply-progress',
+    type: 'input.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
-  assert.equal(message, 'reply-progress cap_safe_123: running memory show')
+  assert.equal(message, 'reply-progress ain_safe_123: running memory show')
   assert.doesNotMatch(message ?? '', /\/tmp\/vault/u)
 })
 
 test('formatAssistantRunEventForTerminal shows safe tool labels by default', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'Tool vault.cli.run',
     providerKind: 'tool',
     providerState: 'completed',
     safeDetails: 'finished vault.cli.run',
-    type: 'capture.reply-progress',
+    type: 'input.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
-  assert.equal(message, 'reply-progress cap_safe_123: finished vault.cli.run')
+  assert.equal(message, 'reply-progress ain_safe_123: finished vault.cli.run')
 })
 
 test('formatAssistantRunEventForTerminal keeps safe auto-reply heartbeat details visible by default', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'assistant still running after 10m; last provider activity 8m ago',
     providerKind: 'status',
     providerState: 'running',
-    type: 'capture.reply-progress',
+    type: 'input.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
   assert.equal(
     message,
-    'reply-progress cap_safe_123: assistant still running after 10m; last provider activity 8m ago',
+    'reply-progress ain_safe_123: assistant still running after 10m; last provider activity 8m ago',
   )
 })
 
 test('formatAssistantRunEventForTerminal keeps long-running auto-reply heartbeat details visible by default', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details:
       'assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
     providerKind: 'status',
     providerState: 'running',
-    type: 'capture.reply-progress',
+    type: 'input.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
   assert.equal(
     message,
-    'reply-progress cap_safe_123: assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
+    'reply-progress ain_safe_123: assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
   )
 })
 
 test('formatAssistantRunEventForTerminal shows safe auto-reply failure details by default', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details:
       "Codex CLI failed. exit code 1. You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Apr 3rd, 2026 1:20 PM.",
     errorCode: 'ASSISTANT_CODEX_FAILED',
     safeDetails: 'provider usage limit reached (ASSISTANT_CODEX_FAILED)',
-    type: 'capture.reply-failed',
+    type: 'input.reply-failed',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
   assert.equal(
     message,
-    'reply-failed cap_safe_123: provider usage limit reached (ASSISTANT_CODEX_FAILED)',
+    'reply-failed ain_safe_123: provider usage limit reached (ASSISTANT_CODEX_FAILED)',
   )
   assert.doesNotMatch(message ?? '', /purchase more credits/u)
 })
 
 test('formatAssistantRunEventForTerminal shows raw auto-reply failure details when unsafe details are enabled', () => {
   const event: AssistantRunEvent = {
-    captureId: 'cap_safe_123',
+    inputId: 'ain_safe_123',
     details: 'Temporary network interruption while delivering the reply.',
     errorCode: 'ASSISTANT_DELIVERY_FAILED',
     safeDetails: 'outbound delivery failed (ASSISTANT_DELIVERY_FAILED)',
-    type: 'capture.reply-failed',
+    type: 'input.reply-failed',
   }
 
   const message = formatAssistantRunEventForTerminal(event, {
@@ -222,7 +222,7 @@ test('formatAssistantRunEventForTerminal shows raw auto-reply failure details wh
 
   assert.equal(
     message,
-    'reply-failed cap_safe_123: Temporary network interruption while delivering the reply.',
+    'reply-failed ain_safe_123: Temporary network interruption while delivering the reply.',
   )
 })
 

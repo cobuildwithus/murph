@@ -3,6 +3,7 @@ import type { AssistantInputCandidate } from '../input-source.js'
 import { isSameAssistantConversationCapture } from '../conversation-ref.js'
 import {
   loadTelegramAutoReplyMetadata,
+  readTelegramAutoReplyMetadataFromAssistantInput,
   type TelegramAutoReplyMetadata,
 } from './prompt-builder.js'
 
@@ -14,6 +15,7 @@ export interface AssistantAutoReplyGroupItem {
 
 export async function collectAssistantAutoReplyGroup(input: {
   captures: InboxListResult['items']
+  inputCandidatesByCaptureId?: ReadonlyMap<string, AssistantInputCandidate>
   startIndex: number
   vault: string
 }): Promise<{
@@ -28,7 +30,9 @@ export async function collectAssistantAutoReplyGroup(input: {
     }
   }
   const items: AssistantAutoReplyGroupItem[] = [
-    await createAssistantAutoReplyGroupItem(input.vault, first),
+    await createAssistantAutoReplyGroupItem(input.vault, first, {
+      inputCandidate: input.inputCandidatesByCaptureId?.get(first.captureId) ?? null,
+    }),
   ]
   let endIndex = input.startIndex
 
@@ -38,7 +42,12 @@ export async function collectAssistantAutoReplyGroup(input: {
       break
     }
 
-    items.push(await createAssistantAutoReplyGroupItem(input.vault, candidate))
+    items.push(
+      await createAssistantAutoReplyGroupItem(input.vault, candidate, {
+        inputCandidate:
+          input.inputCandidatesByCaptureId?.get(candidate.captureId) ?? null,
+      }),
+    )
     endIndex = index
   }
 
@@ -72,18 +81,44 @@ async function createAssistantAutoReplyGroupItem(
   return {
     inputCandidate: input.inputCandidate ?? null,
     summary: capture,
-    telegramMetadata: await loadCaptureTelegramMetadata(vault, capture),
+    telegramMetadata: await loadCaptureTelegramMetadata(
+      vault,
+      capture,
+      input.inputCandidate ?? null,
+    ),
   }
 }
 
 async function loadCaptureTelegramMetadata(
   vault: string,
   capture: InboxListResult['items'][number],
+  inputCandidate: AssistantInputCandidate | null,
 ): Promise<TelegramAutoReplyMetadata | null> {
+  const eventMetadata = inputCandidate
+    ? readTelegramAutoReplyMetadataFromAssistantInput({
+        replyTarget: inputCandidate.event.replyTarget,
+        sourceMetadata: inputCandidate.event.sourceMetadata,
+      })
+    : null
+  if (eventMetadata) {
+    return eventMetadata
+  }
+
+  if (isSyntheticAssistantInputEnvelopePath(capture.envelopePath)) {
+    return null
+  }
+
   return await loadTelegramAutoReplyMetadata(
     vault,
     capture.source === 'telegram' ? capture.envelopePath : null,
   )
+}
+
+function isSyntheticAssistantInputEnvelopePath(
+  envelopePath: string | null,
+): boolean {
+  return typeof envelopePath === 'string'
+    && envelopePath.startsWith('assistant-input-events/')
 }
 
 export function shouldGroupAdjacentConversationCapture(

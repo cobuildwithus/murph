@@ -24,6 +24,7 @@ export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
 export const ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH = 20_000
 export const ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT = 32
 const ASSISTANT_INPUT_EVENT_REPLY_TARGET_MAX_LENGTH = 8_192
+const ASSISTANT_INPUT_EVENT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512
 
 export type AssistantInputConversationRef = AssistantConversationCaptureRef
 export type AssistantInputProjectionStatus =
@@ -176,6 +177,25 @@ const assistantInputReplyTargetSchema = z
   })
   .strict()
 
+const assistantInputTelegramSourceMetadataSchema = z
+  .object({
+    kind: z.literal('telegram'),
+    mediaGroupId: safeNullableAssistantInputTokenSchema(
+      'sourceMetadata.mediaGroupId',
+    ),
+    replyContext: safeNullableAssistantInputMetadataTextSchema(
+      'sourceMetadata.replyContext',
+    ),
+  })
+  .strict()
+
+const assistantInputSourceMetadataSchema = z
+  .discriminatedUnion('kind', [
+    assistantInputTelegramSourceMetadataSchema,
+  ])
+  .nullable()
+  .default(null)
+
 const assistantInputEventRecordSchema = z
   .object({
     content: assistantInputContentSchema,
@@ -194,6 +214,7 @@ const assistantInputEventRecordSchema = z
     receivedAt: safeNullableAssistantInputTimestampSchema('receivedAt'),
     replyTarget: assistantInputReplyTargetSchema.nullable().default(null),
     schema: z.literal(ASSISTANT_INPUT_EVENT_SCHEMA),
+    sourceMetadata: assistantInputSourceMetadataSchema,
     sourceRef: assistantInputSourceRefSchema,
     storedAt: safeAssistantInputTimestampSchema('storedAt'),
     updatedAt: safeAssistantInputTimestampSchema('updatedAt'),
@@ -227,6 +248,9 @@ export type AssistantInputEventProjection = z.infer<
 export type AssistantInputReplyTarget = z.infer<
   typeof assistantInputReplyTargetSchema
 >
+export type AssistantInputSourceMetadata = z.infer<
+  typeof assistantInputSourceMetadataSchema
+>
 export type AssistantInputEventRecord = z.infer<
   typeof assistantInputEventRecordSchema
 >
@@ -237,6 +261,7 @@ export interface UpsertAssistantInputEventInput {
   occurredAt: string
   receivedAt?: string | null
   replyTarget?: z.input<typeof assistantInputReplyTargetSchema> | null
+  sourceMetadata?: z.input<typeof assistantInputSourceMetadataSchema> | null
   sourceRef: AssistantInputSourceRef
 }
 
@@ -668,6 +693,7 @@ function buildAssistantInputEventRecord(input: {
     receivedAt: input.event.receivedAt ?? null,
     replyTarget: input.event.replyTarget ?? null,
     schema: ASSISTANT_INPUT_EVENT_SCHEMA,
+    sourceMetadata: input.event.sourceMetadata ?? null,
     sourceRef,
     storedAt: now,
     updatedAt: now,
@@ -1072,6 +1098,21 @@ function safeNullableAssistantInputTextSchema(
   fieldName: string,
 ) {
   return safeAssistantInputTextSchema(fieldName).nullable().default(null)
+}
+
+function safeAssistantInputMetadataTextSchema(fieldName: string) {
+  return z
+    .string()
+    .max(ASSISTANT_INPUT_EVENT_SOURCE_METADATA_TEXT_MAX_LENGTH)
+    .superRefine((value, context) => {
+      assertSafeAssistantInputText(value, context, fieldName)
+    })
+}
+
+function safeNullableAssistantInputMetadataTextSchema(
+  fieldName: string,
+) {
+  return safeAssistantInputMetadataTextSchema(fieldName).nullable().default(null)
 }
 
 function safeAttachmentTokenSchema(fieldName: string) {

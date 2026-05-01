@@ -52,12 +52,17 @@ describe('store-backed assistant input source', () => {
           accountId: 'acct_1',
           actorId: 'actor_1',
           actorIsSelf: false,
-          source: 'linq',
+          source: 'telegram',
           threadId: 'chat_1',
           threadIsDirect: true,
         },
         occurredAt: '2026-04-22T10:00:00.000Z',
         receivedAt: '2026-04-22T10:00:01.000Z',
+        sourceMetadata: {
+          kind: 'telegram',
+          mediaGroupId: 'media_group_1',
+          replyContext: 'Replying to: earlier message',
+        },
         sourceRef: createHostedMailboxSourceRef({
           eventId: 'evt_store_source',
           laneSeq: '42',
@@ -84,8 +89,22 @@ describe('store-backed assistant input source', () => {
       },
       event: {
         attachmentCount: 1,
+        attachmentDescriptors: [
+          {
+            attachmentId: 'att_1',
+            contentType: 'audio/mp4',
+            fileName: 'voice-note.m4a',
+            kind: 'audio',
+            sizeBytes: 1234,
+          },
+        ],
         inputId: stored.inputId,
-        source: 'linq',
+        source: 'telegram',
+        sourceMetadata: {
+          kind: 'telegram',
+          mediaGroupId: 'media_group_1',
+          replyContext: 'Replying to: earlier message',
+        },
         text: 'stored input text',
         transcriptText: 'stored input text',
       },
@@ -167,7 +186,7 @@ describe('store-backed assistant input source', () => {
     const { vaultRoot } = await createAssistantInputSourceVault(
       'assistant-input-source-store-known-page-',
     )
-    const knownCaptureIds: string[] = []
+    const knownProjectionCaptureIds: string[] = []
     for (let index = 1; index <= 100; index += 1) {
       const stored = await upsertAssistantInputEvent({
         vault: vaultRoot,
@@ -178,7 +197,7 @@ describe('store-backed assistant input source', () => {
         }),
       })
       const captureId = `cap_known_${index}`
-      knownCaptureIds.push(captureId)
+      knownProjectionCaptureIds.push(captureId)
       await updateAssistantInputProjection({
         inputId: stored.inputId,
         vault: vaultRoot,
@@ -209,7 +228,7 @@ describe('store-backed assistant input source', () => {
         threadId: 'chat_1',
         threadIsDirect: true,
       },
-      knownCaptureIds,
+      knownProjectionCaptureIds,
       limit: 1,
     })
 

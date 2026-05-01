@@ -474,14 +474,14 @@ describe('assistant product small seams', () => {
     expect(
       extractAssistantAutoReplyFailedPromptText(
         [
-          'Capture 1:',
+          'Input 1:',
           'Reply context:',
           'quoted',
           '',
           'Message text:',
           'first message',
           '',
-          'Capture 2:',
+          'Input 2:',
           'Message text:',
           'second message',
         ].join('\n'),
@@ -524,7 +524,7 @@ describe('assistant product small seams', () => {
     listAssistantTranscriptEntries.mockResolvedValueOnce([])
     await promptModule.persistFailedAssistantPromptAttempt({
       persistUserPromptOnFailure: false,
-      prompt: 'Capture 1:\nMessage text:\nqueued reply',
+      prompt: 'Input 1:\nMessage text:\nqueued reply',
       session: createAssistantSession({
         sessionId: 'session-2',
       }),

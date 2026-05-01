@@ -451,10 +451,10 @@ describe("runHostedAssistantAutomation", () => {
       });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onEvent?.({
-        captureId: "capture_123",
+        inputId: "ain_123",
         details: "telegram -> real_thread_id",
         safeDetails: "reply_sent",
-        type: "capture.replied",
+        type: "input.replied",
       });
       return {
         nextWakeAt: "2026-04-08T01:15:00.000Z",
@@ -490,18 +490,18 @@ describe("runHostedAssistantAutomation", () => {
           message: "Hosted assistant automation pass starting.",
         }),
         expect.objectContaining({
-          message: "Hosted assistant automation event: capture.replied.",
+          message: "Hosted assistant automation event: input.replied.",
           redacted: expect.objectContaining({
-            captureIdPresent: true,
+            inputIdPresent: true,
             safeDetails: "reply_sent",
-            type: "capture.replied",
+            type: "input.replied",
           }),
         }),
         expect.objectContaining({
           message: "Hosted assistant automation pass finished.",
           redacted: expect.objectContaining({
             automationEventCount0: 1,
-            automationEventType0: "capture.replied",
+            automationEventType0: "input.replied",
             automationEventTypeCount: 1,
             progressed: true,
             requestId: "req_123",
@@ -525,11 +525,11 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          captureIdPresent: true,
+          inputIdPresent: true,
           safeDetails: "reply_sent",
-          type: "capture.replied",
+          type: "input.replied",
         }),
-        message: "Hosted assistant automation event: capture.replied.",
+        message: "Hosted assistant automation event: input.replied.",
       }),
     );
     expect(

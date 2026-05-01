@@ -57,21 +57,21 @@ export function formatAssistantRunEventForTerminal(
     return `routed ${event.captureId ?? 'capture'}${tools ? `: ${tools}` : ''}`
   }
 
-  if (event.type === 'capture.reply-started') {
+  if (event.type === 'input.reply-started') {
     return formatAssistantEventLine(
       'reply-started',
-      event.captureId,
+      event.inputId ?? event.captureId,
       options.unsafeDetails ? event.details : 'assistant provider turn started',
     )
   }
 
-  if (event.type === 'capture.reply-progress') {
+  if (event.type === 'input.reply-progress') {
     const details = formatAssistantReplyProgressDetails(event, options)
-    return formatAssistantEventLine('reply-progress', event.captureId, details)
+    return formatAssistantEventLine('reply-progress', event.inputId ?? event.captureId, details)
   }
 
-  if (event.type === 'capture.replied') {
-    return formatAssistantEventLine('replied', event.captureId, options.unsafeDetails ? event.details : null)
+  if (event.type === 'input.replied') {
+    return formatAssistantEventLine('replied', event.inputId ?? event.captureId, options.unsafeDetails ? event.details : null)
   }
 
   if (event.type === 'daemon.failed') {
@@ -82,9 +82,9 @@ export function formatAssistantRunEventForTerminal(
     )
   }
 
-  const label = event.type.replace(/^(capture|reply\.scan)\./u, '')
+  const label = event.type.replace(/^(capture|input|reply\.scan)\./u, '')
   const details = formatAssistantEventDetails(event, options)
-  return formatAssistantEventLine(label, event.captureId, details)
+  return formatAssistantEventLine(label, event.inputId ?? event.captureId, details)
 }
 
 export function formatInboxRunEventForTerminal(
@@ -290,10 +290,10 @@ function formatConnectorEventLine(
 
 function formatAssistantEventLine(
   label: string,
-  captureId: string | null | undefined,
+  eventId: string | null | undefined,
   details: string | null | undefined,
 ): string {
-  const prefix = captureId ? `${label} ${captureId}` : label
+  const prefix = eventId ? `${label} ${eventId}` : label
   const normalizedDetails = normalizePreviewText(details)
   return normalizedDetails ? `${prefix}: ${normalizedDetails}` : prefix
 }
@@ -306,7 +306,7 @@ function formatAssistantEventDetails(
     return normalizePreviewText(event.details)
   }
 
-  if (event.type === 'capture.reply-failed') {
+  if (event.type === 'input.reply-failed') {
     return (
       formatSafeAssistantAuthenticationFailureDetail(
         normalizePreviewText(event.details),

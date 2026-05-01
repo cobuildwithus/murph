@@ -361,8 +361,8 @@ function buildHostedAssistantAutomationEventLogDetails(
   requestId: string,
 ): Record<string, boolean | number | string | null> {
   return {
-    captureIdPresent: "captureId" in event ? event.captureId != null : false,
     errorCode: event.errorCode ?? null,
+    inputIdPresent: "inputId" in event ? event.inputId != null : false,
     providerKind: event.providerKind ?? null,
     providerState: event.providerState ?? null,
     requestId,
@@ -375,10 +375,10 @@ function buildHostedAssistantAutomationEventLogDetails(
 function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
   return new Set([
     "capture.failed",
-    "capture.replied",
-    "capture.reply-failed",
-    "capture.reply-skipped",
-    "capture.reply-started",
+    "input.replied",
+    "input.reply-failed",
+    "input.reply-skipped",
+    "input.reply-started",
     "reply.scan.started",
     "scan.started",
   ]).has(type);

@@ -31,6 +31,7 @@ export {
   type AssistantInputEventRecordParseFailure,
   type AssistantInputEventProjection,
   type AssistantInputReplyTarget,
+  type AssistantInputSourceMetadata,
   type UpsertAssistantInputEventInput,
 } from './input-store.js'
 export {

@@ -55,21 +55,29 @@ export function formatAssistantRunEventForTerminal(
     return `routed ${event.captureId ?? 'capture'}${tools ? `: ${tools}` : ''}`
   }
 
-  if (event.type === 'capture.reply-started') {
+  if (event.type === 'input.reply-started') {
     return formatAssistantEventLine(
       'reply-started',
-      event.captureId,
+      event.inputId ?? event.captureId,
       options.unsafeDetails ? event.details : 'assistant provider turn started',
     )
   }
 
-  if (event.type === 'capture.reply-progress') {
+  if (event.type === 'input.reply-progress') {
     const details = formatAssistantReplyProgressDetails(event, options)
-    return formatAssistantEventLine('reply-progress', event.captureId, details)
+    return formatAssistantEventLine(
+      'reply-progress',
+      event.inputId ?? event.captureId,
+      details,
+    )
   }
 
-  if (event.type === 'capture.replied') {
-    return formatAssistantEventLine('replied', event.captureId, options.unsafeDetails ? event.details : null)
+  if (event.type === 'input.replied') {
+    return formatAssistantEventLine(
+      'replied',
+      event.inputId ?? event.captureId,
+      options.unsafeDetails ? event.details : null,
+    )
   }
 
   if (event.type === 'daemon.failed') {
@@ -80,9 +88,9 @@ export function formatAssistantRunEventForTerminal(
     )
   }
 
-  const label = event.type.replace(/^(capture|reply\.scan)\./u, '')
+  const label = event.type.replace(/^(capture|input|reply\.scan)\./u, '')
   const details = formatAssistantEventDetails(event, options)
-  return formatAssistantEventLine(label, event.captureId, details)
+  return formatAssistantEventLine(label, event.inputId ?? event.captureId, details)
 }
 
 export function formatInboxRunEventForTerminal(
@@ -270,7 +278,7 @@ function formatAssistantEventDetails(
   const details = normalizeLabel(event.details)
   const safeDetails = normalizeLabel(event.safeDetails)
   if (!details) {
-    if (event.type === 'capture.reply-failed') {
+    if (event.type === 'input.reply-failed') {
       return safeDetails ?? fallbackAssistantReplyFailureDetails(event)
     }
     return null
@@ -284,17 +292,17 @@ function formatAssistantEventDetails(
     case 'capture.noop':
     case 'capture.skipped':
       return isSafeAssistantDetail(details) ? details : null
-    case 'capture.reply-skipped':
+    case 'input.reply-skipped':
       if (isSafeAssistantDetail(details)) {
         return details
       }
 
       return details.endsWith(
-        'Will retry this capture after the provider reconnects.',
+        'Will retry this input after the provider reconnects.',
       )
         ? 'waiting for provider reconnect'
         : null
-    case 'capture.reply-failed':
+    case 'input.reply-failed':
       return (
         formatSafeAssistantAuthenticationFailureDetail(details) ??
         safeDetails ??
@@ -440,9 +448,9 @@ function fallbackAssistantReplyFailureDetails(
 const SAFE_ASSISTANT_DETAILS = new Set([
   'assistant result already exists',
   'assistant reply already exists',
-  'assistant provider stalled without progress; will retry this capture.',
+  'assistant provider stalled without progress; will retry this input.',
   'capture already promoted',
-  'capture has no text or parsed attachment content',
+  'input has no text or parsed attachment content',
   'capture is self-authored',
   'capture matches a recent assistant delivery',
   'channel not enabled for assistant auto-reply',

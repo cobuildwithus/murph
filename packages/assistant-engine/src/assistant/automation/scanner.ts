@@ -13,7 +13,7 @@ import { compareAssistantInputCursors } from '../input-store.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
-  readAssistantAutoReplyTerminalEvidence,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
 } from './evidence.js'
 import {
@@ -30,7 +30,7 @@ import {
   type AssistantRunEvent,
 } from './shared.js'
 
-type AssistantInboxCaptureSummary = Awaited<
+type AssistantAutomationInputSummary = Awaited<
   ReturnType<InboxServices['list']>
 >['items'][number]
 type AssistantPreserveDocumentAttachmentsResult = Awaited<
@@ -39,7 +39,7 @@ type AssistantPreserveDocumentAttachmentsResult = Awaited<
 
 interface AssistantAutomationCandidate {
   inputCandidate: AssistantInputCandidate
-  summary: AssistantInboxCaptureSummary
+  summary: AssistantAutomationInputSummary
 }
 
 export async function scanAssistantAutomationOnce(input: {
@@ -115,6 +115,12 @@ export async function scanAssistantAutomationOnce(input: {
   const candidatesByCaptureId = new Map(
     candidates.map((candidate) => [candidate.summary.captureId, candidate] as const),
   )
+  const inputCandidatesByCaptureId = new Map(
+    candidates.map((candidate) => [
+      candidate.summary.captureId,
+      candidate.inputCandidate,
+    ] as const),
+  )
   const preservedCaptureResults = new Map<
     string,
     AssistantPreserveDocumentAttachmentsResult
@@ -153,8 +159,8 @@ export async function scanAssistantAutomationOnce(input: {
       }
     } catch {
       input.onEvent?.({
-        type: 'capture.reply-progress',
-        captureId: candidate.summary.captureId,
+        type: 'input.reply-progress',
+        inputId: candidate.inputCandidate.event.inputId,
         details: 'nonblocking document preservation failed',
         safeDetails: 'document_preservation_failed_nonblocking',
         providerKind: 'status',
@@ -175,6 +181,7 @@ export async function scanAssistantAutomationOnce(input: {
 
     const group = await collectAssistantAutoReplyGroup({
       captures: candidateSummaries,
+      inputCandidatesByCaptureId,
       startIndex: index,
       vault: input.vault,
     })
@@ -266,11 +273,11 @@ async function listAssistantReplyCandidates(input: {
     const evidenceId = candidate.event.inputId
     let cached = terminalEvidenceCache.get(evidenceId)
     if (!cached) {
-      cached = readAssistantAutoReplyTerminalEvidence(input.vault, evidenceId)
+      cached = readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, evidenceId)
         .then((evidence) =>
           evidence ??
           (candidate.projection.captureId
-            ? readAssistantAutoReplyTerminalEvidence(
+            ? readAssistantAutoReplyTerminalEvidenceByEvidenceId(
                 input.vault,
                 candidate.projection.captureId,
               )
@@ -296,7 +303,7 @@ async function listAssistantReplyCandidates(input: {
 
     const groupEvidence = await Promise.all(
       groupInputIds.map((inputId) =>
-        readAssistantAutoReplyTerminalEvidence(input.vault, inputId),
+        readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, inputId),
       ),
     )
     return groupEvidence.every((item) => item !== null)
@@ -383,7 +390,7 @@ function assistantAutomationCandidateFromInput(
 
 function assistantInboxSummaryFromInputCandidate(
   input: AssistantInputCandidate,
-): AssistantInboxCaptureSummary {
+): AssistantAutomationInputSummary {
   const conversation = input.event.conversation
   const captureId = input.projection.captureId ?? input.event.inputId
   return {

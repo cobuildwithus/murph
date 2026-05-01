@@ -1,10 +1,12 @@
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import {
   listAssistantInputEvents,
+  type AssistantInputAttachmentDescriptor,
   type AssistantInputConversationRef,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
   type AssistantInputProjectionStatus,
+  type AssistantInputSourceMetadata,
   type AssistantInputSourceRef,
 } from './input-store.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
@@ -32,6 +34,7 @@ export interface AssistantInputProjection {
 
 export interface AssistantInputEvent {
   attachmentCount: number
+  attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
   conversation: AssistantInputConversationRef | null
   cursor: AssistantInputCursor
   inputId: string
@@ -39,6 +42,7 @@ export interface AssistantInputEvent {
   receivedAt: string | null
   replyTarget: AssistantInputEventRecord['replyTarget']
   source: string
+  sourceMetadata: AssistantInputSourceMetadata
   sourceRef: AssistantInputSourceRef
   text: string | null
   transcriptText: string | null
@@ -62,7 +66,7 @@ export interface AssistantInputCandidateQuery {
 export interface AssistantTurnConversationInputQuery {
   afterCursor?: AssistantInputCursor | null
   conversation: AssistantInputConversationRef
-  knownCaptureIds?: readonly string[]
+  knownProjectionCaptureIds?: readonly string[]
   knownInputIds?: readonly string[]
   limit?: number
   signal?: AbortSignal
@@ -116,7 +120,7 @@ export function createStoreBackedAssistantInputSource(input: {
       return listStoredAssistantInputCandidates({
         afterCursor: query.afterCursor ?? null,
         conversation: query.conversation,
-        knownCaptureIds: query.knownCaptureIds,
+        knownProjectionCaptureIds: query.knownProjectionCaptureIds,
         knownInputIds: query.knownInputIds,
         limit: query.limit,
         signal: query.signal,
@@ -130,7 +134,7 @@ export function createStoreBackedAssistantInputSource(input: {
 async function listStoredAssistantInputCandidates(input: {
   afterCursor: AssistantInputCursor | null
   conversation?: AssistantInputConversationRef
-  knownCaptureIds?: readonly string[]
+  knownProjectionCaptureIds?: readonly string[]
   knownInputIds?: readonly string[]
   limit?: number
   signal?: AbortSignal
@@ -139,7 +143,7 @@ async function listStoredAssistantInputCandidates(input: {
 }): Promise<AssistantInputCandidateBatch> {
   assertAssistantInputSignalNotAborted(input.signal)
   const knownInputIds = new Set(input.knownInputIds ?? [])
-  const knownCaptureIds = new Set(input.knownCaptureIds ?? [])
+  const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds ?? [])
   const candidateLimit = normalizeAssistantInputQueryLimit(input.limit)
   const scanLimit = Math.max(candidateLimit, DEFAULT_ASSISTANT_INPUT_QUERY_LIMIT)
   const selected: AssistantInputEventRecord[] = []
@@ -164,7 +168,7 @@ async function listStoredAssistantInputCandidates(input: {
         .filter((candidate) => !knownInputIds.has(candidate.inputId))
         .filter((event) =>
           event.projection.captureId
-            ? !knownCaptureIds.has(event.projection.captureId)
+            ? !knownProjectionCaptureIds.has(event.projection.captureId)
             : true,
         )
         .filter((event) =>
@@ -210,6 +214,7 @@ export function assistantInputCandidateFromStoredEvent(
     },
     event: {
       attachmentCount: event.content.attachmentDescriptors.length,
+      attachmentDescriptors: event.content.attachmentDescriptors,
       conversation: event.conversation,
       cursor: event.cursor,
       inputId: event.inputId,
@@ -217,6 +222,7 @@ export function assistantInputCandidateFromStoredEvent(
       receivedAt: event.receivedAt,
       replyTarget: event.replyTarget,
       source: event.conversation?.source ?? event.sourceRef.source,
+      sourceMetadata: event.sourceMetadata,
       sourceRef: event.sourceRef,
       text: event.content.text,
       transcriptText: event.content.transcriptText ?? event.content.text,

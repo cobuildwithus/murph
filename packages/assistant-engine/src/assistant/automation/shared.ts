@@ -8,6 +8,7 @@ export interface AssistantRunEvent {
   captureId?: string
   details?: string
   errorCode?: string
+  inputId?: string
   providerKind?:
     | 'command'
     | 'file'
@@ -23,11 +24,11 @@ export interface AssistantRunEvent {
   type:
     | 'capture.failed'
     | 'capture.noop'
-    | 'capture.reply-progress'
-    | 'capture.reply-started'
-    | 'capture.replied'
-    | 'capture.reply-failed'
-    | 'capture.reply-skipped'
+    | 'input.reply-progress'
+    | 'input.reply-started'
+    | 'input.replied'
+    | 'input.reply-failed'
+    | 'input.reply-skipped'
     | 'capture.routed'
     | 'capture.skipped'
     | 'daemon.failed'
