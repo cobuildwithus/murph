@@ -736,7 +736,6 @@ describe("cloudflare worker routes", () => {
     });
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(stub.runWhenIdleOrBudget).not.toHaveBeenCalled();
   });
 
   it("deletes hosted runner user data without queuing a new invocation", async () => {
@@ -892,7 +891,6 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(202);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(stub.runWhenIdleOrBudget).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
   });
 
@@ -930,7 +928,6 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(404);
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(stub.runWhenIdleOrBudget).not.toHaveBeenCalled();
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -1499,10 +1496,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recorded: true,
     })),
     runUntilIdleOrBudget: vi.fn(async () => ({
-      nextWakeAt: null,
-      status: "idle" as const,
-    })),
-    runWhenIdleOrBudget: vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,
     })),

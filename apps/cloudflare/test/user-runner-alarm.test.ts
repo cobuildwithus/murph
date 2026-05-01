@@ -438,7 +438,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("marks a live invocation pending, schedules recovery, and drains after completion", async () => {
+  it("marks a live invocation pending, schedules recovery, and starts a follow-up after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocation = createDeferred<{
@@ -487,11 +487,12 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
       "2026-04-27T00:00:45.100Z",
+      "2026-04-27T00:00:30.100Z",
       "deleted",
     ]);
   });
 
-  it("waits for a live invocation while the active run drains a follow-up nudge", async () => {
+  it("treats alarms during a live invocation as recovery-only while the pending nudge follows after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -521,6 +522,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     const alarmRun = runner.alarm();
     await Promise.resolve();
     expect(invoke).toHaveBeenCalledOnce();
+    await expect(alarmRun).resolves.toBeUndefined();
 
     firstInvocation.resolve({
       nextWakeAt: null,
@@ -532,10 +534,10 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: null,
       status: "idle",
     });
-    await expect(alarmRun).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   });
 
-  it("schedules a continuation when a pending nudge exhausts the drain budget", async () => {
+  it("queues a follow-up drive after completion when a pending nudge remains after budget exhaustion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -545,6 +547,12 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
       if (invoke.mock.calls.length === 1) {
         return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
       }
       throw new Error("Unexpected extra workspace invocation.");
     });
@@ -565,29 +573,28 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
 
     const scheduledResult = await activeRun;
     expect(scheduledResult).toMatchObject({
-      status: "scheduled",
+      status: "budget_exhausted",
     });
-    expect(scheduledResult.nextWakeAt).not.toBeNull();
-    expect(invoke).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
       "2026-04-27T00:00:45.100Z",
-      scheduledResult.nextWakeAt,
+      "2026-04-27T00:00:30.100Z",
+      "deleted",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          maxConsecutiveInvocationPasses: 3,
           pendingNudge: true,
         }),
-        message: "Hosted runner drain budget reached with pending nudge; scheduled continuation.",
+        message: "Hosted runner queued follow-up drive for pending nudge and synced watchdog alarm.",
         phase: "scheduled",
         userId: "member_123",
       }),
     );
   });
 
-  it("drains a pending follow-up immediately even when the completed pass returned scheduled", async () => {
+  it("starts a pending follow-up after lock release even when the completed pass returned scheduled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -622,11 +629,13 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     });
 
     await expect(activeRun).resolves.toMatchObject({
-      status: "idle",
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      status: "scheduled",
     });
-    expect(invoke).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
       "2026-04-27T00:00:45.100Z",
+      "2026-04-27T00:00:30.100Z",
       "deleted",
     ]);
   });
@@ -638,7 +647,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: null;
       status: "idle";
     }>();
-    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null, {
       invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
     });
     await runner.bindUser("member_123");
@@ -668,30 +677,30 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:30.000Z",
+      "2026-04-27T00:01:15.100Z",
       "deleted",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          pendingNudge: false,
-          runnerNextWakePresent: false,
+          reason: "alarm",
         }),
-        message: "Hosted runner alarm skipped after active invocation consumed pending work.",
-        phase: "wake.running",
+        message: "Hosted runner invocation already active; synced recovery wake.",
+        phase: "scheduled",
         userId: "member_123",
       }),
     );
   });
 
-  it("skips a stale duplicate alarm while an invocation is still active with no pending work", async () => {
+  it("syncs only the recovery alarm for a duplicate alarm while an invocation is still active with no pending work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocation = createDeferred<{
       nextWakeAt: null;
       status: "idle";
     }>();
-    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null, {
       invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
     });
     await runner.bindUser("member_123");
@@ -704,23 +713,28 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:30.000Z",
-      "2026-04-27T00:00:30.000Z",
+      "2026-04-27T00:00:45.100Z",
     ]);
+    expect(
+      sql.exec(
+        "SELECT pending_nudge FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{ pending_nudge: 0 }]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          pendingNudge: false,
-          runnerNextWakePresent: true,
+          reason: "alarm",
         }),
-        message: "Hosted runner stale alarm skipped because no work is pending.",
-        phase: "wake.running",
+        message: "Hosted runner invocation already active; synced recovery wake.",
+        phase: "scheduled",
         userId: "member_123",
       }),
     );
   });
 
-  it("reschedules an alarm drain instead of waiting unbounded behind a long active invocation", async () => {
+  it("syncs a recovery alarm instead of waiting behind a long active invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocation = createDeferred<{
@@ -734,37 +748,70 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
 
     await runner.nudgeHostedRunner();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    const expectedRetryAlarm = new Date(Date.now() + 30_000 + 10_000 + 1_000).toISOString();
 
     await vi.advanceTimersByTimeAsync(30_000);
     const alarmRun = runner.alarm();
     await Promise.resolve();
     expect(invoke).toHaveBeenCalledOnce();
 
-    await vi.advanceTimersByTimeAsync(10_000);
-
     await expect(alarmRun).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:30.000Z",
-      expectedRetryAlarm,
+      "2026-04-27T00:01:15.100Z",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          activeInvocationDrainWaitMs: 10_000,
-          pendingNudge: false,
-          runnerNextWakePresent: true,
+          reason: "alarm",
         }),
-        message: "Hosted runner active invocation still running; rescheduled wake drain.",
+        message: "Hosted runner invocation already active; synced recovery wake.",
         phase: "scheduled",
         userId: "member_123",
       }),
     );
   });
 
-  it("reapplies a future wake alarm before skipping after an active invocation", async () => {
+  it("syncs only a recovery alarm when runUntilIdleOrBudget is called during an active invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "alarm" })).resolves.toEqual({
+      nextWakeAt: "2026-04-27T00:00:45.100Z",
+      status: "scheduled",
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual(["2026-04-27T00:00:45.100Z"]);
+    expect(
+      sql.exec(
+        "SELECT pending_nudge FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{ pending_nudge: 0 }]);
+
+    invocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a future runtime wake after an active alarm syncs recovery", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocation = createDeferred<{
@@ -793,7 +840,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:30.000Z",
-      "2026-04-27T00:05:00.000Z",
+      "2026-04-27T00:01:15.100Z",
       "2026-04-27T00:05:00.000Z",
     ]);
   });

@@ -1,6 +1,6 @@
 # Land hosted runner wake-only alarm cleanup
 
-Status: active
+Status: completed
 Created: 2026-05-01
 Updated: 2026-05-01
 
@@ -21,6 +21,7 @@ Updated: 2026-05-01
 - In scope:
   - `apps/cloudflare/src/index.ts`
   - `apps/cloudflare/src/user-runner.ts`
+  - `apps/cloudflare/src/env.ts` only for the existing helper-reference typecheck blocker exposed by focused verification
   - `apps/cloudflare/src/worker-routes/shared.ts`
   - directly coupled Cloudflare runner tests and Workers test stubs
 - Out of scope:
@@ -61,13 +62,17 @@ Updated: 2026-05-01
 
 - Current `main` already deleted `runner-wake-queue.ts` and no longer exports a Worker `queue` handler.
 - Current `runUntilIdleOrBudget` already uses recovery-alarm sync while active, not `markPendingNudgeAndApplyAlarm`; the remaining cleanup is the wait-for-idle RPC surface plus follow-up-drive shape.
+- Focused Cloudflare verification exposed an existing `env.ts` helper-reference blocker (`normalizeHostedExecutionString` / `requireHostedExecutionString`) before runner tests could execute; fix it in the same app as a narrow verification unblocker.
 
 ## Verification
 
-- Commands to run:
-  - focused Cloudflare runner tests
-  - `pnpm --dir apps/cloudflare verify`
-  - `pnpm typecheck`
-  - `git diff --check`
-- Expected outcomes:
-  - All focused and required checks pass, or any unrelated pre-existing failure is named with evidence.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/index.test.ts` passed.
+- `pnpm --dir apps/cloudflare typecheck` passed.
+- `pnpm --dir apps/cloudflare verify` passed.
+- `pnpm typecheck` passed.
+- `git diff --check -- apps/cloudflare/test/index.test.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-01-hosted-runner-wake-only-alarm.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed.
+- `pnpm verify:acceptance` failed on unrelated repo-wide checks: documented scenario manifest mismatch for `vault-cli device connect` syntax and core package tests missing `audit/2026/2026-04.jsonl`.
+- Security/privacy review: no findings.
+- Coverage review: added active-invocation recovery-only proof.
+- Task-finish review: no findings.
+Completed: 2026-05-01
