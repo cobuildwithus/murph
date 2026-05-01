@@ -16,6 +16,7 @@ import {
 import {
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigsForProvider,
+  resolveAssistantProvider,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -42,13 +43,12 @@ export function resolveAssistantExecutionPlan(input: {
   const baseProviderConfig = baseTarget
     ? assistantBackendTargetToProviderConfigInput(baseTarget)
     : null
+  if (input.override?.provider) {
+    resolveAssistantProvider(input.override.provider)
+  }
   const overrideConfig = compactAssistantProviderConfigInput(input.override)
-  const resolvedProvider =
-    overrideConfig?.provider ??
-    baseProviderConfig?.provider ??
-    null
 
-  if (!resolvedProvider) {
+  if (!baseProviderConfig && !overrideConfig) {
     throw new VaultCliError(
       'ASSISTANT_TARGET_REQUIRED',
       'Assistant execution requires an explicit target or a boundary default.',
@@ -56,7 +56,7 @@ export function resolveAssistantExecutionPlan(input: {
   }
 
   const primaryProviderConfig = mergeAssistantProviderConfigsForProvider(
-    resolvedProvider,
+    'codex-cli',
     baseProviderConfig,
     overrideConfig,
   )

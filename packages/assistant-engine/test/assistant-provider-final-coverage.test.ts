@@ -79,9 +79,6 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import type { AssistantProviderContinuation } from '../src/assistant/active-turn-input-journal.ts'
-import type {
-  AssistantHostedDeviceConnectRequest,
-} from '../src/assistant/execution-context.ts'
 import {
   DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
   DEFAULT_CODEX_REASONING_OPTIONS,
@@ -254,11 +251,11 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
 }
 
 describe('Codex model catalog', () => {
-  it('maps static codex models into default chat-model options', () => {
+  it('uses Codex default as the first chat-model option', () => {
     expect(DEFAULT_CODEX_CHAT_MODEL_OPTIONS).toEqual([
       {
-        value: 'gpt-5.4',
-        description: 'Frontier model',
+        value: '',
+        description: 'Use the model configured by Codex.',
       },
     ])
   })
@@ -342,6 +339,10 @@ describe('Codex model catalog', () => {
     expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
     expect(catalog.modelOptions).toEqual([
       {
+        value: '',
+        description: 'Use the model configured by Codex.',
+      },
+      {
         value: 'custom-current',
         description: 'Current Codex model.',
       },
@@ -350,6 +351,45 @@ describe('Codex model catalog', () => {
         description: 'Frontier model',
       },
     ])
+  })
+
+  it('keeps Codex default selected when no model is explicitly configured', () => {
+    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text', 'image'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.resolveCodexStaticModels.mockReturnValue([
+      {
+        id: 'gpt-5.4',
+        label: 'GPT-5.4',
+        description: 'Frontier model',
+        source: 'static',
+        capabilities: {
+          images: true,
+          pdf: false,
+          reasoning: true,
+          streaming: true,
+          tools: true,
+        },
+      },
+    ])
+
+    const catalog = resolveCodexModelCatalog({
+      currentModel: null,
+      provider: 'codex-cli',
+    })
+
+    expect(catalog.selectedModel).toBeNull()
+    expect(catalog.modelOptions[0]).toEqual({
+      value: '',
+      description: 'Use the model configured by Codex.',
+    })
+    expect(catalog.modelOptions[1]).toEqual({
+      value: 'gpt-5.4',
+      description: 'Frontier model',
+    })
+    expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
   })
 
   it('finds stable fallback indexes for model and reasoning selections', () => {
@@ -499,16 +539,16 @@ describe('Codex model catalog', () => {
     ])
   })
 
-  it('handles hosted device-connect requests before invoking the Codex provider', async () => {
+  it('passes hosted device-connect requests through the Codex provider', async () => {
     const route = createRoute()
     const session = createAssistantSession({
       sessionId: 'session-hosted-device-connect',
     })
     const issueDeviceConnectLink = vi.fn(
-      async (request: AssistantHostedDeviceConnectRequest) => ({
-        authorizationUrl: `https://connect.example.test/${request.provider}`,
+      async () => ({
+        authorizationUrl: 'https://connect.example.test/whoop',
         expiresAt: '2026-04-30T00:05:00.000Z',
-        provider: request.provider,
+        provider: 'whoop' as const,
         providerLabel: 'WHOOP',
       }),
     )
@@ -573,6 +613,12 @@ describe('Codex model catalog', () => {
       } satisfies AssistantRouteTurnPlan,
       session,
     } satisfies AssistantProviderAttemptPlan)
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.recordAssistantToolFailureRuntimeIssues.mockResolvedValue(
+      undefined,
+    )
 
     const outcome = await executeProviderTurnWithRecovery({
       input,
@@ -585,24 +631,20 @@ describe('Codex model catalog', () => {
 
     expect(outcome.kind).toBe('succeeded')
     if (outcome.kind !== 'succeeded') {
-      throw new Error('Expected hosted device connect handling to succeed.')
+      throw new Error('Expected Codex provider handling to succeed.')
     }
-    expect(outcome.providerTurn.response).toContain(
-      'Here is your WHOOP connection link:',
+    expect(outcome.providerTurn.response).toBe('provider response')
+    expect(outcome.providerTurn.nonReplayableProviderWork).toBe(false)
+    expect(issueDeviceConnectLink).not.toHaveBeenCalled()
+    expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userPrompt: 'Please connect my WHOOP',
+      }),
     )
-    expect(outcome.providerTurn.response).toContain(
-      'https://connect.example.test/whoop',
-    )
-    expect(outcome.providerTurn.nonReplayableProviderWork).toBe(true)
-    expect(issueDeviceConnectLink).toHaveBeenCalledWith({
-      messagingReturnTarget: 'imessage',
-      provider: 'whoop',
-    })
-    expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).not.toHaveBeenCalled()
     expect(
       providerTurnRunnerMocks.recordProviderAttemptSucceeded,
     ).toHaveBeenCalledWith(expect.objectContaining({
-      activityLabels: ['hosted-device-connect'],
+      activityLabels: [],
     }))
   })
 })

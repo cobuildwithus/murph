@@ -23,7 +23,6 @@ import {
 import {
   assistantProviderConfigsEqual,
   compactAssistantProviderConfigInput,
-  inferAssistantProviderFromConfigInput,
   mergeAssistantProviderConfigs,
   mergeAssistantProviderConfigsForProvider,
   normalizeAssistantHeaders,
@@ -163,7 +162,6 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
 
 test('assistant provider helpers cover Codex inference and serialization branches', () => {
   assert.equal(resolveAssistantProvider(null), 'codex-cli')
-  assert.equal(inferAssistantProviderFromConfigInput({}), null)
   assert.equal(compactAssistantProviderConfigInput(null), null)
   assert.equal(compactAssistantProviderConfigInput({ provider: null }), null)
   assert.deepEqual(normalizeAssistantHeaders({ ' --- ': 'value', 'x-empty': '   ' }), {

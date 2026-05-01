@@ -345,7 +345,6 @@ describe("assistant service turn route", () => {
       defaults,
       override: expect.objectContaining({
         model: "gpt-5-mini",
-        provider: "codex-cli",
       }),
       resumeState: resolved.session.resumeState,
       sessionTarget: resolved.session.target,
