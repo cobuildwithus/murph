@@ -1,5 +1,5 @@
 import { resolveBiomarkerAnalysis } from "@/src/lib/biomarkers/biomarker-analysis";
-import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
+import type { BiomarkerResearchProjection } from "@/src/lib/health-commons/biomarker-projections";
 import { cn } from "@/src/lib/utils";
 
 const STUDY_TYPE_LABELS: Record<"observational" | "RCT" | "meta-analysis", string> = {
@@ -8,7 +8,11 @@ const STUDY_TYPE_LABELS: Record<"observational" | "RCT" | "meta-analysis", strin
   "meta-analysis": "Meta-analysis",
 };
 
-export function BiomarkerEvidenceRow({ biomarker }: { biomarker: BiomarkerPageModel }) {
+export function BiomarkerEvidenceRow({
+  biomarker,
+}: {
+  biomarker: Pick<BiomarkerResearchProjection, "routeId">;
+}) {
   const profile = resolveBiomarkerAnalysis(biomarker.routeId);
   const evidence = profile?.evidence;
   if (!evidence) return null;

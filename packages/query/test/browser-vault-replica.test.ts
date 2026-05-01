@@ -135,6 +135,38 @@ test("browser vault replica dataVersion changes when only sourceBundleHash chang
   assert.notEqual(first.source.dataVersion, second.source.dataVersion);
 });
 
+test("browser vault query client freezes the exposed replica graph", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "e".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("journal", "journal_1", {
+          attributes: {
+            mood: "steady",
+          },
+          body: "A stable private note.",
+          title: "Private note",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const entity = client.replica.entities[0];
+  assert.ok(entity);
+
+  assert.equal(Object.isFrozen(client.replica), true);
+  assert.equal(Object.isFrozen(client.replica.entities), true);
+  assert.equal(Object.isFrozen(entity), true);
+  assert.equal(Object.isFrozen(entity.attributes), true);
+  assert.throws(() => {
+    entity.title = "Mutated";
+  }, TypeError);
+});
+
 test("browser vault replicas validate schema", () => {
   assert.throws(
     () => parseBrowserVaultReplica({

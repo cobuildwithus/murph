@@ -76,8 +76,43 @@ test("browser-vault provider rejects not_modified refs that do not match the kno
   await waitForText(rendered.container, "error");
 
   const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-  assert.equal(secondRequest.knownDataVersion, ref.dataVersion);
+  assert.deepEqual(secondRequest.knownReplicaRef, ref);
   assert.equal(rendered.container.textContent?.includes("Your dashboard data is not available right now."), true);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider reuses an in-flight load for repeated refreshes", async () => {
+  const response = createDeferred<Response>();
+  const fetchMock = vi.fn(() => response.promise);
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForCondition(() => fetchMock.mock.calls.length === 1, "initial browser-vault fetch");
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  response.resolve(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: createReplicaRef(),
+    state: "ready",
+  }));
+
+  await waitForText(rendered.container, "ready");
+  assert.equal(fetchMock.mock.calls.length, 1);
 
   await rendered.cleanup();
 });
@@ -104,17 +139,24 @@ function installBrowserVaultCryptoMocks(): void {
 }
 
 async function waitForText(container: HTMLElement, text: string): Promise<void> {
+  await waitForCondition(
+    () => Boolean(container.textContent?.includes(text)),
+    `text: ${text}`,
+  );
+}
+
+async function waitForCondition(condition: () => boolean, label: string): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await act(async () => {
       await Promise.resolve();
     });
 
-    if (container.textContent?.includes(text)) {
+    if (condition()) {
       return;
     }
   }
 
-  throw new Error(`Timed out waiting for text: ${text}`);
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 function jsonResponse(value: unknown): Response {
@@ -123,6 +165,15 @@ function jsonResponse(value: unknown): Response {
     ok: true,
     status: 200,
   } as Response;
+}
+
+function createDeferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
 }
 
 function createReplicaRef() {

@@ -4,7 +4,7 @@ import { ChevronRight } from "lucide-react";
 
 import type {
   BiomarkerProtocolRankingModel,
-} from "@/src/lib/health-commons/biomarker-detail";
+} from "@/src/lib/health-commons/biomarker-projections";
 import { resolveHealthCommonsExperimentShell } from "@/src/lib/health-commons/experiment-projections";
 import { cn } from "@/src/lib/utils";
 import { biomarkerFitToneClassName } from "./biomarker-fit-tone";

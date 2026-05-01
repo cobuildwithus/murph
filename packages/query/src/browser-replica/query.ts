@@ -12,9 +12,10 @@ import {
 } from "./shared.ts";
 
 export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): BrowserVaultQueryClient {
+  const frozenReplica = deepFreezeBrowserVaultValue(replica);
   const byLookupId = new Map<string, BrowserVaultEntity>();
 
-  for (const entity of replica.entities) {
+  for (const entity of frozenReplica.entities) {
     byLookupId.set(entity.id, entity);
     for (const lookupId of entity.lookupIds) {
       byLookupId.set(lookupId, entity);
@@ -27,26 +28,26 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
         return byLookupId.get(idOrLookupId) ?? null;
       },
       list(filters = {}) {
-        return replica.entities.filter((entity) => matchesEntityFilters(entity, filters));
+        return frozenReplica.entities.filter((entity) => matchesEntityFilters(entity, filters));
       },
     },
     metricDays: {
       list(filters = {}) {
-        return replica.metricDayRows.filter((row) => matchesMetricDayFilters(row, filters));
+        return frozenReplica.metricDayRows.filter((row) => matchesMetricDayFilters(row, filters));
       },
     },
     metrics: {
       latest(filters = {}) {
-        return replica.metricRows.find((row) => matchesMetricFilters(row, filters)) ?? null;
+        return frozenReplica.metricRows.find((row) => matchesMetricFilters(row, filters)) ?? null;
       },
       list(filters = {}) {
-        return replica.metricRows.filter((row) => matchesMetricFilters(row, filters));
+        return frozenReplica.metricRows.filter((row) => matchesMetricFilters(row, filters));
       },
       series(filters = {}) {
-        return replica.metricRows.filter((row) => matchesMetricFilters(row, filters)).slice().reverse();
+        return frozenReplica.metricRows.filter((row) => matchesMetricFilters(row, filters)).slice().reverse();
       },
     },
-    replica,
+    replica: frozenReplica,
     search(query, filters = {}) {
       const normalizedQuery = normalizeSearch(query);
       const familySet = filters.families ? new Set(filters.families) : null;
@@ -55,7 +56,7 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
         return [];
       }
 
-      return replica.searchRows.filter((row) => {
+      return frozenReplica.searchRows.filter((row) => {
         if (familySet && !familySet.has(row.family)) {
           return false;
         }
@@ -65,7 +66,7 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
     },
     timeline: {
       list(filters = {}) {
-        return replica.timelineRows.filter((row) => matchesTimelineFilters(row, filters));
+        return frozenReplica.timelineRows.filter((row) => matchesTimelineFilters(row, filters));
       },
     },
   };
@@ -157,4 +158,23 @@ function matchesTimelineFilters(row: BrowserVaultTimelineRow, filters: BrowserVa
 
 function normalizeSearch(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function deepFreezeBrowserVaultValue<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const objectValue = value as object;
+  if (seen.has(objectValue)) {
+    return value;
+  }
+
+  seen.add(objectValue);
+
+  for (const nestedValue of Object.values(objectValue as Record<string, unknown>)) {
+    deepFreezeBrowserVaultValue(nestedValue, seen);
+  }
+
+  return Object.freeze(objectValue) as T;
 }

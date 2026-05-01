@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import { BiomarkerOverview } from "@/src/components/biomarkers/biomarker-detail/biomarker-overview";
-import { resolveHealthCommonsBiomarkerDetail } from "@/src/lib/health-commons/biomarker-detail";
+import { resolveHealthCommonsBiomarkerOverview } from "@/src/lib/health-commons/biomarker-projections";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
@@ -11,7 +11,7 @@ export async function generateMetadata({
   params: Promise<{ biomarkerId: string }>;
 }): Promise<Metadata> {
   const { biomarkerId } = await params;
-  const biomarker = resolveHealthCommonsBiomarkerDetail(biomarkerId);
+  const biomarker = resolveHealthCommonsBiomarkerOverview(biomarkerId);
 
   if (!biomarker) {
     return {};
@@ -32,7 +32,7 @@ export default async function BiomarkerOverviewPage({
   params: Promise<{ biomarkerId: string }>;
 }) {
   const { biomarkerId } = await params;
-  const biomarker = resolveHealthCommonsBiomarkerDetail(biomarkerId);
+  const biomarker = resolveHealthCommonsBiomarkerOverview(biomarkerId);
 
   if (!biomarker) {
     notFound();

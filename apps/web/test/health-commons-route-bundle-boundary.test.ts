@@ -8,8 +8,9 @@ const sourceFiles: readonly string[] = [
   "apps/web/src/lib/health-commons/experiment-detail.ts",
   "apps/web/src/lib/health-commons/experiment-browse.ts",
   "apps/web/src/lib/health-commons/generated-experiment-artifacts.ts",
+  "apps/web/src/lib/health-commons/generated-biomarker-artifacts.ts",
   "apps/web/src/lib/health-commons/experiment-projections.ts",
-  "apps/web/src/lib/health-commons/biomarker-detail.ts",
+  "apps/web/src/lib/health-commons/biomarker-projections.ts",
   "apps/web/app/(dashboard)/experiments/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
@@ -52,6 +53,27 @@ describe("Health Commons route-bundle boundary", () => {
     expect(source).not.toContain("prisma");
     expect(source).not.toContain("getServerSession");
     expect(source).not.toContain("auth(");
+  });
+
+  it("keeps public biomarker pages on generated page projections instead of route bundles", () => {
+    const files = [
+      "apps/web/app/biomarkers/page.tsx",
+      "apps/web/app/biomarkers/[biomarkerId]/layout.tsx",
+      "apps/web/app/biomarkers/[biomarkerId]/page.tsx",
+      "apps/web/app/biomarkers/[biomarkerId]/research/page.tsx",
+      "apps/web/src/lib/health-commons/biomarker-projections.ts",
+    ];
+
+    for (const relativePath of files) {
+      const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
+
+      expect(source, `${relativePath} should not load biomarker route bundles`).not.toContain(
+        "loadGeneratedHealthCommonsWebRouteBundle",
+      );
+      expect(source, `${relativePath} should not instantiate biomarker route bundle readers`).not.toContain(
+        "createHealthCommonsRouteBundleReader",
+      );
+    }
   });
 
   it("fails if existing Next traces include the monolithic generated catalog in public Health Commons routes", () => {
@@ -154,7 +176,8 @@ function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-images")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-projections")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-experiment-artifacts")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-detail");
+    || relativePath.startsWith("apps/web/src/lib/health-commons/generated-biomarker-artifacts")
+    || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-projections");
 }
 
 function listTraceFiles(root: string): string[] {

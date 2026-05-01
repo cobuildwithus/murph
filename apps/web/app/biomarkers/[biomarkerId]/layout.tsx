@@ -3,8 +3,8 @@ import { notFound } from "next/navigation";
 
 import {
   listHealthCommonsBiomarkerRoutes,
-  resolveHealthCommonsBiomarkerDetail,
-} from "@/src/lib/health-commons/biomarker-detail";
+  resolveHealthCommonsBiomarkerShell,
+} from "@/src/lib/health-commons/biomarker-projections";
 import { BiomarkerLayoutClient } from "./biomarker-layout-client";
 
 export function generateStaticParams(): Array<{ biomarkerId: string }> {
@@ -19,7 +19,7 @@ export default async function BiomarkerDetailLayout({
   params: Promise<{ biomarkerId: string }>;
 }) {
   const { biomarkerId } = await params;
-  const biomarker = resolveHealthCommonsBiomarkerDetail(biomarkerId);
+  const biomarker = resolveHealthCommonsBiomarkerShell(biomarkerId);
 
   if (!biomarker) {
     notFound();

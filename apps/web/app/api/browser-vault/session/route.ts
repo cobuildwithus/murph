@@ -21,7 +21,10 @@ export const POST = withJsonError(async (request: Request) => {
     body.browserPublicKeyJwk,
     "Browser vault session request browserPublicKeyJwk",
   );
-  const knownDataVersion = readOptionalString(body.knownDataVersion, "Browser vault session request knownDataVersion");
+  const knownReplicaRef = parseHostedBrowserVaultReplicaRef(
+    body.knownReplicaRef ?? null,
+    "Browser vault session request knownReplicaRef",
+  );
   const workspace = await readHostedWorkspace({ userId: auth.member.id });
   const replicaRef = parseHostedBrowserVaultReplicaRef(
     workspace?.browserVaultReplicaRef ?? null,
@@ -37,7 +40,7 @@ export const POST = withJsonError(async (request: Request) => {
     return emptyBrowserVaultSession();
   }
 
-  if (knownDataVersion && knownDataVersion === replicaRef.dataVersion) {
+  if (browserVaultReplicaRefsMatch(knownReplicaRef, replicaRef)) {
     return jsonOk({
       encryptedReplica: null,
       replicaAad: null,
@@ -92,15 +95,19 @@ function emptyBrowserVaultSession() {
   });
 }
 
-function readOptionalString(value: unknown, label: string): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string when provided.`);
-  }
-
-  return value.length > 0 ? value : null;
+function browserVaultReplicaRefsMatch(
+  left: ReturnType<typeof parseHostedBrowserVaultReplicaRef>,
+  right: NonNullable<ReturnType<typeof parseHostedBrowserVaultReplicaRef>>,
+): boolean {
+  return Boolean(left)
+    && left?.byteLength === right.byteLength
+    && left?.dataVersion === right.dataVersion
+    && left?.generatedAt === right.generatedAt
+    && left?.keyId === right.keyId
+    && left?.objectKey === right.objectKey
+    && left?.replicaSchema === right.replicaSchema
+    && left?.schema === right.schema
+    && left?.sourceBundleHash === right.sourceBundleHash;
 }
 
 function readHostedWorkspaceSnapshotHash(value: unknown): string | null {
