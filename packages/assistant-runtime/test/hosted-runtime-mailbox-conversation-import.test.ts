@@ -988,10 +988,11 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(event.content.attachmentDescriptors[0], {
       attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
       contentType: "application/pdf",
-      fileName: "labs.pdf",
+      fileName: null,
       kind: "email_attachment",
       sizeBytes: 321,
     });
+    assert.equal(JSON.stringify(event).includes("labs.pdf"), false);
     assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
   });
 

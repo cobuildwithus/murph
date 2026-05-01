@@ -751,12 +751,11 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
           "email",
           String(index),
           attachment.contentType ?? "",
-          attachment.fileName ?? "",
           String(attachment.sizeBytes ?? ""),
         ].join(":"),
       ),
       contentType: normalizeHostedAssistantInputMimeType(attachment.contentType),
-      fileName: normalizeHostedAssistantInputFileName(attachment.fileName),
+      fileName: null,
       kind: "email_attachment",
       sizeBytes: normalizeHostedAssistantInputSize(attachment.sizeBytes),
     }));
@@ -851,16 +850,6 @@ function normalizeHostedAssistantInputMimeType(value: string | null | undefined)
   const normalized = typeof value === "string" ? value.trim() : "";
   return /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
       .test(normalized)
-    ? normalized
-    : null;
-}
-
-function normalizeHostedAssistantInputFileName(value: string | null | undefined): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 &&
-    normalized.length <= 191 &&
-    /^[^/\\:?#[\]\r\n]{1,191}$/u.test(normalized) &&
-    !/^[a-z][a-z0-9+.-]*:\/\//iu.test(normalized)
     ? normalized
     : null;
 }
