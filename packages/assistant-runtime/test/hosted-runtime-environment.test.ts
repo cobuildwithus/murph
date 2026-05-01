@@ -287,6 +287,71 @@ test("hosted runtime launch spec rejects parserToolchain:null", () => {
   );
 });
 
+test("hosted runtime launch spec validates explicit parser tool paths", () => {
+  assert.deepEqual(
+    buildHostedRuntimeLaunchSpec({
+      forwardedEnv: {},
+      parserToolchain: {
+        tools: {
+          whisper: {
+            command: "  /opt/whisper-cli  ",
+            modelPath: "/opt/models/ggml-base.en.bin",
+          },
+        },
+      },
+    }).runtime.parserToolchain,
+    {
+      tools: {
+        whisper: {
+          command: "/opt/whisper-cli",
+          modelPath: "/opt/models/ggml-base.en.bin",
+        },
+      },
+    },
+  );
+
+  assert.throws(
+    () =>
+      buildHostedRuntimeLaunchSpec({
+        forwardedEnv: {},
+        parserToolchain: JSON.parse(
+          '{"tools":{"whisper":{"command":null}}}',
+        ),
+      }),
+    /parserToolchain\.tools\.whisper\.command must be a non-empty absolute path/u,
+  );
+
+  assert.throws(
+    () =>
+      buildHostedRuntimeLaunchSpec({
+        forwardedEnv: {},
+        parserToolchain: {
+          tools: {
+            whisper: {
+              modelPath: "   ",
+            },
+          },
+        },
+      }),
+    /parserToolchain\.tools\.whisper\.modelPath must be a non-empty absolute path/u,
+  );
+
+  assert.throws(
+    () =>
+      buildHostedRuntimeLaunchSpec({
+        forwardedEnv: {},
+        parserToolchain: {
+          tools: {
+            whisper: {
+              command: "whisper-cli",
+            },
+          },
+        },
+      }),
+    /parserToolchain\.tools\.whisper\.command must be an absolute path/u,
+  );
+});
+
 test("hosted runtime forwarded env profiles are runtime-owned and transport-mappable", () => {
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
