@@ -17,6 +17,7 @@ import {
   type JunctionProviderConnection,
   type JunctionRegion,
 } from "./junction-client.ts";
+import { JUNCTION_DEFAULT_PROVIDER_FILTER } from "./junction-connect-sources.ts";
 
 import type {
   DeviceConnectionSourceStatus,
@@ -37,6 +38,12 @@ import type {
 } from "../types.ts";
 
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
+export {
+  JUNCTION_CONNECT_SOURCE_TARGETS,
+  JUNCTION_DEFAULT_PROVIDER_FILTER,
+  resolveJunctionConnectSourceLabel,
+  resolveJunctionConnectTargetForSourceId,
+} from "./junction-connect-sources.ts";
 
 export interface JunctionDeviceSyncProviderConfig {
   apiKey: string;
