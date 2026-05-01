@@ -102,7 +102,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.bindUser).toHaveBeenCalledWith("member_123");
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
   });
 });
 
@@ -115,9 +114,6 @@ function createUserRunnerDurableObject(
     ...createHostedExecutionTestEnv(),
     BUNDLES: bucket.api,
     RUNNER_CONTAINER: storage.runnerContainerNamespace,
-    RUNNER_WAKE_QUEUE: {
-      send: vi.fn(async () => {}),
-    },
     ...overrides,
   };
   const durableObject = new UserRunnerDurableObject(storage.state, baseEnv as never);
