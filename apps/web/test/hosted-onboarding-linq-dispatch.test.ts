@@ -357,6 +357,7 @@ https://join.example.test/join/code_first_text`);
       );
       expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
         context: "webhook:linq",
+        timeoutMs: 5_000,
         userId: "member_123",
       });
       expect(response).not.toHaveProperty("wakeUserId");
@@ -444,14 +445,10 @@ https://join.example.test/join/code_first_text`);
           step: "hosted-onboarding.webhook.linq.wake-handoff",
         }),
         "completed",
-        expect.objectContaining({
-          deferred: false,
-        }),
       );
       expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
         "hosted-onboarding.webhook.linq.wake-handoff",
         expect.objectContaining({
-          deferred: false,
           eventIdSuffix: "vt_123",
           responseReason: "wake-appended-active-member",
           userIdPresent: true,
@@ -461,7 +458,16 @@ https://join.example.test/join/code_first_text`);
     },
   );
 
-  it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
+  it("rejects active-member webhook success when the runner nudge is not accepted", async () => {
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -484,61 +490,39 @@ https://join.example.test/join/code_first_text`);
         }),
       },
     });
-    const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingLinqWebhook({
-      defer: (drain) => {
-        deferred.push(drain);
-      },
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_deferred_dispatch",
+        eventId: "evt_required_nudge_failed",
       }),
       signature: null,
       timestamp: null,
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Webhook processing is temporarily unavailable.",
+      retryable: true,
     });
-
-    expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-
-    await deferred[0]?.();
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
+      timeoutMs: 5_000,
       userId: "member_123",
     });
-    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
-      "hosted-onboarding.webhook.linq.wake-handoff",
-      expect.objectContaining({
-        deferred: true,
-        eventIdSuffix: "spatch",
-        responseReason: "wake-appended-active-member",
-        userIdPresent: true,
-        userIdSuffix: "er_123",
-      }),
-    );
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.wake-handoff",
+        step: "hosted-onboarding.webhook.linq.wake-nudge",
       }),
-      "scheduled",
+      "not-accepted",
       expect.objectContaining({
-        deferred: true,
+        accepted: false,
+        configured: true,
       }),
     );
-    expect(
-      mocks.finishHostedOnboardingTiming.mock.calls.some(
-        ([handle, outcome]) =>
-          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-nudge"
-          && outcome === "accepted",
-      ),
-    ).toBe(true);
   });
 
-  it("sends an ingress Linq read receipt before a deferred Cloudflare handoff", async () => {
+  it("sends an ingress Linq read receipt before the required Cloudflare handoff", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -561,13 +545,7 @@ https://join.example.test/join/code_first_text`);
         }),
       },
     });
-    const deferred: Array<() => Promise<void>> = [];
-    const defer = vi.fn((drain: () => Promise<void>) => {
-      deferred.push(drain);
-    });
-
     await expect(handleHostedOnboardingLinqWebhook({
-      defer,
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         eventId: "evt_ingress_read_receipt",
@@ -585,10 +563,13 @@ https://join.example.test/join/code_first_text`);
       timeoutMs: 750,
     });
     expect(mocks.sendHostedLinqReadReceipt.mock.invocationCallOrder[0]).toBeLessThan(
-      defer.mock.invocationCallOrder[0],
+      mocks.nudgeHostedRunnerUserBestEffort.mock.invocationCallOrder[0],
     );
-    expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
+      context: "webhook:linq",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.ingress-read-receipt",
       expect.objectContaining({
@@ -633,12 +614,8 @@ https://join.example.test/join/code_first_text`);
         }),
       },
     });
-    const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingLinqWebhook({
-      defer: (drain) => {
-        deferred.push(drain);
-      },
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         eventId: "evt_ingress_read_receipt_failure",
@@ -655,7 +632,6 @@ https://join.example.test/join/code_first_text`);
       signal: undefined,
       timeoutMs: 750,
     });
-    expect(deferred).toHaveLength(1);
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
@@ -666,10 +642,9 @@ https://join.example.test/join/code_first_text`);
         responseReason: "wake-appended-active-member",
       }),
     );
-
-    await deferred[0]?.();
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
+      timeoutMs: 5_000,
       userId: "member_123",
     });
   });
@@ -1198,7 +1173,7 @@ https://join.example.test/join/code_first_text`);
     },
   );
 
-  it("keeps first-contact signup replies inline even when a defer hook is provided", async () => {
+  it("keeps first-contact signup replies inline", async () => {
     const invite = {
       channel: "linq",
       id: "invite_123",
@@ -1241,12 +1216,8 @@ https://join.example.test/join/code_first_text`);
       },
     };
     const prisma = asPrismaTransactionClient(prismaMocks);
-    const deferred: Array<() => Promise<void>> = [];
 
     const response = await handleHostedOnboardingLinqWebhook({
-      defer: (drain) => {
-        deferred.push(drain);
-      },
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         eventId: "evt_deferred_signup",
@@ -1262,7 +1233,6 @@ https://join.example.test/join/code_first_text`);
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(deferred).toHaveLength(0);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
@@ -1318,12 +1288,8 @@ https://join.example.test/join/code_first_text`);
     };
     const prisma = asPrismaTransactionClient(prismaMocks);
     const controller = new AbortController();
-    const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingLinqWebhook({
-      defer: (drain) => {
-        deferred.push(drain);
-      },
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         eventId: "evt_aborted_signup",
@@ -1337,7 +1303,6 @@ https://join.example.test/join/code_first_text`);
       reason: "sent-signup-link",
     });
 
-    expect(deferred).toHaveLength(0);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",

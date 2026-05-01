@@ -258,6 +258,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
+      timeoutMs: 5_000,
       userId: "member_123",
     });
     expect(response).not.toHaveProperty("wakeUserId");

@@ -79,7 +79,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
   });
 
-  it("schedules a deferred webhook nudge without an inline drain wait contract", async () => {
+  it("requires webhook runner nudges inline with the webhook timeout", async () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -94,12 +94,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
-    const deferred: Array<() => Promise<void>> = [];
-
     await maybeHandoffHostedExecutionWebhookWake({
-      defer: async (drain) => {
-        deferred.push(drain);
-      },
       eventId: "evt_inline_gap",
       response: {
         ok: true,
@@ -109,13 +104,64 @@ describe("nudgeHostedRunnerBestEffort", () => {
       userId: "user-123",
     });
 
-    expect(nudgeUserRunner).not.toHaveBeenCalled();
-    expect(deferred).toHaveLength(1);
-
-    await deferred[0]?.();
-
     expect(nudgeUserRunner).toHaveBeenCalledTimes(1);
     expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
+    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5_000);
+  });
+
+  it("rejects webhook handoff when the nudge is not accepted", async () => {
+    const nudgeUserRunner = vi.fn().mockResolvedValue({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "1",
+    });
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+      deleteUserData: vi.fn(),
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner,
+    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_inline_gap",
+      response: {
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      source: "linq",
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Webhook processing is temporarily unavailable.",
+      retryable: true,
+    });
+
+    expect(nudgeUserRunner).toHaveBeenCalledTimes(1);
+    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5_000);
+  });
+
+  it("rejects webhook handoff when the nudge control plane is not configured", async () => {
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue(null);
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_inline_gap",
+      response: {
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      source: "telegram",
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Webhook processing is temporarily unavailable.",
+      retryable: true,
+    });
+
+    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5_000);
   });
 });
 

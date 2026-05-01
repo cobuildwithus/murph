@@ -41,7 +41,6 @@ export type {
 const HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS = 750;
 
 export async function handleHostedOnboardingLinqWebhook(input: {
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   signature: string | null;
   timestamp: string | null;
@@ -130,7 +129,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     responseReason = plan.response.reason ?? null;
     await maybeHandoffHostedExecutionWebhookWake({
-      defer: input.defer,
       eventId: event.event_id,
       response: plan.response,
       source: "linq",
@@ -199,7 +197,6 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
 }
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   secretToken: string | null;
   prisma?: PrismaClient;
@@ -227,7 +224,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   }
 
   await maybeHandoffHostedExecutionWebhookWake({
-    defer: input.defer,
     eventId,
     response: plan.response,
     source: "telegram",
