@@ -156,7 +156,6 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(event.projection, {
       captureId: null,
       lastAttemptedAt: null,
-      nextAttemptAfter: null,
       reasonCode: null,
       status: "pending",
       updatedAt: event.projection.updatedAt,

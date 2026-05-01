@@ -600,7 +600,7 @@ Exit criteria:
 
 ### Phase 7: Demote Inbox To Projection
 
-Move inbox work behind projection attempts:
+Move inbox work behind the post-checkpoint best-effort projection path:
 
 - canonical capture persistence
 - source-specific normalized capture rows
@@ -609,12 +609,13 @@ Move inbox work behind projection attempts:
 - parser drain
 - UI read models
 
-Projection status belongs on the assistant input event or a projection substore.
+Projection status belongs on the assistant input event. `pending` and `failed`
+are diagnostic/enrichment state in the hosted path, not a durable retry queue.
 
 Exit criteria:
 
 - projection failure does not block assistant input listing
-- projection retry can update `inboxCaptureId`
+- a successful one-shot projection can update `inboxCaptureId`
 - normal inbox UI/search still works when projection succeeds
 
 ### Phase 8: Remove Runtime-Only Capture From Reply Path
@@ -831,8 +832,8 @@ apps/cloudflare
   owns runner coordination, container invocation, and encrypted object plumbing
 
 packages/assistant-runtime
-  owns assistant input ingest, assistant input store, projection attempts, and
-  hosted checkpoint timing
+  owns assistant input ingest, assistant input store, one-shot best-effort
+  projection after checkpoint, and hosted checkpoint timing
 
 packages/assistant-engine
   owns source-agnostic assistant input selection, accepted input journal,

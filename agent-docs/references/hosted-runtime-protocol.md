@@ -41,11 +41,14 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, checkpoints the mailbox staged
-watermark, and only then attempts inbox projection. Projection status and inbox
-artifacts are checkpointed separately as best-effort enrichment. Inbox capture
-and parser state remain useful projections for search, display, attachment
-enrichment, and debugging, but hosted callers must not stage hidden
-runtime-only inbox rows to make Codex admission succeed.
+watermark, and only then makes one best-effort inbox projection attempt while
+the decoded wake is still in memory. Projection status and inbox artifacts are
+checkpointed separately as diagnostic/enrichment state. Failed projection is not
+durably retried by hosted runtime unless a future executor adds enough durable
+projection reference data to reconstruct the work without raw payload
+duplication. Inbox capture and parser state remain useful projections for
+search, display, attachment enrichment, and debugging, but hosted callers must
+not stage hidden runtime-only inbox rows to make Codex admission succeed.
 
 ## Current Protocol
 
@@ -73,11 +76,11 @@ active path does not consume or commit them.
 The runtime reads `HostedWorkspace`, restores the encrypted local workspace,
 fetches mailbox rows after its checkpointed per-lane watermarks, stages decoded
 conversation rows as assistant input, checkpoints immediately after staging, and
-attempts any available inbox projection as a post-checkpoint enrichment effect.
-Projection status and artifacts checkpoint separately and best-effort, so failed
-or slow projection does not delay the staged mailbox watermark. Conversation
-import is discovery, not assistant handling: mailbox watermarks prove only that
-source input was staged. A conversation input remains
+attempts inbox projection once as a post-checkpoint enrichment effect. Projection
+status and artifacts checkpoint separately and best-effort, so failed or slow
+projection does not delay the staged mailbox watermark and does not imply a
+durable retry queue. Conversation import is discovery, not assistant handling:
+mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
 for that input, such as committed reply intent evidence or explicit suppression
 evidence. Auto-reply channel state stores only a fixed `eligibleAfter` seed
