@@ -53,6 +53,11 @@ Hosted producers append one `HostedMailboxItem` in the same transaction as the
 product/control-plane mutation that made work necessary. Large payloads use
 `HostedMailboxPayload`; lane sequence allocation uses
 `HostedMailboxLaneCounter`.
+Hosted conversation webhooks return success only after the per-user Cloudflare
+runner nudge is accepted. If that short control-plane call fails, the webhook
+returns a retryable failure to the provider; duplicate provider retries are
+safe because mailbox append dedupes by event id and runner nudges only coalesce
+pending work.
 
 Cloudflare does not acquire a web run row. A runner nudge only asks the
 per-user Durable Object to invoke the container if needed. The Durable Object

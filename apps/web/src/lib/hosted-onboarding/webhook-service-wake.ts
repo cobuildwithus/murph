@@ -1,15 +1,18 @@
 import {
   nudgeHostedRunnerUserBestEffortResult,
 } from "../hosted-runner/control";
+import { hostedOnboardingError } from "./errors";
 import {
+  deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 
+const HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS = 5_000;
+
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
   response: HostedWebhookServiceResponse;
   source: "linq" | "telegram";
@@ -28,7 +31,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
-      deferred: Boolean(input.defer),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       responseReason: input.response.reason,
       userIdPresent: true,
@@ -36,36 +38,23 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
-  if (input.defer) {
-    await input.defer(() =>
-      handoffHostedExecutionWebhookWake({
-        deferred: true,
-        eventId: input.eventId,
-        responseReason: input.response.reason,
-        source: input.source,
-        userId: memberId,
-      }),
-    );
-    finishHostedOnboardingTiming(handoffTiming, "scheduled", {
-      deferred: true,
+  try {
+    await handoffHostedExecutionWebhookWake({
+      eventId: input.eventId,
+      responseReason: input.response.reason,
+      source: input.source,
+      userId: memberId,
     });
-    return;
+    finishHostedOnboardingTiming(handoffTiming, "completed");
+  } catch (error) {
+    finishHostedOnboardingTiming(handoffTiming, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+    });
+    throw error;
   }
-
-  await handoffHostedExecutionWebhookWake({
-    deferred: false,
-    eventId: input.eventId,
-    responseReason: input.response.reason,
-    source: input.source,
-    userId: memberId,
-  });
-  finishHostedOnboardingTiming(handoffTiming, "completed", {
-    deferred: false,
-  });
 }
 
 async function handoffHostedExecutionWebhookWake(input: {
-  deferred: boolean;
   eventId: string;
   responseReason: string | undefined;
   source: "linq" | "telegram";
@@ -74,15 +63,16 @@ async function handoffHostedExecutionWebhookWake(input: {
   const nudgeTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.wake-nudge`,
     {
-      deferred: input.deferred,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       responseReason: input.responseReason,
+      timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
       userIdPresent: true,
       userIdSuffix: toHostedOnboardingLogIdSuffix(input.userId),
     },
   );
   const result = await nudgeHostedRunnerUserBestEffortResult({
     context: `webhook:${input.source}`,
+    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
     userId: input.userId,
   });
   finishHostedOnboardingTiming(nudgeTiming, result.accepted ? "accepted" : "not-accepted", {
@@ -94,4 +84,13 @@ async function handoffHostedExecutionWebhookWake(input: {
     inFlight: result.inFlight,
     nextAlarmAtPresent: result.nextAlarmAtPresent,
   });
+
+  if (!result.accepted) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Webhook processing is temporarily unavailable.",
+      retryable: true,
+    });
+  }
 }

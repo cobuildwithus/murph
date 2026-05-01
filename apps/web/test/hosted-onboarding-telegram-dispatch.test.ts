@@ -258,6 +258,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
+      timeoutMs: 5_000,
       userId: "member_telegram_123",
     });
     expect(response).not.toHaveProperty("wakeUserId");
@@ -607,7 +608,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(preview).toMatch(/\.\.\.$/u);
   });
 
-  it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
+  it("requires the hosted execution nudge before returning active-member success", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
@@ -635,12 +636,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       },
     });
-    const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingTelegramWebhook({
-      defer: (drain) => {
-        deferred.push(drain);
-      },
       prisma,
       rawBody: JSON.stringify({
         message: {
@@ -664,19 +661,24 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-
-    await deferred[0]?.();
-
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
+      timeoutMs: 5_000,
       userId: "member_telegram_123",
     });
   });
 
-  it("returns once deferred recovery is scheduled without an inline nudge wait", async () => {
+  it("rejects active-member Telegram webhook success when runner nudge is not accepted", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -703,12 +705,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       },
     });
-    const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingTelegramWebhook({
-      defer: (drain) => {
-        deferred.push(drain);
-      },
       prisma,
       rawBody: JSON.stringify({
         message: {
@@ -727,17 +725,16 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         update_id: 655,
       }),
       secretToken: "telegram-secret",
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
+      httpStatus: 503,
+      message: "Webhook processing is temporarily unavailable.",
+      retryable: true,
     });
-    expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-
-    await deferred[0]?.();
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
+      timeoutMs: 5_000,
       userId: "member_telegram_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledTimes(1);
