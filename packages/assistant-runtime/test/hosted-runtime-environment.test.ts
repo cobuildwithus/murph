@@ -16,6 +16,7 @@ import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   buildHostedRuntimeResolvedConfig,
+  HOSTED_RUNTIME_ENV_PROFILE_KEYS,
   readHostedRuntimeCommitTimeoutConfigValue,
 } from "../src/hosted-runtime/launch-spec.ts";
 import {
@@ -256,13 +257,14 @@ test("hosted runtime launch spec derives platform env from forwarded env only wh
 test("hosted runtime forwarded env profiles are runtime-owned and transport-mappable", () => {
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
+      FFMPEG_COMMAND: "/stale/ffmpeg",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
       },
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,parsers,telegram",
       LINQ_API_BASE_URL: "http://127.0.0.1:4011",
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -270,6 +272,8 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+      WHISPER_COMMAND: "/stale/whisper-cli",
+      WHISPER_MODEL_PATH: "/stale/model.bin",
     }, {
       mapValue: ({ key, value }) =>
         key.endsWith("_BASE_URL") ? value.replace("127.0.0.1", "host.internal") : value,
@@ -285,6 +289,25 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://host.internal:4012",
       TELEGRAM_FILE_BASE_URL: "http://host.internal:4013",
+    },
+  );
+});
+
+test("hosted runtime parsers profile is semantic and forwards no native paths", () => {
+  assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.parsers, []);
+  assert.deepEqual(
+    buildHostedRuntimeForwardedEnv({
+      FFMPEG_COMMAND: "/stale/ffmpeg",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "parsers",
+      PDFINFO_COMMAND: "/stale/pdfinfo",
+      PDFTOTEXT_COMMAND: "/stale/pdftotext",
+      WHISPER_COMMAND: "/stale/whisper-cli",
+      WHISPER_MODEL_PATH: "/stale/model.bin",
+    }),
+    {
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "production",
     },
   );
 });
