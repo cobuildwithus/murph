@@ -690,6 +690,66 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
   }
 });
 
+test("withHostedProcessEnvironment preserves ambient operator parser tool env", async () => {
+  const originalValues = new Map(
+    [
+      "FFMPEG_COMMAND",
+      "FILE_COMMAND",
+      "MUTOOL_COMMAND",
+      "PDFINFO_COMMAND",
+      "PDFTOPPM_COMMAND",
+      "PDFTOTEXT_COMMAND",
+      "QPDF_COMMAND",
+      "WHISPER_COMMAND",
+      "WHISPER_MODEL_PATH",
+    ].map((key) => [key, process.env[key]]),
+  );
+
+  process.env.FFMPEG_COMMAND = "/usr/bin/ffmpeg";
+  process.env.FILE_COMMAND = "/usr/bin/file";
+  process.env.MUTOOL_COMMAND = "/usr/bin/mutool";
+  process.env.PDFINFO_COMMAND = "/usr/bin/pdfinfo";
+  process.env.PDFTOPPM_COMMAND = "/usr/bin/pdftoppm";
+  process.env.PDFTOTEXT_COMMAND = "/usr/bin/pdftotext";
+  process.env.QPDF_COMMAND = "/usr/bin/qpdf";
+  process.env.WHISPER_COMMAND = "/usr/local/bin/whisper-cli";
+  process.env.WHISPER_MODEL_PATH = "/app/models/whisper/ggml-base.en.bin";
+
+  try {
+    await withHostedProcessEnvironment(
+      {
+        envOverrides: {
+          CUSTOM_HOSTED_ENV: "runtime-value",
+        },
+        operatorHomeRoot: "/tmp/hosted-home",
+        vaultRoot: "/tmp/hosted-vault",
+      },
+      async () => {
+        assert.equal(process.env.FFMPEG_COMMAND, "/usr/bin/ffmpeg");
+        assert.equal(process.env.FILE_COMMAND, "/usr/bin/file");
+        assert.equal(process.env.MUTOOL_COMMAND, "/usr/bin/mutool");
+        assert.equal(process.env.PDFINFO_COMMAND, "/usr/bin/pdfinfo");
+        assert.equal(process.env.PDFTOPPM_COMMAND, "/usr/bin/pdftoppm");
+        assert.equal(process.env.PDFTOTEXT_COMMAND, "/usr/bin/pdftotext");
+        assert.equal(process.env.QPDF_COMMAND, "/usr/bin/qpdf");
+        assert.equal(process.env.WHISPER_COMMAND, "/usr/local/bin/whisper-cli");
+        assert.equal(
+          process.env.WHISPER_MODEL_PATH,
+          "/app/models/whisper/ggml-base.en.bin",
+        );
+      },
+    );
+  } finally {
+    for (const [key, value] of originalValues) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
 test("withHostedProcessEnvironment serializes overlapping process env overrides", async () => {
   const originalHome = process.env.HOME;
   const originalVault = process.env.VAULT;
