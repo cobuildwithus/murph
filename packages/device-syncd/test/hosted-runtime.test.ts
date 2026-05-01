@@ -74,12 +74,15 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
               lastWebhookAt: null,
               nextReconcileAt: "2026-04-07T01:00:00+00:00",
             },
-            tokenBundle: {
-              accessToken: "access-token",
-              accessTokenExpiresAt: "2026-04-07T02:00:00+00:00",
-              keyVersion: "kv_1",
-              refreshToken: null,
-              tokenVersion: 3,
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle: {
+                accessToken: "access-token",
+                accessTokenExpiresAt: "2026-04-07T02:00:00+00:00",
+                keyVersion: "kv_1",
+                refreshToken: null,
+                tokenVersion: 3,
+              },
             },
           },
         ],
@@ -112,12 +115,15 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastWebhookAt: null,
             nextReconcileAt: "2026-04-07T01:00:00.000Z",
           },
-          tokenBundle: {
-            accessToken: "access-token",
-            accessTokenExpiresAt: "2026-04-07T02:00:00.000Z",
-            keyVersion: "kv_1",
-            refreshToken: null,
-            tokenVersion: 3,
+          credential: {
+            kind: "oauth_tokens",
+            tokenBundle: {
+              accessToken: "access-token",
+              accessTokenExpiresAt: "2026-04-07T02:00:00.000Z",
+              keyVersion: "kv_1",
+              refreshToken: null,
+              tokenVersion: 3,
+            },
           },
         },
       ],
@@ -165,10 +171,14 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
               authHeader: "Bearer header-secret",
               clientUserId: "raw-client-user",
               clientUserIdHash: "hash_client_user",
+              client: "raw-client",
               credentialNote: "Authorization: Bearer secret-token",
               hmacSecret: "secret",
+              opaqueNote: "abc123def456ghi789jkl012mno345pq",
+              owner: "raw-owner",
               ownerId: "raw-owner",
               sourceCount: 2,
+              user: "raw-user",
               webhookSecret: "secret",
             },
           },
@@ -222,7 +232,6 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         lastWebhookAt: null,
         nextReconcileAt: null,
       },
-      tokenBundle: null,
     });
   });
 
@@ -283,6 +292,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             },
             credential: {
               kind: "none",
+              credentialMetadata: {},
             },
             localState,
           },
@@ -311,7 +321,6 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             tokenBundle,
           },
           localState,
-          tokenBundle,
         },
         {
           connection: {
@@ -329,9 +338,9 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           },
           credential: {
             kind: "none",
+            credentialMetadata: {},
           },
           localState,
-          tokenBundle: null,
         },
       ],
       generatedAt: "2026-04-12T08:07:00.000Z",
@@ -345,6 +354,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_none_credential",
             credential: {
               kind: "none",
+              credentialMetadata: {},
             },
             observedTokenVersion: null,
           },
@@ -357,6 +367,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           connectionId: "conn_none_credential",
           credential: {
             kind: "none",
+            credentialMetadata: {},
           },
           observedTokenVersion: null,
         },
@@ -436,9 +447,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
                 lastWebhookAt: null,
                 nextReconcileAt: null,
               },
-              tokenBundle: null,
+              credential: {
+                kind: "none",
+                credentialMetadata: {},
+              },
             },
-            tokenBundle: null,
           },
         ],
         userId: "user_01",
@@ -480,9 +493,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
               lastWebhookAt: null,
               nextReconcileAt: null,
             },
-            tokenBundle: null,
+            credential: {
+              kind: "none",
+              credentialMetadata: {},
+            },
           },
-          tokenBundle: null,
         },
       ],
       userId: "user_01",
@@ -540,7 +555,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
               lastWebhookAt: null,
               nextReconcileAt: null,
             },
-            tokenBundle: null,
+            credential: {
+              kind: "none",
+              credentialMetadata: {},
+            },
           },
         },
       ],
@@ -610,11 +628,15 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
               providerConfigKey: "junction",
               credentialMetadata: {
                 authHeader: "Bearer drop-me",
+                client: "raw-client",
                 clientUserId: "raw-client-user",
                 clientUserIdHash: "hash_client_user",
                 credentialNote: "Authorization: Bearer drop-me",
+                opaqueNote: "abc123def456ghi789jkl012mno345pq",
+                owner: "raw-owner",
                 ownerId: "raw-owner",
                 providerApiKey: "drop-me",
+                user: "raw-user",
               },
             },
             observedTokenVersion: null,
@@ -703,6 +725,97 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(/credential\.tokenBundle is not supported/u);
   });
 
+  it("rejects legacy top-level tokenBundle fields in snapshots and seeds", () => {
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+        connections: [
+          {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-12T08:00:00.000Z",
+              createdAt: "2026-04-12T07:55:00.000Z",
+              displayName: "Legacy Snapshot",
+              externalAccountId: "legacy-snapshot",
+              id: "conn_legacy_snapshot",
+              metadata: {},
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+              updatedAt: "2026-04-12T08:01:00.000Z",
+            },
+            credential: {
+              kind: "none",
+              credentialMetadata: {},
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              nextReconcileAt: null,
+            },
+            tokenBundle: {
+              accessToken: "legacy-access-token",
+              accessTokenExpiresAt: null,
+              keyVersion: "kv_legacy",
+              refreshToken: null,
+              tokenVersion: 1,
+            },
+          },
+        ],
+        generatedAt: "2026-04-12T08:07:00.000Z",
+        userId: "user_123",
+      }),
+    ).toThrowError(/tokenBundle is not supported/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_legacy_seed",
+            seed: {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-12T08:05:00.000Z",
+                createdAt: "2026-04-12T08:05:00.000Z",
+                displayName: "Legacy Seed",
+                externalAccountId: "legacy-seed",
+                id: "conn_legacy_seed",
+                metadata: {},
+                provider: "oura",
+                scopes: ["daily"],
+                status: "active",
+              },
+              credential: {
+                kind: "none",
+                credentialMetadata: {},
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: null,
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: null,
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              tokenBundle: {
+                accessToken: "legacy-seed-access-token",
+                accessTokenExpiresAt: null,
+                keyVersion: "kv_legacy_seed",
+                refreshToken: null,
+                tokenVersion: 1,
+              },
+            },
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/tokenBundle is not supported/u);
+  });
+
   it("parses apply request and response payloads across seed, local-state, and token-bundle branches", () => {
     expect(
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
@@ -758,14 +871,20 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
                 lastWebhookAt: null,
                 nextReconcileAt: null,
               },
-              tokenBundle: null,
+              credential: {
+                kind: "none",
+                credentialMetadata: {},
+              },
             },
-            tokenBundle: {
-              accessToken: "access-token",
-              accessTokenExpiresAt: null,
-              keyVersion: "kv_2",
-              refreshToken: "refresh-token",
-              tokenVersion: 5,
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle: {
+                accessToken: "access-token",
+                accessTokenExpiresAt: null,
+                keyVersion: "kv_2",
+                refreshToken: "refresh-token",
+                tokenVersion: 5,
+              },
             },
           },
         ],
@@ -821,14 +940,20 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
               lastWebhookAt: null,
               nextReconcileAt: null,
             },
-            tokenBundle: null,
+            credential: {
+              kind: "none",
+              credentialMetadata: {},
+            },
           },
-          tokenBundle: {
-            accessToken: "access-token",
-            accessTokenExpiresAt: null,
-            keyVersion: "kv_2",
-            refreshToken: "refresh-token",
-            tokenVersion: 5,
+          credential: {
+            kind: "oauth_tokens",
+            tokenBundle: {
+              accessToken: "access-token",
+              accessTokenExpiresAt: null,
+              keyVersion: "kv_2",
+              refreshToken: "refresh-token",
+              tokenVersion: 5,
+            },
           },
         },
       ],
@@ -1004,7 +1129,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
         userId: "user_123",
       }),
-    ).toThrowError(/observedTokenVersion is required when credential or tokenBundle mutations are present/u);
+    ).toThrowError(/tokenBundle is not supported/u);
 
     const seed = {
       connection: {
@@ -1028,7 +1153,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         lastWebhookAt: null,
         nextReconcileAt: null,
       },
-      tokenBundle: null,
+      credential: {
+        kind: "none" as const,
+        credentialMetadata: {},
+      },
     };
 
     expect(() =>
@@ -1054,7 +1182,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
         userId: "user_123",
       }),
-    ).toThrowError(/observedTokenVersion is required when credential or tokenBundle mutations are present/u);
+    ).toThrowError(/observedTokenVersion is required when credential mutations are present/u);
 
     expect(() =>
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
