@@ -88,8 +88,12 @@ async function fetchAndUnwrapRuntimeCryptoContext(input: {
     });
   }
 
-  const context = parseHostedRuntimeCryptoContextResponse(await response.json(), input.userId);
   const domain = input.domain ?? "runtime";
+  const context = parseHostedRuntimeCryptoContextResponse(
+    await response.json(),
+    input.userId,
+    domain,
+  );
   const root = await unwrapHostedWorkerRuntimeRoot({
     context,
     domain,
@@ -125,6 +129,7 @@ function hostedWorkerCryptoEnvFromExecutionEnvironment(input: {
 function parseHostedRuntimeCryptoContextResponse(
   value: unknown,
   expectedUserId: string,
+  requiredDomain: HostedWorkerRuntimeDomain,
 ): HostedRuntimeCryptoContextResponse {
   if (!value || typeof value !== "object") {
     throw new TypeError("Hosted runtime crypto context response must be an object.");
@@ -139,9 +144,9 @@ function parseHostedRuntimeCryptoContextResponse(
   if (!record.envelopes || typeof record.envelopes !== "object") {
     throw new TypeError("Hosted runtime crypto context response envelopes must be an object.");
   }
-  if (!("ingress" in record.envelopes) || !("runtime" in record.envelopes)) {
+  if (!(requiredDomain in record.envelopes)) {
     throw new TypeError(
-      "Hosted runtime crypto context response must include ingress and runtime envelopes.",
+      `Hosted runtime crypto context response must include ${requiredDomain} envelope.`,
     );
   }
   return record as HostedRuntimeCryptoContextResponse;

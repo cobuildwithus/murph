@@ -455,8 +455,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(decodeCalls, [
       {
         itemRef: {
+          dedupeKey: "evt_synthetic_conversation_001",
           id: "mailbox_item_conversation_001",
+          kind: "conversation.message",
+          lane: "conversation",
           laneSeq: "1",
+          occurredAt: TEST_NOW,
           userId: TEST_USER_ID,
         },
         payloadCiphertext: "ciphertext_inline_synthetic",
