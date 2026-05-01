@@ -6,8 +6,8 @@ import {
   decodeHostedEncryptionKeyring,
   type HostedSecretCipherOptions,
   type HostedSecretCodec,
-} from "./device-sync/crypto";
-import { normalizeNullableString } from "./primitives";
+} from "./device-sync-crypto";
+import { normalizeNullableString } from "../src/lib/primitives";
 
 export interface HostedEncryptionEnvironment {
   encryptionKey: Buffer;

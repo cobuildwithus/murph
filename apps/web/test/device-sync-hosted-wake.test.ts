@@ -81,14 +81,6 @@ vi.mock("@/src/lib/device-sync/auth", () => ({
   requireAuthenticatedHostedUser: vi.fn(),
 }));
 
-vi.mock("@/src/lib/device-sync/crypto", () => ({
-  createHostedSecretCodec: vi.fn(() => ({
-    decrypt: vi.fn(),
-    encrypt: vi.fn(),
-    keyVersion: "v1",
-  })),
-}));
-
 vi.mock("@/src/lib/device-sync/env", () => ({
   readHostedDeviceSyncEnvironment: mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => ({
     allowedReturnOrigins: [],

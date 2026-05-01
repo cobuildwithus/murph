@@ -110,13 +110,19 @@ export class HostedDeviceSyncPublicIngressService {
     userId: string,
     provider: string,
     returnTo: string | null,
-    options: { sourceProviderSlug?: string | null } = {},
+    options: {
+      sourceProviderSlug?: string | null;
+      connectSourceId?: string | null;
+      connectTarget?: string | null;
+    } = {},
   ): Promise<BeginConnectionResult> {
     return this.ingress.startConnection({
       provider,
       returnTo,
       ownerId: userId,
       sourceProviderSlug: options.sourceProviderSlug ?? null,
+      connectSourceId: options.connectSourceId ?? null,
+      connectTarget: options.connectTarget ?? null,
     });
   }
 

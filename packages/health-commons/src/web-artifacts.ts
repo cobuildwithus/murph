@@ -667,7 +667,8 @@ function buildRouteBundle(input: {
   routeId: string;
 }): HealthCommonsWebRouteBundle {
   const closureKeys = collectRouteClosureKeys(input.primary, input.catalog, input.entitiesByKey);
-  const reverseEdges = collectRouteReverseEdges(input.catalog, new Set([input.primary.key]));
+  const reverseEdges = collectRouteReverseEdges(input.catalog, new Set([input.primary.key]))
+    .filter((edge) => shouldIncludeReverseEdgeSource(edge, input.entitiesByKey));
   for (const edge of reverseEdges) {
     const sourceKey = stripRevision(edge.sourceKey);
     if (input.entitiesByKey.has(sourceKey)) {
@@ -990,19 +991,14 @@ function listProtocolBiomarkers(
   protocol: HealthCommonsCatalogEntity,
   entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
 ): HealthCommonsCatalogEntity[] {
-  const testPlan = protocol.testPlans?.[0];
-  const orderedKeys = Array.from(new Set([
-    testPlan?.primaryBiomarkerKey,
-    ...(testPlan?.secondaryBiomarkerKeys ?? []),
-    ...(testPlan?.safetyOutcomeKeys ?? []),
-  ].filter((key): key is string => typeof key === "string")));
-  const fromTestPlan = orderedKeys.flatMap((key) => {
+  const protocolKeys = listProtocolBiomarkerKeys(protocol);
+  const fromAuthoredSignals = protocolKeys.flatMap((key) => {
     const entity = entitiesByKey.get(stripRevision(key));
     return entity?.entityType === "biomarker" ? [entity] : [];
   });
 
-  if (fromTestPlan.length > 0) {
-    return fromTestPlan;
+  if (fromAuthoredSignals.length > 0) {
+    return fromAuthoredSignals;
   }
 
   return listRelatedEntities({
@@ -1011,6 +1007,17 @@ function listProtocolBiomarkers(
     entityTypes: ["biomarker"],
     relationTypes: ["primary_biomarker", "secondary_biomarker"],
   });
+}
+
+function listProtocolBiomarkerKeys(protocol: HealthCommonsCatalogEntity): string[] {
+  const testPlan = protocol.testPlans?.[0];
+
+  return uniqueStrings([
+    ...(protocol.expectedSignalDescriptions ?? []).map((signal) => signal.biomarkerKey),
+    testPlan?.primaryBiomarkerKey,
+    ...(testPlan?.secondaryBiomarkerKeys ?? []),
+    ...(testPlan?.safetyOutcomeKeys ?? []),
+  ]);
 }
 
 function listRelatedEntities(input: {
@@ -2200,6 +2207,17 @@ function collectRouteReverseEdges(
     );
 }
 
+function shouldIncludeReverseEdgeSource(
+  edge: HealthCommonsWebReverseRelation,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+): boolean {
+  const source = entitiesByKey.get(stripRevision(edge.sourceKey));
+
+  return source?.entityType === "protocol_variant"
+    ? isPublicProtocolVariant(source)
+    : true;
+}
+
 function collectRouteClosureKeys(
   primary: HealthCommonsCatalogEntity,
   catalog: HealthCommonsCatalog,
@@ -2430,12 +2448,7 @@ function isPublishedBiomarkerIndexEntity(
     && (entity.biomarker?.explainerCards?.length ?? 0) > 0
     && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
     && hasPublishedProtocolExpectedSignal(entity.key, entities)
-    && entity.communityOutcomeSummary !== undefined
-    && (entity.biomarker?.privateMetricBindings?.some((binding) =>
-      binding.source === "browser_vault_metric"
-      && typeof binding.domain === "string"
-      && typeof binding.metric === "string"
-    ) ?? false);
+    && entity.communityOutcomeSummary !== undefined;
 }
 
 function hasPublishedProtocolExpectedSignal(

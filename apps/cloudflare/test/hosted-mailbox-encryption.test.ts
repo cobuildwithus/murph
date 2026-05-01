@@ -9,7 +9,6 @@ import {
 import {
   createHostedMailboxEncryptionEnvironmentFromIngressRoot,
   decryptHostedMailboxPayloadCiphertext,
-  readHostedMailboxEncryptionEnvironment,
 } from "../src/hosted-mailbox-encryption.ts";
 
 const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
@@ -55,11 +54,5 @@ describe("hosted mailbox secure-box encryption", () => {
         kind: "member.channels.updated",
       });
     }
-  });
-
-  it("rejects legacy environment reads after HOSTED_WAKE_ENCRYPTION_KEY removal", () => {
-    expect(() => readHostedMailboxEncryptionEnvironment()).toThrow(
-      "Legacy hosted wake mailbox encryption has been removed. Use createHostedMailboxEncryptionEnvironmentFromIngressRoot with the unwrapped ingress runtime root.",
-    );
   });
 });

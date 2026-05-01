@@ -362,6 +362,15 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.match(markup, /aria-label="Accu-Chek connection is not available yet"/u);
   assert.match(markup, /aria-label="Samsung Health connection is not available yet"/u);
 
+  const { listVisibleConnectSources } = await import("../app/(dashboard)/connect/page");
+  const visibleSourceIds = new Set(listVisibleConnectSources().map((source) => source.id));
+  const configuredSourceIds = new Set(
+    (await import("@murphai/device-syncd/config")).DEVICE_CONNECT_SOURCES
+      .filter((source) => visibleSourceIds.has(source.connectSourceId))
+      .map((source) => source.connectSourceId),
+  );
+  assert.deepEqual([...visibleSourceIds].sort(), [...configuredSourceIds].sort());
+
   const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
   assert.deepEqual(
     resolveConfiguredConnectSources([
@@ -452,9 +461,9 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
     rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/providers/dexcom_v3/connect");
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/dexcom/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
-    body: JSON.stringify({ returnTo: "/connect?connectTarget=dexcom_v3" }),
+    body: JSON.stringify({ returnTo: "/connect?connectSource=dexcom" }),
     cache: "no-store",
     credentials: "same-origin",
     headers: {
@@ -604,9 +613,9 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
     rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/providers/garmin/connect");
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/garmin/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
-    body: JSON.stringify({ returnTo: "/connect?connectTarget=garmin" }),
+    body: JSON.stringify({ returnTo: "/connect?connectSource=garmin" }),
     cache: "no-store",
     credentials: "same-origin",
     headers: {
@@ -704,7 +713,7 @@ test("ConnectPage shows callback success with the original source label", async 
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
-      connectTarget: "oura",
+      connectSource: "oura",
       deviceSyncProvider: "junction",
       deviceSyncStatus: "connected",
     }),
@@ -717,7 +726,7 @@ test("ConnectPage shows callback errors with the original source label", async (
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
-      connectTarget: "oura",
+      connectSource: "oura",
       deviceSyncError: "OAUTH_STATE_INVALID",
       deviceSyncProvider: "junction",
       deviceSyncStatus: "error",

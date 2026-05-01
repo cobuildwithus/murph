@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
+import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";

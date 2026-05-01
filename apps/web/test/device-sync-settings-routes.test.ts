@@ -235,7 +235,11 @@ describe("device sync settings routes", () => {
       "member_123",
       "oura",
       "/settings?tab=wearables",
-      { sourceProviderSlug: null },
+      {
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        sourceProviderSlug: null,
+      },
     );
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
@@ -271,7 +275,11 @@ describe("device sync settings routes", () => {
       "member_123",
       "junction",
       "/connect",
-      { sourceProviderSlug: "garmin" },
+      {
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        sourceProviderSlug: "garmin",
+      },
     );
   });
 

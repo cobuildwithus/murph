@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import {
+  DEVICE_CONNECT_SOURCES,
   listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncProviderConfigs,
@@ -42,200 +43,172 @@ type ConnectPageInitialLoadError = {
 
 type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
 
-const CONNECT_SOURCES: readonly ConnectSource[] = [
-  {
+type ConnectSourceUi = Omit<ConnectSource, "id">;
+
+const CONNECT_SOURCE_UI = {
+  whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
-    id: "whoop",
     logo: logoAsset("whoop.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 96, 15),
     name: "Whoop",
   },
-  {
+  mapmyfitness: {
     description: "Workouts, routes, pace, and distance.",
-    id: "mapmyfitness",
     logo: logoAsset("mapmyfitness.png"),
     name: "MapMyFitness",
   },
-  {
+  ultrahuman: {
     description: "Smart ring. Sleep, recovery, temperature, and movement.",
-    id: "ultrahuman",
     logo: logoAsset("ultrahuman.png"),
     name: "Ultrahuman",
   },
-  {
+  "dexcom-g6-and-older": {
     description: "Continuous glucose and sensor trends.",
-    id: "dexcom-g6-and-older",
     logo: logoAsset("dexcom-g6-and-older.png"),
     name: "Dexcom (G6 and older)",
   },
-  {
+  renpho: {
     description: "Smart scale. Weight and body composition.",
-    id: "renpho",
     logo: logoAsset("renpho.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 110, 22),
     name: "Renpho",
   },
-  {
+  runkeeper: {
     description: "Runs, walks, routes, and pace.",
-    id: "runkeeper",
     logo: logoAsset("runkeeper.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 132, 20),
     name: "Runkeeper",
   },
-  {
+  "samsung-health": {
     description: "Phone and watch activity, sleep, and heart rate.",
-    id: "samsung-health",
     logo: logoAsset("samsung-health.png"),
     name: "Samsung Health",
   },
-  {
+  "tandem-source": {
     description: "Insulin pump and CGM therapy records.",
-    id: "tandem-source",
     logo: logoAsset("tandem-source.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 120, 25),
     name: "Tandem Source",
   },
-  {
+  beurer: {
     description: "Blood pressure, weight, glucose, and pulse ox.",
-    id: "beurer",
     logo: logoAsset("beurer.png"),
     name: "Beurer",
   },
-  {
+  strava: {
     description: "Rides, runs, power, and training load.",
-    id: "strava",
     logo: logoAsset("strava.svg", "h-auto max-h-9 w-auto max-w-[8rem] object-contain", 96, 20),
     name: "Strava",
   },
-  {
+  "freestyle-libre-ble": {
     description: "Real-time glucose via Bluetooth sensor.",
-    id: "freestyle-libre-ble",
     logo: logoAsset("freestyle-libre-ble.png"),
     name: "Freestyle Libre BLE",
   },
-  {
+  omron: {
     description: "Blood pressure, pulse, and weight.",
-    id: "omron",
     logo: logoAsset("omron.png", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 106, 40),
     name: "Omron",
   },
-  {
+  accuchek: {
     description: "Glucose meter readings and history.",
-    id: "accuchek",
     logo: logoAsset("accuchek.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 14),
     name: "Accu-Chek",
   },
-  {
+  "eight-sleep": {
     description: "Smart mattress. Sleep, temperature, and heart rate.",
-    id: "eight-sleep",
     logo: logoAsset("eight-sleep.svg"),
     name: "Eight Sleep",
   },
-  {
+  fitbit: {
     description: "Sleep, activity, heart rate, and daily readiness.",
-    id: "fitbit",
     logo: logoAsset("fitbit.svg"),
     name: "Fitbit",
   },
-  {
+  "freestyle-libre": {
     description: "Glucose history, trends, and time in range.",
-    id: "freestyle-libre",
     logo: logoAsset("freestyle-libre.png"),
     name: "Freestyle Libre",
   },
-  {
+  garmin: {
     description: "Workouts, sleep, stress, heart rate, and body battery.",
-    id: "garmin",
     logo: logoAsset("garmin.png"),
     name: "Garmin",
   },
-  {
+  hammerhead: {
     description: "Cycling computer. Rides, routes, elevation, and power.",
-    id: "hammerhead",
     logo: logoAsset("hammerhead.png"),
     name: "Hammerhead",
   },
-  {
+  ihealth: {
     description: "Blood pressure, glucose, weight, and pulse ox.",
-    id: "ihealth",
     logo: logoAsset("ihealth.png"),
     name: "iHealth",
   },
-  {
+  oura: {
     description: "Smart ring. Sleep, readiness, temperature, and recovery.",
-    id: "oura",
     logo: logoAsset("oura.png", "h-auto max-h-8 w-auto max-w-[8rem] object-contain", 96, 30),
     name: "Oura",
   },
-  {
+  peloton: {
     description: "Rides, runs, strength, and output.",
-    id: "peloton",
     logo: logoAsset("peloton.svg"),
     name: "Peloton",
   },
-  {
+  wahoo: {
     description: "Cycling, running, heart rate, and power.",
-    id: "wahoo",
     logo: logoAsset("wahoo.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 108, 26),
     name: "Wahoo",
   },
-  {
+  "contour-ble": {
     description: "Bluetooth glucose meter readings.",
-    id: "contour-ble",
     logo: logoAsset("contour-ble.png"),
     name: "Contour BLE",
   },
-  {
+  withings: {
     description: "Weight, sleep, blood pressure, temperature, and activity.",
-    id: "withings",
     logo: logoAsset("withings.png"),
     name: "Withings",
   },
-  {
+  "google-fit": {
     description: "Steps, workouts, and heart rate from Android.",
-    id: "google-fit",
     logo: logoAsset("google-fit.svg"),
     name: "Google Fit",
   },
-  {
+  zwift: {
     description: "Virtual rides, runs, power, and distance.",
-    id: "zwift",
     logo: logoAsset("zwift.png"),
     name: "Zwift",
   },
-  {
+  onetouch: {
     description: "Glucose meter readings and trends.",
-    id: "onetouch",
     logo: logoAsset("onetouch.png"),
     name: "OneTouch",
   },
-  {
+  "abbott-libreview": {
     description: "Glucose reports, trends, and sensor history.",
-    id: "abbott-libreview",
     logo: logoAsset("abbott-libreview.svg"),
     name: "Abbott LibreView",
   },
-  {
+  dexcom: {
     description: "Real-time CGM glucose and trend arrows.",
-    id: "dexcom",
     logo: logoAsset("dexcom.png"),
     name: "Dexcom",
   },
-  {
+  kardia: {
     description: "Portable ECG recordings and rhythm detection.",
-    id: "kardia",
     logo: logoAsset("kardia.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 104, 20),
     name: "Kardia",
   },
-  {
+  cronometer: {
     description: "Calories, macros, micronutrients, and meal timing.",
-    id: "cronometer",
     logo: logoAsset("cronometer.png"),
     name: "Cronometer",
   },
-  {
+  polar: {
     description: "Training, sleep, heart rate, and recovery.",
-    id: "polar",
     logo: logoAsset("polar.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 20),
     name: "Polar",
   },
-] as const;
+} satisfies Record<string, ConnectSourceUi>;
+
+const CONNECT_SOURCES: readonly ConnectSource[] = listVisibleConnectSources();
 
 export default async function ConnectPage({
   searchParams,
@@ -286,6 +259,20 @@ export default async function ConnectPage({
       />
     </div>
   );
+}
+
+export function listVisibleConnectSources(): ConnectSource[] {
+  return DEVICE_CONNECT_SOURCES.flatMap((source) => {
+    const ui = readConnectSourceUi(source.connectSourceId);
+    return ui
+      ? [{
+        description: ui.description,
+        id: source.connectSourceId,
+        logo: ui.logo,
+        name: ui.name,
+      }]
+      : [];
+  });
 }
 
 export function resolveConfiguredConnectSources(
@@ -373,6 +360,7 @@ function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): C
 
   return {
     connectTarget: readSearchParamString(searchParams, "connectTarget"),
+    connectSource: readSearchParamString(searchParams, "connectSource"),
     errorCode: readSearchParamString(searchParams, "deviceSyncError"),
     provider: readSearchParamString(searchParams, "deviceSyncProvider"),
     status,
@@ -404,4 +392,10 @@ function logoAsset(
     src: `/brand-logos/connect/${fileName}`,
     width,
   };
+}
+
+function readConnectSourceUi(connectSourceId: string): ConnectSourceUi | null {
+  return Object.prototype.hasOwnProperty.call(CONNECT_SOURCE_UI, connectSourceId)
+    ? CONNECT_SOURCE_UI[connectSourceId as keyof typeof CONNECT_SOURCE_UI]
+    : null;
 }

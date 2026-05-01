@@ -93,7 +93,11 @@ export class HostedDeviceSyncControlPlane {
     userId: string,
     provider: string,
     returnTo: string | null,
-    options: { sourceProviderSlug?: string | null } = {},
+    options: {
+      sourceProviderSlug?: string | null;
+      connectSourceId?: string | null;
+      connectTarget?: string | null;
+    } = {},
   ) {
     return this.connections.startConnection(userId, provider, returnTo, options);
   }

@@ -491,6 +491,8 @@ export interface StartConnectionInput {
   returnTo?: string | null;
   ownerId?: string | null;
   sourceProviderSlug?: string | null;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
 }
 
 export interface BeginConnectionResult {
@@ -515,6 +517,8 @@ export type HandleOAuthCallbackInput = HandleConnectionCallbackInput;
 export interface CompleteConnectionResult {
   account: PublicDeviceSyncAccount;
   returnTo: string | null;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
 }
 
 export interface HandleWebhookResult {

@@ -240,6 +240,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(publishedRouteIds).toEqual(expect.arrayContaining([
       "estimated-vo2max",
       "resting-heart-rate",
+      "sleep-quality",
     ]));
     expect(
       biomarkerIndex.biomarkers.find((entry) => entry.routeId === "estimated-vo2max"),
@@ -489,12 +490,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       title: "Consistent Wake Time",
     }));
     expect(protocolTab?.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual([
-      "daytime-sleepiness",
       "total-sleep-time",
       "sleep-efficiency",
       "resting-heart-rate",
       "hrv-rmssd",
       "sleep-onset-latency",
+      "daytime-sleepiness",
     ]);
     expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
       biomarkerRouteId: "daytime-sleepiness",
@@ -535,14 +536,24 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     });
 
     expect(protocolTab?.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual([
+      "daily-step-count",
+      "step-floor-days",
       "resting-heart-rate",
       "estimated-vo2max",
-      "sleep-efficiency",
       "morning-blood-pressure",
-      "sedentary-time",
+      "sleep-efficiency",
       "musculoskeletal-pain",
       "walking-safety-events",
+      "sedentary-time",
+      "moderate-to-vigorous-activity-minutes",
+      "walking-bout-minutes",
+      "walking-cadence",
     ]);
+    expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
+      biomarkerRouteId: "daily-step-count",
+      expected: "Could improve",
+      protocolProminence: "focus",
+    }));
     expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
       biomarkerRouteId: "walking-safety-events",
       expected: "Could trend lower",
@@ -681,6 +692,21 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     })).toBeNull();
   });
 
+  it("does not include hidden protocol variants in public biomarker route bundles", () => {
+    const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+      entityType: "biomarker",
+      routeId: "musculoskeletal-pain",
+    });
+
+    expect(bundle).not.toBeNull();
+    expect(bundle?.entitiesByKey).not.toHaveProperty(
+      "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
+    );
+    expect(bundle?.reverseEdges.map((edge) => edge.sourceKey)).not.toContain(
+      "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
+    );
+  });
+
   it("keeps the Finnish sauna tab projections materially smaller than the route bundle", () => {
     const bundle = readFileSync(
       new URL("../generated/web/bundles/protocol_variant/finnish-sauna.json", import.meta.url),
@@ -707,7 +733,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(gzipSync(resultsPublic).byteLength).toBeLessThan(4_000);
     expect(gzipSync(researchTab).byteLength).toBeLessThan(60_000);
     expect(bundle.byteLength / researchTab.byteLength).toBeGreaterThan(5);
-    expect(bundle.byteLength / protocolTab.byteLength).toBeGreaterThan(100);
+    expect(bundle.byteLength / protocolTab.byteLength).toBeGreaterThan(80);
     expect(bundle.byteLength / resultsPublic.byteLength).toBeGreaterThan(250);
   });
 

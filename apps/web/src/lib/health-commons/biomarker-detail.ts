@@ -265,7 +265,7 @@ function isPublishedBiomarker(
   return entity?.entityType === "biomarker"
     && entity.status !== "deprecated"
     && entity.hidden !== true
-    && (entity.biomarker?.explainerCards?.length ?? 0) > 0
+    && hasCompleteBiomarkerAbout(entity)
     && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
     && hasProtocolExpectedSignalCandidate(catalog, entity.key)
     && entity.communityOutcomeSummary != null;
@@ -487,7 +487,7 @@ const BIOMARKER_ABOUT_SLOTS: Array<{
 }> = [
   {
     iconKey: "whyPeopleCare",
-    normalizedTitles: ["why people care", "why it matters"],
+    normalizedTitles: ["why murph uses it", "why people care", "why it matters"],
   },
   {
     iconKey: "howToMeasure",
@@ -528,6 +528,11 @@ function buildBiomarkerAbout(
 
 function normalizeAboutTitle(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/gu, " ");
+}
+
+function hasCompleteBiomarkerAbout(entity: HealthCommonsEntity): boolean {
+  return buildBiomarkerAbout(entity.biomarker?.explainerCards ?? []).length ===
+    BIOMARKER_ABOUT_SLOTS.length;
 }
 
 function cleanInterpretationFrame(

@@ -1,19 +1,19 @@
 import {
   readConfiguredDeviceSyncProviderConfigs,
-  resolveConfiguredDeviceSyncConnectTarget,
+  resolveConfiguredDeviceSyncConnectTargetBySourceId,
 } from "@murphai/device-syncd/config";
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
-import { resolveDecodedRouteParam } from "@/src/lib/http";
 
-import { startHostedDeviceSyncConnection } from "@/src/lib/device-sync/hosted-connect-start";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
+import { startHostedDeviceSyncConnection } from "@/src/lib/device-sync/hosted-connect-start";
+import { resolveDecodedRouteParam } from "@/src/lib/http";
 
 export async function GET(): Promise<Response> {
   return Response.json({
     error: {
       code: "METHOD_NOT_ALLOWED",
       message:
-        "Hosted settings device-sync connect routes only allow POST because starting a connection mutates server state.",
+        "Hosted connect source start routes only allow POST because starting a connection mutates server state.",
     },
   }, {
     status: 405,
@@ -26,29 +26,29 @@ export async function GET(): Promise<Response> {
 
 export const POST = withJsonError(async (
   request: Request,
-  context: { params: Promise<{ provider: string }> },
+  context: { params: Promise<{ sourceId: string }> },
 ) => {
-  const provider = await resolveDecodedRouteParam(context.params, "provider");
-  const target = resolveHostedSettingsDeviceConnectTarget(provider);
+  const sourceId = await resolveDecodedRouteParam(context.params, "sourceId");
+  const target = resolveHostedConnectSourceTarget(sourceId);
 
   return jsonOk(await startHostedDeviceSyncConnection({
-    defaultReturnTo: "/settings",
+    defaultReturnTo: "/connect",
     request,
     target,
   }));
 });
 
-function resolveHostedSettingsDeviceConnectTarget(provider: string) {
-  const target = resolveConfiguredDeviceSyncConnectTarget(
+function resolveHostedConnectSourceTarget(sourceId: string) {
+  const target = resolveConfiguredDeviceSyncConnectTargetBySourceId(
     readConfiguredDeviceSyncProviderConfigs(process.env),
-    provider,
+    sourceId,
   );
 
   if (!target) {
     throw deviceSyncError({
-      code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+      code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
       httpStatus: 404,
-      message: "Hosted device connect target is not configured.",
+      message: "Hosted device connect source is not configured.",
       retryable: false,
     });
   }
