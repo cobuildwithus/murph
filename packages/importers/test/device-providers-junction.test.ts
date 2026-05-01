@@ -179,7 +179,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   const observations = payload.events ?? [];
   const samples = payload.samples ?? [];
   assert.ok(observations.length >= 5);
-  assert.equal(samples.length, 3);
+  assert.equal(samples.length, 2);
   assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
   assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
   assert.ok(observations.every((event) => !event.externalRef?.resourceType.includes(":")));
@@ -203,9 +203,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.notEqual(bodyEvent?.occurredAt, "2026-04-22T17:00:00.000Z");
 
   const floatingSample = samples.find((sample) => sample.stream === "spo2");
-  assert.equal(floatingSample?.dataOrigin?.observedAtRaw, "2026-04-22 07:16:00");
-  assert.equal(floatingSample?.dataOrigin?.timestampSemantics, "floating");
-  assert.equal(floatingSample?.recordedAt, "2026-04-22T23:59:59.000Z");
+  assert.equal(floatingSample, undefined);
 
   const glucoseSample = samples.find((sample) => sample.stream === "glucose");
   assert.equal(glucoseSample?.unit, "mg_dL");
@@ -621,41 +619,60 @@ test("Junction snapshot import minimizes grouped source identifiers in raw envel
   assert.match(stepSample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
 });
 
-test("Junction normalizer treats Libre +00:00 glucose timestamps as floating wall time", () => {
-  const payload = normalizeJunctionSnapshot({
-    importedAt: "2023-09-27T12:00:00.000Z",
-    windowStart: "2023-09-27T00:00:00.000Z",
-    windowEnd: "2023-09-27T23:59:59.000Z",
-    timeseries: {
-      glucose: [
-        {
-          sourceProviderSlug: "freestyle_libre",
-          timestamp: "2023-09-27T07:48:00+00:00",
-          value: 101,
-        },
-        {
-          sourceProviderSlug: "abbott_libreview",
-          timestamp: "2023-09-27T07:48:00+00:00",
-          value: 102,
-        },
-      ],
+test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until timezone conversion exists", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2023-09-27T12:00:00.000Z",
+      windowStart: "2023-09-27T00:00:00.000Z",
+      windowEnd: "2023-09-27T23:59:59.000Z",
+      timeseries: {
+        glucose: [
+          {
+            sourceProviderSlug: "freestyle_libre",
+            timestamp: "2023-09-27T07:48:00+00:00",
+            value: 101,
+          },
+          {
+            sourceProviderSlug: "abbott_libreview",
+            timestamp: "2023-09-27T07:48:00+00:00",
+            value: 102,
+          },
+        ],
+      },
     },
   });
 
   const glucoseSamples = payload.samples?.filter((sample) => sample.stream === "glucose") ?? [];
-
-  assert.equal(glucoseSamples.length, 2);
-  assert.deepEqual(
-    glucoseSamples.map((sample) => sample.dataOrigin?.sourceProviderSlug).sort(),
-    ["abbott-libreview", "freestyle-libre"],
+  const glucoseArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role === "junction-timeseries-glucose"
   );
-  for (const sample of glucoseSamples) {
-    assert.equal(sample.dataOrigin?.observedAtRaw, "2023-09-27T07:48:00+00:00");
-    assert.equal(sample.dataOrigin?.timestampSemantics, "floating");
-    assert.equal(sample.dayKey, "2023-09-27");
-    assert.equal(sample.recordedAt, "2023-09-27T23:59:59.000Z");
-    assert.notEqual(sample.recordedAt, "2023-09-27T07:48:00.000Z");
-  }
+  const canonicalArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role.startsWith("wearable-canonical-records:")
+  );
+  const canonicalArtifactContent = canonicalArtifact?.content as { records?: unknown[] } | undefined;
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
+  assert.equal(glucoseSamples.length, 0);
+  assert.deepEqual(payload.canonicalWearableRecords, []);
+  assert.ok(glucoseArtifact);
+  assert.deepEqual(glucoseArtifact.content, [
+    {
+      sourceProviderSlug: "freestyle_libre",
+      timestamp: "2023-09-27T07:48:00+00:00",
+      value: 101,
+    },
+    {
+      sourceProviderSlug: "abbott_libreview",
+      timestamp: "2023-09-27T07:48:00+00:00",
+      value: 102,
+    },
+  ]);
+  assert.ok(canonicalArtifact);
+  assert.deepEqual(canonicalArtifactContent?.records, []);
 });
 
 test("Junction normalizer resolves nested source and provider slug origin fields", () => {
@@ -821,10 +838,7 @@ test("Junction normalizer treats day-only timestamps as floating wall dates", ()
   assert.notEqual(stepEvent?.occurredAt, "2026-04-22T00:00:00.000Z");
 
   const stepSample = payload.samples?.find((sample) => sample.stream === "steps");
-  assert.equal(stepSample?.recordedAt, "2026-04-22T23:59:59.000Z");
-  assert.equal(stepSample?.dataOrigin?.observedAtRaw, "2026-04-22");
-  assert.equal(stepSample?.dataOrigin?.timestampSemantics, "floating");
-  assert.notEqual(stepSample?.recordedAt, "2026-04-22T00:00:00.000Z");
+  assert.equal(stepSample, undefined);
 });
 
 test("Junction normalizer ignores ambiguous provider and type provenance fields", () => {
