@@ -27,3 +27,6 @@ Land the supplied greenfield Codex-authority patch intent on the current checkou
 - Final review findings were fixed: blank model env values are removed from the hosted runtime env, and the ledger row was corrected.
 - Package/root typecheck and `test:diff` remain blocked by unrelated `packages/runtime-state/src/hosted-domain-crypto.ts` BufferSource typing errors.
 - Root `pnpm test` remains blocked by unrelated core/device-sync failures and a CLI/setup prompt hang.
+Status: completed
+Updated: 2026-05-01
+Completed: 2026-05-01
