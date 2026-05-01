@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberSnapshot: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   nudgeHostedRunnerUserBestEffort: vi.fn(),
+  startHostedWebhookNudgeWorkflow: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
@@ -30,6 +31,10 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
+  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -112,6 +117,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       errorCode: null,
       inFlight: false,
       nextAlarmAtPresent: false,
+    });
+    mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
+      runId: "workflow_run_123",
     });
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
@@ -260,10 +268,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         }),
       }),
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
-      context: "webhook:linq",
-      timeoutMs: 5_000,
-      userId: "member_123",
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_evt_123",
+      source: "linq",
     });
     expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();

@@ -9,8 +9,9 @@ device-sync control-plane authority, the hosted AI usage ledger,
 and the hosted mailbox, latest workspace checkpoint pointer, and redacted
 runtime logs/status projection.
 
-Every hosted producer appends an encrypted mailbox item in Postgres and hands
-execution off to Cloudflare with a narrow authenticated runner nudge. Hosted
+Every hosted producer appends an encrypted mailbox item in Postgres. Webhook
+and email ingress then hand execution off through a pointer-only Vercel Workflow
+whose step performs the narrow authenticated Cloudflare runner nudge. Hosted
 execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items and checkpoints its
 own workspace state.

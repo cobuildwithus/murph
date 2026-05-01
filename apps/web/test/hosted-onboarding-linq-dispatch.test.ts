@@ -432,7 +432,7 @@ https://join.example.test/join/code_first_text`);
         }),
         "workflow-enqueued",
         expect.objectContaining({
-          workflowRunIdSuffix: "un_123",
+          workflowRunIdSuffix: "un-123",
         }),
       );
       expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -494,7 +494,7 @@ https://join.example.test/join/code_first_text`);
       }),
       "workflow-enqueued",
       expect.objectContaining({
-        workflowRunIdSuffix: "un_123",
+        workflowRunIdSuffix: "un-123",
       }),
     );
   });
