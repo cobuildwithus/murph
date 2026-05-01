@@ -211,10 +211,10 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   },
   {
     slug: "cloudflare.r2_user_artifacts",
-    label: "Cloudflare R2 user bundles, vault replicas, artifacts, runner secrets, and root-key envelope",
+    label: "Cloudflare R2 user bundles, vault replicas, artifacts, runner secrets, and raw email",
     deletion: "best-effort-delete",
     export: "documented-only",
-    note: "Best-effort hosted execution control deletes opaque per-user R2 prefixes and the user root-key envelope when derivation keys are available.",
+    note: "Best-effort hosted execution control deletes opaque per-user runtime and ingress R2 objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres.",
   },
   {
     slug: "providers.oura_whoop_strava",

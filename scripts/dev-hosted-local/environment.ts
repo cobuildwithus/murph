@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -6,11 +6,13 @@ import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
   DEFAULT_STRIPE_ENV_FILE,
+  HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
+  USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
   WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES,
   WRANGLER_VAR_ALLOWLIST,
   webDir,
@@ -21,8 +23,10 @@ import {
 } from "../../apps/cloudflare/scripts/deploy-automation/worker-secret-names.ts";
 import {
   createEcP256JwkPairJson,
+  createEcP256SigningKeyJson,
   parsePrivateEcP256Jwk,
   type EcP256JwkPairJson,
+  type EcP256SigningKeyJson,
   toPublicEcP256Jwk,
 } from "./crypto.ts";
 import type {
@@ -32,6 +36,11 @@ import type {
 
 const HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL_ENV =
   "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL";
+const HOSTED_LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
+const HOSTED_LOCAL_WEB_WRAP_KEY_NAME =
+  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
+const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION =
+  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
 const LEGACY_HOSTED_EXECUTION_CRYPTO_ENV_RE =
   /^HOSTED_EXECUTION_(?:PLATFORM_ENVELOPE|AUTOMATION_RECIPIENT|RECOVERY_RECIPIENT|TEE_AUTOMATION_RECIPIENT)(?:_|$)/u;
 
@@ -121,9 +130,13 @@ export function mergeCloudflareLocalEnv(input: {
   existing: Record<string, string>;
   oidcIdentity: HostedExecutionOidcIdentity;
   overrides?: Record<string, string | undefined>;
+  createEnvelopeKey?: () => string;
   createJwkPair?: () => EcP256JwkPairJson;
+  createSigningKey?: () => EcP256SigningKeyJson;
 }): Record<string, string> {
+  const createEnvelopeKey = input.createEnvelopeKey ?? (() => randomBytes(32).toString("base64"));
   const createJwkPair = input.createJwkPair ?? createEcP256JwkPairJson;
+  const createSigningKey = input.createSigningKey ?? createEcP256SigningKeyJson;
   const normalizedOverrides = normalizeOptionalEnvOverrides(input.overrides);
   const resolvedExisting = {
     ...input.existing,
@@ -141,33 +154,77 @@ export function mergeCloudflareLocalEnv(input: {
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
+  const useRemoteHostedCryptoKeys = isTruthy(normalizedOverrides[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
+  const hostedLocalKeySource = useRemoteHostedCryptoKeys
+    ? resolvedExisting
+    : resolveExistingHostedLocalKeySource(input.existing);
+  const readHostedLocalKey = (key: string): string | null =>
+    normalizeOptionalString(hostedLocalKeySource[key]);
+
   const cloudflareAutomationKeys =
-    resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK?.trim()
+    readHostedLocalKey("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK")
       ? {
-        privateJwkJson: resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+        privateJwkJson: readHostedLocalKey("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK")!,
         publicJwkJson: JSON.stringify(toPublicEcP256Jwk(parsePrivateEcP256Jwk(
-          resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+          readHostedLocalKey("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK")!,
           "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
         ))),
       }
       : createJwkPair();
-  const callbackSigningPrivateJwkJson = resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?.trim()
-    ? resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK
-    : createJwkPair().privateJwkJson;
+  const cloudflareAutomationKeyId =
+    readHostedLocalKey("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID")
+    ?? "cloudflare-automation:local";
+  const callbackSigningPrivateJwkJson =
+    readHostedLocalKey("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK")
+    ?? createJwkPair().privateJwkJson;
+  const callbackSigningKeyId =
+    readHostedLocalKey("HOSTED_WEB_CALLBACK_SIGNING_KEY_ID")
+    ?? "v1";
+  const callbackSigningPublicJwkJson = JSON.stringify(
+    toPublicEcP256Jwk(parsePrivateEcP256Jwk(callbackSigningPrivateJwkJson)),
+  );
+  const hostedWakeEncryptionKeyVersion =
+    readHostedLocalKey("HOSTED_WAKE_ENCRYPTION_KEY_VERSION") ?? "v1";
+  const hostedWakeEncryptionKey =
+    readHostedLocalKey("HOSTED_WAKE_ENCRYPTION_KEY") ?? createEnvelopeKey();
+  const hostedWebEncryptionKeyVersion =
+    readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEY_VERSION") ?? "v1";
+  const hostedWebEncryptionKey =
+    readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEY") ?? createEnvelopeKey();
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
   const workerOrigin =
     `${input.config.workerProtocol}://${input.config.workerHost}:${input.config.workerPort}`;
-  const authoritySignKeyVersion = readHostedLocalCryptoMirrorValue(
-    resolvedExisting,
-    "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",
-    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
-  );
-  const authoritySignPublicKeyPem = readHostedLocalCryptoMirrorValue(
-    resolvedExisting,
-    "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
-    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
-  );
+  const authoritySigningKey = resolveHostedLocalAuthoritySigningKey({
+    createSigningKey,
+    readHostedLocalKey,
+    useRemoteHostedCryptoKeys,
+  });
+  const authoritySignKeyVersion =
+    readHostedLocalKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
+    ?? readHostedLocalKey("HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION")
+    ?? (useRemoteHostedCryptoKeys
+      ? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
+      : HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION);
+  const authoritySignPublicKeyPem =
+    authoritySigningKey.publicKeyPem
+    ?? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM");
+  const hostedCryptoEnv =
+    readHostedLocalKey("HOSTED_CRYPTO_ENV") ?? (useRemoteHostedCryptoKeys ? "development" : "local");
+  const gcpKmsApiRoot =
+    readHostedLocalKey("HOSTED_CRYPTO_GCP_KMS_API_ROOT")
+    ?? (useRemoteHostedCryptoKeys ? null : HOSTED_LOCAL_KMS_API_ROOT);
+  const webWrapKmsKeyName =
+    readHostedLocalKey("HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME")
+    ?? (useRemoteHostedCryptoKeys
+      ? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME")
+      : HOSTED_LOCAL_WEB_WRAP_KEY_NAME);
+  const localKmsWrapKey =
+    readHostedLocalKey("HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY")
+    ?? (useRemoteHostedCryptoKeys ? null : createEnvelopeKey());
   stripLegacyHostedCryptoAuthorityEnv(resolvedExisting);
+  if (!useRemoteHostedCryptoKeys) {
+    stripHostedLocalGeneratedStateEnv(resolvedExisting);
+  }
 
   return {
     ...resolvedExisting,
@@ -176,42 +233,124 @@ export function mergeCloudflareLocalEnv(input: {
       || "true",
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion,
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authoritySignPublicKeyPem,
-    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
-      resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID?.trim()
-      ?? "cloudflare-automation:local",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: cloudflareAutomationKeyId,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
       cloudflareAutomationKeys.privateJwkJson,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
       cloudflareAutomationKeys.publicJwkJson,
-    HOSTED_CRYPTO_ENV:
-      resolvedExisting.HOSTED_CRYPTO_ENV?.trim()
-      ?? "development",
+    HOSTED_CRYPTO_ENV: hostedCryptoEnv,
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion,
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authoritySignPublicKeyPem,
+    ...(gcpKmsApiRoot ? { HOSTED_CRYPTO_GCP_KMS_API_ROOT: gcpKmsApiRoot } : {}),
+    HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME: webWrapKmsKeyName,
+    ...(authoritySigningKey.privateJwkJson
+      ? { HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: authoritySigningKey.privateJwkJson }
+      : {}),
+    ...(localKmsWrapKey ? { HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: localKmsWrapKey } : {}),
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
       ?? workerOrigin,
+    HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
+    HOSTED_WAKE_ENCRYPTION_KEY_VERSION: hostedWakeEncryptionKeyVersion,
+    HOSTED_WAKE_ENCRYPTION_KEYRING_JSON:
+      readHostedLocalKey("HOSTED_WAKE_ENCRYPTION_KEYRING_JSON")
+      ?? buildEncodedKeyringJson(hostedWakeEncryptionKeyVersion, hostedWakeEncryptionKey),
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
-    HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:
-      resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim()
-      ?? "v1",
+    HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackSigningKeyId,
+    HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON:
+      readHostedLocalKey("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON")
+      ?? buildJsonKeyringJson(callbackSigningKeyId, callbackSigningPublicJwkJson),
+    HOSTED_WEB_ENCRYPTION_KEY: hostedWebEncryptionKey,
+    HOSTED_WEB_ENCRYPTION_KEY_VERSION: hostedWebEncryptionKeyVersion,
+    HOSTED_WEB_ENCRYPTION_KEYRING_JSON:
+      readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEYRING_JSON")
+      ?? buildEncodedKeyringJson(hostedWebEncryptionKeyVersion, hostedWebEncryptionKey),
     HOSTED_WEB_BASE_URL: webOrigin,
   };
+
+  function readRequiredRemoteHostedCryptoKey(key: string): string {
+    const value = readHostedLocalKey(key);
+    if (!value) {
+      throw new Error(
+        `${key} must be configured when ${USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV}=1.`,
+      );
+    }
+    return value;
+  }
 }
 
-function readHostedLocalCryptoMirrorValue(
-  source: Record<string, string | undefined>,
-  workerEnvKey: string,
-  webEnvKey: string,
-): string {
-  const value = source[workerEnvKey]?.trim() ?? source[webEnvKey]?.trim();
-  if (!value) {
-    throw new Error(
-      `${webEnvKey} must be configured so local Cloudflare can verify web-hosted runtime crypto contexts.`,
-    );
+function resolveHostedLocalAuthoritySigningKey(input: {
+  createSigningKey: () => EcP256SigningKeyJson;
+  readHostedLocalKey: (key: string) => string | null;
+  useRemoteHostedCryptoKeys: boolean;
+}): { privateJwkJson: string | null; publicKeyPem: string | null } {
+  const existingPrivateJwk = input.readHostedLocalKey(
+    "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+  );
+  const existingPublicPem =
+    input.readHostedLocalKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM")
+    ?? input.readHostedLocalKey("HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM");
+
+  if (existingPrivateJwk && existingPublicPem) {
+    return {
+      privateJwkJson: existingPrivateJwk,
+      publicKeyPem: existingPublicPem,
+    };
   }
-  return value;
+
+  if (input.useRemoteHostedCryptoKeys) {
+    return {
+      privateJwkJson: existingPrivateJwk,
+      publicKeyPem: existingPublicPem,
+    };
+  }
+
+  return input.createSigningKey();
+}
+
+function resolveExistingHostedLocalKeySource(source: Record<string, string>): Record<string, string> {
+  return isLocalHostedCryptoState(source) ? source : {};
+}
+
+function isLocalHostedCryptoState(source: Record<string, string | undefined>): boolean {
+  const hostedCryptoEnv = normalizeOptionalString(source.HOSTED_CRYPTO_ENV)?.toLowerCase();
+  return hostedCryptoEnv === "local"
+    || normalizeOptionalString(source.HOSTED_CRYPTO_GCP_KMS_API_ROOT) === HOSTED_LOCAL_KMS_API_ROOT
+    || normalizeOptionalString(source.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME)
+      === HOSTED_LOCAL_WEB_WRAP_KEY_NAME
+    || Boolean(
+      normalizeOptionalString(source.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK)
+      && normalizeOptionalString(source.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY),
+    );
+}
+
+function stripHostedLocalGeneratedStateEnv(env: Record<string, string | undefined>): void {
+  for (const key of Object.keys(env)) {
+    if (
+      key.startsWith("HOSTED_CRYPTO_")
+      || key.startsWith("HOSTED_WEB_CALLBACK_SIGNING_")
+      || key.startsWith("HOSTED_WEB_ENCRYPTION_")
+      || key.startsWith("HOSTED_WAKE_ENCRYPTION_")
+      || LEGACY_HOSTED_EXECUTION_CRYPTO_ENV_RE.test(key)
+    ) {
+      delete env[key];
+    }
+  }
+}
+
+function isTruthy(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+function buildEncodedKeyringJson(keyId: string, encodedKey: string): string {
+  return JSON.stringify({ [keyId]: encodedKey });
+}
+
+function buildJsonKeyringJson(keyId: string, jsonValue: string): string {
+  return JSON.stringify({ [keyId]: JSON.parse(jsonValue) });
 }
 
 function normalizeOptionalEnvOverrides(
@@ -296,6 +435,14 @@ export function buildHostedLocalDevOverrides(
   const cloudflareAutomationKeyId =
     cloudflareDevVars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID?.trim();
   const hostedCryptoEnv = cloudflareDevVars.HOSTED_CRYPTO_ENV?.trim();
+  const callbackPublicJwkJson = callbackPrivateJwkJson
+    ? JSON.stringify(toPublicEcP256Jwk(parsePrivateEcP256Jwk(callbackPrivateJwkJson)))
+    : null;
+  const callbackPublicKeyringJson =
+    cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON?.trim()
+    ?? (callbackPublicJwkJson && callbackKeyId
+      ? buildJsonKeyringJson(callbackKeyId, callbackPublicJwkJson)
+      : null);
   const hostedWakeEncryptionKey = cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY?.trim();
   const hostedWakeEncryptionKeyVersion =
     cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION?.trim();
@@ -306,6 +453,15 @@ export function buildHostedLocalDevOverrides(
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_ENV"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_GCP_KMS_API_ROOT"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
     ...(hostedWakeEncryptionKey
       ? {
         HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
@@ -321,8 +477,12 @@ export function buildHostedLocalDevOverrides(
         HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: hostedWakeEncryptionKeyringJson,
       }
       : {}),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_WEB_ENCRYPTION_KEY"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_WEB_ENCRYPTION_KEY_VERSION"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_WEB_ENCRYPTION_KEYRING_JSON"),
     HOSTED_WEB_BASE_URL: webOrigin,
-    ...(cloudflareAutomationPrivateJwkJson
+    ...(!cloudflareDevVars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK?.trim()
+      && cloudflareAutomationPrivateJwkJson
       ? {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK: JSON.stringify(
           toPublicEcP256Jwk(parsePrivateEcP256Jwk(
@@ -332,36 +492,22 @@ export function buildHostedLocalDevOverrides(
         ),
       }
       : {}),
-    ...(cloudflareAutomationKeyId
-      ? {
-        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: cloudflareAutomationKeyId,
-      }
-      : {}),
-    ...(cryptoAuthoritySignKeyVersion
-      ? {
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: cryptoAuthoritySignKeyVersion,
-      }
-      : {}),
-    ...(cryptoAuthoritySignPublicKeyPem
-      ? {
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: cryptoAuthoritySignPublicKeyPem,
-      }
-      : {}),
-    ...(hostedCryptoEnv
-      ? {
-        HOSTED_CRYPTO_ENV: hostedCryptoEnv,
-      }
-      : {}),
-    ...(callbackPrivateJwkJson
-      ? {
-        HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: JSON.stringify(
-          toPublicEcP256Jwk(parsePrivateEcP256Jwk(callbackPrivateJwkJson)),
-        ),
-      }
+    ...(cloudflareAutomationKeyId ? { HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: cloudflareAutomationKeyId } : {}),
+    ...(cryptoAuthoritySignKeyVersion ? { HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: cryptoAuthoritySignKeyVersion } : {}),
+    ...(cryptoAuthoritySignPublicKeyPem ? { HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: cryptoAuthoritySignPublicKeyPem } : {}),
+    ...(hostedCryptoEnv ? { HOSTED_CRYPTO_ENV: hostedCryptoEnv } : {}),
+    ...(callbackPublicJwkJson ? { HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: callbackPublicJwkJson } : {}),
+    ...(callbackPublicKeyringJson
+      ? { HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: callbackPublicKeyringJson }
       : {}),
     ...(callbackKeyId ? { HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackKeyId } : {}),
     VERCEL_PROJECT_PRODUCTION_URL: `${config.webHost}:${config.webPort}`,
   };
+}
+
+function copyNonEmptyEnv(source: Record<string, string>, key: string): NodeJS.ProcessEnv {
+  const value = source[key]?.trim();
+  return value ? { [key]: value } : {};
 }
 
 function resolveLocalClientWorkerHost(workerHost: string): string {
@@ -481,6 +627,24 @@ export function buildWranglerEnvFileText(
   ]) {
     const value = resolveWranglerEnvValue(key, source);
 
+    if (!value) {
+      continue;
+    }
+
+    entries.set(key, value);
+  }
+
+  return [...entries.entries()]
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join("\n");
+}
+
+export function buildHostedLocalStateEnvFileText(
+  source: Readonly<Record<string, string | undefined>>,
+): string {
+  const entries = new Map<string, string>();
+  for (const key of HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES) {
+    const value = source[key]?.trim();
     if (!value) {
       continue;
     }

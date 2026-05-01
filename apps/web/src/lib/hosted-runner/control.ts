@@ -18,7 +18,6 @@ export interface HostedRunnerUserDataDeletionBestEffortResult {
   alarmCleared: boolean | null;
   configured: boolean;
   deleted: boolean;
-  deletedRootKeyEnvelope: boolean | null;
   errorCode: string | null;
   r2DeletedObjectCount: number | null;
   r2SkippedUserScopedPrefixes: boolean | null;
@@ -67,9 +66,7 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
           deleted: result.durableObject.stateDeleted
             && result.durableObject.alarmCleared
             && result.r2.supported
-            && !result.r2.skippedUserScopedPrefixes
-            && result.r2.deletedRootKeyEnvelope,
-          deletedRootKeyEnvelope: result.r2.deletedRootKeyEnvelope,
+            && !result.r2.skippedUserScopedPrefixes,
           errorCode: null,
           r2DeletedObjectCount: result.r2.deletedObjectCount,
           r2SkippedUserScopedPrefixes: result.r2.skippedUserScopedPrefixes,
@@ -81,7 +78,6 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
           alarmCleared: null,
           configured: false,
           deleted: false,
-          deletedRootKeyEnvelope: null,
           errorCode: null,
           r2DeletedObjectCount: null,
           r2SkippedUserScopedPrefixes: null,
@@ -100,7 +96,6 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
       alarmCleared: null,
       configured: true,
       deleted: false,
-      deletedRootKeyEnvelope: null,
       errorCode: error instanceof Error && error.name ? error.name : "UnknownError",
       r2DeletedObjectCount: null,
       r2SkippedUserScopedPrefixes: null,

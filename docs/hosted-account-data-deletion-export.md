@@ -93,7 +93,7 @@ The export explicitly omits:
 | `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces. |
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
-| `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and root-key-envelope objects when derivation keys are available. |
+| `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and raw-email objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres. |
 | `providers.oura_whoop_strava` | Best-effort delete | Metadata/counts | Existing provider revocation hooks run before local token deletion. Provider-side retention remains provider-controlled. |
 | `providers.linq_telegram_email_messages` | Local reference delete | Metadata/counts | Deletes Murph-hosted mailbox and routing records; external carrier, Telegram, Linq, and email-provider copies are outside this endpoint. |
 | `providers.stripe_privy` | Documented retention | Documented only | Deletes local references only. Vendor account records need Stripe/Privy/legal workflows. |
@@ -107,9 +107,9 @@ The Durable Object deletion method:
 
 - clears cached runner crypto state for the target user;
 - preflights the Durable Object bound user before deleting R2 objects;
-- reads the user root key before deleting any root-key envelope so opaque per-user prefixes can still be derived;
-- attempts deletion for user-scoped bundle, artifact, browser vault replica, and runner-secret R2 keys when the R2 binding supports deletion/listing;
-- deletes the root-key envelope only after user-scoped R2 cleanup has been attempted with a usable crypto context;
+- reads web-hosted runtime and ingress root context so opaque per-user prefixes can be derived;
+- attempts deletion for user-scoped bundle, artifact, browser vault replica, runner-secret, and raw-email R2 keys when the R2 binding supports deletion/listing;
+- leaves hosted domain root envelopes in web-owned Postgres for the web deletion transaction;
 - deletes runner SQL state for that user only and rejects deletion if the Durable Object is bound to a different user;
 - clears the Durable Object alarm.
 - best-effort destroys the warm runner container for the deleted user so live container state does not linger until normal container expiry.

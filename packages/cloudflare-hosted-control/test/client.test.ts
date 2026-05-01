@@ -692,7 +692,6 @@ function createUserDataDeletionResult(input: { userId: string }) {
     ok: true,
     r2: {
       deletedObjectCount: 4,
-      deletedRootKeyEnvelope: true,
       skippedUserScopedPrefixes: false,
       supported: true,
       userScopedSkipReason: null,

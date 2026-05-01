@@ -1126,7 +1126,6 @@ function makeCloudflareDeletionResult() {
     alarmCleared: true,
     configured: true,
     deleted: true,
-    deletedRootKeyEnvelope: true,
     errorCode: null,
     r2DeletedObjectCount: 0,
     r2SkippedUserScopedPrefixes: false,

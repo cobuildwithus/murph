@@ -135,7 +135,7 @@ export async function handleHostedEmailIngress(
     userId: route.userId,
   });
   const rawMessageStorageRef = await resolveHostedEmailRawMessageStorageRef({
-    key: userCrypto.ingressRootKey,
+    key: userCrypto.rootKey,
     plaintext: rawBytes,
     userId: route.userId,
   });
@@ -144,8 +144,8 @@ export async function handleHostedEmailIngress(
 
   const rawMessageKey = await writeHostedEmailRawMessage({
     bucket: env.BUNDLES,
-    key: userCrypto.ingressRootKey,
-    keyId: userCrypto.ingressRootKeyId,
+    key: userCrypto.rootKey,
+    keyId: userCrypto.rootKeyId,
     plaintext: rawBytes,
     storageRef: rawMessageStorageRef,
     userId: route.userId,
@@ -188,7 +188,7 @@ export async function handleHostedEmailIngress(
       try {
         await deleteHostedEmailRawMessage({
           bucket: env.BUNDLES,
-          key: userCrypto.ingressRootKey,
+          key: userCrypto.rootKey,
           rawMessageKey,
           userId: route.userId,
         });

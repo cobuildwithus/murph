@@ -5,6 +5,11 @@ export interface EcP256JwkPairJson {
   publicJwkJson: string;
 }
 
+export interface EcP256SigningKeyJson {
+  privateJwkJson: string;
+  publicKeyPem: string;
+}
+
 export function createEcP256JwkPairJson(): EcP256JwkPairJson {
   const pair = generateKeyPairSync("ec", {
     namedCurve: "prime256v1",
@@ -15,6 +20,19 @@ export function createEcP256JwkPairJson(): EcP256JwkPairJson {
   return {
     privateJwkJson: JSON.stringify(pair.privateKey),
     publicJwkJson: JSON.stringify(pair.publicKey),
+  };
+}
+
+export function createEcP256SigningKeyJson(): EcP256SigningKeyJson {
+  const pair = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+
+  return {
+    privateJwkJson: JSON.stringify(pair.privateKey),
+    publicKeyPem: pair.publicKey,
   };
 }
 

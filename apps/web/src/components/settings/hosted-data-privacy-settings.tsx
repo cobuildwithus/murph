@@ -34,7 +34,6 @@ interface HostedAccountDeleteResponse {
       alarmCleared: boolean | null;
       configured: boolean;
       deleted: boolean;
-      deletedRootKeyEnvelope: boolean | null;
       errorCode: string | null;
       r2DeletedObjectCount: number | null;
       r2SkippedUserScopedPrefixes: boolean | null;
@@ -556,7 +555,6 @@ function formatCloudflareCleanupResult(result: CloudflareCleanupSummary): string
     result.alarmCleared === false ? "runner alarm not cleared" : null,
     result.r2Supported === false ? "R2 listing/deletion unsupported" : null,
     result.r2SkippedUserScopedPrefixes ? `user-scoped R2 prefixes skipped${result.r2UserScopedSkipReason ? ` (${result.r2UserScopedSkipReason})` : ""}` : null,
-    result.deletedRootKeyEnvelope === false ? "root-key envelope deletion not confirmed" : null,
   ].filter((detail): detail is string => detail !== null);
 
   return details.length > 0

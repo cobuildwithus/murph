@@ -4,6 +4,10 @@ import { getVercelOidcToken } from "@vercel/oidc";
 
 const CLOUD_KMS_SCOPE = "https://www.googleapis.com/auth/cloudkms";
 const DEFAULT_KMS_API_ROOT = "https://cloudkms.googleapis.com/v1";
+const LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
+const LOCAL_KMS_CIPHERTEXT_PREFIX = "local-kms-v1:";
+const LOCAL_KMS_IV_BYTES = 12;
+const LOCAL_KMS_KEY_BYTES = 32;
 const DEFAULT_STS_TOKEN_URI = "https://sts.googleapis.com/v1/token";
 const DEFAULT_IAM_CREDENTIALS_API_ROOT = "https://iamcredentials.googleapis.com/v1";
 
@@ -70,10 +74,138 @@ interface IamGenerateAccessTokenResponse {
 export function createHostedGcpKmsClientFromEnv(
   source: NodeJS.ProcessEnv = process.env,
 ): HostedGcpKmsClient {
+  const apiRoot = readOptionalEnv(source, "HOSTED_CRYPTO_GCP_KMS_API_ROOT");
+  const localKmsEnabled =
+    apiRoot === LOCAL_KMS_API_ROOT
+    || readOptionalEnv(source, "HOSTED_CRYPTO_LOCAL_KMS") === "1";
+
+  if (localKmsEnabled) {
+    if (isHostedCryptoProductionEnvironment(source)) {
+      throw new TypeError("Hosted local KMS is not allowed in production.");
+    }
+
+    return new HostedLocalGcpKmsClient({
+      authoritySignPrivateJwk: parseLocalP256PrivateJwk(
+        readRequiredEnv(source, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
+        "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+      ),
+      wrapKey: decodeFixedBase64Key(
+        readRequiredEnv(source, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
+        "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
+      ),
+    });
+  }
+
   return new HostedGcpKmsJsonClient({
     accessTokenProvider: createHostedGcpAccessTokenProviderFromEnv(source),
-    apiRoot: readOptionalEnv(source, "HOSTED_CRYPTO_GCP_KMS_API_ROOT"),
+    apiRoot,
   });
+}
+
+class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
+  constructor(
+    private readonly config: {
+      authoritySignPrivateJwk: JsonWebKey;
+      wrapKey: Uint8Array;
+    },
+  ) {}
+
+  async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
+    const keyName = requireKmsResourceName(input.keyName, "Local KMS Encrypt keyName");
+    const iv = crypto.getRandomValues(new Uint8Array(LOCAL_KMS_IV_BYTES));
+    const key = await this.importWrapKey(["encrypt"]);
+    const ciphertext = new Uint8Array(
+      await crypto.subtle.encrypt(
+        {
+          additionalData: toArrayBuffer(
+            localKmsAad({
+              additionalAuthenticatedData: input.additionalAuthenticatedData,
+              keyName,
+            }),
+          ),
+          iv,
+          name: "AES-GCM",
+        },
+        key,
+        toArrayBuffer(input.plaintext),
+      ),
+    );
+
+    return {
+      ciphertext: `${LOCAL_KMS_CIPHERTEXT_PREFIX}${encodeBase64(concatBytes(iv, ciphertext))}`,
+      keyName,
+    };
+  }
+
+  async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
+    const keyName = requireKmsResourceName(input.keyName, "Local KMS Decrypt keyName");
+    if (!input.ciphertext.startsWith(LOCAL_KMS_CIPHERTEXT_PREFIX)) {
+      throw new TypeError("Local KMS ciphertext must use the local-kms-v1 envelope.");
+    }
+
+    const packed = decodeBase64(input.ciphertext.slice(LOCAL_KMS_CIPHERTEXT_PREFIX.length));
+    if (packed.byteLength <= LOCAL_KMS_IV_BYTES) {
+      throw new TypeError("Local KMS ciphertext is malformed.");
+    }
+
+    const iv = packed.slice(0, LOCAL_KMS_IV_BYTES);
+    const ciphertext = packed.slice(LOCAL_KMS_IV_BYTES);
+    const key = await this.importWrapKey(["decrypt"]);
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        additionalData: toArrayBuffer(
+          localKmsAad({
+            additionalAuthenticatedData: input.additionalAuthenticatedData,
+            keyName,
+          }),
+        ),
+        iv,
+        name: "AES-GCM",
+      },
+      key,
+      toArrayBuffer(ciphertext),
+    );
+
+    return { plaintext: new Uint8Array(plaintext) };
+  }
+
+  async asymmetricSign(
+    input: GcpKmsAsymmetricSignInput,
+  ): Promise<{ keyVersionName: string; signature: string }> {
+    const keyVersionName = requireKmsResourceName(
+      input.keyVersionName,
+      "Local KMS Sign keyVersionName",
+    );
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      this.config.authoritySignPrivateJwk,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+    const signature = new Uint8Array(
+      await crypto.subtle.sign(
+        { hash: "SHA-256", name: "ECDSA" },
+        key,
+        toArrayBuffer(input.message),
+      ),
+    );
+
+    return {
+      keyVersionName,
+      signature: encodeBase64(signature),
+    };
+  }
+
+  private importWrapKey(keyUsages: KeyUsage[]): Promise<CryptoKey> {
+    return crypto.subtle.importKey(
+      "raw",
+      toArrayBuffer(this.config.wrapKey),
+      "AES-GCM",
+      false,
+      keyUsages,
+    );
+  }
 }
 
 class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
@@ -147,16 +279,77 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
   }
 }
 
+function localKmsAad(input: {
+  additionalAuthenticatedData: string;
+  keyName: string;
+}): Uint8Array {
+  return utf8(
+    JSON.stringify({
+      additionalAuthenticatedData: input.additionalAuthenticatedData,
+      keyName: input.keyName,
+      schema: "murph.hosted-local-kms.v1",
+    }),
+  );
+}
+
+function parseLocalP256PrivateJwk(value: string, label: string): JsonWebKey {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new TypeError(
+      `${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError(`${label} must be a P-256 EC private JWK.`);
+  }
+
+  const jwk = parsed as JsonWebKey;
+  if (
+    jwk.kty !== "EC"
+    || jwk.crv !== "P-256"
+    || typeof jwk.x !== "string"
+    || typeof jwk.y !== "string"
+    || typeof jwk.d !== "string"
+    || jwk.x.length === 0
+    || jwk.y.length === 0
+    || jwk.d.length === 0
+  ) {
+    throw new TypeError(`${label} must be a P-256 EC private JWK.`);
+  }
+
+  return {
+    crv: "P-256",
+    d: jwk.d,
+    kty: "EC",
+    x: jwk.x,
+    y: jwk.y,
+  };
+}
+
+function decodeFixedBase64Key(value: string, label: string): Uint8Array {
+  const decoded = decodeBase64(value);
+  if (decoded.byteLength !== LOCAL_KMS_KEY_BYTES) {
+    throw new TypeError(`${label} must decode to exactly ${LOCAL_KMS_KEY_BYTES} bytes.`);
+  }
+  return decoded;
+}
+
+function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
+  const out = new Uint8Array(left.byteLength + right.byteLength);
+  out.set(left, 0);
+  out.set(right, left.byteLength);
+  return out;
+}
+
 function createHostedGcpAccessTokenProviderFromEnv(
   source: NodeJS.ProcessEnv,
 ): HostedGcpAccessTokenProvider {
   const staticAccessToken = readOptionalEnv(source, "HOSTED_CRYPTO_GCP_ACCESS_TOKEN");
   if (staticAccessToken) {
-    if (
-      source.NODE_ENV === "production"
-      || source.VERCEL_ENV === "production"
-      || source.HOSTED_CRYPTO_ENV === "prod"
-    ) {
+    if (isHostedCryptoProductionEnvironment(source)) {
       throw new TypeError(
         "HOSTED_CRYPTO_GCP_ACCESS_TOKEN is not allowed in production; use Vercel OIDC / GCP Workload Identity Federation.",
       );
@@ -179,6 +372,14 @@ function createHostedGcpAccessTokenProviderFromEnv(
       "HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID",
     ),
   });
+}
+
+function isHostedCryptoProductionEnvironment(source: NodeJS.ProcessEnv): boolean {
+  const hostedCryptoEnv = readOptionalEnv(source, "HOSTED_CRYPTO_ENV")?.toLowerCase();
+  return source.NODE_ENV === "production"
+    || source.VERCEL_ENV === "production"
+    || hostedCryptoEnv === "prod"
+    || hostedCryptoEnv === "production";
 }
 
 class StaticHostedGcpAccessTokenProvider implements HostedGcpAccessTokenProvider {
@@ -321,7 +522,7 @@ function requireKmsResourceName(value: string, label: string): string {
 function readRequiredEnv(source: NodeJS.ProcessEnv, key: string): string {
   const value = readOptionalEnv(source, key);
   if (!value) {
-    throw new TypeError(`${key} must be configured for hosted crypto GCP Workload Identity.`);
+    throw new TypeError(`${key} must be configured for hosted crypto GCP KMS.`);
   }
   return value;
 }

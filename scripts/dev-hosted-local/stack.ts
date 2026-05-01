@@ -18,11 +18,13 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
+  USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
   webDir,
 } from "./constants.ts";
 import {
   buildHostedRunnerLocalBuildId,
   buildHostedLocalDevOverrides,
+  buildHostedLocalStateEnvFileText,
   buildWranglerEnvFileText,
   buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
@@ -165,6 +167,7 @@ export async function startHostedLocalDevStack(input: {
   const workerEnvPath = path.join(tempDir, "cloudflare-worker.env");
   const workerDevVarsPath = path.join(tempDir, "cloudflare-worker.dev.vars");
   const workerDevVarsBackupPath = path.join(tempDir, "cloudflare-worker.dev.vars.backup");
+  const hostedLocalStateDevVarsPath = path.join(tempDir, "hosted-local-state.dev.vars");
   const workerConfigPath = path.join(tempDir, "cloudflare-worker.local-dev.generated.json");
   const repoEnvPath = path.join(repoRoot, ".env");
   const webEnvPath = path.join(webDir, ".env");
@@ -199,7 +202,7 @@ export async function startHostedLocalDevStack(input: {
     const pulledEnv = (config.skipVercelPull || providedVercelOidcToken)
       ? {}
       : await readSimpleEnvFile(pulledEnvPath);
-    const vercelEnv: NodeJS.ProcessEnv = {
+    const rawVercelEnv: NodeJS.ProcessEnv = {
       ...repoEnv,
       ...pulledEnv,
       ...webEnv,
@@ -207,6 +210,9 @@ export async function startHostedLocalDevStack(input: {
       ...localStripeEnv,
       ...initialEnv,
     };
+    const vercelEnv = shouldUseRemoteHostedCryptoKeys(rawVercelEnv)
+      ? rawVercelEnv
+      : stripHostedCryptoMaterialEnv(rawVercelEnv);
 
     vercelEnv.DATABASE_URL = resolveHostedLocalDatabaseUrl({
       databaseUrlOverride: config.databaseUrlOverride,
@@ -275,6 +281,7 @@ export async function startHostedLocalDevStack(input: {
       : copyWithoutHostedLocalCodexBridgeProxyEnv(workerRuntimeEnv);
     if (workerRuntimeEnv !== null) {
       const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
+      const hostedLocalStateEnvText = `${buildHostedLocalStateEnvFileText(cloudflareDevVars)}\n`;
       await writeFile(workerEnvPath, workerEnvText, {
         encoding: "utf8",
         mode: 0o600,
@@ -285,6 +292,11 @@ export async function startHostedLocalDevStack(input: {
         mode: 0o600,
       });
       await chmod(workerDevVarsPath, 0o600);
+      await writeFile(hostedLocalStateDevVarsPath, hostedLocalStateEnvText, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await chmod(hostedLocalStateDevVarsPath, 0o600);
       await writeFile(
         workerConfigPath,
         `${JSON.stringify(
@@ -504,8 +516,9 @@ export async function startHostedLocalDevStack(input: {
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true });
         if (hadExistingCloudflareDevVars) {
-          await rename(workerDevVarsBackupPath, cloudflareDevVarsPath);
+          await rm(workerDevVarsBackupPath, { force: true });
         }
+        await rename(hostedLocalStateDevVarsPath, cloudflareDevVarsPath);
       }
       await rm(workerConfigPath, { force: true });
       if (!tempDirOverride) {
@@ -785,6 +798,30 @@ function stripHostedLocalCodexCredentialEnv<TEnv extends Record<string, string |
 function stripHostedLocalCodexBridgeProxyEnv(env: Record<string, string | undefined>): void {
   delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV];
   delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV];
+}
+
+function shouldUseRemoteHostedCryptoKeys(env: Record<string, string | undefined>): boolean {
+  const value = env[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]?.trim().toLowerCase();
+  return value === "1" || value === "true";
+}
+
+function stripHostedCryptoMaterialEnv<TEnv extends Record<string, string | undefined>>(
+  env: TEnv,
+): TEnv {
+  const nextEnv = { ...env };
+  for (const key of Object.keys(nextEnv)) {
+    if (
+      key.startsWith("HOSTED_CRYPTO_")
+      || key.startsWith("HOSTED_WEB_CALLBACK_SIGNING_")
+      || key.startsWith("HOSTED_WEB_ENCRYPTION_")
+      || key.startsWith("HOSTED_WAKE_ENCRYPTION_")
+      || /^HOSTED_EXECUTION_(?:PLATFORM_ENVELOPE|AUTOMATION_RECIPIENT|RECOVERY_RECIPIENT|TEE_AUTOMATION_RECIPIENT)(?:_|$)/u
+        .test(key)
+    ) {
+      delete nextEnv[key];
+    }
+  }
+  return nextEnv;
 }
 
 function copyWithoutHostedLocalCodexBridgeProxyEnv<TEnv extends Record<string, string | undefined>>(

@@ -78,20 +78,6 @@ export async function hostedRunnerSecretsObjectKey(
   return `users/runner-secrets/${userSegment}.json`;
 }
 
-export async function hostedUserRootKeyEnvelopeObjectKey(
-  envelopeEncryptionKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey: envelopeEncryptionKey,
-    scope: "user-key-envelope-path",
-    value: `user:${userId}`,
-  });
-
-  return `users/keys/${userSegment}.json`;
-}
-
 export async function hostedBrowserVaultReplicaObjectKey(input: {
   dataVersion: string;
   rootKey: Uint8Array;

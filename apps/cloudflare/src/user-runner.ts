@@ -30,6 +30,7 @@ import {
   hostedRunnerSecretsObjectKey,
 } from "./storage-paths.js";
 import type { HostedExecutionEnvironment } from "./env.js";
+import { hostedEmailRawMessageUserPrefix } from "./hosted-email.ts";
 import { toStringEnvSource } from "./string-env.js";
 import {
   HostedUserCryptoRepairNeededError,
@@ -78,7 +79,6 @@ export interface HostedRunnerUserDataDeletionResult {
   ok: true;
   r2: {
     deletedObjectCount: number;
-    deletedRootKeyEnvelope: boolean;
     skippedUserScopedPrefixes: boolean;
     supported: boolean;
     userScopedSkipReason: string | null;
@@ -309,7 +309,6 @@ export class HostedUserRunner {
       });
       return {
         deletedObjectCount: 0,
-        deletedRootKeyEnvelope: false,
         skippedUserScopedPrefixes: true,
         supported: false,
         userScopedSkipReason: safeCleanupErrorCode(error),
@@ -576,7 +575,8 @@ export class HostedUserRunner {
     const supportsObjectDeletion = Boolean(this.bucket.delete);
     const supportsPrefixDeletion = Boolean(this.bucket.delete && this.bucket.list);
     let userCrypto: HostedUserCryptoContext | null = null;
-    let userScopedSkipReason: string | null = null;
+    let ingressCrypto: HostedUserCryptoContext | null = null;
+    const userScopedSkipReasons: string[] = [];
 
     try {
       userCrypto = await requireHostedUserCryptoContextFromEnvironment({
@@ -590,13 +590,27 @@ export class HostedUserRunner {
       if (!(error instanceof HostedUserCryptoRepairNeededError)) {
         throw error;
       }
-      userScopedSkipReason = error instanceof Error && error.name ? error.name : "UnknownError";
+      userScopedSkipReasons.push(error instanceof Error && error.name ? error.name : "UnknownError");
+    }
+
+    try {
+      ingressCrypto = await requireHostedUserCryptoContextFromEnvironment({
+        bucket: this.bucket,
+        domain: "ingress",
+        environment: this.env,
+        reason: "account-data-deletion",
+        userId,
+      });
+    } catch (error) {
+      if (!(error instanceof HostedUserCryptoRepairNeededError)) {
+        throw error;
+      }
+      userScopedSkipReasons.push(error instanceof Error && error.name ? error.name : "UnknownError");
     }
 
     let deletedObjectCount = 0;
-    let deletedRootKeyEnvelope = false;
-    if (userCrypto) {
-      if (supportsPrefixDeletion) {
+    if (supportsPrefixDeletion) {
+      if (userCrypto) {
         const prefixes = [
           await hostedBundleUserPrefix(userCrypto.rootKey, userId),
           await hostedArtifactUserPrefix(userCrypto.rootKey, userId),
@@ -617,16 +631,30 @@ export class HostedUserRunner {
         // Domain-root envelopes are canonical in web-owned Postgres. Cloudflare
         // deletes only the user-scoped runtime blobs that it stores in R2.
       } else {
-        userScopedSkipReason = "R2PrefixDeletionUnsupported";
+        userScopedSkipReasons.push("RuntimeCryptoContextUnavailable");
       }
+
+      if (ingressCrypto) {
+        deletedObjectCount += (await deleteR2ObjectsWithPrefix(
+          this.bucket,
+          await hostedEmailRawMessageUserPrefix(ingressCrypto.rootKey, userId),
+        )).deletedCount;
+      } else {
+        userScopedSkipReasons.push("IngressCryptoContextUnavailable");
+      }
+    } else if (userCrypto || ingressCrypto) {
+      userScopedSkipReasons.push("R2PrefixDeletionUnsupported");
     }
 
+    const skippedUserScopedPrefixes =
+      !supportsPrefixDeletion || userCrypto === null || ingressCrypto === null;
     return {
       deletedObjectCount,
-      deletedRootKeyEnvelope,
-      skippedUserScopedPrefixes: userCrypto === null || !supportsPrefixDeletion,
+      skippedUserScopedPrefixes,
       supported: supportsObjectDeletion && supportsPrefixDeletion,
-      userScopedSkipReason: userCrypto === null || !supportsPrefixDeletion ? userScopedSkipReason : null,
+      userScopedSkipReason: skippedUserScopedPrefixes
+        ? Array.from(new Set(userScopedSkipReasons)).join(",") || null
+        : null,
     };
   }
 

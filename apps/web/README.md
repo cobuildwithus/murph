@@ -192,9 +192,9 @@ Hosted managed crypto:
   `HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL`,
   `HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID`, and
   `HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID`
-- local/dev escape hatch: `HOSTED_CRYPTO_GCP_ACCESS_TOKEN`; production also
-  requires the explicit `HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN=1`
-  override
+- local/dev escape hatch: `HOSTED_CRYPTO_GCP_ACCESS_TOKEN` with
+  `HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV=1`; production must use
+  Vercel OIDC / GCP Workload Identity Federation
 - optional future recipients:
   `HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK`,
   `HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID`,

@@ -194,7 +194,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       ok: true,
       r2: {
         deletedObjectCount: 1,
-        deletedRootKeyEnvelope: true,
         skippedUserScopedPrefixes: true,
         supported: false,
         userScopedSkipReason: "HostedUserCryptoRepairNeededError",
@@ -214,7 +213,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       alarmCleared: true,
       configured: true,
       deleted: false,
-      deletedRootKeyEnvelope: true,
       errorCode: null,
       r2DeletedObjectCount: 1,
       r2SkippedUserScopedPrefixes: true,

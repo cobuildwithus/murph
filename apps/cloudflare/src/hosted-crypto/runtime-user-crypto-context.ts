@@ -10,7 +10,7 @@ import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionEnvironment } from "../env.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import {
-  unwrapHostedWorkerRuntimeRoots,
+  unwrapHostedWorkerRuntimeRoot,
   type HostedRuntimeCryptoContextResponse,
   type HostedWorkerCryptoEnv,
 } from "./runtime-crypto-context.ts";
@@ -18,18 +18,11 @@ import {
 type HostedWorkerRuntimeDomain = Extract<HostedCryptoDomain, "ingress" | "runtime">;
 
 export interface HostedUserCryptoContext {
+  domain: HostedWorkerRuntimeDomain;
   envelope: HostedDomainRootKeyEnvelopeV1;
   keysById: Readonly<Record<string, Uint8Array>>;
   rootKey: Uint8Array;
   rootKeyId: string;
-  ingressEnvelope: HostedDomainRootKeyEnvelopeV1;
-  ingressKeysById: Readonly<Record<string, Uint8Array>>;
-  ingressRootKey: Uint8Array;
-  ingressRootKeyId: string;
-  runtimeEnvelope: HostedDomainRootKeyEnvelopeV1;
-  runtimeKeysById: Readonly<Record<string, Uint8Array>>;
-  runtimeRootKey: Uint8Array;
-  runtimeRootKeyId: string;
 }
 
 export class HostedUserCryptoRepairNeededError extends Error {
@@ -96,28 +89,22 @@ async function fetchAndUnwrapRuntimeCryptoContext(input: {
   }
 
   const context = parseHostedRuntimeCryptoContextResponse(await response.json(), input.userId);
-  const roots = await unwrapHostedWorkerRuntimeRoots({
+  const domain = input.domain ?? "runtime";
+  const root = await unwrapHostedWorkerRuntimeRoot({
     context,
+    domain,
     env: hostedWorkerCryptoEnvFromExecutionEnvironment({
       env: input.environment,
       userId: input.userId,
     }),
   });
-  const selected = input.domain === "ingress" ? roots.ingress : roots.runtime;
 
   return {
-    envelope: selected.envelope,
-    keysById: { [selected.envelope.rootKeyId]: selected.rootKey },
-    rootKey: selected.rootKey,
-    rootKeyId: selected.envelope.rootKeyId,
-    ingressEnvelope: roots.ingress.envelope,
-    ingressKeysById: { [roots.ingress.envelope.rootKeyId]: roots.ingress.rootKey },
-    ingressRootKey: roots.ingress.rootKey,
-    ingressRootKeyId: roots.ingress.envelope.rootKeyId,
-    runtimeEnvelope: roots.runtime.envelope,
-    runtimeKeysById: { [roots.runtime.envelope.rootKeyId]: roots.runtime.rootKey },
-    runtimeRootKey: roots.runtime.rootKey,
-    runtimeRootKeyId: roots.runtime.envelope.rootKeyId,
+    domain,
+    envelope: root.envelope,
+    keysById: { [root.envelope.rootKeyId]: root.rootKey },
+    rootKey: root.rootKey,
+    rootKeyId: root.envelope.rootKeyId,
   };
 }
 

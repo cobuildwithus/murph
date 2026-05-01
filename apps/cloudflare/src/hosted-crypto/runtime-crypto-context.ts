@@ -99,6 +99,22 @@ export async function unwrapHostedWorkerRuntimeRoots(input: {
   return { ingress, runtime };
 }
 
+export async function unwrapHostedWorkerRuntimeRoot(input: {
+  context: HostedRuntimeCryptoContextResponse;
+  domain: "ingress" | "runtime";
+  env: HostedWorkerCryptoEnv;
+}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
+  assertHostedRuntimeCryptoContext(input.context);
+  const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
+  return await unwrapWorkerDomainRoot({
+    domain: input.domain,
+    envelope: parseHostedDomainRootKeyEnvelope(input.context.envelopes[input.domain]),
+    env: input.env,
+    privateJwk,
+    userId: input.context.userId,
+  });
+}
+
 async function unwrapWorkerDomainRoot(input: {
   domain: "ingress" | "runtime";
   envelope: HostedDomainRootKeyEnvelopeV1;

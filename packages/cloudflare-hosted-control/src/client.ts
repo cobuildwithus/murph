@@ -56,7 +56,6 @@ export interface CloudflareHostedControlUserDataDeletionResult {
   ok: true;
   r2: {
     deletedObjectCount: number;
-    deletedRootKeyEnvelope: boolean;
     skippedUserScopedPrefixes: boolean;
     supported: boolean;
     userScopedSkipReason: string | null;
@@ -414,10 +413,6 @@ function parseCloudflareHostedControlUserDataDeletionResult(
       deletedObjectCount: requireNonNegativeInteger(
         r2.deletedObjectCount,
         "Cloudflare user-data deletion result r2.deletedObjectCount",
-      ),
-      deletedRootKeyEnvelope: requireBoolean(
-        r2.deletedRootKeyEnvelope,
-        "Cloudflare user-data deletion result r2.deletedRootKeyEnvelope",
       ),
       skippedUserScopedPrefixes: requireBoolean(
         r2.skippedUserScopedPrefixes,

@@ -477,10 +477,9 @@ experimentOnboarding:
     missedLogFollowupCopy: "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate."
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, the chosen testPlanId, the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-  - Norwegian 4x4 works by spending repeated minutes near the top of your aerobic system. A four-minute interval is long enough for oxygen demand, heart rate, ventilation, stroke volume, and cardiac output to climb toward a high steady load rather than peaking for only a few sprint seconds.
-  - The three-minute active recoveries are part of the mechanism. They lower effort enough to repeat the next interval, but keep the aerobic system warm, so the session accumulates more total time near high oxygen uptake than one unsustainably hard continuous effort.
-  - Across weeks, the expected adaptation is both central and peripheral: the heart may pump more blood per beat, muscles may improve capillary delivery and mitochondrial oxygen use, and lactate handling may become less limiting. Those changes are the physiology behind lab-measured VO2max improvements in the 4x4 evidence base.
-  - Wearable cardio-fitness estimates, heart-rate recovery, and resting heart rate are only proxies for that physiology. HRV, sleep, and next-day recovery can move in either direction early because the same sympathetic and metabolic stress that drives adaptation can temporarily tax recovery.
+  - A four-minute interval is long enough for oxygen demand, heart rate, ventilation, stroke volume, and cardiac output to climb toward a high steady load — rather than peaking for only a few sprint seconds. You spend repeated minutes near the top of your aerobic system.
+  - The active recoveries are part of the mechanism. They lower effort enough to repeat the next interval but keep the aerobic system warm. The session accumulates more total time near high oxygen uptake than one unsustainably hard continuous effort would allow.
+  - "Across weeks, the changes are both central and peripheral: the heart may pump more blood per beat (stroke volume), muscles may improve capillary delivery and mitochondrial oxygen use, and lactate handling may become less limiting. These are the physiology behind lab-measured VO2max improvements in the 4x4 evidence base."
 claims:
 
   -
