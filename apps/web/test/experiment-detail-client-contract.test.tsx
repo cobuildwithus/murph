@@ -445,6 +445,7 @@ function createProtocol(
     protocolTips: [],
     protocolKeepInMind: [],
     protocolLogFields: [],
+    mechanismChain: [],
     whyItWorks: "Heat load can act as a stressor.",
     experts: [],
     researchStats: [],

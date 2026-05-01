@@ -6,6 +6,7 @@ import type {
   HealthCommonsEvidenceAppraisal,
   HealthCommonsMeasurementMethod,
   HealthCommonsMeasurementPlanPath,
+  HealthCommonsMechanismChainStep,
   HealthCommonsRedirect,
   HealthCommonsRelation,
   HealthCommonsProtocolSpec,
@@ -368,6 +369,11 @@ export interface HealthCommonsWebExperimentProtocolStep {
   title: string;
 }
 
+export interface HealthCommonsWebExperimentMechanismChainStep {
+  content: string;
+  label: string;
+}
+
 export interface HealthCommonsWebExperimentExpert {
   field: string;
   initials: string;
@@ -391,6 +397,7 @@ export interface HealthCommonsWebExperimentProtocolTab {
   id: string;
   key: string;
   measurementPaths: HealthCommonsWebExperimentMeasurementPath[];
+  mechanismChain: HealthCommonsWebExperimentMechanismChainStep[];
   protocol: HealthCommonsWebExperimentProtocolStep[];
   protocolFacts: HealthCommonsWebExperimentProtocolFact[];
   protocolTips: string[];
@@ -766,6 +773,7 @@ function buildExperimentProtocolTab(input: {
     id: input.bundle.route.routeId,
     key: input.protocol.key,
     measurementPaths: toMeasurementPaths(input.protocol, input.entitiesByKey),
+    mechanismChain: toMechanismChain(input.protocol.mechanismChain),
     protocol: toProtocolSteps(input.protocol.protocol),
     protocolFacts: toProtocolFacts(input.protocol.protocol, testPlan),
     protocolTips: input.protocol.protocol?.tips ?? [],
@@ -1347,6 +1355,15 @@ function toProtocolSteps(
     detail: step,
     number: index + 1,
     title: `Step ${index + 1}`,
+  }));
+}
+
+function toMechanismChain(
+  mechanismChain: readonly HealthCommonsMechanismChainStep[] | undefined,
+): HealthCommonsWebExperimentMechanismChainStep[] {
+  return (mechanismChain ?? []).map((step) => ({
+    content: step.content,
+    label: step.label,
   }));
 }
 
@@ -2321,6 +2338,7 @@ function prepareEntityForWebBundle(
     measurementMethod: entity.measurementMethod,
     measurementPlan: entity.measurementPlan,
     media: readPassthroughUnknown(entity, "media"),
+    mechanismChain: entity.mechanismChain,
     options: entity.options,
     profileImageUrl: readPassthroughString(entity, "profileImageUrl"),
     protocol: entity.protocol,

@@ -577,9 +577,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Want to log whether you used the LED mask session and any symptoms?
     confirmationPrompt: Confirm the exact protocol, device, eye protection, baseline-photo workflow, schedule, logging fields, stop conditions, and reminder preference before creating an active experiment.
 whyItWorks:
-- 'Photobiomodulation plausibility is parameter-dependent: reviews propose photoreceptor and mitochondrial signaling pathways, including cytochrome c oxidase, ATP, reactive oxygen species, calcium signaling, and downstream skin-cell responses, but this is mechanism context rather than proof of visible rejuvenation. [source_artifact:pmid-38309304; source_artifact:pmid-24049929; source_artifact:pmid-38674067; source_artifact:pmid-38307144]'
-- Direct and near-direct human skin-aging evidence uses red light around 630-660 nm paired with near-infrared around 830-855 nm in home masks, split-face facial devices, or clinic-style LED systems, with outcomes assessed over repeated multi-week courses rather than one-off sessions; attribution-limited home-mask, deeper-NIR, device-validation, and topical-combination studies should stay labeled as such. [source_artifact:pmid-39960921; source_artifact:pmid-32649063; source_artifact:doi-10.3390-cosmetics12010004; source_artifact:pmid-16414908; source_artifact:pmid-17566756; source_artifact:pmid-16989189; source_artifact:pmid-17760698; source_artifact:pmid-37418018; source_artifact:pmid-39439130; source_artifact:pmid-32716115]
-- The protocol stays conservative because LED dermatology dose reporting is heterogeneous and incomplete, because one direct mask 510(k) documents the exact 10-minute, 5-times-weekly, 6-week device-configuration template without proving it is an optimized clinical dose, and because PBM literature does not support a simple more-is-better rule. [source_artifact:fda-currentbody-series-2-k250966-2025-06-25; source_artifact:pmid-41032498; source_artifact:pmid-26964800; source_artifact:pmid-22461763; source_artifact:pmid-40167796]
+  - "## Photons hit treated skin\n\nRed and near-infrared light reach facial tissue at the selected geometry. The target is local skin signaling, not whole-body recovery."
+  - "## Cell-energy signals shift\n\nPBM affects mitochondrial and nitric-oxide pathways, changing downstream repair and inflammatory signaling. Skin response depends on wavelength, dose, coverage, and consistency."
+  - "## Remodeling is slow\n\nFine lines and texture move through repeated dermal signaling, not first-session glow. Same lighting, angle, expression, and skincare rules make the signal visible."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Red/NIR mask · 10 min · 5x/week · eye protection"
+  -
+    label: "Light dose"
+    content: "Photons reach epidermis and dermis; mitochondrial signaling shifts"
+  -
+    label: "Repeated signal"
+    content: "Same region · same wavelength · same dose repeat"
+  -
+    label: "Adaptation"
+    content: "Fibroblast signaling rises · dermal support improves · texture smooths slowly"
 claims:
 - claimId: supportive-but-heterogeneous-direct-evidence
   type: evidence_scope

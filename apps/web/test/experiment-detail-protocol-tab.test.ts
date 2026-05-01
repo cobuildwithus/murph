@@ -188,8 +188,9 @@ describe("ProtocolTab", () => {
     expect(markup).not.toContain("−5–10%");
     expect(markup).toContain('data-card="Resting Heart Rate"');
     expect(markup).toContain('data-card="Morning Blood Pressure"');
-    expect(markup).toContain("The 4-minute rep is the dose");
+    expect(markup).toContain("4-minute rep is dose");
     expect(markup).toContain("During each rep");
+    expect(markup).toContain("High blood flow · shear stress · lactate turnover");
     expect(markup).not.toContain('data-card="HRV / RMSSD"');
     expect(markup).not.toContain('data-card="Sleep Efficiency"');
     expect(markup).toContain("Morning Blood Pressure");

@@ -85,6 +85,7 @@ export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
     memberId: input.memberId,
     pendingLinqChatId: null,
     pendingLinqRecipientPhone: null,
+    prisma: input.prisma,
     telegramThreadId: null,
     telegramUserId: null,
   });
@@ -117,7 +118,11 @@ export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
   });
 
   return routingRecord
-    ? await projectHostedMemberRoutingLookup(routingRecord, "telegramUserLookupKey")
+    ? await projectHostedMemberRoutingLookup(
+        routingRecord,
+        "telegramUserLookupKey",
+        input.prisma,
+      )
     : null;
 }
 
@@ -162,7 +167,11 @@ export async function resolveHostedMemberRoutingByTelegramUserId(input: {
   const [routingRecord] = [...routingRecordByMemberId.values()];
 
   return {
-    lookup: await projectHostedMemberRoutingLookup(routingRecord, "telegramUserId"),
+    lookup: await projectHostedMemberRoutingLookup(
+      routingRecord,
+      "telegramUserId",
+      input.prisma,
+    ),
     status: "found",
   };
 }
@@ -213,5 +222,5 @@ export async function readHostedMemberRoutingState(input: {
     select: hostedMemberRoutingStateSelect,
   });
 
-  return routingRecord ? await projectHostedMemberRoutingState(routingRecord) : null;
+  return routingRecord ? await projectHostedMemberRoutingState(routingRecord, input.prisma) : null;
 }

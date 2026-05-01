@@ -758,10 +758,22 @@ experimentOnboarding:
     missedLogFollowupCopy: You missed a Tabata log. Record whether the session happened, completed rounds, symptoms, and recovery rather than guessing later.
     confirmationPrompt: Create a 7-day baseline plus 6-week Tabata 20/10 experiment with one conservative 8-round block twice weekly, safety stop rules, and recovery logging?
 whyItWorks:
-  - The 20/10 structure can create high aerobic and anaerobic stress when intensity, completion, and rest fidelity are controlled.
-  - The most appropriate self-experiment target is cardiorespiratory-fitness trend or work-capacity context, while the strongest direct evidence remains small and supervised rather than broad home-workout proof.
-  - Completed rounds, modality, and true rests matter because very high nominal intensity can change total completed work and time near high oxygen uptake.
-  - Recovery context matters because acute autonomic load, soreness, heat, rhabdomyolysis, and musculoskeletal evidence show that short workouts can still carry meaningful burden.
+  - "## 20/10 compresses oxygen debt\n\n20 sec hard work spikes demand; 10 sec rest is too short to reset. Heart, lungs, and muscle chase a load that keeps stacking."
+  - "## Rest fidelity is the protocol\n\nTrue rest preserves the contrast. Adding movements during rest turns the session into a different workout with different fatigue and safety profile."
+  - "## Recovery decides adaptation\n\nThe signal is repeated high demand without wrecking the next 24–48h. VO₂ and work-capacity gains need enough recovery to convert stress into adaptation."
+mechanismChain:
+  -
+    label: "Session"
+    content: "8 × 20 sec hard / 10 sec true rest"
+  -
+    label: "Acute physiology"
+    content: "Oxygen demand outruns recovery; heart and lungs chase fast load"
+  -
+    label: "Repeated signal"
+    content: "Short hypoxic bursts · lactate · high heart rate repeat"
+  -
+    label: "Adaptation"
+    content: "Faster oxygen delivery · stronger buffering · VO₂ signal rises if recovered"
 claims:
 
   -

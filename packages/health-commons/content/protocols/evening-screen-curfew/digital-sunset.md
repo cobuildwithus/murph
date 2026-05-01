@@ -829,10 +829,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you end up doing the screen cutoff last night? Totally fine either way — I just want the experiment record to be accurate.
     confirmationPrompt: Show the protocol key, bedtime anchor, curfew window, phone-location plan, exceptions, logging expectations, stop conditions, test plan, and reminder policy before creating the active experiment or any automations.
 whyItWorks:
-- "The rule can lower several bedtime inputs at once: personal-screen light exposure, emotionally or cognitively stimulating content, message and work loops, notifications, bedtime procrastination, and in-bed pickups."
-- "Light is one plausible pathway because evening room and display light can affect melatonin timing, alertness, circadian markers, and sleep latency, but filter-only and light-manipulation findings are mixed; stopping screens is not the same intervention as changing screen color."
-- "Arousal and displacement may be the most user-visible pathways. If the cutoff moves phone-stop time and lights-out earlier, or lowers pre-sleep wiredness, sleep onset may become easier."
-- "The protocol fails as a safety intervention if it makes the user sleep less, feel anxious, or miss necessary contact. That is why planned exceptions, gradual ramps, and sleep-opportunity stop rules are part of the dose rather than afterthoughts."
+  - "## Screens keep the brain engaged\n\nPhones and laptops deliver light, novelty, decisions, messages, and social threat checks. Those inputs keep arousal up when sleep needs boring conditions."
+  - "## Curfew removes 3 inputs\n\nNo screens cuts melanopic light, interactive content, and notification loops together. The mechanism is not blue light alone; it is lower sensory and cognitive activation."
+  - "## Bedtime becomes less negotiated\n\nRepeating the boundary removes in-bed pickups and delayed lights-out minutes. Sleep onset improves when the final pre-bed window stops recruiting attention."
+mechanismChain:
+  -
+    label: "Session"
+    content: "30–60 min no personal screens before bed"
+  -
+    label: "Inputs removed"
+    content: "Less melanopic light · fewer notifications · less cognitive arousal"
+  -
+    label: "Repeated signal"
+    content: "Lights-out shifts earlier; in-bed pickups stop repeating"
+  -
+    label: "Adaptation"
+    content: "Sleep pressure wins sooner · sleep efficiency improves · bedtime friction drops"
 claims:
 -
   claimId: identity-direct-definition-personal-screen-curfew

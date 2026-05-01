@@ -568,9 +568,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you use the compression pants session today? Totally fine either way — I just want the experiment record and symptoms to be accurate.
     confirmationPrompt: Show protocol key, testPlanId, safety-screen result, selected device/model, garment coverage, pressure/intensity, mode, duration, target/minimum sessions, primary outcome, safety stop rules, baseline/intervention dates, and reminder policy before creating the active experiment.
 whyItWorks:
-- Cyclic external compression can plausibly move venous blood and fluid, change local perfusion, and alter oxygenation or hemoglobin-related signals; this is mechanism context, not proof of faster recovery (`source_artifact:pmid-29122964`, `source_artifact:pmid-30300043`, `source_artifact:pmid-41768774`).
-- In direct post-exercise recovery evidence, the most user-relevant signal is how the legs feel—soreness, pain, fatigue, and perceived recovery—while performance and biomarker effects are smaller, mixed, or inconsistent (`source_artifact:doi-10.1519-ssc.0000000000000892`, `source_artifact:pmid-35456170`, `source_artifact:pmid-39416507`).
-- The practical experiment tests whether a repeatable short compression session reliably improves comfort enough to be worth the time, rather than assuming the device reverses muscle damage or improves next-session output (`source_artifact:pmid-33418535`, `source_artifact:pmid-40325678`, `source_artifact:doi-10.1007-s11332-024-01217-5`).
+  - "## Mechanical squeeze moves fluid\n\nSequential compression empties veins and interstitial fluid from the legs during inflation. Deflation allows refill; each cycle moves blood and fluid through tissue."
+  - "## Comfort is the practical endpoint\n\nThe best signal is how the legs feel after a matched trigger: soreness, heaviness, and fatigue. It is not proof that muscle damage reversed."
+  - "## Dose fails when pressure becomes stress\n\nLowest comfortable pressure keeps the mechanism circulatory. Pain, numbness, skin marks, swelling, or focal pressure means the device is loading the wrong tissue."
+mechanismChain:
+  -
+    label: "Session"
+    content: "20–30 min sequential leg compression · low comfortable pressure"
+  -
+    label: "Pressure cycle"
+    content: "Inflation empties veins and fluid; deflation allows refill"
+  -
+    label: "Repeated signal"
+    content: "Post-exercise pooling, heaviness, and soreness meet same cycle"
+  -
+    label: "Adaptation"
+    content: "Legs feel lighter · soreness drops · comfort improves"
 claims:
 - claimId: scope-consumer-recovery-not-medical-ipc
   type: design_guardrail

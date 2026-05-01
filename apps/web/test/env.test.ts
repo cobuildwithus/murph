@@ -8,7 +8,7 @@ describe("readHostedDeviceSyncEnvironment", () => {
   it("reads the hosted device-sync env from unprefixed variables", () => {
     const environment = readHostedDeviceSyncEnvironment({
       NODE_ENV: "test",
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://example.test/device-sync",
       OURA_CLIENT_ID: "oura-client",
       OURA_CLIENT_SECRET: "oura-secret",
@@ -25,7 +25,7 @@ describe("readHostedDeviceSyncEnvironment", () => {
   it("falls back to the Vercel production domain for hosted defaults", () => {
     const environment = readHostedDeviceSyncEnvironment({
       NODE_ENV: "test",
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
       VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
     });
 
@@ -38,7 +38,7 @@ describe("readHostedDeviceSyncEnvironment", () => {
     expect(() =>
       readHostedDeviceSyncEnvironment({
         NODE_ENV: "test",
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
         VERCEL_PROJECT_PRODUCTION_URL: "http://www.withmurph.ai",
       }),
     ).toThrow(/Hosted execution base URLs must use HTTPS/u);
@@ -47,7 +47,7 @@ describe("readHostedDeviceSyncEnvironment", () => {
   it("preserves explicit device-sync values when a lower-priority hosted public URL is invalid", () => {
     const environment = readHostedDeviceSyncEnvironment({
       NODE_ENV: "test",
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://api.withmurph.ai/device-sync",
       DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS: "https://www.withmurph.ai",
       DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: "https://www.withmurph.ai",
@@ -62,7 +62,7 @@ describe("readHostedDeviceSyncEnvironment", () => {
   it("preserves explicit empty allowlists instead of activating the canonical fallback origin", () => {
     const environment = readHostedDeviceSyncEnvironment({
       NODE_ENV: "test",
-      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
       DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS: "",
       DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: "",
       VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
@@ -72,21 +72,31 @@ describe("readHostedDeviceSyncEnvironment", () => {
     expect(environment.allowedReturnOrigins).toEqual([]);
   });
 
-  it("requires DEVICE_SYNC_ENCRYPTION_KEY", () => {
+  it("requires HOSTED_DEVICE_ROUTING_INDEX_KEY", () => {
     expect(() =>
       readHostedDeviceSyncEnvironment({
         NODE_ENV: "test",
         WHOOP_CLIENT_ID: "whoop-client",
         WHOOP_CLIENT_SECRET: "whoop-secret",
       }),
-    ).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY/u);
+    ).toThrow(/HOSTED_DEVICE_ROUTING_INDEX_KEY/u);
+  });
+
+  it("rejects removed device-sync encryption env keys", () => {
+    expect(() =>
+      readHostedDeviceSyncEnvironment({
+        NODE_ENV: "test",
+        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
+      }),
+    ).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY.*no longer supported/u);
   });
 
   it("rejects the removed development auth fallback env", () => {
     expect(() =>
       readHostedDeviceSyncEnvironment({
         NODE_ENV: "test",
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
         DEVICE_SYNC_DEV_USER_ID: "dev-user",
       }),
     ).toThrow(/DEVICE_SYNC_DEV_USER_ID.*no longer supported/u);

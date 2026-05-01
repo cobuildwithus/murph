@@ -468,10 +468,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did knee pain stay mild after the last rehab or run/walk session, and how did it feel the next morning?
     confirmationPrompt: Before creating the experiment, show the safety screen outcome, starting branch, pain ceiling, weekly rehab/run windows, logging fields, stop conditions, and reminder policy.
 whyItWorks:
-- 'ITBS return-to-run work is load-sensitive: reducing the running dose that provokes lateral knee pain can lower irritability enough to rebuild tolerance.'
-- Hip/glute strengthening and single-leg control work are plausible active components because the direct and mechanism corpus points toward strength, movement-control, and running-biomechanics targets, but those targets should not be oversold as a single proven cause.
-- Run/walk re-entry converts return to running into graded exposure. The useful signal is whether pain stays mild during the run and does not rebound later that day or the next morning.
-- Gait cues such as slightly higher cadence or shorter stride can be explored for selected runners, but they are optional experiments rather than universal requirements.
+  - "## Irritation drops before capacity returns\n\nITBS rehab starts by reducing the running dose that keeps the lateral knee irritated. Pain falls when the tissue stops getting the same provocative stride load."
+  - "## Hip control changes the stride\n\nGlute and hip-abductor work improves pelvis and femur control. Better lateral-hip control reduces how much load each stride dumps into the outer knee."
+  - "## Run/walk rebuilds tolerance\n\nShort flat intervals reload the knee in small steps. Progress means more pain-free minutes with no same-day or next-morning rebound."
+mechanismChain:
+  -
+    label: "Session"
+    content: "3x/week hip and glute work · graded run/walk"
+  -
+    label: "Deload"
+    content: "Provocative running drops; lateral knee irritation settles"
+  -
+    label: "Repeated signal"
+    content: "Single-leg control · hip strength · easy strides repeat"
+  -
+    label: "Adaptation"
+    content: "Better pelvic control · less lateral knee load · longer pain-free running"
 claims:
 
 - claimId: active-rehab-components-not-standardized

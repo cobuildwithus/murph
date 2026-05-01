@@ -135,6 +135,11 @@ export interface ExperimentProtocolFact {
   detail?: string;
 }
 
+export interface ExperimentMechanismChainStep {
+  content: string;
+  label: string;
+}
+
 export interface ExperimentMeasurementMethodReference {
   href?: string;
   key: string;
@@ -233,6 +238,7 @@ export interface ExperimentProtocol {
   protocolKeepInMind: string[];
   protocolLogFields: string[];
   experimentOnboarding?: ExperimentOnboarding;
+  mechanismChain: ExperimentMechanismChainStep[];
   whyItWorks: string;
   experts: Expert[];
   researchStats: ExperimentResearchStat[];

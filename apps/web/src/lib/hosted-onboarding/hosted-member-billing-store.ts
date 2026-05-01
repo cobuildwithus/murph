@@ -74,7 +74,11 @@ export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input
     },
   });
 
-  return resolveHostedMemberStripeBillingLookup(billingRefRecords, "stripeCustomerId");
+  return resolveHostedMemberStripeBillingLookup(
+    billingRefRecords,
+    "stripeCustomerId",
+    input.prisma,
+  );
 }
 
 export async function lookupHostedMemberStripeBillingRefByStripeSubscriptionId(input: {
@@ -100,7 +104,11 @@ export async function lookupHostedMemberStripeBillingRefByStripeSubscriptionId(i
     },
   });
 
-  return resolveHostedMemberStripeBillingLookup(billingRefRecords, "stripeSubscriptionId");
+  return resolveHostedMemberStripeBillingLookup(
+    billingRefRecords,
+    "stripeSubscriptionId",
+    input.prisma,
+  );
 }
 
 export async function readHostedMemberStripeBillingRef(input: {
@@ -113,7 +121,7 @@ export async function readHostedMemberStripeBillingRef(input: {
     },
   });
 
-  return billingRef ? await projectHostedMemberStripeBillingRefSnapshot(billingRef) : null;
+  return billingRef ? await projectHostedMemberStripeBillingRefSnapshot(billingRef, input.prisma) : null;
 }
 
 export async function readHostedMemberStripeCustomerId(input: {
@@ -149,7 +157,7 @@ export async function writeHostedMemberStripeBillingRefTx(
     throw error;
   }
 
-  return projectHostedMemberStripeBillingRefSnapshot(billingRef);
+  return projectHostedMemberStripeBillingRefSnapshot(billingRef, input.tx);
 }
 
 export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
@@ -165,6 +173,7 @@ export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
 
   const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
     memberId: input.memberId,
+    prisma: input.tx,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: null,
   });
@@ -183,7 +192,7 @@ export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
   });
 
   if (currentBillingRef?.stripeCustomerLookupKey) {
-    return projectHostedMemberStripeBillingRefSnapshot(currentBillingRef);
+    return projectHostedMemberStripeBillingRefSnapshot(currentBillingRef, input.tx);
   }
 
   let billingRef;
@@ -212,7 +221,7 @@ export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
     throw error;
   }
 
-  return projectHostedMemberStripeBillingRefSnapshot(billingRef);
+  return projectHostedMemberStripeBillingRefSnapshot(billingRef, input.tx);
 }
 
 export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
@@ -231,8 +240,9 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
 
 export async function projectHostedMemberStripeBillingRefSnapshot(
   billingRef: HostedMemberBillingRef,
+  prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberStripeBillingRefSnapshot> {
-  const privateState = await readHostedMemberBillingPrivateState(billingRef);
+  const privateState = await readHostedMemberBillingPrivateState(billingRef, prisma);
 
   return {
     ...(billingRef.lastStripeEventCreatedAt !== undefined
@@ -251,9 +261,10 @@ async function projectHostedMemberStripeBillingLookup(
     member: HostedMember;
   },
   matchedBy: HostedMemberStripeBillingLookupMatch,
+  prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberStripeBillingLookup> {
   return {
-    billingRef: await projectHostedMemberStripeBillingRefSnapshot(billingRef),
+    billingRef: await projectHostedMemberStripeBillingRefSnapshot(billingRef, prisma),
     core: billingRef.member,
     matchedBy,
   };
@@ -262,6 +273,7 @@ async function projectHostedMemberStripeBillingLookup(
 async function resolveHostedMemberStripeBillingLookup(
   billingRefRecords: Array<HostedMemberBillingRef & { member: HostedMember }>,
   matchedBy: HostedMemberStripeBillingLookupMatch,
+  prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberStripeBillingLookup | null> {
   if (billingRefRecords.length === 0) {
     return null;
@@ -283,7 +295,7 @@ async function resolveHostedMemberStripeBillingLookup(
   }
 
   const [billingRefRecord] = [...billingRefRecordByMemberId.values()];
-  return projectHostedMemberStripeBillingLookup(billingRefRecord, matchedBy);
+  return projectHostedMemberStripeBillingLookup(billingRefRecord, matchedBy, prisma);
 }
 
 async function buildHostedMemberBillingRefCreateData(
@@ -298,6 +310,7 @@ async function buildHostedMemberBillingRefCreateData(
     memberId: input.memberId,
     ...(await buildHostedMemberBillingPrivateColumns({
       memberId: input.memberId,
+      prisma: input.tx,
       stripeCustomerId: input.stripeCustomerId ?? null,
       stripeSubscriptionId: input.stripeSubscriptionId ?? null,
     })),
@@ -320,6 +333,7 @@ async function buildHostedMemberBillingRefUpdateData(
     data.stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
     data.stripeCustomerIdEncrypted = (await buildHostedMemberBillingPrivateColumns({
       memberId: input.memberId,
+      prisma: input.tx,
       stripeCustomerId: input.stripeCustomerId,
       stripeSubscriptionId: null,
     })).stripeCustomerIdEncrypted;
@@ -330,6 +344,7 @@ async function buildHostedMemberBillingRefUpdateData(
     );
     data.stripeSubscriptionIdEncrypted = (await buildHostedMemberBillingPrivateColumns({
       memberId: input.memberId,
+      prisma: input.tx,
       stripeCustomerId: null,
       stripeSubscriptionId: input.stripeSubscriptionId,
     })).stripeSubscriptionIdEncrypted;

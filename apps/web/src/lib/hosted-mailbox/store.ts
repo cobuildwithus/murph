@@ -367,6 +367,7 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     },
   });
   const encodedPayload = await encodeHostedMailboxStoredPayload({
+    prisma: input.tx,
     userId: envelope.userId,
     value: envelope,
   });
@@ -783,19 +784,22 @@ export function projectHostedMailboxPayload(
 export async function decodeHostedMailboxStoredPayload(input: {
   payloadCiphertext?: string | null;
   payloadInlineCiphertext?: string | null;
+  prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<unknown | null> {
   const inlineCiphertext = normalizeNullableString(input.payloadInlineCiphertext);
   const refCiphertext = normalizeNullableString(input.payloadCiphertext);
   const serialized = inlineCiphertext
-    ? await decryptHostedMailboxNullableString({
-        field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
-        userId: input.userId,
-        value: inlineCiphertext,
-      })
+      ? await decryptHostedMailboxNullableString({
+          field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
+          prisma: input.prisma,
+          userId: input.userId,
+          value: inlineCiphertext,
+        })
     : refCiphertext
       ? await decryptHostedMailboxNullableString({
           field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
+          prisma: input.prisma,
           userId: input.userId,
           value: refCiphertext,
         })
@@ -825,6 +829,7 @@ const HOSTED_MAILBOX_REF_PAYLOAD_FIELD = "hosted-mailbox-ref-payload";
 const HOSTED_MAILBOX_PAYLOAD_REF_PREFIX = "hosted-mailbox-payload:";
 
 async function encodeHostedMailboxStoredPayload(input: {
+  prisma?: HostedMailboxStoreClient;
   userId: string;
   value: unknown;
 }): Promise<EncodedHostedMailboxStoredPayload> {
@@ -843,6 +848,7 @@ async function encodeHostedMailboxStoredPayload(input: {
   if (payloadBytes <= HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES) {
     const payloadInlineCiphertext = await encryptHostedMailboxNullableString({
       field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
+      prisma: input.prisma,
       userId: input.userId,
       value: serialized,
     });
@@ -861,6 +867,7 @@ async function encodeHostedMailboxStoredPayload(input: {
 
   const payloadRefCiphertext = await encryptHostedMailboxNullableString({
     field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
+    prisma: input.prisma,
     userId: input.userId,
     value: serialized,
   });

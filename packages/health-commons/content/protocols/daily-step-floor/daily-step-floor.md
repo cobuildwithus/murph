@@ -456,10 +456,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Would you like to log yesterday’s steps and whether anything affected walking or device data?
     confirmationPrompt: Create a 42-day Daily Step Floor experiment with a 14-day baseline, 28-day intervention, one source of truth for steps, conservative fallback rules, and safety stop conditions?
 whyItWorks:
-- 'A daily floor turns walking into a simple self-monitoring loop: one visible number, one daily target, and one repeatability check. Direct pedometer, app, and tracker evidence supports step-count behavior change more strongly than downstream health promises. Source keys: source_artifact:pmid-18029834; source_artifact:pmid-19791652; source_artifact:pmid-33036635.'
-- 'A baseline-responsive floor makes the dose fit the person. Fixed public targets can be useful examples, but the extracted cut-point and observational evidence does not make 10,000 steps a universal threshold. Source keys: source_artifact:pmid-14715035; source_artifact:pmid-21798044; source_artifact:pmid-35247352; source_artifact:pmid-40713949.'
-- 'Keeping one device and placement rule reduces measurement noise, which matters because consumer step counts differ across devices, placements, gait, and activity settings. Source keys: source_artifact:pmid-33361276; source_artifact:pmid-33953288; source_artifact:doi-10.1186-s13102-024-00943-0; source_artifact:doi-10.1123-jmpb.2022-0022.'
-- 'Safety-first fallback rules make the protocol easier to interpret: if the floor requires pushing through pain, cardiopulmonary symptoms, falls, foot problems, heat illness, or poor recovery, the result is not a successful dose. Source keys: source_artifact:pmid-15921486; source_artifact:daily-step-floor-pmid-17521443; source_artifact:pmid-26289360; source_artifact:doi-10.1016-j.bjpt.2023.100500.'
+  - "## Visible floor raises exposure\n\nA step floor turns activity into a daily threshold. The number changes behavior first; downstream fitness, blood pressure, sleep, and pain depend on the added load being real and recoverable."
+  - "## Low-grade load accumulates\n\nWalking adds circulation, weight bearing, and muscle contractions without a formal workout. Repeated daily volume replaces sitting with enough movement for small cardiovascular and tissue signals."
+  - "## Ramp protects adaptation\n\nBaseline matters. A floor that jumps too high turns walking into pain, fatigue, heat risk, or fall risk. The right floor increases exposure without breaking recovery."
+mechanismChain:
+  -
+    label: "Daily dose"
+    content: "Step floor · same source of truth · baseline-informed target"
+  -
+    label: "Acute effect"
+    content: "Light aerobic work replaces sitting; joints and vessels get low load"
+  -
+    label: "Repeated signal"
+    content: "Movement volume · weight bearing · circulation stay above baseline"
+  -
+    label: "Adaptation"
+    content: "Better aerobic efficiency · lower vascular resistance · stronger walking tolerance"
 claims:
 - claimId: canonical-daily-total-step-floor-scope
   type: evidence_scope

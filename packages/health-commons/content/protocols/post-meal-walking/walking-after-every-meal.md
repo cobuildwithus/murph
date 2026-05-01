@@ -769,10 +769,22 @@ experimentOnboarding:
     missedLogFollowupCopy: No judgment—just record whether the meal walk happened, why it was missed, and whether the plan needs to be easier.
     confirmationPrompt: 'Confirm a 7-day baseline plus 14-day Walking After Every Meal test: 10–15 minutes of gentle walking after breakfast, lunch, and dinner when safe; CGM or logged glucose if available; meal timing, walk timing, symptoms, lows, and missed walks logged; stop rules and clinician-guidance flags acknowledged.'
 whyItWorks:
-- 'Post-meal walking puts light-to-moderate muscle activity into the same window when meal glucose is rising; direct studies used meal-timed walking rather than only generic daily steps'
-- 'The 10–15 minute dose is a fidelity-first default: it appears in direct repeated-meal studies and is short enough to repeat after multiple meals without turning the protocol into a full workout program'
-- 'Dinner is highlighted because several studies found dinner-window glucose signals, but the Murph default stays after-main-meals because dinner-only evidence is not the same as every-meal evidence'
-- 'The experiment is built around meal-window measurement because CGM or carefully timed glucose readings are more informative for this behavior than fasting glucose or a vague all-day step count'
+  - "## Muscle contraction opens a glucose sink\n\nWalking makes leg muscle take up glucose without waiting for insulin. The contraction itself moves glucose transporters to the cell surface."
+  - "## Timing hits the meal curve\n\nThe walk starts while digestion sends glucose into blood. Disposal rises during the same window as the peak, so the curve blunts."
+  - "## Matched meals reveal the signal\n\nCGM or fingerstick windows are useful only when meal size, carbs, medication, and walk timing stay visible. The target is post-meal excursion, not generic fitness."
+mechanismChain:
+  -
+    label: "Session"
+    content: "10–15 min gentle walk after each main meal"
+  -
+    label: "Muscle effect"
+    content: "Leg contractions pull glucose into muscle without waiting for insulin"
+  -
+    label: "Repeated signal"
+    content: "Meal glucose enters blood while muscle disposal is active"
+  -
+    label: "Adaptation"
+    content: "Post-meal peaks shrink · iAUC drops · baseline fitness barely changes"
 claims:
 -
   claimId: single-core-protocol-10-15-min-after-main-meals

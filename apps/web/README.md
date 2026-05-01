@@ -108,8 +108,7 @@ See `.env.example` for a working template.
 Required:
 
 - `DATABASE_URL`
-- `DEVICE_SYNC_ENCRYPTION_KEY`
-- `DEVICE_SYNC_ENCRYPTION_KEY_VERSION`
+- `HOSTED_DEVICE_ROUTING_INDEX_KEY`
 
 Required for the hosted device-sync lane:
 
@@ -150,6 +149,7 @@ Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
 - `HOSTED_CONTACT_PRIVACY_KEYS`
+- `HOSTED_DEVICE_ROUTING_INDEX_KEY`
 - `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION`
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
@@ -332,9 +332,9 @@ Callback auth contract:
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
   boundary; the isolated execution child talks back through the worker-owned
   `web-control.worker` proxy instead of receiving the signing key directly
-- `apps/web` also encrypts hosted mailbox payloads with the
-  `HOSTED_WAKE_ENCRYPTION_*` key lane, while member private fields remain on the
-  web-only `HOSTED_WEB_ENCRYPTION_*` lane
+- Hosted member private fields, device-sync credentials, mailbox payloads, and
+  runtime execution state use signed hosted domain-root secure-box envelopes;
+  lookup fingerprints/indexes use separate HMAC-only keys.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production
 project domain or a custom domain. Do not use ephemeral preview deployment URLs
@@ -383,8 +383,9 @@ exercise the same signed assertion contract.
   `cd apps/web && pnpm dev` instead of writing real secrets to repo-local env files.
 - Treat leaked raw repo archives that included local hosted env files the same
   way as direct secret exposure.
-- Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate
-  `DEVICE_SYNC_ENCRYPTION_KEY`.
+- Rotate `HOSTED_DEVICE_ROUTING_INDEX_KEY` if the provider-account routing index
+  key is exposed. Device-sync token plaintext is protected separately by the
+  hosted `device` domain secure-box root.
 - Durable hosted device-sync authority now lives on the web/device-sync side.
   Cloudflare consumes explicit execution-time snapshots and signed writebacks only; token rotation or
   revocation must follow the web-owned control-plane path instead of relying on

@@ -106,7 +106,7 @@ export async function lookupHostedMemberIdentityByPrivyUserId(input: {
   });
 
   return identityRecord
-    ? await projectHostedMemberIdentityLookup(identityRecord, "privyUserId")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "privyUserId", input.prisma)
     : null;
 }
 
@@ -124,7 +124,7 @@ export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
   });
 
   return identityRecord
-    ? await projectHostedMemberIdentityLookup(identityRecord, "phoneLookupKey")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "phoneLookupKey", input.prisma)
     : null;
 }
 
@@ -150,7 +150,7 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   });
 
   return identityRecord
-    ? await projectHostedMemberIdentityLookup(identityRecord, "phoneNumber")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "phoneNumber", input.prisma)
     : null;
 }
 
@@ -178,7 +178,7 @@ export async function lookupHostedMemberIdentityByWalletAddress(input: {
   });
 
   return identityRecord
-    ? await projectHostedMemberIdentityLookup(identityRecord, "walletAddress")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "walletAddress", input.prisma)
     : null;
 }
 
@@ -192,7 +192,7 @@ export async function readHostedMemberIdentity(input: {
     },
   });
 
-  return identityRecord ? await projectHostedMemberIdentityState(identityRecord) : null;
+  return identityRecord ? await projectHostedMemberIdentityState(identityRecord, input.prisma) : null;
 }
 
 export async function upsertHostedMemberIdentity(
@@ -206,7 +206,7 @@ export async function upsertHostedMemberIdentity(
     update: await buildHostedMemberIdentityUpdateData(input),
   });
 
-  return projectHostedMemberIdentityState(identity);
+  return projectHostedMemberIdentityState(identity, input.prisma);
 }
 
 export async function writeHostedMemberSignupPhoneState(
@@ -227,6 +227,7 @@ export async function writeHostedMemberSignupPhoneState(
     data.signupPhoneNumberEncrypted = (await buildHostedMemberIdentityPrivateColumns({
       memberId: input.memberId,
       phoneNumber: null,
+      prisma: input.prisma,
       privyUserId: null,
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
@@ -250,8 +251,9 @@ export async function writeHostedMemberSignupPhoneState(
 
 export async function projectHostedMemberIdentityState(
   identity: HostedMemberIdentity,
+  prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberIdentityState> {
-  const privateState = await readHostedMemberIdentityPrivateState(identity);
+  const privateState = await readHostedMemberIdentityPrivateState(identity, prisma);
 
   return {
     maskedPhoneNumberHint: identity.maskedPhoneNumberHint,
@@ -276,8 +278,9 @@ async function projectHostedMemberIdentityLookup(
     member: HostedMember;
   },
   matchedBy: HostedMemberIdentityLookupMatch,
+  prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberIdentityLookup> {
-  const identityState = await projectHostedMemberIdentityState(identity);
+  const identityState = await projectHostedMemberIdentityState(identity, prisma);
 
   return {
     core: identity.member,
@@ -319,6 +322,7 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
   const privateColumns = await buildHostedMemberIdentityPrivateColumns({
     memberId: input.memberId,
     phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
     privyUserId: input.privyUserId,
     signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,

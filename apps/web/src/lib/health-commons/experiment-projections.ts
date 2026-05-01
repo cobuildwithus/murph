@@ -118,6 +118,7 @@ function toExperimentProtocolTabProjection(
     expectedSignals: protocolTab.expectedSignals.map(cleanExperimentSignal),
     experts: protocolTab.experts.map(cleanExperimentExpert),
     measurementPaths: protocolTab.measurementPaths.map(cleanExperimentMeasurementPath),
+    mechanismChain: protocolTab.mechanismChain.map(cleanExperimentMechanismChainStep),
     protocol: protocolTab.protocol.map(cleanExperimentProtocolStep),
     protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
     protocolFacts: protocolTab.protocolFacts.map(cleanExperimentProtocolFact),
@@ -125,6 +126,15 @@ function toExperimentProtocolTabProjection(
     safety: cleanExperimentSafety(protocolTab.safety),
     title: cleanHealthCommonsUserFacingCopy(protocolTab.title),
     whyItWorks: cleanHealthCommonsUserFacingCopy(protocolTab.whyItWorks),
+  };
+}
+
+function cleanExperimentMechanismChainStep(
+  step: HealthCommonsWebExperimentProtocolTab["mechanismChain"][number],
+): HealthCommonsWebExperimentProtocolTab["mechanismChain"][number] {
+  return {
+    content: cleanHealthCommonsUserFacingCopy(step.content),
+    label: cleanHealthCommonsUserFacingCopy(step.label),
   };
 }
 

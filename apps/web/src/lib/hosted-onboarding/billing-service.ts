@@ -127,7 +127,7 @@ export async function createHostedBillingCheckout(
     if (isHostedMemberMessagingSetupRequired({
       identity: invite.member.identity,
       routing: invite.member.routing
-        ? await projectHostedMemberRoutingState(invite.member.routing)
+        ? await projectHostedMemberRoutingState(invite.member.routing, prisma)
         : null,
     })) {
       throw hostedOnboardingError({

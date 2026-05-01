@@ -524,9 +524,22 @@ experimentOnboarding:
     missedLogFollowupCopy: You missed last night’s silent-meditation log. Add a quick estimate only if it is easy.
     confirmationPrompt: "Create a 7-day baseline plus 14-night Silent Meditation Before Bed experiment, with stop rules active and wearable data treated as exploratory?"
 whyItWorks:
-  - "The mechanistic rationale is pre-sleep arousal downshift: structured mindfulness exposures have reduced cognitive-emotional or pre-sleep arousal in adjacent sources, but not as isolated silent bedtime meditation."
-  - "Sleep evidence for mindfulness is promising but heterogeneous, so the protocol tests a personal signal rather than claiming insomnia treatment."
-  - "Manual sleep-onset and pre-sleep wiredness logging is prioritized because actigraphy and consumer wearables can misclassify quiet wakefulness and vary across devices and populations."
+  - "## Attention stops chasing thoughts\n\nSilent sitting trains repeated return to breath, body contact, or room sounds. Planning and worry lose momentum because they stop getting followed."
+  - "## Grounding lowers threat checks\n\nOpen, simple attention reduces internal negotiation before sleep. The useful mechanism is lower arousal, not a perfect blank mind."
+  - "## Bedtime improves when effort drops\n\nSleep onset eases when meditation replaces trying to sleep. Escalating distress, dissociation, or mood activation means the practice is the wrong dose."
+mechanismChain:
+  -
+    label: "Session"
+    content: "5–10 min silent sitting near bedtime"
+  -
+    label: "Attention shift"
+    content: "Attention returns to breath, body, or sound; rumination loses fuel"
+  -
+    label: "Repeated signal"
+    content: "Low-stimulation cue replaces planning before sleep"
+  -
+    label: "Adaptation"
+    content: "Pre-sleep arousal drops · sleep onset eases · fixation risk stays visible"
 claims:
 
   -

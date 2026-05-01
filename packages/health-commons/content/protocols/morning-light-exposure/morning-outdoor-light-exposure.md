@@ -577,10 +577,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you get outside for your morning-light session today? Totally fine if not — I just want the experiment record to be accurate.
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, the chosen testPlanId, safety-screen outcome, baseline and intervention dates, usual wake time, target morning window, target minutes, backup policy, logging fields, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-  - Light is a primary circadian time cue. In a self-experiment, post-wake outdoor light is meant to strengthen the contrast between bright daytime and dimmer evening/night exposure rather than act as a sedative.
-  - Outdoor daylight can deliver more melanopic/circadian-relevant stimulation than many indoor environments, but the real dose changes with weather, season, latitude, shade, windows, glasses, and device placement.
-  - The expected user-level signal is modest and personal: more consistent morning light may help sleep timing, subjective sleep quality, or morning alertness for some users, but direct evidence is sparse and broader adult data are observational or mixed.
-  - Because evening light, bedtime drift, exercise, caffeine, alcohol, travel, stress, illness, heat, and UV protection can change both exposure and sleep, the protocol treats adherence and confounder logging as part of the mechanism rather than administrative overhead.
+  - "## Morning light resets clock timing\n\nBright outdoor light hits retinal clock pathways soon after waking. That signal anchors the circadian day more strongly than dim indoor light."
+  - "## Early cue shapes evening biology\n\nMorning phase signals help melatonin and alertness shift earlier. Sleep pressure still builds through the day; light tells the clock when the day started."
+  - "## Consistency beats intensity spikes\n\nRepeated morning exposure gives the clock a stable daily cue. The payoff is steadier sleep onset, less evening drift, and clearer day-night contrast."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Outdoor light soon after waking · 10–30 min"
+  -
+    label: "Retinal signal"
+    content: "Bright light hits the circadian clock; morning melatonin shuts down"
+  -
+    label: "Repeated signal"
+    content: "Morning phase cue repeats before daily timing drifts"
+  -
+    label: "Adaptation"
+    content: "Clock anchors earlier · evening melatonin stabilizes · sleep onset aligns"
 claims:
 
   -

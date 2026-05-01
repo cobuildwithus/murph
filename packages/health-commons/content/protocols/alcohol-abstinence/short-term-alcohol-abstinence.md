@@ -1324,10 +1324,22 @@ experimentOnboarding:
       object: assistantSupport
       field: reminderPolicy
 whyItWorks:
-- 'Removing alcohol for a bounded interval can remove an acute exposure that is associated with worse early-night autonomic recovery and can make RHR, HRV, and sleep continuity worth tracking.'
-- 'A full month is long enough for some direct studies to observe changes in blood pressure, heart rate, GGT/liver enzymes, liver biochemistry, HOMA/insulin-resistance-style markers, weight, or lipid panels, while the evidence remains limited by non-randomized, selected, or small samples.'
-- 'The behavioral mechanism is partly measurement and self-efficacy: daily alcohol-free logging, coping plans, and non-moral review can show which cues, social contexts, and support needs drive adherence; subjective and Dry January campaign evidence remains adjacent implementation and review context.'
-- 'The same mechanism can be unsafe for people with dependence or withdrawal risk because abrupt cessation can require clinical assessment and supported withdrawal care.'
+  - "## Alcohol sedates, then disrupts\n\nAlcohol can make sleep start feel easier, then fragments the back half of the night. REM pressure, temperature, hydration, and autonomic arousal rebound."
+  - "## Removal lowers overnight strain\n\nNo alcohol means less vasodilation, dehydration, pulse elevation, and late-night arousal. Resting HR and HRV often show the recovery load first."
+  - "## Cue exposure becomes visible\n\nDaily abstinence reveals when drinking was automatic: stress, social friction, boredom, reward, or sleep effort. Craving and context are part of the mechanism."
+mechanismChain:
+  -
+    label: "Session"
+    content: "7–30 alcohol-free days · daily symptom and craving log"
+  -
+    label: "Acute removal"
+    content: "No ethanol sedation, rebound arousal, vasodilation, or dehydration"
+  -
+    label: "Repeated signal"
+    content: "Sleep architecture, autonomic load, and drinking cues reset nightly"
+  -
+    label: "Adaptation"
+    content: "Resting pulse drops · HRV rebounds · BP, weight, liver markers shift"
 claims:
 -
   claimId: safety-screening-comes-before-the-challenge

@@ -565,6 +565,19 @@ whyItWorks:
   - "## Cooldown makes dose usable\n\n5–20 min works because heat stress needs an exit. Gentle cooldown restores pressure, temperature, fluid balance, and alertness; rushing into driving, exercise, cold plunge, or bed turns heat into strain."
   - "## Repeated heat trains vascular control\n\nAcross sessions, the body gets faster at dumping heat: earlier sweating, easier skin blood flow, steadier pressure. Resting HR plus morning BP track whether baseline strain drops."
   - "## Sleep signal comes from cooling\n\nSauna is not a sedative. The useful sleep mechanism is the warm-to-cool transition after a tolerable session; late, extreme, or dehydrating heat keeps arousal high."
+mechanismChain:
+  -
+    label: "Session"
+    content: "3x/week dry heat · 5–20 min · tolerable cooldown"
+  -
+    label: "Heat load"
+    content: "Skin vessels open; heart rate rises; sweat carries heat out"
+  -
+    label: "Recovery"
+    content: "Cooldown restores pressure, temperature, fluid balance, and alertness"
+  -
+    label: "Adaptation"
+    content: "Earlier sweating · steadier vascular tone · lower resting strain"
 claims:
 
   -

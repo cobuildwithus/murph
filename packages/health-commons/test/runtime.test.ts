@@ -447,6 +447,10 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       label: "Resting Heart Rate",
     }));
     expect(protocolTab?.protocol.length).toBeGreaterThan(0);
+    expect(protocolTab?.mechanismChain).toContainEqual(expect.objectContaining({
+      content: "3x/week dry heat · 5–20 min · tolerable cooldown",
+      label: "Session",
+    }));
     expect(protocolTab?.safety.precautions.length).toBeGreaterThan(0);
     expect(resultsPublic?.protocol).toEqual(protocolTab?.protocol);
     expect(Object.keys(shell ?? {})).not.toContain("entitiesByKey");

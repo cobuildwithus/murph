@@ -662,9 +662,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you complete or intentionally skip the whole-body red/NIR PBM session today? Either answer is useful — I just want the experiment record to be accurate.
     confirmationPrompt: "Show the limited-evidence posture, protocol key plus pageRevisionId and runSpecRevisionId if available, selected testPlanId, safety-screen outcome, baseline and intervention dates, device model, wavelengths, irradiance/fluence status, session duration, timing, exposure geometry/body coverage, eye protection, nonthermal comfort plan, logging path, stop conditions, and reminder policy before creating the active experiment or any automations."
 whyItWorks:
-  - "Photobiomodulation is a nonthermal visible and near-infrared light modality whose biological effects depend heavily on wavelength, irradiance, fluence, duration, repetition, and exposure geometry rather than on color labels alone."
-  - "Sleep-relevant PBM mechanisms are usually discussed through mitochondrial signaling, adenosine, nitric-oxide and vascular pathways, antioxidant effects, and inflammatory modulation, but most human sleep evidence is transcranial, cervical, special-population, or otherwise indirect; the whole-body human sleep literature remains early and heterogeneous."
-  - "Whole-body or large-area exposure has produced measurable non-sleep signals in narrow contexts, but the signal varies by population and endpoint: acute resting-metabolic effects have been reported in women with obesity, while stronger repeated-session symptom gains come from small supervised fibromyalgia studies rather than generic healthy-adult sleep trials."
+  - "## Light is dose, not color\n\nRed/NIR PBM depends on wavelength, irradiance, fluence, duration, distance, and coverage. Marketing color names do not define the biological exposure."
+  - "## Cells shift signaling\n\nPhotons affect mitochondrial, nitric-oxide, inflammatory, and oxidative-stress pathways. The effect is nonthermal; heat turns it into a different protocol."
+  - "## Recovery signal is systemic but weak\n\nLarge-area exposure can change autonomic or vascular tone. Resting HR and RMSSD track whether recovery load drops without overclaiming sleep or performance."
+mechanismChain:
+  -
+    label: "Session"
+    content: "Whole-body red/NIR PBM · 3x/week · nonthermal"
+  -
+    label: "Light dose"
+    content: "Photons affect mitochondrial, nitric-oxide, and inflammatory signaling"
+  -
+    label: "Repeated signal"
+    content: "Large-area cell signal repeats with same geometry and dose"
+  -
+    label: "Adaptation"
+    content: "Recovery load drops · vascular tone eases · RHR and RMSSD track response"
 claims:
 
   -

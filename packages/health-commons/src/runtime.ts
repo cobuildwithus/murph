@@ -1748,6 +1748,8 @@ function assertGeneratedWebExperimentProtocolTab(
     typeof value["key"] !== "string" ||
     !Array.isArray(value["measurementPaths"]) ||
     !value["measurementPaths"].every(isGeneratedWebMeasurementPath) ||
+    !Array.isArray(value["mechanismChain"]) ||
+    !value["mechanismChain"].every(isGeneratedWebMechanismChainStep) ||
     !Array.isArray(value["protocol"]) ||
     !value["protocol"].every(isGeneratedWebProtocolStep) ||
     !Array.isArray(value["protocolFacts"]) ||
@@ -1764,6 +1766,12 @@ function assertGeneratedWebExperimentProtocolTab(
   ) {
     throw new Error(`Health Commons generated experiment protocol tab is invalid: ${artifactPath}.`);
   }
+}
+
+function isGeneratedWebMechanismChainStep(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value["content"] === "string" &&
+    typeof value["label"] === "string";
 }
 
 function assertGeneratedWebExperimentResultsPublic(

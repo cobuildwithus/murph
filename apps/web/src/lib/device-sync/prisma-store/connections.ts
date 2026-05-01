@@ -13,7 +13,7 @@ import type {
   DeviceAccountCredentialKind,
 } from "@murphai/device-syncd/types";
 
-import { buildHostedProviderAccountBlindIndex, type HostedSecretCodec } from "../crypto";
+import { buildHostedProviderAccountBlindIndex } from "../routing-index";
 import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
   maybeDate,
@@ -36,10 +36,11 @@ import {
   type HostedStoredDeviceSyncAccount,
 } from "./connection-records";
 import {
+  HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
   encryptHostedConnectionSecret,
   readHostedStoredExternalAccountId,
   readHostedStoredTokenBundle,
-  requireHostedSecretCodec,
+  type HostedDeviceSyncSecretTestCodec,
 } from "./connection-secrets";
 import { toPrismaJsonObject } from "./prisma-json";
 
@@ -81,17 +82,20 @@ const DEFAULT_HOSTED_DEVICE_SYNC_SETUP_TTL_MS = 30 * 60_000;
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
-  private readonly codec: HostedSecretCodec | null;
   private readonly providerAccountBlindIndexKey: Buffer | null;
+  private readonly testCodec: HostedDeviceSyncSecretTestCodec | null;
 
   constructor(input: {
-    codec?: HostedSecretCodec;
+    codec?: HostedDeviceSyncSecretTestCodec;
     prisma: PrismaClient;
     providerAccountBlindIndexKey?: Buffer | null;
   }) {
     this.prisma = input.prisma;
-    this.codec = input.codec ?? null;
     this.providerAccountBlindIndexKey = input.providerAccountBlindIndexKey ?? null;
+    this.testCodec = input.codec ?? null;
+    if (this.testCodec && !process.env.VITEST) {
+      throw new TypeError("Hosted device-sync test secret codec can only be injected under Vitest.");
+    }
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -104,7 +108,6 @@ export class PrismaHostedConnectionStore {
       ? null
       : normalizeHostedDeviceSyncLifecycleStatus(input.status);
     const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
-    const codec = requireHostedSecretCodec(this.codec);
     const credential = resolveHostedUpsertConnectionCredential(input);
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
@@ -129,14 +132,15 @@ export class PrismaHostedConnectionStore {
           });
         }
 
-        const credentialWrite = buildHostedConnectionCredentialWrite({
-          codec,
+        const credentialWrite = await buildHostedConnectionCredentialWrite({
           connectionId: existing.id,
           credential,
           provider: input.provider,
+          testCodec: this.testCodec,
           tokenVersion: typeof existing.tokenVersion === "number" && existing.tokenVersion > 0
             ? existing.tokenVersion + 1
             : 1,
+          userId: existing.userId,
         });
 
         return tx.deviceConnection.update({
@@ -148,11 +152,12 @@ export class PrismaHostedConnectionStore {
             ...buildHostedConnectionSetupWrite(input, connectedAt, "update"),
             connectedAt,
             displayName,
-            externalAccountIdEncrypted: encryptHostedConnectionSecret({
-              codec,
+            externalAccountIdEncrypted: await encryptHostedConnectionSecret({
               connectionId: existing.id,
               provider: input.provider,
               purpose: "device-sync-external-account-id",
+              testCodec: this.testCodec,
+              userId: existing.userId,
               value: input.externalAccountId,
             }),
             metadataJson: toPrismaJsonObject(metadata),
@@ -174,12 +179,13 @@ export class PrismaHostedConnectionStore {
       }
 
       const connectionId = generateHostedRandomPrefixedId("dsc");
-      const credentialWrite = buildHostedConnectionCredentialWrite({
-        codec,
+      const credentialWrite = await buildHostedConnectionCredentialWrite({
         connectionId,
         credential,
         provider: input.provider,
+        testCodec: this.testCodec,
         tokenVersion: 1,
+        userId: ownerId,
       });
 
       return tx.deviceConnection.create({
@@ -188,11 +194,12 @@ export class PrismaHostedConnectionStore {
           ...setupWrite,
           connectedAt,
           displayName,
-          externalAccountIdEncrypted: encryptHostedConnectionSecret({
-            codec,
+          externalAccountIdEncrypted: await encryptHostedConnectionSecret({
             connectionId,
             provider: input.provider,
             purpose: "device-sync-external-account-id",
+            testCodec: this.testCodec,
+            userId: ownerId,
             value: input.externalAccountId,
           }),
           id: connectionId,
@@ -208,7 +215,7 @@ export class PrismaHostedConnectionStore {
       });
     });
 
-    return this.buildDurableConnectionRecord(record);
+    return await this.buildDurableConnectionRecord(record);
   }
 
   async getConnectionByExternalAccount(
@@ -225,7 +232,7 @@ export class PrismaHostedConnectionStore {
       ...hostedConnectionRecordArgs,
     });
 
-    return record ? this.buildDurableConnectionRecord(record, { externalAccountId }) : null;
+    return record ? await this.buildDurableConnectionRecord(record, { externalAccountId }) : null;
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
@@ -283,7 +290,7 @@ export class PrismaHostedConnectionStore {
       });
     });
 
-    return record ? this.buildDurableConnectionRecord(record) : null;
+    return record ? await this.buildDurableConnectionRecord(record) : null;
   }
 
   async syncDurableConnectionState(
@@ -330,14 +337,14 @@ export class PrismaHostedConnectionStore {
       ...hostedConnectionRecordArgs,
     });
 
-    return this.buildDurableConnectionRecord(record, {
+    return await this.buildDurableConnectionRecord(record, {
       externalAccountId: account.externalAccountId,
     });
   }
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     const records = await this.listConnectionRecordsForUser(userId);
-    return records.map((record) => this.buildDurableConnectionRecord(record));
+    return Promise.all(records.map((record) => this.buildDurableConnectionRecord(record)));
   }
 
   async getConnectionForUser(
@@ -346,7 +353,7 @@ export class PrismaHostedConnectionStore {
     tx?: HostedPrismaTransactionClient,
   ): Promise<PublicDeviceSyncAccount | null> {
     const record = await this.getConnectionRecordForUser(userId, connectionId, tx);
-    return record ? this.buildDurableConnectionRecord(record) : null;
+    return record ? await this.buildDurableConnectionRecord(record) : null;
   }
 
   async getStoredConnectionAccountForUser(
@@ -362,7 +369,7 @@ export class PrismaHostedConnectionStore {
       },
       ...hostedConnectionRecordArgs,
     });
-    return record ? this.buildStoredConnectionAccount(record) : null;
+    return record ? await this.buildStoredConnectionAccount(record) : null;
   }
 
   async persistStoredConnectionTokenBundle(input: {
@@ -391,8 +398,7 @@ export class PrismaHostedConnectionStore {
       return;
     }
 
-    const codec = requireHostedSecretCodec(this.codec);
-    const existingExternalAccountId = readHostedStoredExternalAccountId(record, this.codec);
+    const existingExternalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec);
     const requestedExternalAccountId = normalizeNullableString(input.externalAccountId);
     const externalAccountId = input.clearExternalAccountId === true
       ? null
@@ -401,44 +407,54 @@ export class PrismaHostedConnectionStore {
     const nextCredentialKind: DeviceAccountCredentialKind = input.tokenBundle
       ? "oauth_tokens"
       : existingCredentialKind;
+    const accessTokenEncrypted = input.tokenBundle
+      ? await encryptHostedConnectionSecret({
+        connectionId: input.connectionId,
+        provider: input.provider,
+        purpose: "device-sync-access-token",
+        testCodec: this.testCodec,
+        tokenVersion: input.tokenBundle.tokenVersion,
+        userId: record.userId,
+        value: input.tokenBundle.accessToken,
+      })
+      : null;
+    const refreshTokenEncrypted = input.tokenBundle?.refreshToken
+      ? await encryptHostedConnectionSecret({
+        connectionId: input.connectionId,
+        provider: input.provider,
+        purpose: "device-sync-refresh-token",
+        testCodec: this.testCodec,
+        tokenVersion: input.tokenBundle.tokenVersion,
+        userId: record.userId,
+        value: input.tokenBundle.refreshToken,
+      })
+      : null;
+    const externalAccountIdEncrypted = externalAccountId
+      ? await encryptHostedConnectionSecret({
+        connectionId: input.connectionId,
+        provider: input.provider,
+        purpose: "device-sync-external-account-id",
+        testCodec: this.testCodec,
+        userId: record.userId,
+        value: externalAccountId,
+      })
+      : null;
 
     await prisma.deviceConnection.update({
       where: {
         id: input.connectionId,
       },
       data: {
-        accessTokenEncrypted: input.tokenBundle
-          ? encryptHostedConnectionSecret({
-            codec,
-            connectionId: input.connectionId,
-            provider: input.provider,
-            purpose: "device-sync-access-token",
-            value: input.tokenBundle.accessToken,
-          })
-          : null,
+        accessTokenEncrypted,
         accessTokenExpiresAt: maybeDate(input.tokenBundle?.accessTokenExpiresAt ?? null),
         credentialKind: nextCredentialKind,
         ...(input.tokenBundle ? { credentialMetadataJson: toPrismaJsonObject({}) } : {}),
         providerConfigKey: input.tokenBundle ? null : record.providerConfigKey,
-        externalAccountIdEncrypted: externalAccountId
-          ? encryptHostedConnectionSecret({
-            codec,
-            connectionId: input.connectionId,
-            provider: input.provider,
-            purpose: "device-sync-external-account-id",
-            value: externalAccountId,
-          })
+        externalAccountIdEncrypted,
+        keyVersion: input.tokenBundle
+          ? this.testCodec?.keyVersion ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION
           : null,
-        keyVersion: input.tokenBundle?.keyVersion ?? null,
-        refreshTokenEncrypted: input.tokenBundle?.refreshToken
-          ? encryptHostedConnectionSecret({
-            codec,
-            connectionId: input.connectionId,
-            provider: input.provider,
-            purpose: "device-sync-refresh-token",
-            value: input.tokenBundle.refreshToken,
-          })
-          : null,
+        refreshTokenEncrypted,
         tokenVersion: input.tokenBundle?.tokenVersion ?? null,
       },
     });
@@ -504,14 +520,14 @@ export class PrismaHostedConnectionStore {
     });
   }
 
-  private buildDurableConnectionRecord(
+  private async buildDurableConnectionRecord(
     record: HostedConnectionRecord,
     fallback: {
       externalAccountId?: string | null;
     } = {},
-  ): PublicDeviceSyncAccount {
+  ): Promise<PublicDeviceSyncAccount> {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = readHostedStoredExternalAccountId(record, this.codec);
+    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec);
 
     return toRedactedPublicDeviceSyncAccount(
       buildHostedPublicDeviceSyncAccount({
@@ -521,9 +537,9 @@ export class PrismaHostedConnectionStore {
     );
   }
 
-  private buildStoredConnectionAccount(record: HostedConnectionRecord): HostedStoredDeviceSyncAccount | null {
+  private async buildStoredConnectionAccount(record: HostedConnectionRecord): Promise<HostedStoredDeviceSyncAccount | null> {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = readHostedStoredExternalAccountId(record, this.codec);
+    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec);
 
     const publicConnection = buildHostedPublicDeviceSyncAccount({
       record: mappedRecord,
@@ -531,7 +547,7 @@ export class PrismaHostedConnectionStore {
 
     switch (mappedRecord.credentialKind) {
       case "oauth_tokens": {
-        const tokenBundle = readHostedStoredTokenBundle(record, this.codec);
+        const tokenBundle = await readHostedStoredTokenBundle(record, this.testCodec);
 
         if (!tokenBundle) {
           return null;
@@ -681,23 +697,25 @@ function resolveHostedDeviceSyncSetupExpiresAt(input: {
   return null;
 }
 
-function buildHostedConnectionCredentialWrite(input: {
-  codec: HostedSecretCodec;
+async function buildHostedConnectionCredentialWrite(input: {
   connectionId: string;
   credential: DeviceAccountCredential;
   provider: string;
+  testCodec: HostedDeviceSyncSecretTestCodec | null;
   tokenVersion: number;
-}): HostedConnectionCredentialWrite {
+  userId: string;
+}): Promise<HostedConnectionCredentialWrite> {
   validateHostedDeviceSyncCredentialPolicy(input.provider, input.credential);
 
   switch (input.credential.kind) {
     case "oauth_tokens":
-      return buildHostedOAuthCredentialWrite({
-        codec: input.codec,
+      return await buildHostedOAuthCredentialWrite({
         connectionId: input.connectionId,
         provider: input.provider,
+        testCodec: input.testCodec,
         tokenVersion: input.tokenVersion,
         tokens: input.credential.tokens,
+        userId: input.userId,
       });
     case "provider_config": {
       const providerConfigKey = normalizeNullableString(input.credential.providerConfigKey);
@@ -789,13 +807,14 @@ function normalizeDefaultProviderProfileKey(provider: string): string | null {
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
-function buildHostedOAuthCredentialWrite(input: {
-  codec: HostedSecretCodec;
+async function buildHostedOAuthCredentialWrite(input: {
   connectionId: string;
   provider: string;
+  testCodec: HostedDeviceSyncSecretTestCodec | null;
   tokenVersion: number;
   tokens: ProviderAuthTokens;
-}): HostedConnectionCredentialWrite {
+  userId: string;
+}): Promise<HostedConnectionCredentialWrite> {
   if (typeof input.tokens.accessToken !== "string" || input.tokens.accessToken.length === 0) {
     throw deviceSyncError({
       code: "CONNECTION_CREDENTIAL_INVALID",
@@ -806,24 +825,28 @@ function buildHostedOAuthCredentialWrite(input: {
   }
 
   return {
-    accessTokenEncrypted: encryptHostedConnectionSecret({
-      codec: input.codec,
+    accessTokenEncrypted: await encryptHostedConnectionSecret({
       connectionId: input.connectionId,
       provider: input.provider,
       purpose: "device-sync-access-token",
+      testCodec: input.testCodec,
+      tokenVersion: input.tokenVersion,
+      userId: input.userId,
       value: input.tokens.accessToken,
     }),
     accessTokenExpiresAt: maybeDate(input.tokens.accessTokenExpiresAt),
     credentialKind: "oauth_tokens",
     credentialMetadataJson: toPrismaJsonObject({}),
-    keyVersion: input.codec.keyVersion,
+    keyVersion: input.testCodec?.keyVersion ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
     providerConfigKey: null,
     refreshTokenEncrypted: input.tokens.refreshToken
-      ? encryptHostedConnectionSecret({
-        codec: input.codec,
+      ? await encryptHostedConnectionSecret({
         connectionId: input.connectionId,
         provider: input.provider,
         purpose: "device-sync-refresh-token",
+        testCodec: input.testCodec,
+        tokenVersion: input.tokenVersion,
+        userId: input.userId,
         value: input.tokens.refreshToken,
       })
       : null,
