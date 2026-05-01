@@ -329,7 +329,6 @@ describe("ProtocolTab", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna", reader);
 
     expect(protocol).not.toBeNull();
-    expect(protocol?.expectedSignals).toHaveLength(5);
     expect(protocol?.expectedSignals.map((signal) => signal.label)).not.toEqual(
       expect.arrayContaining([
         "Home image analysis",

@@ -72,6 +72,9 @@ biomarker:
     -
       title: How to read it
       body: Use one stable scale; higher ratings matter when timing, alertness, and confounder notes also improve.
+    -
+      title: What moves it
+      body: Light timing, sleep opportunity, stress, alcohol, illness, pain, travel, and expectation effects can all move a subjective sleep-quality score.
   measurement:
     bestContext: Record the rating soon after waking, before the day changes your memory of the night.
     howToMeasure:

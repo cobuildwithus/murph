@@ -2445,10 +2445,37 @@ function isPublishedBiomarkerIndexEntity(
   return entity.entityType === "biomarker"
     && entity.status !== "deprecated"
     && entity.hidden !== true
-    && (entity.biomarker?.explainerCards?.length ?? 0) > 0
+    && hasCompleteBiomarkerAbout(entity)
     && (entity.biomarker?.measurement?.howToMeasure?.length ?? 0) > 0
     && hasPublishedProtocolExpectedSignal(entity.key, entities)
     && entity.communityOutcomeSummary !== undefined;
+}
+
+const BIOMARKER_ABOUT_SLOT_TITLES: readonly (readonly string[])[] = [
+  ["why murph uses it", "why people care", "why it matters"],
+  [
+    "how to measure it",
+    "how it's measured",
+    "how its measured",
+    "how to read it",
+    "how to read a trend",
+    "lab vs wearable",
+  ],
+  ["what can fool it", "what moves it"],
+];
+
+function hasCompleteBiomarkerAbout(entity: HealthCommonsCatalogEntity): boolean {
+  const titles = new Set(
+    (entity.biomarker?.explainerCards ?? []).map((card) => normalizeAboutTitle(card.title)),
+  );
+
+  return BIOMARKER_ABOUT_SLOT_TITLES.every((slotTitles) =>
+    slotTitles.some((title) => titles.has(title))
+  );
+}
+
+function normalizeAboutTitle(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, " ");
 }
 
 function hasPublishedProtocolExpectedSignal(
