@@ -1,4 +1,15 @@
+import assert from "node:assert/strict";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  attachHostedDomainRootEnvelopeSignature,
+  buildHostedDomainRootEnvelopeSigningPayload,
+  buildHostedDomainRootWrapContext,
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  wrapHostedDomainRootKeyWithP256Ecdh,
+  type HostedDomainRootKeyEnvelopeBodyV1,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
 import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -11,12 +22,16 @@ import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
-import { resolveRunnerOutboundUserRunnerStub } from "../src/runner-outbound/shared.ts";
+import {
+  resolveRunnerOutboundUserCryptoContext,
+  resolveRunnerOutboundUserRunnerStub,
+} from "../src/runner-outbound/shared.ts";
 import {
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
+import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import type {
   WorkerBindUserRunnerStubLike,
   WorkerUserRunnerNamespaceLike,
@@ -563,6 +578,92 @@ describe("handleRunnerOutboundRequest", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(45_000);
   });
 
+  it("selects ingress or runtime roots from the signed hosted crypto context", async () => {
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const env = createRunnerOutboundEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/g, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    });
+    env.USER_RUNNER = {
+      getByName() {
+        return {
+          async bindUser(userId: string) {
+            return { userId };
+          },
+        };
+      },
+    };
+
+    const ingressRoot = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 101 + index);
+    const context = {
+      envelopes: {
+        ingress: await createSignedWorkerEnvelope({
+          domain: "ingress",
+          publicJwk: cloudflareRecipient.publicJwk,
+          rootKey: ingressRoot,
+          signer: signer.privateKey,
+          userId: "member_123",
+        }),
+        runtime: await createSignedWorkerEnvelope({
+          domain: "runtime",
+          publicJwk: cloudflareRecipient.publicJwk,
+          rootKey: runtimeRoot,
+          signer: signer.privateKey,
+          userId: "member_123",
+        }),
+      },
+      schema: "murph.hosted-runtime-crypto-context.v1" as const,
+      userId: "member_123",
+    };
+    const fetchMock = vi.fn(async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      const [url, init] = args;
+      assert.equal(String(url), `https://web.example.test${HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH}`);
+      assert.equal(init?.method, "POST");
+      assert.equal(init?.body, undefined);
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("x-hosted-execution-user-id"), "member_123");
+      assert.equal(headers.has("x-hosted-execution-signature"), true);
+      return new Response(JSON.stringify(context), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+
+    const runtime = await resolveRunnerOutboundUserCryptoContext({
+      bucket: env.BUNDLES,
+      domain: "runtime",
+      env,
+      environment,
+      userId: "member_123",
+    });
+    const ingress = await resolveRunnerOutboundUserCryptoContext({
+      bucket: env.BUNDLES,
+      domain: "ingress",
+      env,
+      environment,
+      userId: "member_123",
+    });
+
+    assert.deepEqual(runtime.rootKey, runtimeRoot);
+    assert.equal(runtime.rootKeyId, "udrk:runtime:test-root");
+    assert.deepEqual(ingress.rootKey, ingressRoot);
+    assert.equal(ingress.rootKeyId, "udrk:ingress:test-root");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects absolute web-control runtime routes before allowlist checks", () => {
     expect(readHostedRunnerWebControlRoute(
       `${HOSTED_RUNTIME_WORKSPACE_PATH}?requestId=request_123`,
@@ -891,6 +992,51 @@ function createDirectRunnerOutboundEnv(
   };
 }
 
+async function createSignedWorkerEnvelope(input: {
+  domain: "ingress" | "runtime";
+  publicJwk: JsonWebKey;
+  rootKey: Uint8Array;
+  signer: CryptoKey;
+  userId: string;
+}): Promise<HostedDomainRootKeyEnvelopeV1> {
+  const rootKeyId = `udrk:${input.domain}:test-root`;
+  const now = "2026-05-01T00:00:00.000Z";
+  const wrap = await wrapHostedDomainRootKeyWithP256Ecdh({
+    encryptionContext: buildHostedDomainRootWrapContext({
+      domain: input.domain,
+      env: "test",
+      recipient: "cloudflare-automation-secret",
+      rootKeyId,
+      userId: input.userId,
+    }),
+    recipient: "cloudflare-automation-secret",
+    recipientKeyId: "cf-key-v1",
+    recipientPublicJwk: input.publicJwk,
+    rootKey: input.rootKey,
+  });
+  const body: HostedDomainRootKeyEnvelopeBodyV1 = {
+    createdAt: now,
+    domain: input.domain,
+    generation: 1,
+    rootKeyId,
+    schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+    updatedAt: now,
+    userId: input.userId,
+    wraps: [wrap],
+  };
+  const signature = await crypto.subtle.sign(
+    { hash: "SHA-256", name: "ECDSA" },
+    input.signer,
+    toArrayBuffer(buildHostedDomainRootEnvelopeSigningPayload(body)),
+  );
+  return attachHostedDomainRootEnvelopeSignature({
+    body,
+    keyVersionName: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+    signature: Buffer.from(new Uint8Array(signature)).toString("base64"),
+    signedAt: now,
+  });
+}
+
 async function ensureRunnerOutboundUserEnvelope(
   env: Record<string, unknown>,
   userId: string,
@@ -914,4 +1060,44 @@ async function ensureRunnerOutboundUserEnvelope(
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
   });
   await store.provisionManagedUserCryptoAtActivation(userId);
+}
+
+async function generateP256EcdhKeyPair(): Promise<{
+  privateJwk: JsonWebKey;
+  publicJwk: JsonWebKey;
+}> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  );
+  return {
+    privateJwk: await crypto.subtle.exportKey("jwk", keyPair.privateKey),
+    publicJwk: await crypto.subtle.exportKey("jwk", keyPair.publicKey),
+  };
+}
+
+async function generateP256SigningKeyPair(): Promise<{
+  privateKey: CryptoKey;
+  publicKeyPem: string;
+}> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  return {
+    privateKey: keyPair.privateKey,
+    publicKeyPem: toSpkiPem(await crypto.subtle.exportKey("spki", keyPair.publicKey)),
+  };
+}
+
+function toArrayBuffer(value: Uint8Array): ArrayBuffer {
+  return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
+}
+
+function toSpkiPem(value: ArrayBuffer): string {
+  const base64 = Buffer.from(new Uint8Array(value)).toString("base64");
+  const lines = base64.match(/.{1,64}/gu) ?? [base64];
+  return `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`;
 }
