@@ -192,14 +192,10 @@ describe("mergeCloudflareLocalEnv", () => {
       generatedAuthorityPrivateJwkJson,
     );
     expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
-    expect(merged.HOSTED_WAKE_ENCRYPTION_KEY).toBe("generated-envelope");
-    expect(merged.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON).toBe(
-      JSON.stringify({ v1: "generated-envelope" }),
-    );
-    expect(merged.HOSTED_WEB_ENCRYPTION_KEY).toBe("generated-envelope");
-    expect(merged.HOSTED_WEB_ENCRYPTION_KEYRING_JSON).toBe(
-      JSON.stringify({ v1: "generated-envelope" }),
-    );
+    expect(merged.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
+    expect(merged.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON).toBeUndefined();
+    expect(merged.HOSTED_WEB_ENCRYPTION_KEY).toBeUndefined();
+    expect(merged.HOSTED_WEB_ENCRYPTION_KEYRING_JSON).toBeUndefined();
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON).toBe(
       JSON.stringify({
         v1: {
@@ -457,12 +453,6 @@ describe("buildHostedLocalDevOverrides", () => {
         "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
       HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
       HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
-      HOSTED_WAKE_ENCRYPTION_KEY: "worker-wake-key",
-      HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-worker-wake-key\"}",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "worker:v2",
-      HOSTED_WEB_ENCRYPTION_KEY: "web-key",
-      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{\"web:v1\":\"web-key\"}",
-      HOSTED_WEB_ENCRYPTION_KEY_VERSION: "web:v1",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
     });
@@ -471,9 +461,6 @@ describe("buildHostedLocalDevOverrides", () => {
       HOSTED_EXECUTION_CONTROL_URL: "http://127.0.0.1:8787",
       HOSTED_EXECUTION_DISPATCH_URL: "http://127.0.0.1:8787",
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
-      HOSTED_WAKE_ENCRYPTION_KEY: "worker-wake-key",
-      HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-worker-wake-key\"}",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "worker:v2",
       HOSTED_WEB_BASE_URL: "http://localhost:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:local",
@@ -485,9 +472,6 @@ describe("buildHostedLocalDevOverrides", () => {
         "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
       HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
       HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
-      HOSTED_WEB_ENCRYPTION_KEY: "web-key",
-      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{\"web:v1\":\"web-key\"}",
-      HOSTED_WEB_ENCRYPTION_KEY_VERSION: "web:v1",
       VERCEL_PROJECT_PRODUCTION_URL: "localhost:3000",
     });
     expect(JSON.parse(overrides.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK ?? "")).toEqual({
@@ -528,14 +512,14 @@ describe("buildHostedLocalDevOverrides", () => {
 
   });
 
-  it("mirrors hosted wake encryption overrides from the worker env", () => {
+  it("does not mirror legacy hosted wake encryption overrides from the worker env", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
       HOSTED_WAKE_ENCRYPTION_KEY: "shared-wake-key",
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "shared-wake-key-id",
     });
 
-    expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY).toBe("shared-wake-key");
-    expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBe("shared-wake-key-id");
+    expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
+    expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBeUndefined();
   });
 });
 

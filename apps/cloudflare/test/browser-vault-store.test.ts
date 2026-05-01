@@ -74,10 +74,10 @@ describe("hosted browser vault replica store", () => {
 
     const storedKey = findStoredObjectKey(
       bucket,
-      (key) => key.startsWith("users/browser-vault-replicas/"),
+      (key) => key.includes("/browser-vault-replicas/"),
     );
     expect(storedKey).toMatch(
-      /^users\/browser-vault-replicas\/[0-9a-f]{24}\/[0-9a-f]{48}\.json$/u,
+      /^users\/hsn_[0-9a-f]{24}\/browser-vault-replicas\/[0-9a-f]{48}\.json$/u,
     );
     expectOpaqueStrings([storedKey], ["user_123"]);
     expect(replicaRef).toMatchObject({
@@ -180,6 +180,38 @@ describe("hosted browser vault replica store", () => {
     expect(bucket.deleted).toEqual([firstRef.objectKey]);
     expect(bucket.objects.has(firstRef.objectKey)).toBe(false);
     expect(bucket.objects.has(secondRef.objectKey)).toBe(true);
+  });
+
+  it("derives replica object keys independently of root-key bytes", async () => {
+    const replica = await createBrowserVaultReplica({
+      generatedAt: "2026-04-17T00:00:00.000Z",
+      sourceBundleHash: "g".repeat(64),
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+
+    const firstRef = await createHostedBrowserVaultReplicaStore({
+      bucket: new MemoryEncryptedR2Bucket(),
+      rootKey: createTestRootKey(45),
+      userId: "user_123",
+    }).writeBrowserVaultReplica({
+      replica,
+      userId: "user_123",
+    });
+    const secondRef = await createHostedBrowserVaultReplicaStore({
+      bucket: new MemoryEncryptedR2Bucket(),
+      rootKey: createTestRootKey(46),
+      userId: "user_123",
+    }).writeBrowserVaultReplica({
+      replica,
+      userId: "user_123",
+    });
+
+    expect(firstRef.objectKey).toBe(secondRef.objectKey);
+    expectOpaqueStrings([firstRef.objectKey], ["user_123"]);
   });
 
   it("refuses to delete a replica outside the bound user's namespace", async () => {
