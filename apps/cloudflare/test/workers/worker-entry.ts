@@ -112,12 +112,12 @@ async function wakeRunnerForTest(
   if (wake.kind === "runtime.timer") {
     await persistRuntimeTimerWakeForTest(wake);
     await armRuntimeWakeInWeb(runtimeEnv, wake);
-    await runner.runUntilIdleOrBudget({ reason: "nudge" });
+    await driveRunnerNudgeForTest(runner);
     return runner.runnerStatus();
   }
 
   await appendHostedWakeInWeb(runtimeEnv, wake);
-  await runner.runUntilIdleOrBudget({ reason: "nudge" });
+  await driveRunnerNudgeForTest(runner);
   return runner.runnerStatus();
 }
 
@@ -130,10 +130,10 @@ async function wakeRunnerWithOutcomeForTest(
   if (wake.kind === "runtime.timer") {
     await persistRuntimeTimerWakeForTest(wake);
     await armRuntimeWakeInWeb(runtimeEnv, wake);
-    await runner.runUntilIdleOrBudget({ reason: "nudge" });
+    await driveRunnerNudgeForTest(runner);
   } else {
     await appendHostedWakeInWeb(runtimeEnv, wake);
-    await runner.runUntilIdleOrBudget({ reason: "nudge" });
+    await driveRunnerNudgeForTest(runner);
   }
   const status = await runner.runnerStatus();
 
@@ -339,6 +339,13 @@ function getUserRunnerStub(userId: string) {
       };
     }
   ).USER_RUNNER).getByName(userId);
+}
+
+async function driveRunnerNudgeForTest(
+  runner: HostedUserRunner,
+): Promise<void> {
+  await runner.nudgeHostedRunner();
+  await runner.runWhenIdleOrBudget({ reason: "nudge" });
 }
 
 function hostedRunnerStatusIsIdle(status: HostedRunnerStatusResponse): boolean {
