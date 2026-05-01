@@ -45,6 +45,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_mailbox_lane_counter",
   "prisma.hosted_workspace",
   "prisma.hosted_runtime_log",
+  "prisma.hosted_user_crypto_envelope",
+  "prisma.hosted_user_crypto_audit",
   "prisma.hosted_ai_usage",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_invite",
@@ -249,6 +251,8 @@ describe("buildHostedDataExport", () => {
       },
       counts: {
         "prisma.hosted_mailbox_payload": 1,
+        "prisma.hosted_user_crypto_audit": 1,
+        "prisma.hosted_user_crypto_envelope": 1,
       },
       limits: {
         maxRowsPerStore: 250,
@@ -458,7 +462,7 @@ describe("buildHostedDataExport", () => {
 });
 
 describe("deleteHostedAccountData", () => {
-  it("runs Cloudflare cleanup only after the Prisma transaction commits", async () => {
+  it("runs Cloudflare cleanup before deleting Prisma rows that cascade crypto roots", async () => {
     const order: string[] = [];
     serviceMocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
       order.push("cloudflare");
@@ -474,7 +478,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "cloudflare"]);
+    expect(order).toEqual(["cloudflare", "prisma"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
       context: "settings.account-data.delete",
@@ -482,7 +486,7 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("does not call Cloudflare cleanup when the Prisma transaction fails", async () => {
+  it("keeps Cloudflare cleanup before Prisma even when the later transaction fails", async () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => {
         throw new Error("transaction failed");
@@ -495,7 +499,10 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).rejects.toThrow("transaction failed");
 
-    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
+      context: "settings.account-data.delete",
+      userId: "member_123",
+    });
   });
 
   it("does not report provider-config device connections as provider-revoked without OAuth tokens", async () => {
@@ -728,6 +735,7 @@ function createHostedAccountDataExportPrisma(input: {
   });
 
   return {
+    $queryRaw: async () => [{ count: 1n }],
     $transaction: async () => {
       throw new Error("Unexpected transaction during export proof.");
     },
