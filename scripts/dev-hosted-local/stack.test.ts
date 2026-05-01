@@ -415,11 +415,11 @@ describe("hosted local dev stack", () => {
         mode: 0o600,
       },
     );
-    expect(vi.mocked(rename)).toHaveBeenCalledWith(
+    expect(vi.mocked(rename)).not.toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/hosted-local-state.dev.vars",
       expect.stringContaining("apps/cloudflare/.dev.vars"),
     );
-    expect(vi.mocked(rename)).not.toHaveBeenCalledWith(
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars.backup",
       expect.stringContaining("apps/cloudflare/.dev.vars"),
     );

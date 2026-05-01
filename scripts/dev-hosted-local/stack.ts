@@ -516,9 +516,11 @@ export async function startHostedLocalDevStack(input: {
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true });
         if (hadExistingCloudflareDevVars) {
-          await rm(workerDevVarsBackupPath, { force: true });
+          await rename(workerDevVarsBackupPath, cloudflareDevVarsPath);
+          await rm(hostedLocalStateDevVarsPath, { force: true });
+        } else {
+          await rename(hostedLocalStateDevVarsPath, cloudflareDevVarsPath);
         }
-        await rename(hostedLocalStateDevVarsPath, cloudflareDevVarsPath);
       }
       await rm(workerConfigPath, { force: true });
       if (!tempDirOverride) {
