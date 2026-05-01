@@ -4,7 +4,9 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   getPrisma: vi.fn(),
   readOptionalJsonObject: vi.fn(),
+  readHostedMailboxItemOwnerById: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  startHostedWebhookNudgeWorkflow: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -29,6 +31,11 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
+  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
 }));
 
 describe("hosted email mailbox ingress route", () => {
@@ -59,6 +66,13 @@ describe("hosted email mailbox ingress route", () => {
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",
       },
+    });
+    mocks.readHostedMailboxItemOwnerById.mockResolvedValue({
+      id: "mailbox_item_24",
+      userId: "member_123",
+    });
+    mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
+      runId: "workflow_run_123",
     });
   });
 
@@ -149,5 +163,58 @@ describe("hosted email mailbox ingress route", () => {
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("starts an email nudge workflow after verifying the mailbox item owner", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      mailboxItemId: "mailbox_item_24",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/nudge-workflow/route");
+    const response = await POST(new Request("https://example.test", {
+      body: JSON.stringify({
+        mailboxItemId: "mailbox_item_24",
+      }),
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      runId: "workflow_run_123",
+    });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
+    expect(mocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_item_24",
+    });
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_item_24",
+      source: "email",
+    });
+  });
+
+  it("does not start an email nudge workflow for a mailbox item owned by another user", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      mailboxItemId: "mailbox_item_24",
+    });
+    mocks.readHostedMailboxItemOwnerById.mockResolvedValue({
+      id: "mailbox_item_24",
+      userId: "member_other",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/nudge-workflow/route");
+    const response = await POST(new Request("https://example.test", {
+      body: JSON.stringify({
+        mailboxItemId: "mailbox_item_24",
+      }),
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_EMAIL_INGRESS_NUDGE_WORKFLOW_MAILBOX_ITEM_NOT_FOUND",
+      }),
+    });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 });

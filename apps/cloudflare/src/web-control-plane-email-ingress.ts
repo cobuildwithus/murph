@@ -14,12 +14,18 @@ import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts
 
 const HOSTED_WEB_HOSTED_MAILBOX_EMAIL_INGRESS_PATH =
   "/api/internal/hosted-mailbox/email-ingress";
+const HOSTED_WEB_HOSTED_MAILBOX_EMAIL_INGRESS_NUDGE_WORKFLOW_PATH =
+  "/api/internal/hosted-mailbox/email-ingress/nudge-workflow";
 
 export interface HostedEmailMailboxIngressAppendResponse {
   dedupeConflict: boolean;
   duplicate: boolean;
   inserted: boolean;
   item: HostedMailboxItem;
+}
+
+export interface HostedEmailMailboxNudgeWorkflowStartResponse {
+  runId: string;
 }
 
 export async function appendHostedEmailIngressWakeInWeb(input: {
@@ -91,6 +97,79 @@ export async function appendHostedEmailIngressWakeInWeb(input: {
   return parseHostedEmailMailboxIngressAppendResponse(await response.json());
 }
 
+export async function startHostedEmailIngressNudgeWorkflowInWeb(input: {
+  baseUrl: string;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  mailboxItemId: string;
+  timeoutMs: number | null;
+}): Promise<HostedEmailMailboxNudgeWorkflowStartResponse> {
+  const body = JSON.stringify({
+    mailboxItemId: input.mailboxItemId,
+  });
+  let response: Response;
+
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      body,
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_MAILBOX_EMAIL_INGRESS_NUDGE_WORKFLOW_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        description: "Hosted email ingress nudge workflow start",
+        path: HOSTED_WEB_HOSTED_MAILBOX_EMAIL_INGRESS_NUDGE_WORKFLOW_PATH,
+        userId: input.boundUserId,
+      },
+      error,
+      level: "warn",
+      message: "Hosted email ingress nudge workflow control-plane request failed.",
+      phase: "outbox",
+      userId: input.boundUserId,
+    });
+    throw error;
+  }
+
+  if (!response.ok) {
+    const responseDetail = (await response.text()).trim();
+    const error = new Error(
+      responseDetail.length > 0
+        ? `Hosted email ingress nudge workflow start failed with HTTP ${response.status}. ${responseDetail}`
+        : `Hosted email ingress nudge workflow start failed with HTTP ${response.status}.`,
+    ) as Error & {
+      status: number;
+      statusCode: number;
+    };
+    error.status = response.status;
+    error.statusCode = response.status;
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        description: "Hosted email ingress nudge workflow start",
+        path: HOSTED_WEB_HOSTED_MAILBOX_EMAIL_INGRESS_NUDGE_WORKFLOW_PATH,
+        responseStatus: response.status,
+        userId: input.boundUserId,
+      },
+      error,
+      level: "warn",
+      message: "Hosted email ingress nudge workflow control-plane response returned non-OK.",
+      phase: "outbox",
+      userId: input.boundUserId,
+    });
+    throw error;
+  }
+
+  return parseHostedEmailMailboxNudgeWorkflowStartResponse(await response.json());
+}
+
 function parseHostedEmailMailboxIngressAppendResponse(
   value: unknown,
 ): HostedEmailMailboxIngressAppendResponse {
@@ -115,6 +194,21 @@ function parseHostedEmailMailboxIngressAppendResponse(
   };
 }
 
+function parseHostedEmailMailboxNudgeWorkflowStartResponse(
+  value: unknown,
+): HostedEmailMailboxNudgeWorkflowStartResponse {
+  if (!isRecord(value)) {
+    throw new TypeError("Hosted email mailbox nudge workflow response must be an object.");
+  }
+
+  return {
+    runId: requireString(
+      value.runId,
+      "Hosted email mailbox nudge workflow response runId",
+    ),
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -122,6 +216,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
     throw new TypeError(`${label} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
   }
 
   return value;
