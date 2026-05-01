@@ -8,14 +8,15 @@ import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control"
 import {
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER,
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_STEP_MAX_RETRIES,
-  HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
   type HostedWebhookNudgeWorkflowInput,
-  type HostedWebhookNudgeWorkflowStepResult,
 } from "./webhook-workflow-types";
+import {
+  HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+} from "./webhook-nudge-policy";
 
 export async function nudgeHostedWebhookMailboxItemStep(
   input: HostedWebhookNudgeWorkflowInput,
-): Promise<HostedWebhookNudgeWorkflowStepResult> {
+): Promise<void> {
   "use step";
 
   const mailboxItemOwner = await readHostedMailboxItemOwnerById({
@@ -40,10 +41,6 @@ export async function nudgeHostedWebhookMailboxItemStep(
       },
     );
   }
-
-  return {
-    accepted: true,
-  };
 }
 
 Object.assign(nudgeHostedWebhookMailboxItemStep, {

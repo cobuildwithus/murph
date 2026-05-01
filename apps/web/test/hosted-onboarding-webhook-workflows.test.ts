@@ -91,9 +91,7 @@ describe("hosted onboarding webhook workflows", () => {
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",
       source: "telegram",
-    })).resolves.toEqual({
-      accepted: true,
-    });
+    })).resolves.toBeUndefined();
 
     expect(mocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",

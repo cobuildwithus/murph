@@ -14,7 +14,7 @@ import {
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 import {
   HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-} from "./webhook-workflow-types";
+} from "./webhook-nudge-policy";
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   eventId: string;
