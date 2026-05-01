@@ -12,6 +12,7 @@ import {
   type AssistantInputSource,
 } from '../input-source.js'
 import {
+  compareAssistantInputCursors,
   createAssistantInputEventId,
   readAssistantInputEvent,
 } from '../input-store.js'
@@ -20,15 +21,17 @@ import { readAssistantAutoReplyTerminalEvidenceByEvidenceId } from './evidence.j
 import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
 import {
   type AssistantAutoReplyGroupItem,
-  shouldGroupAdjacentConversationCapture,
+  shouldGroupAdjacentConversationInput,
 } from './grouping.js'
-import { loadTelegramAutoReplyMetadata } from './prompt-builder.js'
+import { readTelegramAutoReplyMetadataFromAssistantInput } from './prompt-builder.js'
+import {
+  assistantAutomationInputSummaryFromCandidate,
+} from './input-summary.js'
 import {
   createAssistantAutoReplyGroupContext,
   processAssistantAutoReplyGroup,
 } from './reply.js'
 import {
-  compareAssistantCaptureOrder,
   createEmptyAutoReplyScanResult,
   normalizeEnabledChannels,
   normalizeScanLimit,
@@ -37,8 +40,10 @@ import {
   earliestAssistantAutomationWakeAt,
 } from './shared.js'
 
-const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
-const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
+const AUTO_REPLY_RECEIPT_INPUT_ID_KEY = 'autoReplyInputId'
+const AUTO_REPLY_RECEIPT_INPUT_IDS_KEY = 'autoReplyInputIds'
+const LEGACY_AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
+const LEGACY_AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
 const FAILED_RECEIPT_RECOVERY_RECEIPT_LIMIT = 200
 const TERMINAL_PROVIDER_VALIDATION_FAILURE_PATTERNS = [
   /\binput\.\d+\.output:\s*Invalid input\b/iu,
@@ -63,8 +68,8 @@ export interface RecoverAssistantAutoRepliesInput {
 }
 
 interface AutoReplyRecoveryCandidate {
-  captureIds: readonly string[]
-  primaryCaptureId: string
+  inputIds: readonly string[]
+  primaryInputId: string
 }
 
 export interface AssistantAutoReplyRecoveryResult
@@ -117,7 +122,7 @@ export async function recoverAssistantAutoReplies(
   let resolvedGroups = 0
   input.onEvent?.({
     type: 'reply.scan.started',
-    details: `retrying up to ${candidateListing.candidates.length} failed auto-reply capture(s) from persisted receipts`,
+    details: `retrying up to ${candidateListing.candidates.length} failed auto-reply input(s) from persisted receipts`,
   })
 
   for (const candidate of candidateListing.candidates) {
@@ -140,7 +145,7 @@ export async function recoverAssistantAutoReplies(
     if (!channelState || !enabledChannels.includes(recoverySource)) {
       continue
     }
-    summary.considered += context.captureCount
+    summary.considered += context.inputCount
     const result = await processAssistantAutoReplyGroup({
       allowSelfAuthored: input.allowSelfAuthored,
       context,
@@ -208,7 +213,7 @@ async function listReceiptRecoveryCandidates(input: {
     input.vault,
     FAILED_RECEIPT_RECOVERY_RECEIPT_LIMIT,
   )
-  const seenCaptureIds = new Set<string>()
+  const seenInputIds = new Set<string>()
   const recoverable: AutoReplyRecoveryCandidate[] = []
   let hasMoreDueCandidates = false
   let nextWakeAt: string | null = null
@@ -219,10 +224,10 @@ async function listReceiptRecoveryCandidates(input: {
     if (!metadata) {
       continue
     }
-    if (seenCaptureIds.has(metadata.primaryCaptureId)) {
+    if (seenInputIds.has(metadata.primaryInputId)) {
       continue
     }
-    seenCaptureIds.add(metadata.primaryCaptureId)
+    seenInputIds.add(metadata.primaryInputId)
     if (receipt.status !== 'failed') {
       continue
     }
@@ -237,7 +242,7 @@ async function listReceiptRecoveryCandidates(input: {
     if (hasUnsafeDeliveryEvidence(receipt)) {
       continue
     }
-    if (await hasTerminalHandlingEvidence(input.vault, metadata.captureIds)) {
+    if (await hasTerminalHandlingEvidence(input.vault, metadata.inputIds)) {
       continue
     }
 
@@ -247,8 +252,8 @@ async function listReceiptRecoveryCandidates(input: {
     }
 
     recoverable.push({
-      captureIds: metadata.captureIds,
-      primaryCaptureId: metadata.primaryCaptureId,
+      inputIds: metadata.inputIds,
+      primaryInputId: metadata.primaryInputId,
     })
   }
 
@@ -284,9 +289,9 @@ async function loadAutoReplyRecoveryContext(input: {
 }) {
   const groupItems = (
     await Promise.all(
-      input.candidate.captureIds.map((captureId) =>
+      input.candidate.inputIds.map((inputId) =>
         loadAutoReplyRecoveryGroupItem({
-          captureId,
+          inputId,
           inboxServices: input.inboxServices,
           requestId: input.requestId,
           vault: input.vault,
@@ -296,7 +301,10 @@ async function loadAutoReplyRecoveryContext(input: {
   )
     .filter((item): item is AssistantAutoReplyGroupItem => item !== null)
     .sort((left, right) =>
-      compareAssistantCaptureOrder(left.summary, right.summary),
+      compareAssistantInputCursors(
+        left.inputCandidate!.event.cursor,
+        right.inputCandidate!.event.cursor,
+      ),
     )
 
   if (groupItems.length === 0) {
@@ -304,15 +312,18 @@ async function loadAutoReplyRecoveryContext(input: {
   }
 
   const primaryItem = groupItems.find(
-    (item) => item.summary.captureId === input.candidate.primaryCaptureId,
+    (item) => recoveryItemMatchesInputId(item, input.candidate.primaryInputId),
   )
-  if (!primaryItem || groupItems[0]?.summary.captureId !== primaryItem.summary.captureId) {
+  if (
+    !primaryItem ||
+    !recoveryItemMatchesInputId(groupItems[0], input.candidate.primaryInputId)
+  ) {
     return null
   }
   if (
     groupItems.some(
       (item) =>
-        !shouldGroupAdjacentConversationCapture(primaryItem.summary, item.summary),
+        !shouldGroupAdjacentConversationInput(primaryItem.summary, item.summary),
     )
   ) {
     return null
@@ -321,64 +332,121 @@ async function loadAutoReplyRecoveryContext(input: {
   return createAssistantAutoReplyGroupContext(groupItems)
 }
 
+function recoveryItemMatchesInputId(
+  item: AssistantAutoReplyGroupItem | undefined,
+  inputId: string,
+): boolean {
+  return item?.summary.inputId === inputId ||
+    item?.summary.projectionCaptureId === inputId
+}
+
 async function loadAutoReplyRecoveryGroupItem(input: {
-  captureId: string
+  inputId: string
   inboxServices: InboxServices
   requestId: string | null
   vault: string
 }): Promise<AssistantAutoReplyGroupItem | null> {
-  try {
-    const shown = await input.inboxServices.show({
-      captureId: input.captureId,
-      requestId: input.requestId,
-      vault: input.vault,
-    })
-    const inputId = createAssistantInputEventId({
-      sourceRef: {
-        captureId: shown.capture.captureId,
-        kind: 'inbox-capture',
-        source: shown.capture.source,
-        version: null,
-      },
-    })
-    const storedInput = await readAssistantInputEvent({
-      inputId,
-      vault: input.vault,
-    })
-    if (!storedInput) {
+  let inputId = input.inputId
+  let legacyCapture: Awaited<ReturnType<InboxServices['show']>>['capture'] | null = null
+  if (!isAssistantInputEventId(inputId)) {
+    try {
+      const shown = await input.inboxServices.show({
+        captureId: input.inputId,
+        requestId: input.requestId,
+        vault: input.vault,
+      })
+      legacyCapture = shown.capture
+      inputId = createAssistantInputEventId({
+        sourceRef: {
+          captureId: shown.capture.captureId,
+          kind: 'inbox-capture',
+          source: shown.capture.source,
+          version: null,
+        },
+      })
+    } catch (error) {
+      if (!isInboxCaptureNotFoundError(error)) {
+        throw error
+      }
       return null
     }
-    const candidate = assistantInputCandidateFromStoredEvent(storedInput)
-    return {
-      inputCandidate: candidate,
-      summary: shown.capture,
-      telegramMetadata: await loadTelegramAutoReplyMetadata(
-        input.vault,
-        shown.capture.source === 'telegram' ? shown.capture.envelopePath : null,
-      ),
-    }
-  } catch (error) {
-    if (!isInboxCaptureNotFoundError(error)) {
-      throw error
-    }
   }
 
-  if (!isAssistantInputEventId(input.captureId)) {
-    return null
-  }
   const storedInput = await readAssistantInputEvent({
-    inputId: input.captureId,
+    inputId,
     vault: input.vault,
   })
-  if (!storedInput) {
+  if (!storedInput && !legacyCapture) {
     return null
   }
 
-  const candidate = assistantInputCandidateFromStoredEvent(storedInput)
+  const candidate = legacyCapture
+    ? assistantInputCandidateFromLegacyCapture(legacyCapture, inputId)
+    : assistantInputCandidateFromStoredEvent(storedInput!)
   return {
     inputCandidate: candidate,
-    summary: assistantRecoverySummaryFromInputCandidate(candidate),
-    telegramMetadata: null,
+    summary: assistantAutomationInputSummaryFromCandidate(candidate),
+    telegramMetadata: readTelegramAutoReplyMetadataFromAssistantInput({
+      replyTarget: candidate.event.replyTarget,
+      sourceMetadata: candidate.event.sourceMetadata,
+    }),
+  }
+}
+
+function assistantInputCandidateFromLegacyCapture(
+  capture: Awaited<ReturnType<InboxServices['show']>>['capture'],
+  inputId: string,
+): AssistantInputCandidate {
+  return {
+    acceptedInput: {
+      captureIds: [capture.captureId],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: inputId,
+        version: 'murph.assistant-input-event.v1',
+      },
+      id: inputId,
+      source: 'assistant-input',
+    },
+    event: {
+      attachmentCount: capture.attachmentCount,
+      attachmentDescriptors: [],
+      conversation: {
+        accountId: capture.accountId,
+        actorId: capture.actorId,
+        actorIsSelf: capture.actorIsSelf,
+        source: capture.source,
+        threadId: capture.threadId,
+        threadIsDirect: capture.threadIsDirect,
+      },
+      cursor: {
+        createdAt: capture.createdAt,
+        inputId,
+        occurredAt: capture.occurredAt,
+        sourceKind: 'inbox-capture',
+        sourcePosition: `inbox-capture:${capture.source}:${capture.captureId}`,
+      },
+      inputId,
+      occurredAt: capture.occurredAt,
+      receivedAt: capture.receivedAt,
+      replyTarget: null,
+      source: capture.source,
+      sourceMetadata: null,
+      sourceRef: {
+        captureId: capture.captureId,
+        kind: 'inbox-capture',
+        source: capture.source,
+        version: null,
+      },
+      text: capture.text,
+      transcriptText: capture.text,
+      userMessageContent: null,
+    },
+    projection: {
+      captureId: capture.captureId,
+      reasonCode: null,
+      status: 'succeeded',
+    },
   }
 }
 
@@ -386,38 +454,11 @@ function isAssistantInputEventId(value: string): boolean {
   return /^ain_[0-9a-f]{32}$/u.test(value)
 }
 
-function assistantRecoverySummaryFromInputCandidate(
-  input: AssistantInputCandidate,
-): AssistantAutoReplyGroupItem['summary'] {
-  const conversation = input.event.conversation
-  const captureId = input.projection.captureId ?? input.event.inputId
-  return {
-    accountId: conversation?.accountId ?? null,
-    actorId: conversation?.actorId ?? null,
-    actorIsSelf: conversation?.actorIsSelf ?? false,
-    actorName: null,
-    attachmentCount: input.event.attachmentCount,
-    captureId,
-    createdAt: input.event.receivedAt ?? input.event.occurredAt,
-    envelopePath: `assistant-input-events/${input.event.inputId}.json`,
-    eventId: input.event.inputId,
-    externalId: input.event.inputId,
-    occurredAt: input.event.occurredAt,
-    promotions: [],
-    receivedAt: input.event.receivedAt,
-    source: input.event.source,
-    text: input.event.transcriptText ?? input.event.text,
-    threadId: conversation?.threadId ?? input.event.inputId,
-    threadIsDirect: conversation?.threadIsDirect ?? false,
-    threadTitle: null,
-  }
-}
-
 function readAutoReplyReceiptMetadata(
   receipt: AssistantTurnReceipt,
-): { captureIds: readonly string[]; primaryCaptureId: string } | null {
-  const captureIds: string[] = []
-  let primaryCaptureId: string | null = null
+): { inputIds: readonly string[]; primaryInputId: string } | null {
+  const inputIds: string[] = []
+  let primaryInputId: string | null = null
 
   for (const event of receipt.timeline) {
     if (
@@ -427,33 +468,40 @@ function readAutoReplyReceiptMetadata(
       continue
     }
 
-    const groupedCaptureIds = event.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
+    const groupedInputIds = event.metadata[AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]
       ?.split(',')
       .map((value) => value.trim())
       .filter((value) => value.length > 0) ?? []
-    const eventPrimaryCaptureId =
-      event.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]?.trim() ||
-      groupedCaptureIds[0] ||
+    const legacyGroupedCaptureIds =
+      event.metadata[LEGACY_AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
+        ?.split(',')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0) ?? []
+    const eventPrimaryInputId =
+      event.metadata[AUTO_REPLY_RECEIPT_INPUT_ID_KEY]?.trim() ||
+      groupedInputIds[0] ||
+      event.metadata[LEGACY_AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]?.trim() ||
+      legacyGroupedCaptureIds[0] ||
       null
-    if (eventPrimaryCaptureId && !captureIds.includes(eventPrimaryCaptureId)) {
-      captureIds.push(eventPrimaryCaptureId)
+    if (eventPrimaryInputId && !inputIds.includes(eventPrimaryInputId)) {
+      inputIds.push(eventPrimaryInputId)
     }
-    for (const captureId of groupedCaptureIds) {
-      if (!captureIds.includes(captureId)) {
-        captureIds.push(captureId)
+    for (const inputId of [...groupedInputIds, ...legacyGroupedCaptureIds]) {
+      if (!inputIds.includes(inputId)) {
+        inputIds.push(inputId)
       }
     }
-    if (primaryCaptureId === null && eventPrimaryCaptureId !== null) {
-      primaryCaptureId = eventPrimaryCaptureId
+    if (primaryInputId === null && eventPrimaryInputId !== null) {
+      primaryInputId = eventPrimaryInputId
     }
   }
 
-  const resolvedPrimaryCaptureId = primaryCaptureId ?? captureIds[0] ?? null
-  return resolvedPrimaryCaptureId
+  const resolvedPrimaryInputId = primaryInputId ?? inputIds[0] ?? null
+  return resolvedPrimaryInputId
     ? {
-        captureIds:
-          captureIds.length > 0 ? captureIds : [resolvedPrimaryCaptureId],
-        primaryCaptureId: resolvedPrimaryCaptureId,
+        inputIds:
+          inputIds.length > 0 ? inputIds : [resolvedPrimaryInputId],
+        primaryInputId: resolvedPrimaryInputId,
       }
     : null
 }
@@ -474,11 +522,11 @@ function hasUnsafeDeliveryEvidence(receipt: AssistantTurnReceipt): boolean {
 
 async function hasTerminalHandlingEvidence(
   vault: string,
-  captureIds: readonly string[],
+  inputIds: readonly string[],
 ): Promise<boolean> {
   const existingEvidence = await Promise.all(
-    captureIds.map((captureId) =>
-      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, captureId),
+    inputIds.map((inputId) =>
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, inputId),
     ),
   )
   return existingEvidence.every((evidence) => evidence !== null)

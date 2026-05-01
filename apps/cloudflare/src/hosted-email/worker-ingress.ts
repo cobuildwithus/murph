@@ -3,7 +3,9 @@ import { readHostedEmailCapabilities } from "@murphai/hosted-execution/hosted-em
 import {
   parseRawEmailMessage,
   readRawEmailHeaderValue,
+  type ParsedEmailMessage,
 } from "@murphai/inboxd/connectors/email/parsed";
+import type { HostedExecutionEmailAttachmentSummary } from "@murphai/hosted-execution";
 import {
   buildParsedEmailThreadTarget,
   resolveParsedEmailThreadKey,
@@ -156,11 +158,13 @@ export async function handleHostedEmailIngress(
     message: parsedMessage,
     rawMessageKey,
   });
+  const promptProjection = buildHostedEmailPromptProjection(parsedMessage);
 
   try {
     await appendHostedEmailIngressWakeInWeb({
       baseUrl: environment.hostedWebBaseUrl,
       body: {
+        ...promptProjection,
         eventId,
         identityId: route.identityId,
         messageId: parsedMessage.messageId,
@@ -229,6 +233,84 @@ export async function handleHostedEmailIngress(
       userId: route.userId,
     });
   }
+}
+
+const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT = 8;
+const HOSTED_EMAIL_PROMPT_ATTACHMENT_MAX_COUNT = 12;
+const HOSTED_EMAIL_PROMPT_SUBJECT_MAX_CHARS = 240;
+const HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS = 4_000;
+const HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS = 160;
+const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
+
+function buildHostedEmailPromptProjection(
+  message: ParsedEmailMessage,
+): {
+  attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
+  cc?: string[];
+  from?: string | null;
+  subject?: string | null;
+  textPreview?: string | null;
+  to?: string[];
+} {
+  const textPreview = normalizeHostedEmailPromptScalar(
+    message.text,
+    HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS,
+  );
+  if (!textPreview) {
+    return {};
+  }
+
+  const attachmentSummaries = message.attachments
+    .slice(0, HOSTED_EMAIL_PROMPT_ATTACHMENT_MAX_COUNT)
+    .map((attachment): HostedExecutionEmailAttachmentSummary => ({
+      contentType: normalizeHostedEmailPromptScalar(
+        attachment.contentType,
+        HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS,
+      ),
+      fileName: normalizeHostedEmailPromptScalar(
+        attachment.fileName,
+        HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS,
+      ),
+      sizeBytes: attachment.data?.byteLength ?? null,
+    }));
+
+  return {
+    ...(attachmentSummaries.length > 0 ? { attachmentSummaries } : {}),
+    cc: normalizeHostedEmailPromptList(message.cc, HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT),
+    from: normalizeHostedEmailPromptScalar(
+      message.from,
+      HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS,
+    ),
+    subject: normalizeHostedEmailPromptScalar(
+      message.subject,
+      HOSTED_EMAIL_PROMPT_SUBJECT_MAX_CHARS,
+    ),
+    textPreview,
+    to: normalizeHostedEmailPromptList(message.to, HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT),
+  };
+}
+
+function normalizeHostedEmailPromptList(
+  values: readonly string[],
+  maxCount: number,
+): string[] {
+  return values
+    .map((value) => normalizeHostedEmailPromptScalar(value, HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS))
+    .filter((value): value is string => value !== null)
+    .slice(0, maxCount);
+}
+
+function normalizeHostedEmailPromptScalar(
+  value: string | null | undefined,
+  maxChars: number,
+): string | null {
+  const normalized = value?.replace(/\s+/gu, " ").trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+  return normalized.length <= maxChars
+    ? normalized
+    : `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 function isDefinitiveHostedEmailIngressAppendFailure(

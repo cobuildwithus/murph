@@ -1,28 +1,27 @@
-import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantInputCandidate } from '../input-source.js'
-import { isSameAssistantConversationCapture } from '../conversation-ref.js'
+import { isSameAssistantConversationRef } from '../conversation-ref.js'
 import {
-  loadTelegramAutoReplyMetadata,
   readTelegramAutoReplyMetadataFromAssistantInput,
   type TelegramAutoReplyMetadata,
 } from './prompt-builder.js'
+import type { AssistantAutomationInputSummary } from './input-summary.js'
 
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null
-  summary: InboxListResult['items'][number]
+  summary: AssistantAutomationInputSummary
   telegramMetadata: TelegramAutoReplyMetadata | null
 }
 
 export async function collectAssistantAutoReplyGroup(input: {
-  captures: InboxListResult['items']
-  inputCandidatesByCaptureId?: ReadonlyMap<string, AssistantInputCandidate>
+  inputSummaries: readonly AssistantAutomationInputSummary[]
+  inputCandidatesByInputId?: ReadonlyMap<string, AssistantInputCandidate>
   startIndex: number
   vault: string
 }): Promise<{
   endIndex: number
   items: AssistantAutoReplyGroupItem[]
 }> {
-  const first = input.captures[input.startIndex]
+  const first = input.inputSummaries[input.startIndex]
   if (!first) {
     return {
       endIndex: input.startIndex,
@@ -31,21 +30,25 @@ export async function collectAssistantAutoReplyGroup(input: {
   }
   const items: AssistantAutoReplyGroupItem[] = [
     await createAssistantAutoReplyGroupItem(input.vault, first, {
-      inputCandidate: input.inputCandidatesByCaptureId?.get(first.captureId) ?? null,
+      inputCandidate: input.inputCandidatesByInputId?.get(first.inputId) ?? null,
     }),
   ]
   let endIndex = input.startIndex
 
-  for (let index = input.startIndex + 1; index < input.captures.length; index += 1) {
-    const candidate = input.captures[index]
-    if (!candidate || !shouldGroupAdjacentConversationCapture(first, candidate)) {
+  for (
+    let index = input.startIndex + 1;
+    index < input.inputSummaries.length;
+    index += 1
+  ) {
+    const candidate = input.inputSummaries[index]
+    if (!candidate || !shouldGroupAdjacentConversationInput(first, candidate)) {
       break
     }
 
     items.push(
       await createAssistantAutoReplyGroupItem(input.vault, candidate, {
         inputCandidate:
-          input.inputCandidatesByCaptureId?.get(candidate.captureId) ?? null,
+          input.inputCandidatesByInputId?.get(candidate.inputId) ?? null,
       }),
     )
     endIndex = index
@@ -58,14 +61,14 @@ export async function collectAssistantAutoReplyGroup(input: {
 }
 
 export async function loadAssistantAutoReplyGroupItems(input: {
-  captures: readonly InboxListResult['items'][number][]
-  inputCandidatesByCaptureId?: ReadonlyMap<string, AssistantInputCandidate>
+  inputSummaries: readonly AssistantAutomationInputSummary[]
+  inputCandidatesByInputId?: ReadonlyMap<string, AssistantInputCandidate>
   vault: string
 }): Promise<AssistantAutoReplyGroupItem[]> {
   return Promise.all(
-    input.captures.map((capture) =>
-      createAssistantAutoReplyGroupItem(input.vault, capture, {
-        inputCandidate: input.inputCandidatesByCaptureId?.get(capture.captureId) ?? null,
+    input.inputSummaries.map((summary) =>
+      createAssistantAutoReplyGroupItem(input.vault, summary, {
+        inputCandidate: input.inputCandidatesByInputId?.get(summary.inputId) ?? null,
       }),
     ),
   )
@@ -73,27 +76,29 @@ export async function loadAssistantAutoReplyGroupItems(input: {
 
 async function createAssistantAutoReplyGroupItem(
   vault: string,
-  capture: InboxListResult['items'][number],
+  summary: AssistantAutomationInputSummary,
   input: {
     inputCandidate?: AssistantInputCandidate | null
   } = {},
 ): Promise<AssistantAutoReplyGroupItem> {
   return {
     inputCandidate: input.inputCandidate ?? null,
-    summary: capture,
-    telegramMetadata: await loadCaptureTelegramMetadata(
+    summary,
+    telegramMetadata: await loadInputTelegramMetadata(
       vault,
-      capture,
+      summary,
       input.inputCandidate ?? null,
     ),
   }
 }
 
-async function loadCaptureTelegramMetadata(
+async function loadInputTelegramMetadata(
   vault: string,
-  capture: InboxListResult['items'][number],
+  summary: AssistantAutomationInputSummary,
   inputCandidate: AssistantInputCandidate | null,
 ): Promise<TelegramAutoReplyMetadata | null> {
+  void vault
+  void summary
   const eventMetadata = inputCandidate
     ? readTelegramAutoReplyMetadataFromAssistantInput({
         replyTarget: inputCandidate.event.replyTarget,
@@ -104,26 +109,12 @@ async function loadCaptureTelegramMetadata(
     return eventMetadata
   }
 
-  if (isSyntheticAssistantInputEnvelopePath(capture.envelopePath)) {
-    return null
-  }
-
-  return await loadTelegramAutoReplyMetadata(
-    vault,
-    capture.source === 'telegram' ? capture.envelopePath : null,
-  )
+  return null
 }
 
-function isSyntheticAssistantInputEnvelopePath(
-  envelopePath: string | null,
+export function shouldGroupAdjacentConversationInput(
+  first: AssistantAutomationInputSummary,
+  candidate: AssistantAutomationInputSummary,
 ): boolean {
-  return typeof envelopePath === 'string'
-    && envelopePath.startsWith('assistant-input-events/')
-}
-
-export function shouldGroupAdjacentConversationCapture(
-  first: InboxListResult['items'][number],
-  candidate: InboxListResult['items'][number],
-): boolean {
-  return isSameAssistantConversationCapture(first, candidate)
+  return isSameAssistantConversationRef(first.conversation, candidate.conversation)
 }

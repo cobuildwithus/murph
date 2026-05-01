@@ -64,14 +64,26 @@ describe("hosted email mailbox ingress route", () => {
 
   it("appends hosted email conversation messages to the mailbox", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
+      attachmentSummaries: [
+        {
+          contentType: "text/plain",
+          fileName: "notes.txt",
+          sizeBytes: 42,
+        },
+      ],
+      cc: ["helper@example.test"],
       eventId: "evt_email",
+      from: "Sender <sender@example.test>",
       identityId: "assistant@example.test",
       messageId: "<message-123@example.test>",
       occurredAt: "2026-04-17T00:00:00.000Z",
       rawMessageKey: "raw_123",
       selfAddress: "reply@example.test",
+      subject: "Hosted email",
+      textPreview: "Please look at this update.",
       threadKey: "<thread-root@example.test>",
       threadTarget: "hostedmail:opaque-thread-target",
+      to: ["reply@example.test"],
     });
 
     const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
@@ -93,13 +105,25 @@ describe("hosted email mailbox ingress route", () => {
         eventId: "evt_email",
         kind: "conversation.message",
         message: {
+          attachmentSummaries: [
+            {
+              contentType: "text/plain",
+              fileName: "notes.txt",
+              sizeBytes: 42,
+            },
+          ],
           channel: "email",
+          cc: ["helper@example.test"],
+          from: "Sender <sender@example.test>",
           identityId: "assistant@example.test",
           messageId: "<message-123@example.test>",
           rawMessageKey: "raw_123",
           selfAddress: "reply@example.test",
+          subject: "Hosted email",
+          textPreview: "Please look at this update.",
           threadKey: "<thread-root@example.test>",
           threadTarget: "hostedmail:opaque-thread-target",
+          to: ["reply@example.test"],
         },
         occurredAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",

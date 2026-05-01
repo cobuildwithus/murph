@@ -902,6 +902,11 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(listed.events.length, 1);
     assert.equal(listed.events[0]?.content.text, "Received an email message.");
+    assert.deepEqual(listed.events[0]?.sourceMetadata, {
+      kind: "email",
+      promptReady: false,
+      promptUnavailableReason: "email.body_unavailable",
+    });
     assert.equal(listed.events[0]?.projection.captureId, null);
     assert.equal(listed.events[0]?.projection.reasonCode, null);
     assert.equal(listed.events[0]?.projection.status, "pending");
@@ -917,6 +922,77 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(afterProjection.events[0]?.projection.status, "failed");
     assert.ok(afterProjection.events[0]?.projection.lastAttemptedAt);
+  });
+
+  test("stages hosted email input with minimized prompt-ready metadata and body preview", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-prompt-ready-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        attachmentSummaries: [
+          {
+            contentType: "application/pdf",
+            fileName: "labs.pdf",
+            sizeBytes: 321,
+          },
+        ],
+        cc: ["helper@example.test"],
+        channel: "email",
+        from: "Sender <sender@example.test>",
+        identityId: "identity_synthetic",
+        messageId: "<message-123@example.test>",
+        rawMessageKey: "raw_email_prompt_ready",
+        selfAddress: "assistant@example.test",
+        subject: "Question about sauna",
+        textPreview: "Can you compare my sauna notes from this week?",
+        threadTarget: "hostedmail:opaque-thread-target",
+        to: ["assistant@example.test"],
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedRawEmailMessageMissingError({
+          rawMessageKey: "raw_email_prompt_ready",
+          userId: TEST_USER_ID,
+        });
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    const event = listed.events[0]!;
+    assert.match(event.content.text ?? "", /Sender summary - Sender <sender@example\.test>/u);
+    assert.match(event.content.text ?? "", /Recipient summary - assistant@example\.test/u);
+    assert.match(event.content.text ?? "", /Cc summary - helper@example\.test/u);
+    assert.match(event.content.text ?? "", /Email subject - Question about sauna/u);
+    assert.match(
+      event.content.text ?? "",
+      /Email body preview - Can you compare my sauna notes from this week\?/u,
+    );
+    assert.deepEqual(event.sourceMetadata, {
+      kind: "email",
+      promptReady: true,
+      promptUnavailableReason: null,
+    });
+    assert.deepEqual(event.content.attachmentDescriptors[0], {
+      attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
+      contentType: "application/pdf",
+      fileName: "labs.pdf",
+      kind: "email_attachment",
+      sizeBytes: 321,
+    });
+    assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
   });
 
   test("makes five rapid staged mailbox conversation messages available without capture projection", async () => {
