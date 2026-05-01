@@ -15,6 +15,7 @@ import {
   resolveHostedWebDistDir,
 } from "../next-artifacts";
 import {
+  HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
   buildHostedWebNextConfig,
   buildHostedWebTurbopackConfig,
@@ -144,6 +145,14 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
   assert.equal(productionNextConfig.webpack, undefined);
   assert.equal(productionNextConfig.typescript, undefined);
+});
+
+test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops", () => {
+  assert.deepEqual(HOSTED_WEB_WORKFLOW_OPTIONS, {
+    workflows: {
+      lazyDiscovery: true,
+    },
+  });
 });
 
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {

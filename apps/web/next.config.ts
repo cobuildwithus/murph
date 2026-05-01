@@ -53,6 +53,11 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
+export const HOSTED_WEB_WORKFLOW_OPTIONS = {
+  workflows: {
+    lazyDiscovery: true,
+  },
+} satisfies Parameters<typeof withWorkflow>[1];
 
 export function resolvePrivyBaseDomainOrigin(value: string | null | undefined): string | null {
   const parsed = parseConfiguredOrigin(value);
@@ -256,7 +261,12 @@ async function nextConfig(phase: string): Promise<NextConfig> {
   return buildHostedWebNextConfig(phase);
 }
 
-export default withWorkflow(nextConfig);
+export const HOSTED_WEB_WORKFLOW_NEXT_CONFIG = withWorkflow(
+  nextConfig,
+  HOSTED_WEB_WORKFLOW_OPTIONS,
+);
+
+export default HOSTED_WEB_WORKFLOW_NEXT_CONFIG;
 
 function uniqueSources(sources: readonly (string | null | undefined)[]): string[] {
   return [...new Set(sources.filter((value): value is string => Boolean(value)))];
