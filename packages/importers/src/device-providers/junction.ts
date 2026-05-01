@@ -111,6 +111,10 @@ const TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>([
   ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
 ]);
+const FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
+  "abbott-libreview",
+  "freestyle-libre",
+]);
 
 const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
@@ -290,7 +294,7 @@ function normalizeTimeseries(
       }
 
       const value = firstNumberFromPaths(entry, streamDescriptor?.paths ?? observationDescriptor?.paths ?? []);
-      const timestamp = resolveRecordTimestamp(entry, context);
+      const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
 
       if (value === undefined || !timestamp.occurredAt) {
         return;
@@ -372,9 +376,15 @@ function pushSleepSummary(
   resourceContext: ResourceContext,
   context: NormalizationContext,
 ): void {
-  const timestamp = resolveRecordTimestamp(entry, context);
-  const startAt = resolveSafeTimestamp(firstValueFromPaths(entry, ["startAt", "start_at", "bedtimeStart", "bedtime_start"]));
-  const endAt = resolveSafeTimestamp(firstValueFromPaths(entry, ["endAt", "end_at", "bedtimeEnd", "bedtime_end"]));
+  const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const startAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["startAt", "start_at", "bedtimeStart", "bedtime_start"]),
+    resourceContext.sourceProviderSlug,
+  );
+  const endAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["endAt", "end_at", "bedtimeEnd", "bedtime_end"]),
+    resourceContext.sourceProviderSlug,
+  );
   const durationMinutes = firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes", "totalSleepMinutes", "total_sleep_minutes"]);
 
   if (startAt || endAt || durationMinutes !== undefined) {
@@ -408,9 +418,15 @@ function pushWorkoutSummary(
   resourceContext: ResourceContext,
   context: NormalizationContext,
 ): void {
-  const timestamp = resolveRecordTimestamp(entry, context);
-  const startAt = resolveSafeTimestamp(firstValueFromPaths(entry, ["startAt", "start_at", "start"]));
-  const endAt = resolveSafeTimestamp(firstValueFromPaths(entry, ["endAt", "end_at", "end"]));
+  const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const startAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["startAt", "start_at", "start"]),
+    resourceContext.sourceProviderSlug,
+  );
+  const endAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["endAt", "end_at", "end"]),
+    resourceContext.sourceProviderSlug,
+  );
   const occurredAt = endAt ?? startAt ?? timestamp.occurredAt;
 
   if (!occurredAt) {
@@ -447,7 +463,7 @@ function pushObservationMetrics(
   context: NormalizationContext,
   metrics: readonly MetricDescriptor[],
 ): void {
-  const timestamp = resolveRecordTimestamp(entry, context);
+  const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
 
   if (!timestamp.occurredAt) {
     return;
@@ -600,6 +616,7 @@ function buildStableResourceId(resourceContext: ResourceContext, entry: PlainObj
 function resolveRecordTimestamp(
   entry: PlainObject,
   context: Pick<NormalizationContext, "importedAt" | "windowEnd" | "windowStart">,
+  sourceProviderSlug: string | undefined,
 ): {
   occurredAt?: string;
   recordedAt?: string;
@@ -618,11 +635,16 @@ function resolveRecordTimestamp(
     "day",
   ]);
   const explicitSemantics = firstTimestampSemantics(entry);
-  const timestampSemantics = explicitSemantics ?? inferTimestampSemantics(rawObservedAt);
+  const timestampSemantics = hasFloatingTimestampSourceProvider(sourceProviderSlug)
+    ? "floating"
+    : explicitSemantics ?? inferTimestampSemantics(rawObservedAt);
   const occurredAt = timestampSemantics === "floating"
     ? context.windowEnd ?? context.windowStart ?? context.importedAt
-    : resolveSafeTimestamp(rawObservedAt) ?? context.windowEnd ?? context.windowStart ?? context.importedAt;
-  const recordedAt = resolveSafeTimestamp(firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]))
+    : resolveSafeTimestamp(rawObservedAt, sourceProviderSlug) ?? context.windowEnd ?? context.windowStart ?? context.importedAt;
+  const recordedAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]),
+    sourceProviderSlug,
+  )
     ?? occurredAt;
 
   return stripUndefined({
@@ -738,14 +760,23 @@ function normalizeTimestamp(value: unknown): string | undefined {
   return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 }
 
-function resolveSafeTimestamp(value: unknown): string | undefined {
+function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): string | undefined {
   const raw = typeof value === "string" ? value.trim() : value;
+
+  if (typeof raw === "string" && hasFloatingTimestampSourceProvider(sourceProviderSlug)) {
+    return undefined;
+  }
 
   if (typeof raw === "string" && inferTimestampSemantics(raw) === "floating") {
     return undefined;
   }
 
   return normalizeTimestamp(raw);
+}
+
+function hasFloatingTimestampSourceProvider(sourceProviderSlug: string | undefined): boolean {
+  const normalized = normalizeSourceProviderSlug(sourceProviderSlug);
+  return normalized ? FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS.has(normalized) : false;
 }
 
 function inferTimestampSemantics(value: string | undefined): TimestampSemantics | undefined {
