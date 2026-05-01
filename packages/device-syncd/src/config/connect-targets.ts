@@ -3,8 +3,8 @@ import { normalizeJunctionProviderFilter } from "../providers/junction.ts";
 import { listConfiguredDeviceSyncProviderNames } from "./provider-configs.ts";
 
 import type {
-  ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
+  ConfiguredDeviceSyncProviderPresence,
 } from "./provider-types.ts";
 
 export interface DeviceSyncConnectTarget {
@@ -13,6 +13,10 @@ export interface DeviceSyncConnectTarget {
   provider: ConfiguredDeviceSyncProviderKey;
   sourceProviderSlug?: string | null;
 }
+
+type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresence & {
+  junction?: { providerFilter?: string[] };
+};
 
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value
@@ -25,7 +29,7 @@ export function normalizeDeviceSyncConnectTargetKey(value: string): string | nul
 }
 
 export function listConfiguredDeviceSyncConnectTargets(
-  providerConfigs: ConfiguredDeviceSyncProviderConfigs,
+  providerConfigs: DeviceSyncConnectTargetProviderConfigs,
 ): DeviceSyncConnectTarget[] {
   const targetsByKey = new Map<string, DeviceSyncConnectTarget>();
 
@@ -61,7 +65,7 @@ export function listConfiguredDeviceSyncConnectTargets(
 }
 
 export function resolveConfiguredDeviceSyncConnectTarget(
-  providerConfigs: ConfiguredDeviceSyncProviderConfigs,
+  providerConfigs: DeviceSyncConnectTargetProviderConfigs,
   requestedConnectTarget: string,
 ): DeviceSyncConnectTarget | null {
   const connectTarget = normalizeDeviceSyncConnectTargetKey(requestedConnectTarget);

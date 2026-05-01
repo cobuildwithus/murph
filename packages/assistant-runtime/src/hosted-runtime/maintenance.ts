@@ -1,4 +1,5 @@
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
+import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
   type AssistantExecutionContext,
@@ -521,7 +522,9 @@ function createHostedDeviceSyncRuntime(input: {
   }
 
   const registry = createDeviceSyncRegistry(
-    createConfiguredDeviceSyncProvidersFromConfigs(input.deviceSyncConfig.providerConfigs),
+    createConfiguredDeviceSyncProvidersFromConfigs(
+      resolveHostedRuntimeDeviceSyncProviderConfigs(input.deviceSyncConfig.providerConfigs),
+    ),
   );
 
   if (registry.list().length === 0) {
@@ -536,4 +539,33 @@ function createHostedDeviceSyncRuntime(input: {
     },
     registry,
   });
+}
+
+function resolveHostedRuntimeDeviceSyncProviderConfigs(
+  providerConfigs: HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"],
+): ConfiguredDeviceSyncProviderConfigs {
+  const runtimeProviderConfigs: ConfiguredDeviceSyncProviderConfigs = {};
+
+  // Junction provider-config credentials require provider-owned API/HMAC
+  // secrets. The resolved hosted config is serializable, so Junction must be
+  // hydrated through an explicit runtime secret channel before provider
+  // instantiation instead of being reconstructed from this envelope.
+
+  if (providerConfigs.garmin) {
+    runtimeProviderConfigs.garmin = providerConfigs.garmin;
+  }
+
+  if (providerConfigs.oura) {
+    runtimeProviderConfigs.oura = providerConfigs.oura;
+  }
+
+  if (providerConfigs.whoop) {
+    runtimeProviderConfigs.whoop = providerConfigs.whoop;
+  }
+
+  if (providerConfigs.strava) {
+    runtimeProviderConfigs.strava = providerConfigs.strava;
+  }
+
+  return runtimeProviderConfigs;
 }

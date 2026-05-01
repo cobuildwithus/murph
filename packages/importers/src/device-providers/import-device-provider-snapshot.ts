@@ -95,6 +95,9 @@ export async function prepareDeviceProviderSnapshotImport(
     ? adapter.parseSnapshot(request.snapshot)
     : request.snapshot;
   const normalized = await adapter.normalizeSnapshot(snapshot);
+  const rawSnapshot = adapter.sanitizeRawSnapshot
+    ? adapter.sanitizeRawSnapshot(snapshot)
+    : request.snapshot;
   const rawObservedAt = resolveStableRawEnvelopeObservedAt(request, normalized);
   const basePayload = stripUndefined({
     vaultRoot: request.vaultRoot,
@@ -104,7 +107,7 @@ export async function prepareDeviceProviderSnapshotImport(
   });
   const rawEnvelope = buildWearableRawIngestEnvelope({
     provider: basePayload.provider,
-    payload: request.snapshot,
+    payload: rawSnapshot,
     userId: request.userId,
     accountId: basePayload.accountId,
     connectionId: request.connectionId,

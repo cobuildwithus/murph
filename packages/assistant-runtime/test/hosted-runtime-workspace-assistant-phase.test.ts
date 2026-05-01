@@ -225,8 +225,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       resolvedDeviceSync: {
         providerConfigs: {
           junction: {
-            apiKey: "synthetic-junction-key",
-            clientUserIdSecret: "synthetic-junction-secret",
             environment: "sandbox",
             providerFilter: ["fitbit", "junction"],
             region: "us",
@@ -294,7 +292,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
-    expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-junction-secret");
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
   });
 
@@ -581,7 +578,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         bootstrapResult: null,
         conversationMetrics: null,
         mailboxLane: "assistant-notification",
-        redactedLogEntries: [],
+        redactedLogEntries: [{
+          component: "runtime",
+          level: "warn",
+          message:
+            "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
+          phase: "wake.running",
+          redacted: {
+            deliveryDispatchMode: "queue-only",
+            errorCode: "assistant_provider_failed",
+            localPathPreview: "/tmp/not-allowed",
+            notificationChannel: "linq",
+          },
+        }],
       },
       status: "processed",
     });
@@ -596,10 +605,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await result.afterCheckpoint?.();
 
     expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+      "assistant.automation_detail",
       "mailbox.system_processed",
       "mailbox.system_processed",
     ]);
-    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      level: "warn",
+      phase: "invoke",
+      redactedJson: expect.objectContaining({
+        deliveryDispatchMode: "queue-only",
+        detailComponent: "runtime",
+        detailLabel:
+          "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
+        errorCode: "assistant_provider_failed",
+        notificationChannel: "linq",
+      }),
+    }));
+    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
+      localPathPreview: expect.anything(),
+    }));
+    expect(logRequests[2]?.entries[0]).toEqual(expect.objectContaining({
       component: "mailbox",
       eventCode: "mailbox.system_processed",
       level: "warn",

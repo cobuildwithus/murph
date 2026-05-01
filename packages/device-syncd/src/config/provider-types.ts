@@ -21,7 +21,10 @@ export type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
 
 export interface SerializableConfiguredDeviceSyncProviderConfigByKey {
   garmin: Omit<GarminDeviceSyncProviderConfig, "fetchImpl">;
-  junction: Omit<JunctionDeviceSyncProviderConfig, "fetchImpl" | "webhookSecret">;
+  junction: Omit<
+    JunctionDeviceSyncProviderConfig,
+    "fetchImpl" | "webhookSecret" | "apiKey" | "clientUserIdSecret"
+  >;
   oura: Omit<OuraDeviceSyncProviderConfig, "fetchImpl" | "webhookVerificationToken">;
   whoop: Omit<WhoopDeviceSyncProviderConfig, "fetchImpl">;
   strava: Omit<StravaDeviceSyncProviderConfig, "fetchImpl" | "webhookVerifyToken">;

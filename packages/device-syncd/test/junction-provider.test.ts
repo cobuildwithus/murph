@@ -204,6 +204,24 @@ test("Junction createLinkToken accepts documented Link web URL hosts", async () 
   );
 });
 
+test("Junction client derives the API host from environment and region", async () => {
+  const requests: string[] = [];
+  const client = new JunctionClient({
+    apiKey: "pk_eu_test_123",
+    environment: "production",
+    region: "eu",
+    fetchImpl: async (input) => {
+      requests.push(readUrl(input));
+      return createJsonResponse({ user_id: "junction-user-1" });
+    },
+  });
+
+  const user = await client.createUser("murph_test_client_user");
+
+  assert.equal(user.userId, "junction-user-1");
+  assert.deepEqual(requests, ["https://api.eu.junction.com/v2/user/"]);
+});
+
 test("Junction createLinkToken rejects unexpected Link web URL hosts", async () => {
   assert.equal(isAllowedJunctionLinkHost("link.tryvital.io"), true);
   assert.equal(isAllowedJunctionLinkHost("tryvital.io"), true);
@@ -833,6 +851,10 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(snapshot.summaries?.activity?.[1]?.providerConnectionId, undefined);
   assert.equal(snapshot.summaries?.activity?.[1]?.userId, undefined);
   assert.deepEqual(Object.keys(snapshot.timeseries ?? {}).sort(), ["distance", "heartrate", "hrv", "steps"]);
+  assert.equal(snapshot.timeseries?.steps?.length, 1);
+  assert.equal(snapshot.timeseries?.distance?.length, 1);
+  assert.equal(snapshot.timeseries?.heartrate?.length, 1);
+  assert.equal(snapshot.timeseries?.hrv?.length, 1);
   const stepRecord = snapshot.timeseries?.steps?.[0];
   assert.equal(stepRecord?.accountId, undefined);
   assert.equal(stepRecord?.account, undefined);
@@ -1168,5 +1190,7 @@ test("Junction resource jobs infer opt-in glucose as timeseries", async () => {
   assert.equal(requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/glucose/grouped")).length, 2);
   assert.equal(requests.some((url) => url.includes("/v2/summary/glucose/")), false);
   assert.equal(importedSnapshots.length, 1);
-  assert.match(JSON.stringify(importedSnapshots[0]), /"glucose"/u);
+  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
+  assert.equal(snapshot.timeseries?.glucose?.length, 1);
+  assert.match(JSON.stringify(snapshot), /"glucose"/u);
 });

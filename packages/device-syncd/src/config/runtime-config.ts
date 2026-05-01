@@ -69,7 +69,10 @@ export function cloneConfiguredDeviceSyncRuntimeConfig(
   config: ConfiguredDeviceSyncRuntimeConfig,
 ): ConfiguredDeviceSyncRuntimeConfig {
   return {
-    providerConfigs: cloneSerializableConfiguredDeviceSyncProviderConfigs(config.providerConfigs),
+    providerConfigs: parseSerializableConfiguredDeviceSyncProviderConfigs(
+      structuredClone(config.providerConfigs),
+      "runtimeConfig.providerConfigs",
+    ),
     publicBaseUrl: config.publicBaseUrl,
     secret: config.secret,
   };

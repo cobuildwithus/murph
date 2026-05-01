@@ -25,6 +25,11 @@
       "import": "./dist/device-providers/provider-descriptors.js",
       "default": "./dist/device-providers/provider-descriptors.js"
     },
+    "./device-providers/junction-origin": {
+      "types": "./dist/device-providers/junction-origin.d.ts",
+      "import": "./dist/device-providers/junction-origin.js",
+      "default": "./dist/device-providers/junction-origin.js"
+    },
     "./device-providers/canonical-wearable-records": {
       "types": "./dist/device-providers/canonical-wearable-records.d.ts",
       "import": "./dist/device-providers/canonical-wearable-records.js",

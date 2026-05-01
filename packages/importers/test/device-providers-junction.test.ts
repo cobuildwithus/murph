@@ -6,7 +6,60 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
+  resolveJunctionOrigin,
 } from "../src/index.ts";
+
+test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
+  const slugCases: Array<[string, Record<string, unknown>]> = [
+    ["sourceProviderSlug", { sourceProviderSlug: "oura" }],
+    ["source_provider_slug", { source_provider_slug: "oura" }],
+    ["provider", { provider: "oura" }],
+    ["provider_slug", { provider_slug: "oura" }],
+    ["source.provider", { source: { provider: "oura" } }],
+    ["source.slug", { source: { slug: "oura" } }],
+    ["source.provider_slug", { source: { provider_slug: "oura" } }],
+  ];
+
+  for (const [label, record] of slugCases) {
+    assert.equal(resolveJunctionOrigin(record).sourceProviderSlug, "oura", label);
+  }
+  assert.equal(
+    resolveJunctionOrigin({
+      provider: "junction",
+      source: { provider: "oura" },
+    }).sourceProviderSlug,
+    "oura",
+    "later real source provider is not masked by aggregator provider",
+  );
+
+  assert.equal(resolveJunctionOrigin({}, { groupedSourceSlug: "polar" }).sourceProviderSlug, "polar");
+
+  const origin = resolveJunctionOrigin({
+    source_type: "ring",
+    source: {
+      device_id: "raw-ring-device",
+      app_id: "raw-oura-app",
+    },
+  }, {
+    groupedSourceSlug: "oura",
+  });
+
+  assert.equal(origin.sourceProviderSlug, "oura");
+  assert.equal(origin.sourceType, "ring");
+  assert.match(origin.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(origin.sourceInstanceId?.includes("raw-ring-device"), false);
+  assert.equal(origin.sourceInstanceId?.includes("raw-oura-app"), false);
+
+  const flatOrigin = resolveJunctionOrigin({
+    sourceProviderSlug: "withings",
+    sourceDeviceId: "raw-scale-device",
+    source_app_id: "raw-withings-app",
+  });
+  assert.equal(flatOrigin.sourceProviderSlug, "withings");
+  assert.match(flatOrigin.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(flatOrigin.sourceInstanceId?.includes("raw-scale-device"), false);
+  assert.equal(flatOrigin.sourceInstanceId?.includes("raw-withings-app"), false);
+});
 
 test("Junction snapshot adapter preserves aggregator identity and upstream source provenance", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
@@ -206,6 +259,322 @@ test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timesta
   assert.equal(glucoseSample?.recordedAt, "2026-04-22T07:16:00.000Z");
 });
 
+test("Junction normalizer accepts real nested source provider fields on timeseries entries", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    timeseries: {
+      heartrate: [{
+        source: {
+          provider: "oura",
+          type: "ring",
+          device_id: "ring-1",
+          app_id: "oura-cloud",
+        },
+        timestamp: "2026-04-22T07:15:00Z",
+        value: 54,
+      }],
+    },
+  });
+
+  const sample = payload.samples?.find((entry) => entry.stream === "heart_rate");
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["heartrate"]);
+  assert.equal(payload.samples?.length, 1);
+  assert.equal(sample?.externalRef?.system, "junction");
+  assert.equal(sample?.externalRef?.resourceType, "junction-oura-heartrate");
+  assert.equal(sample?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(sample?.dataOrigin?.sourceType, "ring");
+  assert.match(sample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("ring-1"), false);
+  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("oura-cloud"), false);
+});
+
+test("Junction summary resource id stays stable when a same-id summary value changes", () => {
+  const buildPayload = (steps: number) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        id: "daily-activity-1",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        observedAt: "2026-04-22T12:00:00Z",
+        steps,
+        activeCalories: 320,
+      }],
+    },
+  });
+
+  const firstPayload = buildPayload(7200);
+  const secondPayload = buildPayload(8100);
+  const firstStepEvent = firstPayload.events?.find((event) => event.fields?.metric === "daily-steps");
+  const secondStepEvent = secondPayload.events?.find((event) => event.fields?.metric === "daily-steps");
+  const firstCaloriesEvent = firstPayload.events?.find((event) => event.fields?.metric === "active-calories");
+
+  assert.equal(firstStepEvent?.externalRef?.resourceId, "activity-daily-activity-1");
+  assert.equal(secondStepEvent?.externalRef?.resourceId, firstStepEvent?.externalRef?.resourceId);
+  assert.equal(firstCaloriesEvent?.externalRef?.resourceId, firstStepEvent?.externalRef?.resourceId);
+  assert.equal(firstStepEvent?.externalRef?.facet, "daily-steps");
+  assert.equal(firstCaloriesEvent?.externalRef?.facet, "active-calories");
+});
+
+test("Junction timeseries resource id stays stable when a same-key sample value changes", () => {
+  const buildPayload = (value: number) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    timeseries: {
+      steps: [{
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        sourceDeviceId: "ring-a",
+        timestamp: "2026-04-22T07:16:00Z",
+        value,
+      }],
+    },
+  });
+
+  const firstSample = buildPayload(72).samples?.find((sample) => sample.stream === "steps");
+  const correctedSample = buildPayload(91).samples?.find((sample) => sample.stream === "steps");
+
+  assert.equal(correctedSample?.externalRef?.resourceId, firstSample?.externalRef?.resourceId);
+  assert.equal(correctedSample?.externalRef?.facet, "sample");
+});
+
+test("Junction timeseries resource id changes when the source device changes", () => {
+  const buildPayload = (sourceDeviceId: string) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    timeseries: {
+      steps: [{
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        sourceDeviceId,
+        timestamp: "2026-04-22T07:16:00Z",
+        value: 72,
+      }],
+    },
+  });
+
+  const firstSample = buildPayload("ring-a").samples?.find((sample) => sample.stream === "steps");
+  const secondSample = buildPayload("ring-b").samples?.find((sample) => sample.stream === "steps");
+
+  assert.notEqual(secondSample?.externalRef?.resourceId, firstSample?.externalRef?.resourceId);
+});
+
+test("Junction timeseries resource id changes when the resource changes", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    timeseries: {
+      steps: [{
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        sourceDeviceId: "ring-a",
+        timestamp: "2026-04-22T07:16:00Z",
+        value: 72,
+      }],
+      heartrate: [{
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        sourceDeviceId: "ring-a",
+        timestamp: "2026-04-22T07:16:00Z",
+        value: 54,
+      }],
+    },
+  });
+
+  const stepSample = payload.samples?.find((sample) => sample.stream === "steps");
+  const heartRateSample = payload.samples?.find((sample) => sample.stream === "heart_rate");
+
+  assert.notEqual(heartRateSample?.externalRef?.resourceId, stepSample?.externalRef?.resourceId);
+});
+
+test("Junction normalizer flattens grouped timeseries payloads for activity and vitals", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-22T23:59:59.000Z",
+    timeseries: {
+      steps: {
+        groups: {
+          oura: [{
+            data: [{
+              end: "2026-04-22T14:57:24+00:00",
+              start: "2026-04-22T14:30:52+00:00",
+              unit: "count",
+              value: 123,
+            }],
+            source: {
+              provider: "oura",
+              type: "ring",
+              name: "Oura Ring",
+              device_id: "device-oura-ring-1",
+              app_id: "app-oura-cloud-1",
+            },
+          }],
+        },
+      },
+      distance: {
+        groups: {
+          oura: [{
+            data: [{
+              end: "2026-04-22T14:57:24+00:00",
+              start: "2026-04-22T14:30:52+00:00",
+              unit: "m",
+              value: 5.6,
+            }],
+            source: { provider: "oura", type: "ring" },
+          }],
+        },
+      },
+      heartrate: {
+        groups: {
+          oura: [{
+            data: [{
+              timestamp: "2026-04-22T14:30:52+00:00",
+              unit: "bpm",
+              value: 70,
+            }],
+            source: { provider: "oura", type: "ring" },
+          }],
+        },
+      },
+      hrv: {
+        groups: {
+          oura: [{
+            data: [{
+              timestamp: "2026-04-22T14:30:52+00:00",
+              unit: "rmssd",
+              value: 48,
+            }],
+            source: { provider: "oura", type: "ring" },
+          }],
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["steps", "distance", "heartrate", "hrv"]);
+
+  const samples = payload.samples ?? [];
+  const stepSample = samples.find((sample) => sample.stream === "steps");
+  const heartRateSample = samples.find((sample) => sample.stream === "heart_rate");
+  const hrvSample = samples.find((sample) => sample.stream === "hrv");
+  const distanceEvent = payload.events?.find((event) => event.fields?.metric === "distance");
+  const rawTimeseriesArtifacts = JSON.stringify(
+    payload.rawArtifacts?.filter((artifact) => artifact.role.startsWith("junction-timeseries-")),
+  );
+
+  assert.equal(samples.length, 3);
+  assert.doesNotMatch(rawTimeseriesArtifacts, /Oura Ring|device-oura-ring-1|app-oura-cloud-1/u);
+  assert.match(rawTimeseriesArtifacts, /"provider":"oura"/u);
+  assert.match(rawTimeseriesArtifacts, /"type":"ring"/u);
+  assert.equal(stepSample?.recordedAt, "2026-04-22T14:57:24.000Z");
+  assert.equal(stepSample?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(stepSample?.dataOrigin?.sourceType, "ring");
+  assert.match(stepSample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(stepSample?.dataOrigin?.sourceInstanceId?.includes("device-oura-ring-1"), false);
+  assert.equal(stepSample?.dataOrigin?.sourceInstanceId?.includes("app-oura-cloud-1"), false);
+  assert.equal(heartRateSample?.unit, "bpm");
+  assert.equal(heartRateSample?.sample.value, 70);
+  assert.equal(hrvSample?.unit, "ms");
+  assert.equal(hrvSample?.sample.value, 48);
+  assert.equal(distanceEvent?.occurredAt, "2026-04-22T14:57:24.000Z");
+  assert.equal(distanceEvent?.fields?.unit, "m");
+  assert.equal(distanceEvent?.fields?.value, 5.6);
+  assert.equal(distanceEvent?.dataOrigin?.sourceProviderSlug, "oura");
+});
+
+test("Junction snapshot import minimizes grouped source identifiers in raw envelopes", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-04-22T12:00:00.000Z",
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-22T23:59:59.000Z",
+      connections: [
+        {
+          id: "connection-oura-raw",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          name: "Connection Oura Ring",
+          display_name: "Connection Display Oura Ring",
+          sourceDeviceId: "connection-device-oura-ring-1",
+          sourceAppId: "connection-app-oura-cloud-1",
+        },
+      ],
+      summaries: {
+        profile: {
+          connectionId: "connection-oura-raw",
+          sourceProviderSlug: "oura",
+          sourceType: "ring",
+          displayName: "Profile Oura Ring",
+        },
+        activity: [{
+          connectionId: "activity-connection-raw",
+          providerConnectionId: "activity-provider-connection-raw",
+          sourceId: "activity-source-raw",
+          sourceInstanceId: "activity-source-instance-raw",
+          sourceProviderSlug: "oura",
+          observedAt: "2026-04-22T12:00:00Z",
+          steps: 7200,
+        }],
+      },
+      timeseries: {
+        steps: {
+          groups: {
+            oura: [{
+              data: [{
+                end: "2026-04-22T14:57:24+00:00",
+                start: "2026-04-22T14:30:52+00:00",
+                unit: "count",
+                value: 123,
+                connection_id: "timeseries-connection-raw",
+                source_id: "timeseries-source-raw",
+                source_instance_id: "timeseries-source-instance-raw",
+              }],
+              source: {
+                id: "nested-source-id-raw",
+                uuid: "nested-source-uuid-raw",
+                provider: "oura",
+                type: "ring",
+                name: "Timeseries Oura Ring",
+                device_id: "timeseries-device-oura-ring-1",
+                app_id: "timeseries-app-oura-cloud-1",
+                providerDetails: "kept-non-identity-detail",
+              },
+              provider: {
+                id: "nested-provider-id-raw",
+                name: "Nested Provider Oura Ring",
+                display_name: "Nested Provider Display Oura Ring",
+              },
+            }],
+          },
+        },
+      },
+    },
+  });
+
+  const rawEnvelopeText = JSON.stringify(payload.rawIngestEnvelopes?.[0]?.payload);
+  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+  const stepSample = payload.samples?.find((sample) => sample.stream === "steps");
+
+  assert.doesNotMatch(
+    rawEnvelopeText,
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u,
+  );
+  assert.doesNotMatch(
+    rawArtifactText,
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u,
+  );
+  assert.match(rawEnvelopeText, /"provider":"oura"/u);
+  assert.match(rawEnvelopeText, /"sourceProviderSlug":"oura"/u);
+  assert.match(rawEnvelopeText, /"sourceType":"ring"/u);
+  assert.equal(stepSample?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(stepSample?.dataOrigin?.sourceType, "ring");
+  assert.match(stepSample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+});
+
 test("Junction normalizer treats Libre +00:00 glucose timestamps as floating wall time", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2023-09-27T12:00:00.000Z",
@@ -241,6 +610,69 @@ test("Junction normalizer treats Libre +00:00 glucose timestamps as floating wal
     assert.equal(sample.recordedAt, "2023-09-27T23:59:59.000Z");
     assert.notEqual(sample.recordedAt, "2023-09-27T07:48:00.000Z");
   }
+});
+
+test("Junction normalizer resolves nested source and provider slug origin fields", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    windowEnd: "2026-04-22T23:59:59.000Z",
+    summaries: {
+      activity: {
+        source: {
+          provider: "oura",
+          type: "ring",
+          device_id: "raw-ring-device",
+          app_id: "raw-oura-app",
+        },
+        data: [{
+          observedAt: "2026-04-22T12:00:00Z",
+          steps: 7200,
+        }],
+      },
+      body: [{
+        provider_slug: "withings",
+        source_type: "scale",
+        observedAt: "2026-04-22T12:30:00Z",
+        weight_kg: 82.4,
+      }],
+    },
+    timeseries: {
+      heartrate: {
+        groups: {
+          polar: [{
+            provider: {
+              id: "raw-provider-object",
+            },
+            source: {
+              type: "watch",
+              device_id: "raw-polar-watch",
+            },
+            data: [{
+              timestamp: "2026-04-22T12:45:00Z",
+              value: 61,
+            }],
+          }],
+        },
+      },
+    },
+  });
+
+  const stepEvent = payload.events?.find((event) => event.fields?.metric === "daily-steps");
+  assert.equal(stepEvent?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(stepEvent?.dataOrigin?.sourceType, "ring");
+  assert.match(stepEvent?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(stepEvent?.dataOrigin?.sourceInstanceId?.includes("raw-ring-device"), false);
+  assert.equal(stepEvent?.dataOrigin?.sourceInstanceId?.includes("raw-oura-app"), false);
+
+  const bodyEvent = payload.events?.find((event) => event.fields?.metric === "weight");
+  assert.equal(bodyEvent?.dataOrigin?.sourceProviderSlug, "withings");
+  assert.equal(bodyEvent?.dataOrigin?.sourceType, "scale");
+
+  const heartRateSample = payload.samples?.find((sample) => sample.stream === "heart_rate");
+  assert.equal(heartRateSample?.dataOrigin?.sourceProviderSlug, "polar");
+  assert.equal(heartRateSample?.dataOrigin?.sourceType, "watch");
+  assert.match(heartRateSample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(heartRateSample?.dataOrigin?.sourceInstanceId?.includes("raw-polar-watch"), false);
 });
 
 test("Junction normalizer defaults to the PR3 resource allowlist", () => {

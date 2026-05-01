@@ -21,6 +21,7 @@ import {
   deviceSyncProviderManifests as rootDeviceSyncProviderManifests,
   getConfiguredDeviceSyncProviderManifest as rootGetConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition as rootGetConfiguredDeviceSyncProviderJobDefinition,
+  resolveJunctionBaseUrl,
   resolveConfiguredDeviceSyncProviderManifest as rootResolveConfiguredDeviceSyncProviderManifest,
 } from "@murphai/device-syncd";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
@@ -58,7 +59,7 @@ describe("deviceSyncProviderManifests", () => {
     }
   });
 
-  it("pins Junction to provider_config credentials and validates its API key and base URL inputs", () => {
+  it("pins Junction to provider_config credentials and validates its API key inputs", () => {
     const junctionManifest = getConfiguredDeviceSyncProviderManifest("junction");
 
     expect(junctionManifest.credentialPolicy).toEqual({
@@ -81,15 +82,51 @@ describe("deviceSyncProviderManifests", () => {
       }),
     ).toThrow(/JUNCTION_API_KEY must start with sk_us_/u);
 
-    expect(() =>
-      junctionManifest.readConfig({
-        JUNCTION_API_KEY: "sk_us_test_manifest",
-        JUNCTION_BASE_URL: "https://api.sandbox.eu.junction.com/",
-        JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
-        JUNCTION_ENV: "sandbox",
-        JUNCTION_REGION: "us",
-      }),
-    ).toThrow(/JUNCTION_BASE_URL must be https:\/\/api\.sandbox\.us\.junction\.com\/ for sandbox\/us\./u);
+    const config = junctionManifest.readConfig({
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    });
+
+    expect(config).toMatchObject({
+      environment: "sandbox",
+      region: "us",
+    });
+    expect(config).not.toHaveProperty("allowCustomBaseUrl");
+    expect(config).not.toHaveProperty("baseUrl");
+  });
+
+  it("resolves Junction canonical base URLs from environment and region", () => {
+    const profiles = [
+      {
+        environment: "production",
+        region: "us",
+        expected: "https://api.us.junction.com/",
+      },
+      {
+        environment: "production",
+        region: "eu",
+        expected: "https://api.eu.junction.com/",
+      },
+      {
+        environment: "sandbox",
+        region: "us",
+        expected: "https://api.sandbox.us.junction.com/",
+      },
+      {
+        environment: "sandbox",
+        region: "eu",
+        expected: "https://api.sandbox.eu.junction.com/",
+      },
+    ] as const;
+
+    for (const profile of profiles) {
+      expect(resolveJunctionBaseUrl({
+        environment: profile.environment,
+        region: profile.region,
+      })).toBe(profile.expected);
+    }
   });
 
   it("declares provider-owned job definitions for every built-in provider job kind", () => {
@@ -193,6 +230,7 @@ describe("deviceSyncProviderManifests", () => {
         tokenBaseUrl: "https://connectapi.garmin.com",
       },
       junction: {
+        allowedLinkHosts: ["junction.com", "tryvital.io"],
         apiKey: "sk_us_test_runtime",
         clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
         environment: "sandbox",
@@ -248,8 +286,13 @@ describe("deviceSyncProviderManifests", () => {
 
     expect(cloned.oura).not.toHaveProperty("webhookVerificationToken");
     expect(cloned.strava).not.toHaveProperty("webhookVerifyToken");
+    expect(cloned.junction).not.toHaveProperty("apiKey");
+    expect(cloned.junction).not.toHaveProperty("allowCustomBaseUrl");
+    expect(cloned.junction).not.toHaveProperty("baseUrl");
+    expect(cloned.junction).not.toHaveProperty("clientUserIdSecret");
     expect(cloned.junction).not.toHaveProperty("webhookSecret");
     expect(cloned.junction).toMatchObject({
+      allowedLinkHosts: ["junction.com", "tryvital.io"],
       environment: "sandbox",
       region: "us",
       providerFilter: ["oura", "withings"],
@@ -276,6 +319,26 @@ describe("deviceSyncProviderManifests", () => {
         "runtime.providerConfigs",
       ),
     ).toThrow(/provider-owned admin secret/);
+    expect(() =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          junction: {
+            apiKey: "sk_us_test_runtime",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    ).toThrow(/provider-owned API secret/);
+    expect(() =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          junction: {
+            clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    ).toThrow(/provider-owned HMAC secret/);
     expect(() =>
       parseSerializableConfiguredDeviceSyncProviderConfigs(
         {
