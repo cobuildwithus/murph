@@ -101,7 +101,7 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity(),
+            identity: await createIdentity(),
           }),
         })),
       },
@@ -130,7 +130,7 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
+            identity: await createIdentity({
               privyUserLookupKey: createHostedPrivyUserLookupKey("did:privy:user_123"),
             }),
           }),
@@ -161,7 +161,7 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity({
+            identity: await createIdentity({
               phoneLookupKey: null,
               privyUserLookupKey: null,
               walletAddressLookupKey: null,
@@ -195,8 +195,8 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
-              ...buildHostedMemberIdentityPrivateColumns({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
                 memberId: "member_123",
                 phoneNumber: null,
                 privyUserId: null,
@@ -205,7 +205,7 @@ describe("getHostedInviteStatus", () => {
                 signupPhoneCodeSentAt: null,
                 signupPhoneNumber: "+1 (202) 555-0123",
                 walletAddress: null,
-              }),
+              })),
               phoneNumberVerifiedAt: null,
             }),
           }),
@@ -242,8 +242,8 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
-              ...buildHostedMemberIdentityPrivateColumns({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
                 memberId: "member_123",
                 phoneNumber: null,
                 privyUserId: null,
@@ -252,7 +252,7 @@ describe("getHostedInviteStatus", () => {
                 signupPhoneCodeSentAt: null,
                 signupPhoneNumber: "+1 (202) 555-0123",
                 walletAddress: null,
-              }),
+              })),
               maskedPhoneNumberHint: null,
               phoneNumberVerifiedAt: null,
             }),
@@ -290,8 +290,8 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
-              ...buildHostedMemberIdentityPrivateColumns({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
                 memberId: "member_123",
                 phoneNumber: null,
                 privyUserId: null,
@@ -300,7 +300,7 @@ describe("getHostedInviteStatus", () => {
                 signupPhoneCodeSentAt: null,
                 signupPhoneNumber: null,
                 walletAddress: null,
-              }),
+              })),
             }),
           }),
         })),
@@ -328,8 +328,8 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity({
-              ...buildHostedMemberIdentityPrivateColumns({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
                 memberId: "member_123",
                 phoneNumber: "+12025550123",
                 privyUserId: null,
@@ -338,7 +338,7 @@ describe("getHostedInviteStatus", () => {
                 signupPhoneCodeSentAt: null,
                 signupPhoneNumber: "+12025550123",
                 walletAddress: null,
-              }),
+              })),
             }),
           }),
         })),
@@ -365,8 +365,8 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity({
-              ...buildHostedMemberIdentityPrivateColumns({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
                 memberId: "member_123",
                 phoneNumber: "+12025550123",
                 privyUserId: "did:privy:user_123",
@@ -375,7 +375,7 @@ describe("getHostedInviteStatus", () => {
                 signupPhoneCodeSentAt: null,
                 signupPhoneNumber: null,
                 walletAddress: null,
-              }),
+              })),
               phoneNumberVerifiedAt: NOW,
             }),
           }),
@@ -406,8 +406,8 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity({
-              ...buildHostedMemberIdentityPrivateColumns({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
                 memberId: "member_123",
                 phoneNumber: "+12025550123",
                 privyUserId: "did:privy:user_123",
@@ -416,7 +416,7 @@ describe("getHostedInviteStatus", () => {
                 signupPhoneCodeSentAt: null,
                 signupPhoneNumber: "+12025550123",
                 walletAddress: null,
-              }),
+              })),
               phoneNumberVerifiedAt: NOW,
             }),
           }),
@@ -451,7 +451,7 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
+            identity: await createIdentity({
               privyUserLookupKey: rotatedLookupKey,
             }),
           }),
@@ -481,7 +481,7 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
+            identity: await createIdentity({
               phoneLookupKey: createHostedPhoneLookupKey("+1 415 555 2671"),
             }),
           }),
@@ -513,7 +513,7 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
+            identity: await createIdentity({
               walletAddressLookupKey: createHostedWalletAddressLookupKey(
                 "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
               ),
@@ -554,7 +554,7 @@ describe("getHostedInviteStatus", () => {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
-            identity: createIdentity({
+            identity: await createIdentity({
               walletAddressLookupKey: rotatedLookupKey,
             }),
           }),
@@ -587,8 +587,8 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity(),
-            routing: createRouting({
+            identity: await createIdentity(),
+            routing: await createRouting({
               linqChatId: "chat_123",
               linqRecipientPhone: "+1 (555) 010-0001",
             }),
@@ -616,8 +616,8 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity(),
-            routing: createRouting({
+            identity: await createIdentity(),
+            routing: await createRouting({
               linqChatId: "chat_123",
               linqRecipientPhone: "+15550100001",
             }),
@@ -651,7 +651,7 @@ describe("getHostedInviteStatus", () => {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             billingStatus: HostedBillingStatus.active,
-            identity: createIdentity(),
+            identity: await createIdentity(),
           }),
         })),
       },
@@ -689,7 +689,7 @@ function createInvite(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createIdentity(overrides: Record<string, unknown> = {}) {
+async function createIdentity(overrides: Record<string, unknown> = {}) {
   return {
     createdAt: NOW,
     maskedPhoneNumberHint: "*** 4567",
@@ -704,7 +704,7 @@ function createIdentity(overrides: Record<string, unknown> = {}) {
     walletChainType: null,
     walletCreatedAt: null,
     walletProvider: null,
-    ...buildHostedMemberIdentityPrivateColumns({
+    ...(await buildHostedMemberIdentityPrivateColumns({
       memberId: "member_123",
       phoneNumber: "+14155554567",
       privyUserId: null,
@@ -713,12 +713,12 @@ function createIdentity(overrides: Record<string, unknown> = {}) {
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
       walletAddress: null,
-    }),
+    })),
     ...overrides,
   };
 }
 
-function createRouting(input?: {
+async function createRouting(input?: {
   linqChatId?: string | null;
   linqRecipientPhone?: string | null;
   pendingLinqChatId?: string | null;
@@ -730,7 +730,7 @@ function createRouting(input?: {
     memberId: "member_123",
     telegramUserLookupKey: input?.telegramUserLookupKey ?? null,
     updatedAt: NOW,
-    ...buildHostedMemberRoutingPrivateColumns({
+    ...(await buildHostedMemberRoutingPrivateColumns({
       linqChatId: input?.linqChatId ?? null,
       linqRecipientPhone: input?.linqRecipientPhone ?? null,
       memberId: "member_123",
@@ -738,7 +738,7 @@ function createRouting(input?: {
       pendingLinqRecipientPhone: input?.pendingLinqRecipientPhone ?? null,
       telegramThreadId: null,
       telegramUserId: null,
-    }),
+    })),
   };
 }
 

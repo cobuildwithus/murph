@@ -106,7 +106,7 @@ export async function lookupHostedMemberIdentityByPrivyUserId(input: {
   });
 
   return identityRecord
-    ? projectHostedMemberIdentityLookup(identityRecord, "privyUserId")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "privyUserId")
     : null;
 }
 
@@ -124,7 +124,7 @@ export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
   });
 
   return identityRecord
-    ? projectHostedMemberIdentityLookup(identityRecord, "phoneLookupKey")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "phoneLookupKey")
     : null;
 }
 
@@ -150,7 +150,7 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   });
 
   return identityRecord
-    ? projectHostedMemberIdentityLookup(identityRecord, "phoneNumber")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "phoneNumber")
     : null;
 }
 
@@ -178,7 +178,7 @@ export async function lookupHostedMemberIdentityByWalletAddress(input: {
   });
 
   return identityRecord
-    ? projectHostedMemberIdentityLookup(identityRecord, "walletAddress")
+    ? await projectHostedMemberIdentityLookup(identityRecord, "walletAddress")
     : null;
 }
 
@@ -192,7 +192,7 @@ export async function readHostedMemberIdentity(input: {
     },
   });
 
-  return identityRecord ? projectHostedMemberIdentityState(identityRecord) : null;
+  return identityRecord ? await projectHostedMemberIdentityState(identityRecord) : null;
 }
 
 export async function upsertHostedMemberIdentity(
@@ -202,8 +202,8 @@ export async function upsertHostedMemberIdentity(
     where: {
       memberId: input.memberId,
     },
-    create: buildHostedMemberIdentityCreateData(input),
-    update: buildHostedMemberIdentityUpdateData(input),
+    create: await buildHostedMemberIdentityCreateData(input),
+    update: await buildHostedMemberIdentityUpdateData(input),
   });
 
   return projectHostedMemberIdentityState(identity);
@@ -224,7 +224,7 @@ export async function writeHostedMemberSignupPhoneState(
     data.signupPhoneCodeSentAt = input.signupPhoneCodeSentAt;
   }
   if (input.signupPhoneNumber !== undefined) {
-    data.signupPhoneNumberEncrypted = buildHostedMemberIdentityPrivateColumns({
+    data.signupPhoneNumberEncrypted = (await buildHostedMemberIdentityPrivateColumns({
       memberId: input.memberId,
       phoneNumber: null,
       privyUserId: null,
@@ -233,7 +233,7 @@ export async function writeHostedMemberSignupPhoneState(
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: input.signupPhoneNumber,
       walletAddress: null,
-    }).signupPhoneNumberEncrypted;
+    })).signupPhoneNumberEncrypted;
   }
 
   if (Object.keys(data).length === 0) {
@@ -248,10 +248,10 @@ export async function writeHostedMemberSignupPhoneState(
   });
 }
 
-export function projectHostedMemberIdentityState(
+export async function projectHostedMemberIdentityState(
   identity: HostedMemberIdentity,
-): HostedMemberIdentityState {
-  const privateState = readHostedMemberIdentityPrivateState(identity);
+): Promise<HostedMemberIdentityState> {
+  const privateState = await readHostedMemberIdentityPrivateState(identity);
 
   return {
     maskedPhoneNumberHint: identity.maskedPhoneNumberHint,
@@ -271,13 +271,13 @@ export function projectHostedMemberIdentityState(
   };
 }
 
-function projectHostedMemberIdentityLookup(
+async function projectHostedMemberIdentityLookup(
   identity: HostedMemberIdentity & {
     member: HostedMember;
   },
   matchedBy: HostedMemberIdentityLookupMatch,
-): HostedMemberIdentityLookup {
-  const identityState = projectHostedMemberIdentityState(identity);
+): Promise<HostedMemberIdentityLookup> {
+  const identityState = await projectHostedMemberIdentityState(identity);
 
   return {
     core: identity.member,
@@ -300,23 +300,23 @@ function projectHostedMemberIdentityLookup(
   };
 }
 
-function buildHostedMemberIdentityCreateData(
+async function buildHostedMemberIdentityCreateData(
   input: HostedMemberIdentityWriteInput,
-): Prisma.HostedMemberIdentityUncheckedCreateInput {
+): Promise<Prisma.HostedMemberIdentityUncheckedCreateInput> {
   return {
     memberId: input.memberId,
-    ...buildHostedMemberIdentityMutationData(input),
+    ...(await buildHostedMemberIdentityMutationData(input)),
   };
 }
 
-function buildHostedMemberIdentityUpdateData(
+async function buildHostedMemberIdentityUpdateData(
   input: HostedMemberIdentityWriteInput,
-): Prisma.HostedMemberIdentityUncheckedUpdateInput {
+): Promise<Prisma.HostedMemberIdentityUncheckedUpdateInput> {
   return buildHostedMemberIdentityMutationData(input);
 }
 
-function buildHostedMemberIdentityMutationData(input: HostedMemberIdentityWriteInput) {
-  const privateColumns = buildHostedMemberIdentityPrivateColumns({
+async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentityWriteInput) {
+  const privateColumns = await buildHostedMemberIdentityPrivateColumns({
     memberId: input.memberId,
     phoneNumber: input.phoneNumber,
     privyUserId: input.privyUserId,

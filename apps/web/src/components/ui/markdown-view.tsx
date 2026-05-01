@@ -22,17 +22,16 @@ function SafeLink(props: ComponentProps<"a">) {
 
 export function MarkdownView({ content, className }: Props) {
   return (
-    <article className={className ?? "prose max-w-none"}>
-      <Markdown
-        options={{
-          disableParsingRawHTML: true,
-          overrides: {
-            a: SafeLink,
-          },
-        }}
-      >
-        {content}
-      </Markdown>
-    </article>
+    <Markdown
+      options={{
+        disableParsingRawHTML: true,
+        wrapper: ({ children }) => <div className={className}>{children}</div>,
+        overrides: {
+          a: SafeLink,
+        },
+      }}
+    >
+      {content}
+    </Markdown>
   );
 }

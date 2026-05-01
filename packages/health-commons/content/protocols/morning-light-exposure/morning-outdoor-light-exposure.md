@@ -352,7 +352,7 @@ expectedSignalDescriptions:
       kind: absolute
       low: 0
       high: 3
-      unit: percentage points
+      unit: "%"
       window: 1-3 weeks
       confidence: low
       basis: Sleep-efficiency evidence is indirect and mixed. A direct morning-sunlight survey found no significant association, while outdoor/daytime bright-light studies support tracking sleep-wake consolidation as a secondary signal.

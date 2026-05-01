@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createHostedSecretCodec, decodeHostedEncryptionKey } from "@/src/lib/device-sync/crypto";
 import {
+  decryptHostedWebNullableString,
   encryptHostedWebNullableString,
-  isHostedWebConfigurationError,
 } from "@/src/lib/hosted-web/encryption";
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
@@ -36,66 +36,21 @@ describe("hosted device-sync secret codec", () => {
     expect(decodeHostedEncryptionKey(key.toString("base64url"))).toEqual(key);
   });
 
-  it("surfaces a hosted-web config error when hosted private-field encryption runs without a key outside test mode", () => {
-    restoreEnvValue("NODE_ENV", "development");
-    delete process.env.HOSTED_WEB_ENCRYPTION_KEY;
-    delete process.env.HOSTED_WEB_ENCRYPTION_KEYRING_JSON;
-    delete process.env.HOSTED_WEB_ENCRYPTION_KEY_VERSION;
-    clearHostedWebEncryptionCodecCache();
-
-    const error = captureThrownError(() =>
-      encryptHostedWebNullableString({
-        field: "hosted-member-identity.phone-number",
-        memberId: "member_test",
-        value: "+15551234567",
-      }));
-
-    expect(isHostedWebConfigurationError(error)).toBe(true);
-    expect(error).toMatchObject({
-      code: "HOSTED_WEB_ENCRYPTION_KEY_REQUIRED",
-      httpStatus: 500,
-      message: "HOSTED_WEB_ENCRYPTION_KEY must be configured for hosted member private field encryption.",
-      name: "HostedWebConfigurationError",
+  it("round-trips hosted member private fields through the secure-box string wrapper", async () => {
+    const encrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-identity.phone-number",
+      memberId: "member_test",
+      value: "+15551234567",
     });
-  });
 
-  it("surfaces malformed hosted-web encryption config as a server-side config error", () => {
-    restoreEnvValue("NODE_ENV", "development");
-    process.env.HOSTED_WEB_ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64url");
-    process.env.HOSTED_WEB_ENCRYPTION_KEYRING_JSON = "{";
-    delete process.env.HOSTED_WEB_ENCRYPTION_KEY_VERSION;
-    clearHostedWebEncryptionCodecCache();
-
-    const error = captureThrownError(() =>
-      encryptHostedWebNullableString({
-        field: "hosted-member-identity.phone-number",
-        memberId: "member_test",
-        value: "+15551234567",
-      }));
-
-    expect(isHostedWebConfigurationError(error)).toBe(true);
-    expect(error).toMatchObject({
-      code: "HOSTED_WEB_ENCRYPTION_CONFIG_INVALID",
-      httpStatus: 500,
-      name: "HostedWebConfigurationError",
-    });
-    expect(error.message).toContain("HOSTED_WEB_ENCRYPTION_KEYRING_JSON must be valid JSON");
+    expect(encrypted).toEqual(expect.any(String));
+    await expect(decryptHostedWebNullableString({
+      field: "hosted-member-identity.phone-number",
+      memberId: "member_test",
+      value: encrypted,
+    })).resolves.toBe("+15551234567");
   });
 });
-
-function captureThrownError(action: () => unknown): Error {
-  try {
-    action();
-  } catch (error) {
-    if (error instanceof Error) {
-      return error;
-    }
-
-    throw new Error(`Expected Error instance, received ${String(error)}`);
-  }
-
-  throw new Error("Expected action to throw.");
-}
 
 function clearHostedWebEncryptionCodecCache(): void {
   delete (globalThis as typeof globalThis & {

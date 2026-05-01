@@ -180,7 +180,7 @@ expectedSignalDescriptions:
     kind: absolute
     low: -2.0
     high: -0.5
-    unit: percentage points
+    unit: "%"
     window: 8-12 weeks
     confidence: low
     basis: Direct 1.6 g/kg/day weight-loss trials show better fat-loss partitioning, but estimates shrink in weight-stable runs and home body-composition tools are noisy.

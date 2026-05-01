@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import path from "node:path";
 
 import {
@@ -32,20 +31,21 @@ import {
   type HostedRuntimeBridgeCheckpointLease,
 } from "./runtime-bridge-checkpoint.ts";
 import {
+  decryptHostedMailboxPayloadCiphertext,
+  createHostedMailboxEncryptionEnvironmentFromIngressRoot,
   readHostedMailboxEncryptionEnvironment,
   type HostedMailboxEncryptionEnvironment,
 } from "./hosted-mailbox-encryption.ts";
-
-const AES_GCM_ALGORITHM = "AES-GCM";
-const HKDF_HASH = "SHA-256";
-const GCM_IV_BYTES = 12;
-const GCM_AUTH_TAG_BYTES = 16;
-const HOSTED_MAILBOX_ENCRYPTION_KEY_BYTES = 32;
-const HOSTED_MAILBOX_SCOPE_SALT = new TextEncoder().encode("murph.hosted.device-sync.secret.v1");
-const ENCRYPTED_SECRET_PREFIX = "hbds";
-const HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD = "hosted-mailbox-inline-payload";
-const HOSTED_MAILBOX_REF_PAYLOAD_FIELD = "hosted-mailbox-ref-payload";
-const BASE64URL_CANONICAL_PATTERN = /^[A-Za-z0-9_-]*$/u;
+import {
+  readHostedExecutionWorkerEnvironment,
+} from "./hosted-execution-worker-env.ts";
+import {
+  fetchHostedWorkerRuntimeRoots,
+  type HostedWorkerCryptoEnv,
+} from "./hosted-crypto/runtime-crypto-context.ts";
+import {
+  readHostedWebCallbackSigningEnvironment,
+} from "./web-callback-auth.ts";
 
 type HostedWorkspaceRuntimeBridgeImportItem =
   HostedWorkspaceRuntimeJobOptions["importItem"];
@@ -63,7 +63,9 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
 export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
-  readEncryptionEnvironment?: () => HostedMailboxEncryptionEnvironment;
+  readEncryptionEnvironment?: (
+    input: { userId: string },
+  ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
   request: HostedWorkspaceInvocationRequest;
   runtime: HostedAssistantRuntimeConfig;
   vaultRoot?: string | null;
@@ -77,10 +79,7 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     ?? (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.request));
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, input.platform);
   const readEncryptionEnvironment = input.readEncryptionEnvironment
-    ?? createHostedMailboxEncryptionEnvironmentReader({
-      allowAmbientFallback: isAmbientHostedRuntimeEnvelope(input.runtime),
-      platformEnv: runtime.platformEnv,
-    });
+    ?? createHostedMailboxEncryptionEnvironmentReader({ runtime });
 
   return {
     createCheckpointSnapshot: async (checkpointInput) => ({
@@ -115,27 +114,22 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
   };
 }
 
-function createHostedMailboxEncryptionEnvironmentReader(
-  input: {
-    allowAmbientFallback: boolean;
-    platformEnv: Readonly<Record<string, string>>;
-  },
-): () => HostedMailboxEncryptionEnvironment {
-  return () => {
-    if (input.platformEnv.HOSTED_WAKE_ENCRYPTION_KEY || !input.allowAmbientFallback) {
-      return readHostedMailboxEncryptionEnvironment(input.platformEnv);
+function createHostedMailboxEncryptionEnvironmentReader(input: {
+  runtime: Pick<HostedRuntimeBridgeNormalizedRuntime, "platformEnv">;
+}): (readerInput: { userId: string }) => Promise<HostedMailboxEncryptionEnvironment> {
+  const environmentsByUserId = new Map<string, Promise<HostedMailboxEncryptionEnvironment>>();
+  return ({ userId }) => {
+    const existing = environmentsByUserId.get(userId);
+    if (existing) {
+      return existing;
     }
-
-    return readHostedMailboxEncryptionEnvironment();
+    const created = readHostedMailboxEncryptionEnvironmentFromRuntime({
+      platformEnv: input.runtime.platformEnv,
+      userId,
+    });
+    environmentsByUserId.set(userId, created);
+    return created;
   };
-}
-
-function isAmbientHostedRuntimeEnvelope(runtime: HostedAssistantRuntimeConfig): boolean {
-  return runtime.commitTimeoutMs === undefined
-    && runtime.forwardedEnv === undefined
-    && runtime.platformEnv === undefined
-    && runtime.resolvedConfig === undefined
-    && runtime.userEnv === undefined;
 }
 
 export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
@@ -191,8 +185,41 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   });
 }
 
+async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
+  platformEnv: Readonly<Record<string, string>>;
+  userId: string;
+}): Promise<HostedMailboxEncryptionEnvironment> {
+  if (Object.keys(input.platformEnv).length === 0) {
+    return readHostedMailboxEncryptionEnvironment();
+  }
+  const workerEnv = readHostedExecutionWorkerEnvironment(input.platformEnv);
+  const roots = await fetchHostedWorkerRuntimeRoots({
+    baseUrl: workerEnv.hostedWebBaseUrl,
+    callbackSigning: readHostedWebCallbackSigningEnvironment(input.platformEnv),
+    cryptoEnv: {
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
+        workerEnv.hostedCryptoAuthoritySignKeyVersion,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+        workerEnv.hostedCryptoAuthoritySignPublicKeyPem,
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+        workerEnv.hostedCryptoCloudflareAutomationKeyId,
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+        workerEnv.hostedCryptoCloudflareAutomationPrivateJwk,
+      HOSTED_CRYPTO_ENV: workerEnv.hostedCryptoEnv,
+    } satisfies HostedWorkerCryptoEnv,
+    timeoutMs: workerEnv.webControlTimeoutMs,
+    userId: input.userId,
+  });
+  return createHostedMailboxEncryptionEnvironmentFromIngressRoot({
+    rootKey: roots.ingress.rootKey,
+    rootKeyId: roots.ingress.envelope.rootKeyId,
+  });
+}
+
 function createHostedWorkspaceBridgeMailboxImporter(input: {
-  readEncryptionEnvironment: () => HostedMailboxEncryptionEnvironment;
+  readEncryptionEnvironment: (
+    input: { userId: string },
+  ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
   runtime: {
     forwardedEnv: Readonly<Record<string, string>>;
     platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -205,7 +232,9 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
       decode: async (decodeInput) => {
         const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
           ciphertext: decodeInput.payloadCiphertext,
-          environment: input.readEncryptionEnvironment(),
+          environment: await input.readEncryptionEnvironment({
+            userId: decodeInput.itemRef.userId,
+          }),
           userId: decodeInput.itemRef.userId,
         });
         const wake = parseHostedExecutionWake(decodedPayload);
@@ -238,7 +267,9 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   importConversationItem: (item: HostedWorkspaceRuntimeBridgeImportItemInput) =>
     ReturnType<HostedWorkspaceRuntimeBridgeImportItem>;
   item: HostedWorkspaceRuntimeBridgeImportItemInput;
-  readEncryptionEnvironment: () => HostedMailboxEncryptionEnvironment;
+  readEncryptionEnvironment: (
+    input: { userId: string },
+  ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
   runtime: {
     forwardedEnv: Readonly<Record<string, string>>;
     platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -265,7 +296,9 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
 
   const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
     ciphertext: input.item.payload.payloadCiphertext,
-    environment: input.readEncryptionEnvironment(),
+    environment: await input.readEncryptionEnvironment({
+      userId: input.item.item.userId,
+    }),
     userId: input.item.item.userId,
   });
   const wake = parseHostedExecutionWake(decodedPayload);
@@ -294,170 +327,6 @@ function decodedSystemWakeMatchesMailboxItem(
     && wake.occurredAt === item.item.occurredAt
     && wake.eventId === item.item.dedupeKey
     && wake.kind === item.item.kind;
-}
-
-async function decryptHostedMailboxPayloadCiphertext(input: {
-  ciphertext: string;
-  environment: HostedMailboxEncryptionEnvironment;
-  userId: string;
-}): Promise<unknown> {
-  const fields = [
-    HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
-    HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
-  ] as const;
-  let lastError: unknown = null;
-
-  for (const field of fields) {
-    try {
-      const plaintext = await decryptHostedMailboxCiphertext({
-        ...input,
-        field,
-      });
-      return parseJsonValue(plaintext, "Hosted mailbox payload ciphertext");
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new TypeError("Hosted mailbox payload ciphertext is invalid.");
-}
-
-async function decryptHostedMailboxCiphertext(input: {
-  ciphertext: string;
-  environment: HostedMailboxEncryptionEnvironment;
-  field: string;
-  userId: string;
-}): Promise<string> {
-  const [prefix, payloadKeyVersion, ivText, tagText, ciphertextText] = input.ciphertext.split(":");
-
-  if (
-    prefix !== ENCRYPTED_SECRET_PREFIX
-    || !payloadKeyVersion
-    || !ivText
-    || !tagText
-    || ciphertextText === undefined
-  ) {
-    throw new TypeError("Encrypted hosted mailbox payload is malformed.");
-  }
-
-  const key = input.environment.keysByVersion[payloadKeyVersion];
-
-  if (!key) {
-    throw new TypeError(
-      `Encrypted hosted mailbox payload references unknown key version ${payloadKeyVersion}.`,
-    );
-  }
-
-  const scopedKey = await deriveHostedMailboxScopeKey(
-    key,
-    `hosted-mailbox-payload:${input.field}`,
-  );
-  const iv = decodeStrictBase64Url(ivText, "Encrypted hosted mailbox payload is malformed.");
-  const authTag = decodeStrictBase64Url(tagText, "Encrypted hosted mailbox payload is malformed.");
-  const ciphertext = decodeStrictBase64Url(
-    ciphertextText,
-    "Encrypted hosted mailbox payload is malformed.",
-  );
-
-  if (iv.byteLength !== GCM_IV_BYTES || authTag.byteLength !== GCM_AUTH_TAG_BYTES) {
-    throw new TypeError("Encrypted hosted mailbox payload is malformed.");
-  }
-
-  const keyHandle = await crypto.subtle.importKey(
-    "raw",
-    toArrayBuffer(scopedKey),
-    AES_GCM_ALGORITHM,
-    false,
-    ["decrypt"],
-  );
-  const plaintext = await crypto.subtle.decrypt(
-    {
-      additionalData: toArrayBuffer(buildHostedMailboxFieldAad({
-        field: input.field,
-        userId: input.userId,
-      })),
-      iv: toArrayBuffer(iv),
-      name: AES_GCM_ALGORITHM,
-      tagLength: GCM_AUTH_TAG_BYTES * 8,
-    },
-    keyHandle,
-    toArrayBuffer(concatBytes(ciphertext, authTag)),
-  );
-
-  return new TextDecoder().decode(plaintext);
-}
-
-async function deriveHostedMailboxScopeKey(rootKey: Uint8Array, scope: string): Promise<Uint8Array> {
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    toArrayBuffer(rootKey),
-    "HKDF",
-    false,
-    ["deriveBits"],
-  );
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      hash: HKDF_HASH,
-      info: toArrayBuffer(new TextEncoder().encode(scope)),
-      name: "HKDF",
-      salt: toArrayBuffer(HOSTED_MAILBOX_SCOPE_SALT),
-    },
-    keyMaterial,
-    HOSTED_MAILBOX_ENCRYPTION_KEY_BYTES * 8,
-  );
-
-  return new Uint8Array(derivedBits);
-}
-
-function buildHostedMailboxFieldAad(input: {
-  field: string;
-  userId: string;
-}): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({
-    field: input.field,
-    memberId: input.userId,
-    purpose: "hosted-mailbox-payload",
-  }));
-}
-
-function parseJsonValue(value: string, label: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    throw new TypeError(
-      `${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
-function decodeStrictBase64Url(value: string, errorMessage: string): Uint8Array {
-  if (!BASE64URL_CANONICAL_PATTERN.test(value) || value.length % 4 === 1) {
-    throw new TypeError(errorMessage);
-  }
-
-  const decoded = Buffer.from(value, "base64url");
-
-  if (decoded.toString("base64url") !== value) {
-    throw new TypeError(errorMessage);
-  }
-
-  return Uint8Array.from(decoded);
-}
-
-function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const joined = new Uint8Array(left.byteLength + right.byteLength);
-  joined.set(left, 0);
-  joined.set(right, left.byteLength);
-  return joined;
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer;
 }
 
 function resolveWorkspaceOperatorHomeRoot(vaultRoot: string): string {

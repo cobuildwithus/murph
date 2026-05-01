@@ -9,6 +9,14 @@ import {
 
 const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 300;
 const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
+const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+  HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+    "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
+  HOSTED_CRYPTO_ENV: "production",
+} as const;
 
 function parseJsoncObject(rawConfig: string): Record<string, unknown> {
   return JSON.parse(
@@ -26,6 +34,7 @@ describe("Cloudflare container rollout config", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
     const renderedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
@@ -45,6 +54,7 @@ describe("Cloudflare container rollout config", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
     const renderedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{

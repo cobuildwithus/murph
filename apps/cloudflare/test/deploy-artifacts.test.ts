@@ -36,6 +36,14 @@ const finnishDrySaunaProtocol = {
   slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
   title: "Finnish Dry Sauna",
 } as const;
+const requiredHostedCryptoWorkerVars = {
+  HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+  HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+    "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
+  HOSTED_CRYPTO_ENV: "production",
+} as const;
 
 describe("deploy artifact validation", () => {
   it("accepts a complete freshly assembled deploy artifact set", async () => {
@@ -689,6 +697,7 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
     CF_BUNDLES_BUCKET: "hosted-bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
     CF_WORKER_NAME: "hosted-worker",
+    ...requiredHostedCryptoWorkerVars,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
   };

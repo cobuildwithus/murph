@@ -151,7 +151,7 @@ describe("health commons catalog", () => {
         high: 2,
         kind: "absolute",
         low: -1,
-        unit: "percentage points",
+        unit: "%",
       }),
     }));
     expect(redLightProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({

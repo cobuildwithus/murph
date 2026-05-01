@@ -228,7 +228,7 @@ describe("buildHostedDataExport", () => {
   it("exports high-value user data while omitting secrets and lookup material", async () => {
     const exported = await buildHostedDataExport({
       memberId: "member_123",
-      prisma: createHostedAccountDataExportPrismaForTest(),
+      prisma: await createHostedAccountDataExportPrismaForTest(),
     });
     const serialized = JSON.stringify(exported);
 
@@ -436,7 +436,7 @@ describe("buildHostedDataExport", () => {
     const memberId = "member_123";
     const exported = await buildHostedDataExport({
       memberId,
-      prisma: createHostedAccountDataExportPrismaForTest({
+      prisma: await createHostedAccountDataExportPrismaForTest({
         aiUsageRows: Array.from({ length: 251 }, (_unused, index) =>
           makeHostedAiUsageRowForTest({
             id: `usage-${index}`,
@@ -625,12 +625,12 @@ function makeHostedAiUsageRowForTest(input: {
   };
 }
 
-function createHostedAccountDataExportPrisma(input: {
+async function createHostedAccountDataExportPrisma(input: {
   aiUsageRows?: ReturnType<typeof makeHostedAiUsageRowForTest>[];
 } = {}) {
   const count = async () => 1;
   const memberId = "member_123";
-  const linqMailboxPayload = encryptHostedMailboxNullableString({
+  const linqMailboxPayload = await encryptHostedMailboxNullableString({
     field: "hosted-mailbox-inline-payload",
     userId: memberId,
     value: JSON.stringify({
@@ -667,7 +667,7 @@ function createHostedAccountDataExportPrisma(input: {
       userId: memberId,
     }),
   });
-  const emailMailboxPayload = encryptHostedMailboxNullableString({
+  const emailMailboxPayload = await encryptHostedMailboxNullableString({
     field: "hosted-mailbox-inline-payload",
     userId: memberId,
     value: JSON.stringify({
@@ -683,7 +683,7 @@ function createHostedAccountDataExportPrisma(input: {
       userId: memberId,
     }),
   });
-  const systemMailboxPayload = encryptHostedMailboxNullableString({
+  const systemMailboxPayload = await encryptHostedMailboxNullableString({
     field: "hosted-mailbox-inline-payload",
     userId: memberId,
     value: JSON.stringify({
@@ -709,12 +709,12 @@ function createHostedAccountDataExportPrisma(input: {
       userId: memberId,
     }),
   });
-  const billingPrivateColumns = buildHostedMemberBillingPrivateColumns({
+  const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
     memberId,
     stripeCustomerId: "cus_export_123",
     stripeSubscriptionId: "sub_export_123",
   });
-  const identityPrivateColumns = buildHostedMemberIdentityPrivateColumns({
+  const identityPrivateColumns = await buildHostedMemberIdentityPrivateColumns({
     memberId,
     phoneNumber: "+15550100123",
     privyUserId: "privy-user-123",
@@ -724,7 +724,7 @@ function createHostedAccountDataExportPrisma(input: {
     signupPhoneNumber: "+15550100123",
     walletAddress: "0xabc123",
   });
-  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: "linq-chat-123",
     linqRecipientPhone: "+15550100123",
     memberId,
@@ -1096,11 +1096,11 @@ function createHostedAccountDataExportPrisma(input: {
   };
 }
 
-function createHostedAccountDataExportPrismaForTest(
+async function createHostedAccountDataExportPrismaForTest(
   input?: Parameters<typeof createHostedAccountDataExportPrisma>[0],
-): HostedAccountDataPrismaForTest {
+): Promise<HostedAccountDataPrismaForTest> {
   // This fake implements the Prisma delegates exercised by this focused unit test.
-  const fakePrisma: unknown = createHostedAccountDataExportPrisma(input);
+  const fakePrisma: unknown = await createHostedAccountDataExportPrisma(input);
   return fakePrisma as HostedAccountDataPrismaForTest;
 }
 

@@ -137,7 +137,7 @@ expectedSignalDescriptions:
     kind: absolute
     low: -1
     high: 2
-    unit: percentage points
+    unit: "%"
     window: baseline vs 7-14 intervention nights
     confidence: mixed
     basis: A small adult device-use eyewear trial reported significantly better sleep efficiency; pooled actigraphy across three crossover RCTs estimated SE MD -0.61 percentage points with a wide CI crossing zero [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515].

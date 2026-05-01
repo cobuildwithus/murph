@@ -188,7 +188,7 @@ expectedSignalDescriptions:
       kind: absolute
       low: 1
       high: 4
-      unit: percentage points
+      unit: "%"
       window: 14 nights vs 7-night baseline
       confidence: low
       basis: "The paced-breathing insomnia study reported higher PSG sleep efficiency, and the non-forced breathing-cycle study lowered smartwatch/app awake time by 5.4 percentage points. Objective findings were inconclusive in the healthy-adult PSG pilot and 2026 systematic review, so the estimate is conservative."

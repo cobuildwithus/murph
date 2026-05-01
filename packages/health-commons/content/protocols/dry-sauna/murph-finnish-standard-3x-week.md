@@ -181,7 +181,7 @@ expectedSignalDescriptions:
       kind: "absolute"
       low: 0
       high: 3
-      unit: "percentage points"
+      unit: "%"
       window: "2-3 weeks"
       confidence: "low"
       basis: "Adjacent warm bath/shower passive-heating meta-analysis supports better sleep efficiency from a warm-to-cool transition; extracted Finnish-sauna sources do not provide a direct estimate."

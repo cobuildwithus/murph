@@ -6,6 +6,7 @@ import {
   DEFAULT_WORKER_PORT,
   DEFAULT_WORKER_PROTOCOL,
   DEFAULT_STRIPE_ENV_FILE,
+  USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
 } from "./constants.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
 
@@ -100,6 +101,7 @@ export function printHelp(): void {
       "  MURPH_DEV_CODEX_BRIDGE_PORT=0       Local Codex bridge listen port (0 picks a free port)",
       "  MURPH_DEV_USE_VERCEL_DATABASE_URL=1 Use the pulled Vercel development DATABASE_URL instead of the default local database",
       "  MURPH_DEV_SKIP_VERCEL_PULL=1        Reuse the current shell env instead of pulling Vercel development env",
+      `  ${USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV}=1 Use pulled development hosted crypto/KMS env instead of generated local-only keys`,
       "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
       "  MURPH_DEV_SKIP_RUNNER_SMOKE=1       Skip the runner container deploy-smoke readiness proof",
       "  MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1  Skip the Health Commons markdown watcher after startup generation",

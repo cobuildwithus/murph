@@ -79,7 +79,7 @@ export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
     throw new TypeError("Hosted member reply alias lookup key must be a non-empty string.");
   }
 
-  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: null,
     linqRecipientPhone: null,
     memberId: input.memberId,
@@ -117,7 +117,7 @@ export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
   });
 
   return routingRecord
-    ? projectHostedMemberRoutingLookup(routingRecord, "telegramUserLookupKey")
+    ? await projectHostedMemberRoutingLookup(routingRecord, "telegramUserLookupKey")
     : null;
 }
 
@@ -162,7 +162,7 @@ export async function resolveHostedMemberRoutingByTelegramUserId(input: {
   const [routingRecord] = [...routingRecordByMemberId.values()];
 
   return {
-    lookup: projectHostedMemberRoutingLookup(routingRecord, "telegramUserId"),
+    lookup: await projectHostedMemberRoutingLookup(routingRecord, "telegramUserId"),
     status: "found",
   };
 }
@@ -213,5 +213,5 @@ export async function readHostedMemberRoutingState(input: {
     select: hostedMemberRoutingStateSelect,
   });
 
-  return routingRecord ? projectHostedMemberRoutingState(routingRecord) : null;
+  return routingRecord ? await projectHostedMemberRoutingState(routingRecord) : null;
 }

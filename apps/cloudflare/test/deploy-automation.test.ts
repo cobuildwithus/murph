@@ -7,14 +7,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
+  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
+  HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
   readHostedDeployAutomationEnvironment,
   resolveCloudflareDeployPaths,
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
 import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
-import { HOSTED_WORKER_OPTIONAL_VAR_NAMES } from "../scripts/deploy-automation/worker-optional-vars.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 
 afterEach(() => {
@@ -95,6 +96,15 @@ const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
   "HOSTED_ASSISTANT_PROVIDER_NAME",
 ] as const;
 
+const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+  HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+    "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
+  HOSTED_CRYPTO_ENV: "production",
+} as const;
+
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
     const environment = readHostedDeployAutomationEnvironment({
@@ -105,13 +115,11 @@ describe("hosted deploy automation helpers", () => {
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
       HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
-      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
-      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v2",
-      HOSTED_CRYPTO_ENV: "prod",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
@@ -243,7 +251,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
     expect(config.vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe("cloudflare-automation:v2");
-    expect(config.vars.HOSTED_CRYPTO_ENV).toBe("prod");
+    expect(config.vars.HOSTED_CRYPTO_ENV).toBe("production");
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
     expect(config.vars.HOSTED_ASSISTANT_APPROVAL_POLICY).toBe("never");
     expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.5");
@@ -272,6 +280,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "murph-hosted",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
     const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
@@ -414,6 +423,9 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");
     }
+    for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
+      expect(workflowEnvBindings.get(name)).toBe("vars");
+    }
     for (const name of HOSTED_WORKER_OPTIONAL_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
@@ -449,10 +461,12 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
     });
 
     expect(environment.workerVars).toEqual({
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
     });
   });
@@ -462,6 +476,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox",
     });
 
@@ -473,6 +488,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
@@ -486,6 +502,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048,\"disk_mb\":8192}",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
 
     expect(environment.containerInstanceType).toEqual({
@@ -502,6 +519,7 @@ describe("hosted deploy automation helpers", () => {
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
         CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048}",
         CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       }),
     ).toThrowError(/CF_CONTAINER_INSTANCE_TYPE\.disk_mb must be a positive number\./u);
   });
@@ -605,6 +623,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
@@ -614,6 +633,7 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",

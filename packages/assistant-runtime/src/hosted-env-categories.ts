@@ -5,9 +5,15 @@ export const HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES = [
 ] as const;
 
 export const HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES = [
-  "HOSTED_WAKE_ENCRYPTION_KEY",
-  "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
-  "HOSTED_WAKE_ENCRYPTION_KEY_VERSION",
+  "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",
+  "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
+  "HOSTED_CRYPTO_ENV",
+  "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
+  "HOSTED_WEB_BASE_URL",
+  "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
+  "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
 ] as const;
 
 export const HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES = [
@@ -17,8 +23,8 @@ export const HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES = [
 ] as const;
 
 // Platform-owned runtime vars must never be user-controlled. Telegram routing
-// vars authorize privileged Bot API traffic, and wake encryption vars decrypt
-// hosted mailbox payloads.
+// vars authorize privileged Bot API traffic, and mailbox platform vars fetch
+// and unwrap hosted mailbox payload roots.
 export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
   ...HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES,
   ...HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,

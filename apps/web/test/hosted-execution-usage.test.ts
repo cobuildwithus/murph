@@ -54,7 +54,7 @@ describe("importHostedAiUsageRecords", () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const findUnique = vi.fn(async () => ({
       memberId: "member_123",
-      stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
         memberId: "member_123",
         value: "cus_123",
@@ -460,7 +460,7 @@ describe("importHostedAiUsageRecords", () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const findUnique = vi.fn(async () => ({
       memberId: "member_123",
-      stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
         memberId: "member_123",
         value: "cus_123",
@@ -509,7 +509,7 @@ describe("importHostedAiUsageRecords", () => {
       hostedMemberBillingRef: {
         findUnique: vi.fn(async () => ({
           memberId: "member_123",
-          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-customer-id",
             memberId: "member_123",
             value: "cus_123",
@@ -585,7 +585,7 @@ describe("importHostedAiUsageRecords", () => {
       hostedMemberBillingRef: {
         findUnique: vi.fn(async () => ({
           memberId: "member_123",
-          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-customer-id",
             memberId: "member_123",
             value: "cus_123",
@@ -727,7 +727,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       member: {
         billingRef: {
           memberId: "member_123",
-          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-customer-id",
             memberId: "member_123",
             value: "cus_123",

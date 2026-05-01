@@ -9,6 +9,10 @@ export {
   buildHostedWorkerSecretsPayload,
 } from "./deploy-automation/secrets.ts";
 export {
+  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
+  HOSTED_WORKER_REQUIRED_VAR_NAMES,
+} from "./deploy-automation/worker-optional-vars.ts";
+export {
   buildHostedWranglerDeployConfig,
   resolveCloudflareDeployPaths,
 } from "./deploy-automation/wrangler-config.ts";

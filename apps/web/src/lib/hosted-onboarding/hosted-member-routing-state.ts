@@ -78,10 +78,10 @@ export interface HostedMemberRoutingLookup {
   routing: HostedMemberRoutingLookupSnapshot;
 }
 
-export function projectHostedMemberRoutingState(
+export async function projectHostedMemberRoutingState(
   routing: HostedMemberRoutingRecord,
-): HostedMemberRoutingStateSnapshot {
-  const privateState = readHostedMemberRoutingPrivateState(routing);
+): Promise<HostedMemberRoutingStateSnapshot> {
+  const privateState = await readHostedMemberRoutingPrivateState(routing);
 
   return {
     linqChatId: privateState.linqChatId,
@@ -95,11 +95,11 @@ export function projectHostedMemberRoutingState(
   };
 }
 
-export function projectHostedMemberRoutingLookup(
+export async function projectHostedMemberRoutingLookup(
   routing: HostedMemberRoutingLookupRecord,
   matchedBy: HostedMemberRoutingLookupMatch,
-): HostedMemberRoutingLookup {
-  const routingState = projectHostedMemberRoutingState(routing);
+): Promise<HostedMemberRoutingLookup> {
+  const routingState = await projectHostedMemberRoutingState(routing);
 
   return {
     core: routing.member,

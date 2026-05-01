@@ -45,7 +45,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     },
   });
   const existingTelegramRouting = existingRouting
-    ? readHostedMemberRoutingTelegramPrivateState(existingRouting)
+    ? await readHostedMemberRoutingTelegramPrivateState(existingRouting)
     : null;
   const preferredTelegramThreadId =
     existingTelegramRouting?.telegramUserId === input.telegramUserId
@@ -55,7 +55,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
       })
       : null;
 
-  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: null,
     linqRecipientPhone: null,
     memberId: input.memberId,

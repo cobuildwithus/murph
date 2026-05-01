@@ -177,7 +177,7 @@ expectedSignalDescriptions:
       kind: absolute
       low: 0
       high: 2
-      unit: percentage points
+      unit: "%"
       window: 14 nights vs 7-night baseline
       confidence: low
       basis: "Objective sleep-continuity findings are inconsistent: the mindfulness-course source did not change actigraphy sleep efficiency, the app-based worry trial found no Fitbit sleep-efficiency difference, and mindfulness reviews are stronger for self-reported sleep quality or symptoms than objective continuity. A small gain is plausible only if wake time falls."

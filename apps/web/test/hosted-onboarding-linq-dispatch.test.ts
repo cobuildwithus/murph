@@ -1394,12 +1394,12 @@ https://join.example.test/join/code_first_text`);
           invites: [],
           phoneLookupKey: "+15551234567",
           routing: {
-            linqChatIdEncrypted: encryptHostedWebNullableString({
+            linqChatIdEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-routing.home-linq-chat-id",
               memberId: "member_123",
               value: "chat_home",
             }),
-            linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+            linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-routing.home-linq-recipient-phone",
               memberId: "member_123",
               value: "+15550100001",
@@ -1414,12 +1414,12 @@ https://join.example.test/join/code_first_text`);
       },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: encryptHostedWebNullableString({
+          linqChatIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-routing.home-linq-chat-id",
             memberId: "member_123",
             value: "chat_home",
           }),
-          linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+          linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-routing.home-linq-recipient-phone",
             memberId: "member_123",
             value: "+15550100001",
@@ -1495,12 +1495,12 @@ https://join.example.test/join/code_first_text`);
           invites: [],
           phoneLookupKey: "+15551234567",
           routing: {
-            linqChatIdEncrypted: encryptHostedWebNullableString({
+            linqChatIdEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-routing.home-linq-chat-id",
               memberId: "member_123",
               value: "chat_home",
             }),
-            linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+            linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-routing.home-linq-recipient-phone",
               memberId: "member_123",
               value: "+15550100001",

@@ -1049,7 +1049,7 @@ expectedSignalDescriptions:
     kind: absolute
     low: 0
     high: 3
-    unit: percentage points
+    unit: "%"
     window: 1-4 weeks
     confidence: low
     basis: Acute alcohol and wearable context support the direction, but direct abstinence sleep-efficiency effect sizes are not well extracted for this wellness protocol.
