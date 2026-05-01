@@ -13,8 +13,10 @@ import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail
 import {
   listHealthCommonsBiomarkerRoutes,
   resolveHealthCommonsBiomarkerDetail,
-  type BiomarkerPageModel,
 } from "@/src/lib/health-commons/biomarker-detail";
+import type {
+  BiomarkerShellProjection,
+} from "@/src/lib/health-commons/biomarker-projections";
 
 const mocks = vi.hoisted(() => ({
   biomarkerLayoutClient: vi.fn(),
@@ -35,7 +37,7 @@ vi.mock("../app/biomarkers/[biomarkerId]/biomarker-layout-client", () => ({
   BiomarkerLayoutClient({
     biomarker,
   }: {
-    biomarker: BiomarkerPageModel;
+    biomarker: BiomarkerShellProjection;
     children?: unknown;
   }) {
     mocks.biomarkerLayoutClient({ biomarker });
@@ -98,7 +100,7 @@ describe("BiomarkerPage", () => {
     ]);
   });
 
-  it("resolves the VO₂ max biomarker page model", async () => {
+  it("resolves the VO₂ max biomarker shell projection", async () => {
     const element = await BiomarkerDetailLayout({
       children: createElement("div", null),
       params: Promise.resolve({
@@ -109,7 +111,7 @@ describe("BiomarkerPage", () => {
 
     expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
     const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
-      ?.biomarker as BiomarkerPageModel;
+      ?.biomarker as BiomarkerShellProjection;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
       key: "biomarker:estimated-vo2max",
@@ -118,55 +120,12 @@ describe("BiomarkerPage", () => {
       title: "VO₂ Max",
       unit: "ml/kg/min",
     }));
-    expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        domain: "activity",
-        metric: "estimatedVo2Max",
-        preferred: true,
-        source: "browser_vault_metric",
-      }),
-    ]));
-    expect(clientBiomarker.claims).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        claimId: "wearable_vo2max_proxy",
-        sourceKeys: expect.arrayContaining([
-          "source_artifact:pmid-35072942",
-          "source_artifact:pmid-41477023",
-        ]),
-        sources: expect.arrayContaining([
-          expect.objectContaining({
-            externalUrl: "https://pubmed.ncbi.nlm.nih.gov/35072942/",
-          }),
-        ]),
-      }),
-    ]));
-    expect(clientBiomarker.sourceHighlights).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        key: "source_artifact:pmid-35072942",
-        externalUrl: "https://pubmed.ncbi.nlm.nih.gov/35072942/",
-      }),
-    ]));
-    expect(
-      clientBiomarker.protocolRankings.map((protocol) => ({
-        href: protocol.href,
-        title: protocol.title,
-      })).slice(0, 2),
-    ).toEqual([
-      {
-        href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4",
-      },
-      {
-        href: "/experiments/zone-2-aerobic-base-block",
-        title: "Zone 2 Cardio",
-      },
-    ]);
     expect(markup).toContain('data-biomarker-id="estimated-vo2max"');
     expect(markup).toContain('data-biomarker-key="biomarker:estimated-vo2max"');
     expect(markup).toContain("VO₂ Max");
   });
 
-  it("resolves the SpO₂ biomarker page model", async () => {
+  it("resolves the SpO₂ biomarker shell projection", async () => {
     const element = await BiomarkerDetailLayout({
       children: createElement("div", null),
       params: Promise.resolve({
@@ -177,7 +136,7 @@ describe("BiomarkerPage", () => {
 
     expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
     const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
-      ?.biomarker as BiomarkerPageModel;
+      ?.biomarker as BiomarkerShellProjection;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
       key: "biomarker:blood-oxygen-spo2",
@@ -185,61 +144,7 @@ describe("BiomarkerPage", () => {
       shortName: "SpO₂",
       title: "Blood Oxygen Saturation (SpO₂)",
       unit: "%",
-      valuePrecision: 1,
     }));
-    expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        domain: "sleep",
-        metric: "spo2",
-        preferred: true,
-        source: "browser_vault_metric",
-      }),
-      expect.objectContaining({
-        domain: "recovery",
-        metric: "spo2",
-        source: "browser_vault_metric",
-      }),
-    ]));
-    expect(clientBiomarker.claims).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        claimId: "spo2-readings-are-estimates",
-        sourceKeys: expect.arrayContaining([
-          "source_artifact:fda-pulse-oximeter-basics-2025",
-          "source_artifact:pmid-29262014",
-        ]),
-      }),
-      expect.objectContaining({
-        claimId: "spo2-low-readings-with-symptoms-need-escalation-context",
-        sourceKeys: expect.arrayContaining([
-          "source_artifact:mayo-hypoxemia-pulse-oximetry",
-          "source_artifact:cleveland-clinic-blood-oxygen-level",
-        ]),
-      }),
-    ]));
-    expect(clientBiomarker.sourceHighlights).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        key: "source_artifact:fda-pulse-oximeter-basics-2025",
-      }),
-    ]));
-    expect(
-      clientBiomarker.protocolRankings.map((protocol) => ({
-        href: protocol.href,
-        title: protocol.title,
-      })).slice(0, 3),
-    ).toEqual([
-      {
-        href: "/experiments/red-light-glasses-before-bed",
-        title: "Red Light Glasses Before Bed",
-      },
-      {
-        href: "/experiments/finnish-sauna",
-        title: "Finnish Dry Sauna",
-      },
-      {
-        href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4",
-      },
-    ]);
     expect(markup).toContain('data-biomarker-id="blood-oxygen-spo2"');
     expect(markup).toContain('data-biomarker-key="biomarker:blood-oxygen-spo2"');
     expect(markup).toContain("SpO₂");
@@ -294,7 +199,7 @@ describe("BiomarkerPage", () => {
     expect(changes).toContain('"changeId":"chg_2026_04_23_spo2_claims_and_delta_copy"');
   });
 
-  it("resolves the REM sleep biomarker page model", async () => {
+  it("resolves the REM sleep biomarker shell projection", async () => {
     const element = await BiomarkerDetailLayout({
       children: createElement("div", null),
       params: Promise.resolve({
@@ -305,7 +210,7 @@ describe("BiomarkerPage", () => {
 
     expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
     const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
-      ?.biomarker as BiomarkerPageModel;
+      ?.biomarker as BiomarkerShellProjection;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
       key: "biomarker:rem-sleep-minutes",
@@ -313,34 +218,12 @@ describe("BiomarkerPage", () => {
       shortName: "REM",
       title: "REM Sleep",
     }));
-    expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        domain: "sleep",
-        metric: "remMinutes",
-        preferred: true,
-        source: "browser_vault_metric",
-      }),
-    ]));
-    expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        href: "/experiments/red-light-glasses-before-bed",
-        title: "Red Light Glasses Before Bed",
-      }),
-      expect.objectContaining({
-        href: "/experiments/finnish-sauna",
-        title: "Finnish Dry Sauna",
-      }),
-      expect.objectContaining({
-        href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4",
-      }),
-    ]));
     expect(markup).toContain('data-biomarker-id="rem-sleep-minutes"');
     expect(markup).toContain('data-biomarker-key="biomarker:rem-sleep-minutes"');
     expect(markup).toContain("REM Sleep");
   });
 
-  it("resolves the deep sleep biomarker page model", async () => {
+  it("resolves the deep sleep biomarker shell projection", async () => {
     const element = await BiomarkerDetailLayout({
       children: createElement("div", null),
       params: Promise.resolve({
@@ -351,7 +234,7 @@ describe("BiomarkerPage", () => {
 
     expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
     const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
-      ?.biomarker as BiomarkerPageModel;
+      ?.biomarker as BiomarkerShellProjection;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
       key: "biomarker:deep-sleep-minutes",
@@ -359,62 +242,13 @@ describe("BiomarkerPage", () => {
       shortName: "Deep sleep",
       title: "Deep Sleep",
       unit: "minutes",
-      valuePrecision: 0,
     }));
-    expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        domain: "sleep",
-        metric: "deepMinutes",
-        preferred: true,
-        source: "browser_vault_metric",
-      }),
-    ]));
-    expect(clientBiomarker.claims).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        claimId: "wearable-stage-noise",
-        sourceKeys: expect.arrayContaining([
-          "source_artifact:pmid-37917155-deep-sleep",
-          "source_artifact:pmid-39460013-deep-sleep",
-        ]),
-      }),
-    ]));
-    expect(clientBiomarker.sourceHighlights).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        key: "source_artifact:doi-10.1093-sleep-zsaf063",
-        externalUrl: "https://academic.oup.com/sleep/article/48/10/zsaf063/8074201",
-        year: 2025,
-      }),
-      expect.objectContaining({
-        key: "source_artifact:pmid-21876072",
-        externalUrl: "https://pubmed.ncbi.nlm.nih.gov/21876072/",
-      }),
-    ]));
-    expect(clientBiomarker.sourceHighlights.slice(0, 4).map((source) => source.key)).toEqual([
-      "source_artifact:doi-10.1093-sleep-zsaf063",
-      "source_artifact:pmid-37917155-deep-sleep",
-      "source_artifact:pmid-39460013-deep-sleep",
-      "source_artifact:doi-10.1038-s41598-025-93774-z",
-    ]);
-    expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        href: "/experiments/red-light-glasses-before-bed",
-        title: "Red Light Glasses Before Bed",
-      }),
-      expect.objectContaining({
-        href: "/experiments/finnish-sauna",
-        title: "Finnish Dry Sauna",
-      }),
-      expect.objectContaining({
-        href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4",
-      }),
-    ]));
     expect(markup).toContain('data-biomarker-id="deep-sleep-minutes"');
     expect(markup).toContain('data-biomarker-key="biomarker:deep-sleep-minutes"');
     expect(markup).toContain("Deep Sleep");
   });
 
-  it("resolves the HRV biomarker page model", async () => {
+  it("resolves the HRV biomarker shell projection", async () => {
     const element = await BiomarkerDetailLayout({
       children: createElement("div", null),
       params: Promise.resolve({
@@ -425,7 +259,7 @@ describe("BiomarkerPage", () => {
 
     expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
     const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
-      ?.biomarker as BiomarkerPageModel;
+      ?.biomarker as BiomarkerShellProjection;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
       key: "biomarker:hrv-rmssd",
@@ -433,63 +267,13 @@ describe("BiomarkerPage", () => {
       shortName: "HRV",
       title: "Heart Rate Variability",
       unit: "ms",
-      valuePrecision: 0,
     }));
-    expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        domain: "recovery",
-        metric: "hrv",
-        preferred: true,
-        source: "browser_vault_metric",
-      }),
-      expect.objectContaining({
-        domain: "sleep",
-        metric: "hrv",
-        source: "browser_vault_metric",
-      }),
-    ]));
-    expect(clientBiomarker.claims).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        claimId: "hrv_measurement_standardization",
-        sourceKeys: expect.arrayContaining([
-          "source_artifact:pmid-39351472",
-          "source_artifact:pmid-30852243",
-        ]),
-      }),
-    ]));
-    expect(clientBiomarker.sourceHighlights).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        key: "source_artifact:pmid-40834291",
-        externalUrl: "https://pubmed.ncbi.nlm.nih.gov/40834291/",
-        year: 2025,
-      }),
-      expect.objectContaining({
-        key: "source_artifact:pmid-8598068",
-        externalUrl: "https://pubmed.ncbi.nlm.nih.gov/8598068/",
-        year: 1996,
-      }),
-    ]));
-    expect(
-      clientBiomarker.protocolRankings.map((protocol) => ({
-        href: protocol.href,
-        title: protocol.title,
-      })).slice(0, 2),
-    ).toEqual([
-      {
-        href: "/experiments/whole-body-red-and-near-infrared-light-exposure",
-        title: "Red Light Therapy",
-      },
-      {
-        href: "/experiments/bryan-johnson-blueprint",
-        title: "Bryan Johnson Sauna",
-      },
-    ]);
     expect(markup).toContain('data-biomarker-id="hrv-rmssd"');
     expect(markup).toContain('data-biomarker-key="biomarker:hrv-rmssd"');
     expect(markup).toContain("Heart Rate Variability");
   });
 
-  it("resolves the resting-heart-rate biomarker page model", async () => {
+  it("resolves the resting-heart-rate biomarker shell projection", async () => {
     const element = await BiomarkerDetailLayout({
       children: createElement("div", null),
       params: Promise.resolve({
@@ -500,7 +284,7 @@ describe("BiomarkerPage", () => {
 
     expect(mocks.biomarkerLayoutClient).toHaveBeenCalledTimes(1);
     const clientBiomarker = mocks.biomarkerLayoutClient.mock.calls.at(-1)?.[0]
-      ?.biomarker as BiomarkerPageModel;
+      ?.biomarker as BiomarkerShellProjection;
 
     expect(clientBiomarker).toEqual(expect.objectContaining({
       about: [
@@ -525,39 +309,6 @@ describe("BiomarkerPage", () => {
       shortName: "RHR",
       title: "Resting Heart Rate",
     }));
-    expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        domain: "recovery",
-        metric: "restingHeartRate",
-        preferred: true,
-        source: "browser_vault_metric",
-      }),
-    ]));
-    expect(
-      clientBiomarker.protocolRankings.map((protocol) => ({
-        href: protocol.href,
-        title: protocol.title,
-      })).slice(0, 3),
-    ).toEqual([
-      {
-        href: "/experiments/daily-step-floor",
-        title: "Daily Step Floor",
-      },
-      {
-        href: "/experiments/whole-body-red-and-near-infrared-light-exposure",
-        title: "Red Light Therapy",
-      },
-      {
-        href: "/experiments/bryan-johnson-blueprint",
-        title: "Bryan Johnson Sauna",
-      },
-    ]);
-    expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        href: "/experiments/bryan-johnson-blueprint",
-        title: "Bryan Johnson Sauna",
-      }),
-    ]));
     expect(markup).toContain('data-biomarker-id="resting-heart-rate"');
     expect(markup).toContain('data-biomarker-key="biomarker:resting-heart-rate"');
     expect(markup).toContain("Resting Heart Rate");
