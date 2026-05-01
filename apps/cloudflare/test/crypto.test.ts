@@ -176,7 +176,7 @@ describe("hosted storage object keys", () => {
     expectOpaqueStrings([storedArtifactKey], ["user_artifact_123", artifactSha]);
 
     const runnerSecretsUserId = "user_env_123";
-    const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, runnerSecretsUserId);
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: runnerSecretsUserId });
     await writeEncryptedR2Payload({
       aad: buildHostedStorageAad({
         key: runnerSecretsKey,

@@ -612,12 +612,9 @@ export class HostedUserRunner {
     if (supportsPrefixDeletion) {
       if (userCrypto) {
         const prefixes = [
-          await hostedBundleUserPrefix(userCrypto.rootKey, userId),
-          await hostedArtifactUserPrefix(userCrypto.rootKey, userId),
-          await hostedBrowserVaultReplicaUserPrefix({
-            rootKey: userCrypto.rootKey,
-            userId,
-          }),
+          await hostedBundleUserPrefix({ userId }),
+          await hostedArtifactUserPrefix({ userId }),
+          await hostedBrowserVaultReplicaUserPrefix({ userId }),
         ];
         for (const prefix of prefixes) {
           deletedObjectCount += (await deleteR2ObjectsWithPrefix(this.bucket, prefix)).deletedCount;
@@ -625,7 +622,7 @@ export class HostedUserRunner {
 
         deletedObjectCount += (await deleteR2ObjectIfSupported(
           this.bucket,
-          await hostedRunnerSecretsObjectKey(userCrypto.rootKey, userId),
+          await hostedRunnerSecretsObjectKey({ userId }),
         )).deletedCount;
 
         // Domain-root envelopes are canonical in web-owned Postgres. Cloudflare

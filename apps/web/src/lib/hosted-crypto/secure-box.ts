@@ -53,7 +53,7 @@ export function setHostedSecureBoxStringTestCodecForTests(
   }
 }
 
-export async function encryptHostedWebString(input: {
+export async function sealHostedUserSecureBoxString(input: {
   aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
   lane: HostedCryptoLane;
   prisma?: HostedSecureBoxPrismaClient;
@@ -108,7 +108,7 @@ export async function encryptHostedWebString(input: {
   }
 }
 
-export async function decryptHostedWebString(input: {
+export async function openHostedUserSecureBoxString(input: {
   aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
   lane: HostedCryptoLane;
   prisma?: HostedSecureBoxPrismaClient;

@@ -1,6 +1,6 @@
 import {
-  decryptHostedWebString,
-  encryptHostedWebString,
+  openHostedUserSecureBoxString,
+  sealHostedUserSecureBoxString,
   type HostedSecureBoxPrismaClient,
 } from "../../hosted-crypto/secure-box";
 import { maybeIsoTimestamp, normalizeNullableString } from "../shared";
@@ -51,7 +51,7 @@ export async function encryptHostedConnectionSecret(input: {
   }
 
   const descriptor = resolveHostedDeviceSyncSecretDescriptor(input.purpose, input.connectionId);
-  const encrypted = await encryptHostedWebString({
+  const encrypted = await sealHostedUserSecureBoxString({
     aad: buildHostedDeviceSyncSecretAad({
       connectionId: input.connectionId,
       field: descriptor.field,
@@ -172,7 +172,7 @@ async function decryptHostedConnectionSecret(input: {
   }
 
   const descriptor = resolveHostedDeviceSyncSecretDescriptor(input.purpose, input.connectionId);
-  const decrypted = await decryptHostedWebString({
+  const decrypted = await openHostedUserSecureBoxString({
     aad: buildHostedDeviceSyncSecretAad({
       connectionId: input.connectionId,
       field: descriptor.field,

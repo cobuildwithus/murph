@@ -284,7 +284,17 @@ const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
 const DEFAULT_SOURCE_LIMIT = 8;
 const MAX_LIMIT = 500;
+type HealthCommonsWebExperimentProjectionKey = Extract<
+  HealthCommonsWebProjectionKey,
+  | "experiment.protocol"
+  | "experiment.research"
+  | "experiment.results-public"
+  | "experiment.shell"
+>;
 const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey[] = [
+  "biomarker.overview",
+  "biomarker.research",
+  "biomarker.shell",
   "experiment.protocol",
   "experiment.research",
   "experiment.results-public",
@@ -485,7 +495,7 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
   assertArtifact: (value: unknown, artifactPath: string) => asserts value is T;
   cache: Map<string, T | null>;
   generatedWebRoot?: string | URL;
-  projectionKey: HealthCommonsWebProjectionKey;
+  projectionKey: HealthCommonsWebExperimentProjectionKey;
   routeId: string;
 }): T | null {
   const routeIndex = getGeneratedHealthCommonsWebRouteIndex({
@@ -1502,7 +1512,7 @@ function routeIdFromGeneratedWebBundlePath(bundlePath: string): string {
 }
 
 function assertProjectionPathMatchesRoute(
-  projectionKey: HealthCommonsWebProjectionKey,
+  projectionKey: HealthCommonsWebExperimentProjectionKey,
   artifactPath: string,
   routeId: string,
 ): void {
@@ -1515,7 +1525,7 @@ function assertProjectionPathMatchesRoute(
 }
 
 function experimentProjectionPathForRouteId(
-  projectionKey: HealthCommonsWebProjectionKey,
+  projectionKey: HealthCommonsWebExperimentProjectionKey,
   routeId: string,
 ): string {
   switch (projectionKey) {

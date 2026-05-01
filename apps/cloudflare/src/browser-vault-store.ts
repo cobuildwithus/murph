@@ -100,7 +100,6 @@ export function createHostedBrowserVaultReplicaStore(input: {
       const parsed = parseBrowserVaultReplicaStorageInput(replica);
       const objectKey = await hostedBrowserVaultReplicaObjectKey({
         dataVersion: parsed.source.dataVersion,
-        rootKey: input.rootKey,
         userId,
       });
       const ref: HostedBrowserVaultReplicaRef = {
@@ -153,7 +152,6 @@ async function assertHostedBrowserVaultReplicaOwnedByUser(
   }
 
   const expectedPrefix = await hostedBrowserVaultReplicaUserPrefix({
-    rootKey: input.rootKey,
     userId: input.userId,
   });
   if (!ref.objectKey.startsWith(expectedPrefix)) {

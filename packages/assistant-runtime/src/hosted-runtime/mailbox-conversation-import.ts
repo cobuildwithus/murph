@@ -68,8 +68,12 @@ export interface HostedConversationMailboxPayloadDecoder {
 
 export interface HostedConversationMailboxPayloadDecodeInput {
   itemRef: {
+    dedupeKey: string;
     id: string;
+    kind: string;
+    lane: string;
     laneSeq: string;
+    occurredAt: string;
     userId: string;
   };
   payloadCiphertext: string;
@@ -188,8 +192,12 @@ export async function importHostedConversationMailboxItem(input: {
 
   const decoded = await input.decodePayload.decode({
     itemRef: {
+      dedupeKey: input.item.item.dedupeKey,
       id: input.item.item.id,
+      kind: input.item.item.kind,
+      lane: input.item.item.lane,
       laneSeq: input.item.item.laneSeq,
+      occurredAt: input.item.item.occurredAt,
       userId: input.item.item.userId,
     },
     payloadCiphertext: input.item.payload.payloadCiphertext,
