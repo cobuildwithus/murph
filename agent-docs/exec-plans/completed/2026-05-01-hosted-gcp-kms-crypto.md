@@ -1,6 +1,6 @@
 # Land hosted GCP KMS domain crypto patch
 
-Status: active
+Status: completed
 Created: 2026-05-01
 Updated: 2026-05-01
 
@@ -73,14 +73,30 @@ Updated: 2026-05-01
 
 - Use a plan rather than ledger-only handling because the patch adds persisted
   state and trust-boundary surfaces across web, runtime-state, and Cloudflare.
+- Required security/privacy review found the signed Cloudflare crypto-context
+  route was not wired into production resolution. Follow-up wiring now fetches
+  the signed web context for configured Cloudflare runtime paths, selects
+  ingress/runtime roots by caller, and guards production static GCP tokens.
+- The signed worker context intentionally returns full signed ingress/runtime
+  envelopes so Cloudflare can verify web's authority signature before selecting
+  only its `cloudflare-automation-secret` recipient wrap.
 
 ## Verification
 
-- Commands to run:
-- `pnpm typecheck`
-- Truthful coverage-bearing focused command for touched files, preferably
-  `bash scripts/workspace-verify.sh test:diff <touched paths...>` once the
-  patch is applied.
-- `git diff --check`
-- Expected outcomes:
-- Commands pass, or unrelated blockers are recorded with exact failing targets.
+- Passed:
+  - `pnpm --dir packages/runtime-state typecheck`
+  - `pnpm --dir apps/web typecheck`
+  - `pnpm --dir packages/runtime-state test:coverage`
+  - `pnpm exec vitest run apps/web/test/hosted-crypto-env.test.ts --config apps/web/vitest.config.ts --no-coverage`
+  - `pnpm exec vitest run apps/cloudflare/test/hosted-runtime-crypto-context.test.ts apps/cloudflare/test/runner-outbound.test.ts --config apps/cloudflare/vitest.config.ts --no-coverage`
+  - `pnpm --dir apps/web exec eslint src/lib/hosted-crypto app/api/internal/hosted-runtime/crypto-context/route.ts test/hosted-crypto-env.test.ts`
+  - `pnpm docs:drift`
+  - scoped `git diff --check`
+- Failed unrelated:
+  - `bash scripts/workspace-verify.sh test:diff <hosted crypto paths>` failed in
+    `packages/core` on date-sensitive `audit/2026/2026-04.jsonl` expectations;
+    the same failure reproduced with `pnpm --dir packages/core test -- --runInBand test/core.test.ts`.
+  - `pnpm --dir apps/cloudflare typecheck` is currently blocked by unrelated
+    dirty `apps/cloudflare/test/user-runner-alarm.test.ts` drift:
+    `Cannot find name 'sql'`.
+Completed: 2026-05-01

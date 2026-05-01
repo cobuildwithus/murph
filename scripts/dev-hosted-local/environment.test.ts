@@ -54,6 +54,11 @@ const callbackPrivateJwkJson = JSON.stringify({
   x: "callback-x",
   y: "callback-y",
 });
+const hostedCryptoAuthorityEnv = {
+  HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/test/cryptoKeyVersions/1",
+  HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+    "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
+} as const;
 
 describe("parseEnvText", () => {
   it("parses dotenv text values verbatim", () => {
@@ -132,15 +137,14 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        ...hostedCryptoAuthorityEnv,
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:9998",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "stale-token",
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:9999",
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "192.168.65.2",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "existing-envelope",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
       },
       oidcIdentity,
-      createEnvelopeKey: () => "generated-envelope",
       createJwkPair: () => ({
         privateJwkJson: JSON.stringify({
           crv: "P-256",
@@ -158,9 +162,18 @@ describe("mergeCloudflareLocalEnv", () => {
       }),
     });
 
-    expect(merged.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY).toBe("existing-envelope");
-    expect(merged.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK).toContain("generated-d");
-    expect(merged.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK).toContain("generated-x");
+    expect(merged.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toContain("generated-d");
+    expect(merged.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK).toContain("generated-x");
+    expect(merged.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe(
+      "cloudflare-automation:local",
+    );
+    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toBe(
+      hostedCryptoAuthorityEnv.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION,
+    );
+    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
+      hostedCryptoAuthorityEnv.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+    );
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("development");
     expect(merged.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL).toBe("http://127.0.0.1:9998");
     expect(merged.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN).toBe("stale-token");
     expect(merged.ALLOW_LOCAL_INTERNAL_PROXY).toBe("true");
@@ -177,6 +190,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        ...hostedCryptoAuthorityEnv,
         LINQ_API_BASE_URL: "http://127.0.0.1:9999",
       },
       oidcIdentity,
@@ -190,6 +204,18 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.LINQ_API_TOKEN).toBe("linq-local-test-token");
   });
 
+  it("fails closed when local web crypto authority env is missing", () => {
+    expect(() =>
+      mergeCloudflareLocalEnv({
+        config: localConfig,
+        existing: {},
+        oidcIdentity,
+      })
+    ).toThrow(
+      "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION must be configured so local Cloudflare can verify web-hosted runtime crypto contexts.",
+    );
+  });
+
   it("drops stale local Codex bridge proxy values when the bridge is disabled", () => {
     const merged = mergeCloudflareLocalEnv({
       config: {
@@ -197,6 +223,7 @@ describe("mergeCloudflareLocalEnv", () => {
         localCodexBridge: false,
       },
       existing: {
+        ...hostedCryptoAuthorityEnv,
         MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
       },
@@ -215,6 +242,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        ...hostedCryptoAuthorityEnv,
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
       },
       oidcIdentity,
@@ -234,6 +262,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        ...hostedCryptoAuthorityEnv,
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
       },
       oidcIdentity,
@@ -246,6 +275,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        ...hostedCryptoAuthorityEnv,
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
       },
       oidcIdentity,
@@ -263,6 +293,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        ...hostedCryptoAuthorityEnv,
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:9999",
       },
       oidcIdentity,
@@ -290,6 +321,17 @@ describe("assertLocalWorkerOidcEnvironment", () => {
 describe("buildHostedLocalDevOverrides", () => {
   it("derives localhost overrides and the callback public key", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/cryptoKeyVersions/1",
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:local",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify({
+        crv: "P-256",
+        d: "cloudflare-d",
+        kty: "EC",
+        x: "cloudflare-x",
+        y: "cloudflare-y",
+      }),
+      HOSTED_CRYPTO_ENV: "development",
       HOSTED_WAKE_ENCRYPTION_KEY: "worker-wake-key",
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-worker-wake-key\"}",
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "worker:v2",
@@ -306,7 +348,17 @@ describe("buildHostedLocalDevOverrides", () => {
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "worker:v2",
       HOSTED_WEB_BASE_URL: "http://localhost:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:local",
+      HOSTED_CRYPTO_ENV: "development",
+      HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "projects/test/cryptoKeyVersions/1",
+      HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
       VERCEL_PROJECT_PRODUCTION_URL: "localhost:3000",
+    });
+    expect(JSON.parse(overrides.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK ?? "")).toEqual({
+      crv: "P-256",
+      kty: "EC",
+      x: "cloudflare-x",
+      y: "cloudflare-y",
     });
     expect(JSON.parse(overrides.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK ?? "")).toEqual({
       crv: "P-256",
@@ -508,7 +560,7 @@ describe("buildWranglerEnvFileText", () => {
   it("includes worker secrets and defaults the runner env profiles", () => {
     expect(
       buildWranglerEnvFileText({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
@@ -516,7 +568,7 @@ describe("buildWranglerEnvFileText", () => {
     ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,hosted-email,linq,mapbox,telegram"');
     expect(
       buildWranglerEnvFileText({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
@@ -524,7 +576,7 @@ describe("buildWranglerEnvFileText", () => {
     ).toContain('HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS="60000"');
     expect(
       buildWranglerEnvFileText({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
@@ -534,14 +586,14 @@ describe("buildWranglerEnvFileText", () => {
     ).toContain('LINQ_API_TOKEN="linq-secret"');
     expect(
       buildWranglerEnvFileText({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
       }),
     ).toContain('MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN="bridge-token"');
     expect(
       buildWranglerEnvFileText({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
         MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
       }),

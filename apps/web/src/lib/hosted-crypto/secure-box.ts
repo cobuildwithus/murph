@@ -37,25 +37,29 @@ export async function encryptHostedWebString(input: {
     domain,
     userId: input.userId,
   });
-  const aad = buildHostedSecureBoxAad({
-    ...input.aad,
-    domain,
-    lane: input.lane,
-    scope: input.scope,
-    tenant: "murph-hosted",
-    userId: input.userId,
-  });
-  return serializeHostedSecureBoxEnvelope(
-    await sealHostedSecureBox({
-      aad,
+  try {
+    const aad = buildHostedSecureBoxAad({
+      ...input.aad,
       domain,
       lane: input.lane,
-      plaintext: new TextEncoder().encode(input.value),
-      rootKey,
-      rootKeyId: envelope.rootKeyId,
       scope: input.scope,
-    }),
-  );
+      tenant: "murph-hosted",
+      userId: input.userId,
+    });
+    return serializeHostedSecureBoxEnvelope(
+      await sealHostedSecureBox({
+        aad,
+        domain,
+        lane: input.lane,
+        plaintext: new TextEncoder().encode(input.value),
+        rootKey,
+        rootKeyId: envelope.rootKeyId,
+        scope: input.scope,
+      }),
+    );
+  } finally {
+    rootKey.fill(0);
+  }
 }
 
 export async function decryptHostedWebString(input: {
@@ -80,25 +84,29 @@ export async function decryptHostedWebString(input: {
     domain,
     userId: input.userId,
   });
-  if (serializedEnvelope.rootKeyId !== envelope.rootKeyId) {
-    throw new Error("Hosted secure-box root rotation is not implemented in greenfield hard-cut mode.");
+  try {
+    if (serializedEnvelope.rootKeyId !== envelope.rootKeyId) {
+      throw new Error("Hosted secure-box root rotation is not implemented in greenfield hard-cut mode.");
+    }
+    const aad = buildHostedSecureBoxAad({
+      ...input.aad,
+      domain,
+      lane: input.lane,
+      scope: input.scope,
+      tenant: "murph-hosted",
+      userId: input.userId,
+    });
+    const plaintext = await openHostedSecureBox({
+      aad,
+      envelope: serializedEnvelope,
+      expectedDomain: domain,
+      expectedLane: input.lane,
+      expectedRootKeyId: envelope.rootKeyId,
+      expectedScope: input.scope,
+      rootKey,
+    });
+    return new TextDecoder().decode(plaintext);
+  } finally {
+    rootKey.fill(0);
   }
-  const aad = buildHostedSecureBoxAad({
-    ...input.aad,
-    domain,
-    lane: input.lane,
-    scope: input.scope,
-    tenant: "murph-hosted",
-    userId: input.userId,
-  });
-  const plaintext = await openHostedSecureBox({
-    aad,
-    envelope: serializedEnvelope,
-    expectedDomain: domain,
-    expectedLane: input.lane,
-    expectedRootKeyId: envelope.rootKeyId,
-    expectedScope: input.scope,
-    rootKey,
-  });
-  return new TextDecoder().decode(plaintext);
 }

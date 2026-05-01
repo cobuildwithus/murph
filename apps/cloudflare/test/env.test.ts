@@ -12,15 +12,15 @@ const REMOVED_BUNDLE_KEY_ALIAS = ["HB", "HOSTED", "BUNDLE", "KEY"].join("_");
 
 describe("readHostedExecutionEnvironment", () => {
   it("reads required values and defaults", () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
-    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv());
 
-    expect(environment.platformEnvelopeKey).toHaveLength(32);
-    expect(environment.platformEnvelopeKeysById).toEqual({
-      v1: environment.platformEnvelopeKey,
-    });
-    expect(environment.platformEnvelopeKeyId).toBe("v1");
+    expect(environment.hostedCrypto.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain(
+      "BEGIN PUBLIC KEY",
+    );
+    expect(environment.hostedCrypto.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe(
+      "cloudflare-automation:v1",
+    );
+    expect(environment.hostedCrypto.HOSTED_CRYPTO_ENV).toBe("test");
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
@@ -28,8 +28,6 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.webControlTimeoutMs).toBe(30_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
     expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
-    expect(environment.hostedMailboxEncryption.keyVersion).toBe("v1");
-    expect(environment.hostedMailboxEncryption.key).toHaveLength(32);
     expect(environment.webCallbackSigning.keyId).toBe("v1");
     expect(environment.webCallbackSigning.privateKeyJwkJson).toContain("\"kty\":\"EC\"");
   });
@@ -105,43 +103,28 @@ describe("readHostedExecutionEnvironment", () => {
     );
   });
 
-  it("reads optional platform-envelope keyrings", () => {
-    const previousKey = Buffer.alloc(32, 8).toString("base64");
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: JSON.stringify({
-        legacy: previousKey,
-      }),
-    }));
-
-    expect(Object.keys(environment.platformEnvelopeKeysById).sort()).toEqual(["legacy", "v1"]);
-    expect(environment.platformEnvelopeKeysById.legacy).toEqual(Uint8Array.from(Buffer.alloc(32, 8)));
-    expect(environment.platformEnvelopeKeysById.v1).toEqual(Uint8Array.from(Buffer.alloc(32, 9)));
-  });
-
-  it("rejects malformed platform-envelope keyrings", () => {
+  it("rejects a missing hosted crypto authority public key", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "[1,2,3]",
+        HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: undefined,
       })),
-    ).toThrow(/must be a JSON object/u);
+    ).toThrow(/HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM is required/u);
   });
 
-  it("rejects platform-envelope keys that are not exactly 32 bytes", () => {
+  it("rejects a missing Cloudflare automation private key", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(16, 9).toString("base64url"),
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: undefined,
       })),
-    ).toThrow(/valid 32-byte base64 or base64url values/u);
+    ).toThrow(/HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK is required/u);
   });
 
-  it("rejects platform-envelope keyrings that conflict with the active key id", () => {
+  it("rejects a missing hosted crypto environment", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: JSON.stringify({
-          v1: Buffer.alloc(32, 7).toString("base64"),
-        }),
+        HOSTED_CRYPTO_ENV: undefined,
       })),
-    ).toThrow(/must match the current platform envelope key/u);
+    ).toThrow(/HOSTED_CRYPTO_ENV is required/u);
   });
 
   it("rejects a missing hosted web base url", () => {
@@ -152,21 +135,12 @@ describe("readHostedExecutionEnvironment", () => {
     ).toThrow(/HOSTED_WEB_BASE_URL must be a valid absolute URL/u);
   });
 
-  it("rejects a missing hosted wake encryption key", () => {
-    expect(() =>
-      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_WAKE_ENCRYPTION_KEY: undefined,
-      })),
-    ).toThrow(/HOSTED_WAKE_ENCRYPTION_KEY is required/u);
-  });
-
   it("does not accept the removed bundle-key alias", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
         [REMOVED_BUNDLE_KEY_ALIAS]: Buffer.alloc(32, 9).toString("base64"),
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: undefined,
       } as Record<string, string | undefined>)),
-    ).toThrow(/HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY/u);
+    ).not.toThrow();
   });
 
   it("does not accept the removed Cloudflare signing-secret alias", () => {
@@ -182,13 +156,11 @@ describe("readHostedExecutionEnvironment", () => {
     expect(toStringEnvSource({
       BUNDLES: { fetch() {} },
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
       VERCEL_AI_API_KEY: "vercel-secret",
       PORT: 8787,
     })).toEqual({
       BUNDLES: undefined,
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
       VERCEL_AI_API_KEY: "vercel-secret",
       PORT: undefined,
     });

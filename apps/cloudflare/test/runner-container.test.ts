@@ -202,18 +202,15 @@ describe("RunnerContainer", () => {
   it("starts the container without operator-only control-plane secrets in supervisor env", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"pub","y":"pub"}',
+        HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "public-pem",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC"}',
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
         HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://host.docker.internal:4010/.well-known/jwks",
         HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
-        HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-key",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "web:v3",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
@@ -235,9 +232,7 @@ describe("RunnerContainer", () => {
       PORT: "8080",
       HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
     });
-    expect(envVars).not.toHaveProperty("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK");
-    expect(envVars).not.toHaveProperty("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY");
-    expect(envVars).not.toHaveProperty("HOSTED_WAKE_ENCRYPTION_KEY");
+    expect(envVars).not.toHaveProperty("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
     expect(envVars).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
   });
 
@@ -248,9 +243,7 @@ describe("RunnerContainer", () => {
 
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-envelope-key",
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-encryption-key",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
         VERCEL_AI_API_KEY: "model-api-key",
       },
@@ -271,9 +264,7 @@ describe("RunnerContainer", () => {
     }
     const procEnv = await readParentProcEnvironmentFromChild(envVars);
 
-    expect(procEnv).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK");
-    expect(procEnv).not.toContain("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY");
-    expect(procEnv).not.toContain("HOSTED_WAKE_ENCRYPTION_KEY");
+    expect(procEnv).not.toContain("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
     expect(procEnv).not.toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
     expect(procEnv).not.toContain("VERCEL_AI_API_KEY");
   });

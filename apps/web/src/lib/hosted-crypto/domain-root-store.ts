@@ -176,9 +176,9 @@ async function getOrCreateActiveHostedDomainRootEnvelopeTx(input: {
       ${id},
       ${input.userId},
       ${input.domain}::hosted_crypto_domain,
-      ${created.envelope.rootKeyId},
+      ${created.rootKeyId},
       'active'::hosted_crypto_envelope_status,
-      ${JSON.stringify(created.envelope)}::jsonb,
+      ${JSON.stringify(created)}::jsonb,
       NOW(),
       NOW()
     )
@@ -188,120 +188,122 @@ async function getOrCreateActiveHostedDomainRootEnvelopeTx(input: {
     actor: "web",
     domain: input.domain,
     reason: input.reason,
-    recipientKinds: created.envelope.wraps.map((wrap) => wrap.recipient),
-    rootKeyId: created.envelope.rootKeyId,
+    recipientKinds: created.wraps.map((wrap) => wrap.recipient),
+    rootKeyId: created.rootKeyId,
     tx: input.tx,
     userId: input.userId,
   });
-  return created.envelope;
+  return created;
 }
 
 async function createSignedHostedDomainRootEnvelope(input: {
   domain: HostedCryptoDomain;
   userId: string;
-}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
+}): Promise<HostedDomainRootKeyEnvelopeV1> {
   const config = getHostedWebCryptoConfig();
   const rootKey = generateHostedDomainRootKey();
-  const rootKeyId = createHostedDomainRootKeyId(input.domain);
-  const nowIso = new Date().toISOString();
-  const wraps: HostedDomainRootKeyWrap[] = [];
 
-  const kmsRecipient = kmsRecipientForDomain(input.domain);
-  if (kmsRecipient) {
-    const encryptionContext = buildHostedDomainRootWrapContext({
+  try {
+    const rootKeyId = createHostedDomainRootKeyId(input.domain);
+    const nowIso = new Date().toISOString();
+    const wraps: HostedDomainRootKeyWrap[] = [];
+
+    const kmsRecipient = kmsRecipientForDomain(input.domain);
+    if (kmsRecipient) {
+      const encryptionContext = buildHostedDomainRootWrapContext({
+        domain: input.domain,
+        env: config.env,
+        recipient: kmsRecipient,
+        rootKeyId,
+        userId: input.userId,
+      });
+      const additionalAuthenticatedData = serializeAdditionalAuthenticatedData(encryptionContext);
+      const encrypted = await config.gcpKms.encrypt({
+        additionalAuthenticatedData,
+        keyName: config.webWrapKmsKeyName,
+        plaintext: rootKey,
+      });
+      wraps.push({
+        additionalAuthenticatedData,
+        ciphertextBlob: encrypted.ciphertext,
+        encryptionContext,
+        kind: "gcp-kms",
+        kmsKeyName: config.webWrapKmsKeyName,
+        recipient: kmsRecipient,
+      });
+    }
+
+    if (input.domain === "ingress" || input.domain === "runtime") {
+      wraps.push(
+        await createEcdhWrap({
+          domain: input.domain,
+          publicJwk: config.cloudflareAutomationPublicJwk,
+          recipient: "cloudflare-automation-secret",
+          recipientKeyId: config.cloudflareAutomationRecipientKeyId,
+          rootKey,
+          rootKeyId,
+          userId: input.userId,
+        }),
+      );
+    }
+
+    if (
+      (input.domain === "ingress" || input.domain === "runtime") &&
+      config.teeRuntimePublicJwk &&
+      config.teeRuntimeRecipientKeyId &&
+      config.teeRuntimeAttestedPolicyId
+    ) {
+      wraps.push(
+        await createEcdhWrap({
+          domain: input.domain,
+          publicJwk: config.teeRuntimePublicJwk,
+          recipient: "tee-runtime-attested",
+          recipientKeyId: config.teeRuntimeRecipientKeyId,
+          rootKey,
+          rootKeyId,
+          teePolicyId: config.teeRuntimeAttestedPolicyId,
+          userId: input.userId,
+        }),
+      );
+    }
+
+    if (config.recoveryPublicJwk && config.recoveryRecipientKeyId) {
+      wraps.push(
+        await createEcdhWrap({
+          domain: input.domain,
+          publicJwk: config.recoveryPublicJwk,
+          recipient: "recovery-offline",
+          recipientKeyId: config.recoveryRecipientKeyId,
+          rootKey,
+          rootKeyId,
+          userId: input.userId,
+        }),
+      );
+    }
+
+    const body: HostedDomainRootKeyEnvelopeBodyV1 = {
+      createdAt: nowIso,
       domain: input.domain,
-      env: config.env,
-      recipient: kmsRecipient,
+      generation: 1,
       rootKeyId,
+      schema: "murph.hosted-domain-root-key-envelope.v1",
+      updatedAt: nowIso,
       userId: input.userId,
+      wraps,
+    };
+    const signature = await config.gcpKms.asymmetricSign({
+      keyVersionName: config.authoritySignKeyVersionName,
+      message: buildHostedDomainRootEnvelopeSigningPayload(body),
     });
-    const additionalAuthenticatedData = serializeAdditionalAuthenticatedData(encryptionContext);
-    const encrypted = await config.gcpKms.encrypt({
-      additionalAuthenticatedData,
-      keyName: config.webWrapKmsKeyName,
-      plaintext: rootKey,
-    });
-    wraps.push({
-      additionalAuthenticatedData,
-      ciphertextBlob: encrypted.ciphertext,
-      encryptionContext,
-      kind: "gcp-kms",
-      kmsKeyName: config.webWrapKmsKeyName,
-      recipient: kmsRecipient,
-    });
-  }
-
-  if (input.domain === "ingress" || input.domain === "runtime") {
-    wraps.push(
-      await createEcdhWrap({
-        domain: input.domain,
-        publicJwk: config.cloudflareAutomationPublicJwk,
-        recipient: "cloudflare-automation-secret",
-        recipientKeyId: config.cloudflareAutomationRecipientKeyId,
-        rootKey,
-        rootKeyId,
-        userId: input.userId,
-      }),
-    );
-  }
-
-  if (
-    (input.domain === "ingress" || input.domain === "runtime") &&
-    config.teeRuntimePublicJwk &&
-    config.teeRuntimeRecipientKeyId &&
-    config.teeRuntimeAttestedPolicyId
-  ) {
-    wraps.push(
-      await createEcdhWrap({
-        domain: input.domain,
-        publicJwk: config.teeRuntimePublicJwk,
-        recipient: "tee-runtime-attested",
-        recipientKeyId: config.teeRuntimeRecipientKeyId,
-        rootKey,
-        rootKeyId,
-        teePolicyId: config.teeRuntimeAttestedPolicyId,
-        userId: input.userId,
-      }),
-    );
-  }
-
-  if (config.recoveryPublicJwk && config.recoveryRecipientKeyId) {
-    wraps.push(
-      await createEcdhWrap({
-        domain: input.domain,
-        publicJwk: config.recoveryPublicJwk,
-        recipient: "recovery-offline",
-        recipientKeyId: config.recoveryRecipientKeyId,
-        rootKey,
-        rootKeyId,
-        userId: input.userId,
-      }),
-    );
-  }
-
-  const body: HostedDomainRootKeyEnvelopeBodyV1 = {
-    createdAt: nowIso,
-    domain: input.domain,
-    generation: 1,
-    rootKeyId,
-    schema: "murph.hosted-domain-root-key-envelope.v1",
-    updatedAt: nowIso,
-    userId: input.userId,
-    wraps,
-  };
-  const signature = await config.gcpKms.asymmetricSign({
-    keyVersionName: config.authoritySignKeyVersionName,
-    message: buildHostedDomainRootEnvelopeSigningPayload(body),
-  });
-  return {
-    envelope: attachHostedDomainRootEnvelopeSignature({
+    return attachHostedDomainRootEnvelopeSignature({
       body,
       keyVersionName: signature.keyVersionName,
       signature: signature.signature,
       signedAt: nowIso,
-    }),
-    rootKey,
-  };
+    });
+  } finally {
+    rootKey.fill(0);
+  }
 }
 
 async function createEcdhWrap(input: {

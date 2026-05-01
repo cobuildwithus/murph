@@ -215,7 +215,18 @@ vi.mock("./environment.ts", () => ({
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       input.overrides?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL
       ?? "http://127.0.0.1:8787",
-    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/cryptoKeyVersions/1",
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+      "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:local",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify({
+      crv: "P-256",
+      d: "automation-d",
+      kty: "EC",
+      x: "automation-x",
+      y: "automation-y",
+    }),
+    HOSTED_CRYPTO_ENV: "development",
     MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN:
       input.overrides?.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN,
     MURPH_DEV_CODEX_APP_SERVER_PROXY_URL:
@@ -319,7 +330,8 @@ describe("hosted local dev stack", () => {
       ],
       expect.objectContaining({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+          expect.stringContaining("automation-d"),
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
         HOSTED_ASSISTANT_PROVIDER: "local-codex",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",

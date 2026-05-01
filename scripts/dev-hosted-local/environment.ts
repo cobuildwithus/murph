@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -32,6 +32,8 @@ import type {
 
 const HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL_ENV =
   "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL";
+const LEGACY_HOSTED_EXECUTION_CRYPTO_ENV_RE =
+  /^HOSTED_EXECUTION_(?:PLATFORM_ENVELOPE|AUTOMATION_RECIPIENT|RECOVERY_RECIPIENT|TEE_AUTOMATION_RECIPIENT)(?:_|$)/u;
 
 export async function resolveCloudflareLocalEnv(input: {
   config: HostedLocalDevConfig;
@@ -119,10 +121,8 @@ export function mergeCloudflareLocalEnv(input: {
   existing: Record<string, string>;
   oidcIdentity: HostedExecutionOidcIdentity;
   overrides?: Record<string, string | undefined>;
-  createEnvelopeKey?: () => string;
   createJwkPair?: () => EcP256JwkPairJson;
 }): Record<string, string> {
-  const createEnvelopeKey = input.createEnvelopeKey ?? (() => randomBytes(32).toString("base64"));
   const createJwkPair = input.createJwkPair ?? createEcP256JwkPairJson;
   const normalizedOverrides = normalizeOptionalEnvOverrides(input.overrides);
   const resolvedExisting = {
@@ -141,42 +141,51 @@ export function mergeCloudflareLocalEnv(input: {
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
-  const automationKeys = resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK?.trim()
-    && resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK?.trim()
-    ? {
-      privateJwkJson: resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK,
-      publicJwkJson: resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK,
-    }
-    : createJwkPair();
+  const cloudflareAutomationKeys =
+    resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK?.trim()
+      ? {
+        privateJwkJson: resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+        publicJwkJson: JSON.stringify(toPublicEcP256Jwk(parsePrivateEcP256Jwk(
+          resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+          "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
+        ))),
+      }
+      : createJwkPair();
   const callbackSigningPrivateJwkJson = resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?.trim()
     ? resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK
     : createJwkPair().privateJwkJson;
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
   const workerOrigin =
     `${input.config.workerProtocol}://${input.config.workerHost}:${input.config.workerPort}`;
+  const authoritySignKeyVersion = readHostedLocalCryptoMirrorValue(
+    resolvedExisting,
+    "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+  );
+  const authoritySignPublicKeyPem = readHostedLocalCryptoMirrorValue(
+    resolvedExisting,
+    "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  );
+  stripLegacyHostedCryptoAuthorityEnv(resolvedExisting);
 
   return {
     ...resolvedExisting,
     ALLOW_LOCAL_INTERNAL_PROXY:
       resolvedExisting.ALLOW_LOCAL_INTERNAL_PROXY?.trim()
       || "true",
-    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY:
-      resolvedExisting.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY?.trim()
-      ?? createEnvelopeKey(),
-    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID:
-      resolvedExisting.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID?.trim()
-      ?? "v1",
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID:
-      resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID?.trim()
-      ?? "automation:v1",
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: automationKeys.privateJwkJson,
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: automationKeys.publicJwkJson,
-    HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID:
-      resolvedExisting.HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID?.trim()
-      ?? "recovery:v1",
-    HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK:
-      resolvedExisting.HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK?.trim()
-      ?? automationKeys.publicJwkJson,
+    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion,
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authoritySignPublicKeyPem,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+      resolvedExisting.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID?.trim()
+      ?? "cloudflare-automation:local",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+      cloudflareAutomationKeys.privateJwkJson,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+      cloudflareAutomationKeys.publicJwkJson,
+    HOSTED_CRYPTO_ENV:
+      resolvedExisting.HOSTED_CRYPTO_ENV?.trim()
+      ?? "development",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
@@ -189,6 +198,20 @@ export function mergeCloudflareLocalEnv(input: {
       ?? "v1",
     HOSTED_WEB_BASE_URL: webOrigin,
   };
+}
+
+function readHostedLocalCryptoMirrorValue(
+  source: Record<string, string | undefined>,
+  workerEnvKey: string,
+  webEnvKey: string,
+): string {
+  const value = source[workerEnvKey]?.trim() ?? source[webEnvKey]?.trim();
+  if (!value) {
+    throw new Error(
+      `${webEnvKey} must be configured so local Cloudflare can verify web-hosted runtime crypto contexts.`,
+    );
+  }
+  return value;
 }
 
 function normalizeOptionalEnvOverrides(
@@ -208,6 +231,16 @@ function normalizeOptionalEnvOverrides(
   }
 
   return values;
+}
+
+function stripLegacyHostedCryptoAuthorityEnv(
+  env: Record<string, string | undefined>,
+): void {
+  for (const key of Object.keys(env)) {
+    if (LEGACY_HOSTED_EXECUTION_CRYPTO_ENV_RE.test(key)) {
+      delete env[key];
+    }
+  }
 }
 
 function stripHostedLocalCodexBridgeProxyEnv(env: Record<string, string | undefined>): void {
@@ -241,16 +274,7 @@ function normalizeHostedLocalBaseEnvironment(
   const environment = {
     ...input,
   };
-  const teeAutomationKeyId =
-    environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID?.trim() ?? "";
-  const teeAutomationPublicJwk =
-    environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK?.trim() ?? "";
-
-  if (Boolean(teeAutomationKeyId) !== Boolean(teeAutomationPublicJwk)) {
-    delete environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID;
-    delete environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK;
-  }
-
+  stripLegacyHostedCryptoAuthorityEnv(environment);
   return environment;
 }
 
@@ -263,6 +287,15 @@ export function buildHostedLocalDevOverrides(
     `${config.workerProtocol}://${resolveLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
   const callbackPrivateJwkJson = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
   const callbackKeyId = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim();
+  const cloudflareAutomationPrivateJwkJson =
+    cloudflareDevVars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK?.trim();
+  const cryptoAuthoritySignKeyVersion =
+    cloudflareDevVars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION?.trim();
+  const cryptoAuthoritySignPublicKeyPem =
+    cloudflareDevVars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM?.trim();
+  const cloudflareAutomationKeyId =
+    cloudflareDevVars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID?.trim();
+  const hostedCryptoEnv = cloudflareDevVars.HOSTED_CRYPTO_ENV?.trim();
   const hostedWakeEncryptionKey = cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY?.trim();
   const hostedWakeEncryptionKeyVersion =
     cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION?.trim();
@@ -289,6 +322,36 @@ export function buildHostedLocalDevOverrides(
       }
       : {}),
     HOSTED_WEB_BASE_URL: webOrigin,
+    ...(cloudflareAutomationPrivateJwkJson
+      ? {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK: JSON.stringify(
+          toPublicEcP256Jwk(parsePrivateEcP256Jwk(
+            cloudflareAutomationPrivateJwkJson,
+            "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
+          )),
+        ),
+      }
+      : {}),
+    ...(cloudflareAutomationKeyId
+      ? {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: cloudflareAutomationKeyId,
+      }
+      : {}),
+    ...(cryptoAuthoritySignKeyVersion
+      ? {
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: cryptoAuthoritySignKeyVersion,
+      }
+      : {}),
+    ...(cryptoAuthoritySignPublicKeyPem
+      ? {
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: cryptoAuthoritySignPublicKeyPem,
+      }
+      : {}),
+    ...(hostedCryptoEnv
+      ? {
+        HOSTED_CRYPTO_ENV: hostedCryptoEnv,
+      }
+      : {}),
     ...(callbackPrivateJwkJson
       ? {
         HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: JSON.stringify(
@@ -445,7 +508,6 @@ export function buildWranglerLocalDevConfig(
     buildHostedRunnerLocalBuildId(source[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]);
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: resolveWranglerEnvValue("HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS", source) ?? "3",
-    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: resolveWranglerEnvValue("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID", source) ?? "v1",
     HOSTED_EXECUTION_RETRY_DELAY_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RETRY_DELAY_MS", source) ?? "30000",
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", source) ?? "30000",
     // Local Cloudflare container cold starts are materially slower than the hosted runtime.

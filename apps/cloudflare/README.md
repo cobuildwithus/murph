@@ -62,11 +62,7 @@ Bindings:
 
 Required worker secrets:
 
-- `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`
-- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
-- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
-- `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
-- `HOSTED_WAKE_ENCRYPTION_KEY`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
 Required worker vars:
@@ -74,6 +70,10 @@ Required worker vars:
 - `HOSTED_WEB_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
+- `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`
+- `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
+- `HOSTED_CRYPTO_ENV`
 
 `HOSTED_WEB_BASE_URL` must be an origin-only hosted web URL. Do not configure a
 subpath such as `https://example.test/app`; the worker appends its own internal
@@ -87,8 +87,6 @@ path also runs it inside the apply step before artifact validation and upload.
 
 Defaulted worker vars:
 
-- `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID=v1`
-- `HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID=recovery:v1`
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000`
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
@@ -100,17 +98,7 @@ Defaulted worker vars:
 Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
-- `HOSTED_WAKE_ENCRYPTION_KEY_VERSION` and `HOSTED_WAKE_ENCRYPTION_KEYRING_JSON` for wake-payload key rotation inside the execution plane
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`, and `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` for staged key rotation or future envelope lanes
-- `HOSTED_CRYPTO_ENV`, `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`,
-  optional `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`,
-  `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`, and
-  `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK` when the runner unwraps
-  signed ingress/runtime root envelopes from web. Web returns the signed full
-  ingress/runtime root envelopes so Cloudflare can verify the authority
-  signature before selecting only its `cloudflare-automation-secret` recipient
-  wrap.
 - Codex hosted assistant config plus `VERCEL_AI_API_KEY` for Vercel AI Gateway
 - `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`, `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED`, and `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing

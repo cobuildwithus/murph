@@ -452,7 +452,7 @@ export function loadGeneratedHealthCommonsCatalog() {
     const fixture = await createDeployArtifactFixture();
     const staleSecrets = buildHostedWorkerSecretsPayload({
       ...fixture.source,
-      HOSTED_WAKE_ENCRYPTION_KEY: "stale-wake-key",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "stale-automation-key",
     });
 
     await writeFile(fixture.secretsFilePath, `${JSON.stringify(staleSecrets, null, 2)}\n`, "utf8");
@@ -689,11 +689,7 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
     CF_BUNDLES_BUCKET: "hosted-bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
     CF_WORKER_NAME: "hosted-worker",
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"EC\"}",
-    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"EC\"}",
-    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-    HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"EC\"}",
-    HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
   };
 }

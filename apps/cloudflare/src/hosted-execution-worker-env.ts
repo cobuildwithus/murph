@@ -6,20 +6,11 @@ import {
 
 export interface HostedExecutionWorkerEnvironment {
   allowedRunnerSecretKeys: string | null;
-  automationRecipientKeyId: string;
-  automationRecipientPrivateJwkJson: string;
-  automationRecipientPrivateKeyringJson: string | null;
-  automationRecipientPublicJwkJson: string;
-  hostedWakeEncryptionKey: string;
-  hostedWakeEncryptionKeyVersion: string;
-  hostedWakeEncryptionKeyringJson: string | null;
-  recoveryRecipientKeyId: string;
-  recoveryRecipientPublicJwkJson: string;
-  teeAutomationRecipientKeyId: string | null;
-  teeAutomationRecipientPublicJwkJson: string | null;
-  platformEnvelopeKeyBase64: string;
-  platformEnvelopeKeyId: string;
-  platformEnvelopeKeyringJson: string | null;
+  hostedCryptoAuthoritySignKeyVersion: string;
+  hostedCryptoAuthoritySignPublicKeyPem: string;
+  hostedCryptoCloudflareAutomationKeyId: string;
+  hostedCryptoCloudflareAutomationPrivateJwk: string;
+  hostedCryptoEnv: string;
   hostedWebBaseUrl: string;
   maxEventAttempts: number;
   retryDelayMs: number;
@@ -35,52 +26,25 @@ export function readHostedExecutionWorkerEnvironment(
 ): HostedExecutionWorkerEnvironment {
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
-    automationRecipientKeyId: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID,
-    ) ?? "automation:v1",
-    automationRecipientPrivateJwkJson: requireHostedExecutionString(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK),
-      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
+    hostedCryptoAuthoritySignKeyVersion: requireHostedExecutionString(
+      source.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+      "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",
     ),
-    automationRecipientPrivateKeyringJson: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON,
+    hostedCryptoAuthoritySignPublicKeyPem: requireHostedExecutionString(
+      source.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+      "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
     ),
-    automationRecipientPublicJwkJson: requireHostedExecutionString(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK),
-      "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+    hostedCryptoCloudflareAutomationKeyId: requireHostedExecutionString(
+      source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
     ),
-    hostedWakeEncryptionKey: requireHostedExecutionString(
-      normalizeHostedExecutionString(source.HOSTED_WAKE_ENCRYPTION_KEY),
-      "HOSTED_WAKE_ENCRYPTION_KEY",
+    hostedCryptoCloudflareAutomationPrivateJwk: requireHostedExecutionString(
+      source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
     ),
-    hostedWakeEncryptionKeyVersion: normalizeHostedExecutionString(
-      source.HOSTED_WAKE_ENCRYPTION_KEY_VERSION,
-    ) ?? "v1",
-    hostedWakeEncryptionKeyringJson: normalizeHostedExecutionString(
-      source.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON,
-    ),
-    recoveryRecipientKeyId: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID,
-    ) ?? "recovery:v1",
-    recoveryRecipientPublicJwkJson: requireHostedExecutionString(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK),
-      "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK",
-    ),
-    teeAutomationRecipientKeyId: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID,
-    ),
-    teeAutomationRecipientPublicJwkJson: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
-    ),
-    platformEnvelopeKeyBase64: requireHostedExecutionString(
-      source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY,
-      "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
-    ),
-    platformEnvelopeKeyId: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID,
-    ) ?? "v1",
-    platformEnvelopeKeyringJson: normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON,
+    hostedCryptoEnv: requireHostedExecutionString(
+      source.HOSTED_CRYPTO_ENV,
+      "HOSTED_CRYPTO_ENV",
     ),
     hostedWebBaseUrl: requireHostedExecutionBaseUrl(
       source.HOSTED_WEB_BASE_URL,
@@ -115,24 +79,6 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
     ),
   };
-}
-
-export function assertHostedExecutionOptionalJwkPairConfigured(input: {
-  currentKeyId: string | null;
-  currentPublicJwkJson: string | null;
-  keyIdLabel: string;
-  publicJwkLabel: string;
-}): void {
-  const hasKeyId = Boolean(input.currentKeyId);
-  const hasPublicJwk = Boolean(input.currentPublicJwkJson);
-
-  if (hasKeyId === hasPublicJwk) {
-    return;
-  }
-
-  throw new TypeError(
-    `${input.keyIdLabel} and ${input.publicJwkLabel} must either both be configured or both be omitted.`,
-  );
 }
 
 function requireHostedExecutionString(

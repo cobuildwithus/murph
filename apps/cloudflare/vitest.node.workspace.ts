@@ -64,7 +64,6 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
         "node-runner*.test.ts",
         "runner-*.test.ts",
         "runner-secrets.test.ts",
-        "user-key-store.test.ts",
         "user-runner.test.ts",
       ],
     },
@@ -73,7 +72,6 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
       name: "cloudflare-node-platform",
       patterns: [
         "auth*.test.ts",
-        "base64.test.ts",
         "container-entrypoint.test.ts",
         "crypto.test.ts",
         "env.test.ts",

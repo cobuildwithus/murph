@@ -28,17 +28,14 @@ import {
   hostedBrowserVaultReplicaUserPrefix,
   hostedBundleUserPrefix,
   hostedRunnerSecretsObjectKey,
-  hostedUserRootKeyEnvelopeObjectKey,
 } from "./storage-paths.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
-  createHostedUserKeyStoreFromEnvironment,
   HostedUserCryptoRepairNeededError,
   requireHostedUserCryptoContextFromEnvironment,
   type HostedUserCryptoContext,
-  type HostedUserKeyAuditRecord,
-} from "./user-key-store.js";
+} from "./hosted-crypto/runtime-user-crypto-context.ts";
 import {
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
@@ -100,23 +97,12 @@ interface RunnerDrainInput {
   reason: HostedWorkspaceInvocationReason;
 }
 
-function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
-  emitHostedExecutionStructuredLog({
-    component: "hosted.user-key-store",
-    level: "warn",
-    message: `${record.action}: ${record.reason}`,
-    phase: "runtime.starting",
-    userId: record.userId,
-  });
-}
-
 export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
-  private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStoreFromEnvironment>;
   private runnerStores: RunnerUserStores | null = null;
-  private userKeyEnvelopeLock: Promise<void> | null = null;
+  private runtimeCryptoContextLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
   private pendingRunnerDriveAfterInvocation: {
     reason: HostedWorkspaceInvocationReason;
@@ -135,12 +121,6 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
-    const userKeyStore = createHostedUserKeyStoreFromEnvironment({
-      auditLog: emitHostedUserKeyAuditLog,
-      bucket,
-      environment: env,
-    });
-    this.userKeyStore = userKeyStore;
     this.stateStore = new RunnerStateStore(state);
     this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(this.stateStore, state);
   }
@@ -148,11 +128,11 @@ export class HostedUserRunner {
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
     const resolvedUserId = userId ?? await this.requireBoundUserId();
 
-    if (this.runnerStores?.userId === resolvedUserId && !this.userKeyEnvelopeLock) {
+    if (this.runnerStores?.userId === resolvedUserId && !this.runtimeCryptoContextLock) {
       return this.runnerStores;
     }
 
-    return this.withUserKeyEnvelopeLock(async () => {
+    return this.withRuntimeCryptoContextLock(async () => {
       if (this.runnerStores?.userId === resolvedUserId) {
         return this.runnerStores;
       }
@@ -535,10 +515,6 @@ export class HostedUserRunner {
     try {
       const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
       this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
-      await this.provisionUserCryptoForWorkspaceBootstrapIfNeeded({
-        userId: initialRecord.userId,
-        workspace: workspaceRead.workspace,
-      });
       const workspaceVersion = workspaceRead.workspace?.version ?? "0";
       lease = await this.stateStore.bindInvocationWorkspaceVersion({
         lease,
@@ -638,13 +614,8 @@ export class HostedUserRunner {
           await hostedRunnerSecretsObjectKey(userCrypto.rootKey, userId),
         )).deletedCount;
 
-        const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
-          this.env.platformEnvelopeKey,
-          userId,
-        );
-        const rootKeyEnvelopeDeletion = await deleteR2ObjectIfSupported(this.bucket, rootEnvelopeKey);
-        deletedObjectCount += rootKeyEnvelopeDeletion.deletedCount;
-        deletedRootKeyEnvelope = rootKeyEnvelopeDeletion.deleted;
+        // Domain-root envelopes are canonical in web-owned Postgres. Cloudflare
+        // deletes only the user-scoped runtime blobs that it stores in R2.
       } else {
         userScopedSkipReason = "R2PrefixDeletionUnsupported";
       }
@@ -766,28 +737,6 @@ export class HostedUserRunner {
     if (workspace && workspace.userId !== userId) {
       throw new Error("Hosted workspace read returned a different user.");
     }
-  }
-
-  private async provisionUserCryptoForWorkspaceBootstrapIfNeeded(input: {
-    userId: string;
-    workspace: HostedWorkspaceState | null;
-  }): Promise<void> {
-    if (!hostedWorkspaceNeedsActivationBootstrapCrypto(input.workspace)) {
-      return;
-    }
-    if (this.env.hostedCrypto) {
-      return;
-    }
-
-    await this.withUserKeyEnvelopeLock(async () => {
-      const status = await this.userKeyStore.provisionManagedUserCryptoAtActivation(
-        input.userId,
-        { reason: "member-activation-workspace-bootstrap" },
-      );
-      if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === input.userId) {
-        this.runnerStores = null;
-      }
-    });
   }
 
   private async invokeWorkspaceRunner(input: {
@@ -984,12 +933,12 @@ export class HostedUserRunner {
     return (await this.stateStore.readState()).userId;
   }
 
-  private async withUserKeyEnvelopeLock<T>(run: () => Promise<T>): Promise<T> {
+  private async withRuntimeCryptoContextLock<T>(run: () => Promise<T>): Promise<T> {
     return withSerializedLock(
       {
-        get: () => this.userKeyEnvelopeLock,
+        get: () => this.runtimeCryptoContextLock,
         set: (value) => {
-          this.userKeyEnvelopeLock = value;
+          this.runtimeCryptoContextLock = value;
         },
       },
       run,
@@ -1114,11 +1063,4 @@ function resolvePendingNudgeWakeAt(input: {
       ? orphanObservedAtMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS
       : input.nowMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS;
   return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, orphanDeadlineMs))).toISOString();
-}
-
-function hostedWorkspaceNeedsActivationBootstrapCrypto(
-  workspace: HostedWorkspaceState | null,
-): boolean {
-  return workspace === null
-    || (workspace.version === "0" && workspace.snapshotRef === null);
 }
