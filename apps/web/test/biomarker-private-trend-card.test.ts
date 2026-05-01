@@ -23,14 +23,14 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
 
 import { BiomarkerOverview } from "@/src/components/biomarkers/biomarker-detail/biomarker-overview";
 import { BiomarkerPrivateTrendCard } from "@/src/components/biomarkers/biomarker-detail/biomarker-private-trend-card";
-import { resolveHealthCommonsBiomarkerDetail } from "@/src/lib/health-commons/biomarker-detail";
+import { resolveHealthCommonsBiomarkerOverview } from "@/src/lib/health-commons/biomarker-projections";
 
 beforeEach(() => {
   mocks.useBrowserVault.mockReset();
 });
 
 test("does not render mocked private biomarker values when browser-vault is unavailable", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
@@ -70,7 +70,7 @@ test("the biomarker overview mounts the browser-vault private card", () => {
 });
 
 test("the biomarker overview skips the private card for biomarkers without browser-vault metric bindings", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
@@ -97,7 +97,7 @@ test("the biomarker overview skips the private card for biomarkers without brows
 });
 
 test("renders private trend values from the browser-vault selector", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
@@ -138,7 +138,7 @@ test("renders private trend values from the browser-vault selector", () => {
 });
 
 test("renders the insufficient-data state from real browser-vault rows", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
@@ -166,7 +166,7 @@ test("renders the insufficient-data state from real browser-vault rows", () => {
 });
 
 test("renders a no-data state when the browser-vault replica has no matching rows", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
@@ -189,7 +189,7 @@ test("renders a no-data state when the browser-vault replica has no matching row
 });
 
 test("renders an unsupported state for biomarkers without browser-vault metric bindings", () => {
-  const biomarker = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({

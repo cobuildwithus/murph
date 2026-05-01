@@ -74,6 +74,34 @@ export async function fetchHostedWorkerRuntimeRoots(input: {
   });
 }
 
+export async function fetchHostedWorkerRuntimeRoot(input: {
+  baseUrl: string;
+  callbackSigning: HostedWebCallbackSigningEnvironment;
+  cryptoEnv: HostedWorkerCryptoEnv;
+  domain: "ingress" | "runtime";
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+  userId: string;
+}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    boundUserId: input.userId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+  if (!response.ok) {
+    throw new Error(`Hosted runtime crypto context fetch failed with HTTP ${response.status}.`);
+  }
+  return unwrapHostedWorkerRuntimeRoot({
+    context: await response.json() as HostedRuntimeCryptoContextResponse,
+    domain: input.domain,
+    env: input.cryptoEnv,
+  });
+}
+
 export async function unwrapHostedWorkerRuntimeRoots(input: {
   context: HostedRuntimeCryptoContextResponse;
   env: HostedWorkerCryptoEnv;

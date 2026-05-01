@@ -29,7 +29,11 @@ vi.mock("@murphai/runtime-state", async () => {
   };
 });
 
-import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
+import {
+  BrowserVaultProvider,
+  useBrowserVault,
+  useBrowserVaultSelector,
+} from "@/src/lib/browser-vault/context";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -117,6 +121,69 @@ test("browser-vault provider reuses an in-flight load for repeated refreshes", a
   await rendered.cleanup();
 });
 
+test("browser-vault selector returns projected data only after the client is ready", async () => {
+  const response = createDeferred<Response>();
+  const fetchMock = vi.fn(() => response.promise);
+  const dataVersion = createReplicaRef().dataVersion;
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(BrowserVaultProvider, null, createElement(BrowserVaultSelectorProbe)),
+    { requireButton: false },
+  );
+
+  assert.equal(rendered.container.textContent, "loading:none");
+
+  response.resolve(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: createReplicaRef(),
+    state: "ready",
+  }));
+
+  await waitForText(rendered.container, `ready:${dataVersion}`);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider aborts in-flight loads on unmount", async () => {
+  const response = createDeferred<Response>();
+  let requestSignal: AbortSignal | null = null;
+  const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    requestSignal = init?.signal ?? null;
+    return response.promise;
+  });
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForCondition(() => fetchMock.mock.calls.length === 1, "initial browser-vault fetch");
+
+  await rendered.cleanup();
+
+  assert.equal(requestSignal?.aborted, true);
+
+  response.resolve(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: createReplicaRef(),
+    state: "ready",
+  }));
+
+  await act(async () => {
+    await response.promise;
+  });
+});
+
 function BrowserVaultStatusProbe() {
   const vault = useBrowserVault();
 
@@ -124,6 +191,17 @@ function BrowserVaultStatusProbe() {
     "button",
     { onClick: () => void vault.refresh() },
     `${vault.status}:${vault.error ?? vault.dataVersion ?? "none"}`,
+  );
+}
+
+function BrowserVaultSelectorProbe() {
+  const vault = useBrowserVault();
+  const dataVersion = useBrowserVaultSelector((client) => client.replica.source.dataVersion);
+
+  return createElement(
+    "button",
+    { onClick: () => void vault.refresh() },
+    `${vault.status}:${dataVersion ?? "none"}`,
   );
 }
 

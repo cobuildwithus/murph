@@ -194,7 +194,7 @@ async function writeRunnerSecretsObject(input: {
   plaintext: Uint8Array;
   userId: string;
 }): Promise<void> {
-  const objectKey = await hostedRunnerSecretsObjectKey(input.key, input.userId);
+  const objectKey = await hostedRunnerSecretsObjectKey({ userId: input.userId });
 
   await writeEncryptedR2Payload({
     aad: buildHostedStorageAad({

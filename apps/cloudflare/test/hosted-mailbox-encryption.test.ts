@@ -21,18 +21,40 @@ describe("hosted mailbox secure-box encryption", () => {
       rootKeyId,
     });
 
-    for (const field of [
-      "hosted-mailbox-inline-payload",
-      "hosted-mailbox-ref-payload",
+    for (const { field, payloadStorage } of [
+      { field: "hosted-mailbox-inline-payload", payloadStorage: "inline" },
+      { field: "hosted-mailbox-ref-payload", payloadStorage: "sidecar" },
     ] as const) {
+      const metadata = {
+        dedupeKey: `event:${field}`,
+        itemId: `item:${field}`,
+        kind: "member.channels.updated",
+        lane: "system",
+        laneSeq: field === "hosted-mailbox-inline-payload" ? "1" : "2",
+        occurredAt: "2026-05-01T00:00:00.000Z",
+        payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+        payloadStorage,
+        userId: "member_mailbox_1",
+      };
       const ciphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
         aad: buildHostedSecureBoxAad({
           domain: "ingress",
           field,
           lane: "mailbox-payload",
+          objectKey: JSON.stringify({
+            dedupeKey: metadata.dedupeKey,
+            kind: metadata.kind,
+            lane: metadata.lane,
+            occurredAt: metadata.occurredAt,
+            payloadSchema: metadata.payloadSchema,
+            payloadStorage,
+          }),
           purpose: "hosted-mailbox-payload",
+          rowId: metadata.itemId,
           scope: `hosted-mailbox-payload:${field}`,
-          userId: "member_mailbox_1",
+          sequence: metadata.laneSeq,
+          table: "hosted_mailbox_item",
+          userId: metadata.userId,
         }),
         domain: "ingress",
         lane: "mailbox-payload",
@@ -48,7 +70,7 @@ describe("hosted mailbox secure-box encryption", () => {
       await expect(decryptHostedMailboxPayloadCiphertext({
         ciphertext,
         environment,
-        userId: "member_mailbox_1",
+        metadata,
       })).resolves.toEqual({
         field,
         kind: "member.channels.updated",

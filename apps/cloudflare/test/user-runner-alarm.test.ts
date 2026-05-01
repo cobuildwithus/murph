@@ -339,10 +339,9 @@ describe("HostedUserRunner alarm routing", () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const rootKey = getTestHostedRuntimeRootKey("runtime");
     const ingressRootKey = getTestHostedRuntimeRootKey("ingress");
-    const bundlePrefix = await hostedBundleUserPrefix(rootKey, "member_123");
-    const artifactPrefix = await hostedArtifactUserPrefix(rootKey, "member_123");
+    const bundlePrefix = await hostedBundleUserPrefix({ userId: "member_123" });
+    const artifactPrefix = await hostedArtifactUserPrefix({ userId: "member_123" });
     const browserVaultPrefix = await hostedBrowserVaultReplicaUserPrefix({
-      rootKey,
       userId: "member_123",
     });
     const emailRawPrefix = await hostedEmailRawMessageUserPrefix(ingressRootKey, "member_123");
@@ -350,7 +349,7 @@ describe("HostedUserRunner alarm routing", () => {
       ingressRootKey,
       "other_member",
     );
-    const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, "member_123");
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: "member_123" });
     await bucket.put(`${bundlePrefix}bundle.bundle.json`, "bundle");
     await bucket.put(`${artifactPrefix}artifact.artifact.bin`, "artifact");
     await bucket.put(`${browserVaultPrefix}replica.json`, "replica");

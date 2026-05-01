@@ -2234,15 +2234,23 @@ function projectionPathsForRoute(
   entity: HealthCommonsCatalogEntity,
   routeId: string,
 ): Partial<Record<HealthCommonsWebProjectionKey, string>> | null {
-  if (!isPublicProtocolVariant(entity)) {
-    return null;
+  if (entity.entityType === "biomarker") {
+    return {
+      "biomarker.overview": `pages/biomarkers/${routeId}/overview.json`,
+      "biomarker.research": `pages/biomarkers/${routeId}/research.json`,
+      "biomarker.shell": `shell/biomarkers/${routeId}.json`,
+    };
   }
 
-  const projections: Partial<Record<HealthCommonsWebProjectionKey, string>> = {};
-  for (const spec of EXPERIMENT_PROJECTION_SPECS) {
-    projections[spec.key] = spec.pathForRouteId(routeId);
+  if (isPublicProtocolVariant(entity)) {
+    const projections: Partial<Record<HealthCommonsWebProjectionKey, string>> = {};
+    for (const spec of EXPERIMENT_PROJECTION_SPECS) {
+      projections[spec.key] = spec.pathForRouteId(routeId);
+    }
+    return projections;
   }
-  return projections;
+
+  return null;
 }
 
 function collectRouteReverseEdges(
@@ -2500,10 +2508,10 @@ function bundlePathForEntity(entityType: HealthCommonsEntityType, routeId: strin
 }
 
 function isPublishedBiomarkerIndexEntity(
-  entity: HealthCommonsCatalogEntity,
+  entity: HealthCommonsCatalogEntity | undefined,
   entities: Iterable<HealthCommonsCatalogEntity>,
-): boolean {
-  return entity.entityType === "biomarker"
+): entity is HealthCommonsCatalogEntity & { entityType: "biomarker" } {
+  return entity?.entityType === "biomarker"
     && entity.status !== "deprecated"
     && entity.hidden !== true
     && hasCompleteBiomarkerAbout(entity)

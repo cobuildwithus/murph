@@ -26,8 +26,9 @@ import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import {
-  decryptHostedMailboxNullableString,
-  encryptHostedMailboxNullableString,
+  decryptHostedMailboxPayloadString,
+  encryptHostedMailboxPayloadString,
+  type HostedMailboxPayloadStorage,
 } from "./encryption";
 import { hashHostedMailboxStoredPayload } from "./fingerprint";
 
@@ -98,6 +99,7 @@ interface AppendHostedMailboxItemBaseInput {
   payloadCiphertext?: string | null;
   payloadHash?: string | null;
   payloadInlineCiphertext?: string | null;
+  payloadSerializedJson?: string | null;
   payloadSchema?: string | null;
   userId: string;
 }
@@ -212,16 +214,30 @@ export async function appendHostedMailboxItemTx(
   }
 
   const itemId = randomUUID();
-  const payloadStorage = resolveHostedMailboxPayloadStorage({
-    itemId,
-    payloadCiphertext: input.payloadCiphertext,
-    payloadInlineCiphertext: input.payloadInlineCiphertext,
-  });
   const laneSeq = await allocateHostedMailboxLaneSeqTx({
     lane,
     tx: input.tx,
     userId,
   });
+  const payloadStorage = input.payloadSerializedJson
+    ? await encryptHostedMailboxPayloadStorage({
+      dedupeKey,
+      itemId,
+      kind,
+      lane,
+      laneSeq,
+      occurredAt,
+      payloadBytes,
+      payloadSchema,
+      prisma: input.tx,
+      serialized: input.payloadSerializedJson,
+      userId,
+    })
+    : resolveHostedMailboxPayloadStorage({
+      itemId,
+      payloadCiphertext: input.payloadCiphertext,
+      payloadInlineCiphertext: input.payloadInlineCiphertext,
+    });
   const inserted = await input.tx.$queryRaw<HostedMailboxItemRow[]>`
     INSERT INTO hosted_mailbox_item (
       id,
@@ -366,8 +382,7 @@ export async function appendHostedMailboxEnvelopeTx(input: {
       userId: envelope.userId,
     },
   });
-  const encodedPayload = await encodeHostedMailboxStoredPayload({
-    prisma: input.tx,
+  const encodedPayload = serializeHostedMailboxPayload({
     userId: envelope.userId,
     value: envelope,
   });
@@ -378,9 +393,8 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     lane: resolveHostedMailboxLaneForKind(envelope.kind),
     occurredAt: envelope.occurredAt,
     payloadBytes: encodedPayload.payloadBytes,
-    payloadCiphertext: encodedPayload.payloadRefCiphertext,
     payloadHash: encodedPayload.payloadHash,
-    payloadInlineCiphertext: encodedPayload.payloadInlineCiphertext,
+    payloadSerializedJson: encodedPayload.serialized,
     tx: input.tx,
     userId: envelope.userId,
   });
@@ -782,27 +796,52 @@ export function projectHostedMailboxPayload(
 }
 
 export async function decodeHostedMailboxStoredPayload(input: {
+  dedupeKey: string;
+  kind: string;
+  lane: string;
+  laneSeq: bigint | number | string;
+  mailboxItemId: string;
+  occurredAt: string;
   payloadCiphertext?: string | null;
   payloadInlineCiphertext?: string | null;
+  payloadSchema?: string | null;
   prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<unknown | null> {
   const inlineCiphertext = normalizeNullableString(input.payloadInlineCiphertext);
   const refCiphertext = normalizeNullableString(input.payloadCiphertext);
+  const payloadSchema = normalizeNullableString(input.payloadSchema)
+    ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
   const serialized = inlineCiphertext
-      ? await decryptHostedMailboxNullableString({
-          field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
-          prisma: input.prisma,
-          userId: input.userId,
-          value: inlineCiphertext,
-        })
+    ? await decryptHostedMailboxPayloadString({
+      dedupeKey: input.dedupeKey,
+      field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
+      itemId: input.mailboxItemId,
+      kind: input.kind,
+      lane: input.lane,
+      laneSeq: input.laneSeq,
+      occurredAt: input.occurredAt,
+      payloadSchema,
+      payloadStorage: "inline",
+      prisma: input.prisma,
+      userId: input.userId,
+      value: inlineCiphertext,
+    })
     : refCiphertext
-      ? await decryptHostedMailboxNullableString({
-          field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
-          prisma: input.prisma,
-          userId: input.userId,
-          value: refCiphertext,
-        })
+      ? await decryptHostedMailboxPayloadString({
+        dedupeKey: input.dedupeKey,
+        field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
+        itemId: input.mailboxItemId,
+        kind: input.kind,
+        lane: input.lane,
+        laneSeq: input.laneSeq,
+        occurredAt: input.occurredAt,
+        payloadSchema,
+        payloadStorage: "sidecar",
+        prisma: input.prisma,
+        userId: input.userId,
+        value: refCiphertext,
+      })
       : null;
 
   if (!serialized) {
@@ -819,8 +858,7 @@ export function resolveHostedMailboxLaneForKind(kind: string): HostedMailboxLane
 interface EncodedHostedMailboxStoredPayload {
   payloadBytes: number;
   payloadHash: string;
-  payloadInlineCiphertext: string | null;
-  payloadRefCiphertext: string | null;
+  serialized: string;
 }
 
 const HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES = 16 * 1024;
@@ -828,11 +866,10 @@ const HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD = "hosted-mailbox-inline-payload";
 const HOSTED_MAILBOX_REF_PAYLOAD_FIELD = "hosted-mailbox-ref-payload";
 const HOSTED_MAILBOX_PAYLOAD_REF_PREFIX = "hosted-mailbox-payload:";
 
-async function encodeHostedMailboxStoredPayload(input: {
-  prisma?: HostedMailboxStoreClient;
+function serializeHostedMailboxPayload(input: {
   userId: string;
   value: unknown;
-}): Promise<EncodedHostedMailboxStoredPayload> {
+}): EncodedHostedMailboxStoredPayload {
   const serialized = JSON.stringify(input.value);
 
   if (typeof serialized !== "string" || serialized.length === 0) {
@@ -845,43 +882,64 @@ async function encodeHostedMailboxStoredPayload(input: {
     userId: input.userId,
   });
 
-  if (payloadBytes <= HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES) {
-    const payloadInlineCiphertext = await encryptHostedMailboxNullableString({
-      field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
-      prisma: input.prisma,
-      userId: input.userId,
-      value: serialized,
-    });
-
-    if (!payloadInlineCiphertext) {
-      throw new TypeError("Hosted mailbox payload encryption returned an empty ciphertext.");
-    }
-
-    return {
-      payloadBytes,
-      payloadHash,
-      payloadInlineCiphertext,
-      payloadRefCiphertext: null,
-    };
-  }
-
-  const payloadRefCiphertext = await encryptHostedMailboxNullableString({
-    field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
-    prisma: input.prisma,
-    userId: input.userId,
-    value: serialized,
-  });
-
-  if (!payloadRefCiphertext) {
-    throw new TypeError("Hosted mailbox payload spill encryption returned an empty ciphertext.");
-  }
-
   return {
     payloadBytes,
     payloadHash,
-    payloadInlineCiphertext: null,
-    payloadRefCiphertext,
+    serialized,
   };
+}
+
+async function encryptHostedMailboxPayloadStorage(input: {
+  dedupeKey: string;
+  itemId: string;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  laneSeq: bigint;
+  occurredAt: Date;
+  payloadBytes: number;
+  payloadSchema: string;
+  prisma?: HostedMailboxStoreClient;
+  serialized: string;
+  userId: string;
+}): Promise<ReturnType<typeof resolveHostedMailboxPayloadStorage>> {
+  const payloadStorage: HostedMailboxPayloadStorage = input.payloadBytes <= HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES
+    ? "inline"
+    : "sidecar";
+  const field = payloadStorage === "inline"
+    ? HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD
+    : HOSTED_MAILBOX_REF_PAYLOAD_FIELD;
+  const ciphertext = await encryptHostedMailboxPayloadString({
+    dedupeKey: input.dedupeKey,
+    field,
+    itemId: input.itemId,
+    kind: input.kind,
+    lane: input.lane,
+    laneSeq: input.laneSeq,
+    occurredAt: input.occurredAt.toISOString(),
+    payloadSchema: input.payloadSchema,
+    payloadStorage,
+    prisma: input.prisma,
+    userId: input.userId,
+    value: input.serialized,
+  });
+
+  if (!ciphertext) {
+    throw new TypeError("Hosted mailbox payload encryption returned an empty ciphertext.");
+  }
+
+  return payloadStorage === "inline"
+    ? {
+      payloadCiphertext: null,
+      payloadInlineCiphertext: ciphertext,
+      payloadRef: null,
+      storage: "inline",
+    }
+    : {
+      payloadCiphertext: ciphertext,
+      payloadInlineCiphertext: null,
+      payloadRef: `${HOSTED_MAILBOX_PAYLOAD_REF_PREFIX}${input.itemId}`,
+      storage: "ref",
+    };
 }
 
 function resolveHostedMailboxPayloadStorage(input: {

@@ -197,7 +197,11 @@ export function createHostedBundleStore(input: {
 
     async writeBundle(kind, plaintext) {
       const hash = sha256HostedBundleHex(plaintext);
-      const key = await hostedBundleObjectKey(input.key, kind, hash, input.userId ?? null);
+      const key = await hostedBundleObjectKey({
+        hash,
+        kind,
+        userId: input.userId ?? null,
+      });
       await writeEncryptedR2Payload({
         aad: buildHostedStorageAad({
           hash,
@@ -235,7 +239,7 @@ async function assertHostedBundleOwnedByUser(
     return;
   }
 
-  const expectedPrefix = await hostedBundleUserPrefix(input.key, input.userId);
+  const expectedPrefix = await hostedBundleUserPrefix({ userId: input.userId });
   if (!ref.key.startsWith(expectedPrefix)) {
     throw new Error(`Hosted bundle ${ref.key} is outside the bound user bundle namespace.`);
   }
@@ -254,12 +258,18 @@ export function createHostedArtifactStore(input: {
         return;
       }
 
-      const key = await hostedArtifactObjectKey(input.key, input.userId, sha256);
+      const key = await hostedArtifactObjectKey({
+        sha256,
+        userId: input.userId,
+      });
       await input.bucket.delete(key);
     },
 
     async readArtifact(sha256) {
-      const key = await hostedArtifactObjectKey(input.key, input.userId, sha256);
+      const key = await hostedArtifactObjectKey({
+        sha256,
+        userId: input.userId,
+      });
       return readEncryptedR2Payload({
         aad: buildHostedStorageAad({
           key,
@@ -278,7 +288,10 @@ export function createHostedArtifactStore(input: {
     },
 
     async writeArtifact(sha256, plaintext) {
-      const key = await hostedArtifactObjectKey(input.key, input.userId, sha256);
+      const key = await hostedArtifactObjectKey({
+        sha256,
+        userId: input.userId,
+      });
       await assertHostedArtifactHash(plaintext, sha256);
       await writeEncryptedR2Payload({
         aad: buildHostedStorageAad({
@@ -306,7 +319,7 @@ export function createHostedRunnerSecretsReader(input: {
 }): HostedRunnerSecretsReader {
   return {
     async readRunnerSecrets(userId) {
-      const key = await hostedRunnerSecretsObjectKey(input.key, userId);
+      const key = await hostedRunnerSecretsObjectKey({ userId });
       return readEncryptedR2Payload({
         aad: buildHostedStorageAad({
           key,

@@ -1,6 +1,6 @@
 import {
-  decryptHostedWebString,
-  encryptHostedWebString,
+  openHostedUserSecureBoxString,
+  sealHostedUserSecureBoxString,
   type HostedSecureBoxPrismaClient,
 } from "../hosted-crypto/secure-box";
 
@@ -36,7 +36,7 @@ export async function encryptHostedWebNullableString(input: {
   prisma?: HostedWebEncryptionPrismaClient;
   value: string | null | undefined;
 }): Promise<string | null> {
-  return encryptHostedWebString({
+  return sealHostedUserSecureBoxString({
     aad: {
       field: input.field,
       purpose: "hosted-member-private-field",
@@ -57,7 +57,7 @@ export async function decryptHostedWebNullableString(input: {
   prisma?: HostedWebEncryptionPrismaClient;
   value: string | null | undefined;
 }): Promise<string | null> {
-  return decryptHostedWebString({
+  return openHostedUserSecureBoxString({
     aad: {
       field: input.field,
       purpose: "hosted-member-private-field",

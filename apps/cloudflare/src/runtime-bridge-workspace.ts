@@ -39,7 +39,7 @@ import {
   readHostedExecutionWorkerEnvironment,
 } from "./hosted-execution-worker-env.ts";
 import {
-  fetchHostedWorkerRuntimeRoots,
+  fetchHostedWorkerRuntimeRoot,
   type HostedWorkerCryptoEnv,
 } from "./hosted-crypto/runtime-crypto-context.ts";
 import {
@@ -194,7 +194,7 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
     );
   }
   const workerEnv = readHostedExecutionWorkerEnvironment(input.platformEnv);
-  const roots = await fetchHostedWorkerRuntimeRoots({
+  const ingressRoot = await fetchHostedWorkerRuntimeRoot({
     baseUrl: workerEnv.hostedWebBaseUrl,
     callbackSigning: readHostedWebCallbackSigningEnvironment(input.platformEnv),
     cryptoEnv: {
@@ -208,17 +208,14 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
         workerEnv.hostedCryptoCloudflareAutomationPrivateJwk,
       HOSTED_CRYPTO_ENV: workerEnv.hostedCryptoEnv,
     } satisfies HostedWorkerCryptoEnv,
+    domain: "ingress",
     timeoutMs: workerEnv.webControlTimeoutMs,
     userId: input.userId,
   });
-  try {
-    return createHostedMailboxEncryptionEnvironmentFromIngressRoot({
-      rootKey: roots.ingress.rootKey,
-      rootKeyId: roots.ingress.envelope.rootKeyId,
-    });
-  } finally {
-    roots.runtime.rootKey.fill(0);
-  }
+  return createHostedMailboxEncryptionEnvironmentFromIngressRoot({
+    rootKey: ingressRoot.rootKey,
+    rootKeyId: ingressRoot.envelope.rootKeyId,
+  });
 }
 
 function createHostedWorkspaceBridgeMailboxImporter(input: {
@@ -240,7 +237,17 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
           environment: await input.readEncryptionEnvironment({
             userId: decodeInput.itemRef.userId,
           }),
-          userId: decodeInput.itemRef.userId,
+          metadata: {
+            dedupeKey: decodeInput.itemRef.dedupeKey,
+            itemId: decodeInput.itemRef.id,
+            kind: decodeInput.itemRef.kind,
+            lane: decodeInput.itemRef.lane,
+            laneSeq: decodeInput.itemRef.laneSeq,
+            occurredAt: decodeInput.itemRef.occurredAt,
+            payloadSchema: decodeInput.payloadSchema,
+            payloadStorage: decodeInput.payloadSource === "inline" ? "inline" : "sidecar",
+            userId: decodeInput.itemRef.userId,
+          },
         });
         const wake = parseHostedExecutionWake(decodedPayload);
         if (wake.kind !== "conversation.message") {
@@ -304,7 +311,17 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     environment: await input.readEncryptionEnvironment({
       userId: input.item.item.userId,
     }),
-    userId: input.item.item.userId,
+    metadata: {
+      dedupeKey: input.item.item.dedupeKey,
+      itemId: input.item.item.id,
+      kind: input.item.item.kind,
+      lane: input.item.item.lane,
+      laneSeq: input.item.item.laneSeq,
+      occurredAt: input.item.item.occurredAt,
+      payloadSchema: input.item.payload.payloadSchema,
+      payloadStorage: input.item.payload.source === "inline" ? "inline" : "sidecar",
+      userId: input.item.item.userId,
+    },
   });
   const wake = parseHostedExecutionWake(decodedPayload);
 
