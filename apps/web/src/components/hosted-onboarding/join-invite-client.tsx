@@ -27,6 +27,7 @@ import {
   shouldAwaitHostedInviteSessionResolution,
 } from "./join-invite-state";
 import { JoinInviteStageContent } from "./join-invite-sections";
+import { JoinInviteCenteredShell, JoinInviteShell } from "./join-invite-shell";
 
 const JOIN_INVITE_STEPS = [
   { step: 1, label: "Invite" },
@@ -309,27 +310,28 @@ export function JoinInviteClient({
     }
   }
 
-  const consentGateOverridesChrome =
-    launchLegalConsentGateActive && status.stage !== "checkout";
-  const eyebrow = consentGateOverridesChrome
+  const useCenteredShell = launchLegalConsentGateActive || status.stage === "verify";
+
+  const eyebrow = launchLegalConsentGateActive
     ? { label: "Murph", tone: "default" as const }
     : resolveJoinInviteEyebrow(status.stage);
-  const title = consentGateOverridesChrome
+  const title = launchLegalConsentGateActive
     ? "One quick step"
     : resolveJoinInviteTitle(status);
-  const subtitle = consentGateOverridesChrome
+  const subtitle = launchLegalConsentGateActive
     ? "Review and accept the legal agreements below to get started."
     : resolveJoinInviteSubtitle(status);
 
   const showStepIndicator = !launchLegalConsentGateActive && status.stage === "verify";
 
+  const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
+
   return (
-    <div
-      className={[
+    <Shell>
+      <div className={[
         "flex w-full flex-col gap-6",
-        status.stage === "checkout" ? "max-w-5xl" : "max-w-xl",
-      ].join(" ")}
-    >
+        useCenteredShell ? "max-w-lg" : status.stage === "checkout" ? "max-w-5xl" : "max-w-xl",
+      ].join(" ")}>
       <PageHeader
         eyebrow={<JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />}
         title={title}
@@ -366,7 +368,8 @@ export function JoinInviteClient({
           }}
         />
       </div>
-    </div>
+      </div>
+    </Shell>
   );
 }
 
