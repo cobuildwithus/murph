@@ -10,6 +10,9 @@ import {
   buildHostedRunnerPlatformEnv,
 } from "./runner-env.ts";
 import {
+  createHostedRunnerNativeParserToolchain,
+} from "./runner-native-parser-toolchain.ts";
+import {
   runHostedWorkspaceInvocationIsolatedDetailed,
   type HostedExecutionIsolatedRunnerInput,
 } from "./node-runner-isolated.ts";
@@ -74,6 +77,12 @@ export function buildHostedExecutionJobRuntime(
   const configSource = requestedRuntime.forwardedEnv === undefined
     ? process.env
     : requestedRuntime.forwardedEnv;
+  const parserToolchain =
+    requestedRuntime.parserToolchain === undefined
+      ? createHostedRunnerNativeParserToolchain(
+          requestedRuntime.forwardedEnv === undefined ? process.env : {},
+        )
+      : requestedRuntime.parserToolchain;
 
   // The worker-owned runtime envelope is the source of truth when present.
   // The container only falls back to ambient env for local/manual callers that omit it entirely.
@@ -81,7 +90,7 @@ export function buildHostedExecutionJobRuntime(
     commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
     configSource,
     forwardedEnv,
-    parserToolchain: requestedRuntime.parserToolchain,
+    parserToolchain,
     platformEnv,
     resolvedConfig: requestedRuntime.resolvedConfig,
     runnerSecrets: requestedRuntime.userEnv ?? {},

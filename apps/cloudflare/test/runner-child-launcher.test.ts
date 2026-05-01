@@ -56,6 +56,7 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
       WHISPER_MODEL_PATH: "/opt/murph/models/whisper/ggml-base.en.bin",
     },
     forwardedEnv: {
+      FFMPEG_COMMAND: "/stale/ffmpeg",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
@@ -67,30 +68,78 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       VERCEL_AI_API_KEY: "secret",
       PATH: "/custom/bin",
+      WHISPER_COMMAND: "/stale/whisper-cli",
+      WHISPER_MODEL_PATH: "/stale/model.bin",
     },
     isTypeScriptChild: true,
     launcherDirectories,
+    parserToolchain: {
+      tools: {
+        ffmpeg: {
+          command: "/runner/bin/ffmpeg",
+        },
+        pdfinfo: {
+          command: "/runner/bin/pdfinfo",
+        },
+        pdftotext: {
+          command: "/runner/bin/pdftotext",
+        },
+        whisper: {
+          command: "/runner/bin/whisper-cli",
+          modelPath: "/runner/models/whisper/model.bin",
+        },
+      },
+    },
   });
 
   assert.deepEqual(env, {
+    FFMPEG_COMMAND: "/runner/bin/ffmpeg",
     HF_HOME: launcherDirectories.huggingFaceRoot,
     HOME: launcherDirectories.homeRoot,
     LANG: "en_US.UTF-8",
     VERCEL_AI_API_KEY: "secret",
     PATH: "/usr/bin:/bin",
+    PDFINFO_COMMAND: "/runner/bin/pdfinfo",
+    PDFTOTEXT_COMMAND: "/runner/bin/pdftotext",
     SSL_CERT_FILE: "/etc/ssl/cert.pem",
     TEMP: launcherDirectories.tempRoot,
     TMP: launcherDirectories.tempRoot,
     TMPDIR: launcherDirectories.tempRoot,
     TSX_TSCONFIG_PATH: resolveHostedRunnerTsconfigPath(),
     TZ: "UTC",
+    WHISPER_COMMAND: "/runner/bin/whisper-cli",
+    WHISPER_MODEL_PATH: "/runner/models/whisper/model.bin",
     XDG_CACHE_HOME: launcherDirectories.cacheRoot,
   });
   assert.equal("HTTPS_PROXY" in env, false);
+  assert.equal(env.PATH, "/usr/bin:/bin");
+});
+
+test("hosted runner child process env omits parser paths without a typed parser toolchain", () => {
+  const env = createHostedRunnerChildProcessEnv({
+    ambientEnv: {
+      FFMPEG_COMMAND: "/usr/bin/ffmpeg",
+      PATH: "/usr/bin:/bin",
+      WHISPER_COMMAND: "/usr/local/bin/whisper-cli",
+      WHISPER_MODEL_PATH: "/opt/murph/models/whisper/ggml-base.en.bin",
+    },
+    forwardedEnv: {
+      FFMPEG_COMMAND: "/stale/ffmpeg",
+      PDFINFO_COMMAND: "/stale/pdfinfo",
+      PDFTOTEXT_COMMAND: "/stale/pdftotext",
+      WHISPER_COMMAND: "/stale/whisper-cli",
+      WHISPER_MODEL_PATH: "/stale/model.bin",
+    },
+    isTypeScriptChild: false,
+    launcherDirectories: createLauncherDirectories("/tmp/hosted-runner"),
+  });
+
+  assert.equal(env.PATH, "/usr/bin:/bin");
   assert.equal("FFMPEG_COMMAND" in env, false);
+  assert.equal("PDFINFO_COMMAND" in env, false);
+  assert.equal("PDFTOTEXT_COMMAND" in env, false);
   assert.equal("WHISPER_COMMAND" in env, false);
   assert.equal("WHISPER_MODEL_PATH" in env, false);
-  assert.equal(env.PATH, "/usr/bin:/bin");
 });
 
 test("hosted runner child process env omits tsx config wiring for non-typescript children", () => {

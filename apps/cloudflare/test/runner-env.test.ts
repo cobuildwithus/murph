@@ -405,6 +405,30 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
+  it("does not derive typed parser config from forwarded env without a trusted config source", () => {
+    expect(buildHostedRunnerJobRuntime({
+      forwardedEnv: {
+        FFMPEG_COMMAND: "/stale/ffmpeg",
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        WHISPER_COMMAND: "/stale/whisper-cli",
+        WHISPER_MODEL_PATH: "/stale/model.bin",
+      },
+      runnerSecrets: {},
+    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+  });
+
+  it("does not derive typed parser config through the runtime config wrapper without a trusted config source", () => {
+    expect(buildHostedRunnerJobRuntimeConfig({
+      forwardedEnv: {
+        FFMPEG_COMMAND: "/stale/ffmpeg",
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        WHISPER_COMMAND: "/stale/whisper-cli",
+        WHISPER_MODEL_PATH: "/stale/model.bin",
+      },
+      runnerSecrets: {},
+    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+  });
+
   it("derives typed native parser config from platform config without forwarding parser env", () => {
     const configSource = {
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",

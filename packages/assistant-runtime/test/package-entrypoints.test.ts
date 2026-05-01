@@ -25,6 +25,7 @@ import {
 import {
   buildHostedRuntimeForwardedEnv,
   buildHostedRuntimeLaunchSpec,
+  projectHostedRuntimeToChildEnv,
 } from "../src/hosted-runtime-contracts.ts";
 import {
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
@@ -43,6 +44,9 @@ import {
   buildHostedRuntimeForwardedEnv as buildHostedRuntimeForwardedEnvDirect,
   buildHostedRuntimeLaunchSpec as buildHostedRuntimeLaunchSpecDirect,
 } from "../src/hosted-runtime/launch-spec.ts";
+import {
+  projectHostedRuntimeToChildEnv as projectHostedRuntimeToChildEnvDirect,
+} from "../src/hosted-runtime/environment.ts";
 
 test("package root export re-exports the hosted runtime surface only", () => {
   assert.equal(
@@ -80,8 +84,13 @@ test("hosted-runtime-contracts subpath stays wired to the worker-safe hosted run
     contracts["buildHostedRuntimeLaunchSpec" as keyof typeof contracts],
     buildHostedRuntimeLaunchSpecDirect,
   );
+  assert.equal(
+    contracts["projectHostedRuntimeToChildEnv" as keyof typeof contracts],
+    projectHostedRuntimeToChildEnvDirect,
+  );
   assert.equal(buildHostedRuntimeForwardedEnv, buildHostedRuntimeForwardedEnvDirect);
   assert.equal(buildHostedRuntimeLaunchSpec, buildHostedRuntimeLaunchSpecDirect);
+  assert.equal(projectHostedRuntimeToChildEnv, projectHostedRuntimeToChildEnvDirect);
 });
 
 test("package manifest declares the hosted assistant env, hosted runtime contracts, and hosted email subpaths", async () => {

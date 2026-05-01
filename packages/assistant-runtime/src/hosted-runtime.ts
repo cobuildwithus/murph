@@ -105,6 +105,7 @@ export type {
 } from "./hosted-runtime/liveness.ts";
 export {
   normalizeHostedAssistantRuntimeConfig,
+  projectHostedRuntimeToChildEnv,
   sanitizeHostedAssistantRuntimeForwardedEnv,
 } from "./hosted-runtime/environment.ts";
 export {

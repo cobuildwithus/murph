@@ -9,6 +9,9 @@ import {
   buildHostedExecutionJobRuntime,
   createHostedWorkspaceInvocationRunner,
 } from "../src/node-runner.ts";
+import {
+  createHostedRunnerNativeParserToolchain,
+} from "../src/runner-native-parser-toolchain.ts";
 import type { HostedExecutionWorkspaceInvocationJobInput } from "../src/runner-job-transport.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
@@ -149,6 +152,19 @@ describe("buildHostedExecutionJobRuntime", () => {
     expect(runtime.userEnv).toEqual({
       CUSTOM_API_KEY: "secret-value",
     });
+  });
+
+  it("uses runner image parser defaults instead of stale forwarded parser paths", () => {
+    const runtime = buildHostedExecutionJobRuntime({
+      forwardedEnv: {
+        FFMPEG_COMMAND: "/stale/ffmpeg",
+        HOSTED_ASSISTANT_MODEL: "gpt-test",
+        WHISPER_COMMAND: "/stale/whisper-cli",
+        WHISPER_MODEL_PATH: "/stale/model.bin",
+      },
+    });
+
+    expect(runtime.parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
   });
 });
 
