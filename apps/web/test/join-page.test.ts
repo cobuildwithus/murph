@@ -5,28 +5,41 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
+import type { JoinInvitePageModel } from "@/src/components/hosted-onboarding/join-invite-page-model";
+import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import {
+  getHostedDefaultBillingPlanCode,
+  listHostedBillingPlanPresentations,
+} from "@/src/lib/hosted-onboarding/billing-plans";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
+
 const mocks = vi.hoisted(() => ({
-  buildHostedInvitePageData: vi.fn(),
+  getHostedInviteStatus: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  getPrisma: vi.fn(),
+  joinInvitePageViewProps: null as { model: JoinInvitePageModel } | null,
+  readHostedConsentStatus: vi.fn(),
 }));
 
-vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
-  JoinInviteClient(input: {
-    initialStatus: unknown;
-    inviteCode: string;
+vi.mock("@/src/components/hosted-onboarding/join-invite-page-view", () => ({
+  JoinInvitePageView(input: {
+    model: JoinInvitePageModel;
   }) {
+    mocks.joinInvitePageViewProps = input;
     return createElement(
       "div",
       {
-        "data-invite-code": input.inviteCode,
+        "data-consent-status": input.model.launchConsent.status,
+        "data-invite-code": input.model.inviteCode,
+        "data-stage": input.model.status.stage,
       },
-      "Join invite client",
+      "Join invite page view",
     );
   },
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
-  buildHostedInvitePageData: mocks.buildHostedInvitePageData,
+  getHostedInviteStatus: mocks.getHostedInviteStatus,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -47,8 +60,18 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary",
   },
 }));
 
+vi.mock("@/src/lib/legal/consent", () => ({
+  readHostedConsentStatus: mocks.readHostedConsentStatus,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.joinInvitePageViewProps = null;
+  mocks.getPrisma.mockReturnValue({ prisma: true });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -63,49 +86,43 @@ beforeEach(() => {
     session: {
       identity: {
         phone: {
-          number: "+14155552671",
+          number: "+15550100271",
           verifiedAt: 1741194420,
         },
-        userId: "did:privy:user_123",
+        userId: "test-privy-user",
         wallet: null,
       },
       linkedAccounts: [],
       verifiedPrivyUser: {
-        id: "did:privy:user_123",
+        id: "test-privy-user",
       },
     },
   });
-  mocks.buildHostedInvitePageData.mockResolvedValue({
-    billing: {
-      defaultPlanCode: "launch_monthly",
-      plans: [],
-    },
-    capabilities: {
-      billingReady: true,
-      phoneAuthReady: true,
-    },
-    invite: null,
+  mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
     session: {
       authenticated: false,
       expiresAt: null,
       matchesInvite: false,
     },
     stage: "verify",
-  });
+  }));
+  mocks.readHostedConsentStatus.mockResolvedValue(createConsentStatus({
+    launchGranted: true,
+  }));
 });
 
-test("JoinInvitePage passes invite status into the client tree without legacy share state", async () => {
+test("JoinInvitePage builds a server model with the verified session identity", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
   const legacyShareSearchParams = { preview: undefined, share: "share-code" };
 
   const markup = renderToStaticMarkup(
     await JoinInvitePage({
-      params: Promise.resolve({ inviteCode: "invite-code" }),
+      params: Promise.resolve({ inviteCode: "invite%20code" }),
       searchParams: Promise.resolve(legacyShareSearchParams),
     }),
   );
 
-  expect(mocks.buildHostedInvitePageData).toHaveBeenCalledWith({
+  expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
     authenticatedMember: {
       billingStatus: "active",
       createdAt: new Date("2025-03-27T08:00:00.000Z"),
@@ -113,15 +130,45 @@ test("JoinInvitePage passes invite status into the client tree without legacy sh
       suspendedAt: null,
       updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     },
-    inviteCode: "invite-code",
+    authenticatedSessionIdentity: {
+      phone: {
+        number: "+15550100271",
+        verifiedAt: 1741194420,
+      },
+      userId: "test-privy-user",
+      wallet: null,
+    },
+    inviteCode: "invite code",
+  });
+  expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
+  expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
+    awaitingInviteSessionResolution: false,
+    inviteCode: "invite code",
+    preview: false,
+    status: {
+      stage: "verify",
+    },
   });
   assert.match(markup, /data-phone-country-code="GB"/);
-  assert.match(markup, /data-invite-code="invite-code"/);
+  assert.match(markup, /data-invite-code="invite code"/);
   assert.doesNotMatch(markup, /data-share-code/);
 });
 
-test("JoinInvitePage keeps the desktop invite rail sticky", async () => {
+test("JoinInvitePage gates checkout on server-read launch consent", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  const consentStatus = createConsentStatus({
+    launchGranted: false,
+    withGrant: true,
+  });
+  mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  }));
+  mocks.readHostedConsentStatus.mockResolvedValue(consentStatus);
 
   const markup = renderToStaticMarkup(
     await JoinInvitePage({
@@ -130,9 +177,81 @@ test("JoinInvitePage keeps the desktop invite rail sticky", async () => {
     }),
   );
 
-  assert.match(markup, /md:sticky/);
-  assert.match(markup, /md:top-0/);
-  assert.match(markup, /md:h-svh/);
+  expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: { prisma: true },
+  });
+  expect(mocks.joinInvitePageViewProps?.model.launchConsent).toMatchObject({
+    gateActive: true,
+    status: "required",
+  });
+  expect(
+    mocks.joinInvitePageViewProps?.model.launchConsent.initialStatus?.scopes.map(
+      (scope) => scope.grant,
+    ),
+  ).toEqual([null, null]);
+  assert.match(markup, /data-consent-status="required"/);
+});
+
+test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      createdAt: new Date("2025-03-27T08:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    },
+    linkedAccounts: [
+      {
+        address: "hidden@example.test",
+        type: "email",
+      },
+      {
+        id: "telegram-test-user",
+        privateMetadata: "do-not-serialize",
+        type: "telegram",
+        username: "murph_test",
+      },
+    ],
+    memberLookup: null,
+    session: {
+      identity: null,
+      linkedAccounts: [],
+      verifiedPrivyUser: {
+        id: "test-privy-user",
+      },
+    },
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    messagingSetupRequired: true,
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  }));
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+
+  renderToStaticMarkup(
+    await JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "invite-code" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    }),
+  );
+
+  expect(mocks.joinInvitePageViewProps?.model.telegramAccountForMessagingSetup).toEqual({
+    firstName: null,
+    lastName: null,
+    photoUrl: null,
+    telegramUserId: "telegram-test-user",
+    username: "murph_test",
+  });
 });
 
 test("JoinInvitePage keeps route copy and inherits the shared Open Graph image", async () => {
@@ -220,3 +339,124 @@ test("JoinInviteCancelPage returns to the invite without legacy share state", as
   assert.match(markup, /href="\/join\/invite-code"/);
   assert.doesNotMatch(markup, /\?share=/);
 });
+
+function createStatus(
+  overrides: Partial<HostedInviteStatusPayload> & {
+    capabilities?: Partial<HostedInviteStatusPayload["capabilities"]>;
+  },
+): HostedInviteStatusPayload {
+  return {
+    billing: {
+      defaultPlanCode: getHostedDefaultBillingPlanCode(),
+      plans: listHostedBillingPlanPresentations(),
+    },
+    capabilities: {
+      billingReady: true,
+      phoneAuthReady: true,
+      ...overrides.capabilities,
+    },
+    invite: {
+      code: "invite-code",
+      expiresAt: "2026-03-27T12:00:00.000Z",
+      phoneAuthTarget: {
+        kind: "saved",
+        phoneHint: "*** 2671",
+      },
+      phoneHint: "*** 2671",
+      verificationMode: "invite_phone",
+    },
+    messagingSetupRequired: overrides.messagingSetupRequired ?? false,
+    murphPhoneNumber: overrides.murphPhoneNumber ?? null,
+    session: {
+      authenticated: false,
+      expiresAt: null,
+      matchesInvite: false,
+    },
+    stage: "verify",
+    ...overrides,
+  };
+}
+
+function createConsentStatus(input: {
+  launchGranted: boolean;
+  withGrant?: boolean;
+}): HostedConsentStatus {
+  const legalDocument = consentDocument("terms-of-service", "Murph Terms of Service", "/legal/terms");
+  const healthDocument = consentDocument(
+    "consumer-health-data-notice",
+    "Murph Consumer Health Data Notice",
+    "/consumer-health-data-privacy-policy",
+  );
+  const documents = [legalDocument, healthDocument];
+  const grant = input.withGrant
+    ? {
+        documentVersions: {
+          "terms-of-service": "2026-04-29",
+        },
+        grantedAt: "2026-04-30T00:00:00.000Z",
+        lastEventId: "event_123",
+        revokedAt: null,
+        scope: "launch.legal",
+        source: "test",
+        status: "granted" as const,
+        updatedAt: "2026-04-30T00:00:00.000Z",
+      }
+    : null;
+
+  return {
+    documents,
+    generatedAt: "2026-04-30T00:00:00.000Z",
+    launchGranted: input.launchGranted,
+    launchScopes: [
+      {
+        granted: input.launchGranted,
+        missingDocuments: input.launchGranted ? [] : [legalDocument],
+        scope: "launch.legal",
+      },
+      {
+        granted: input.launchGranted,
+        missingDocuments: input.launchGranted ? [] : [healthDocument],
+        scope: "launch.health-data",
+      },
+    ],
+    ok: true,
+    schema: "murph.hosted-consent-status.v1",
+    scopes: [
+      consentScope("launch.legal", "Terms, privacy, and AI disclosure", [legalDocument], input.launchGranted, grant),
+      consentScope("launch.health-data", "Health data collection consent", [healthDocument], input.launchGranted, grant),
+    ],
+  };
+}
+
+function consentDocument(
+  id: HostedConsentStatus["documents"][number]["id"],
+  title: string,
+  href: string,
+): HostedConsentStatus["documents"][number] {
+  return {
+    href,
+    id,
+    pdfHref: `${href}.pdf`,
+    title,
+    version: "2026-04-29",
+  };
+}
+
+function consentScope(
+  scope: HostedConsentStatus["scopes"][number]["scope"],
+  label: string,
+  documents: HostedConsentStatus["documents"],
+  granted: boolean,
+  grant: HostedConsentStatus["scopes"][number]["grant"],
+): HostedConsentStatus["scopes"][number] {
+  return {
+    current: granted,
+    documents,
+    grant,
+    granted,
+    label,
+    missingDocuments: granted ? [] : documents,
+    revocable: false,
+    scope,
+  };
+}

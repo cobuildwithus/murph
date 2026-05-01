@@ -4,7 +4,7 @@ import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
+import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   resolveHostedTelegramSettingsDisplayState,
@@ -22,10 +22,10 @@ type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
 
 export function ConnectTelegram(props: {
   authenticated: boolean;
-  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  initialTelegramAccount: HostedPrivyTelegramAccount | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
-  const { authenticated, initialLinkedAccounts, onSynced } = props;
+  const { authenticated, initialTelegramAccount, onSynced } = props;
   const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser, user } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
@@ -41,7 +41,7 @@ export function ConnectTelegram(props: {
   const displayState = resolveHostedTelegramSettingsDisplayState({
     syncedTelegramOverride,
     user: user ?? {
-      linkedAccounts: initialLinkedAccounts,
+      telegram: initialTelegramAccount,
     },
   });
   const currentTelegram = displayState.currentTelegram;
@@ -141,7 +141,7 @@ export function ConnectTelegram(props: {
       const refreshedUser = await refreshUser().catch(() => null);
       const refreshedTelegram = resolveHostedTelegramSettingsDisplayState({
         user: refreshedUser ?? user ?? {
-          linkedAccounts: initialLinkedAccounts,
+          telegram: initialTelegramAccount,
         },
       }).currentTelegram;
 

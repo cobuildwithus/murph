@@ -1645,17 +1645,23 @@ function createStubService(overrides: Partial<DeviceSyncService> = {}): DeviceSy
         metricFamilies: {},
       },
     },
-    buildConnectUrl() {
-      return "https://provider.test/oauth?state=state_demo_01";
+    connectionHandler: {
+      async beginConnection() {
+        return {
+          authorizationUrl: "https://provider.test/oauth?state=state_demo_01",
+        };
+      },
+      async completeConnection() {
+        throw new Error("createStubService demo provider should not exchange authorization codes in HTTP tests.");
+      },
+      async refreshTokens() {
+        throw new Error("createStubService demo provider should not refresh tokens in HTTP tests.");
+      },
     },
-    async exchangeAuthorizationCode() {
-      throw new Error("createStubService demo provider should not exchange authorization codes in HTTP tests.");
-    },
-    async refreshTokens() {
-      throw new Error("createStubService demo provider should not refresh tokens in HTTP tests.");
-    },
-    async executeJob() {
-      throw new Error("createStubService demo provider should not execute jobs in HTTP tests.");
+    jobExecutor: {
+      async executeJob() {
+        throw new Error("createStubService demo provider should not execute jobs in HTTP tests.");
+      },
     },
   } satisfies DeviceSyncProvider;
 

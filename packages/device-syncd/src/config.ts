@@ -179,6 +179,12 @@ export {
   normalizeDeviceSyncConnectTargetKey,
   resolveConfiguredDeviceSyncConnectTarget,
 } from "./config/connect-targets.ts";
+export {
+  JUNCTION_CONNECT_SOURCE_TARGETS,
+  JUNCTION_DEFAULT_PROVIDER_FILTER,
+  resolveJunctionConnectSourceLabel,
+  resolveJunctionConnectTargetForSourceId,
+} from "./providers/junction-connect-sources.ts";
 
 export type {
   ConfiguredDeviceSyncProviderConfigByKey,
@@ -188,6 +194,9 @@ export type {
 export type {
   DeviceSyncConnectTarget,
 } from "./config/connect-targets.ts";
+export type {
+  JunctionConnectSourceTarget,
+} from "./providers/junction-connect-sources.ts";
 export type {
   ConfiguredDeviceSyncProviderCapabilities,
   DeviceSyncProviderCatalogEntry,

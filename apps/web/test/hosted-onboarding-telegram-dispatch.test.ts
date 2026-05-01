@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => {
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
+    startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
+      runId: "workflow-run-123",
+    })),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     runtimeEnv: {
       contactPrivacyKeyring: {
@@ -61,6 +64,7 @@ const mocks = vi.hoisted(() => {
       return {
         item: {
           dedupeKey: eventId,
+          id: `mailbox_${eventId}`,
         },
       };
     }),
@@ -114,6 +118,10 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
+  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
 }));
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -668,7 +676,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
   });
 
-  it("rejects active-member Telegram webhook success when runner nudge is not accepted", async () => {
+  it("enqueues a pointer workflow fallback when the runner nudge is not accepted", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValueOnce({
       accepted: false,
@@ -725,11 +733,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         update_id: 655,
       }),
       secretToken: "telegram-secret",
-    })).rejects.toMatchObject({
-      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
-      httpStatus: 503,
-      message: "Webhook processing is temporarily unavailable.",
-      retryable: true,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
@@ -738,6 +744,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       userId: "member_telegram_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_telegram:update:655",
+      source: "telegram",
+    });
   });
 
   it("accepts Telegram webhooks whose secret header is missing", async () => {

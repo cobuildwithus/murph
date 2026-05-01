@@ -21,6 +21,7 @@ import {
   buildOAuthConnectUrl,
   buildProviderApiError,
   buildScheduledReconcileJobs,
+  adaptDeviceSyncOAuthProvider,
   createRefreshingApiSession,
   fetchBearerJson,
   parseResponseBody,
@@ -29,7 +30,6 @@ import {
   requireRefreshToken,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
-  withOAuthCompatibilityHandlers,
 } from "./shared-oauth.ts";
 import { createOuraWebhookSubscriptionClient, OURA_DEFAULT_WEBHOOK_TARGETS } from "./oura-webhooks.ts";
 
@@ -37,7 +37,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncWebhookPreflightResponse,
   DeviceSyncJobRecord,
-  DeviceSyncOAuthCompatibilityProvider,
+  DeviceSyncOAuthProvider,
   ProviderWebhookAdminCapability,
   ProviderAuthTokens,
   ProviderCallbackContext,
@@ -580,7 +580,7 @@ function buildOuraApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
-export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfig): DeviceSyncOAuthCompatibilityProvider {
+export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfig): DeviceSyncOAuthProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = (config.authBaseUrl ?? OURA_AUTH_BASE_URL).replace(/\/+$/u, "");
   const apiBaseUrl = (config.apiBaseUrl ?? OURA_API_BASE_URL).replace(/\/+$/u, "");
@@ -935,7 +935,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     return {};
   }
 
-  const provider = withOAuthCompatibilityHandlers({
+  const provider = adaptDeviceSyncOAuthProvider({
     provider: descriptor.provider,
     descriptor,
     webhookAdmin,

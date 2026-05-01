@@ -435,21 +435,25 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         kind: "provider_config",
         providerConfigKey: "junction",
         subject: {
+          accountId: "raw-account",
           client_user_id: "raw-client-user",
           hmacSecret: "do-not-store",
           ownerId: "raw-owner",
           ownerIdHash: "owner-hash",
+          profileId: "raw-profile",
           region: "us",
           userId: "raw-user",
           userIdHash: "user-hash",
         },
       },
       metadata: {
+        accountId: "raw-account",
         client_user_id: "raw-client-user",
         connectedSources: ["oura"],
         hmacSecret: "do-not-store",
         ownerId: "raw-owner",
         ownerIdHash: "owner-hash",
+        profileId: "raw-profile",
         region: "us",
         resourceAvailability: ["profile"],
         userId: "raw-user",
@@ -501,7 +505,54 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-owner");
     expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-user");
     expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-client-user");
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-account");
+    expect(JSON.stringify(createdArtifacts.connection)).not.toContain("raw-profile");
     expect(JSON.stringify(createdArtifacts.connection)).not.toContain("do-not-store");
+  });
+
+  it("hydrates provider-config stored connection accounts without token material", async () => {
+    const connection = createConnection({
+      accessTokenEncrypted: null,
+      credentialKind: "provider_config",
+      credentialMetadataJson: {
+        "subject.region": "us",
+      },
+      externalAccountIdEncrypted: "enc:junction-user-123",
+      keyVersion: null,
+      provider: "junction",
+      providerConfigKey: "junction",
+      refreshTokenEncrypted: null,
+      tokenVersion: null,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+            where.id === connection.id && where.userId === connection.userId ? cloneConnection(connection) : null,
+        },
+      } as never,
+    });
+
+    await expect(store.getStoredConnectionAccountForUser("user-123", "dsc_123")).resolves.toEqual(
+      expect.objectContaining({
+        credential: {
+          kind: "provider_config",
+          credentialMetadata: {
+            "subject.region": "us",
+          },
+          providerConfigKey: "junction",
+        },
+        disconnectGeneration: 0,
+        externalAccountId: "junction-user-123",
+        id: "dsc_123",
+        keyVersion: null,
+        provider: "junction",
+        tokenVersion: null,
+      }),
+    );
   });
 
   it("rejects provider-config hosted connection credentials with unexpected provider profile keys", async () => {
@@ -896,9 +947,15 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.getStoredConnectionAccountForUser("user-123", "dsc_123")).resolves.toEqual(
       expect.objectContaining({
-        accessToken: "fresh-access-token",
+        credential: {
+          kind: "oauth_tokens",
+          tokens: {
+            accessToken: "fresh-access-token",
+            accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+            refreshToken: "fresh-refresh-token",
+          },
+        },
         externalAccountId: "acct_456",
-        refreshToken: "fresh-refresh-token",
         tokenVersion: 1,
       }),
     );

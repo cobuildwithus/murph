@@ -30,6 +30,9 @@ import type {
   HostedLocalDevConfig,
 } from "./types.ts";
 
+const HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL_ENV =
+  "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL";
+
 export async function resolveCloudflareLocalEnv(input: {
   config: HostedLocalDevConfig;
   oidcIdentity: HostedExecutionOidcIdentity;
@@ -126,6 +129,10 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
+  stripStaleHostedLocalOidcJwksOverride({
+    env: resolvedExisting,
+    overrides: normalizedOverrides,
+  });
   if (input.config.localCodexBridge) {
     stripHostedLocalCodexAppServerStubEnv(resolvedExisting);
   } else {
@@ -210,6 +217,17 @@ function stripHostedLocalCodexBridgeProxyEnv(env: Record<string, string | undefi
 
 function stripHostedLocalCodexAppServerStubEnv(env: Record<string, string | undefined>): void {
   delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV];
+}
+
+function stripStaleHostedLocalOidcJwksOverride(input: {
+  env: Record<string, string | undefined>;
+  overrides: Record<string, string | undefined>;
+}): void {
+  if (input.overrides[HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL_ENV]?.trim()) {
+    return;
+  }
+
+  delete input.env[HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL_ENV];
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

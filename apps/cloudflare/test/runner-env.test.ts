@@ -113,6 +113,26 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
+  it("forwards local Codex app-server assistant config into local runner containers", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "local-codex",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
+      NODE_ENV: "development",
+      VERCEL_AI_API_KEY: "gateway-key",
+    })).toEqual({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "local-codex",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
+      NODE_ENV: "development",
+      VERCEL_AI_API_KEY: "gateway-key",
+    });
+  });
+
   it("does not forward the Linq webhook verification secret into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",

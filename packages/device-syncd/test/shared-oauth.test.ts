@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import {
+  adaptDeviceSyncOAuthProvider,
   buildOAuthConnectUrl,
   buildProviderApiError,
   buildScheduledReconcileJobs,
@@ -431,6 +432,158 @@ test("shared oauth helper flows cover auth-code exchange, refresh rotation, bear
       nextReconcileAt: "2026-03-16T10:01:00.000Z",
     },
   );
+});
+
+test("shared oauth adapter exposes nested oauthAdapter and routes refresh and revoke through connectionHandler", async () => {
+  const refreshTokens = vi.fn(async () => ({
+    accessToken: "refreshed-access-token",
+    refreshToken: "refreshed-refresh-token",
+  }));
+  const revokeAccess = vi.fn(async () => {});
+  const provider = adaptDeviceSyncOAuthProvider({
+    provider: "demo",
+    descriptor: {
+      provider: "demo",
+      displayName: "Demo",
+      transportModes: ["oauth_callback"],
+      oauth: {
+        callbackPath: "/oauth/demo/callback",
+        defaultScopes: ["offline"],
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 50,
+        metricFamilies: {
+          activity: 50,
+        },
+      },
+    },
+    buildConnectUrl({ state, callbackUrl }) {
+      return `https://provider.test/oauth?state=${state}&callback=${encodeURIComponent(callbackUrl)}`;
+    },
+    async exchangeAuthorizationCode(context, code) {
+      assert.equal(context.state, "state-1");
+      assert.equal(context.callbackUrl, "https://sync.example.test/oauth/callback");
+      assert.deepEqual(context.grantedScopes, ["offline"]);
+      assert.equal(code, "auth-code");
+
+      return {
+        externalAccountId: `external-${code}`,
+        scopes: ["offline"],
+        tokens: {
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+        },
+      };
+    },
+    refreshTokens,
+    revokeAccess,
+    async executeJob() {
+      return {};
+    },
+  });
+
+  assert.ok(provider.oauthAdapter);
+  assert.ok(provider.connectionHandler);
+  assert.ok(provider.jobExecutor);
+  assert.equal("buildConnectUrl" in provider, false);
+  assert.equal("exchangeAuthorizationCode" in provider, false);
+  assert.equal("refreshTokens" in provider, false);
+  assert.equal("revokeAccess" in provider, false);
+  assert.equal(provider.connectionHandler.refreshTokens, provider.oauthAdapter.refreshTokens);
+
+  const begin = await provider.connectionHandler.beginConnection({
+    state: "state-1",
+    callbackUrl: "https://sync.example.test/oauth/callback",
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    scopes: ["offline"],
+    now: "2026-03-16T10:00:00.000Z",
+  });
+  assert.equal(
+    begin.authorizationUrl,
+    "https://provider.test/oauth?state=state-1&callback=https%3A%2F%2Fsync.example.test%2Foauth%2Fcallback",
+  );
+
+  const connection = await provider.connectionHandler.completeConnection({
+    callbackUrl: "https://sync.example.test/oauth/callback",
+    state: "state-1",
+    now: "2026-03-16T10:00:00.000Z",
+    grantedScopes: ["offline"],
+    query: new URLSearchParams({ code: "auth-code" }),
+  });
+
+  assert.equal(connection.externalAccountId, "external-auth-code");
+  assert.equal(refreshTokens.mock.calls.length, 0);
+
+  const connectionRefreshTokens = provider.connectionHandler.refreshTokens;
+  if (!connectionRefreshTokens) {
+    throw new Error("Expected connectionHandler.refreshTokens.");
+  }
+  const refreshed = await connectionRefreshTokens(createAccount());
+  assert.deepEqual(refreshed, {
+    accessToken: "refreshed-access-token",
+    refreshToken: "refreshed-refresh-token",
+  });
+  assert.equal(refreshTokens.mock.calls.length, 1);
+
+  const connectionRevokeAccess = provider.connectionHandler.revokeAccess;
+  if (!connectionRevokeAccess) {
+    throw new Error("Expected connectionHandler.revokeAccess.");
+  }
+  await connectionRevokeAccess(createAccount());
+  assert.equal(revokeAccess.mock.calls.length, 1);
+});
+
+test("shared oauth adapter omits revokeAccess when it is not supplied", () => {
+  const provider = adaptDeviceSyncOAuthProvider({
+    provider: "demo",
+    descriptor: {
+      provider: "demo",
+      displayName: "Demo",
+      transportModes: ["oauth_callback"],
+      oauth: {
+        callbackPath: "/oauth/demo/callback",
+        defaultScopes: ["offline"],
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 50,
+        metricFamilies: {
+          activity: 50,
+        },
+      },
+    },
+    buildConnectUrl() {
+      return "https://provider.test/oauth";
+    },
+    async exchangeAuthorizationCode() {
+      return {
+        externalAccountId: "external-auth-code",
+        tokens: {
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+        },
+      };
+    },
+    async refreshTokens() {
+      return {
+        accessToken: "refreshed-access-token",
+      };
+    },
+    async executeJob() {
+      return {};
+    },
+  });
+
+  assert.equal(provider.connectionHandler.revokeAccess, undefined);
+  assert.equal("revokeAccess" in provider.connectionHandler, false);
+  assert.equal("revokeAccess" in provider, false);
 });
 
 test("shared oauth refreshing sessions reuse refreshed credentials and rethrow non-retryable request failures", async () => {

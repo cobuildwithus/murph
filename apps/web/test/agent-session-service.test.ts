@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createDeviceSyncRegistry,
   deviceSyncError,
+  type DeviceConnectionHandler,
+  type DeviceSyncAccount,
   type DeviceSyncProvider,
+  type ProviderAuthTokens,
 } from "@murphai/device-syncd/public-ingress";
 import { WHOOP_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
@@ -563,7 +566,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
 });
 
 function createWhoopProvider(input: {
-  refreshTokens?: DeviceSyncProvider["refreshTokens"];
+  refreshTokens?: DeviceConnectionHandler["refreshTokens"];
 } = {}): DeviceSyncProvider {
   return {
     provider: WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider,
@@ -574,20 +577,26 @@ function createWhoopProvider(input: {
         defaultScopes: ["offline"],
       },
     },
-    buildConnectUrl: () => "https://provider.example/connect",
-    async exchangeAuthorizationCode() {
-      throw new Error("not used");
+    connectionHandler: {
+      async beginConnection() {
+        return { authorizationUrl: "https://provider.example/connect" };
+      },
+      async completeConnection() {
+        throw new Error("not used");
+      },
+      refreshTokens: input.refreshTokens ?? (async () => {
+        throw deviceSyncError({
+          code: "WHOOP_REFRESH_TOKEN_MISSING",
+          message: "WHOOP refresh token is missing.",
+          retryable: false,
+          accountStatus: "reauthorization_required",
+        });
+      }),
     },
-    refreshTokens: input.refreshTokens ?? (async () => {
-      throw deviceSyncError({
-        code: "WHOOP_REFRESH_TOKEN_MISSING",
-        message: "WHOOP refresh token is missing.",
-        retryable: false,
-        accountStatus: "reauthorization_required",
-      });
-    }),
-    async executeJob() {
-      return {};
+    jobExecutor: {
+      async executeJob() {
+        return {};
+      },
     },
   };
 }
@@ -613,6 +622,13 @@ function createConnectionRecord() {
     nextReconcileAt: null,
     accessToken: "access-token",
     refreshToken: "refresh-token",
+    credential: {
+      kind: "oauth_tokens" as const,
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+      } satisfies ProviderAuthTokens,
+    },
     keyVersion: "v1",
     tokenVersion: 2,
     createdAt: new Date("2026-03-20T00:00:00.000Z"),
@@ -657,9 +673,10 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   };
   let storedConnection: Omit<
     typeof publicConnection,
-    "accessToken" | "keyVersion" | "refreshToken" | "tokenVersion"
+    "accessToken" | "credential" | "keyVersion" | "refreshToken" | "tokenVersion"
   > & {
     accessToken: string;
+    credential: DeviceSyncAccount["credential"];
     keyVersion: string;
     refreshToken: string | null;
     tokenVersion: number;
@@ -755,6 +772,15 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           accessToken: input.tokenBundle.accessToken,
           accessTokenExpiresAt:
             input.tokenBundle.accessTokenExpiresAt ?? storedConnection.accessTokenExpiresAt,
+          credential: {
+            kind: "oauth_tokens",
+            tokens: {
+              accessToken: input.tokenBundle.accessToken,
+              accessTokenExpiresAt:
+                input.tokenBundle.accessTokenExpiresAt ?? storedConnection.accessTokenExpiresAt ?? null,
+              refreshToken: input.tokenBundle.refreshToken,
+            } satisfies ProviderAuthTokens,
+          },
           keyVersion: input.tokenBundle.keyVersion,
           refreshToken: input.tokenBundle.refreshToken,
           tokenVersion: input.tokenBundle.tokenVersion,

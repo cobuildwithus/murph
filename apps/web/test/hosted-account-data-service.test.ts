@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const serviceMocks = vi.hoisted(() => ({
+  createHostedDeviceSyncControlPlane: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
+}));
+
+vi.mock("@/src/lib/device-sync/control-plane", () => ({
+  createHostedDeviceSyncControlPlane: serviceMocks.createHostedDeviceSyncControlPlane,
 }));
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
@@ -75,6 +80,7 @@ const VALID_EXPORT_MODES = new Set([
 ]);
 
 beforeEach(() => {
+  serviceMocks.createHostedDeviceSyncControlPlane.mockReset();
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
 });
@@ -490,6 +496,82 @@ describe("deleteHostedAccountData", () => {
     })).rejects.toThrow("transaction failed");
 
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("does not report provider-config device connections as provider-revoked without OAuth tokens", async () => {
+    const order: string[] = [];
+    const revokeAccess = vi.fn();
+    const getStoredConnectionAccountForUser = vi.fn(async () => ({
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-04-27T00:07:00.000Z",
+      createdAt: "2026-04-27T00:07:00.000Z",
+      credential: {
+        kind: "provider_config" as const,
+        credentialMetadata: {},
+        providerConfigKey: "junction",
+      },
+      disconnectGeneration: 0,
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      id: "dsc_junction",
+      keyVersion: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "junction",
+      scopes: [],
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      tokenVersion: null,
+      updatedAt: "2026-04-27T00:07:00.000Z",
+    }));
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      registry: {
+        get: vi.fn(() => ({
+          connectionHandler: {
+            revokeAccess,
+          },
+        })),
+      },
+      store: {
+        getStoredConnectionAccountForUser,
+      },
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [
+        {
+          id: "dsc_junction",
+          provider: "junction",
+          providerAccountBlindIndex: "blind-index",
+        },
+      ],
+      onTransaction: () => order.push("prisma"),
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
+    expect(revokeAccess).not.toHaveBeenCalled();
+    expect(order).toEqual(["prisma"]);
+    expect(result.providerRevocations).toEqual([
+      {
+        connectionId: "dsc_junction",
+        errorCode: null,
+        provider: "junction",
+        status: "warning",
+        warningCode: "CONNECTION_SECRET_MISSING",
+      },
+    ]);
   });
 });
 
@@ -1015,11 +1097,16 @@ function createHostedAccountDataExportPrismaForTest(
 }
 
 function createHostedAccountDeletionPrismaForTest(input: {
+  deviceConnections?: Array<{
+    id: string;
+    provider: string;
+    providerAccountBlindIndex: string;
+  }>;
   onTransaction: () => void;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
   const fakePrisma: unknown = {
     deviceConnection: {
-      findMany: async () => [],
+      findMany: async () => input.deviceConnections ?? [],
     },
     hostedMember: {
       findUnique: async () => ({ id: "member_123" }),

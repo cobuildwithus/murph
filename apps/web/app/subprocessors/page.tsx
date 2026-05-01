@@ -17,17 +17,19 @@ export const metadata: Metadata = createMurphPageMetadata({
 const providerRows = [
   {
     provider: "Vercel",
-    service: "Hosted web deployment, edge/runtime infrastructure, and optional web analytics.",
+    service:
+      "Hosted web deployment, pointer-only Workflow-managed runner nudge retries, edge/runtime infrastructure, and optional web analytics.",
     dataCategories:
-      "Account, device/browser, operational, and hosted-control-plane metadata.",
+      "Account, device/browser, operational, hosted-control-plane, opaque workflow input such as mailbox item identifiers and source labels, workflow event logs, and retry metadata. Provider webhook message bodies and verification secrets are not Workflow inputs.",
     region: "United States / global infrastructure",
     training: "No",
-    retention: "Service logs and analytics per Vercel settings and Murph retention rules.",
+    retention:
+      "Service logs, workflow state, and analytics per Vercel settings and Murph retention rules.",
     role: "Subprocessor",
   },
   {
     provider: "Cloudflare",
-    service: "Hosted execution, Workers, Durable Objects, queues, object storage, logs, and security.",
+    service: "Hosted execution, Workers, Durable Objects, object storage, logs, and security.",
     dataCategories:
       "Encrypted stored workspace data, transient execution content needed to run requested hosted workflows, execution metadata, runtime logs, and operational artifacts.",
     region: "United States / global infrastructure",

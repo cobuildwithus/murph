@@ -11,7 +11,9 @@ The live ownership split is:
 
 - `apps/web` owns hosted product/control-plane facts, encrypted mailbox rows,
   latest workspace checkpoint metadata, redacted runtime status, and bounded
-  redacted runtime logs.
+  redacted runtime logs. For Linq and Telegram conversation webhooks, it verifies
+  and appends in web-owned code, then may start a Vercel Workflow run that
+  durably retries runner nudge by opaque mailbox item pointer only.
 - `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
@@ -56,11 +58,18 @@ Hosted producers append one `HostedMailboxItem` in the same transaction as the
 product/control-plane mutation that made work necessary. Large payloads use
 `HostedMailboxPayload`; lane sequence allocation uses
 `HostedMailboxLaneCounter`.
-Hosted conversation webhooks return success only after the per-user Cloudflare
-runner nudge is accepted. If that short control-plane call fails, the webhook
-returns a retryable failure to the provider; duplicate provider retries are
-safe because mailbox append dedupes by event id and runner nudges only coalesce
-pending work.
+Hosted Linq and Telegram conversation webhook routes read the raw body and
+verification headers only in the route/service process. That code verifies the
+provider payload, appends the canonical encrypted mailbox item transactionally,
+drains any receipt-local side effects, and first requires a direct per-user
+Cloudflare runner nudge. If the direct nudge is not accepted after a mailbox row
+exists, web may enqueue a Vercel Workflow with only `{ mailboxItemId, source }`
+to retry the runner nudge. Raw provider bodies, message content, verification
+headers, provider secrets, and decrypted mailbox payloads must not be Vercel
+Workflow inputs or outputs. If neither the direct nudge nor the pointer workflow
+can be accepted, the webhook returns a retryable provider response. Duplicate
+provider retries or duplicate workflow attempts are safe because mailbox append
+dedupes by event id and runner nudges only coalesce pending work.
 
 Cloudflare does not acquire a web run row. A runner nudge only asks the
 per-user Durable Object to invoke the container if needed. The Durable Object
@@ -153,6 +162,18 @@ silently dropped from later checkpoints.
 
 Cloudflare does not own product facts, mailbox state, mailbox import progress,
 assistant channel enablement state, outbox truth, or durable queue history.
+
+### Vercel Workflow Owns
+
+- pointer-only nudge workflow run state for Linq and Telegram conversation webhook handoff
+- workflow event logs for opaque mailbox item ids, channel source labels, retry status, and step errors
+- retry state for runner nudge handoff after web-owned verification and mailbox append have committed
+
+Vercel Workflow does not own raw webhook payloads, provider verification
+headers, provider secrets, canonical product facts, mailbox payload content,
+mailbox state after Postgres commit, message-processing completion, outbox
+truth, or per-user runner coordination. Treat workflow state as durable
+execution state, not as queryable product truth.
 
 ## Runtime Timers
 

@@ -19,6 +19,7 @@ import {
   buildOAuthConnectUrl,
   buildProviderApiError,
   buildScheduledReconcileJobs,
+  adaptDeviceSyncOAuthProvider,
   createRefreshingApiSession,
   fetchBearerJson,
   isoFromExpiresIn,
@@ -28,7 +29,6 @@ import {
   refreshOAuthTokens,
   requireRefreshToken,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
-  withOAuthCompatibilityHandlers,
 } from "./shared-oauth.ts";
 import { createStravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
 
@@ -36,7 +36,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
-  DeviceSyncOAuthCompatibilityProvider,
+  DeviceSyncOAuthProvider,
   DeviceSyncWebhookPreflightResponse,
   ProviderAuthTokens,
   ProviderCallbackContext,
@@ -397,7 +397,7 @@ export function resolveStravaWebhookPreflightResponse(input: {
 
 export function createStravaDeviceSyncProvider(
   config: StravaDeviceSyncProviderConfig,
-): DeviceSyncOAuthCompatibilityProvider {
+): DeviceSyncOAuthProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = (config.authBaseUrl ?? STRAVA_AUTH_BASE_URL).replace(/\/+$/u, "");
   const apiBaseUrl = (config.apiBaseUrl ?? STRAVA_API_BASE_URL).replace(/\/+$/u, "");
@@ -738,7 +738,7 @@ export function createStravaDeviceSyncProvider(
     return {};
   }
 
-  return withOAuthCompatibilityHandlers({
+  return adaptDeviceSyncOAuthProvider({
     provider: descriptor.provider,
     descriptor,
     webhookAdmin,
@@ -971,5 +971,5 @@ export function createStravaDeviceSyncProvider(
           });
       }
     },
-  } satisfies DeviceSyncOAuthCompatibilityProvider);
+  });
 }

@@ -37,9 +37,9 @@ describe("device-sync hosted runtime helpers", () => {
     vi.clearAllMocks();
   });
 
-  it("requires a token bundle when composing a Cloudflare-backed runtime account", async () => {
+  it("requires a token bundle when composing an OAuth Cloudflare-backed runtime account", async () => {
     const {
-      composeHostedRuntimeDeviceSyncAccount,
+      composeHostedRuntimeOAuthDeviceSyncAccount,
       requireHostedDeviceSyncStoredTokenBundle,
     } = await import(
       "@/src/lib/device-sync/internal-runtime"
@@ -63,7 +63,7 @@ describe("device-sync hosted runtime helpers", () => {
       userId: "user-123",
     });
 
-    expect(composeHostedRuntimeDeviceSyncAccount({
+    expect(composeHostedRuntimeOAuthDeviceSyncAccount({
       connection: {
         externalAccountId: "oura_alice",
         id: "dsc_123",
@@ -126,12 +126,15 @@ describe("device-sync hosted runtime helpers", () => {
           },
           observedUpdatedAt: "2026-03-26T12:00:00+00:00",
           observedTokenVersion: null,
-          tokenBundle: {
-            accessToken: "new-access-token",
-            accessTokenExpiresAt: "2026-03-30T01:30:00+01:30",
-            keyVersion: "cloudflare-runtime",
-            refreshToken: "new-refresh-token",
-            tokenVersion: 1,
+          credential: {
+            kind: "oauth_tokens",
+            tokenBundle: {
+              accessToken: "new-access-token",
+              accessTokenExpiresAt: "2026-03-30T01:30:00+01:30",
+              keyVersion: "cloudflare-runtime",
+              refreshToken: "new-refresh-token",
+              tokenVersion: 1,
+            },
           },
         },
       ],
@@ -146,12 +149,15 @@ describe("device-sync hosted runtime helpers", () => {
           },
           observedUpdatedAt: "2026-03-26T12:00:00.000Z",
           observedTokenVersion: null,
-          tokenBundle: {
-            accessToken: "new-access-token",
-            accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-            keyVersion: "cloudflare-runtime",
-            refreshToken: "new-refresh-token",
-            tokenVersion: 1,
+          credential: {
+            kind: "oauth_tokens",
+            tokenBundle: {
+              accessToken: "new-access-token",
+              accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
+              keyVersion: "cloudflare-runtime",
+              refreshToken: "new-refresh-token",
+              tokenVersion: 1,
+            },
           },
         },
       ],
@@ -159,7 +165,7 @@ describe("device-sync hosted runtime helpers", () => {
     });
   });
 
-  it("ignores removed flat runtime update fields and only reads canonical nested updates", () => {
+  it("rejects removed flat runtime update fields and only reads canonical nested updates", () => {
     expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
         {
@@ -168,8 +174,6 @@ describe("device-sync hosted runtime helpers", () => {
             status: "active",
           },
           connectionId: "dsc_123",
-          displayName: "legacy-top-level-name",
-          lastErrorCode: "legacy-top-level-error",
           localState: {
             lastErrorCode: "oauth_expired",
           },
@@ -193,6 +197,24 @@ describe("device-sync hosted runtime helpers", () => {
       ],
       userId: "user-123",
     });
+
+    expect(() => parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connection: {
+            displayName: "Oura",
+            status: "active",
+          },
+          connectionId: "dsc_123",
+          displayName: "legacy-top-level-name",
+          localState: {
+            lastErrorCode: "oauth_expired",
+          },
+          observedUpdatedAt: null,
+        },
+      ],
+      userId: "user-123",
+    }, "user-123")).toThrow(/displayName is not supported/u);
   });
 
   it("redacts secret-bearing hosted runtime error text across heartbeat, apply, and durable account helpers", async () => {

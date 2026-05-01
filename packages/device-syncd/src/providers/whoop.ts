@@ -21,6 +21,7 @@ import {
   buildOAuthConnectUrl,
   buildProviderApiError,
   buildScheduledReconcileJobs,
+  adaptDeviceSyncOAuthProvider,
   createRefreshingApiSession,
   exchangeOAuthAuthorizationCode,
   fetchBearerJson,
@@ -30,14 +31,13 @@ import {
   requireRefreshToken,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
-  withOAuthCompatibilityHandlers,
 } from "./shared-oauth.ts";
 
 import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
-  DeviceSyncOAuthCompatibilityProvider,
+  DeviceSyncOAuthProvider,
   ProviderAuthTokens,
   ProviderCallbackContext,
   ProviderConnectionResult,
@@ -354,7 +354,7 @@ function buildWhoopApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
-export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthCompatibilityProvider {
+export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = whoopBaseUrl(config);
   const scopes = buildWhoopScopes(config.scopes);
@@ -641,7 +641,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     return {};
   }
 
-  const provider = withOAuthCompatibilityHandlers({
+  const provider = adaptDeviceSyncOAuthProvider({
     provider: descriptor.provider,
     descriptor,
     buildConnectUrl(context) {

@@ -28,6 +28,9 @@ const mocks = vi.hoisted(() => {
     })),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
+    startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
+      runId: "workflow-run-123",
+    })),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
@@ -50,6 +53,7 @@ const mocks = vi.hoisted(() => {
       return {
         item: {
           dedupeKey: eventId,
+          id: `mailbox_${eventId}`,
         },
       };
     }),
@@ -82,6 +86,10 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
+  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -458,7 +466,7 @@ https://join.example.test/join/code_first_text`);
     },
   );
 
-  it("rejects active-member webhook success when the runner nudge is not accepted", async () => {
+  it("enqueues a pointer workflow fallback when the runner nudge is not accepted", async () => {
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: false,
@@ -498,17 +506,19 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
-      httpStatus: 503,
-      message: "Webhook processing is temporarily unavailable.",
-      retryable: true,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
       timeoutMs: 5_000,
       userId: "member_123",
+    });
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_evt_required_nudge_failed",
+      source: "linq",
     });
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({

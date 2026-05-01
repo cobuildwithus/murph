@@ -7,13 +7,30 @@ import type {
   DeviceConnectionHandler,
   DeviceJobExecutor,
   DeviceSyncAccount,
-  DeviceSyncOAuthCompatibilityProvider,
+  DeviceSyncOAuthAdapter,
+  DeviceSyncOAuthProvider,
   DeviceSyncProvider,
-  DeviceWebhookHandler,
   ProviderAuthTokens,
+  ProviderCallbackContext,
+  ProviderConnectionResult,
   ProviderJobContext,
+  ProviderJobResult,
   ProviderScheduleResult,
+  ProviderWebhookContext,
+  ProviderWebhookResult,
+  StoredDeviceSyncAccount,
 } from "../types.ts";
+
+interface DeviceSyncOAuthProviderDefinition
+  extends Omit<DeviceSyncProvider, "connectionHandler" | "webhookHandler" | "jobExecutor"> {
+  buildConnectUrl(input: Parameters<DeviceSyncOAuthAdapter["buildConnectUrl"]>[0]): string;
+  exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
+  refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
+  revokeAccess?(account: DeviceSyncAccount): Promise<void>;
+  createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
+  verifyAndParseWebhook?(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
+  executeJob(context: ProviderJobContext, job: Parameters<DeviceJobExecutor["executeJob"]>[1]): Promise<ProviderJobResult>;
+}
 
 export async function parseResponseBody(response: Response): Promise<string> {
   try {
@@ -177,10 +194,15 @@ export function requireRefreshToken(refreshToken: unknown, buildMissingRefreshTo
   return normalized;
 }
 
-export function withOAuthCompatibilityHandlers<T extends DeviceSyncOAuthCompatibilityProvider>(provider: T): T {
-  const connectionHandler: DeviceConnectionHandler = provider.connectionHandler ?? {
+function createOAuthConnectionHandler(adapterInput: {
+  oauthAdapter: DeviceSyncOAuthAdapter;
+  revokeAccess?: DeviceConnectionHandler["revokeAccess"];
+}): DeviceConnectionHandler & {
+  refreshTokens: NonNullable<DeviceConnectionHandler["refreshTokens"]>;
+} {
+  return {
     beginConnection: async (input) => ({
-      authorizationUrl: provider.buildConnectUrl({
+      authorizationUrl: adapterInput.oauthAdapter.buildConnectUrl({
         state: input.state,
         callbackUrl: input.callbackUrl,
         scopes: input.scopes,
@@ -210,7 +232,7 @@ export function withOAuthCompatibilityHandlers<T extends DeviceSyncOAuthCompatib
         });
       }
 
-      return provider.exchangeAuthorizationCode(
+      return adapterInput.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: input.callbackUrl,
           state: input.state,
@@ -220,16 +242,37 @@ export function withOAuthCompatibilityHandlers<T extends DeviceSyncOAuthCompatib
         code,
       );
     },
-    refreshTokens: provider.refreshTokens,
-    ...(provider.revokeAccess ? { revokeAccess: provider.revokeAccess } : {}),
+    refreshTokens: adapterInput.oauthAdapter.refreshTokens,
+    ...(adapterInput.revokeAccess ? { revokeAccess: adapterInput.revokeAccess } : {}),
   };
-  const webhookHandler: DeviceWebhookHandler | undefined = provider.webhookHandler
-    ?? (provider.verifyAndParseWebhook
-      ? { verifyAndParseWebhook: provider.verifyAndParseWebhook }
-      : undefined);
-  const jobExecutor: DeviceJobExecutor = provider.jobExecutor ?? {
-    ...(provider.createScheduledJobs ? { createScheduledJobs: provider.createScheduledJobs } : {}),
-    executeJob: provider.executeJob,
+}
+
+export function adaptDeviceSyncOAuthProvider(
+  input: DeviceSyncOAuthProviderDefinition,
+): DeviceSyncOAuthProvider {
+  const {
+    buildConnectUrl,
+    exchangeAuthorizationCode,
+    refreshTokens,
+    revokeAccess,
+    createScheduledJobs,
+    verifyAndParseWebhook,
+    executeJob,
+    ...provider
+  } = input;
+  const oauthAdapter: DeviceSyncOAuthAdapter = {
+    buildConnectUrl,
+    exchangeAuthorizationCode,
+    refreshTokens,
+  };
+  const connectionHandler = createOAuthConnectionHandler({
+    oauthAdapter,
+    revokeAccess,
+  });
+  const webhookHandler = verifyAndParseWebhook ? { verifyAndParseWebhook } : undefined;
+  const jobExecutor: DeviceJobExecutor = {
+    ...(createScheduledJobs ? { createScheduledJobs } : {}),
+    executeJob,
   };
 
   return {
@@ -237,6 +280,7 @@ export function withOAuthCompatibilityHandlers<T extends DeviceSyncOAuthCompatib
     connectionHandler,
     ...(webhookHandler ? { webhookHandler } : {}),
     jobExecutor,
+    oauthAdapter,
   };
 }
 

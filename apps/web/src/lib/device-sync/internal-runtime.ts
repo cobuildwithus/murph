@@ -82,7 +82,7 @@ export function requireHostedDeviceSyncStoredTokenBundle(input: {
   });
 }
 
-export function composeHostedRuntimeDeviceSyncAccount(input: {
+export function composeHostedRuntimeOAuthDeviceSyncAccount(input: {
   connection: PublicDeviceSyncAccount;
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle;
 }): DeviceSyncAccount {

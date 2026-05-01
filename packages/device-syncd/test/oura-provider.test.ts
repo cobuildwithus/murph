@@ -11,6 +11,7 @@ import { createJsonResponse, requireValue } from "./helpers.ts";
 
 import type {
   DeviceSyncAccount,
+  DeviceWebhookHandler,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
   ProviderAuthTokens,
@@ -154,8 +155,8 @@ function requireOAuthTokens(connection: ProviderConnectionResult): ProviderAuthT
 
 function requireVerifyAndParseWebhook(
   provider: DeviceSyncProvider,
-): NonNullable<DeviceSyncProvider["verifyAndParseWebhook"]> {
-  return requireValue(provider.verifyAndParseWebhook);
+): NonNullable<DeviceWebhookHandler["verifyAndParseWebhook"]> {
+  return requireValue(provider.webhookHandler?.verifyAndParseWebhook);
 }
 
 test("Oura provider exchanges an auth code into a refreshable connection", async () => {
@@ -187,7 +188,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
     },
   });
 
-  const connection = await provider.exchangeAuthorizationCode(
+  const connection = await provider.oauthAdapter.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
       state: "state-1",
@@ -236,7 +237,7 @@ test("Oura provider normalizes extapi-prefixed token scopes from token responses
     },
   });
 
-  const connection = await provider.exchangeAuthorizationCode(
+  const connection = await provider.oauthAdapter.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
       state: "state-1",
@@ -268,7 +269,7 @@ test("Oura provider requires a replacement refresh token during refresh", async 
   });
 
   await assert.rejects(
-    provider.refreshTokens(createAccount(["personal"])),
+    provider.oauthAdapter.refreshTokens(createAccount(["personal"])),
     (error) =>
       error instanceof DeviceSyncError &&
       error.code === "OURA_REFRESH_TOKEN_ROTATION_MISSING" &&
@@ -288,7 +289,7 @@ test("Oura provider requires an existing refresh token before attempting refresh
   });
 
   await assert.rejects(
-    provider.refreshTokens(createAccount(["personal"], {
+    provider.oauthAdapter.refreshTokens(createAccount(["personal"], {
       refreshToken: null,
     })),
     (error) =>
@@ -319,7 +320,7 @@ test("Oura provider revokes access tokens through the OAuth revoke endpoint", as
       throw new Error(`Unexpected request: ${url}`);
     },
   });
-  const revokeAccess = requireValue(provider.revokeAccess);
+  const revokeAccess = requireValue(provider.connectionHandler.revokeAccess);
 
   await revokeAccess(createAccount(["personal"]));
   await revokeAccess(createAccount(["personal"], {
@@ -359,7 +360,7 @@ test("Oura provider rejects auth exchanges without a refresh token and personal-
 
   await assert.rejects(
     () =>
-      missingRefreshProvider.exchangeAuthorizationCode(
+      missingRefreshProvider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
           state: "state-missing-refresh",
@@ -409,7 +410,7 @@ test("Oura provider rejects auth exchanges without a refresh token and personal-
 
   await assert.rejects(
     () =>
-      missingProfileIdProvider.exchangeAuthorizationCode(
+      missingProfileIdProvider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
           state: "state-missing-profile-id",
@@ -509,7 +510,7 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
     },
   };
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     context,
     createJob("backfill", {
       windowStart: "2026-03-15T00:00:00.000Z",
@@ -577,7 +578,7 @@ test("Oura provider splits heartrate backfills into 30-day chunks", async () => 
     },
   };
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     context,
     createJob("backfill", {
       windowStart: "2026-01-01T00:00:00.000Z",
@@ -649,7 +650,7 @@ test("Oura provider rejects invalid heartrate window payloads", async () => {
   };
 
   await assert.rejects(
-    provider.executeJob(
+    provider.jobExecutor.executeJob(
       context,
       createJob("backfill", {
         windowStart: "not-a-date",
@@ -694,7 +695,7 @@ test("Oura provider falls back to granted scopes and rejects connections without
     },
   });
 
-  const grantedScopeConnection = await provider.exchangeAuthorizationCode(
+  const grantedScopeConnection = await provider.oauthAdapter.exchangeAuthorizationCode(
     {
       callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
       state: "state-2",
@@ -713,7 +714,7 @@ test("Oura provider falls back to granted scopes and rejects connections without
 
   await assert.rejects(
     () =>
-      provider.exchangeAuthorizationCode(
+      provider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
           state: "state-3",
@@ -756,7 +757,7 @@ test("Oura provider best-effort revokes exchanged access tokens when post-token-
 
   await assert.rejects(
     () =>
-      provider.exchangeAuthorizationCode(
+      provider.oauthAdapter.exchangeAuthorizationCode(
         {
           callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
           state: "state-revoke-on-failure",
@@ -1105,7 +1106,7 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
     },
   };
 
-  await provider.executeJob(context, createJob("delete", parsed?.jobs[0]?.payload ?? {}));
+  await provider.jobExecutor.executeJob(context, createJob("delete", parsed?.jobs[0]?.payload ?? {}));
 
   assert.deepEqual(importedSnapshots, [
     {
@@ -1152,7 +1153,7 @@ test("Oura provider imports hosted-narrowed delete wake payloads as deletion sna
     },
   };
 
-  await provider.executeJob(context, createJob("delete", {
+  await provider.jobExecutor.executeJob(context, createJob("delete", {
     dataType: "session",
     objectId: "session-42",
     occurredAt: "2026-03-27T08:03:00.000Z",
@@ -1335,7 +1336,7 @@ test("Oura webhook resource jobs fetch only the hinted collection and keep the m
     },
   };
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     context,
     createJob("resource", {
       dataType: "workout",
@@ -1404,7 +1405,7 @@ test("Oura webhook resource jobs keep object scope even when the hinted object i
     },
   };
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     context,
     createJob("resource", {
       dataType: "workout",
@@ -1549,7 +1550,7 @@ test("Oura provider rejects invalid webhook payloads, schedules reconcile jobs, 
       error.httpStatus === 400,
   );
 
-  const scheduled = reconcileProvider.createScheduledJobs?.(
+  const scheduled = reconcileProvider.jobExecutor.createScheduledJobs?.(
     createStoredAccount(["personal"], {
       nextReconcileAt: "2026-03-16T09:00:00.000Z",
     }),
@@ -1563,7 +1564,7 @@ test("Oura provider rejects invalid webhook payloads, schedules reconcile jobs, 
   });
 
   const importedSnapshots: unknown[] = [];
-  await reconcileProvider.executeJob(
+  await reconcileProvider.jobExecutor.executeJob(
     {
       account: createAccount(["personal"]),
       async importSnapshot(snapshot) {
@@ -1590,7 +1591,7 @@ test("Oura provider rejects invalid webhook payloads, schedules reconcile jobs, 
 
   await assert.rejects(
     () =>
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: createAccount(["personal"]),
           async importSnapshot() {
@@ -1621,7 +1622,7 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
   const fallbackSnapshots: unknown[] = [];
 
   assert.equal(
-    provider.buildConnectUrl({
+    provider.oauthAdapter.buildConnectUrl({
       callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
       scopes: ["personal", "workout"],
       state: "state-connect",
@@ -1645,7 +1646,7 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
     },
   );
 
-  await provider.executeJob(
+  await provider.jobExecutor.executeJob(
     {
       account: createAccount(["personal"]),
       async importSnapshot(snapshot) {
@@ -1671,7 +1672,7 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
   ]);
   await assert.rejects(
     () =>
-      provider.executeJob(
+      provider.jobExecutor.executeJob(
         {
           account: createAccount(["personal"]),
           async importSnapshot() {

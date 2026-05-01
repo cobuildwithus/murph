@@ -26,7 +26,7 @@ import {
   type HostedDeviceSyncWakeSource,
 } from "./wake";
 import {
-  composeHostedRuntimeDeviceSyncAccount,
+  composeHostedRuntimeOAuthDeviceSyncAccount,
 } from "./internal-runtime";
 import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
@@ -68,11 +68,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
   if (storedAccount) {
     const provider = input.registry.get(existing.provider);
-    const storedTokenBundle = buildStoredTokenBundle(storedAccount);
+    const revokeAccess = provider?.connectionHandler?.revokeAccess;
+    const storedTokenBundle = revokeAccess ? buildStoredTokenBundle(storedAccount) : null;
 
-    if (provider?.revokeAccess && storedTokenBundle) {
+    if (revokeAccess && storedTokenBundle) {
       try {
-        await provider.revokeAccess(composeHostedRuntimeDeviceSyncAccount({
+        await revokeAccess(composeHostedRuntimeOAuthDeviceSyncAccount({
           connection: storedAccount,
           tokenBundle: storedTokenBundle,
         }));

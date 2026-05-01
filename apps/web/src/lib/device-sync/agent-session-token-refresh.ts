@@ -5,6 +5,7 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 
 import type {
+  DeviceConnectionHandler,
   DeviceSyncProvider,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
@@ -15,7 +16,7 @@ import type {
 } from "./prisma-store";
 import type { HostedStoredTokenBundle } from "./agent-session-token-bundle";
 
-type ProviderTokenRefresh = NonNullable<DeviceSyncProvider["refreshTokens"]>;
+type ProviderTokenRefresh = NonNullable<DeviceConnectionHandler["refreshTokens"]>;
 
 export type HostedProviderTokenRefreshResult =
   | { status: "success"; tokens: Awaited<ReturnType<ProviderTokenRefresh>> }
@@ -31,7 +32,7 @@ export async function refreshProviderTokensWithStatusHandling(input: {
   userId: string;
 }): Promise<HostedProviderTokenRefreshResult> {
   try {
-    const refreshTokens = input.provider.connectionHandler?.refreshTokens ?? input.provider.refreshTokens;
+    const refreshTokens = input.provider.connectionHandler?.refreshTokens;
 
     if (!refreshTokens) {
       throw new Error(`Device sync provider ${input.provider.provider} does not support token refresh.`);

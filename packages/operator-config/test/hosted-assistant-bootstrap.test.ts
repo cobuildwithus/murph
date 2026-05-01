@@ -56,6 +56,18 @@ function assertCodexGatewayProfile(profile: HostedAssistantConfig['profiles'][nu
   assert.equal(profile.target.modelProvider, 'vercel-ai-gateway')
 }
 
+function assertLocalCodexProfile(profile: HostedAssistantConfig['profiles'][number] | undefined) {
+  assert.ok(profile)
+  assert.equal(profile.target.adapter, 'codex-cli')
+  if (profile.target.adapter !== 'codex-cli') {
+    throw new Error('expected hosted profile to use Codex')
+  }
+
+  assert.equal(profile.label, 'Codex App Server')
+  assert.equal(profile.target.model, 'gpt-5.5')
+  assert.equal(profile.target.modelProvider, null)
+}
+
 test('hosted assistant config parsing and readiness helpers normalize Codex hosted profiles', async () => {
   const hostedConfigModule = await loadHostedAssistantModule()
   const {
@@ -178,6 +190,36 @@ test('hosted assistant bootstrap maps Vercel AI Gateway env to Codex model provi
     VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey,
     'VERCEL_AI_API_KEY',
   )
+})
+
+test('hosted assistant bootstrap maps local Codex bridge env to host-default Codex provider config', async () => {
+  const hostedConfigModule = await loadHostedAssistantModule({
+    readOperatorConfigResult: null,
+  })
+
+  const seeded = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'local-codex',
+      HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
+      HOSTED_ASSISTANT_REASONING_EFFORT: 'medium',
+      HOSTED_ASSISTANT_APPROVAL_POLICY: 'never',
+      HOSTED_ASSISTANT_SANDBOX: 'danger-full-access',
+    },
+  })
+
+  assert.deepEqual(seeded, {
+    configured: true,
+    provider: 'codex-cli',
+    seeded: true,
+    source: 'hosted-env',
+  })
+  assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 1)
+
+  const savedProfile = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
+    ?.profiles?.[0]
+  assertLocalCodexProfile(savedProfile)
+  assert.equal(hostedConfigModule.isHostedAssistantProfileReady(savedProfile), true)
 })
 
 test('hosted assistant bootstrap returns missing or invalid states and throws required errors', async () => {

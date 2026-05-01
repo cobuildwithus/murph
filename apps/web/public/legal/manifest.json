@@ -97,9 +97,9 @@
       "effectiveDate": "2026-04-29",
       "id": "subprocessors",
       "latest": {
-        "bytes": 12324,
+        "bytes": 12939,
         "path": "/legal/subprocessors.pdf",
-        "sha256": "2aef5d139fc76cc857aa43136599b7b6e7477b6a077aaab9ec53602a70f4c7fb"
+        "sha256": "c5efea5e9004ab45e2e721ec0a13adb270e5d00821ced16f56183490bf430ae5"
       },
       "lastUpdated": "2026-04-29",
       "source": "apps/web/legal/subprocessors.md",
@@ -107,9 +107,9 @@
       "version": "2026-04-29",
       "versions": [
         {
-          "bytes": 12324,
+          "bytes": 12939,
           "path": "/legal/subprocessors-2026-04-29.pdf",
-          "sha256": "2aef5d139fc76cc857aa43136599b7b6e7477b6a077aaab9ec53602a70f4c7fb"
+          "sha256": "c5efea5e9004ab45e2e721ec0a13adb270e5d00821ced16f56183490bf430ae5"
         }
       ]
     },

@@ -98,7 +98,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     });
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(undefined);
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({ eventId: "evt_123" });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: {
+        id: "mailbox_evt_123",
+      },
+    });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,

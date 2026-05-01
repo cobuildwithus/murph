@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
+import { withWorkflow } from "workflow/next";
 import {
   HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
 } from "../../config/workspace-source-resolution";
@@ -251,9 +252,11 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
   };
 }
 
-export default function nextConfig(phase: string): NextConfig {
+async function nextConfig(phase: string): Promise<NextConfig> {
   return buildHostedWebNextConfig(phase);
 }
+
+export default withWorkflow(nextConfig);
 
 function uniqueSources(sources: readonly (string | null | undefined)[]): string[] {
   return [...new Set(sources.filter((value): value is string => Boolean(value)))];

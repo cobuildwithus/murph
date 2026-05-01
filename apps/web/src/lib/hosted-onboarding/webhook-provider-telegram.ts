@@ -87,7 +87,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     telegramUserId: summary.senderTelegramUserId,
   });
 
-  await appendHostedMailboxEnvelopeTx({
+  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId: buildHostedTelegramWebhookEventId(input.update),
       occurredAt: summary.occurredAt,
@@ -103,6 +103,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ok: true,
       reason: "wake-appended-active-member",
     },
+    wakeMailboxItemId: mailboxAppend.item.id,
     wakeUserId: existingMember.id,
   };
 }

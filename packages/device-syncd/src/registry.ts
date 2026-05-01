@@ -32,30 +32,26 @@ export function createDeviceSyncRegistry(providers: readonly DeviceSyncProvider[
 
 export function assertDeviceSyncProviderCapabilities(provider: DeviceSyncProvider): void {
   const connection = resolveDeviceProviderConnectionDescriptor(provider.descriptor);
-  const hasGenericConnection = Boolean(
-    provider.connectionHandler
-      ?? (provider.beginConnection && provider.completeConnection),
-  );
-  const hasOAuthCompatibilityConnection = Boolean(
-    provider.buildConnectUrl && provider.exchangeAuthorizationCode,
-  );
+  const hasConnectionHandler = Boolean(provider.connectionHandler);
 
-  if (connection.kind === "oauth2" && !hasGenericConnection && !hasOAuthCompatibilityConnection) {
+  if (connection.kind === "oauth2" && !hasConnectionHandler) {
     throw new TypeError(
-      `Device sync provider ${provider.provider} declares oauth2 connection support but does not expose connectionHandler, beginConnection/completeConnection, or OAuth compatibility methods.`,
+      `Device sync provider ${provider.provider} declares oauth2 connection support but does not expose connectionHandler.`,
     );
   }
 
-  if (connection.kind === "external_link" && !hasGenericConnection) {
+  if (connection.kind === "external_link" && !hasConnectionHandler) {
     throw new TypeError(
-      `Device sync provider ${provider.provider} declares external_link connection support but does not expose connectionHandler or beginConnection/completeConnection.`,
+      `Device sync provider ${provider.provider} declares external_link connection support but does not expose connectionHandler.`,
     );
   }
 
   const credentialPolicy = provider.credentialPolicy
-    ?? (provider.descriptor.oauth ? { kind: "oauth_tokens" as const } : { kind: "none" as const });
+    ?? (provider.descriptor.oauth || connection.kind === "oauth2"
+      ? { kind: "oauth_tokens" as const }
+      : { kind: "none" as const });
   const explicitlyNonRefreshable = provider.descriptor.sync?.supportsTokenRefresh === false;
-  const hasTokenRefresh = Boolean(provider.connectionHandler?.refreshTokens ?? provider.refreshTokens);
+  const hasTokenRefresh = Boolean(provider.connectionHandler?.refreshTokens);
 
   if (credentialPolicy.kind === "oauth_tokens" && !explicitlyNonRefreshable && !hasTokenRefresh) {
     throw new TypeError(

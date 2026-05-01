@@ -96,7 +96,7 @@ describe("ConnectTelegram", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(ConnectTelegram, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialTelegramAccount: null,
       }),
     );
     cleanupRender = cleanup;
@@ -152,7 +152,7 @@ describe("ConnectTelegram", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(ConnectTelegram, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialTelegramAccount: null,
       }),
     );
     cleanupRender = cleanup;
@@ -160,6 +160,46 @@ describe("ConnectTelegram", () => {
     expect(container.textContent).toContain("Connect Telegram");
     expect(container.textContent).not.toContain("Message @withmurph_bot");
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
+  it("uses a sanitized initial Telegram account when Privy user state has not loaded", async () => {
+    const { ConnectTelegram } = await import(
+      "@/src/components/settings/hosted-telegram-settings"
+    );
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: null,
+    });
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "telegram-test-user",
+      telegramUsername: "murph_test",
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(ConnectTelegram, {
+        authenticated: true,
+        initialTelegramAccount: {
+          firstName: null,
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "telegram-test-user",
+          username: "murph_test",
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.textContent).toContain("@murph_test");
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        payload: {
+          expectedTelegramUserId: "telegram-test-user",
+        },
+        url: "/api/settings/telegram/sync",
+      });
+    });
   });
 
   it("keeps a newer relink result when an older background sync resolves later", async () => {
@@ -184,7 +224,7 @@ describe("ConnectTelegram", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(ConnectTelegram, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialTelegramAccount: null,
       }),
     );
     cleanupRender = cleanup;

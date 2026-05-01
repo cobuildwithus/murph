@@ -47,8 +47,8 @@ export const hostedConnectionRecordArgs = {
 
 export type HostedConnectionRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionRecordArgs>;
 export type HostedStoredDeviceSyncAccount = DeviceSyncAccount & {
-  keyVersion: string;
-  tokenVersion: number;
+  keyVersion: string | null;
+  tokenVersion: number | null;
 };
 
 export function mapHostedConnectionRecord(record: HostedConnectionRecord): HostedStaticDeviceSyncConnectionRecord {
@@ -217,7 +217,9 @@ function isBlockedHostedDeviceSyncConnectionMetadataKey(key: string): boolean {
   if (
     (normalized.includes("ownerid")
       || normalized.includes("userid")
-      || normalized.includes("clientuserid"))
+      || normalized.includes("clientuserid")
+      || normalized.includes("accountid")
+      || normalized.includes("profileid"))
     && !normalized.includes("hash")
     && !normalized.includes("blindindex")
   ) {

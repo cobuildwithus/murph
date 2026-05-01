@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
-import { DeviceSyncError } from "../src/errors.ts";
+import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
 import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
@@ -9,6 +9,8 @@ import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   ConsumeOAuthStateResult,
+  DeviceConnectionHandler,
+  DeviceJobExecutor,
   DeviceSyncIngressWebhook,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncProvider,
@@ -16,6 +18,7 @@ import type {
   DeviceSyncPublicIngressWebhookAcceptedInput,
   DeviceSyncPublicIngressWebhookAcceptedResult,
   DeviceSyncWebhookTraceRecord,
+  DeviceWebhookHandler,
   OAuthStateRecord,
   ProviderAuthTokens,
   ProviderConnectionResult,
@@ -294,7 +297,108 @@ function readRecordedWebhookTrace(store: InMemoryPublicIngressStore): DeviceSync
   return store.lastRecordedWebhookTrace;
 }
 
-function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
+type FakeProviderOverrides = Partial<DeviceSyncProvider> & {
+  beginConnection?: DeviceConnectionHandler["beginConnection"];
+  completeConnection?: DeviceConnectionHandler["completeConnection"];
+  buildConnectUrl?: (input: {
+    state: string;
+    callbackUrl: string;
+    scopes: string[];
+    now: string;
+  }) => string;
+  exchangeAuthorizationCode?: (
+    context: Parameters<DeviceConnectionHandler["completeConnection"]>[0] extends infer _Input
+      ? {
+          callbackUrl: string;
+          state: string;
+          now: string;
+          grantedScopes: string[];
+        }
+      : never,
+    code: string,
+  ) => Promise<ProviderConnectionResult>;
+  refreshTokens?: DeviceConnectionHandler["refreshTokens"];
+  revokeAccess?: DeviceConnectionHandler["revokeAccess"];
+  createScheduledJobs?: DeviceJobExecutor["createScheduledJobs"];
+  verifyAndParseWebhook?: DeviceWebhookHandler["verifyAndParseWebhook"];
+  executeJob?: DeviceJobExecutor["executeJob"];
+};
+
+function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncProvider {
+  const defaultBuildConnectUrl: NonNullable<FakeProviderOverrides["buildConnectUrl"]> = (context) =>
+    `https://example.test/oauth?state=${context.state}&redirect_uri=${encodeURIComponent(context.callbackUrl)}`;
+  const defaultExchangeAuthorizationCode: NonNullable<FakeProviderOverrides["exchangeAuthorizationCode"]> =
+    async (_context, code) => ({
+      externalAccountId: `demo-${code}`,
+      displayName: `Demo ${code}`,
+      scopes: ["offline", "read:data"],
+      metadata: {
+        connectedBy: code,
+      },
+      tokens: {
+        accessToken: "<REDACTED_ACCESS_TOKEN>",
+        refreshToken: "<REDACTED_REFRESH_TOKEN>",
+      } satisfies ProviderAuthTokens,
+      initialJobs: [
+        {
+          kind: "backfill",
+          payload: {
+            windowStart: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      ],
+      nextReconcileAt: "2026-03-24T00:00:00.000Z",
+    });
+  const defaultRefreshTokens: NonNullable<DeviceConnectionHandler["refreshTokens"]> = async () => ({
+    accessToken: "<REDACTED_ACCESS_TOKEN_2>",
+  });
+  const defaultVerifyAndParseWebhook: DeviceWebhookHandler["verifyAndParseWebhook"] = async () => ({
+    externalAccountId: "demo-abc",
+    eventType: "demo.updated",
+    traceId: "trace-1",
+    jobs: [
+      {
+        kind: "resource",
+        payload: {
+          resourceId: "resource-1",
+        },
+      },
+    ],
+  });
+  const defaultExecuteJob: DeviceJobExecutor["executeJob"] = async () => ({});
+  const hasConnectionHandlerOverride = Object.hasOwn(overrides, "connectionHandler");
+  const hasWebhookHandlerOverride = Object.hasOwn(overrides, "webhookHandler");
+  const hasJobExecutorOverride = Object.hasOwn(overrides, "jobExecutor");
+  const buildConnectUrl = Object.hasOwn(overrides, "buildConnectUrl")
+    ? overrides.buildConnectUrl
+    : defaultBuildConnectUrl;
+  const exchangeAuthorizationCode = Object.hasOwn(overrides, "exchangeAuthorizationCode")
+    ? overrides.exchangeAuthorizationCode
+    : defaultExchangeAuthorizationCode;
+  const refreshTokens = Object.hasOwn(overrides, "refreshTokens")
+    ? overrides.refreshTokens
+    : defaultRefreshTokens;
+  const verifyAndParseWebhook = Object.hasOwn(overrides, "verifyAndParseWebhook")
+    ? overrides.verifyAndParseWebhook
+    : defaultVerifyAndParseWebhook;
+  const executeJob = Object.hasOwn(overrides, "executeJob")
+    ? overrides.executeJob
+    : defaultExecuteJob;
+  const createScheduledJobs = Object.hasOwn(overrides, "createScheduledJobs")
+    ? overrides.createScheduledJobs
+    : undefined;
+  const {
+    beginConnection,
+    completeConnection,
+    buildConnectUrl: _buildConnectUrl,
+    exchangeAuthorizationCode: _exchangeAuthorizationCode,
+    refreshTokens: _refreshTokens,
+    revokeAccess,
+    createScheduledJobs: _createScheduledJobs,
+    verifyAndParseWebhook: _verifyAndParseWebhook,
+    executeJob: _executeJob,
+    ...providerOverrides
+  } = overrides;
   const baseProvider: DeviceSyncProvider = {
     provider: "demo",
     descriptor: {
@@ -321,60 +425,71 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
         },
       },
     },
-    buildConnectUrl(context) {
-      return `https://example.test/oauth?state=${context.state}&redirect_uri=${encodeURIComponent(context.callbackUrl)}`;
-    },
-    async exchangeAuthorizationCode(_context, code) {
-      return {
-        externalAccountId: `demo-${code}`,
-        displayName: `Demo ${code}`,
-        scopes: ["offline", "read:data"],
-        metadata: {
-          connectedBy: code,
-        },
-        tokens: {
-          accessToken: "<REDACTED_ACCESS_TOKEN>",
-          refreshToken: "<REDACTED_REFRESH_TOKEN>",
-        } satisfies ProviderAuthTokens,
-        initialJobs: [
-          {
-            kind: "backfill",
-            payload: {
-              windowStart: "2026-01-01T00:00:00.000Z",
-            },
+    ...(hasConnectionHandlerOverride
+      ? { connectionHandler: providerOverrides.connectionHandler }
+      : {
+          connectionHandler: {
+            beginConnection: beginConnection ?? (async (input) => ({
+              authorizationUrl: buildConnectUrl
+                ? buildConnectUrl({
+                    state: input.state,
+                    callbackUrl: input.callbackUrl,
+                    scopes: input.scopes,
+                    now: input.now,
+                  })
+                : "",
+            })),
+            completeConnection: completeConnection ?? (async (input) => {
+              const callbackError = input.query.get("error")?.trim();
+              if (callbackError) {
+                throw deviceSyncError({
+                  code: "OAUTH_CALLBACK_REJECTED",
+                  message: "OAuth authorization was denied or canceled.",
+                  retryable: false,
+                  httpStatus: 400,
+                });
+              }
+              const code = input.query.get("code") ?? "";
+              if (!code) {
+                throw deviceSyncError({
+                  code: "OAUTH_CODE_MISSING",
+                  message: "OAuth callback is missing the authorization code.",
+                  retryable: false,
+                  httpStatus: 400,
+                });
+              }
+              if (!exchangeAuthorizationCode) {
+                throw new Error("Fake provider exchangeAuthorizationCode is not configured.");
+              }
+              return exchangeAuthorizationCode({
+                callbackUrl: input.callbackUrl,
+                state: input.state,
+                now: input.now,
+                grantedScopes: input.grantedScopes,
+              }, code);
+            }),
+            ...(refreshTokens ? { refreshTokens } : {}),
+            ...(revokeAccess ? { revokeAccess } : {}),
           },
-        ],
-        nextReconcileAt: "2026-03-24T00:00:00.000Z",
-      };
-    },
-    async refreshTokens() {
-      return {
-        accessToken: "<REDACTED_ACCESS_TOKEN_2>",
-      };
-    },
-    async verifyAndParseWebhook() {
-      return {
-        externalAccountId: "demo-abc",
-        eventType: "demo.updated",
-        traceId: "trace-1",
-        jobs: [
-          {
-            kind: "resource",
-            payload: {
-              resourceId: "resource-1",
-            },
+        }),
+    ...(hasWebhookHandlerOverride
+      ? { webhookHandler: providerOverrides.webhookHandler }
+      : verifyAndParseWebhook
+        ? { webhookHandler: { verifyAndParseWebhook } }
+        : {}),
+    ...(hasJobExecutorOverride
+      ? { jobExecutor: providerOverrides.jobExecutor }
+      : {
+          jobExecutor: {
+            ...(createScheduledJobs ? { createScheduledJobs } : {}),
+            executeJob: executeJob ?? defaultExecuteJob,
           },
-        ],
-      };
-    },
-    async executeJob() {
-      return {};
-    },
+        }),
   };
 
   return {
     ...baseProvider,
-    ...overrides,
+    ...providerOverrides,
   };
 }
 

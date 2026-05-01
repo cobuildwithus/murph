@@ -11,6 +11,8 @@ import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
 } from "../hosted-runner/control";
+import { buildStoredTokenBundle } from "../device-sync/agent-session-token-bundle";
+import { composeHostedRuntimeOAuthDeviceSyncAccount } from "../device-sync/internal-runtime";
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -1308,7 +1310,9 @@ async function revokeDeviceProvidersBestEffort(input: {
   for (const connection of input.connections) {
     const provider = controlPlane.registry.get(connection.provider);
 
-    if (!provider?.revokeAccess) {
+    const revokeAccess = provider?.connectionHandler?.revokeAccess;
+
+    if (!revokeAccess) {
       results.push({
         connectionId: connection.id,
         errorCode: null,
@@ -1336,7 +1340,23 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      await provider.revokeAccess(storedAccount);
+      const storedTokenBundle = buildStoredTokenBundle(storedAccount);
+
+      if (!storedTokenBundle) {
+        results.push({
+          connectionId: connection.id,
+          errorCode: null,
+          provider: connection.provider,
+          status: "warning",
+          warningCode: "CONNECTION_SECRET_MISSING",
+        });
+        continue;
+      }
+
+      await revokeAccess(composeHostedRuntimeOAuthDeviceSyncAccount({
+        connection: storedAccount,
+        tokenBundle: storedTokenBundle,
+      }));
       results.push({
         connectionId: connection.id,
         errorCode: null,
