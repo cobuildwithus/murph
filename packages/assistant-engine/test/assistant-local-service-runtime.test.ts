@@ -2138,6 +2138,83 @@ test('active-turn controller validates hook input before live steering it to the
   }
 })
 
+test('active-turn controller can notify every active turn in one vault', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    notifyAssistantActiveTurnInputsAvailableForVault,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const steer = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => ({
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Vault-level hook input',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Vault-level hook input',
+      transcriptText: 'Vault-level hook transcript',
+      userMessageContent: [
+        {
+          text: 'Vault-level hook input',
+          type: 'text',
+        },
+      ],
+    }),
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const otherController = createAssistantActiveTurnInputController({
+    admissionHook: async () => {
+      throw new Error('other vault should not be notified')
+    },
+    conversationKeys: ['channel:telegram|identity:identity-2|thread:thread-2'],
+    sessionId: 'session-other',
+    turnId: 'turn-other',
+    vault: '/vaults/other',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    providerSessionId: 'provider-session',
+    providerTurnId: 'provider-turn',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    await expect(
+      notifyAssistantActiveTurnInputsAvailableForVault({
+        vault: '/vaults/test',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        kind: 'accepted',
+        prompt: 'Vault-level hook input',
+      }),
+    ])
+    expect(steer).toHaveBeenCalledWith({
+      prompt: 'Vault-level hook input',
+      userMessageContent: [
+        {
+          text: 'Vault-level hook input',
+          type: 'text',
+        },
+      ],
+    })
+  } finally {
+    releaseLiveTurn()
+    controller.fail(new Error('active-turn controller vault notify test complete'))
+    controller.close()
+    otherController.close()
+  }
+})
+
 test('active-turn controller keeps boundary input behind in-flight live steer input', async () => {
   const {
     createAssistantActiveTurnInputController,

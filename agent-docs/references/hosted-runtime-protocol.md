@@ -60,6 +60,12 @@ keeps lease, in-flight invocation, alarm, and short-lived coordination metadata
 only. It does not persist queue history, per-message completion, outbox truth,
 assistant channel enablement state, or checkpoint recovery truth.
 
+When the Durable Object is idle, the persisted nudge starts the runner drive
+directly and keeps the alarm as recovery. When an invocation is active, runtime
+liveness heartbeats surface that input is available so the active-turn refresh
+path can import late mailbox rows; the alarm remains the durable backstop if the
+active path does not consume or commit them.
+
 The runtime reads `HostedWorkspace`, restores the encrypted local workspace,
 fetches mailbox rows after its checkpointed per-lane watermarks, stages decoded
 conversation rows as assistant input, checkpoints immediately after staging, and

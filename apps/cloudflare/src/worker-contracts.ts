@@ -44,8 +44,10 @@ export interface WorkerUserRunnerStubLike {
     userId: string;
   }): Promise<
     | {
+      inputAvailable: boolean;
       nextAlarmAt: string | null;
       ok: true;
+      pendingNudge: boolean;
     }
     | {
       ok: false;

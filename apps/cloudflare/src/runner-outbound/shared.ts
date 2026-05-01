@@ -24,8 +24,10 @@ interface RunnerOutboundUserRunnerStubLike extends WorkerBindUserRunnerStubLike 
     userId: string;
   }): Promise<
     | {
+      inputAvailable: boolean;
       nextAlarmAt: string | null;
       ok: true;
+      pendingNudge: boolean;
     }
     | {
       ok: false;

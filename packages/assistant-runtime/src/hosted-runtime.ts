@@ -3,6 +3,9 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  notifyAssistantActiveTurnInputsAvailableForVault,
+} from "@murphai/assistant-engine";
+import {
   normalizeHostedAssistantRuntimeConfig,
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
@@ -231,6 +234,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
   const livenessAbortController = new AbortController();
   let livenessRejectedReason: RuntimeLivenessRejectionReason | null = null;
+  let activeVaultRoot = options.vaultRoot;
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
   const assertRuntimeLiveness = () => {
     if (livenessRejectedReason) {
@@ -243,6 +247,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessRejectedReason = reason;
       livenessAbortController.abort(new HostedWorkspaceRuntimeLivenessRejectedError(reason));
     },
+    onInputAvailable: () =>
+      notifyAssistantActiveTurnInputsAvailableForVault({
+        signal: livenessAbortController.signal,
+        vault: activeVaultRoot,
+      }).then(() => undefined),
     port: runtime.platform.runtimeLivenessPort,
     requestId,
     signal: livenessAbortController.signal,
@@ -292,6 +301,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       livenessAbortController.signal,
     );
+    activeVaultRoot = restored.vaultRoot;
     assertRuntimeLiveness();
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,

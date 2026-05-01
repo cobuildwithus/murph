@@ -13,7 +13,6 @@ import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
   HostedEmailWorkerRequest,
 } from "../hosted-email.ts";
-import { enqueueHostedRunnerWake } from "../runner-wake-queue.ts";
 import {
   deleteHostedEmailRawMessage,
   readHostedEmailConfig,
@@ -212,36 +211,20 @@ export async function handleHostedEmailIngress(
 
   try {
     const stub = await resolveUserRunnerStub(env, route.userId);
-    const nudge = await stub.nudgeHostedRunner();
-    if (nudge.alreadyRunning) {
-      return;
-    }
-
-    await enqueueHostedRunnerWake({
-      component: "hosted.email",
-      details: buildHostedEmailIngressLogDetails({
-        eventId,
-        identityId: route.identityId,
-        reason: "runner-wake-queue",
-        routeAddress: route.routeAddress,
-        to: message.to,
-      }),
-      env,
-      userId: route.userId,
-    });
+    await stub.nudgeHostedRunner();
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "hosted.email",
       details: buildHostedEmailIngressLogDetails({
         eventId,
         identityId: route.identityId,
-        reason: "runner-wake-queue-setup-failed",
+        reason: "runner-nudge-failed",
         routeAddress: route.routeAddress,
         to: message.to,
       }),
       error,
       level: "warn",
-      message: "Hosted email runner wake queue setup failed after appending the canonical ingress event.",
+      message: "Hosted email runner nudge failed after appending the canonical ingress event.",
       phase: "wake.running",
       userId: route.userId,
     });
