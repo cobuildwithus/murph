@@ -82,7 +82,7 @@ export async function runHostedLocalE2eSuite(
 ): Promise<void> {
   const env = input.env ?? process.env;
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
-  const prepareRunnerBundle = input.prepareRunnerBundle === true;
+  const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
   const vitestEnv = buildHostedLocalVitestEnv({
     env,

@@ -31,6 +31,48 @@ describe("hosted-local harness", () => {
     ]);
   });
 
+  test("keeps root hosted-local scripts canonical", async () => {
+    const rootPackage = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const scripts = rootPackage.scripts ?? {};
+
+    expect(scripts["hosted-local"]).toBe(
+      "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
+    );
+    expect(scripts["dev"]).toBe("pnpm hosted-local up");
+    expect(scripts["test:e2e:hosted-local"]).toBe("pnpm hosted-local e2e");
+  });
+
+  test("keeps Cloudflare package hosted-local E2E surface generic", async () => {
+    const cloudflarePackage = JSON.parse(
+      await readFile("apps/cloudflare/package.json", "utf8"),
+    ) as { scripts?: Record<string, string> };
+    const scripts = cloudflarePackage.scripts ?? {};
+
+    expect(scripts["test:e2e:hosted-local"]).toBe(
+      "pnpm --dir ../.. hosted-local e2e",
+    );
+
+    const allowedLocalE2eScripts = new Set([
+      "test:e2e:local",
+      "test:e2e:hosted-local",
+      "test:e2e:workers:local",
+      "test:e2e:full-stack:local",
+      "test:e2e:smoke:local",
+      "test:e2e:runner-python:local",
+    ]);
+
+    const bespokeLocalE2eScripts = Object.keys(scripts).filter(
+      (name) =>
+        name.startsWith("test:e2e:") &&
+        name.endsWith(":local") &&
+        !allowedLocalE2eScripts.has(name),
+    );
+
+    expect(bespokeLocalE2eScripts).toEqual([]);
+  });
+
   test("resolves scenario aliases through one registry", () => {
     expect(resolveHostedLocalE2eScenarios("telegram")[0]?.name).toBe(
       "telegram-first-contact",

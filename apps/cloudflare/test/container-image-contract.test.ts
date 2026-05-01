@@ -611,25 +611,15 @@ describe("hosted runner container image contract", () => {
       "pnpm test:e2e:workers:local",
     );
     expect(packageJson.scripts?.["test:e2e:workers:local"]).toBe("pnpm test:workers");
-    expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain(
-      "pnpm runner:bundle:hosted-local &&",
+    expect(packageJson.scripts?.["test:e2e:hosted-local"]).toBe(
+      "pnpm --dir ../.. hosted-local e2e",
     );
-    expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain(
-      "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN=1",
-    );
-    expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
-    expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain(
-      "pnpm runner:bundle:hosted-local &&",
-    );
-    expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
-    expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain(
-      "pnpm runner:bundle:hosted-local &&",
-    );
-    expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
-    expect(packageJson.scripts?.["test:e2e:device-connect:local"]).toContain(
-      "pnpm runner:bundle:hosted-local &&",
-    );
-    expect(packageJson.scripts?.["test:e2e:device-connect:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
+    expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toBeUndefined();
+    expect(packageJson.scripts?.["test:e2e:telegram:local"]).toBeUndefined();
+    expect(packageJson.scripts?.["test:e2e:device-connect:local"]).toBeUndefined();
+    expect(packageJson.scripts?.["test:e2e:linq-webhook:local"]).toBeUndefined();
+    expect(packageJson.scripts?.["test:e2e:mailbox-platform-env:local"]).toBeUndefined();
+    expect(packageJson.scripts?.["test:e2e:first-contact:local"]).toBeUndefined();
     expect(packageJson.scripts?.["test:e2e:runner-python:local"]).toBe(
       "pnpm runner:docker:build && pnpm runner:docker:python-path",
     );
