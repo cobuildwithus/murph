@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
+import { MarkdownView } from "@/src/components/ui/markdown-view";
 import { SectionLabel } from "@/src/components/ui/section-label";
 import type {
   Expert,
@@ -587,20 +588,10 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
         <section className="flex flex-col gap-6 rounded-xl border border-secondary/25 bg-card/90 p-7">
           <SectionLabel>Why it works</SectionLabel>
           <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
-            <div className="flex max-w-3xl flex-col gap-5">
-              {whyItWorksParagraphs.map((paragraph, i) => (
-                <p
-                  key={i}
-                  className={
-                    i === 0
-                      ? "font-serif text-[19px]/7 text-foreground text-pretty"
-                      : "text-base/7 text-foreground text-pretty"
-                  }
-                >
-                  {paragraph}
-                </p>
-              ))}
-            </div>
+            <MarkdownView
+              content={whyItWorksParagraphs.join("\n\n")}
+              className="prose prose-neutral dark:prose-invert max-w-3xl text-pretty [&>h2]:font-serif [&>h2]:text-[19px]/7 [&>h2]:font-normal [&>p]:text-base/7"
+            />
             <MechanismCausalChain experimentId={experiment.id} />
           </div>
 
