@@ -13,6 +13,7 @@ export interface HostedRunnerSmokeResult {
   codexCommandDiscovered: boolean;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
   codexHostedShellMurphHelpBytes: number;
+  codexHostedShellPythonVersion: string;
   codexHostedShellVaultCliLlmsBytes: number;
   codexVersion: string;
   healthCommonsCatalogHash: string;
@@ -28,6 +29,7 @@ export interface HostedRunnerSmokeResult {
   operatorHomeRebound: boolean;
   pdfParserProviderId: string;
   pdfTextSha256: string;
+  pythonVersion: string;
   reportedVaultId: string;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
   vaultCliCommandDiscovered: boolean;
@@ -88,6 +90,10 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.codexHostedShellMurphHelpBytes,
       "Hosted runner smoke result.codexHostedShellMurphHelpBytes",
     ),
+    codexHostedShellPythonVersion: readPython3VersionString(
+      record.codexHostedShellPythonVersion,
+      "Hosted runner smoke result.codexHostedShellPythonVersion",
+    ),
     codexHostedShellVaultCliLlmsBytes: readPositiveFiniteNumber(
       record.codexHostedShellVaultCliLlmsBytes,
       "Hosted runner smoke result.codexHostedShellVaultCliLlmsBytes",
@@ -147,6 +153,10 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     pdfTextSha256: readNonEmptyString(
       record.pdfTextSha256,
       "Hosted runner smoke result.pdfTextSha256",
+    ),
+    pythonVersion: readPython3VersionString(
+      record.pythonVersion,
+      "Hosted runner smoke result.pythonVersion",
     ),
     reportedVaultId: readNonEmptyString(
       record.reportedVaultId,
@@ -235,6 +245,15 @@ function readNonEmptyString(value: unknown, label: string): string {
   const normalized = value.trim();
   if (normalized.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return normalized;
+}
+
+function readPython3VersionString(value: unknown, label: string): string {
+  const normalized = readNonEmptyString(value, label);
+  if (!/^Python\s+3\./u.test(normalized)) {
+    throw new TypeError(`${label} must be a Python 3 version string.`);
   }
 
   return normalized;

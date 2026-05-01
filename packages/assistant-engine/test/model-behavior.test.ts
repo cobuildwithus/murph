@@ -106,6 +106,12 @@ describe('assistant local PDF evidence guidance', () => {
       'Supported connect-link requests are handled by the hosted runtime before the model turn',
     )
     expect(prompt).toContain(
+      'Python is available for small local scripts when it makes the task easier',
+    )
+    expect(prompt).toContain(
+      'prefer canonical `vault-cli ... --format json` commands for Murph reads and writes',
+    )
+    expect(prompt).toContain(
       'If no real link is present in the current turn, say you cannot create one right now instead of fabricating a URL',
     )
     expect(prompt).toContain(

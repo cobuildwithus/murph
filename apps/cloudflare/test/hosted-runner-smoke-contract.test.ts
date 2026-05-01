@@ -12,6 +12,7 @@ const validHostedRunnerSmokeResult = {
   codexCommandDiscovered: true,
   codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
   codexHostedShellMurphHelpBytes: 1536,
+  codexHostedShellPythonVersion: "Python 3.11.2",
   codexHostedShellVaultCliLlmsBytes: 4096,
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
@@ -31,6 +32,7 @@ const validHostedRunnerSmokeResult = {
   operatorHomeRebound: true,
   pdfParserProviderId: "poppler.pdf",
   pdfTextSha256: "pdf-hash",
+  pythonVersion: "Python 3.11.2",
   reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
   schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
   vaultCliCommandDiscovered: true,
@@ -74,6 +76,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexCommandDiscovered: true,
       codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
       codexHostedShellMurphHelpBytes: 1536,
+      codexHostedShellPythonVersion: "Python 3.11.2",
       codexHostedShellVaultCliLlmsBytes: 4096,
       codexVersion: "codex-cli 0.125.0",
       murphCommandDiscovered: true,
@@ -81,6 +84,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       operatorHomeRebound: true,
       pdfParserProviderId: "poppler.pdf",
       pdfTextSha256: "pdf-hash",
+      pythonVersion: "Python 3.11.2",
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
       healthCommonsCatalogHash: "sha256:catalog",
       healthCommonsCliSearchBytes: 512,
@@ -153,6 +157,27 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexHostedShellMurphHelpBytes: 0,
     })).toThrow(
       "Hosted runner smoke result.codexHostedShellMurphHelpBytes must be a positive finite number.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      pythonVersion: "",
+    })).toThrow(
+      "Hosted runner smoke result.pythonVersion must be a non-empty string.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      pythonVersion: "Python 2.7.18",
+    })).toThrow(
+      "Hosted runner smoke result.pythonVersion must be a Python 3 version string.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexHostedShellPythonVersion: "not python",
+    })).toThrow(
+      "Hosted runner smoke result.codexHostedShellPythonVersion must be a Python 3 version string.",
     );
   });
 
