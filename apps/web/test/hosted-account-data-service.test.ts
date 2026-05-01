@@ -23,7 +23,7 @@ import {
   buildHostedMemberIdentityPrivateColumns,
   buildHostedMemberRoutingPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
-import { encryptHostedMailboxNullableString } from "@/src/lib/hosted-mailbox/encryption";
+import { encryptHostedMailboxPayloadString } from "@/src/lib/hosted-mailbox/encryption";
 import {
   buildHostedDataExport,
   deleteHostedAccountData,
@@ -625,15 +625,45 @@ function makeHostedAiUsageRowForTest(input: {
   };
 }
 
+async function encryptHostedMailboxPayloadForFixture(input: {
+  dedupeKey: string;
+  itemId: string;
+  kind: string;
+  lane: string;
+  laneSeq: bigint;
+  occurredAt: string;
+  userId: string;
+  value: unknown;
+}): Promise<string | null> {
+  return encryptHostedMailboxPayloadString({
+    dedupeKey: input.dedupeKey,
+    field: "hosted-mailbox-inline-payload",
+    itemId: input.itemId,
+    kind: input.kind,
+    lane: input.lane,
+    laneSeq: input.laneSeq,
+    occurredAt: input.occurredAt,
+    payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+    payloadStorage: "inline",
+    userId: input.userId,
+    value: JSON.stringify(input.value),
+  });
+}
+
 async function createHostedAccountDataExportPrisma(input: {
   aiUsageRows?: ReturnType<typeof makeHostedAiUsageRowForTest>[];
 } = {}) {
   const count = async () => 1;
   const memberId = "member_123";
-  const linqMailboxPayload = await encryptHostedMailboxNullableString({
-    field: "hosted-mailbox-inline-payload",
+  const linqMailboxPayload = await encryptHostedMailboxPayloadForFixture({
+    dedupeKey: "secret-dedupe-key-linq",
+    itemId: "mailbox-1",
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: 1n,
+    occurredAt: "2026-04-27T00:24:30.000Z",
     userId: memberId,
-    value: JSON.stringify({
+    value: {
       eventId: "mailbox-event-linq",
       kind: "conversation.message",
       message: {
@@ -665,12 +695,17 @@ async function createHostedAccountDataExportPrisma(input: {
         credentialId: "secret-credential-id",
       },
       userId: memberId,
-    }),
+    },
   });
-  const emailMailboxPayload = await encryptHostedMailboxNullableString({
-    field: "hosted-mailbox-inline-payload",
+  const emailMailboxPayload = await encryptHostedMailboxPayloadForFixture({
+    dedupeKey: "secret-dedupe-key-email",
+    itemId: "mailbox-2",
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: 2n,
+    occurredAt: "2026-04-27T00:24:45.000Z",
     userId: memberId,
-    value: JSON.stringify({
+    value: {
       eventId: "mailbox-event-email",
       kind: "conversation.message",
       message: {
@@ -681,12 +716,17 @@ async function createHostedAccountDataExportPrisma(input: {
       },
       occurredAt: "2026-04-27T00:24:45.000Z",
       userId: memberId,
-    }),
+    },
   });
-  const systemMailboxPayload = await encryptHostedMailboxNullableString({
-    field: "hosted-mailbox-inline-payload",
+  const systemMailboxPayload = await encryptHostedMailboxPayloadForFixture({
+    dedupeKey: "secret-dedupe-key-system",
+    itemId: "mailbox-3",
+    kind: "assistant.notification.requested",
+    lane: "system",
+    laneSeq: 1n,
+    occurredAt: "2026-04-27T00:25:15.000Z",
     userId: memberId,
-    value: JSON.stringify({
+    value: {
       eventId: "mailbox-event-system",
       kind: "assistant.notification.requested",
       notification: {
@@ -707,7 +747,7 @@ async function createHostedAccountDataExportPrisma(input: {
       },
       occurredAt: "2026-04-27T00:25:15.000Z",
       userId: memberId,
-    }),
+    },
   });
   const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
     memberId,
