@@ -44,7 +44,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and, by default,
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, and timestamps. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; bundle refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
 - Hosted raw email payloads now live under a durable encrypted prefix, are deleted after terminal wake cleanup when possible, and also carry a 1-hour R2 lifecycle backstop under `hosted-email/messages/` if eager cleanup misses them.
-- Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-secrets blobs, and queue-local execution sidecars. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
+- Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, and runner-secrets blobs. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 
 ## Worker Contract
 
@@ -53,7 +53,6 @@ Bindings:
 - `USER_RUNNER`
 - `RUNNER_CONTAINER`
 - `BUNDLES`
-- `RUNNER_WAKE_QUEUE` Queue consumer binding for legacy queued runner wake delivery and operational fallback; normal nudges drive through the per-user Durable Object plus alarm recovery
 - `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request
 - optional `HOSTED_EMAIL` native `send_email` binding for outbound hosted email
 

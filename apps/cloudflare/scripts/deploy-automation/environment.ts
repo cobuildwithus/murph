@@ -60,7 +60,6 @@ export interface HostedDeployAutomationEnvironment {
   runnerCommitTimeoutMs: string;
   runnerReadyTimeoutMs: string;
   runnerTimeoutMs: string;
-  runnerWakeQueueName: string;
   traceHeadSamplingRate: number;
   webControlTimeoutMs: string;
   workerName: string;
@@ -123,8 +122,6 @@ export function readHostedDeployAutomationEnvironment(
       "600000",
       "CF_RUNNER_TIMEOUT_MS",
     ),
-    runnerWakeQueueName: normalizeOptionalString(source.CF_RUNNER_WAKE_QUEUE)
-      ?? `${workerName}-runner-wake`,
     traceHeadSamplingRate: normalizeSamplingRate(
       source.CF_TRACE_HEAD_SAMPLING_RATE,
       DEFAULT_TRACE_HEAD_SAMPLING_RATE,
