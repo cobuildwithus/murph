@@ -223,13 +223,13 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
           };
         },
         async getStoredConnectionAccountForUser() {
-          return null;
+          return createProviderConfigStoredConnectionRecord();
         },
-        async getConnectionRecordForUser() {
+        getConnectionRecordForUser: vi.fn(async () => {
           return {
             credentialKind: "provider_config",
           };
-        },
+        }),
       },
     );
     const registry = createDeviceSyncRegistry([createWhoopProvider()]);
@@ -242,6 +242,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     await expect(service.exportTokenBundle(SESSION, "conn-1")).rejects.toMatchObject({
       code: "OAUTH_TOKENS_REQUIRED",
     });
+    expect(store.getConnectionRecordForUser).not.toHaveBeenCalled();
     expect(createTokenAudit).not.toHaveBeenCalled();
   });
 
@@ -260,7 +261,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       {
         createTokenAudit,
         async getStoredConnectionAccountForUser() {
-          return null;
+          return createProviderConfigStoredConnectionRecord();
         },
         async withConnectionRefreshLock<TResult>(
           _connectionId: string,
@@ -633,6 +634,24 @@ function createConnectionRecord() {
     tokenVersion: 2,
     createdAt: new Date("2026-03-20T00:00:00.000Z"),
     updatedAt: new Date("2026-03-20T00:00:00.000Z"),
+  };
+}
+
+function createProviderConfigStoredConnectionRecord() {
+  const connection = createConnectionRecord();
+
+  return {
+    ...connection,
+    accessTokenExpiresAt: null,
+    credential: {
+      kind: "provider_config" as const,
+      credentialMetadata: {},
+      providerConfigKey: "junction",
+    },
+    keyVersion: null,
+    provider: "junction",
+    refreshToken: null,
+    tokenVersion: null,
   };
 }
 

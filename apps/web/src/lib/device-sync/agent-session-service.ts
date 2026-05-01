@@ -118,7 +118,12 @@ export class HostedDeviceSyncAgentSessionService {
     if (!storedAccount) {
       const record = await this.store.getConnectionRecordForUser(session.userId, connectionId);
       throwIfHostedTokenBundleUnsupported(record, connectionId);
+    } else {
+      throwIfHostedTokenBundleUnsupported({
+        credentialKind: storedAccount.credential.kind,
+      }, connectionId);
     }
+
     const tokenBundle = buildTokenExport(
       requireHostedDeviceSyncStoredTokenBundle({
         connectionId,
@@ -186,6 +191,9 @@ export class HostedDeviceSyncAgentSessionService {
           httpStatus: 409,
         });
       }
+      throwIfHostedTokenBundleUnsupported({
+        credentialKind: currentAccount.credential.kind,
+      }, connectionId);
 
       const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
         connectionId,
