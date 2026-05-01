@@ -684,6 +684,79 @@ test("Junction accepts nested webhook user ids and comma-delivered Svix signatur
   });
 });
 
+test("Junction accepts user ids nested inside webhook envelopes", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const cases: Array<{ body: Record<string, unknown>; expectedUserId: string; messageId: string }> = [
+    {
+      body: {
+        event_type: "provider.connection.created",
+        data: {},
+        payload: {
+          user: {
+            id: "junction-user-root-payload",
+          },
+        },
+      },
+      expectedUserId: "junction-user-root-payload",
+      messageId: "msg_root_payload_user",
+    },
+    {
+      body: {
+        event_type: "provider.connection.created",
+        data: {
+          payload: {
+            user: {
+              id: "junction-user-data-payload",
+            },
+          },
+        },
+      },
+      expectedUserId: "junction-user-data-payload",
+      messageId: "msg_data_payload_user",
+    },
+    {
+      body: {
+        event_type: "provider.connection.created",
+        data: {
+          event: {
+            message: {
+              user: {
+                id: "junction-user-event-message",
+              },
+            },
+          },
+        },
+      },
+      expectedUserId: "junction-user-event-message",
+      messageId: "msg_event_message_user",
+    },
+  ];
+
+  for (const { body, expectedUserId, messageId } of cases) {
+    const webhook = createJunctionSvixWebhook({
+      body,
+      messageId,
+      timestamp: "1775174400",
+    });
+
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+
+    assert.equal(parsed.externalAccountId, expectedUserId);
+    assert.deepEqual(parsed.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
+  }
+});
+
 test("Junction rejects webhooks with conflicting signed payload user ids", async () => {
   const provider = createJunctionProvider(
     async (input) => {
@@ -698,7 +771,13 @@ test("Junction rejects webhooks with conflicting signed payload user ids", async
       event_type: "provider.connection.created",
       user_id: "junction-user-top",
       data: {
-        user_id: "junction-user-data",
+        event: {
+          message: {
+            user: {
+              id: "junction-user-deep",
+            },
+          },
+        },
       },
     },
     timestamp: "1775174400",
