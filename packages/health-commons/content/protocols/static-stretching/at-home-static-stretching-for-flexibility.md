@@ -523,12 +523,12 @@ protocol:
   - Measure the chosen ROM test at the same time of day and in the same warm-up state at least weekly, and preferably 2–3 times per week if the measure is quick.
   - Log completed holds, total hold seconds, intensity, whether the sensation stayed mild and non-painful, symptoms during and after the session, whether symptoms settled after stopping, support/position used, recent or unusually strenuous exercise, severe soreness/swelling/weakness, illness, pain/injury/rehab changes, and any measurement setup changes.
   tips:
-  - Start with one target area; adding too many areas makes it harder to tell what worked and raises session burden.
-  - Use the same stretch position each time rather than mixing several different techniques mid-run.
-  - A small amount of ordinary warm-up or walking before measuring is acceptable only if you repeat it the same way at baseline and follow-up.
-  - For hamstrings/posterior-chain, toe-touch or sit-and-reach is a practical default; for ankle/calf, use knee-to-wall distance; for shoulder, use a repeated reach measure only if shoulder stretching is part of the routine.
-  - High fall-risk, dizzy, frail, or floor-limited users should use seated or fully supported positions and avoid balance-challenging stretches unless a safer guided branch is created.
-  - Keep pain treatment, injury rehab, athletic warm-up changes, foam rolling, dynamic stretching, PNF/contract-relax, yoga, and strength-through-range work separate from this run.
+  - One target area at a time; too many areas blur attribution and raise burden.
+  - Same stretch position each session — do not mix techniques mid-run.
+  - Pre-measurement warm-up is fine only if repeated identically at baseline and follow-up.
+  - "Hamstrings: toe-touch or sit-and-reach. Ankle/calf: knee-to-wall. Shoulder: repeated reach if stretching that area."
+  - "High fall-risk, dizzy, frail, or floor-limited? Use seated or fully supported positions."
+  - Keep rehab, foam rolling, PNF, yoga, dynamic stretching, and strength-through-range separate from this run.
   keepInMind:
   - The strongest evidence is for measured ROM/flexibility, not for preventing injuries, treating pain, correcting posture, improving performance, or producing permanent gains after stopping.
   - 'The starter dose is a conservative home translation from heterogeneous studies: 2–3 × 30-second holds on 5 days/week gives about 5–7.5 minutes per target area/week, while about 10 minutes per target muscle group per week is a group-level chronic dose plateau from a static-only meta-regression—not a guarantee or required minimum for every person.'
@@ -1856,16 +1856,28 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - sharp, radiating, neurologic, new, worsening, persistent, or unexplained pain
-  - numbness, tingling, paresthesia, new weakness, reflex changes, gait or hand clumsiness, or progressive neurologic symptoms
-  - diagnosed or suspected hEDS/EDS, symptomatic hypermobility, recurrent subluxations or dislocations, or unstable joints
-  - current pregnancy or postpartum status; use a pregnancy/postpartum-specific branch, and stop activity for pregnancy/postpartum warning signs
-  - new or changing low back pain, sciatica-like radiation, progressive painful or function-limiting shoulder restriction, plantar heel or foot pain, suspected hip flexor strain, or any pain condition the user hopes to treat
-  - recent or uncleared surgery, repaired tendon or soft-tissue injury, Achilles/calf repair, clinician-imposed ROM limits, or current rehabilitation plan
-  - high fall risk, frailty, dizziness, balance limits, or floor limitations unless the run is converted to seated or fully supported positions with no balance-challenging stretches
-  - severe post-exercise muscle pain, swelling, weakness, dark urine, systemic symptoms, or severe symptoms after unusually strenuous exercise
-  - forceful partner-applied, manual, assisted, externally loaded, pain-seeking, or extreme-range stretching
-  - known cardiovascular, metabolic, or renal disease with concerning symptoms, or plans to combine this with higher-intensity exercise
+  - sharp_radiating_or_unexplained_pain
+  - neurologic_symptoms_or_new_weakness
+  - numbness_tingling_or_paresthesia
+  - diagnosed_or_suspected_eds_hypermobility
+  - recurrent_subluxations_or_unstable_joints
+  - pregnancy_or_postpartum
+  - new_or_changing_low_back_pain
+  - sciatica_like_radiation
+  - progressive_shoulder_restriction
+  - plantar_heel_or_foot_pain
+  - suspected_muscle_or_tendon_strain
+  - recent_or_uncleared_surgery
+  - repaired_tendon_or_soft_tissue_injury
+  - clinician_imposed_rom_limits
+  - current_rehabilitation_plan
+  - high_fall_risk_or_frailty
+  - dizziness_or_balance_limits
+  - severe_post_exercise_muscle_pain
+  - dark_urine_or_systemic_symptoms
+  - forceful_or_pain_seeking_stretching
+  - externally_loaded_or_extreme_range
+  - cardiovascular_metabolic_or_renal_disease
   stopIf:
   - sharp pain, sudden pull, popping sensation, or strain-like symptoms
   - radiating pain, numbness, tingling, paresthesia, new weakness, reflex change, gait/hand-clumsiness symptoms, or progressive neurologic symptoms
@@ -1878,9 +1890,9 @@ safety:
   - the protocol creates unsafe balance demands, anxiety, fixation, or burden that outweighs the benefit
   notes:
   - Stretch at mild tension or slight discomfort, not pain.
-  - Supported or seated positions are preferred when balance is uncertain; chair sit-and-reach is the default alternative for older, fall-risk, dizzy, or floor-limited users.
-  - Clinical, pregnancy/postpartum, hypermobility, neurologic, post-surgical, severe post-exertion, fall-risk, and pain-treatment contexts are outside the ordinary unsupervised starter variant unless appropriately guided.
-  - Absence of adverse-event reporting in many trials is not proof of safety for forced, clinical, high-risk, or mismatched contexts.
+  - Use seated or supported positions when balance is uncertain.
+  - Clinical, pregnancy, hypermobility, neurologic, post-surgical, and fall-risk contexts need guidance first.
+  - No adverse-event reports in trials does not prove safety for forced or high-risk use.
 ---
 
 At Home Static Stretching is a simple static-hold routine for testing one practical question: **did a repeated home stretching dose improve the ROM measure I chose before starting?**

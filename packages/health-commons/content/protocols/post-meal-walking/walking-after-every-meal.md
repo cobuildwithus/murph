@@ -450,12 +450,12 @@ protocol:
   - Pregnancy, gestational diabetes, type 1 diabetes, recurrent hypoglycemia, frailty, falls, meal-related dizziness, suspected postprandial hypotension, neuropathy or foot ulcers, and unstable cardiac or respiratory symptoms are clinician-guidance contexts rather than routine Murph self-experiment contexts.
   - Keep the walk gentle if reflux, nausea, bloating, or heavy-meal discomfort is present; do not use vigorous post-meal exercise as a digestive or reflux treatment.
   tips:
-  - 'Indoor walking counts: hallway laps, treadmill walking, grocery-store loops, office loops, or pacing during a phone call are acceptable if safe.'
-  - Attach the walk to an existing cue such as clearing dishes, taking out recycling, walking a dog, or closing lunch with a calendar reminder.
-  - Keep meals, caffeine, alcohol, sleep timing, new supplements, and other exercise as stable as reasonably possible during the test window.
-  - Use well-lit routes with safe footing. Footwear and visibility matter more than hitting a perfect start minute.
-  - For reflux-prone users, choose upright gentle walking and avoid bending, lifting, or high-intensity effort immediately after eating.
-  - A longer 20–30 minute walk can be an escalation, but log it as a longer-dose variation rather than blending it into the default 10–15 minute test.
+  - 'Indoor walking counts: hallway laps, treadmill, office loops, or pacing a phone call.'
+  - Attach the walk to an existing cue — clearing dishes, taking out recycling, walking the dog.
+  - Hold meals, caffeine, alcohol, sleep timing, supplements, and other exercise stable during the test.
+  - Well-lit routes, safe footing — footwear and visibility matter more than a perfect start minute.
+  - Reflux-prone? Stay upright and gentle; avoid bending, lifting, or intensity right after eating.
+  - A 20-30 min walk is an escalation — log it as a longer-dose variation, not the default test.
   keepInMind:
   - The best direct evidence is for post-meal glucose excursions, especially in adults with type 2 diabetes or impaired-glucose-tolerance risk; general adult and long-term outcome evidence is less certain.
   - CGM meal windows, post-meal peaks, and meal-level iAUC are better test targets than a vague all-day average, but all CGM interpretation depends on meal content, timing, medication context, sensor behavior, sleep, stress, and other activity.
@@ -1558,14 +1558,21 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - insulin, sulfonylurea, meglitinide, or other glucose-lowering medication with low-glucose risk
-  - type 1 diabetes, recurrent hypoglycemia, hypoglycemia unawareness, or recent severe lows
-  - pregnancy, gestational diabetes, or pre-existing diabetes in pregnancy
-  - older/frail users with meal-related dizziness, syncope, falls, very low blood pressure, autonomic dysfunction, or suspected postprandial hypotension
-  - active foot ulcer, foot wound, severe foot pain, neuropathy with loss of protective sensation, unsafe footwear, or balance/mobility limitations
-  - unstable chest pain, unexplained shortness of breath, fainting, arrhythmia symptoms, or clinician advice to avoid unsupervised activity
-  - severe reflux, vomiting, abdominal pain, or GI symptoms that worsen with movement
-  - unsafe walking environment, poor lighting, traffic exposure, weather hazards, or poor footing
+  - glucose_lowering_medication_with_hypo_risk
+  - type_1_diabetes_or_recurrent_hypoglycemia
+  - hypoglycemia_unawareness_or_recent_severe_lows
+  - pregnancy_or_gestational_diabetes
+  - pre_existing_diabetes_in_pregnancy
+  - postprandial_hypotension_or_meal_syncope
+  - frailty_falls_or_autonomic_dysfunction
+  - active_foot_ulcer_wound_or_severe_foot_pain
+  - neuropathy_with_loss_of_protective_sensation
+  - unsafe_footwear_or_balance_limitations
+  - unstable_chest_pain_or_arrhythmia_symptoms
+  - unexplained_shortness_of_breath_or_fainting
+  - clinician_advice_to_avoid_unsupervised_activity
+  - severe_reflux_vomiting_or_gi_symptoms
+  - unsafe_walking_environment_or_poor_footing
   stopIf:
   - measured or symptomatic low glucose, confusion, shakiness, sweating, weakness, or need for rescue carbs
   - chest pain or pressure, faintness, severe dizziness, near-fall, palpitations, severe shortness of breath, neurologic symptoms, or unsafe pain
@@ -1574,9 +1581,9 @@ safety:
   - unsafe route, weather, footing, visibility, or traffic conditions
   - repeated symptom worsening, anxiety, or conflict with clinician guidance
   notes:
-  - This is a wellness self-experiment template, not a diabetes treatment plan or medication-adjustment protocol.
-  - Safety boundaries deliberately exceed efficacy certainty because low-glucose, fall, foot, pregnancy/GDM, and postprandial-hypotension risks can matter even when the walking dose is short.
-  - For users without glucose-risk context, the main practical safety risks are route safety, falls, GI discomfort, foot problems, and overinterpreting noisy CGM curves; direct adverse-event evidence is limited and should not be turned into broad safety reassurance.
+  - Wellness experiment template, not a diabetes treatment or medication-adjustment plan.
+  - Safety boundaries exceed efficacy certainty — hypo, fall, foot, and GDM risks matter even at short walking doses.
+  - Without glucose-risk context, main risks are route safety, falls, GI, foot problems, and overinterpreting noisy CGM data.
 ---
 Walking After Every Meal is the Murph canonical post-meal walking experiment: take a short, gentle walk after each main meal and test whether meal-window glucose response changes.
 

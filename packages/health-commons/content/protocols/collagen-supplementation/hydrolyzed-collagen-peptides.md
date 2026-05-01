@@ -467,11 +467,11 @@ protocol:
   - Log daily grams taken, missed doses, product/lot identity, GI symptoms, allergy/rash symptoms, urinary or stone-warning symptoms, and major confounders.
   - Review the primary outcome weekly and at the target-specific endpoint window; mark a new experiment if the product, dose, source, or active coingredients change.
   tips:
-  - Plain HCP products and multi-ingredient beauty blends are not interchangeable; active coingredients should trigger clinician/pharmacist guidance or a separate protocol.
-  - For marine-source products, prefer a batch COA or credible third-party contaminant test that includes metals/metalloids.
-  - If the product contains biotin, pause before thyroid, cardiac/troponin, endocrine, hormone, or other relevant lab testing and follow lab or clinician instructions.
-  - Count collagen as protein exposure, but do not use collagen as the main protein source or as a meal replacement.
-  - Keep training load, rehab, skincare, sun/weather, diet/protein intake, analgesic use, and new medications/supplements stable where possible.
+  - Plain HCP and multi-ingredient blends are not interchangeable — active coingredients need separate guidance.
+  - Marine-source? Prefer a batch COA or third-party test covering metals/metalloids.
+  - Biotin in the product? Pause before thyroid, troponin, or hormone labs.
+  - Count collagen as protein, but never as the main protein source or a meal replacement.
+  - Hold training, skincare, sun, diet, analgesics, and new supplements stable during the test.
   keepInMind:
   - Skin evidence is more directly aligned with consumer HCP use than joint/OA, tendon/loading, exercise recovery, body-composition, or bone contexts, which are heterogeneous or population-specific.
   - Bioavailability and mechanistic studies support plausibility but do not prove that a user-specific endpoint will improve.
@@ -1521,18 +1521,26 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - prior reaction to collagen, gelatin, gummies, marshmallows, capsules, bovine/porcine/fish/marine ingredients, or the same product
-  - fish allergy when the product is fish/marine-derived or source is unclear
-  - Crustacean shellfish allergy when the product is marine-source or source/cross-contact controls are unclear, unless the manufacturer confirms source and cross-contact controls and a clinician/allergist clears use
-  - alpha-gal syndrome or reactions to mammalian meat, bovine/porcine gelatin, or mammal-derived capsules/excipients unless an allergist/clinician clears the specific product
-  - CKD, transplant history, dialysis, clinician-prescribed protein restriction, recurrent stones, calcium-oxalate stones, hyperoxaluria, reduced/uncertain kidney function, or kidney-related diet advice without clinician guidance
-  - pregnant, trying to conceive, breastfeeding, child/adolescent use, or other higher-safety-threshold context
-  - prescription medications, active medical care, immune/liver/GI malabsorption/cancer/eating-disorder concerns, or a medically supervised diet
-  - product contains biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, or other active ingredients beyond HCP
-  - upcoming thyroid, cardiac/troponin, endocrine, hormone, or other clinical lab tests, especially if the product contains biotin
-  - active wound, burn, pressure injury, recent surgery, fragility fracture, frailty, malnutrition, or clinician-directed nutrition plan
-  - product lacks grams per serving, source species/category, full ingredient list, allergen information, serving instructions, manufacturer, or lot/batch information
-  - product is recalled, seal is damaged, label is inconsistent, source is unclear, or contamination/adulteration concern exists
+  - prior_reaction_to_collagen_or_gelatin
+  - fish_allergy_with_marine_source
+  - shellfish_allergy_with_marine_source
+  - alpha_gal_syndrome
+  - kidney_disease_or_transplant
+  - dialysis_or_protein_restriction
+  - recurrent_stones_or_hyperoxaluria
+  - pregnancy_or_trying_to_conceive
+  - breastfeeding
+  - child_or_adolescent
+  - prescription_medications_or_active_care
+  - eating_disorder_or_supervised_diet
+  - immune_liver_gi_or_cancer_concerns
+  - product_contains_biotin_or_extras
+  - upcoming_clinical_lab_tests
+  - active_wound_burn_or_pressure_injury
+  - recent_surgery_or_fragility_fracture
+  - frailty_or_malnutrition
+  - product_missing_label_information
+  - product_recalled_or_seal_damaged
   stopIf:
   - hives with systemic symptoms, swelling of lips/tongue/face/throat, throat tightness, wheezing, shortness of breath, dizziness/fainting, or repeated vomiting
   - painful or widespread red-purple rash, blistering, peeling skin, fever with rash, mouth sores, eye pain/redness, genital sores, or facial swelling
@@ -1540,15 +1548,15 @@ safety:
   - upcoming or active lab testing where the product contains biotin; pause and follow lab/clinician instructions
   - contamination concern, damaged seal, recall, wrong product, label inconsistency, source/allergen uncertainty, or unexpected serious reaction
   notes:
-  - 'Dietary supplements are not FDA-approved before marketing; manufacturer responsibility, label review, and adverse-event reporting are product-specific safety context.'
-  - 'Short-term tolerability reports do not eliminate allergy, GI, product-quality, or population-specific risks.'
-  - 'Fish/marine collagen and gelatin allergy gates are supported by fish-collagen and fish-gelatin case evidence plus FDA food-allergen labeling context.'
-  - 'Mammalian-source and alpha-gal gates are supported by bovine-collagen allergy case evidence and CDC alpha-gal product/management guidance.'
-  - 'Clinical wound, burn, pressure-injury, fragility-fracture, frailty, malnutrition, kidney/protein-restriction, pregnancy/lactation, child/adolescent, and supervised nutrition contexts should be routed to clinical guidance before unsupervised experimentation.'
-  - 'Recurrent-stone or hyperoxaluria caution is mechanistic/safety-context only; do not convert it into a general disease claim for healthy users.'
-  - 'Biotin-containing collagen or beauty blends require lab-test caution, especially around thyroid, cardiac/troponin, endocrine, and hormone testing.'
-  - 'Collagen should be counted as protein exposure but not used as a main/sole protein or meal replacement; collagen is incomplete protein and dose changes are confounders.'
-  - 'Marine-source contaminant and lot-level concerns are product-quality gates, not evidence that all marine HCP is unsafe.'
+  - Supplements are not FDA-approved before marketing — label review and quality are on you.
+  - Short-term tolerability does not rule out allergy, GI, or product-quality risks.
+  - Fish/marine collagen allergy gates rest on case evidence and FDA allergen labeling.
+  - Alpha-gal gates rest on bovine-collagen cases and CDC alpha-gal guidance.
+  - Clinical contexts — wounds, fractures, frailty, kidney, pregnancy, child — need clinician guidance first.
+  - Stone/hyperoxaluria caution is mechanistic context, not a disease claim for healthy users.
+  - Biotin in the product? Pause before thyroid, troponin, or hormone labs.
+  - Count collagen as protein but never as the main source or a meal replacement.
+  - Marine-source contaminant concerns are product-quality gates, not a blanket risk.
 ---
 
 # Hydrolyzed Collagen Peptides

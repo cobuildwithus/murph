@@ -283,11 +283,11 @@ protocol:
     - "Review weekly trends in wake-time variability, days inside the window, sleep duration, sleepiness, naps, and confounders rather than judging single nights."
     - "Safety overrides that protect sleep opportunity, illness recovery, drowsy-driving prevention, or safety-sensitive work should be logged as valid exceptions, not counted as nonadherence."
   tips:
-    - "Make the first target realistic rather than aspirational; a later consistent window is safer than an early window that creates sleep debt."
-    - "Pair the wake target with a bedtime or wind-down guardrail so consistency does not silently become sleep restriction."
-    - "Use a wearable for convenience if available, but keep a simple sleep diary field for final wake time and time out of bed."
-    - "Keep caffeine timing, alcohol, late screens or bright light, naps, training load, stress, and travel as stable as reasonably possible while testing."
-    - "Weekends can use the same window when sleep opportunity is adequate, but recovery sleep wins when weekday sleep has been too short."
+    - "Realistic beats aspirational — a later consistent window is safer than one that creates sleep debt."
+    - "Pair wake target with a bedtime guardrail so consistency does not become sleep restriction."
+    - "Wearable for convenience, but keep a diary field for final wake time and time out of bed."
+    - "Hold caffeine, alcohol, screens, naps, training, stress, and travel stable during the test."
+    - "Weekends can match, but recovery sleep wins when weekday sleep was too short."
   keepInMind:
     - "This is not a treatment for chronic insomnia, sleep apnea, narcolepsy, circadian rhythm sleep-wake disorders, bipolar mood destabilization, or shift-work fatigue."
     - "The strongest direct source used both bedtime and wake-time windows, so evidence for wake-time-only effects is limited."
@@ -872,12 +872,16 @@ researchLandscape:
 safety:
   cautionLevel: "moderate"
   avoidOrGetClinicianGuidance:
-    - "severe or chronic insomnia, or current CBT-I/sleep restriction treatment without clinician guidance"
-    - "suspected obstructive sleep apnea, narcolepsy, central hypersomnolence, or persistent excessive daytime sleepiness"
-    - "delayed sleep-wake phase disorder or another circadian rhythm sleep-wake disorder needing phase-shift care"
-    - "bipolar disorder, recent mania or hypomania, or mood destabilization with sleep loss"
-    - "rotating shift work, long work hours, drowsy commutes, or safety-sensitive duties that conflict with a single wake window"
-    - "adolescents whose school start time or family context would force inadequate sleep opportunity"
+    - severe_or_chronic_insomnia
+    - current_cbti_or_sleep_restriction_tx
+    - suspected_obstructive_sleep_apnea
+    - narcolepsy_or_central_hypersomnolence
+    - circadian_rhythm_sleep_wake_disorder
+    - bipolar_or_mania_history
+    - mood_destabilization_with_sleep_loss
+    - rotating_shift_work
+    - safety_sensitive_duties_with_drowsiness
+    - adolescent_with_forced_early_start
   stopIf:
     - "the wake window repeatedly causes short sleep or worsening daytime sleepiness"
     - "you are sleepy before driving, commuting, operating machinery, or safety-sensitive work"
@@ -885,8 +889,8 @@ safety:
     - "mania, hypomania, risky activation, severe irritability, or mood destabilization emerges"
     - "illness, travel, caregiving, shift work, or acute stress makes the target unsafe or uninterpretable"
   notes:
-    - "Safety overrides adherence. Recovery sleep after short sleep is not a protocol failure."
-    - "This page does not make seizure-specific claims because the extraction did not identify source-supported seizure guidance for this protocol."
+    - "Safety overrides adherence — recovery sleep after short sleep is not a failure."
+    - "No seizure-specific claims; extraction found no source-supported seizure guidance here."
 ---
 
 ## What this tests

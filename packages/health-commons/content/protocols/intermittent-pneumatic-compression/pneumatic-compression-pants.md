@@ -198,11 +198,11 @@ protocol:
   - Safety screening and stop rules are stronger than efficacy claims because direct recovery trials do not provide a robust consumer adverse-event denominator.
   - Use clinician guidance before starting if any relevant medical condition, medication, recent surgery/injury, sensory issue, skin issue, unexplained swelling, or clot/travel-risk context makes compression risk uncertain.
   tips:
-  - Use the same device and settings during the intervention so the personal signal is not confounded by changing the dose.
-  - Pair each session with a simple 0–10 soreness or leg-heaviness rating and a 0–10 perceived-recovery or readiness rating.
-  - Avoid stacking a new massage routine, cold plunge, sauna, aggressive stretching, supplement, or major training-load change during the test window.
-  - If a session feels too intense, lower pressure or stop; higher pressure is not a proven better dose.
-  - For travel or prolonged sitting, this protocol is comfort-only. It does not replace walking/mobility breaks, calf exercises, prescribed stockings, anticoagulation, or a clinician-directed VTE plan; high-risk travelers should ask a clinician before relying on any compression strategy.
+  - Same device and settings throughout — changing the dose confounds the signal.
+  - Rate soreness (0-10) and perceived recovery (0-10) with each session.
+  - No new massage, cold plunge, sauna, aggressive stretching, supplement, or major load change during the test.
+  - Too intense? Lower pressure or stop — higher pressure is not proven better.
+  - For travel or prolonged sitting this is comfort-only, not a VTE plan replacement.
   keepInMind:
   - The direct evidence is mixed and strongest for subjective soreness or perceived recovery, not for guaranteed performance, muscle-damage, biomarker, wearable-recovery, or inflammation changes.
   - Most direct studies used athletic or healthy post-exercise settings; disease, travel-risk, and hospital IPC evidence belongs to separate supervised branches.
@@ -868,13 +868,45 @@ researchLandscape:
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
-  - Known, suspected, or prior DVT/PE; acute thrombophlebitis or active phlebitis; unexplained calf pain; one-sided swelling/warmth/redness; chest pain; coughing blood; fainting; unexplained shortness of breath; known thrombophilia or clotting disorder; or a clinician-directed clot-prevention plan.
-  - Acute pulmonary edema, cardiopulmonary edema, acute or decompensated heart failure, edema from congestive heart failure, severe arterial disease, PAD/CLTI, acute limb ischemia, severe arteriosclerosis/ischemic vascular disease, severe/uncontrolled hypertension, or acute/severe heart, liver, or kidney disease.
-  - Active infection/cellulitis/erysipelas/phlegmon, active phlebitis, open wound, leg ulcer, burn, blistering dermatosis, skin rash, local tissue inflammation, fragile skin, tumor/cancerous lesion near the garment site, lymphangiosarcoma, or any wound/lesion/infection under or near the garment.
-  - Neuropathy or reduced sensation, abnormal pressure sensitivity, medicines that alter sensation or alertness, inability to reliably feel symptoms, inability to understand instructions, or inability to stop and remove the garment quickly.
-  - Recent surgery, direct pressure over a surgical site or hardware, recent skin graft or vascular bypass/graft in the affected area, immobilization, cast/splint, fracture, dislocation, major injury, severe osteopenia/osteoporosis or bone fragility, suspected compartment syndrome, severe bony prominences, poor garment fit, or focal pressure over the fibular head/knee/ankle/groin/genitals.
-  - Anticoagulant or blood-thinner use, bleeding disorder, major bruising risk, pregnancy/postpartum, controlled hypertension, diabetes, varicose veins, heart/liver/kidney disease, relevant implanted medical device, or any medical condition where pressure or increased venous/lymphatic return may be unsafe.
-  - Any goal involving DVT/PE prevention, travel VTE prevention, unexplained swelling treatment, lymphedema/lipedema, venous ulcer, wound care, PAD/ischemia, diabetic foot risk, post-thrombotic syndrome, post-surgical prophylaxis, or replacing a medical compression plan.
+  - known_suspected_or_prior_dvt_pe
+  - acute_thrombophlebitis_or_active_phlebitis
+  - unexplained_calf_pain_or_swelling
+  - chest_pain_coughing_blood_or_fainting
+  - unexplained_shortness_of_breath
+  - known_thrombophilia_or_clotting_disorder
+  - clinician_directed_clot_prevention_plan
+  - acute_or_decompensated_heart_failure
+  - pulmonary_or_cardiopulmonary_edema
+  - severe_arterial_disease_pad_or_clti
+  - acute_limb_ischemia
+  - severe_uncontrolled_hypertension
+  - acute_severe_heart_liver_or_kidney_disease
+  - active_infection_cellulitis_or_phlebitis
+  - open_wound_leg_ulcer_burn_or_skin_rash
+  - fragile_skin_or_blistering_dermatosis
+  - tumor_or_cancerous_lesion_near_garment
+  - lymphangiosarcoma
+  - neuropathy_or_reduced_sensation
+  - abnormal_pressure_sensitivity
+  - medication_altering_sensation_or_alertness
+  - inability_to_feel_symptoms_or_remove_garment
+  - recent_surgery_or_pressure_over_surgical_site
+  - recent_skin_graft_or_vascular_bypass_graft
+  - fracture_dislocation_or_major_injury
+  - cast_splint_or_immobilization
+  - severe_osteoporosis_or_bone_fragility
+  - suspected_compartment_syndrome
+  - poor_garment_fit_or_focal_bony_pressure
+  - anticoagulant_or_blood_thinner_use
+  - bleeding_disorder_or_major_bruising_risk
+  - pregnancy_or_postpartum
+  - diabetes
+  - varicose_veins
+  - relevant_implanted_medical_device
+  - unsafe_venous_or_lymphatic_return_condition
+  - dvt_pe_or_vte_prevention_goal
+  - lymphedema_lipedema_or_venous_ulcer_goal
+  - replacing_a_medical_compression_plan
   stopIf:
   - Severe pain, pain that feels wrong, pain out of proportion, rapidly increasing tightness/swelling, a hard/tight limb compartment, or pain with toe/ankle movement.
   - New numbness, tingling, weakness, gait instability, foot drop, trouble lifting the toes, foot slapping, dizziness, fainting, or any symptom that makes walking unsafe after removal.
@@ -886,10 +918,10 @@ safety:
   - Any session requires walking with leg attachments or any activity that prevents immediate stop/removal.
   - Symptoms recur or worsen across repeated sessions, delayed symptoms appear later the same day, or safety concerns outweigh any comfort benefit.
   notes:
-  - Healthy recovery use has a different risk profile than supervised clinical IPC; do not borrow clinical efficacy claims into this page.
-  - Rare serious harms are not well quantified for consumer recovery use, so conservative screening and stop rules are intentional.
-  - When unsure whether a condition is relevant, choose clinician guidance before compression rather than self-clearing.
-  - Travel or prolonged-sitting use is comfort-only in this protocol and does not replace mobility breaks, calf exercises, prescribed stockings, anticoagulation, or clinician-directed VTE prevention.
+  - Consumer recovery use differs from clinical IPC — do not borrow clinical claims.
+  - Rare serious harms are poorly quantified — conservative screening is intentional.
+  - When in doubt, get clinician guidance before compression rather than self-clearing.
+  - Travel/sitting use is comfort-only — does not replace VTE prevention, stockings, or mobility breaks.
 ---
 
 Use consumer pneumatic compression pants, boots, or leg sleeves as a bounded soreness-and-comfort experiment, not as a medical compression protocol.

@@ -542,11 +542,11 @@ protocol:
     - "After each session, log pressure/ATA, minutes completed, air breaks, symptoms, adverse events, glucose/BP checks if relevant, vision or ear changes, and whether the session was paused, shortened, or stopped."
     - "Keep mild/soft-chamber sessions, topical oxygen devices, normobaric oxygen, EWOT, athletic oxygen exposure, and named wellness programs out of this protocol log; track those as separate variants."
   tips:
-    - "Replace the default schedule with the clinician’s actual pressure, oxygen method, chamber type, session duration, air-break plan, frequency, and total planned sessions; the 5x/week, 60-90 minute, and 20-session fields are tracking defaults, not a universal dose recommendation."
-    - "Use the same pressure units the source/facility uses—ATA, bar, kPa, or atmospheres—and avoid silently converting unless the facility confirms the conversion."
-    - "If diabetes or blood-pressure risk is present, ask the care team what pre/post checks and thresholds they want recorded."
-    - "Treat missed, paused, or shortened sessions as dose-fidelity data rather than failures."
-    - "Keep the disease-specific outcome outside Murph’s scope unless the clinician has supplied a validated outcome measure or follow-up plan."
+    - "Replace defaults with the clinician’s actual pressure, O2 method, chamber type, duration, air breaks, frequency, and total sessions."
+    - "Use the facility’s pressure units (ATA, bar, kPa) — do not silently convert."
+    - "Diabetes or BP risk? Ask the care team what pre/post checks to record."
+    - "Missed or shortened sessions are dose-fidelity data, not failures."
+    - "Disease-specific outcomes stay outside Murph unless the clinician supplies a validated measure."
   keepInMind:
     - "HBOT evidence is indication-specific: diabetic-foot ulcers, late radiation injury, sudden sensorineural hearing loss, acute carbon monoxide poisoning, decompression illness, trauma, healthy aging, and neurocognitive claims do not share one certainty level."
     - "Accepted, covered, cleared, advertised, and evidence-supported are different labels; do not turn an indication list or device clearance into a broad benefit claim."
@@ -1940,20 +1940,31 @@ researchLandscape:
 safety:
   cautionLevel: "high"
   avoidOrGetClinicianGuidance:
-    - "no_clinician_prescription_or_no_medically_supervised_facility"
-    - "untreated_pneumothorax"
-    - "pulmonary_blebs_bullae_copd_asthma_or_thoracic_surgery_history"
-    - "ear_or_sinus_equalization_problem_or_recent_upper_respiratory_infection"
-    - "fever_or_seizure_threshold_concern"
-    - "diabetes_or_hypoglycemia_risk"
-    - "pregnancy_context"
-    - "intraocular_gas_or_recent_eye_surgery_context"
-    - "implanted_or_external_device_needing_pressure_compatibility_review"
-    - "selected_chemotherapy_or_medication_exposures"
-    - "uncontrolled_blood_pressure_or_heart_failure_context"
-    - "severe_claustrophobia_or_confinement_anxiety"
-    - "recent_nicotine_high_caffeine_or_other_vasoconstrictor_exposure_needing_facility_review"
-    - "cns_disease_hypercapnia_opioid_or_sedative_use_alcohol_withdrawal_or_other_seizure_threshold_modifier"
+    - no_clinician_prescription
+    - no_supervised_facility
+    - untreated_pneumothorax
+    - pulmonary_blebs_or_bullae
+    - copd_or_asthma
+    - thoracic_surgery_history
+    - ear_or_sinus_equalization_problem
+    - recent_upper_respiratory_infection
+    - fever
+    - seizure_threshold_concern
+    - diabetes_or_hypoglycemia_risk
+    - pregnancy
+    - intraocular_gas_or_recent_eye_surgery
+    - implanted_device_pressure_review
+    - external_device_pressure_review
+    - selected_chemotherapy_exposures
+    - medication_pressure_interactions
+    - uncontrolled_blood_pressure
+    - heart_failure
+    - severe_claustrophobia
+    - recent_vasoconstrictor_exposure
+    - cns_disease_or_hypercapnia
+    - opioid_or_sedative_use
+    - alcohol_withdrawal
+    - seizure_threshold_modifier
   stopIf:
     - "facility_or_clinician_says_not_to_proceed"
     - "severe_ear_or_sinus_pain_or_inability_to_equalize"
@@ -1967,9 +1978,9 @@ safety:
     - "device_alarm_or_staff_safety_concern"
     - "session_paused_shortened_or_stopped_for_safety_without_clinician_followup"
   notes:
-    - "Safety claims are stronger than efficacy claims for Murph experiment creation: the default action is to track prescribed care, not to recommend starting HBOT."
-    - "Ear/sinus pressure symptoms, vision changes, anxiety, glucose/BP issues, and adverse events should be logged even when they are mild."
-    - "A clear safety screen does not prove HBOT is appropriate; it only supports creating a tracking plan for an already prescribed course."
+    - "Default action is to track prescribed care, not recommend starting HBOT — safety claims outweigh efficacy claims."
+    - "Log ear/sinus pressure, vision changes, anxiety, glucose/BP issues, and adverse events even when mild."
+    - "A clear safety screen does not prove HBOT is appropriate — it only supports tracking an already-prescribed course."
 ---
 
 # Hyperbaric Oxygen Therapy

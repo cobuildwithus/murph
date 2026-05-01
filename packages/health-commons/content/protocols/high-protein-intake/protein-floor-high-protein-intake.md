@@ -88,12 +88,12 @@ protocol:
   - Review the first two weeks for tolerability and adherence. If the target crowds out fiber, worsens GI symptoms, or requires unsustainable meal planning, lower the target or pause rather than forcing it.
   - At the end of the window, interpret outcomes by achieved dose, energy balance, training context, source quality, and safety context—not just by the assigned target.
   tips:
-  - Use the lower end of the band first when baseline intake is unknown or already near target.
-  - Spread protein across meals only if it helps adherence, satiety, or training workflow; do not treat meal distribution as mandatory.
-  - Keep fiber-rich plants, legumes, whole grains, vegetables, fruit, and adequate fluids visible in the plan.
-  - Choose leaner or lower-saturated-fat protein sources when lipids are a concern.
-  - Use the same nutrition app or logging method throughout baseline and intervention.
-  - Do not start a new training program, calorie deficit, supplement stack, or weight-loss plan at the same time unless that cointervention is intentionally part of the experiment.
+  - Start at the lower end of the band when baseline intake is unknown.
+  - Spread protein across meals only if it helps adherence or satiety — distribution is not mandatory.
+  - Keep fiber, plants, legumes, whole grains, vegetables, fruit, and fluids visible in the plan.
+  - Lean toward lower-saturated-fat sources when lipids are a concern.
+  - Same tracking app or logging method throughout baseline and intervention.
+  - No new training program, deficit, supplement stack, or weight-loss plan unless intentionally part of the experiment.
   keepInMind:
   - This protocol tests achieved daily protein intake; an assigned target that is not reached is not the same exposure.
   - The best-supported body-composition signals come mainly from energy-restriction or adjacent training contexts, so weight-stable users should keep expectations conservative.
@@ -1324,33 +1324,34 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - known_chronic_or_acute_kidney_disease
+  - chronic_or_acute_kidney_disease
   - reduced_egfr
   - albuminuria_or_proteinuria
   - abnormal_creatinine_or_kidney_labs
   - clinician_directed_protein_restriction
-  - dialysis_or_kidney_transplant_history
+  - dialysis_or_kidney_transplant
   - recurrent_kidney_stones
   - uric_acid_or_cystine_stones
   - hyperuricosuria_or_low_urine_citrate
   - gout_or_marked_hyperuricemia
-  - urate_lowering_medication_context
+  - urate_lowering_medication
   - pregnancy_or_possible_pregnancy
   - significant_liver_disease_or_cirrhosis
   - severe_digestive_intolerance
-  - active_or_prior_eating_disorder_triggered_by_tracking
-  - unintentional_restrictive_eating_or_food_distress
-  - diabetes_or_prediabetes_with_unknown_or_abnormal_kidney_status
-  - diabetes_with_kidney_risk_or_uncertain_kidney_status
-  - renal_hyperfiltration_or_mild_renal_insufficiency
-  - clinician_prescribed_diabetes_lipid_cardiovascular_kidney_bariatric_or_weight_loss_diet
-  - recent_bariatric_surgery_or_postoperative_nutrition_context
-  - frailty_malnutrition_sarcopenia_institutional_or_post_hospital_recovery
-  - established_cardiovascular_disease_or_major_dyslipidemia_when_source_mix_changes
+  - active_or_prior_eating_disorder
+  - restrictive_eating_or_food_distress
+  - diabetes_with_unknown_kidney_status
+  - renal_hyperfiltration
+  - clinician_prescribed_diet
+  - recent_bariatric_surgery
+  - frailty_or_malnutrition
+  - sarcopenia_or_post_hospital_recovery
+  - established_cardiovascular_disease
+  - major_dyslipidemia
   - abnormal_liver_tests
-  - trying_to_conceive_lactation_or_postpartum_nutrition_context
-  - under_18_or_pediatric_nutrition_context
-  - supplement_heavy_plan_or_target_above_2_0_g_per_kg_day
+  - trying_to_conceive_or_lactation
+  - under_18_or_pediatric
+  - target_above_2_g_per_kg_per_day
   stopIf:
   - new_or_worsening_flank_pain
   - blood_in_urine
@@ -1370,12 +1371,12 @@ safety:
   - new_pregnancy_possible_pregnancy_lactation_or_postpartum_nutrition_context
   - new_clinician_prescribed_diet_or_protein_limit
   notes:
-  - This is a bounded wellness self-experiment, not treatment for obesity, diabetes, CKD, gout, kidney stones, pregnancy nutrition, liver disease, or cardiovascular risk.
-  - Safety boundaries are stricter than efficacy claims because the direct evidence is mixed and population-specific.
+  - Wellness experiment only — not treatment for obesity, diabetes, CKD, gout, stones, liver disease, or cardiovascular risk.
+  - Safety boundaries are stricter than efficacy claims — direct evidence is mixed and population-specific.
   - Do not escalate above the selected floor to chase faster results.
-  - Use 1.8–2.0 g/kg/day only after a negative safety screen, appropriate denominator choice, preserved fiber/diet quality, and documented or clinician-guided rationale; do not exceed 2.0 g/kg/day in this base protocol.
-  - Eating-disorder/restrictive-tracking, lactation/postpartum, trying-to-conceive, and under-18 routing are conservative clinical or product-scope cautions; lactation/preconception and pediatric extraction coverage was not sufficient to support this adult self-directed protocol.
-  - Supplement-heavy, ketogenic, bodybuilding/cutting, disease-treatment, bariatric, frailty/malnutrition, and clinician-prescribed diet contexts should be handled as separate variants or clinician-guided plans, not as this base wellness protocol.
+  - Use 1.8–2.0 g/kg/day only with a negative screen, appropriate denominator, preserved fiber, and documented rationale — never exceed 2.0.
+  - Eating-disorder, lactation/postpartum, trying-to-conceive, and under-18 contexts route to clinician guidance.
+  - Supplement-heavy, ketogenic, bodybuilding/cutting, bariatric, and frailty contexts are separate variants, not this base protocol.
 researchCoverage:
   bibliographyKey: source_artifact:high-protein-intake-bibliography
   corpusStats:

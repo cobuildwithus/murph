@@ -60,10 +60,10 @@ protocol:
   - Remove the glasses before driving, cycling, cooking with visual hazards, using tools, navigating stairs or unfamiliar low-light spaces, or doing color-, contrast-, or motion-critical work. Cycling, cooking, tools, stairs, and falls were not directly tested; this is a conservative extrapolation from visual-performance and low-light evidence [source_artifact:pmid-35227699; source_artifact:pmid-31369054; source_artifact:pmid-32830377; source_artifact:pmid-34475483; source_artifact:pmid-18954312; source_artifact:pmid-12322929; source_artifact:pmid-4564949; source_artifact:pmid-31696535].
   - This is a bounded adult wellness self-experiment about filtering ocular evening light; it is not eye care, insomnia treatment, bipolar or depression treatment, delayed-sleep-phase treatment, pregnancy guidance, pediatric guidance, shift-work adaptation, or a photobiomodulation protocol [source_artifact:evening-light-reduction-pmid-37593770; source_artifact:evening-light-reduction-pmid-31752544; source_artifact:evening-light-reduction-pmid-27226262; source_artifact:evening-light-reduction-pmid-41421618; source_artifact:evening-light-reduction-pmid-35024497; source_artifact:evening-light-reduction-pmid-35089982; source_artifact:doi-10.1001-jamapediatrics.2026.0976; source_artifact:pmid-33588653].
   tips:
-  - Lens color is not proof of useful filtering; product spectral data is better than marketing language [source_artifact:evening-light-reduction-pmid-40728371; source_artifact:evening-light-reduction-doi-10.25039-s026.2018].
-  - A close or wraparound fit is preferable because top and side leakage can reduce the actual retinal light reduction [source_artifact:pmid-34983271; source_artifact:pmid-31696535].
-  - Use the same wearable, bedtime target, logging window, and interpretation rule across baseline and intervention [source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
-  - Null results are expected for some healthy or stable sleepers; if evening light is already dim, a small signal is also a mechanism-based expectation rather than a directly proven subgroup finding [source_artifact:pmid-33707105; source_artifact:evening-light-reduction-pmid-41341515].
+  - Spectral data beats marketing — lens color alone does not prove useful filtering [source_artifact:evening-light-reduction-pmid-40728371; source_artifact:evening-light-reduction-doi-10.25039-s026.2018].
+  - Wraparound or close fit — top/side leakage undercuts retinal light reduction [source_artifact:pmid-34983271; source_artifact:pmid-31696535].
+  - Same wearable, bedtime target, and logging window across baseline and intervention [source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
+  - Null results are normal for stable sleepers or already-dim evenings [source_artifact:pmid-33707105; source_artifact:evening-light-reduction-pmid-41341515].
   keepInMind:
   - Direct adult glasses evidence is small and mixed; the most practical first read is repeated subjective sleep-onset ease plus pre-bed wiredness or sleepiness, not sleep-stage improvement [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:pmid-33707105; source_artifact:evening-light-reduction-pmid-41341515].
   - A wearable sleep-onset estimate is useful context, but pair it with a subjective estimate because quiet wakefulness can be misclassified [source_artifact:evening-light-reduction-pmid-12749556; source_artifact:evening-light-reduction-pmid-29991437; source_artifact:evening-light-reduction-pmid-40300398].
@@ -697,19 +697,25 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - eye_disease_new_visual_symptoms_or_recent_eye_surgery
-  - migraine_photosensitivity_visual_triggered_seizures_or_tinted_lens_intolerance
-  - bipolar_disorder_recent_mania_hypomania_or_unstable_mood
-  - severe_insomnia_or_delayed_sleep_phase_disorder
-  - pregnancy_or_postpartum_mood_context
+  - eye_disease_or_recent_eye_surgery
+  - new_visual_symptoms
+  - migraine_or_photosensitivity
+  - visual_triggered_seizures
+  - tinted_lens_intolerance
+  - bipolar_or_unstable_mood
+  - severe_insomnia
+  - delayed_sleep_phase_disorder
+  - pregnancy_or_postpartum
   - children_or_adolescents
-  - shift_work_or_planned_overnight_wakefulness
-  - current_timed_light_therapy_or_melatonin_timing_protocol
-  - significant_fall_risk_or_low_light_navigation_risk
-  - safety_critical_evening_tasks_that_cannot_be_rescheduled
-  - major_depression_or_severe_unstable_mood_symptoms
-  - hospital_recovery_major_surgery_acute_neurologic_or_cardiac_event
-  - regular_evening_driving_cycling_tools_cooking_or_color_critical_work_that_cannot_be_moved_outside_wear_window
+  - shift_work_or_overnight_wakefulness
+  - current_light_therapy_or_melatonin_protocol
+  - significant_fall_risk
+  - low_light_navigation_risk
+  - safety_critical_evening_tasks
+  - major_depression
+  - hospital_recovery_or_acute_event
+  - regular_evening_driving_or_cycling
+  - evening_color_critical_work
   stopIf:
   - safety_critical_task_arises_while_glasses_are_on
   - new_visual_symptoms_blurred_double_vision_photophobia_eye_pain_or_visual_discomfort
@@ -720,11 +726,11 @@ safety:
   - severe_sleep_worsening_next_day_impairment_or_unsafe_drowsiness
   - experiment_creates_tracking_anxiety_rumination_or_extra_sleep_score_checking
   notes:
-  - This is a bounded wellness self-experiment, not treatment for insomnia, circadian rhythm disorder, depression, mania, pregnancy sleep problems, child/adolescent sleep problems, shift-work adaptation, hospital recovery, or eye disease [source_artifact:evening-light-reduction-pmid-31752544; source_artifact:evening-light-reduction-pmid-27226262; source_artifact:evening-light-reduction-pmid-41421618; source_artifact:evening-light-reduction-pmid-28488943; source_artifact:evening-light-reduction-pmid-35024497; source_artifact:evening-light-reduction-pmid-35089982; source_artifact:doi-10.1001-jamapediatrics.2026.0976; source_artifact:pmid-33588653; source_artifact:clinicaltrials-nct04578249-2026-04-27; source_artifact:evening-light-reduction-pmid-37593770].
-  - Do not combine with new melatonin, sleep supplements, timed light therapy, screen curfews, bedtime shifts, or room-light redesign during the same test window unless attribution is intentionally weakened [source_artifact:evening-light-reduction-pmid-30410784; source_artifact:evening-light-reduction-pmid-31752544; source_artifact:pmid-36508661].
-  - Do not wear the glasses during driving, cycling, cooking with visual hazards, tool use, stair navigation if visibility is reduced, color-, contrast-, or motion-critical tasks, or unfamiliar low-light environments [source_artifact:pmid-35227699; source_artifact:pmid-31369054; source_artifact:pmid-32830377; source_artifact:pmid-34475483; source_artifact:pmid-18954312; source_artifact:pmid-12322929; source_artifact:pmid-4564949; source_artifact:pmid-31696535].
-  - If evening light is already dim and screen use is already low, the expected signal may be small or absent as a mechanism-based expectation; healthy/stable sleepers may also see null results [source_artifact:pmid-33707105; source_artifact:evening-light-reduction-pmid-41341515].
-  - Short-term use appears feasible in small studies, but adverse-event reporting is limited; do not describe short-term use as proven safe [source_artifact:evening-light-reduction-pmid-37593770; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-30410784; source_artifact:evening-light-reduction-pmid-26730983].
+  - Wellness experiment only — not treatment for insomnia, mood disorders, pregnancy, pediatric sleep, shift work, or eye disease.
+  - Do not add melatonin, sleep supplements, light therapy, screen curfews, or room-light changes during the test unless attribution is intentionally weakened.
+  - Remove glasses before driving, cycling, cooking hazards, tools, stairs, color/contrast/motion tasks, or unfamiliar low-light spaces.
+  - Already-dim evenings or stable sleep may produce a small or null signal — that is expected, not failure.
+  - Short-term use appears feasible but adverse-event data is limited — do not describe it as proven safe.
 researchCoverage:
   auditCutoff: '2026-04-27'
   canonicalSourceRecords: 214

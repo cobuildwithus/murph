@@ -73,12 +73,12 @@ protocol:
     - "Cool down gently before driving, exercising, hot showering, cold plunging, or going to bed; do not resume activity until you feel fully alert and steady."
     - "Log the session dose, context, cool-down method, and any symptoms the same day."
   tips:
-    - "Keep sessions at a similar time of day when practical."
-    - "Keep cold plunges, cold swimming, ice baths, contrast therapy, new supplements, new training blocks, major diet changes, and intentional alcohol changes out of the test window."
-    - "If a session follows a workout, label it as post-exercise and interpret it separately; postpone if you are dehydrated, overheated, unusually fatigued, or unable to cool down."
-    - "Treat the first session as a tolerance check; completing a conservative session is better than pushing through warning symptoms."
-    - "Do not make up missed sessions by stacking sessions, extending duration, or using hotter settings."
-    - "In public or shared saunas, use a towel or seating barrier, follow facility rules, and skip the session if hygiene, ventilation, timer, temperature control, or exit access seems questionable."
+    - Same time of day when practical.
+    - No cold plunges, new supplements, diet changes, or alcohol changes during the test window.
+    - Post-workout sessions get labeled separately; skip if dehydrated or overheated.
+    - First session is a tolerance check — conservative beats heroic.
+    - Never stack missed sessions, extend duration, or raise temperature to catch up.
+    - Shared saunas — towel barrier, check ventilation and exit access, skip if questionable.
   keepInMind:
     - "This is a short self-experiment for practical recovery context and cardiovascular proxies, not a treatment plan or longevity proof."
     - "HRV and sleep-stage changes are exploratory and can be moved by illness, stress, alcohol, travel, and training load."
@@ -561,10 +561,10 @@ experimentOnboarding:
     missedLogFollowupCopy: "Did you end up doing today’s sauna session? Totally fine either way, I just want the experiment record to be accurate."
     confirmationPrompt: "Before I start this, I’ll show the exact sauna plan, schedule, logging expectations, stop conditions, and reminder policy so you can confirm it."
 whyItWorks:
-  - "A traditional dry sauna is a controlled whole-body heat stress. The body opens skin blood vessels, sweats, and raises heart rate to move heat out while trying to keep blood pressure and core temperature stable."
-  - "The working hypothesis is adaptation: a short, tolerable heat stress followed by recovery may improve heat tolerance for some people over repeated exposures. That does not prove a recovery benefit, and it does not mean harder or hotter is better."
-  - "The vascular hypothesis is that repeated heat-driven blood flow and cooling recovery may affect vascular tone in some contexts. That makes resting pulse and optional morning blood pressure reasonable signals to track, while disease outcomes and durable cardiometabolic effects remain outside this experiment."
-  - "The sleep-and-recovery theory is about the rebound after heat. Cooling down after a tolerable session may help some people settle; late, extreme, dehydrating, or poorly tolerated sessions can do the opposite."
+  - "## Heat forces redistribution\n\nDry sauna loads the body without muscle work. Skin vessels open; sweat carries heat out; heart rate rises; blood shifts outward. The stress is circulation and thermoregulation, not fitness effort."
+  - "## Cooldown makes dose usable\n\n5–20 min works because heat stress needs an exit. Gentle cooldown restores pressure, temperature, fluid balance, and alertness; rushing into driving, exercise, cold plunge, or bed turns heat into strain."
+  - "## Repeated heat trains vascular control\n\nAcross sessions, the body gets faster at dumping heat: earlier sweating, easier skin blood flow, steadier pressure. Resting HR plus morning BP track whether baseline strain drops."
+  - "## Sleep signal comes from cooling\n\nSauna is not a sedative. The useful sleep mechanism is the warm-to-cool transition after a tolerable session; late, extreme, or dehydrating heat keeps arousal high."
 claims:
 
   -
@@ -1109,14 +1109,30 @@ researchLandscape:
 safety:
   cautionLevel: "high"
   avoidOrGetClinicianGuidance:
-    - "pregnancy, possible pregnancy, trying to become pregnant, early postpartum, or active fertility or sperm-marker concerns"
-    - "transdermal opioid patches, especially fentanyl or buprenorphine patches, or any medication patch with heat warnings unless explicit medical guidance clears sauna exposure"
-    - "unstable cardiovascular disease, recent cardiac event, unexplained chest pain, serious arrhythmia, heart failure, ischemic heart disease, peripheral arterial disease, uncontrolled blood pressure, or prior fainting with heat"
-    - "diabetes, kidney disease, seizure disorder, chronic respiratory disease, asthma, COPD, heat intolerance, prior heat illness, or clinician advice to avoid heat exposure"
-    - "recent heat illness, significant dehydration, fever, vomiting, diarrhea, acute infection, or unusually impaired recovery after hard training"
-    - "medications or substances that change hydration, electrolytes, blood pressure, alertness, sweating, thermoregulation, skin blood flow, or heat tolerance, including diuretics, antihypertensives, beta blockers, anticholinergics, psychotropics, stimulants, sedatives, antiseizure medicines, lithium, insulin or heat-sensitive medicines, alcohol, and recreational drugs"
-    - "heat-triggered itching, burning, hives, dermatitis, rash flares, inflamed skin, open wounds, or skin infection concerns"
-    - "children, minors, frail older adults, or anyone who cannot reliably exit, cool down, hydrate normally, or recognize and report symptoms"
+    - pregnancy_or_early_postpartum
+    - active_fertility_or_sperm_concerns
+    - transdermal_opioid_or_medication_patches
+    - unstable_cardiovascular_disease
+    - recent_cardiac_event
+    - unexplained_chest_pain
+    - serious_arrhythmia
+    - heart_failure
+    - ischemic_heart_disease
+    - peripheral_arterial_disease
+    - uncontrolled_blood_pressure
+    - prior_fainting_with_heat
+    - diabetes
+    - kidney_disease
+    - seizure_disorder
+    - chronic_respiratory_disease_or_copd
+    - heat_intolerance_or_prior_heat_illness
+    - fever_or_acute_illness
+    - significant_dehydration
+    - medications_affecting_thermoregulation
+    - alcohol_or_recreational_drugs_same_day
+    - heat_triggered_skin_conditions
+    - open_wounds_or_skin_infection
+    - children_or_frail_older_adults
   stopIf:
     - "chest pain or pressure"
     - "faintness, severe dizziness, loss of balance, or weakness"
@@ -1126,11 +1142,11 @@ safety:
     - "skin burning, heat-triggered itching, hives, rash flare, or painful irritation"
     - "panic-level distress or feeling unsafe"
   notes:
-    - "Safety takes priority over adherence; leaving early is a valid logged outcome."
-    - "Do not use this protocol to chase extreme heat, severe discomfort, a sweat target, or a specific core-temperature threshold."
-    - "Do not use this protocol after alcohol or recreational drugs that day; postpone rather than trying to compensate with hydration."
-    - "Do not change prescribed medications for sauna. Medication and fluid plans belong with a clinician or pharmacist."
-    - "Use fertility, pregnancy, medication, skin, respiratory, kidney, seizure, diabetes, and cardiovascular concerns as reasons to pause unsupervised setup rather than as topics to optimize casually."
+    - "Safety beats adherence — leaving early is a valid logged outcome."
+    - "Never chase extreme heat, a sweat target, or a core-temperature threshold."
+    - "Skip sessions after same-day alcohol or recreational drugs — hydration does not compensate."
+    - "Never adjust medications for sauna — medication and fluid plans belong with a clinician."
+    - "Fertility, pregnancy, medication, skin, respiratory, kidney, seizure, diabetes, or cardiovascular concerns pause unsupervised setup."
 researchCoverage:
   canonicalLedgerPath: "output-packages/research/finnish-dry-sauna-research-restart-20260427/downloads/11-source-ledger-reducer/canonical_source_ledger_v1.json"
   ledgerSourceCount: 265

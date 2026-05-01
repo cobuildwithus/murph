@@ -901,11 +901,11 @@ protocol:
   - 'For days 1–7 especially, check withdrawal-like symptoms and red flags: tremor/shakes, sweats, nausea/vomiting, severe anxiety or agitation, racing or irregular heartbeat, high blood-pressure concern if measured, insomnia, mood worsening, craving/loss of control, confusion, hallucinations, poor coordination or new vision changes, seizure, dehydration, chest pain, severe shortness of breath, or feeling unable to stay safe.'
   - At the end, review adherence, symptoms, sleep, wearable trends, blood pressure or labs if collected, craving/self-efficacy, social burden, replacement behaviors, and what you want the next week of drinking or continued abstinence to look like.
   tips:
-  - 'Keep the goal descriptive: “observe what changes when alcohol is removed,” not “prove discipline.”'
-  - 'Plan the first high-friction situation before it happens: restaurant, work event, family dinner, travel, loneliness, boredom, or the usual evening cue.'
-  - Use replacement drinks or rituals only if they reduce friction without triggering cravings, extra sugar, cannabis/nicotine/sedative substitution, or late-night snacking.
-  - Keep bedtime, caffeine, exercise load, major diet changes, sleep aids, cannabis, nicotine, and new supplements as stable as practical so the alcohol-free signal is easier to interpret.
-  - A missed day is data, not a moral failure. Log it accurately and choose continue, pause, shorten, or restart.
+  - 'Goal is “observe what changes,” not “prove discipline.”'
+  - Plan the first high-friction situation before it arrives.
+  - Replacement drinks or rituals only if they do not trigger cravings or substitution.
+  - Keep caffeine, bedtime, exercise, cannabis, nicotine, and supplements stable during the test.
+  - A missed day is data, not failure. Log it and decide next step.
   keepInMind:
   - This is a wellness self-experiment for appropriately screened adults, not detoxification, AUD treatment, medication advice, pregnancy counseling, or liver-disease care.
   - Thirty days has the strongest direct challenge fit; seven days is mainly a starter/early-signal check; fourteen days is pragmatic but has sparse direct wellness evidence.
@@ -2019,23 +2019,27 @@ researchLandscape:
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
-  - possible_alcohol_dependence_or_needing_alcohol_to_prevent_symptoms
-  - prior_withdrawal_seizure_delirium_tremens_hallucinations_or_confusion
-  - severe_tremor_sweats_racing_heart_or_worsening_withdrawal_like_symptoms
-  - heavy_daily_intake_or_uncertain_withdrawal_risk
-  - current_benzodiazepine_opioid_cns_depressant_or_sedative_use
-  - pregnancy_trying_to_conceive_or_breastfeeding_with_alcohol_questions
-  - known_or_suspected_liver_disease_hepatitis_cirrhosis_or_abnormal_liver_tests
-  - active_aud_treatment_aud_medication_questions_or_recent_detox
-  - unstable_depression_mania_psychosis_suicidal_thoughts_or_co_occurring_substance_use
-  - seizure_disorder_significant_cardiovascular_instability_or_major_medical_comorbidity
-  - current_or_past_withdrawal_symptoms_when_cutting_down
-  - severe_dependence_or_inability_to_characterize_recent_intake
-  - active_benzodiazepine_taper_or_recent_sedative_change
-  - complex_medication_list_or_alcohol_interactive_medicines
-  - strong_craving_loss_of_control_or_drinking_to_relieve_symptoms
-  - malnutrition_wernicke_risk_or_new_neurologic_red_flags
-  - under_18_or_pediatric_context
+  - possible_alcohol_dependence
+  - prior_withdrawal_seizure_or_delirium
+  - severe_withdrawal_symptoms
+  - heavy_daily_intake
+  - uncertain_withdrawal_risk
+  - benzodiazepine_opioid_or_sedative_use
+  - pregnancy_or_trying_to_conceive
+  - breastfeeding
+  - liver_disease_or_abnormal_liver_tests
+  - active_aud_treatment_or_recent_detox
+  - unstable_depression_or_psychosis
+  - suicidal_thoughts
+  - co_occurring_substance_use
+  - seizure_disorder
+  - cardiovascular_instability
+  - past_withdrawal_when_cutting_down
+  - benzodiazepine_taper_or_sedative_change
+  - alcohol_interactive_medicines
+  - strong_craving_or_loss_of_control
+  - malnutrition_or_wernicke_risk
+  - under_18
   stopIf:
   - seizure
   - confusion_or_delirium
@@ -2054,11 +2058,11 @@ safety:
   - self_harm_urges_mania_psychosis_or_unable_to_stay_safe
   - medication_change_to_manage_withdrawal_craving_or_sleep_without_clinician
   notes:
-  - Safety routing overrides the experiment. When risk is present or unclear, the correct Murph action is clinician-guided care, not a self-guided abstinence challenge.
-  - A selected study reporting no serious adverse events is not proof that abrupt cessation is safe for dependent or medically complex drinkers.
-  - Emergency symptoms should be treated as medical red flags, not experiment outcomes.
-  - This self-guided version is adult-only and only for users who can reasonably stop drinking without withdrawal risk.
-  - Do not start, stop, increase, or substitute alcohol-interactive medicines, sedatives, sleep medicines, AUD medications, cannabis, nicotine, supplements, or analgesics to manage the challenge without clinician guidance.
+  - Safety overrides the experiment — unclear risk means clinician-guided care, not self-guided.
+  - No adverse-event report proves abrupt cessation is safe for dependent drinkers.
+  - Emergency symptoms are medical red flags, not experiment outcomes.
+  - Adult-only — only for users who can stop without withdrawal risk.
+  - Do not change medicines, sedatives, or substances to manage the challenge without clinician guidance.
 researchCoverage:
   auditCutoff: '2026-04-26'
   sourceIndexStatus: packages/health-commons/generated/source-index.json absent in snapshot; identity resolved from canonical ledger plus existing content inventory

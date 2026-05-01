@@ -179,11 +179,11 @@ protocol:
   - 'Optional movement experiment: if symptoms repeatedly appear at the same point in easy running, trial one small cue such as slightly higher cadence, shorter stride, or quieter landing. Do not stack multiple gait changes at once, and stop if the cue increases pain.'
   - Keep strength/control work in place while the run/walk branch progresses. Once easy running is consistently tolerated for several weeks, taper rehab to maintenance instead of abruptly stopping it.
   tips:
-  - Use a simple pain rule agreed before the experiment starts, but treat the numeric pain cap as a conservative Murph safety heuristic rather than a validated ITBS-specific threshold. Sharp pain, gait change, or next-day rebound should stop progression even if the number is low.
-  - Flat routes, predictable surfaces, stable shoes, and easy pace make the signal easier to interpret.
-  - Do not introduce a new shoe, aggressive foam-rolling routine, NSAID/acetaminophen pain-masking, injection, shockwave treatment, dry needling, manual-therapy plan, major bike-fit change, or separate knee protocol during the same experiment unless it is clinician-directed and intentionally logged as a confounder.
-  - A single better run is not proof of recovery. Look for repeated tolerance across sessions and the next morning.
-  - Clinician or physical-therapist input is appropriate when symptoms are recurrent, worsening, diagnostically uncertain, persistent after deload and rehab, or important to a race/work requirement.
+  - Agree on a pain rule up front. Sharp pain, gait change, or next-day rebound stops progression regardless of the number.
+  - Flat routes, predictable surfaces, stable shoes, easy pace — keep the signal clean.
+  - No new shoe, aggressive rolling, NSAID masking, injection, shockwave, or separate knee protocol during the experiment.
+  - One good run is not recovery — look for repeated tolerance across sessions and the next morning.
+  - See a clinician or PT when symptoms are recurrent, worsening, unclear, or persistent after deload.
   keepInMind:
   - The evidence supports active conservative components more than it validates one exact dose schedule or one guaranteed return-to-run timeline.
   - Runner ITBS rehab is the core protocol. Cycling-specific bike-fit and return-to-cycling evidence is adjacent and should not be merged into this runner protocol.
@@ -782,15 +782,39 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - Acute traumatic onset, fall, twist, sudden pop, high-energy injury, immediate or sudden swelling, deformity, instability, severe pain, or inability to bear weight
-  - Hot, red, warm, or swollen knee; fever; systemic illness; spreading redness; markedly limited range of motion; or severe unexplained night/rest pain
-  - True locking, inability to fully extend, recurrent swelling, painful clicking/catching, buckling/giving way, numbness, weakness, or progressive neurologic symptoms
-  - Focal bony tenderness, suspected stress fracture, suspected meniscal/ligament/cartilage injury, patellofemoral mimic, hip/back referral, or any pattern that is not typical lateral running-related knee pain
-  - Adolescent knee pain, especially with hip pain or limp
-  - Prior knee surgery or replacement, known meniscus/ligament injury, inflammatory arthritis, gout/crystal arthritis, significant osteoarthritis, infection history, or immunosuppression
-  - Symptoms that last beyond a short deload period, recur whenever running resumes, or do not clearly improve after several weeks of appropriate load reduction
-  - Pregnancy/postpartum return-to-run, elite/high-mileage or tactical/military loading, cyclist bike-fit-driven symptoms, or post-surgical knees
-  - Current or planned NSAID/acetaminophen pain-masking, prescription medication, corticosteroid injection, shockwave therapy, dry needling, clinician-directed manual therapy, imaging-driven decisions, or surgery planning
+  - acute_traumatic_onset_or_fall
+  - sudden_pop_or_high_energy_injury
+  - immediate_swelling_or_deformity
+  - instability_or_inability_to_bear_weight
+  - hot_red_or_swollen_knee
+  - fever_or_systemic_illness
+  - severe_unexplained_night_or_rest_pain
+  - true_locking_or_inability_to_extend
+  - recurrent_swelling
+  - painful_clicking_or_catching
+  - buckling_or_giving_way
+  - numbness_weakness_or_neurologic_symptoms
+  - focal_bony_tenderness
+  - suspected_stress_fracture
+  - suspected_meniscal_or_ligament_injury
+  - patellofemoral_mimic
+  - hip_or_back_referral_pattern
+  - adolescent_knee_pain
+  - prior_knee_surgery_or_replacement
+  - inflammatory_or_crystal_arthritis
+  - significant_osteoarthritis
+  - infection_history_or_immunosuppression
+  - symptoms_beyond_short_deload_period
+  - recurrence_on_running_resumption
+  - pregnancy_or_postpartum_return_to_run
+  - elite_or_tactical_military_loading
+  - cyclist_bike_fit_driven_symptoms
+  - post_surgical_knees
+  - nsaid_or_pain_masking_use
+  - corticosteroid_injection
+  - shockwave_or_dry_needling
+  - clinician_directed_manual_therapy
+  - imaging_driven_decisions_or_surgery
   stopIf:
   - Lateral knee pain becomes sharp, rapidly worsens, alters gait, causes limping, exceeds the protocol pain cap, or keeps increasing during a run
   - Pain appears at rest, persists after the session, or is worse later that day or the next morning after a run/walk or rehab session
@@ -799,10 +823,10 @@ safety:
   - Walking, stairs, or ordinary daily activity become meaningfully worse
   - The user starts a new medication, injection, shockwave, dry needling, manual-therapy plan, surgery pathway, or another major treatment that changes attribution
   notes:
-  - This is not a diagnostic tool. The page should route unclear, traumatic, mechanically symptomatic, systemic, or urgent knee pain away from self-guided experiment creation.
-  - Numeric pain caps are conservative self-experiment safety rules, not proven ITBS-specific thresholds unless separately cited.
-  - Adverse-event rates for active rehab were not extracted in detail; stop conditions are intentionally conservative.
-  - Safety and differential-diagnosis language should be more forceful than efficacy language.
+  - Not a diagnostic tool — route unclear or urgent knee pain to clinical evaluation.
+  - Pain caps are conservative safety rules, not proven ITBS-specific thresholds.
+  - Stop conditions are intentionally conservative given limited adverse-event data.
+  - Safety language should be more forceful than efficacy language.
 ---
 
 This protocol is a **conservative, symptom-guided return-to-run tracker** for runners whose lateral knee pain is consistent with iliotibial band syndrome (ITBS) or who already have a clinician diagnosis.

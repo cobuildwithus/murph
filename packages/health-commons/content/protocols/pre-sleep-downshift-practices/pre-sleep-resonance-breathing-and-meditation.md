@@ -84,11 +84,11 @@ protocol:
     - Exclude forceful breathing, breath retention, deliberate CO2-lowering, high-ventilation methods, breath of fire, holotropic breathwork, Wim-Hof-style breathing, and any breathing pattern that increases air hunger, chest symptoms, dizziness, faintness, or panic.
     - Meditation should stay low-dose and grounding-oriented. Stop rather than push through escalating distress, dissociation, depersonalization/derealization, traumatic re-experiencing, hallucinations, delusions, unusual mood elevation, mania-like activation, psychosis-like experiences, worsening depression, or self-harm thoughts.
   tips:
-    - Start at the low end if you are new to either practice. A consistent five to ten minutes is more useful for this test than an ambitious session that becomes stressful.
-    - Keep bedtime, wake time, caffeine, alcohol, late exercise, screens, room light, sleep supplements, and medication changes as stable as practical during baseline and intervention.
-    - Use the same practice on most intervention nights. Switching between breathing, meditation, and combined sessions makes personal attribution weaker.
-    - Treat wearable sleep and HRV metrics as trend context. Pair them with a brief subjective sleep-onset estimate and a pre-sleep arousal rating.
-    - Do not chase perfect calm. The intended behavior is a comfortable, low-intensity routine for appropriate users, not a performance target or proof that breathing or meditation is risk-free.
+    - New to this? Start with 5-10 consistent minutes — ambitious sessions that become stressful defeat the purpose.
+    - Hold bedtime, wake time, caffeine, alcohol, exercise, screens, room light, and supplements stable during the test.
+    - Same practice most nights. Switching between breathing, meditation, and combined weakens attribution.
+    - Wearable sleep/HRV is trend context — pair with a subjective sleep-onset estimate and pre-sleep arousal rating.
+    - Do not chase perfect calm. This is a low-intensity routine, not a performance target.
   keepInMind:
     - The exact combined stack is not established by the extraction corpus. This page routes users toward separate child practices unless they knowingly choose an exploratory combined run.
     - Direct breathing evidence is promising but mixed, especially for objective sleep metrics.
@@ -1028,17 +1028,23 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-    - Chronic, impairing, treatment-resistant, or comorbid insomnia, especially if present at least three nights per week for months or causing major daytime impairment.
-    - Suspected or diagnosed obstructive sleep apnea, PAP/CPAP treatment questions, loud snoring with witnessed apneas, gasping, morning headaches, severe daytime sleepiness, sleep attacks, or drowsy-driving risk.
-    - Restless legs syndrome or periodic limb movement symptoms, including urge-to-move, leg discomfort at rest, evening worsening, or disruptive limb movements.
-    - Parasomnias or circadian rhythm sleep-wake disorder signs, including sleepwalking, dream enactment, injurious night behaviors, major sleep-timing instability, shift-work sleep disorder, or persistent delayed/advanced sleep timing.
-    - Current medication changes, sedative or sleep-medicine use questions, pregnancy, postpartum/peripartum sleep disruption, lactation, new-parent sleep disruption, or pregnancy-specific snoring/gasping/sleepiness.
-    - Older-adult sleep complaints with polypharmacy, sedatives, cognitive concerns, fall risk, cardiopulmonary disease, or complex medical/psychiatric comorbidity.
-    - Pediatric or adolescent use unless a separate age-appropriate variant and guardian/clinician boundary is defined.
-    - Respiratory disease, asthma, unexplained breathlessness, dysfunctional breathing or hyperventilation symptoms, fainting history, panic attacks triggered by breathing focus, or prior adverse reactions to breathwork.
-    - Pacemaker-driven rhythm, heart-rate medication, medical acidosis, serious arrhythmia, or unstable cardiopulmonary disease.
-    - Panic disorder, diagnosed anxiety disorder, trauma/PTSD symptoms, dissociation, depersonalization/derealization, or prior adverse meditation experiences.
-    - Bipolar disorder, mania vulnerability, psychosis vulnerability, severe depression, suicidality, or severe distress when attention turns inward.
+    - chronic_or_treatment_resistant_insomnia
+    - obstructive_sleep_apnea_or_cpap_questions
+    - restless_legs_or_periodic_limb_movements
+    - parasomnia_or_circadian_rhythm_disorder
+    - pregnancy_postpartum_or_lactation
+    - sedative_or_sleep_medication_changes
+    - older_adult_with_polypharmacy_or_fall_risk
+    - pediatric_or_adolescent
+    - respiratory_disease_asthma_or_breathlessness
+    - dysfunctional_breathing_or_hyperventilation
+    - fainting_history_or_breathwork_adverse_reaction
+    - pacemaker_arrhythmia_or_unstable_cardiac_disease
+    - panic_disorder_or_diagnosed_anxiety_disorder
+    - ptsd_trauma_dissociation_or_depersonalization
+    - prior_adverse_meditation_experience
+    - bipolar_mania_or_psychosis_vulnerability
+    - severe_depression_or_suicidality
   stopIf:
     - Air hunger, overbreathing, chest pain or tightness, palpitations, severe or new shortness of breath, faintness, dizziness, alarming tingling, or escalating panic-like sensations.
     - Derealization, depersonalization, dissociation, traumatic re-experiencing, hallucinations, delusions, intense agitation, unusual mood elevation, mania-like activation, or psychosis-like experiences.
@@ -1048,9 +1054,9 @@ safety:
     - Sleep worsens meaningfully for three consecutive nights without an obvious outside cause, or worsens severely after one night with marked next-day impairment.
     - The routine increases bedtime anxiety, rumination, clock-watching, orthosomnia-like fixation, or fear of not sleeping.
   notes:
-    - Keep safety stronger than efficacy. This page is a chooser and research umbrella, not a clinical treatment page.
-    - Do not include breath holds, high-ventilation breathing, forceful pranayama, breath of fire, holotropic breathwork, or Wim-Hof-style breathing.
-    - Do not present mindfulness, CBT-I, app-guided programs, VR, body-scan/music routines, or HRV-biofeedback packages as the same protocol.
+    - Safety stronger than efficacy — this is a chooser, not a treatment page.
+    - No breath holds, high-ventilation, forceful pranayama, breath of fire, holotropic, or Wim-Hof breathing.
+    - Mindfulness, CBT-I, apps, VR, body-scan/music, and HRV-biofeedback are separate protocols.
 ---
 
 ## How to use this page

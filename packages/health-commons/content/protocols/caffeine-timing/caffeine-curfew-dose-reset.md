@@ -64,11 +64,11 @@ protocol:
   - Log curfew adherence, total estimated caffeine milligrams, sleep timing, sleep-onset estimate, sleep quality, wearable sleep metrics when available, and withdrawal or excess-caffeine symptoms each day.
   - Review the result against your own baseline, using adherent days only and checking alcohol, illness, stress, travel, late exercise, schedule changes, and new medications or supplements before calling it a signal.
   tips:
-  - Use product labels or trusted tables for milligram estimates; cup counts alone are too crude for this experiment.
-  - The protocol is easier if the first caffeine of the day is deliberate and measured rather than automatic refills.
-  - If 10am is unrealistic, use 11am for the first test but keep the 8-hour bedtime buffer; caffeine-sensitive users may need an earlier or lower-dose variant.
-  - Keep bedtime, wake time, alcohol, late exercise, sleep supplements, and screen/lighting habits as stable as practical during the test.
-  - A small accidental exposure should be logged as a curfew miss rather than treated as a failed experiment.
+  - Use labels or tables for milligram estimates — cup counts are too crude.
+  - Make the first caffeine deliberate and measured, not automatic refills.
+  - If 10am is unrealistic, try 11am but keep the 8-hour bedtime buffer.
+  - Hold bedtime, wake time, alcohol, late exercise, and screen habits stable during the test.
+  - Small accidental exposure = logged curfew miss, not a failed experiment.
   keepInMind:
   - The exact 14-day 10–11am-or-8-hour rule has not been directly tested as a complete protocol.
   - The strongest direct evidence is for acute or short repeated dose/timing challenges, especially 200–400 mg caffeine near the sleep window.
@@ -837,19 +837,20 @@ safety:
   avoidOrGetClinicianGuidance:
   - pregnancy_trying_to_conceive_or_lactation
   - children_or_adolescents
-  - persistent_insomnia_suspected_sleep_apnea_or_other_sleep_disorder
-  - uncontrolled_hypertension_or_concerning_blood_pressure
-  - cardiovascular_symptoms_arrhythmia_chest_pain_or_fainting_history
-  - panic_disorder_severe_anxiety_or_caffeine_triggered_anxiety
-  - bipolar_disorder_recent_mania_hypomania_or_lithium_treatment
-  - migraine_severe_headache_prior_thunderclap_headache_or_neurologic_red_flags
-  - history_of_difficult_caffeine_withdrawal
-  - heavy_or_problematic_caffeine_use_or_inability_to_cut_down_despite_distress
-  - shift_work_operational_alertness_or_safety_critical_duties
-  - fluvoxamine_ciprofloxacin_quinolones_or_other_caffeine_interacting_medicines
-  - caffeine_containing_medicines_or_supplements
-  - energy_drinks_energy_shots_preworkout_or_stimulant_blends_as_primary_source
-  - pure_or_highly_concentrated_caffeine_products
+  - persistent_insomnia_or_sleep_apnea
+  - uncontrolled_blood_pressure
+  - arrhythmia_or_cardiovascular_symptoms
+  - panic_disorder_or_caffeine_anxiety
+  - bipolar_disorder_or_lithium_treatment
+  - migraine_or_thunderclap_headache
+  - neurologic_red_flags
+  - difficult_caffeine_withdrawal_history
+  - heavy_problematic_caffeine_use
+  - shift_work_or_safety_critical_duties
+  - caffeine_interacting_medicines
+  - caffeine_containing_supplements
+  - energy_drinks_or_stimulant_blends
+  - pure_or_concentrated_caffeine_products
   stopIf:
   - chest_pain_fainting_rapid_or_erratic_heartbeat_or_severe_palpitations
   - seizure_confusion_disorientation_or_stupor
@@ -865,12 +866,12 @@ safety:
   - persistent_insomnia_worsening_with_daytime_impairment
   - experiment_creates_tracking_anxiety_or_rumination
   notes:
-  - This is a bounded adult wellness self-experiment, not treatment for insomnia, sleep apnea, anxiety, hypertension, arrhythmia, pregnancy-related risk, lactation concerns, bipolar disorder, lithium management, medication interactions, caffeine dependence, or caffeine overdose.
-  - Pure or highly concentrated caffeine powder or liquid concentrate is a hard exclusion. Do not use caffeine pills, energy shots, pre-workout products, or stimulant blends to move dose earlier.
-  - Do not front-load caffeine into a large morning bolus. Keep total daily caffeine and the largest single serving stable or lower than baseline.
-  - Do not skip prescribed or needed medicines to satisfy the curfew. Check labels and get clinician or pharmacist guidance when medicines contain caffeine or may alter caffeine metabolism.
-  - If baseline intake is high, withdrawal is likely, or alertness is needed for safety-critical tasks, tapering or clinician-guided planning is safer than abrupt reduction.
-  - 'A null result is useful: it may show caffeine timing is not a major sleep lever for that user under current conditions.'
+  - Wellness experiment — not treatment for insomnia, sleep apnea, or caffeine dependence.
+  - Pure caffeine powder, concentrate, pills, energy shots, and pre-workouts are excluded.
+  - Keep total daily caffeine stable — do not front-load into one large morning bolus.
+  - Do not skip needed medicines to meet the curfew — check labels with a pharmacist.
+  - High baseline or safety-critical alertness needs? Taper or get clinician guidance first.
+  - 'A null result is useful — it may show timing is not a major sleep lever for this user.'
 researchCoverage:
   bibliographyKey: source_artifact:caffeine-timing-bibliography
   auditCutoff: '2026-04-27'

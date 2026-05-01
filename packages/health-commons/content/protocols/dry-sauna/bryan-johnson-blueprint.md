@@ -160,10 +160,10 @@ protocol:
     - Rehydrate after the session with water or electrolytes.
     - Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable.
   tips:
-    - If you are not already heat-adapted, the Blueprint public beginner guidance points toward a more conservative 15–20 minutes, 3–5 times per week, and 80–100 °C.
-    - Keep humidity low if you are trying to mirror the source routine.
-    - Treat the April 2026 core-temperature-threshold experiments as a higher-burden variant, not the default entry version.
-    - Consider adding a simple next-workout note, because post-exercise sauna studies disagree on whether the extra heat load helps performance or hurts recovery.
+    - Not heat-adapted? Blueprint beginner guidance suggests 15-20 min, 3-5x/week, 80-100 C.
+    - Keep humidity low to mirror the source routine.
+    - Core-temperature-threshold experiments are a higher-burden variant, not the default entry.
+    - Add a next-workout note — post-exercise sauna evidence is split on help vs. harm.
   keepInMind:
     - This is a higher-burden daily routine layered after workouts, so exercise load and dehydration can easily confound the result.
     - Groin cooling, face or neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics rather than general sauna rules.
@@ -772,7 +772,7 @@ safety:
     - beta_blocker_or_diuretic_use
     - irritated_or_inflamed_skin_conditions
     - fertility_concerns_or_trying_to_conceive
-    - heat_intolerance_or_another_condition_where_heat_exposure_is_risky
+    - heat_intolerance_or_prior_heat_illness
   stopIf:
     - chest_pain
     - faintness
@@ -783,8 +783,8 @@ safety:
     - palpitations
     - new_neurologic_symptoms
   notes:
-    - This is source-attributed and higher-burden, so interpret it more cautiously than the simpler dry-sauna experiment.
-    - Groin cooling, face and neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics, not general rules.
+    - Source-attributed and higher-burden — interpret more cautiously than simpler dry-sauna protocols.
+    - Groin cooling, face/neck cooling, and no-cold-after guidance are source-specific, not general rules.
 ---
 This is a higher-burden sauna routine publicly described by Bryan Johnson / Blueprint. It is included as an external comparison, not as the easiest place to start.
 

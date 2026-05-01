@@ -251,10 +251,10 @@ protocol:
   - After each session, log session minutes, mode, treatment area, eye protection, heat or discomfort, skin irritation, pigment changes, headache, eye symptoms, and any skincare or procedure changes.
   - Repeat the same standardized photos at week 4 and week 6; score only pre-specified regions and review adherence and confounders before interpreting the result.
   tips:
-  - Manufacturer wavelength and irradiance values are useful to record, but they are not the same as independent radiometry.
-  - A mask that sits on the skin has different exposure geometry from a panel; use a panel only as a separate fork with distance and angle logged.
-  - Periocular or crow's-feet outcomes are region-specific; do not count them as proof of whole-face change.
-  - A useful result should be visible across repeated photos or scores and still make sense after checking adherence, skincare, lighting, sun exposure, sleep, stress, and procedures.
+  - Record manufacturer wavelength/irradiance, but know it is not independent radiometry.
+  - A mask on skin differs from a panel; treat a panel as a separate fork with distance and angle logged.
+  - Periocular or crow's-feet outcomes are region-specific — not proof of whole-face change.
+  - A real result survives repeated photos, adherence checks, and confounder review.
   keepInMind:
   - Direct and near-direct home/facial red+NIR evidence is supportive but heterogeneous; this is a cautious self-test, not a promise of rejuvenation.
   - Outcome changes are slow and may be subtle; first-session warmth, glow, or satisfaction is not the endpoint.
@@ -783,14 +783,31 @@ claims:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - Under 18; this starter is adult-only and minors need a separate clinician/guardian-guided variant.
-  - Pregnant, trying to become pregnant, or lactating; no extracted pregnancy/lactation safety source clears unsupervised use.
-  - Eye disease, retinal or macular risk, ocular photosensitivity, recent eye procedure, photosensitizing medication exposure, or any current visual symptom.
-  - No manufacturer-specified eye inserts, shields, or goggles available for every session, or any need to look directly at active LEDs.
-  - Melasma, post-inflammatory hyperpigmentation history, active pigment flare, Fitzpatrick IV-VI skin with pigment concern, photosensitivity condition, prior light-triggered reaction, or photosensitizing medication/topical exposure.
-  - Active sunburn or intense recent UV tanning, rash, infection, blistering, wound, healing skin, unexplained lesion, suspicious lesion, pre-cancerous/cancerous lesion, or active/recent cancer history requiring clinician review.
-  - Recent or planned laser, IPL, RF, microneedling, peel, filler, PRP, PDT/photosensitizer, photoconverter, or other cosmetic procedure in the target area.
-  - Unknown device model, unknown mode, blue/violet/acne/UV/PDT/heat mode, damaged device parts, timer failure, unclear auto-shutoff, or device that feels hot or painful.
+  - under_18_adult_only
+  - pregnancy_or_lactation
+  - eye_disease_or_retinal_risk
+  - ocular_photosensitivity_or_eye_procedure
+  - photosensitizing_medication
+  - current_visual_symptoms
+  - no_manufacturer_eye_protection_available
+  - need_to_look_directly_at_active_leds
+  - melasma_or_hyperpigmentation_history
+  - active_pigment_flare
+  - fitzpatrick_iv_vi_pigment_concern
+  - photosensitivity_condition
+  - prior_light_triggered_reaction
+  - active_sunburn_or_intense_uv_tanning
+  - rash_infection_or_blistering
+  - wound_or_healing_skin
+  - unexplained_or_suspicious_lesion
+  - precancerous_or_cancerous_lesion
+  - active_or_recent_cancer_history
+  - recent_or_planned_cosmetic_procedure
+  - pdt_or_photosensitizer_exposure
+  - unknown_or_damaged_device
+  - blue_violet_uv_pdt_heat_mode
+  - timer_failure_or_unclear_auto_shutoff
+  - device_feels_hot_or_painful
   stopIf:
   - Stop for tearing, distorted vision, temporary vision loss, persistent or recurrent afterimage, flashes, spots, floaters, blurry vision, eye pain, eye irritation, or any new ocular or visual symptom during or after use.
   - Stop if eye inserts, shields, or goggles shift, fit poorly, feel hot, cause contact irritation/allergy, or cannot be used without removing them near the eyelids.
@@ -799,9 +816,9 @@ safety:
   - Pause before continuing if a photosensitizing medication/topical is started or changed, a major skincare active is added, a cosmetic procedure occurs or is planned, or sunburn/recent intense tanning occurs.
   - Stop for damaged device parts, device malfunction, unexpected heat or hot spots, timer or auto-shutoff failure, unclear mode behavior, or any pressure to increase dose, frequency, closeness, or remove protection.
   notes:
-  - This adult starter should not be presented as cleared for minors, pregnancy, lactation, active/recent cancer history, suspicious lesions, eye disease, active pigment disorders, photosensitizing medications, open/healing skin, or immediate post-procedure use.
-  - Direct home/facial mask tolerability findings are short-term and incompletely characterized; safety boundaries rely on direct tolerability evidence plus adjacent eye, pigment, medication, procedure, oncologic, and thermal safety sources. [source_artifact:pmid-39960921; source_artifact:pmid-32649063; source_artifact:doi-10.3390-cosmetics12010004; source_artifact:pmid-37418018; source_artifact:pmid-39439130; source_artifact:pmid-32716115; source_artifact:pmid-17566756; source_artifact:pmid-15909229]
-  - Eye, pigment, photosensitivity, procedure, PDT/photoconverter, and heat cautions are intentionally stronger than efficacy language because many safety sources are adjacent but high-consequence. [source_artifact:pmid-39122507; source_artifact:pmid-39335685; source_artifact:pmid-37533142; source_artifact:pmid-32541484; source_artifact:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17; source_artifact:fda-currentbody-series-2-k250966-2025-06-25; source_artifact:fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20; source_artifact:fda-k230124-led-facewear-mask-eye-protection-2023-02-09; source_artifact:fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27; source_artifact:pmid-35606999; source_artifact:pmid-28891192; source_artifact:pmid-29552271; source_artifact:pmid-35333214; source_artifact:doi-10.5318-wjo.v4.i1.1; source_artifact:pmid-33390779; source_artifact:pmid-34863776; source_artifact:pmid-37227712; source_artifact:pmid-39672511; source_artifact:ranzco-red-light-nir-pbm-eye-position-statement-2020-11-01; source_artifact:pmid-31483941; source_artifact:pmid-27484782; source_artifact:pmid-30894210; source_artifact:clinicaltrials-nct02630303-2026-04-24; source_artifact:clinicaltrials-nct03433222-2026-04-24; source_artifact:pmid-20410914; source_artifact:pmid-24888214; source_artifact:pmid-26121474; source_artifact:pmid-32289393; source_artifact:pmid-33640508; source_artifact:pmid-33640513; source_artifact:pmid-30227084; source_artifact:pmid-39899363; source_artifact:pmid-40650752; source_artifact:pmid-30888626; source_artifact:pmid-33491908; source_artifact:pmid-34451820; source_artifact:pmid-21879777; source_artifact:pmid-3530309; source_artifact:pmid-19438994; source_artifact:pmid-25192842; source_artifact:bmla-drugs-and-lasers-ipls-2018-11-30; source_artifact:cdc-sun-exposure-photosensitizing-medications-2025-04-23; source_artifact:dermnet-drug-induced-photosensitivity-2026-04-24; source_artifact:pmid-36722207; source_artifact:pmid-16581685; source_artifact:doi-10.1016-j.mla.2006.06.001; source_artifact:pmid-18254808; source_artifact:pmid-19397672; source_artifact:pmid-23551853; source_artifact:pmid-30074109; source_artifact:pmid-25266806; source_artifact:clinicaltrials-nct07054710-cosmetic-light-mask-2026-04-24; source_artifact:bmla-laser-ipl-treatment-guidelines-2019-05-01; source_artifact:pmid-30506819; source_artifact:pmid-34575408; source_artifact:pmid-29552272; source_artifact:pmid-20456545; source_artifact:pmid-27257391; source_artifact:pmid-26745730; source_artifact:pmid-29178437; source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21; source_artifact:pmid-39439130]
+  - Not cleared for minors, pregnancy, lactation, cancer history, suspicious lesions, eye disease, pigment disorders, photosensitizing meds, open skin, or post-procedure use.
+  - Tolerability findings are short-term — safety boundaries also draw on adjacent eye, pigment, medication, procedure, and thermal sources.
+  - Eye, pigment, photosensitivity, and procedure cautions are intentionally stronger than efficacy language — adjacent but high-consequence.
 researchLandscape:
   bottomLine: 'Supportive but mixed: the closest facial/periocular red+NIR studies justify a cautious adult self-experiment with standardized photos and strong safety gates, but the evidence is heterogeneous, mixed/null findings remain visible, and the literature does not establish a universal device, dose, or promise of visible rejuvenation.'
   confidenceLabel: mixed

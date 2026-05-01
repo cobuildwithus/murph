@@ -408,13 +408,12 @@ protocol:
   - Keep regular meals, protein, fiber-rich carbohydrates, fruit, dairy or alternatives, and hydration in place; this is not a fasting, keto, or total-carbohydrate elimination protocol.
   - At the end, use the baseline-to-intervention added-sugar drop as the dose check, then interpret weight, waist, blood pressure, glucose, cravings, and taste changes as downstream or exploratory outcomes; log sleep or recovery as a confounder/context signal, not as an expected no-added-sugar outcome.
   tips:
-  - Start with drinks if they are a major source; beverage changes are often easier to execute than a whole pantry overhaul.
-  - Use neutral language such as 'logged exception' instead of 'failure' or 'cheat.'
-  - Keep a short list of default snacks and meals that require no label debate.
-  - Log replacements because switching from added sugar to juice, low/no-calorie sweeteners, refined starches, or larger portions changes interpretation.
-  - Plan social meals before they happen; an explicit exception is easier to interpret than a vague lapse.
-  - Prefer weekly averages for weight or waist; single-day changes are noisy.
-  - If sweeteners are used, treat them as optional transition tools and log them separately rather than making them the default recommendation.
+  - Start with drinks if they are a major source — easier win than a full pantry overhaul.
+  - Say 'logged exception,' not 'failure' or 'cheat.'
+  - Keep a short default-meals list that requires no label debate.
+  - Log replacements; juice, sweeteners, starch, or bigger portions all change interpretation.
+  - Plan social meals in advance; a planned exception beats a vague lapse.
+  - Use weekly averages for weight or waist; single days are noise.
   keepInMind:
   - Added-sugar intake is the exposure check; the main downstream home signals are weight trend, waist trend, and morning blood pressure when those are safe to measure.
   - Many supporting studies use free-sugar, sugar-sweetened-beverage, pediatric, clinical, or substitution designs; these are adjacent to, not identical with, a strict adult no-added-sugar diet.
@@ -1538,18 +1537,22 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - diabetes_or_prediabetes_with_glucose_lowering_medication_cgm_lows_or_uncertain_hypoglycemia_plan
-  - type_1_diabetes_gestational_diabetes_or_diabetes_in_pregnancy
-  - use_of_insulin_sulfonylurea_sglt2_inhibitor_or_recent_relevant_medication_changes
-  - pregnancy_or_breastfeeding_without_clinician_aligned_nutrition_plan
-  - child_or_adolescent_without_caregiver_and_clinician_appropriate_framing
-  - current_or_past_eating_disorder_orthorexia_risk_or_food_rule_compulsion
-  - underweight_recent_unintentional_weight_loss_frailty_malnutrition_dehydration_or_long_term_care_context
-  - hospitalized_or_acute_illness_context_with_reduced_intake_vomiting_diarrhea_or_dehydration
-  - high_energy_athlete_red_s_low_energy_availability_or_heavy_training_load_with_underfueling_risk
-  - food_insecurity_limited_food_access_or_low_control_over_available_food
-  - kidney_disease_cystic_fibrosis_nafld_dental_periodontal_disease_or_other_condition_requiring_medical_nutrition_therapy
-  - concurrent_weight_loss_fasting_ketogenic_or_low_carb_protocol_without_clinician_plan
+  - diabetes_on_glucose_lowering_medication
+  - hypoglycemia_risk_or_cgm_lows
+  - type_1_or_gestational_diabetes
+  - diabetes_in_pregnancy
+  - insulin_sulfonylurea_or_sglt2_inhibitor
+  - pregnancy_or_breastfeeding
+  - child_or_adolescent
+  - eating_disorder_or_orthorexia_risk
+  - underweight_or_unintentional_weight_loss
+  - frailty_malnutrition_or_dehydration
+  - hospitalized_or_acute_illness
+  - high_energy_athlete_or_red_s_risk
+  - food_insecurity_or_limited_access
+  - kidney_disease_or_cystic_fibrosis
+  - nafld_or_medical_nutrition_therapy
+  - concurrent_fasting_keto_or_low_carb
   stopIf:
   - hypoglycemia_symptoms_or_low_glucose_reading_that_needs_rapid_carbohydrate
   - repeated_low_glucose_severe_low_or_uncertain_medication_adjustment
@@ -1562,10 +1565,10 @@ safety:
   - training_performance_recovery_or_fueling_declines_in_a_way_suggesting_underfueling
   - pregnancy_breastfeeding_pediatric_medical_diet_or_clinician_advised_reason_to_stop
   notes:
-  - This is a wellness self-experiment about added-sugar exposure and adherence, not diabetes treatment, weight-loss treatment, dental treatment, pregnancy or lactation nutrition, pediatric feeding, kidney nutrition, medical nutrition therapy, or eating-disorder care.
-  - Adequate calories, carbohydrate availability, fiber, protein, hydration, fruit, dairy or alternatives, regular meals, and clinician-required nutrition are part of the protocol boundary.
-  - Sweeteners and sugar alcohols are optional logged transition tools, not required replacements and not guaranteed safer or better long-term.
-  - If the safest version is simply tracking added-sugar sources without strict avoidance, use that lighter variant instead.
+  - Wellness experiment — not treatment for diabetes, weight loss, dental disease, or eating disorders.
+  - Preserve adequate calories, carbs, fiber, protein, fruit, dairy, and regular meals.
+  - Sweeteners are optional logged tools — not required replacements or proven safer long-term.
+  - When strict avoidance is unsafe, use the lighter sugar-source-awareness variant instead.
 researchCoverage:
   corpusStats:
     canonicalLedgerRecords: 214
