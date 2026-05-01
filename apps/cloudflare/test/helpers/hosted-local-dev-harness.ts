@@ -24,6 +24,7 @@ export interface HostedLocalDevHarness {
   request(pathname: string, init?: RequestInit): Promise<Response>;
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  runtimeEnv: NodeJS.ProcessEnv;
   stderrTail(maxChars?: number): string;
   stop(): Promise<void>;
   stdoutTail(maxChars?: number): string;
@@ -142,6 +143,7 @@ export async function startHostedLocalDevHarness(input: {
       },
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
+      runtimeEnv: stack.runtimeEnv,
       stop,
       stdoutTail: (maxChars?: number): string => stack?.stdoutTail(maxChars) ?? "",
       stderrTail: (maxChars?: number): string => stack?.stderrTail(maxChars) ?? "",
@@ -156,6 +158,7 @@ export async function startHostedLocalDevHarness(input: {
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
         let nextLagNudgeAt = startedAt;
+        let lastStatus: HostedRunnerStatusResponse | null = null;
 
         while ((Date.now() - startedAt) < timeoutMs) {
           const status = await readHostedUserStatus({
@@ -164,6 +167,7 @@ export async function startHostedLocalDevHarness(input: {
             statusPath,
             userId,
           });
+          lastStatus = status;
 
           if (
             !status.inFlight
@@ -185,6 +189,7 @@ export async function startHostedLocalDevHarness(input: {
 
         throw new Error(formatFailure([
           `Timed out waiting for hosted completion for ${userId}.`,
+          ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
         ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
       waitForHostedIdle: async (

@@ -27,7 +27,13 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberRoutingState: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  provisionHostedCryptoDomainRootsForUserTx: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  provisionHostedCryptoDomainRootsForUserTx:
+    mocks.provisionHostedCryptoDomainRootsForUserTx,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -105,6 +111,7 @@ describe("hosted onboarding member activation", () => {
         dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_123",
       },
     });
+    mocks.provisionHostedCryptoDomainRootsForUserTx.mockResolvedValue(undefined);
     mocks.updateHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       createdAt: new Date("2026-04-12T00:00:00.000Z"),
@@ -139,6 +146,11 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
       member,
       prisma: expect.anything(),
+    });
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).toHaveBeenCalledWith({
+      reason: "hosted-member.activation",
+      tx: expect.anything(),
+      userId: "member_123",
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({

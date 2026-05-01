@@ -20,6 +20,9 @@ const skippedSourceArtifactDirectoryNames = new Set([
   ".deploy",
   ".wrangler",
 ]);
+const skippedSourceArtifactDirectoryPaths = new Set([
+  "apps/web/app/.well-known/workflow",
+]);
 const blockedTrackedArtifactDirectoryNames = new Set([
   "dist",
   ".next",
@@ -118,7 +121,10 @@ async function scanPath(relativePath: string, offenders: string[]): Promise<void
     const entryRelativePath = path.posix.join(relativePath, entry.name);
 
     if (entry.isDirectory()) {
-      if (shouldSkipSourceArtifactDirectory(entry.name)) {
+      if (
+        shouldSkipSourceArtifactDirectory(entry.name) ||
+        skippedSourceArtifactDirectoryPaths.has(entryRelativePath)
+      ) {
         continue;
       }
 

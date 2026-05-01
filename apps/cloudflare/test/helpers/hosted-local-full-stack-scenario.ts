@@ -128,7 +128,6 @@ export async function startHostedLocalFullStackScenario(input: {
   });
   const localDatabaseUrl = localDatabase.url;
   const baseEnvironment = await loadHostedLocalBaseEnvironment();
-  const seedEnvironment = input.seedEnvironment ?? baseEnvironment;
   const assistantProviderMode =
     input.assistantProviderMode ?? resolveHostedAssistantProviderMode(baseEnvironment);
 
@@ -195,6 +194,8 @@ export async function startHostedLocalFullStackScenario(input: {
       streamLogs: input.streamLogs,
     });
     const scenarioHarness = harness;
+    const scenarioRuntimeEnv = scenarioHarness.runtimeEnv;
+    const seedEnvironment = input.seedEnvironment ?? scenarioRuntimeEnv;
 
     return {
       assistantProviderRequests,
@@ -229,7 +230,7 @@ export async function startHostedLocalFullStackScenario(input: {
           `stderr tail: ${scenarioHarness.stderrTail()}`,
         ].join("\n");
       },
-      runtimeEnv,
+      runtimeEnv: scenarioRuntimeEnv,
       queueAssistantResponses: (responseTexts) => {
         for (const responseText of responseTexts) {
           const trimmed = responseText.trim();
