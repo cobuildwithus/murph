@@ -35,9 +35,17 @@ export async function GET(
     );
   } catch (error) {
     if (isDeviceSyncError(error)) {
+      const connectSourceId = typeof error.details?.connectSourceId === "string"
+        ? error.details.connectSourceId
+        : null;
+      const connectTarget = typeof error.details?.connectTarget === "string"
+        ? error.details.connectTarget
+        : null;
       const redirect = errorToCallbackRedirect({
         returnTo: typeof error.details?.returnTo === "string" ? error.details.returnTo : null,
         provider: typeof error.details?.provider === "string" ? error.details.provider : (providerName ?? "unknown"),
+        connectSourceId,
+        connectTarget,
         error,
       });
 

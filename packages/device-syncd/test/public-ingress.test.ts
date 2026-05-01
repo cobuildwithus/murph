@@ -2444,6 +2444,8 @@ test("public ingress preserves callback redirect context on OAuth callback failu
   });
 
   const begin = await ingress.startConnection({
+    connectSourceId: "garmin",
+    connectTarget: "garmin",
     provider: "demo",
     returnTo: "https://app.example.test/settings/devices",
   });
@@ -2460,6 +2462,8 @@ test("public ingress preserves callback redirect context on OAuth callback failu
       error instanceof DeviceSyncError &&
       error.code === "OAUTH_CALLBACK_REJECTED" &&
       error.message === "OAuth authorization was denied or canceled." &&
+      error.details?.connectSourceId === "garmin" &&
+      error.details?.connectTarget === "garmin" &&
       error.details?.provider === "demo" &&
       error.details?.returnTo === "https://app.example.test/settings/devices",
   );

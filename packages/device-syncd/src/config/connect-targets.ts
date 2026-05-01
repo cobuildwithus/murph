@@ -62,12 +62,12 @@ export function listConfiguredDeviceSyncConnectTargets(
       }
 
       addDeviceSyncConnectTarget(targetsBySourceId, {
-          connectSourceId: junctionRoute.source.connectSourceId,
-          connectTarget: junctionRoute.route.connectTarget,
-          label: junctionRoute.source.label,
-          provider: "junction",
-          sourceProviderSlug: junctionRoute.route.sourceProviderSlug,
-        });
+        connectSourceId: junctionRoute.source.connectSourceId,
+        connectTarget: junctionRoute.route.connectTarget,
+        label: junctionRoute.source.label,
+        provider: "junction",
+        sourceProviderSlug: junctionRoute.route.sourceProviderSlug,
+      });
     }
   }
 

@@ -5,9 +5,10 @@ import {
   listConfiguredDeviceSyncConnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
+  resolveConfiguredDeviceSyncConnectTargetBySourceId,
 } from "../src/config.ts";
 
-test("connect targets prefer Junction for Oura and Strava but keep WHOOP direct-first", () => {
+test("connect targets prefer direct providers when direct and Junction routes are configured", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -30,9 +31,9 @@ test("connect targets prefer Junction for Oura and Strava but keep WHOOP direct-
       sourceProviderSlug: target.sourceProviderSlug ?? null,
     })),
     [
-      { connectSourceId: "oura", connectTarget: "oura", provider: "junction", sourceProviderSlug: "oura" },
+      { connectSourceId: "oura", connectTarget: "oura", provider: "oura", sourceProviderSlug: null },
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "whoop", sourceProviderSlug: null },
-      { connectSourceId: "strava", connectTarget: "strava", provider: "junction", sourceProviderSlug: "strava" },
+      { connectSourceId: "strava", connectTarget: "strava", provider: "strava", sourceProviderSlug: null },
       { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
     ],
   );
@@ -41,15 +42,13 @@ test("connect targets prefer Junction for Oura and Strava but keep WHOOP direct-
     connectSourceId: "oura",
     connectTarget: "oura",
     label: "Oura",
-    provider: "junction",
-    sourceProviderSlug: "oura",
+    provider: "oura",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), {
     connectSourceId: "strava",
     connectTarget: "strava",
     label: "Strava",
-    provider: "junction",
-    sourceProviderSlug: "strava",
+    provider: "strava",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "WHOOP"), {
     connectSourceId: "whoop",
@@ -59,7 +58,33 @@ test("connect targets prefer Junction for Oura and Strava but keep WHOOP direct-
   });
 });
 
-test("connect targets apply the same Junction preference with the default Junction source list", () => {
+test("connect target source-id lookups resolve direct and Junction sources", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "garmin",
+    JUNCTION_REGION: "us",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+  });
+
+  assert.deepEqual(resolveConfiguredDeviceSyncConnectTargetBySourceId(configs, "Oura"), {
+    connectSourceId: "oura",
+    connectTarget: "oura",
+    label: "Oura",
+    provider: "oura",
+  });
+  assert.deepEqual(resolveConfiguredDeviceSyncConnectTargetBySourceId(configs, "garmin"), {
+    connectSourceId: "garmin",
+    connectTarget: "garmin",
+    label: "Garmin",
+    provider: "junction",
+    sourceProviderSlug: "garmin",
+  });
+});
+
+test("connect targets keep direct providers first with the default Junction source list", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -77,15 +102,13 @@ test("connect targets apply the same Junction preference with the default Juncti
     connectSourceId: "oura",
     connectTarget: "oura",
     label: "Oura",
-    provider: "junction",
-    sourceProviderSlug: "oura",
+    provider: "oura",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), {
     connectSourceId: "strava",
     connectTarget: "strava",
     label: "Strava",
-    provider: "junction",
-    sourceProviderSlug: "strava",
+    provider: "strava",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "WHOOP"), {
     connectSourceId: "whoop",

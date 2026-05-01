@@ -265,12 +265,14 @@ export function listVisibleConnectSources(): ConnectSource[] {
   return DEVICE_CONNECT_SOURCES.flatMap((source) => {
     const ui = readConnectSourceUi(source.connectSourceId);
     return ui
-      ? [{
-        description: ui.description,
-        id: source.connectSourceId,
-        logo: ui.logo,
-        name: ui.name,
-      }]
+      ? [
+          {
+            description: ui.description,
+            id: source.connectSourceId,
+            logo: ui.logo,
+            name: ui.name,
+          },
+        ]
       : [];
   });
 }

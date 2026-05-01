@@ -47,12 +47,14 @@ type SettingsDeviceSyncSidebarStatusRouteModule = typeof import("../app/api/sett
 type SettingsDeviceSyncConnectRouteModule = typeof import("../app/api/settings/device-sync/providers/[provider]/connect/route");
 type SettingsDeviceSyncDisconnectRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
 type SettingsDeviceSyncStatusRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
+type ConnectSourceStartRouteModule = typeof import("../app/api/connect-sources/[sourceId]/start/route");
 
 let settingsDeviceSyncRoute: SettingsDeviceSyncRouteModule;
 let settingsDeviceSyncSidebarStatusRoute: SettingsDeviceSyncSidebarStatusRouteModule;
 let settingsDeviceSyncConnectRoute: SettingsDeviceSyncConnectRouteModule;
 let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
+let connectSourceStartRoute: ConnectSourceStartRouteModule;
 
 describe("device sync settings routes", () => {
   beforeAll(async () => {
@@ -61,6 +63,7 @@ describe("device sync settings routes", () => {
     settingsDeviceSyncConnectRoute = await import("../app/api/settings/device-sync/providers/[provider]/connect/route");
     settingsDeviceSyncDisconnectRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
     settingsDeviceSyncStatusRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
+    connectSourceStartRoute = await import("../app/api/connect-sources/[sourceId]/start/route");
   });
 
   beforeEach(() => {
@@ -281,6 +284,105 @@ describe("device sync settings routes", () => {
         sourceProviderSlug: "garmin",
       },
     );
+  });
+
+  it("starts a hosted connect source flow by source id without returning OAuth state", async () => {
+    mocks.startConnection.mockResolvedValueOnce({
+      authorizationUrl: "https://provider.example.test/oauth/source-start",
+      state: "state_browser_leak",
+    });
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/oura/start",
+        {
+          returnTo: "/connect?connectSource=oura",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "oura" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "oura",
+      "/connect?connectSource=oura",
+      {
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        sourceProviderSlug: null,
+      },
+    );
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/source-start",
+    });
+  });
+
+  it("starts a hosted connect source flow through Junction by source id", async () => {
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
+    vi.stubEnv("JUNCTION_REGION", "us");
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/garmin/start",
+        {},
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "garmin" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "junction",
+      "/connect",
+      {
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        sourceProviderSlug: "garmin",
+      },
+    );
+  });
+
+  it("rejects oversized hosted connect source start payloads before starting OAuth", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/oura/start",
+        {
+          returnTo: `/connect?padding=${"x".repeat(5_000)}`,
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "oura" }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it("rejects Garmin settings connect when Junction does not expose Garmin", async () => {
