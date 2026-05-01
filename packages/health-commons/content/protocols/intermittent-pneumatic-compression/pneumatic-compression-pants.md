@@ -266,7 +266,7 @@ testPlans:
   - Do not interpret this plan as VTE prophylaxis, swelling treatment, or a medical compression prescription.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:muscle-soreness-score
-  description: "Compression cycles squeeze the legs, driving venous blood and interstitial fluid out of compressed tissue and then allowing refill. After hard lower-body work, less pooling and stiffness can show up as a lower same-muscle soreness score across the DOMS window."
+  description: "Compression cycles squeeze and refill leg tissue, moving venous blood and interstitial fluid to reduce pooling, stiffness, and soreness."
   expected: Could trend lower
   estimatedChange:
     kind: absolute
@@ -278,7 +278,7 @@ expectedSignalDescriptions:
     basis: "source_artifact:pmid-35456170 reports SMD -0.33 for soreness from 24–96 hours after DOMS induction; source_artifact:pmid-39416507 supports pain/soreness as a clearer practical signal than objective recovery. The range maps that small standardized effect to a 0–10 score."
   protocolProminence: focus
 - biomarkerKey: biomarker:leg-heaviness-score
-  description: "Sequential pressure empties the lower legs during inflation and allows refill during deflation. After standing, sitting, or a heavy-leg day, the practical signal is lighter legs soon after the session."
+  description: "Sequential pressure empties and refills the lower legs, reducing pooled fluid that makes legs feel heavy."
   expected: Could trend lower
   estimatedChange:
     kind: absolute
@@ -290,7 +290,7 @@ expectedSignalDescriptions:
     basis: "source_artifact:pmid-34260560 and source_artifact:pmid-36419142 reported leg-pain and circumference improvements after prolonged-standing contexts. Confidence stays low because leg heaviness was not pooled and this consumer protocol is not a swelling-treatment plan."
   protocolProminence: focus
 - biomarkerKey: biomarker:perceived-recovery-score
-  description: "Compression adds a quiet recovery block while the device cycles fluid through the legs. When that reduces immediate fatigue, readiness can rise even if jump, strength, or running-power tests stay unchanged."
+  description: "Fluid movement and quiet rest reduce immediate leg fatigue, making the next session feel more available."
   expected: Could improve
   estimatedChange:
     kind: absolute

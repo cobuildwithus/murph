@@ -165,7 +165,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:body-weight
   expected: Goal-dependent
-  description: Protein-rich meals digest slowly and cost more energy to process. If that helps a calorie deficit stick, weekly scale weight can drift down; in maintenance or muscle-gain runs, stable weight may be the useful result.
+  description: "Protein-rich meals slow digestion, increase satiety signaling, and cost more energy to process, helping a calorie deficit hold when energy intake drops."
   estimatedChange:
     kind: mixed_or_contextual
     window: 8 weeks
@@ -175,7 +175,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:body-fat-percent
   expected: Could trend lower
-  description: A protein floor supplies amino acids during a deficit, so more of the lost weight can come from fat instead of lean tissue. Same-method body-composition trends are more useful than single BIA readings.
+  description: "Amino acids support lean tissue during a deficit, shifting more weight loss toward fat instead of muscle."
   estimatedChange:
     kind: absolute
     low: -2.0
@@ -188,7 +188,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:lean-mass
   expected: Hold steadier
-  description: Extra amino acids support muscle repair and protein turnover. The measurable signal is usually less lean-mass loss during dieting, or a small gain when resistance training is already in place.
+  description: "Extra amino acids supply muscle repair and protein turnover, helping lean tissue stay steadier during dieting or training."
   estimatedChange:
     kind: absolute
     low: 0.0
@@ -201,7 +201,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:subjective-satiety
   expected: Could feel fuller
-  description: Protein-rich meals slow digestion and trigger gut satiety signals. If the target replaces lower-satiety calories, hunger ratings can improve within days.
+  description: "Protein slows gastric emptying and activates gut satiety signals, reducing hunger after meals."
   estimatedChange:
     kind: absolute
     low: 0.5
@@ -214,7 +214,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:triglycerides
   expected: Could trend lower
-  description: When lean protein replaces refined carbohydrate and body fat falls, the liver can export less triglyceride-rich VLDL. A lipid panel is most likely to move when weight, carbohydrate quality, alcohol, or glycemic control also changes.
+  description: "Replacing refined carbohydrates with lean protein and losing body fat reduces liver export of triglyceride-rich VLDL."
   estimatedChange:
     kind: absolute
     low: -20
@@ -227,7 +227,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:ldl-c
   expected: Source-dependent
-  description: LDL-C follows the protein source mix more than the gram target. Lean, plant, or low-saturated-fat dairy sources can leave it steady; more fatty meat or high-saturated-fat dairy can push it up.
+  description: "LDL follows source mix: lean or plant proteins lower saturated-fat load, while fatty meats and dairy raise it."
   estimatedChange:
     kind: absolute
     low: -5
@@ -240,7 +240,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:blood-pressure
   expected: Could dip slightly
-  description: If the protein floor helps weight loss or replaces refined carbohydrates, vascular load can ease and home blood pressure may fall a little. Extra sodium or processed meats can erase or reverse that.
+  description: "Weight loss, better carbohydrate quality, and lower vascular load reduce pressure; extra sodium or processed meats push the other way."
   estimatedChange:
     kind: absolute
     low: -4
@@ -253,7 +253,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:digestive-comfort
   expected: Watch GI comfort
-  description: Larger protein portions and source swaps change gastric load, lactose or whey exposure, legume intake, and fiber displacement. Constipation, reflux, bloating, or diarrhea means the food mix needs redesign.
+  description: "Large protein portions, new sources, and lost fiber change gut load, causing constipation, reflux, bloating, or diarrhea."
   estimatedChange:
     kind: mixed_or_contextual
     window: days to 2 weeks
@@ -263,7 +263,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:serum-creatinine
   expected: Should stay stable
-  description: Higher protein changes renal workload and creatinine context through meat intake, creatine, training, and lean mass. A meaningful rise is a safety signal, not a success signal.
+  description: "More protein, meat, creatine, training, and lean mass change creatinine context by increasing renal workload and muscle-derived byproducts."
   estimatedChange:
     kind: absolute
     low: 0.0
@@ -276,7 +276,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:estimated-gfr
   expected: Should stay stable
-  description: Protein raises renal blood-flow demand; eGFR may stay stable or shift with hydration, creatinine, and lab-equation inputs. A sustained drop needs clinician review.
+  description: "Protein increases renal blood-flow demand, shifting eGFR through hydration, creatinine production, and lab-equation inputs."
   estimatedChange:
     kind: absolute
     low: -5

@@ -545,7 +545,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:chosen-primary-outcome-score
   expected: Choose before start
   protocolProminence: focus
-  description: Treat the selected target as the primary signal. Choose one domain before baseline, keep the same scale and context through the run, and do not compare skin, pain, tendon/loading, recovery, and tolerability scores as if they were one pooled collagen outcome.
+  description: Collagen signals are target-specific; choose one domain before baseline so skin, joint, tendon, recovery, and tolerability effects are not pooled together.
   estimatedChange:
     kind: mixed_or_contextual
     window: target-specific
@@ -555,7 +555,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:standardized-skin-photo-score
   expected: Could improve slowly
   protocolProminence: focus
-  description: Skin is the best-matched HCP signal. If the selected target is skin-specific, hydration and elasticity can show up as steadier texture, less dry-looking skin, or fewer visible fine-line changes on the same photo setup.
+  description: Collagen peptides supply amino-acid signals that support dermal hydration, elasticity, and matrix turnover, improving visible texture and fine-line appearance.
   estimatedChange:
     kind: mixed_or_contextual
     window: 8-12 weeks
@@ -565,7 +565,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:skin-texture-roughness-score
   expected: Could feel smoother
   protocolProminence: context
-  description: Hydration and elasticity changes usually matter to users as smoother, less rough, or less crepey-looking skin. Score the same area and lighting; skincare, sun, humidity, and procedures can move this faster than collagen.
+  description: Better hydration and matrix support make skin feel smoother, less rough, and less crepey.
   estimatedChange:
     kind: absolute
     low: -1
@@ -578,7 +578,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:musculoskeletal-pain
   expected: Could trend lower
   protocolProminence: focus
-  description: Joint and tendon claims only make sense against a repeatable load. If the selected target is joint or tendon/loading tolerance, the same walk, lift, sport drill, or rehab session should hurt a little less or function a little better without extra rescue medication.
+  description: Collagen-derived peptides and amino acids support connective-tissue remodeling around repeated joint or tendon loading, reducing pain under the matched load.
   estimatedChange:
     kind: absolute
     low: -1.5
@@ -591,7 +591,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:lean-body-mass
   expected: Training-dependent
   protocolProminence: context
-  description: Collagen is not a complete muscle-building protein, but in a stable training block it can be part of the recovery input. Same-device lean-mass or fat-free-mass trends are useful only when paired with body weight, training volume, total protein, and hydration context.
+  description: Collagen supplies recovery substrate but lacks a complete muscle-building amino-acid profile, so lean-mass effects depend on training and total protein.
   estimatedChange:
     kind: absolute
     low: 0
@@ -604,7 +604,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:muscle-soreness-score
   expected: Could trend lower
   protocolProminence: context
-  description: Recovery claims need a repeatable stressor. If the selected target is post-exercise soreness, the same muscle group should feel less sore at 24, 48, or 72 hours; a new workout plan or harder session can overwhelm the signal.
+  description: Collagen recovery signals depend on a repeatable stressor; matched workouts reveal whether the same muscle group feels less sore.
   estimatedChange:
     kind: mixed_or_contextual
     window: 24-72 hours after matched workouts
@@ -614,7 +614,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:perceived-recovery-score
   expected: Could improve
   protocolProminence: context
-  description: Some users care most about whether joints or muscles feel ready for the next session. Treat readiness as context next to soreness, sleep, stress, and training load rather than proof that tissue repaired faster.
+  description: Readiness improves when joint and muscle discomfort eases enough for the next session to feel more available.
   estimatedChange:
     kind: absolute
     low: 0
@@ -627,7 +627,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:gi-tolerance
   expected: Should stay stable
   protocolProminence: context
-  description: GI tolerance is a safety and feasibility signal, not the win condition. Collagen peptides, source proteins, sweeteners, flavors, or beauty-blend coingredients can cause nausea, bloating, reflux, diarrhea, or abdominal discomfort.
+  description: Collagen peptides, source proteins, sweeteners, flavors, and active coingredients change gut load, triggering nausea, bloating, reflux, diarrhea, or discomfort.
   estimatedChange:
     kind: absolute
     low: 0

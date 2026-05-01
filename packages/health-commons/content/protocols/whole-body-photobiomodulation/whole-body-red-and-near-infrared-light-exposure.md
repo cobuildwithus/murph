@@ -312,7 +312,7 @@ expectedSignalDescriptions:
       confidence: low
       basis: "Adjacent partial-body 850 nm RCT data showed -4.60 +/- 1.90 bpm in winter at 6.5 J/cm^2; whole-body athlete implementation data also showed lower nocturnal heart rate, while direct general whole-body registries have no posted outcomes."
     protocolProminence: focus
-    description: Red/NIR exposure can increase nitric-oxide signaling and shift inflammatory/autonomic tone; if overnight recovery demand drops, the same wearable may show a lower resting pulse.
+    description: "Red/NIR exposure supports nitric-oxide signaling and inflammatory balance, lowering overnight recovery demand and resting pulse."
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Could rise or stay stable
@@ -325,7 +325,7 @@ expectedSignalDescriptions:
       confidence: low
       basis: "An acute whole-body pre-exercise crossover trial found higher next-morning rMSSD versus placebo, and athlete implementation data showed a numerical HRV increase; neither source proves a durable general-wellness shift."
     protocolProminence: focus
-    description: Lower recovery load gives the vagal system more room to rebound during sleep; RMSSD is the wearable signal most likely to show that autonomic shift.
+    description: "Lower recovery load gives the vagal system more room to rebound during sleep, raising RMSSD."
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: Small or no clear change
@@ -338,7 +338,7 @@ expectedSignalDescriptions:
       confidence: low
       basis: "The closest controlled 850 nm wellness trial did not show significant sleep or circadian effects; direct whole-body sleep registries selected Oura and sleep-quality endpoints but do not yet provide outcome data."
     protocolProminence: context
-    description: A calmer, less uncomfortable night leaves fewer quiet-wake minutes in bed, so sleep efficiency is the cleanest sleep-continuity readout.
+    description: "A calmer, less uncomfortable night may reduce quiet-wake minutes, but controlled sleep effects remain unclear."
   -
     biomarkerKey: biomarker:deep-sleep-minutes
     expected: Background signal
@@ -351,7 +351,7 @@ expectedSignalDescriptions:
       confidence: low
       basis: "No extracted study directly anchors N3 or wearable deep-sleep minutes for this protocol; the range reflects a noisy same-device context signal around otherwise null or mixed sleep findings."
     protocolProminence: context
-    description: Early-night deep sleep can rise when the first cycles are less fragmented; use the same-device trend as a background check beside total sleep and RHR.
+    description: "Deep-sleep minutes remain a noisy context signal when sleep findings are null, mixed, or unmeasured."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

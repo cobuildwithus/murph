@@ -504,7 +504,7 @@ expectedSignalDescriptions:
     confidence: "low"
     basis: "The closest adult-style 30-minute phone-curfew RCT reported about 12 minutes less sleep latency over 4 weeks; adolescent and screen-reduction studies support earlier sleep timing, while athlete/device-removal and active-control results were mixed or null [source_artifact:pmid-32040492; source_artifact:pmid-29313721; source_artifact:pmid-31260534; source_artifact:pmid-28081034; source_artifact:pmid-29073407; source_artifact:pmid-40081281]."
   protocolProminence: "focus"
-  description: "Stopping personal screens removes late light, message loops, and stimulating content from the wind-down window. If those inputs were keeping the brain alert or delaying lights-out, time to fall asleep can shorten."
+  description: "Stopping personal screens removes late light, message loops, and stimulating content, letting the brain shift out of alert mode before bed."
 -
   biomarkerKey: "biomarker:sleep-efficiency"
   expected: "Could improve slightly"
@@ -517,7 +517,7 @@ expectedSignalDescriptions:
     confidence: "low"
     basis: "Direct Digital Sunset evidence is strongest for sleep-onset and duration signals; sleep-efficiency support is indirect or preliminary, including in-bed smartphone associations and underpowered screen-restriction findings [source_artifact:pmid-32040492; source_artifact:pmid-39432278; source_artifact:pmid-36405389; source_artifact:pmid-28081034; source_artifact:pmid-30741866]."
   protocolProminence: "focus"
-  description: "The curfew does not deepen sleep directly. It can improve sleep efficiency when fewer in-bed pickups, delayed lights-out minutes, and restless starts leave more of the sleep window actually asleep."
+  description: "Fewer in-bed pickups, delayed lights-out minutes, and restless starts leave more of the sleep window actually asleep."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

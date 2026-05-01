@@ -452,7 +452,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:estimated-vo2max
     expected: Could improve
-    description: "The 20/10 block creates oxygen debt quickly, forcing the heart, lungs, and working muscles to deliver and use oxygen faster; if recovery is adequate, same-device VO2max or cardio-fitness estimates may rise."
+    description: "The 20/10 block creates oxygen debt quickly, training the heart, lungs, and working muscles to deliver and use oxygen faster."
     estimatedChange:
       kind: absolute
       low: 1
@@ -465,7 +465,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
-    description: "As aerobic power and stroke volume adapt, each beat can move a little more blood, so resting pulse may drift lower when the interval dose is recoverable."
+    description: "Aerobic power and stroke volume adapt, letting each beat move more blood and lowering the pulse needed at rest."
     estimatedChange:
       kind: absolute
       low: -3
@@ -478,7 +478,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Possible change
-    description: "The workout first pushes the stress system, then demands a recovery rebound; RMSSD can rise with adaptation or fall if the sessions outpace recovery."
+    description: "The workout spikes stress first; adequate recovery restores parasympathetic rebound, while overload suppresses RMSSD."
     estimatedChange:
       kind: relative_percent
       low: -10
@@ -491,7 +491,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: Possible change
-    description: "A recoverable hard session can raise sleep pressure, but late timing or overload can keep the body activated; sleep efficiency may nudge up or dip."
+    description: "Recoverable hard sessions raise sleep pressure; late timing or overload keeps arousal high and fragments sleep."
     estimatedChange:
       kind: absolute
       low: -2
@@ -504,7 +504,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:morning-blood-pressure
     expected: Could trend lower
-    description: "Repeated vigorous aerobic work can help blood vessels relax more easily, so morning systolic pressure may edge down, especially when baseline pressure is elevated."
+    description: "Repeated vigorous aerobic work improves vessel relaxation, reducing resistance against each heartbeat."
     estimatedChange:
       kind: absolute
       low: -4

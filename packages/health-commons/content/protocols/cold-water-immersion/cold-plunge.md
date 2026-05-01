@@ -145,7 +145,7 @@ testPlans:
   - Exclude or annotate days with illness, alcohol/sedatives, sauna/heat exposure, unusual training load, travel, major sleep disruption, or protocol deviations.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:self-reported-mood
-  description: Cold water delivers a sharp arousal jolt, then relief and challenge-appraisal after exit. Log the same mood scale before the session and 30–180 minutes after; a useful signal is a repeatable post-session lift without stop conditions or heavy rewarming burden.
+  description: "Cold water creates a strong arousal surge, followed by relief after exit, shifting perceived challenge and mood state."
   expected: acute mood may rise
   estimatedChange:
     kind: absolute
@@ -157,7 +157,7 @@ expectedSignalDescriptions:
     basis: Direct single-session CWI studies reported POMS/TMD mood improvements, but those scales and 5–20 minute exposures do not map cleanly to a 1–3 minute Murph run; this is a conservative user-scale translation.
   protocolProminence: focus
 - biomarkerKey: biomarker:resting-heart-rate
-  description: Immersion raises cardiac load while you are in the water; next-morning resting heart rate shows whether that stress is resolving. Compare same-device overnight or morning averages; persistent upward drift means the protocol is adding strain.
+  description: "Immersion raises cardiac load; next-morning resting pulse shows whether the stress response has resolved."
   expected: stable or slightly lower
   estimatedChange:
     kind: absolute
@@ -169,7 +169,7 @@ expectedSignalDescriptions:
     basis: Direct repeated-CWI and habituation sources show acute heart-rate load with mixed or unclear repeated-dose effects; a near-baseline range is the defensible expectation for consumer resting heart rate.
   protocolProminence: context
 - biomarkerKey: biomarker:hrv-rmssd
-  description: Cold acutely shifts the nervous system toward sympathetic drive, so RMSSD can dip around the session and should recover by overnight or morning. Use same-device RMSSD to catch recovery cost, not to score one dramatic session.
+  description: "Cold shifts the nervous system toward sympathetic drive; overnight RMSSD reflects whether parasympathetic recovery returned."
   expected: stable with possible acute dip
   estimatedChange:
     kind: relative_percent
@@ -181,7 +181,7 @@ expectedSignalDescriptions:
     basis: Direct CWI HRV data are limited and include small acute/post-exercise contexts; adjacent athlete recovery studies are positive in places but not direct evidence of better baseline RMSSD.
   protocolProminence: context
 - biomarkerKey: biomarker:morning-blood-pressure
-  description: Cold water constricts peripheral vessels and can raise pressure during exposure. Morning cuff averages should stay near baseline; a sustained rise or symptomatic reading means the cold load is too much.
+  description: "Cold constricts peripheral vessels and raises pressure during exposure; morning pressure should settle once vascular tone normalizes."
   expected: should stay stable
   estimatedChange:
     kind: absolute
@@ -193,7 +193,7 @@ expectedSignalDescriptions:
     basis: Cold-shock and safety sources support acute pressure load, while direct repeated-dose and WHM-adjacent data do not establish a durable home-BP improvement.
   protocolProminence: context
 - biomarkerKey: biomarker:sleep-efficiency
-  description: A late or stressful plunge can disrupt thermoregulation, arousal, or shivering; an earlier well-tolerated session may leave sleep unchanged. Track sleep efficiency to catch burden, especially after evening sessions.
+  description: "Late or stressful plunges disrupt thermoregulation and arousal, while earlier well-tolerated sessions preserve sleep continuity."
   expected: no clear change
   estimatedChange:
     kind: absolute

@@ -1042,7 +1042,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:training-performance
     expected: "Max strength may improve"
     protocolProminence: focus
-    description: "Extra intramuscular creatine raises phosphocreatine availability and speeds ATP recycling. The clearest numeric signal is selected max-strength testing; repeated hard sets, short sprints, and power work are useful context when measured the same way."
+    description: "Creatine raises muscle phosphocreatine stores, helping regenerate ATP during heavy lifts, sprints, and repeated high-intensity efforts."
     estimatedChange:
       kind: absolute
       low: 4
@@ -1055,7 +1055,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:body-weight
     expected: "May increase"
     protocolProminence: focus
-    description: "Creatine-loaded muscle holds more water as stores rise; same-condition scale weight can climb quickly even when fat mass has not changed."
+    description: "Creatine draws water into muscle and supports training volume, increasing scale weight even before true tissue gain."
     estimatedChange:
       kind: absolute
       low: 0.5
@@ -1068,7 +1068,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:lean-body-mass
     expected: "May increase"
     protocolProminence: focus
-    description: "Creatine-loaded muscle holds more water, and easier repeated high-tension work can add hypertrophy stimulus; DXA and BIA lean-mass changes are useful but water-sensitive."
+    description: "Intramuscular water retention and training-supported muscle gain raise lean-mass readings over weeks."
     estimatedChange:
       kind: absolute
       low: 0.5
@@ -1081,7 +1081,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:gi-tolerance
     expected: "Symptoms should stay low"
     protocolProminence: focus
-    description: "Large single servings leave more creatine in the gut at once; nausea, bloating, belching, or diarrhea are most likely during loading or unsplit doses above 5 g."
+    description: "Large servings, loading, poor mixing, or additives increase gut osmotic load, triggering bloating, cramps, nausea, or diarrhea."
     estimatedChange:
       kind: mixed_or_contextual
       window: "during loading or dose changes"

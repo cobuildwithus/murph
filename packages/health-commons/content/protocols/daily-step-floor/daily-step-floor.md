@@ -149,7 +149,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:resting-heart-rate
   expected: down_or_stable
   protocolProminence: focus
-  description: 'Easy extra walking can improve aerobic efficiency; if the dose is recoverable, the heart may need slightly fewer beats at true rest.'
+  description: 'Easy extra walking improves aerobic efficiency and stroke volume, reducing the resting beats needed when the added dose stays recoverable.'
   estimatedChange:
     kind: absolute
     low: -2
@@ -161,7 +161,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:estimated-vo2max
   expected: up_or_stable
   protocolProminence: focus
-  description: 'More daily walking can add a small aerobic training stimulus; same-device wearable cardio fitness or a field test may rise most in low-baseline users.'
+  description: 'Added walking gives low-intensity aerobic practice, improving oxygen delivery most when baseline activity is low.'
   estimatedChange:
     kind: absolute
     low: 0
@@ -173,7 +173,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:morning-blood-pressure
   expected: down_or_stable
   protocolProminence: focus
-  description: 'Repeated easy walking can improve vascular tone and replace sitting; morning systolic pressure may drift down, especially when baseline pressure is high.'
+  description: 'Repeated walking improves vascular tone and replaces sitting, reducing resistance against each heartbeat.'
   estimatedChange:
     kind: absolute
     low: -4
@@ -185,7 +185,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-efficiency
   expected: mixed_or_contextual
   protocolProminence: context
-  description: 'Daytime movement can build sleep pressure, but late or too-large step gaps can also leave the body activated; treat sleep efficiency as context.'
+  description: 'Daytime movement builds sleep pressure; late or oversized step gaps keep the body activated and fragment sleep.'
   estimatedChange:
     kind: absolute
     low: -1
@@ -197,7 +197,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:musculoskeletal-pain
   expected: down_or_stable
   protocolProminence: focus
-  description: 'A modest ramp can build tissue tolerance; rising foot, shin, knee, hip, or back pain means the floor is too steep.'
+  description: 'A modest ramp builds tissue tolerance; rising foot, shin, knee, hip, or back pain signals load is too steep.'
   estimatedChange:
     kind: absolute
     low: -1
@@ -209,7 +209,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:walking-safety-events
   expected: down_or_stable
   protocolProminence: focus
-  description: 'The dose is only working if falls, near-falls, chest symptoms, heat symptoms, and foot or skin problems stay at zero.'
+  description: 'Falls, near-falls, chest symptoms, heat symptoms, and foot or skin problems show the dose is unsafe.'
   estimatedChange:
     kind: absolute
     low: 0
@@ -221,7 +221,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sedentary-time
   expected: down_or_stable
   protocolProminence: context
-  description: 'Filling the floor from sitting replaces chair time with light movement; if steps come from already-active chores, sedentary time may barely move.'
+  description: 'Filling the floor from sitting replaces chair time with light movement.'
   estimatedChange:
     kind: absolute
     low: -30
@@ -233,7 +233,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:moderate-to-vigorous-activity-minutes
   expected: mixed_or_contextual
   protocolProminence: context
-  description: 'The floor becomes moderate activity only when the added steps are brisk enough; easy or fragmented steps add movement without much MVPA.'
+  description: 'Added steps become moderate activity only when the pace is brisk enough.'
   estimatedChange:
     kind: absolute
     low: 0
@@ -245,7 +245,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:walking-cadence
   expected: mixed_or_contextual
   protocolProminence: context
-  description: 'Cadence only shows how the step gap was filled: brisk walks raise it, while errands and short breaks may leave it unchanged.'
+  description: 'Cadence reflects how the gap was filled: brisk walks raise it, errands and breaks leave it flatter.'
   estimatedChange:
     kind: mixed_or_contextual
     window: 4 weeks
@@ -254,7 +254,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:walking-bout-minutes
   expected: mixed_or_contextual
   protocolProminence: context
-  description: 'A higher floor often creates more intentional or detected walking bouts, but bout minutes are dose context, not the health outcome.'
+  description: 'Higher floors create more intentional or detected walking bouts, showing how the step dose was accumulated.'
   estimatedChange:
     kind: absolute
     low: 5

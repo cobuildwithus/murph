@@ -197,7 +197,7 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: "biomarker:ldl-c"
-    description: "Monacolin K inhibits hepatic cholesterol synthesis. Lower liver cholesterol increases LDL-receptor clearance, pulling LDL particles out of blood."
+    description: "Monacolin K inhibits liver cholesterol synthesis, increasing LDL-receptor clearance and pulling LDL particles out of blood."
     expected: "Likely lower"
     estimatedChange:
       kind: "absolute"
@@ -210,7 +210,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
-    description: "Each LDL-related particle carries one ApoB. Receptor-driven particle clearance should lower ApoB, not just the cholesterol inside those particles."
+    description: "Each LDL-related particle carries one ApoB; receptor-driven particle clearance lowers ApoB alongside LDL particles."
     expected: "Could fall"
     estimatedChange:
       kind: "relative_percent"
@@ -223,7 +223,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:non-hdl-c"
-    description: "Non-HDL-C sums cholesterol carried by LDL and other ApoB-containing particles. When LDL clearance rises and HDL-C stays stable, this total should drop."
+    description: "Non-HDL-C falls when LDL and other ApoB-containing particles clear faster while HDL stays stable."
     expected: "Could fall"
     estimatedChange:
       kind: "absolute"
@@ -236,7 +236,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:total-cholesterol"
-    description: "LDL-C makes up much of total cholesterol in the studied hyperlipidemia populations. When RYR pulls LDL-C down, total cholesterol usually follows."
+    description: "LDL-C makes up much of total cholesterol, so LDL clearance pulls total cholesterol down too."
     expected: "Likely lower"
     estimatedChange:
       kind: "absolute"
@@ -249,7 +249,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:triglycerides"
-    description: "Less hepatic cholesterol synthesis can reduce VLDL assembly and secretion, so fasting triglycerides may dip when diet, alcohol, weight, and exercise stay stable."
+    description: "Lower liver cholesterol synthesis reduces VLDL assembly and secretion, lowering fasting triglyceride traffic."
     expected: "May decrease"
     estimatedChange:
       kind: "absolute"
@@ -262,7 +262,7 @@ expectedSignalDescriptions:
     protocolProminence: "context"
   -
     biomarkerKey: "biomarker:hdl-c"
-    description: "RYR targets LDL production and clearance, not HDL formation. HDL-C usually serves as a stability check while LDL-related markers move."
+    description: "RYR targets LDL production and clearance rather than HDL formation, leaving HDL mostly stable."
     expected: "Usually stable"
     estimatedChange:
       kind: "absolute"

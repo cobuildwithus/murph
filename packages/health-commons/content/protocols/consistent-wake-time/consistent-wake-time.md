@@ -344,7 +344,7 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: "biomarker:wake-time-variability"
-    description: "The wake window removes late sleep-ins and early-morning drift as recurring schedule noise. Diary or wearable wake times should cluster closer together when the anchor is realistic."
+    description: "A steady wake window removes recurring schedule drift, giving the body clock a more predictable morning anchor."
     expected: "Wake times tighten"
     estimatedChange:
       kind: "absolute"
@@ -357,7 +357,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:total-sleep-time"
-    description: "The fixed wake anchor changes the back end of sleep. It works cleanly only when bedtime or time in bed shifts early enough to protect sleep opportunity, so total sleep should hold steady instead of being cut."
+    description: "The wake anchor works only when bedtime protects enough sleep opportunity, keeping total sleep from being cut."
     expected: "Should stay stable"
     estimatedChange:
       kind: "absolute"
@@ -370,7 +370,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:sleep-efficiency"
-    description: "A steadier wake anchor can make bedtime timing and sleep pressure less erratic, but direct actigraphy evidence is mixed. Treat sleep efficiency as context, not as a promised win."
+    description: "Regular wake timing aligns sleep pressure with bedtime, reducing time awake in bed when sleep opportunity stays adequate."
     expected: "Track as mixed context"
     estimatedChange:
       kind: "absolute"
@@ -383,7 +383,7 @@ expectedSignalDescriptions:
     protocolProminence: "context"
   -
     biomarkerKey: "biomarker:resting-heart-rate"
-    description: "More regular sleep timing can reduce morning sympathetic carryover. When the anchor lowers overnight strain without shortening sleep, resting pulse may drift down."
+    description: "More regular sleep timing lowers overnight sympathetic carryover, reducing the resting pulse needed after sleep."
     expected: "May drop slightly"
     estimatedChange:
       kind: "absolute"
@@ -396,7 +396,7 @@ expectedSignalDescriptions:
     protocolProminence: "context"
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "Stable sleep timing can shift more of the night toward predictable recovery and less autonomic arousal. If that happens, RMSSD-style HRV may rise; sleep loss, alcohol, illness, or hard training can erase it."
+    description: "Stable sleep timing reduces autonomic arousal and supports stronger parasympathetic recovery during the night."
     expected: "May rise if recoverable"
     estimatedChange:
       kind: "absolute"
@@ -409,7 +409,7 @@ expectedSignalDescriptions:
     protocolProminence: "context"
   -
     biomarkerKey: "biomarker:sleep-onset-latency"
-    description: "The same wake anchor builds sleep pressure on a more repeatable schedule. When evening timing follows it, sleep onset may shorten because the body clock and tiredness converge closer to bedtime."
+    description: "The same wake anchor builds sleep pressure on schedule, helping tiredness and the body clock converge at bedtime."
     expected: "May fall asleep sooner"
     estimatedChange:
       kind: "absolute"
@@ -422,7 +422,7 @@ expectedSignalDescriptions:
     protocolProminence: "context"
   -
     biomarkerKey: "biomarker:daytime-sleepiness"
-    description: "The anchor should reduce circadian whiplash, not force short sleep. Sleepiness should ease only when wake regularity comes with enough time asleep; a rise means the target is too early or too rigid."
+    description: "Wake regularity reduces circadian whiplash; enough sleep opportunity lets daytime alertness recover."
     expected: "Should fall, not rise"
     estimatedChange:
       kind: "absolute"

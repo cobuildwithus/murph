@@ -164,7 +164,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:fasting-tolerance-symptom-log
   expected: Safety signal
   protocolProminence: focus
-  description: "Fasting pulls on glucose availability, fluid balance, caffeine routine, and stress hormones; hunger, headache, dizziness, palpitations, severe weakness, confusion, or chest symptoms show whether the selected dose is tolerable."
+  description: "Fasting stresses glucose supply, fluid balance, caffeine routine, and stress hormones; symptoms reveal whether the chosen duration is tolerable."
   estimatedChange:
     kind: mixed_or_contextual
     window: During the fast through the planned end
@@ -173,7 +173,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:refeed-tolerance-symptom-log
   expected: Safety signal after first meal
   protocolProminence: focus
-  description: "Refeeding switches insulin, glucose handling, gut load, and fluid-electrolyte shifts back on. Severe weakness, confusion, ataxia, swelling, breathlessness, chest symptoms, or palpitations after the first meal are stop-and-seek-care signals."
+  description: "Refeeding restarts insulin, gut load, and fluid-electrolyte shifts; severe neurologic, breathing, swelling, chest, or palpitation symptoms signal danger."
   estimatedChange:
     kind: mixed_or_contextual
     window: First hours after the planned refeed
@@ -182,7 +182,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
   expected: Fuel-switch marker
   protocolProminence: focus
-  description: "As liver glycogen falls, the liver turns fatty acids into beta-hydroxybutyrate. A higher BHB reading confirms deeper fuel switching; it is not a target to chase or a reason to extend the fast."
+  description: "Falling liver glycogen pushes fatty acids into beta-hydroxybutyrate production, showing a deeper fuel switch."
   estimatedChange:
     kind: absolute
     low: 0.5
@@ -194,7 +194,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:continuous-glucose
   expected: Lower during fast; watch lows and refeed rise
   protocolProminence: focus
-  description: "With no incoming carbohydrate, the liver holds glucose up with glycogen release and gluconeogenesis while tissues shift toward fat and ketones. Glucose often drifts lower during the fast; symptomatic lows or high refeed excursions matter more than a lower average."
+  description: "With no carbohydrate coming in, glycogen release and gluconeogenesis hold glucose while tissues shift toward fat and ketones."
   estimatedChange:
     kind: absolute
     low: -30
@@ -206,7 +206,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:body-weight
   expected: Acute scale drop
   protocolProminence: context
-  description: "No food intake, falling glycogen, natriuresis, and gut-content loss can lower scale weight quickly. Most of that early drop is water, sodium, glycogen, and food mass, so the signal should not be read as durable fat loss."
+  description: "No food intake, glycogen loss, natriuresis, and emptied gut contents lower scale weight quickly."
   estimatedChange:
     kind: absolute
     low: -3.0
@@ -218,7 +218,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:resting-heart-rate
   expected: Can fall early or rise late
   protocolProminence: focus
-  description: "A 24-hour fast can lower ambulatory pulse when rest and vagal tone rise, while 60–72 hours can feel more adrenergic as catecholamines and sleep disruption increase. Resting pulse is a strain-and-tolerance read, not a benefit target."
+  description: "Short fasts raise vagal tone, while longer fasts increase catecholamines, sleep disruption, and cardiac strain."
   estimatedChange:
     kind: absolute
     low: -4
@@ -230,7 +230,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:hrv-rmssd
   expected: Can rise early or dip late
   protocolProminence: context
-  description: "Shorter fasting can increase vagal modulation in some settings, but longer fasting can pull the autonomic system toward sympathetic activation and lower vagal tone. RMSSD helps show whether the fast is recoverable."
+  description: "Short fasting raises vagal modulation; longer fasting shifts autonomic balance toward sympathetic activation and lower RMSSD."
   estimatedChange:
     kind: relative_percent
     low: -35
@@ -242,7 +242,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:morning-blood-pressure
   expected: May drift lower or stay stable
   protocolProminence: context
-  description: "Lower insulin and sodium/water handling can reduce vascular load, but the same fluid shift can reduce orthostatic reserve. Home BP is useful context when dizziness, dehydration, medications, or low-pressure symptoms are in play."
+  description: "Lower insulin and sodium-water shifts reduce vascular load, while lower fluid reserve increases orthostatic stress."
   estimatedChange:
     kind: absolute
     low: -5

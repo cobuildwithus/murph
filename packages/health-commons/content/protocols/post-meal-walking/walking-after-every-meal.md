@@ -505,7 +505,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:postprandial-glucose-excursion
   expected: meal-window rise may shrink
   protocolProminence: focus
-  description: Walking places gentle leg-muscle contractions into the same window when the meal is sending glucose into the blood. Working muscle can pull more glucose out of circulation, so matched CGM or fingerstick meal windows may show a smaller peak or iAUC.
+  description: Walking pairs gentle leg-muscle contractions with incoming meal glucose, pulling more glucose out of circulation during the post-meal window.
   estimatedChange:
     kind: relative_percent
     low: -25
@@ -517,7 +517,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:morning-blood-pressure
   expected: should stay stable
   protocolProminence: context
-  description: Post-meal walking can interact with meal-related blood-pressure dips, dizziness, and fall risk. Morning home-cuff averages are a safety and context read: a sustained rise, unusual drop, or symptom-linked reading matters more than claiming BP improvement.
+  description: Post-meal walking shifts blood flow toward digestion and working muscle, interacting with meal-related pressure dips and dizziness risk.
   estimatedChange:
     kind: absolute
     low: -3
@@ -529,7 +529,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:resting-heart-rate
   expected: usually stable
   protocolProminence: context
-  description: The walks add small repeated activity bouts, but the dose is meant to time muscle glucose uptake rather than train the cardiovascular system. Same-device resting heart rate helps catch recovery strain from extra walking, sleep disruption, illness, or underfueling.
+  description: Small repeated walking bouts add light activity load; inadequate recovery, sleep disruption, illness, or underfueling raise resting pulse.
   estimatedChange:
     kind: absolute
     low: -2

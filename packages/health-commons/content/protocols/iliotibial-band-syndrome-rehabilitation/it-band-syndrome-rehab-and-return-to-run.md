@@ -239,7 +239,7 @@ testPlans:
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:lateral-knee-pain
   expected: Less run pain
-  description: Reducing the provocative running dose lowers lateral-knee irritation; hip/glute and single-leg control work gives each stride more capacity. The signal is lower peak pain during flat easy running and no same-day or next-morning rebound.
+  description: Reducing provocative running lowers lateral-knee irritation; hip/glute control gives each stride more capacity before pain escalates.
   estimatedChange:
     kind: absolute
     low: -4
@@ -251,7 +251,7 @@ expectedSignalDescriptions:
   protocolProminence: focus
 - biomarkerKey: biomarker:running-tolerance
   expected: More pain-free minutes
-  description: Short, flat run/walk intervals reload the knee in small steps after the flare trigger is reduced. More pain-free minutes show the knee can handle repeated strides without forcing a stop or rebounding the next day.
+  description: Short, flat run/walk intervals reload the knee in small steps, rebuilding repeated-stride tolerance without rebound.
   estimatedChange:
     kind: absolute
     low: 10

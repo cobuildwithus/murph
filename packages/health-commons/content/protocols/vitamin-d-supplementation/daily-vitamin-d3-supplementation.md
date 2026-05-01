@@ -115,7 +115,7 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:serum-25-hydroxyvitamin-d
-    description: Daily D3 adds cholecalciferol for liver conversion into 25(OH)D, so the follow-up lab should rise when absorption and total intake are stable.
+    description: "Daily D3 supplies cholecalciferol for liver conversion into 25(OH)D, raising the follow-up lab when intake and absorption stay stable."
     expected: Likely rises
     estimatedChange:
       kind: absolute

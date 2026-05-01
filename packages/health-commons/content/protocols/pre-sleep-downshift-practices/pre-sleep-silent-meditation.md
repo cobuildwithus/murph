@@ -159,7 +159,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-onset-latency
     expected: May fall asleep sooner
-    description: Silent attention gives planning and worry a neutral place to land before lights-out. If that lowers pre-sleep arousal and sleep effort, diary or wearable sleep-onset latency can shorten.
+    description: Silent attention gives planning and worry a neutral anchor before lights-out, lowering pre-sleep arousal and sleep effort.
     estimatedChange:
       kind: absolute
       low: -8
@@ -172,7 +172,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: Could improve slightly
-    description: If the practice trims the awake stretch at the start of the night, more of the time in bed becomes sleep. Same-device sleep efficiency may rise a little if sleep onset improves.
+    description: Less pre-sleep arousal shortens the awake stretch at the start of the night, turning more time in bed into sleep.
     estimatedChange:
       kind: absolute
       low: 0
@@ -185,7 +185,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:deep-sleep-minutes
     expected: Likely unchanged or slightly higher
-    description: The practice does not directly create deep sleep. Any wearable deep-sleep change would come indirectly from a calmer, less fragmented first part of the night.
+    description: A calmer, less fragmented first part of the night protects early deep-sleep cycles.
     estimatedChange:
       kind: absolute
       low: 0
@@ -198,7 +198,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Could rise modestly
-    description: Lower pre-sleep threat-checking can reduce sympathetic load and leave more room for overnight recovery. Same-device RMSSD may rise if the session feels calming rather than effortful.
+    description: Lower threat-checking reduces sympathetic load, leaving more room for parasympathetic recovery during sleep.
     estimatedChange:
       kind: relative_percent
       low: 0
@@ -211,7 +211,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
-    description: If the routine lowers mental arousal before sleep, the heart may enter the night from a lower stress set point. Overnight resting heart rate can dip slightly when sleep is less effortful.
+    description: Lower mental arousal before sleep lets the heart enter the night from a calmer stress set point.
     estimatedChange:
       kind: absolute
       low: -2
