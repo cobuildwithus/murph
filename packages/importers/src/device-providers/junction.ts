@@ -346,6 +346,10 @@ function normalizeTimeseries(
       }
 
       if (streamDescriptor) {
+        if (!shouldEmitQueryableSample(timestamp)) {
+          return;
+        }
+
         context.samples.push(stripUndefined({
           stream: streamDescriptor.stream,
           recordedAt: timestamp.occurredAt,
@@ -984,6 +988,12 @@ function normalizeTimeseriesUnit(resource: string, rawUnit: string | undefined, 
   }
 
   return rawUnit ?? fallbackUnit;
+}
+
+function shouldEmitQueryableSample(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): boolean {
+  return timestamp.timestampSemantics !== "floating";
 }
 
 function listAllowedResourceKeys(
