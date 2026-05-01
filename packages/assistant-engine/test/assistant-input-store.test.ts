@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -449,88 +448,124 @@ describe('assistant input event store', () => {
     })
   })
 
-  it('reuses legacy hosted mailbox input records after the identity cutover', async () => {
+  it('rejects stored input records whose id does not match source identity', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
-      'assistant-input-store-legacy-hosted-identity-',
+      'assistant-input-store-hard-cut-hosted-identity-',
     )
     const sourceRef = createHostedMailboxSourceRef({
-      eventId: 'evt_legacy_identity',
-      itemId: 'item_legacy_identity',
+      eventId: 'evt_hard_cut_identity',
+      itemId: 'item_hard_cut_identity',
       laneSeq: '42',
     })
     const stored = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: {
         content: {
-          text: 'legacy identity text',
+          text: 'hard cut identity text',
         },
         occurredAt: '2026-04-22T10:00:00.000Z',
         sourceRef,
       },
     })
-    const legacyInputId = createLegacyHostedMailboxInputId(sourceRef)
     const paths = resolveAssistantStatePaths(vaultRoot)
-    const currentPath = resolveAssistantInputEventPath({
-      inputId: stored.inputId,
-      paths,
-    })
-    const legacyRecord = {
+    const mismatchedRecord = {
       ...stored,
       cursor: {
         ...stored.cursor,
-        inputId: legacyInputId,
+        inputId: 'ain_00000000000000000000000000000000',
       },
-      idempotencyKey: `sha256:${sha256Hex(stableStringify({
-        eventId: sourceRef.eventId,
-        itemId: sourceRef.itemId,
-        kind: sourceRef.kind,
-        lane: sourceRef.lane,
-        laneSeq: sourceRef.laneSeq,
-      }))}`,
-      inputId: legacyInputId,
+      inputId: 'ain_00000000000000000000000000000000',
     }
-    await rm(currentPath)
     await writeFile(
       resolveAssistantInputEventPath({
-        inputId: legacyInputId,
+        inputId: stored.inputId,
         paths,
       }),
       `${JSON.stringify({
         schema: 'murph.assistant-input-event.v1',
         schemaVersion: 1,
-        value: legacyRecord,
+        value: mismatchedRecord,
       })}\n`,
       { mode: 0o600 },
     )
 
-    const replay = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: {
-        content: {
-          text: 'legacy identity text',
-        },
-        occurredAt: '2026-04-22T10:00:00.000Z',
-        sourceRef: {
-          ...sourceRef,
-          itemId: 'item_legacy_duplicate',
-          laneSeq: '43',
-        },
-      },
-    })
-
-    expect(replay.inputId).toBe(legacyInputId)
-    expect(
-      await readAssistantInputEvent({
-        inputId: legacyInputId,
-        vault: vaultRoot,
-      }),
-    ).toEqual(legacyRecord)
     await expect(
       readAssistantInputEvent({
         inputId: stored.inputId,
         vault: vaultRoot,
       }),
-    ).resolves.toBeNull()
+    ).rejects.toThrow('inputId must match its sourceRef')
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'hard cut identity text',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef,
+        },
+      }),
+    ).rejects.toThrow('inputId must match its sourceRef')
+  })
+
+  it('rejects stored input records whose cursor id does not match input id', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-hard-cut-cursor-identity-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_hard_cut_cursor_identity',
+      itemId: 'item_hard_cut_cursor_identity',
+      laneSeq: '42',
+    })
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'hard cut cursor identity text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef,
+      },
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await writeFile(
+      resolveAssistantInputEventPath({
+        inputId: stored.inputId,
+        paths,
+      }),
+      `${JSON.stringify({
+        schema: 'murph.assistant-input-event.v1',
+        schemaVersion: 1,
+        value: {
+          ...stored,
+          cursor: {
+            ...stored.cursor,
+            inputId: 'ain_00000000000000000000000000000000',
+          },
+        },
+      })}\n`,
+      { mode: 0o600 },
+    )
+
+    await expect(
+      readAssistantInputEvent({
+        inputId: stored.inputId,
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow('cursor inputId must match its inputId')
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'hard cut cursor identity text',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef,
+        },
+      }),
+    ).rejects.toThrow('cursor inputId must match its inputId')
   })
 
   it('lists inputs by conversation and leaves projection failures listable', async () => {
@@ -1732,39 +1767,4 @@ function createHostedMailboxSourceRef(input: {
     source: 'hosted-mailbox' as const,
     wakeSchema: 'murph.hosted-wake.v1',
   }
-}
-
-function createLegacyHostedMailboxInputId(
-  sourceRef: ReturnType<typeof createHostedMailboxSourceRef>,
-): string {
-  return `ain_${sha256Hex(stableStringify({
-    eventId: sourceRef.eventId,
-    itemId: sourceRef.itemId,
-    kind: sourceRef.kind,
-    lane: sourceRef.lane,
-    laneSeq: sourceRef.laneSeq,
-  })).slice(0, 32)}`
-}
-
-function sha256Hex(value: string): string {
-  return createHash('sha256').update(value).digest('hex')
-}
-
-function stableStringify(value: unknown): string {
-  return JSON.stringify(stableJsonValue(value))
-}
-
-function stableJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => stableJsonValue(item))
-  }
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value).sort(([left], [right]) =>
-      left.localeCompare(right),
-    )
-    return Object.fromEntries(
-      entries.map(([key, entryValue]) => [key, stableJsonValue(entryValue)]),
-    )
-  }
-  return value
 }
