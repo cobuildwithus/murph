@@ -26,7 +26,6 @@ const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const HOSTED_CODEX_PROXY_CONFIG_FILE_NAME = "app-server-proxy.json";
 const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
 const HOSTED_LOCAL_CODEX_PROVIDER_ID = "local-codex";
-const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
@@ -115,11 +114,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
+  const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
+  delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
-    HOSTED_ASSISTANT_MODEL:
-      normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL)
-      ?? DEFAULT_HOSTED_CODEX_MODEL,
+    ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
     HOSTED_ASSISTANT_REASONING_EFFORT:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT)
       ?? DEFAULT_HOSTED_CODEX_REASONING_EFFORT,
@@ -140,11 +139,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexConfigPath,
     usesLocalCodexProvider
       ? buildHostedLocalCodexConfigToml({
-          model: runtimeEnv.HOSTED_ASSISTANT_MODEL,
+          model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
           reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
         })
       : buildHostedCodexConfigToml({
-          model: runtimeEnv.HOSTED_ASSISTANT_MODEL,
+          model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
           provider: providerConfig,
           reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
         }),
@@ -731,12 +730,12 @@ rl.on("line", (line) => {
 }
 
 export function buildHostedCodexConfigToml(input: {
-  model: string;
+  model: string | null;
   provider: typeof VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
   reasoningEffort: string;
 }): string {
   return [
-    `model = ${tomlString(input.model)}`,
+    ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
     `model_provider = ${tomlString(input.provider.id)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
@@ -756,11 +755,11 @@ export function buildHostedCodexConfigToml(input: {
 }
 
 export function buildHostedLocalCodexConfigToml(input: {
-  model: string;
+  model: string | null;
   reasoningEffort: string;
 }): string {
   return [
-    `model = ${tomlString(input.model)}`,
+    ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,

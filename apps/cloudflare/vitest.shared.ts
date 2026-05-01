@@ -32,6 +32,7 @@ export const cloudflareVitestAliases = [
       "@murphai/gateway-core": "packages/gateway-core/src/index.ts",
       "@murphai/gateway-local": "packages/gateway-local/src/index.ts",
       "@murphai/hosted-execution": "packages/hosted-execution/src/index.ts",
+      "@murphai/hosted-local-harness": "packages/hosted-local-harness/package.json",
       "@murphai/importers": "packages/importers/src/index.ts",
       "@murphai/inbox-services": "packages/inbox-services/src/index.ts",
       "@murphai/inboxd": "packages/inboxd/src/index.ts",

@@ -157,6 +157,8 @@ silently dropped from later checkpoints.
 - `HostedMailboxLaneCounter`
 - `HostedWorkspace`
 - `HostedRuntimeLog`
+- `hosted_user_crypto_envelope` signed wrapped domain-root envelopes
+- `hosted_user_crypto_audit` append-only hosted crypto authority audit events
 - runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
 - hosted member identity/routing/billing/email authorization
 - hosted device-sync authority
@@ -183,6 +185,8 @@ silently dropped from later checkpoints.
 - container invocation
 - encrypted bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
+- verification of signed ingress/runtime root envelopes plus Cloudflare P-256
+  recipient unwrap; Cloudflare must not hold GCP KMS decrypt authority
 
 Cloudflare does not own product facts, mailbox state, mailbox import progress,
 assistant channel enablement state, outbox truth, or durable queue history.

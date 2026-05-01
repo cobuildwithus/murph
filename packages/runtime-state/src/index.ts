@@ -10,6 +10,7 @@ export {
 export * from "./hosted-email.ts";
 export * from "./hosted-storage.ts";
 export * from "./hosted-user-keys.ts";
+export * from "./hosted-domain-crypto.ts";
 export * from "./hosted-browser-session-keys.ts";
 export * from "./loopback-control-plane.ts";
 export * from "./ulid.ts";

@@ -45,18 +45,24 @@ async function loadHostedAssistantModule(options?: {
   }
 }
 
-function assertCodexGatewayProfile(profile: HostedAssistantConfig['profiles'][number] | undefined) {
+function assertCodexGatewayProfile(
+  profile: HostedAssistantConfig['profiles'][number] | undefined,
+  expectedModel: string | null = null,
+) {
   assert.ok(profile)
   assert.equal(profile.target.adapter, 'codex-cli')
   if (profile.target.adapter !== 'codex-cli') {
     throw new Error('expected hosted profile to use Codex')
   }
 
-  assert.equal(profile.target.model, 'gpt-5.5')
+  assert.equal(profile.target.model, expectedModel)
   assert.equal(profile.target.modelProvider, 'vercel-ai-gateway')
 }
 
-function assertLocalCodexProfile(profile: HostedAssistantConfig['profiles'][number] | undefined) {
+function assertLocalCodexProfile(
+  profile: HostedAssistantConfig['profiles'][number] | undefined,
+  expectedModel: string | null = null,
+) {
   assert.ok(profile)
   assert.equal(profile.target.adapter, 'codex-cli')
   if (profile.target.adapter !== 'codex-cli') {
@@ -64,7 +70,7 @@ function assertLocalCodexProfile(profile: HostedAssistantConfig['profiles'][numb
   }
 
   assert.equal(profile.label, 'Codex App Server')
-  assert.equal(profile.target.model, 'gpt-5.5')
+  assert.equal(profile.target.model, expectedModel)
   assert.equal(profile.target.modelProvider, null)
 }
 
@@ -96,8 +102,8 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
       approvalPolicy: 'never',
     },
   })
-  const incompleteProfile = createHostedAssistantProfile({
-    id: 'member-incomplete',
+  const providerOnlyProfile = createHostedAssistantProfile({
+    id: 'member-provider-only',
     providerConfig: {
       provider: 'codex-cli',
       modelProvider: 'vercel-ai-gateway',
@@ -105,7 +111,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
   })
   const config = createHostedAssistantConfig({
     activeProfileId: readyProfile.id,
-    profiles: [readyProfile, incompleteProfile],
+    profiles: [readyProfile, providerOnlyProfile],
     updatedAt: '2026-04-08T10:00:00.000Z',
   })
 
@@ -118,7 +124,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
   assert.deepEqual(resolveActiveHostedAssistantProfile(config), readyProfile)
   assert.deepEqual(resolveReadyHostedAssistantProfile(config), readyProfile)
   assert.equal(resolveReadyHostedAssistantProfile(null), null)
-  assert.equal(isHostedAssistantProfileReady(incompleteProfile), false)
+  assert.equal(isHostedAssistantProfileReady(providerOnlyProfile), true)
   assert.equal(isHostedAssistantProfileReady(null), false)
   assert.deepEqual(compileHostedAssistantProfileProviderConfig(readyProfile), {
     approvalPolicy: 'never',
@@ -144,6 +150,34 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
   })
+
+  const nullModelProfile = createHostedAssistantProfile({
+    id: 'member-null-model',
+    providerConfig: {
+      provider: 'codex-cli',
+      model: null,
+      modelProvider: null,
+    },
+  })
+  const nullModelConfig = createHostedAssistantConfig({
+    activeProfileId: nullModelProfile.id,
+    profiles: [nullModelProfile],
+    updatedAt: '2026-04-08T10:00:00.000Z',
+  })
+
+  assert.deepEqual(resolveReadyHostedAssistantProfile(nullModelConfig), nullModelProfile)
+  assert.deepEqual(resolveHostedAssistantProviderConfig(nullModelConfig), {
+    approvalPolicy: null,
+    codexCommand: null,
+    codexHome: null,
+    model: null,
+    modelProvider: null,
+    oss: false,
+    profile: null,
+    provider: 'codex-cli',
+    reasoningEffort: 'medium',
+    sandbox: null,
+  })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(config), {
     configured: true,
     provider: 'codex-cli',
@@ -161,7 +195,6 @@ test('hosted assistant bootstrap maps Vercel AI Gateway env to Codex model provi
   })
 
   vi.stubEnv('HOSTED_ASSISTANT_PROVIDER', 'vercel-ai-gateway')
-  vi.stubEnv('HOSTED_ASSISTANT_MODEL', 'gpt-5.5')
   vi.stubEnv('HOSTED_ASSISTANT_REASONING_EFFORT', 'medium')
   vi.stubEnv('HOSTED_ASSISTANT_APPROVAL_POLICY', 'never')
   vi.stubEnv('HOSTED_ASSISTANT_SANDBOX', 'danger-full-access')
@@ -201,7 +234,6 @@ test('hosted assistant bootstrap maps local Codex bridge env to host-default Cod
     allowMissing: false,
     env: {
       HOSTED_ASSISTANT_PROVIDER: 'local-codex',
-      HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
       HOSTED_ASSISTANT_REASONING_EFFORT: 'medium',
       HOSTED_ASSISTANT_APPROVAL_POLICY: 'never',
       HOSTED_ASSISTANT_SANDBOX: 'danger-full-access',
@@ -315,7 +347,6 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
     allowMissing: false,
     env: {
       HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
-      HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
     },
   })
   assert.deepEqual(updated, {
@@ -338,7 +369,6 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
             providerConfig: {
               approvalPolicy: 'never',
               provider: 'codex-cli',
-              model: 'gpt-5.5',
               modelProvider: 'vercel-ai-gateway',
               reasoningEffort: 'medium',
               sandbox: 'danger-full-access',
@@ -354,7 +384,6 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
     allowMissing: false,
     env: {
       HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
-      HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
     },
   })
   assert.deepEqual(unchanged, {

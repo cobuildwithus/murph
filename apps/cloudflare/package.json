@@ -85,6 +85,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.13.4",
     "@cloudflare/workers-types": "^4.20260317.1",
+    "@murphai/hosted-local-harness": "workspace:*",
     "@types/node": "^25.5.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",

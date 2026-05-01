@@ -73,7 +73,6 @@ const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV =
   resolveAssistantCodexModelProviderConfig(
     VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
   )?.envKey ?? 'VERCEL_AI_API_KEY'
-const DEFAULT_HOSTED_ASSISTANT_MODEL = 'gpt-5.5'
 const DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT: AssistantReasoningEffort = 'medium'
 const DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY: AssistantApprovalPolicy = 'never'
 const DEFAULT_HOSTED_ASSISTANT_SANDBOX: AssistantSandbox = 'danger-full-access'
@@ -197,10 +196,6 @@ export function isHostedAssistantProfileReady(
   }
 
   const providerConfig = hostedAssistantProfileToProviderConfigInput(profile)
-  if (!normalizeHostedAssistantString(providerConfig.model)) {
-    return false
-  }
-
   return providerConfig.modelProvider === null ||
     resolveAssistantCodexModelProviderConfig(providerConfig.modelProvider) !== null
 }
@@ -304,7 +299,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
     'HOSTED_ASSISTANT_CONFIG_REQUIRED',
     [
       'Hosted assistant automation requires explicit hosted assistant config.',
-      `Set ${HOSTED_ASSISTANT_PROVIDER_ENV} and ${HOSTED_ASSISTANT_MODEL_ENV}`,
+      `Set ${HOSTED_ASSISTANT_PROVIDER_ENV}`,
       'or save an explicit hosted assistant profile before hosted runs.',
     ].join(' '),
   )
@@ -433,7 +428,7 @@ function resolveHostedAssistantSeedPlan(
       provider: 'codex-cli',
       approvalPolicy:
         raw.approvalPolicy ?? DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY,
-      model: raw.model ?? DEFAULT_HOSTED_ASSISTANT_MODEL,
+      model: raw.model,
       modelProvider: providerSelection.modelProvider,
       reasoningEffort:
         raw.reasoningEffort ?? DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT,

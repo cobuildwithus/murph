@@ -51,13 +51,13 @@ test("hosted Codex runtime config writes Vercel AI Gateway Responses config with
   assert.equal(result.codexConfigPath, path.join(operatorHomeRoot, ".codex-hosted", "config.toml"));
   assert.equal(result.runtimeEnv.CODEX_HOME, result.codexHome);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV, undefined);
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, "gpt-5.5");
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "medium");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_APPROVAL_POLICY, "never");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_SANDBOX, "danger-full-access");
 
   const config = await readFile(result.codexConfigPath!, "utf8");
-  assert.match(config, /model = "gpt-5\.5"/u);
+  assert.doesNotMatch(config, /^model = /mu);
   assert.match(config, /model_provider = "vercel-ai-gateway"/u);
   assert.match(config, /model_reasoning_effort = "medium"/u);
   assert.match(config, /approval_policy = "never"/u);
@@ -109,6 +109,22 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_OSS, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROFILE, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
+});
+
+test("hosted Codex runtime config drops blank model env values", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_MODEL: "   ",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      VERCEL_AI_API_KEY: "secret-vercel-key",
+    },
+  });
+
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, undefined);
+  const config = await readFile(result.codexConfigPath!, "utf8");
+  assert.doesNotMatch(config, /^model = /mu);
 });
 
 test("hosted Codex runtime config preserves explicit model and reasoning env", async () => {
@@ -492,7 +508,7 @@ test("hosted Codex runtime config rejects non-Codex provider env", async () => {
 
 test("hosted Codex config TOML uses env var names rather than credential values", () => {
   const config = buildHostedCodexConfigToml({
-    model: "gpt-5.5",
+    model: null,
     provider: {
       id: "vercel-ai-gateway",
       name: "Vercel AI Gateway",
@@ -506,7 +522,6 @@ test("hosted Codex config TOML uses env var names rather than credential values"
   assert.equal(
     config,
     [
-      'model = "gpt-5.5"',
       'model_provider = "vercel-ai-gateway"',
       'model_reasoning_effort = "medium"',
       'approval_policy = "never"',
@@ -528,14 +543,13 @@ test("hosted Codex config TOML uses env var names rather than credential values"
 
 test("hosted local Codex config TOML omits explicit model provider config", () => {
   const config = buildHostedLocalCodexConfigToml({
-    model: "gpt-5.5",
+    model: null,
     reasoningEffort: "medium",
   });
 
   assert.equal(
     config,
     [
-      'model = "gpt-5.5"',
       'model_reasoning_effort = "medium"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
@@ -546,9 +560,22 @@ test("hosted local Codex config TOML omits explicit model provider config", () =
       "",
     ].join("\n"),
   );
+  assert.doesNotMatch(config, /^model = /mu);
   assert.doesNotMatch(config, /model_provider/u);
   assert.doesNotMatch(config, /model_providers/u);
   assert.doesNotMatch(config, /VERCEL_AI_API_KEY/u);
+});
+
+test("hosted local Codex config TOML preserves an explicit model when provided", () => {
+  const config = buildHostedLocalCodexConfigToml({
+    model: "gpt-local-explicit",
+    reasoningEffort: "medium",
+  });
+
+  assert.match(config, /^model = "gpt-local-explicit"/mu);
+  assert.match(config, /model_reasoning_effort = "medium"/u);
+  assert.doesNotMatch(config, /model_provider/u);
+  assert.doesNotMatch(config, /model_providers/u);
 });
 
 async function createTemporaryDirectory(): Promise<string> {
