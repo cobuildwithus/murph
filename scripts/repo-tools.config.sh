@@ -87,6 +87,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
   "agent-docs/generated/**" \
   "agent-docs/exec-plans/completed/**" \
   "agent-docs/prompts/**" \
+  "apps/web/app/.well-known/workflow/**" \
   "**/.next-smoke*/**" \
   "packages/*/test/**" \
   "packages/*/tests/**" \

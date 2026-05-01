@@ -12,6 +12,10 @@ const hostedMemberRoutingStoreModuleSpecifier = new URL(
 ).href;
 const hostedMemberStoreModuleSpecifier = new URL("./hosted-member-store.ts", import.meta.url)
   .href;
+const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
+  "../hosted-crypto/domain-root-store.ts",
+  import.meta.url,
+).href;
 
 interface HostedActiveMemberSeedInput {
   environment?: NodeJS.ProcessEnv;
@@ -38,6 +42,14 @@ interface HostedMemberStoreModule {
     memberId: string;
     prisma: unknown;
   }): Promise<unknown>;
+}
+
+interface HostedCryptoDomainRootStoreModule {
+  provisionHostedCryptoDomainRootsForUser(input: {
+    prisma: HostedMemberSeedPrismaClient;
+    reason?: string;
+    userId: string;
+  }): Promise<void>;
 }
 
 interface ContactPrivacyModule {
@@ -85,6 +97,8 @@ interface HostedMemberSeedModules {
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
   createHostedPhoneLookupKey: ContactPrivacyModule["createHostedPhoneLookupKey"];
   getPrisma: HostedMemberSeedPrismaModule["getPrisma"];
+  provisionHostedCryptoDomainRootsForUser:
+    HostedCryptoDomainRootStoreModule["provisionHostedCryptoDomainRootsForUser"];
   readHostedPhoneHint: ContactPrivacyModule["readHostedPhoneHint"];
   upsertHostedMemberHomeLinqBindingTx:
     HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqBindingTx"];
@@ -112,6 +126,11 @@ export async function seedHostedActiveMember(
         memberId: input.memberId,
         prisma: tx,
       });
+    });
+    await modules.provisionHostedCryptoDomainRootsForUser({
+      prisma,
+      reason: "hosted-member.test-seed",
+      userId: input.memberId,
     });
   } finally {
     await prisma.$disconnect();
@@ -166,6 +185,11 @@ export async function seedHostedActiveLinqMember(
         recipientPhone: input.homePhone,
       });
     });
+    await modules.provisionHostedCryptoDomainRootsForUser({
+      prisma,
+      reason: "hosted-member.test-seed",
+      userId: input.memberId,
+    });
   } finally {
     await prisma.$disconnect();
   }
@@ -218,12 +242,14 @@ async function loadHostedMemberSeedModules(
   const [
     prismaModule,
     contactPrivacyModule,
+    hostedCryptoDomainRootStoreModule,
     hostedMemberIdentityStoreModule,
     hostedMemberRoutingStoreModule,
     hostedMemberStoreModule,
   ] = await Promise.all([
     import(prismaModuleSpecifier),
     import(contactPrivacyModuleSpecifier),
+    import(hostedCryptoDomainRootStoreModuleSpecifier),
     import(hostedMemberIdentityStoreModuleSpecifier),
     import(hostedMemberRoutingStoreModuleSpecifier),
     import(hostedMemberStoreModuleSpecifier),
@@ -235,6 +261,8 @@ async function loadHostedMemberSeedModules(
 
   const typedPrismaModule = prismaModule as HostedMemberSeedPrismaModule;
   const typedContactPrivacyModule = contactPrivacyModule as ContactPrivacyModule;
+  const typedHostedCryptoDomainRootStoreModule =
+    hostedCryptoDomainRootStoreModule as HostedCryptoDomainRootStoreModule;
   const typedHostedMemberIdentityStoreModule =
     hostedMemberIdentityStoreModule as HostedMemberIdentityStoreModule;
   const typedHostedMemberRoutingStoreModule =
@@ -245,6 +273,8 @@ async function loadHostedMemberSeedModules(
     createHostedMember: typedHostedMemberStoreModule.createHostedMember,
     createHostedPhoneLookupKey: typedContactPrivacyModule.createHostedPhoneLookupKey,
     getPrisma: typedPrismaModule.getPrisma,
+    provisionHostedCryptoDomainRootsForUser:
+      typedHostedCryptoDomainRootStoreModule.provisionHostedCryptoDomainRootsForUser,
     readHostedPhoneHint: typedContactPrivacyModule.readHostedPhoneHint,
     upsertHostedMemberHomeLinqBindingTx:
       typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqBindingTx,

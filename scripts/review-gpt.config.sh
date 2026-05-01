@@ -46,6 +46,7 @@ repomix_ignore_patterns=(
   "**/*.tsbuildinfo"
   "audit-packages/**"
   "output-packages/**"
+  "apps/web/app/.well-known/workflow/**"
   "packages/health-commons/content/**"
   "packages/health-commons/generated/**"
 )

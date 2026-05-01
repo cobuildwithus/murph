@@ -13,6 +13,9 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
+  provisionHostedCryptoDomainRootsForUserTx,
+} from "../hosted-crypto/domain-root-store";
+import {
   appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
@@ -149,6 +152,12 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       prisma: input.prisma,
     });
   }
+
+  await provisionHostedCryptoDomainRootsForUserTx({
+    reason: "hosted-member.activation",
+    tx: input.prisma,
+    userId: currentMember.core.id,
+  });
 
   const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
     member: currentMember,

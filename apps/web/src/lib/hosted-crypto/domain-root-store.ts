@@ -53,15 +53,27 @@ export async function provisionHostedCryptoDomainRootsForUser(input: {
 }): Promise<void> {
   const prisma = input.prisma ?? getPrisma();
   await prisma.$transaction(async (tx) => {
-    for (const domain of ALL_DOMAINS) {
-      await getOrCreateActiveHostedDomainRootEnvelopeTx({
-        domain,
-        reason: input.reason ?? "hosted-crypto.provision",
-        tx,
-        userId: input.userId,
-      });
-    }
+    await provisionHostedCryptoDomainRootsForUserTx({
+      reason: input.reason,
+      tx,
+      userId: input.userId,
+    });
   });
+}
+
+export async function provisionHostedCryptoDomainRootsForUserTx(input: {
+  reason?: string;
+  tx: HostedCryptoTx;
+  userId: string;
+}): Promise<void> {
+  for (const domain of ALL_DOMAINS) {
+    await getOrCreateActiveHostedDomainRootEnvelopeTx({
+      domain,
+      reason: input.reason ?? "hosted-crypto.provision",
+      tx: input.tx,
+      userId: input.userId,
+    });
+  }
 }
 
 export async function getOrCreateActiveHostedDomainRootEnvelope(input: {

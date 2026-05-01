@@ -93,6 +93,7 @@ export interface HostedLocalDevStack {
     web: BufferedNamedChildProcess | null;
   };
   ready: Promise<void>;
+  runtimeEnv: NodeJS.ProcessEnv;
   stderrTail(maxChars?: number): string;
   stdoutTail(maxChars?: number): string;
   stop(signal?: NodeJS.Signals): Promise<void>;
@@ -629,6 +630,7 @@ export async function startHostedLocalDevStack(input: {
         web: webProcess,
       },
       ready,
+      runtimeEnv,
       stderrTail: (maxChars?: number): string => tail(combineChildOutput(
         reportingChildren.map(
           (child) => `[${child.name}:stderr]\n${child.stderrText()}`,
