@@ -346,9 +346,41 @@ function cloneHostedAssistantRuntimeParserToolConfig(
   input: HostedAssistantRuntimeParserToolConfig,
 ): HostedAssistantRuntimeParserToolConfig {
   return {
-    ...(input.command === undefined ? {} : { command: input.command }),
-    ...(input.modelPath === undefined ? {} : { modelPath: input.modelPath }),
+    ...(input.command === undefined
+      ? {}
+      : {
+          command: normalizeHostedAssistantRuntimeParserToolPath(
+            input.command,
+            "command",
+          ),
+        }),
+    ...(input.modelPath === undefined
+      ? {}
+      : {
+          modelPath: normalizeHostedAssistantRuntimeParserToolPath(
+            input.modelPath,
+            "modelPath",
+          ),
+        }),
   };
+}
+
+function normalizeHostedAssistantRuntimeParserToolPath(
+  value: string | null | undefined,
+  fieldName: string,
+): string {
+  const normalized = normalizeHostedRuntimeString(value);
+  if (!normalized) {
+    throw new TypeError(
+      `Hosted runtime parser toolchain ${fieldName} must be a non-empty absolute path.`,
+    );
+  }
+  if (!normalized.startsWith("/")) {
+    throw new TypeError(
+      `Hosted runtime parser toolchain ${fieldName} must be an absolute path.`,
+    );
+  }
+  return normalized;
 }
 
 function cloneHostedManagedAutoReplyChannel(

@@ -47,12 +47,12 @@ export interface CodexModelCatalog {
 }
 
 export const DEFAULT_CODEX_CHAT_MODEL_OPTIONS: readonly CodexModelOption[] =
-  resolveCodexStaticModels({
-    provider: 'codex-cli',
-  }).map((model) => ({
-    value: model.id,
-    description: model.description,
-  }))
+  [
+    {
+      value: '',
+      description: 'Use the model configured by Codex.',
+    },
+  ] as const
 
 export const DEFAULT_CODEX_REASONING_OPTIONS: readonly CodexReasoningOption[] = [
   {
@@ -118,21 +118,27 @@ export function resolveCodexModelCatalog(input: {
     staticModels,
     targetCapabilities: capabilities,
   })
-  const selectedModel =
-    models.find((model) => model.id === normalizeNullableString(input.currentModel)) ??
-    models[0] ??
-    null
-
-  return {
-    capabilities,
-    modelOptions: models.map((model) => ({
+  const normalizedCurrentModel = normalizeNullableString(input.currentModel)
+  const selectedModel = normalizedCurrentModel
+    ? models.find((model) => model.id === normalizedCurrentModel) ?? null
+    : null
+  const modelOptions = [
+    ...DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
+    ...models.map((model) => ({
       value: model.id,
       description: model.description,
     })),
+  ]
+
+  return {
+    capabilities,
+    modelOptions,
     models,
     provider: resolveAssistantChatProviderFromConfig(profile),
     providerLabel: profile.providerLabel,
-    reasoningOptions: resolveCodexCatalogReasoningOptions(selectedModel),
+    reasoningOptions: capabilities.supportsReasoningEffort
+      ? DEFAULT_CODEX_REASONING_OPTIONS
+      : resolveCodexCatalogReasoningOptions(selectedModel),
     selectedModel,
   }
 }

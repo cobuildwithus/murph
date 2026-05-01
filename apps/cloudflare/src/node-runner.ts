@@ -77,9 +77,11 @@ export function buildHostedExecutionJobRuntime(
   const configSource = requestedRuntime.forwardedEnv === undefined
     ? process.env
     : requestedRuntime.forwardedEnv;
-  const parserToolchain = resolveHostedExecutionJobParserToolchain(
+  const parserToolchain = bindHostedExecutionJobParserToolchain(
     requestedRuntime.parserToolchain,
   );
+  // Native parser paths are container-image facts. Do not trust or preserve
+  // Worker-provided typed toolchain paths across the Worker -> container seam.
 
   // The worker-owned runtime envelope is the source of truth when present.
   // The container only falls back to ambient env for local/manual callers that omit it entirely.
@@ -94,7 +96,7 @@ export function buildHostedExecutionJobRuntime(
   });
 }
 
-function resolveHostedExecutionJobParserToolchain(
+function bindHostedExecutionJobParserToolchain(
   parserToolchain: HostedAssistantRuntimeConfig["parserToolchain"] | null | undefined,
 ): NonNullable<HostedAssistantRuntimeConfig["parserToolchain"]> {
   if (parserToolchain === null) {
@@ -103,7 +105,7 @@ function resolveHostedExecutionJobParserToolchain(
     );
   }
 
-  return parserToolchain ?? createHostedRunnerNativeParserToolchain();
+  return createHostedRunnerNativeParserToolchain();
 }
 
 export function createHostedWorkspaceInvocationRunner(

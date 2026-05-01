@@ -1,0 +1,461 @@
+import process from "node:process";
+import os from "node:os";
+import { pathToFileURL } from "node:url";
+
+import { repoRoot } from "../../../scripts/dev-hosted-local/constants.ts";
+import type { HostedLocalDevConfig } from "../../../scripts/dev-hosted-local/types.ts";
+import { startHostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
+import type { HostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
+import { resolveHostedLocalDevConfig } from "../../../scripts/dev-hosted-local/config.ts";
+import { runHostedLocalE2eSuite, resolveHostedLocalE2eScenarios } from "./e2e.ts";
+import { listHostedLocalProfiles, applyHostedLocalProfile } from "./profiles.ts";
+import { runDoctorCommand, runForegroundCommand } from "./process.ts";
+import {
+  applyHostedLocalStateEnv,
+  createHostedLocalHarnessState,
+  updateHostedLocalHarnessState,
+} from "./state.ts";
+
+interface HostedLocalCliIo {
+  env?: NodeJS.ProcessEnv;
+  stderr?: NodeJS.WritableStream;
+  stdout?: NodeJS.WritableStream;
+}
+
+type ParsedProfileArgs = {
+  args: string[];
+  profileName: string | null;
+};
+
+export async function runHostedLocalCli(
+  argv: readonly string[] = process.argv.slice(2),
+  io: HostedLocalCliIo = {},
+): Promise<void> {
+  const args = [...argv];
+  const command = args.shift();
+  if (!command || command === "help" || command === "--help" || command === "-h") {
+    printHelp(io.stdout ?? process.stdout);
+    return;
+  }
+
+  switch (command) {
+    case "profiles":
+      printProfiles(io.stdout ?? process.stdout);
+      return;
+    case "doctor":
+      await runDoctor(args, io);
+      return;
+    case "up":
+      await runUp(args, io);
+      return;
+    case "run":
+      await runCommand(args, io);
+      return;
+    case "e2e":
+      await runE2e(args, io);
+      return;
+    default:
+      throw new Error(`Unknown hosted-local command: ${command}`);
+  }
+}
+
+async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+  const parsed = parseProfileArgs(args, "dev");
+  if (parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
+    printUpHelp(io.stdout ?? process.stdout);
+    return;
+  }
+
+  const profiled = applyHostedLocalProfile({
+    env: io.env ?? process.env,
+    profileName: parsed.profileName,
+  });
+  let state = await createHostedLocalHarnessState({
+    command: ["hosted-local", "up", ...args],
+    env: profiled.env,
+    profile: profiled.profile,
+    status: "starting",
+  });
+  const runtimeEnv = applyHostedLocalStateEnv({ env: profiled.env, state });
+  state = await updateHostedLocalHarnessState(state, {
+    webBaseUrl: state.webBaseUrl,
+    workerBaseUrl: state.workerBaseUrl,
+    status: "starting",
+  });
+
+  const stack = await startHostedLocalDevStack({
+    env: runtimeEnv,
+    stderrTarget: io.stderr,
+    stdoutTarget: io.stdout,
+  });
+
+  let terminationSignal: NodeJS.Signals | null = null;
+  let stopPromise: Promise<void> | null = null;
+  let resolveTerminationCleanup: (() => void) | null = null;
+  const terminationCleanupComplete = new Promise<void>((resolve) => {
+    resolveTerminationCleanup = resolve;
+  });
+  let terminationCleanupError: unknown = null;
+
+  const stopStack = (signal: NodeJS.Signals): Promise<void> => {
+    stopPromise ??= stack.stop(signal);
+    return stopPromise;
+  };
+
+  const awaitTerminationCleanup = async (): Promise<void> => {
+    await terminationCleanupComplete;
+    if (terminationCleanupError !== null) {
+      throw terminationCleanupError;
+    }
+  };
+
+  const handleTerminationSignal = async (signal: NodeJS.Signals): Promise<void> => {
+    if (terminationSignal) {
+      return;
+    }
+    terminationSignal = signal;
+    (io.stderr ?? process.stderr).write(`\nStopping hosted-local harness (${signal}).\n`);
+    try {
+      await updateHostedLocalHarnessState(state, { status: "stopped" });
+      await stopStack(signal);
+    } catch (error) {
+      terminationCleanupError = error;
+    } finally {
+      resolveTerminationCleanup?.();
+    }
+  };
+
+  const onSigint = (): void => {
+    void handleTerminationSignal("SIGINT");
+  };
+  const onSigterm = (): void => {
+    void handleTerminationSignal("SIGTERM");
+  };
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
+
+  try {
+    try {
+      await stack.ready;
+    } catch (error) {
+      await updateHostedLocalHarnessState(state, { status: "failed" });
+      if (terminationSignal) {
+        await awaitTerminationCleanup();
+        return;
+      }
+      throw error;
+    }
+
+    state = await updateHostedLocalHarnessState(state, {
+      status: "ready",
+      webBaseUrl: stack.webBaseUrl,
+      workerBaseUrl: stack.workerBaseUrl,
+    });
+    printReady(stack, state.statePath, io.stdout ?? process.stdout);
+    emitReadyToken(runtimeEnv.MURPH_DEV_READY_TOKEN);
+
+    const result = await Promise.race([
+      stack.waitForExit().then((exited) => ({ exited, type: "child-exit" as const })),
+      awaitTerminationCleanup().then(() => ({ type: "termination-cleanup" as const })),
+    ]);
+
+    if (result.type === "termination-cleanup") {
+      return;
+    }
+
+    const { exited } = result;
+    await stopStack("SIGTERM");
+    await updateHostedLocalHarnessState(state, {
+      status: exited.child.exitCode === 0 ? "complete" : "failed",
+    });
+    if (terminationSignal) {
+      await awaitTerminationCleanup();
+      return;
+    }
+    if (exited.child.exitCode === 0) {
+      return;
+    }
+    throw new Error(`${exited.name} exited with code ${exited.child.exitCode ?? "unknown"}.`);
+  } finally {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
+  }
+}
+
+async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+  const parsed = parseProfileArgs(args, "e2e:stub");
+  let prepareRunnerBundle = true;
+  let listOnly = false;
+  const positional: string[] = [];
+  for (const arg of parsed.args) {
+    if (arg === "--no-bundle") {
+      prepareRunnerBundle = false;
+      continue;
+    }
+    if (arg === "--list") {
+      listOnly = true;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      printE2eHelp(io.stdout ?? process.stdout);
+      return;
+    }
+    positional.push(arg);
+  }
+  if (listOnly) {
+    printE2eScenarios(io.stdout ?? process.stdout);
+    return;
+  }
+  const scenario = positional[0] ?? "all";
+  const scenarios = resolveHostedLocalE2eScenarios(scenario);
+  const profiled = applyHostedLocalProfile({
+    env: io.env ?? process.env,
+    profileName: parsed.profileName,
+  });
+  let state = await createHostedLocalHarnessState({
+    command: ["hosted-local", "e2e", ...args],
+    env: profiled.env,
+    profile: profiled.profile,
+    runIdSuffix: scenario,
+    status: "running",
+  });
+  const env = applyHostedLocalStateEnv({ env: profiled.env, state });
+  try {
+    await runHostedLocalE2eSuite({
+      env,
+      prepareRunnerBundle,
+      scenario,
+    });
+    state = await updateHostedLocalHarnessState(state, { status: "complete" });
+    (io.stdout ?? process.stdout).write(`Hosted-local E2E complete: ${state.statePath}\n`);
+  } catch (error) {
+    await updateHostedLocalHarnessState(state, { status: "failed" });
+    throw error;
+  }
+
+  void scenarios;
+}
+
+async function runCommand(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+  const parsed = parseProfileArgs(args, "dev");
+  const separatorIndex = parsed.args.indexOf("--");
+  const commandArgs = separatorIndex >= 0 ? parsed.args.slice(separatorIndex + 1) : parsed.args;
+  if (commandArgs.length === 0 || parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
+    printRunHelp(io.stdout ?? process.stdout);
+    return;
+  }
+  const [command, ...commandRest] = commandArgs;
+  const profiled = applyHostedLocalProfile({
+    env: io.env ?? process.env,
+    profileName: parsed.profileName,
+  });
+  let state = await createHostedLocalHarnessState({
+    command: ["hosted-local", "run", ...args],
+    env: profiled.env,
+    profile: profiled.profile,
+    runIdSuffix: command,
+    status: "running",
+  });
+  const env = applyHostedLocalStateEnv({ env: profiled.env, state });
+  try {
+    await runForegroundCommand({
+      args: commandRest,
+      command: command ?? "",
+      cwd: repoRoot,
+      env,
+      label: `hosted-local run ${command}`,
+    });
+    state = await updateHostedLocalHarnessState(state, { status: "complete" });
+    (io.stdout ?? process.stdout).write(`Hosted-local command complete: ${state.statePath}\n`);
+  } catch (error) {
+    await updateHostedLocalHarnessState(state, { status: "failed" });
+    throw error;
+  }
+}
+
+async function runDoctor(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+  const parsed = parseProfileArgs(args, "dev");
+  const json = parsed.args.includes("--json");
+  if (parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
+    printDoctorHelp(io.stdout ?? process.stdout);
+    return;
+  }
+  const profiled = applyHostedLocalProfile({
+    env: io.env ?? process.env,
+    profileName: parsed.profileName,
+  });
+  const config = resolveHostedLocalDevConfig(profiled.env);
+  const commands = [
+    runDoctorCommand("node", ["--version"]),
+    runDoctorCommand("pnpm", ["--version"]),
+    runDoctorCommand("docker", ["info"]),
+    runDoctorCommand("createdb", ["--version"]),
+  ];
+  const result = {
+    commands: commands.map(redactHostedLocalDoctorCommandResult),
+    config: redactHostedLocalDoctorConfig(config),
+    profile: profiled.profile,
+  };
+  if (json) {
+    (io.stdout ?? process.stdout).write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  const stdout = io.stdout ?? process.stdout;
+  stdout.write(`Hosted-local profile: ${profiled.profile.name}\n`);
+  stdout.write(`  ${profiled.profile.description}\n`);
+  stdout.write(`Web: ${config.skipWeb ? "disabled" : `http://${config.webHost}:${config.webPort}`}\n`);
+  stdout.write(`Worker: ${config.workerProtocol}://${config.workerHost}:${config.workerPort}\n`);
+  stdout.write("\nPrerequisites:\n");
+  for (const command of commands) {
+    stdout.write(`  ${command.ok ? "[ok]" : "[fail]"} ${command.command}\n`);
+    if (!command.ok && command.stderr.trim()) {
+      stdout.write(`    ${redactHostedLocalDiagnosticText(command.stderr).split(/\r?\n/u)[0]}\n`);
+    }
+  }
+}
+
+function redactHostedLocalDoctorConfig(
+  config: HostedLocalDevConfig,
+): HostedLocalDevConfig {
+  return {
+    ...config,
+    databaseUrlOverride: config.databaseUrlOverride ? "[redacted]" : null,
+    localCodexCommand: config.localCodexCommand.includes("/")
+      ? "<configured-command>"
+      : config.localCodexCommand,
+    workerPersistDir: config.workerPersistDir.startsWith("/")
+      ? "<configured-path>"
+      : config.workerPersistDir,
+  };
+}
+
+function redactHostedLocalDoctorCommandResult(
+  command: ReturnType<typeof runDoctorCommand>,
+): ReturnType<typeof runDoctorCommand> {
+  return {
+    ...command,
+    stderr: redactHostedLocalDiagnosticText(command.stderr),
+    stdout: redactHostedLocalDiagnosticText(command.stdout),
+  };
+}
+
+function redactHostedLocalDiagnosticText(value: string): string {
+  return value
+    .split(repoRoot).join("<REPO_ROOT>")
+    .split(os.homedir()).join("<HOME_DIR>")
+    .slice(0, 2_000);
+}
+
+function parseProfileArgs(
+  args: readonly string[],
+  defaultProfileName: string,
+): ParsedProfileArgs {
+  const rest: string[] = [];
+  let profileName: string | null = null;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--profile") {
+      profileName = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--profile=")) {
+      profileName = arg.slice("--profile=".length);
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { args: rest, profileName: profileName ?? defaultProfileName };
+}
+
+function printReady(
+  stack: HostedLocalDevStack,
+  statePath: string,
+  stdout: NodeJS.WritableStream,
+): void {
+  stdout.write(
+    [
+      "",
+      "Hosted-local harness is ready.",
+      ...(stack.webBaseUrl ? [`web: ${stack.webBaseUrl}`] : []),
+      `worker: ${stack.workerBaseUrl}`,
+      `state: ${statePath}`,
+      "",
+    ].join("\n"),
+  );
+}
+
+function emitReadyToken(token: string | undefined): void {
+  const normalized = token?.trim();
+  if (!normalized) {
+    return;
+  }
+  process.stdout.write(`__MURPH_HOSTED_LOCAL_READY__ ${normalized}\n`);
+}
+
+function printHelp(stdout: NodeJS.WritableStream): void {
+  stdout.write(
+    [
+      "Run the local hosted Murph harness.",
+      "",
+      "Usage:",
+      "  hosted-local up [--profile dev]",
+      "  hosted-local e2e [all|device-connect|linq-webhook|telegram] [--profile e2e:stub]",
+      "  hosted-local run [--profile dev] -- <command> [args...]",
+      "  hosted-local doctor [--profile dev] [--json]",
+      "  hosted-local profiles",
+      "",
+      "Compatibility:",
+      "  pnpm dev still works through scripts/dev-hosted-local.ts.",
+      "",
+    ].join("\n"),
+  );
+}
+
+function printProfiles(stdout: NodeJS.WritableStream): void {
+  for (const profile of listHostedLocalProfiles()) {
+    stdout.write(`${profile.name}\n  ${profile.description}\n`);
+  }
+}
+
+function printUpHelp(stdout: NodeJS.WritableStream): void {
+  stdout.write("Usage: hosted-local up [--profile dev|worker-only]\n");
+}
+
+function printE2eHelp(stdout: NodeJS.WritableStream): void {
+  stdout.write(
+    [
+      "Usage: hosted-local e2e [scenario] [--profile e2e:stub|e2e:live] [--no-bundle] [--list]",
+      "",
+      "The command prepares one hosted-local runner bundle, runs the selected Vitest files,",
+      "and cleans stale Cloudflare runner containers once in a finally block.",
+      "",
+    ].join("\n"),
+  );
+}
+
+function printE2eScenarios(stdout: NodeJS.WritableStream): void {
+  for (const scenario of resolveHostedLocalE2eScenarios("all")) {
+    stdout.write(`${scenario.name}\t${scenario.file}\n`);
+  }
+}
+
+function printRunHelp(stdout: NodeJS.WritableStream): void {
+  stdout.write("Usage: hosted-local run [--profile name] -- <command> [args...]\n");
+}
+
+function printDoctorHelp(stdout: NodeJS.WritableStream): void {
+  stdout.write("Usage: hosted-local doctor [--profile name] [--json]\n");
+}
+
+function isDirectCliEntrypoint(): boolean {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    return false;
+  }
+  return import.meta.url === pathToFileURL(entrypoint).href;
+}
+
+if (isDirectCliEntrypoint()) {
+  await runHostedLocalCli();
+}

@@ -1,0 +1,216 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, rename, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { repoRoot } from "../../../scripts/dev-hosted-local/constants.ts";
+import { resolveHostedLocalDevConfig } from "../../../scripts/dev-hosted-local/config.ts";
+import type { HostedLocalProfile } from "./profiles.ts";
+
+export type HostedLocalHarnessStateStatus =
+  | "created"
+  | "starting"
+  | "ready"
+  | "running"
+  | "complete"
+  | "failed"
+  | "stopped";
+
+export interface HostedLocalHarnessState {
+  artifactDir: string;
+  command: readonly string[];
+  createdAt: string;
+  cwd: string;
+  env: Record<string, string>;
+  mode: HostedLocalProfile["mode"];
+  profile: HostedLocalProfile["name"];
+  profileDescription: string;
+  runId: string;
+  statePath: string;
+  status: HostedLocalHarnessStateStatus;
+  updatedAt: string;
+  version: 1;
+  webBaseUrl?: string | null;
+  workerBaseUrl?: string | null;
+}
+
+export interface CreateHostedLocalStateInput {
+  command: readonly string[];
+  cwd?: string;
+  env: NodeJS.ProcessEnv;
+  profile: HostedLocalProfile;
+  runIdSuffix?: string | null;
+  status?: HostedLocalHarnessStateStatus;
+}
+
+const hostedLocalEnvPrefixAllowlist = [
+  "DATABASE_URL",
+  "HOSTED_",
+  "LINQ_",
+  "MURPH_",
+  "NEXT_",
+  "NODE_ENV",
+  "PRIVY_",
+  "TELEGRAM_",
+  "VERCEL_",
+  "VITEST",
+] as const;
+
+const secretKeyPattern =
+  /(API[_-]?KEY|AUTH|COOKIE|CREDENTIAL|DATABASE_URL|DSN|ENCRYPTION|JWK|KEY|PASSWORD|PRIVATE|SECRET|SESSION|TOKEN)/iu;
+const hostedLocalArtifactRoot = path.join(".artifacts", "hosted-local");
+
+export async function createHostedLocalHarnessState(
+  input: CreateHostedLocalStateInput,
+): Promise<HostedLocalHarnessState> {
+  const createdAt = new Date().toISOString();
+  const runId = buildHostedLocalRunId(input.profile.name, input.runIdSuffix);
+  const artifactDir = path.join(hostedLocalArtifactRoot, runId);
+  const statePath = path.join(artifactDir, "state.json");
+  await mkdir(resolveHostedLocalRepoPath(artifactDir), { recursive: true });
+  const state: HostedLocalHarnessState = {
+    artifactDir,
+    command: input.command,
+    createdAt,
+    cwd: formatHostedLocalStatePath(input.cwd ?? repoRoot),
+    env: redactHostedLocalEnvironment(input.env),
+    mode: input.profile.mode,
+    profile: input.profile.name,
+    profileDescription: input.profile.description,
+    runId,
+    statePath,
+    status: input.status ?? "created",
+    updatedAt: createdAt,
+    version: 1,
+    workerBaseUrl: resolveWorkerBaseUrl(input.env),
+    webBaseUrl: resolveWebBaseUrl(input.env),
+  };
+  await writeHostedLocalHarnessState(state);
+  return state;
+}
+
+export async function updateHostedLocalHarnessState(
+  state: HostedLocalHarnessState,
+  patch: Partial<
+    Pick<HostedLocalHarnessState, "status" | "webBaseUrl" | "workerBaseUrl">
+  >,
+): Promise<HostedLocalHarnessState> {
+  const updated: HostedLocalHarnessState = {
+    ...state,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeHostedLocalHarnessState(updated);
+  return updated;
+}
+
+export async function writeHostedLocalHarnessState(
+  state: HostedLocalHarnessState,
+): Promise<void> {
+  const statePath = resolveHostedLocalRepoPath(state.statePath);
+  await mkdir(path.dirname(statePath), { recursive: true });
+  const tempPath = `${statePath}.${process.pid}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await rename(tempPath, statePath);
+}
+
+export function applyHostedLocalStateEnv(input: {
+  env: NodeJS.ProcessEnv;
+  state: HostedLocalHarnessState;
+}): NodeJS.ProcessEnv {
+  return {
+    ...input.env,
+    MURPH_HOSTED_LOCAL_ARTIFACT_DIR: resolveHostedLocalRepoPath(input.state.artifactDir),
+    MURPH_HOSTED_LOCAL_RUN_ID: input.state.runId,
+    MURPH_HOSTED_LOCAL_STATE_PATH: resolveHostedLocalRepoPath(input.state.statePath),
+  };
+}
+
+function buildHostedLocalRunId(
+  profileName: HostedLocalProfile["name"],
+  suffix: string | null | undefined,
+): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/gu, "-");
+  const profileSlug = slug(profileName);
+  const suffixSlug = suffix ? `-${slug(suffix)}` : "";
+  const randomSlug = randomUUID().replace(/-/gu, "").slice(0, 10);
+  return `${timestamp}-${profileSlug}${suffixSlug}-${randomSlug}`;
+}
+
+function slug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "") || "hosted-local";
+}
+
+function redactHostedLocalEnvironment(
+  env: NodeJS.ProcessEnv,
+): Record<string, string> {
+  const redacted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    if (!shouldIncludeHostedLocalEnvKey(key)) {
+      continue;
+    }
+    redacted[key] = secretKeyPattern.test(key)
+      ? "[redacted]"
+      : redactHostedLocalStateValue(value);
+  }
+  return Object.fromEntries(Object.entries(redacted).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function shouldIncludeHostedLocalEnvKey(key: string): boolean {
+  return hostedLocalEnvPrefixAllowlist.some((prefix) => key === prefix || key.startsWith(prefix));
+}
+
+function resolveHostedLocalRepoPath(value: string): string {
+  return path.isAbsolute(value) ? value : path.join(repoRoot, value);
+}
+
+function formatHostedLocalStatePath(value: string): string {
+  const resolved = path.resolve(value);
+  const relative = path.relative(repoRoot, resolved);
+  if (!relative) {
+    return ".";
+  }
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+    return relative;
+  }
+  return "<outside-repo>";
+}
+
+function redactHostedLocalStateValue(value: string): string {
+  return value
+    .split(repoRoot).join("<REPO_ROOT>")
+    .split(os.homedir()).join("<HOME_DIR>");
+}
+
+function resolveWorkerBaseUrl(env: NodeJS.ProcessEnv): string | null {
+  try {
+    const config = resolveHostedLocalDevConfig(env);
+    const host = config.workerHost === "0.0.0.0" ? "127.0.0.1" : config.workerHost;
+    return `${config.workerProtocol}://${host}:${config.workerPort}`;
+  } catch {
+    return null;
+  }
+}
+
+function resolveWebBaseUrl(env: NodeJS.ProcessEnv): string | null {
+  try {
+    const config = resolveHostedLocalDevConfig(env);
+    if (config.skipWeb) {
+      return null;
+    }
+    const host = config.webHost === "0.0.0.0" ? "127.0.0.1" : config.webHost;
+    return `http://${host}:${config.webPort}`;
+  } catch {
+    return null;
+  }
+}

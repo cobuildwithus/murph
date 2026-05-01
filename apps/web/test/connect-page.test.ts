@@ -354,9 +354,10 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   const { default: ConnectPage, resolveConfiguredConnectSources } = await import(
     "../app/(dashboard)/connect/page"
   );
+  const { JUNCTION_DEFAULT_PROVIDER_FILTER } = await import("@murphai/device-syncd/config");
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 27);
+  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, 5);
   assert.match(markup, /aria-label="Accu-Chek connection is not available yet"/u);
   assert.match(markup, /aria-label="Samsung Health connection is not available yet"/u);
@@ -397,16 +398,17 @@ test("ConnectPage enables mapped Junction Link source slugs only", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
   vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "map_my_fitness,accuchek_ble");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "map_my_fitness,beurer_api");
   vi.stubEnv("JUNCTION_REGION", "us");
 
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /aria-label="Connect MapMyFitness"/u);
+  assert.match(markup, /aria-label="Connect Beurer"/u);
   assert.match(markup, /aria-label="Accu-Chek connection is not available yet"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Accu-Chek"/u);
-  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 1);
+  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 2);
 });
 
 test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {

@@ -1,5 +1,6 @@
 import {
   DEVICE_CONNECT_SOURCES,
+  normalizeJunctionLinkProviderFilter,
   normalizeJunctionProviderSlug,
   resolveDeviceConnectSourceById,
   resolveJunctionDeviceConnectRouteByProviderSlug,
@@ -42,14 +43,6 @@ export const JUNCTION_LINK_PROVIDER_SLUGS: readonly string[] = Object.freeze(
 
 export const JUNCTION_DEFAULT_PROVIDER_FILTER: readonly string[] = JUNCTION_LINK_PROVIDER_SLUGS;
 
-const JUNCTION_LINK_PROVIDER_SLUG_SET = new Set(JUNCTION_LINK_PROVIDER_SLUGS);
-
-export const JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS: readonly string[] = Object.freeze(
-  JUNCTION_CONNECT_SOURCE_TARGETS
-    .filter((target) => target.connectMode !== "junction_link")
-    .map(({ providerSlug }) => providerSlug),
-);
-
 export function resolveJunctionConnectTargetForSourceId(sourceId: string): string | null {
   const source = resolveDeviceConnectSourceById(sourceId);
   const junctionRoute = source?.routes.find(isJunctionProviderRoute);
@@ -62,13 +55,7 @@ export function resolveJunctionConnectSourceLabel(providerSlug: string): string 
 }
 
 export function normalizeJunctionProviderFilter(value: readonly string[] | undefined): string[] {
-  const requested = value && value.length > 0 ? value : JUNCTION_LINK_PROVIDER_SLUGS;
-
-  return [...new Set(
-    requested
-      .map(normalizeJunctionProviderSlug)
-      .filter((entry): entry is string => entry !== null && JUNCTION_LINK_PROVIDER_SLUG_SET.has(entry)),
-  )];
+  return normalizeJunctionLinkProviderFilter(value);
 }
 
 function isJunctionProviderRoute(

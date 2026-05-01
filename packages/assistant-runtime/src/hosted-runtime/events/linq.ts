@@ -1,4 +1,11 @@
 import type { LinqAttachmentDownloadDriver as HostedConversationLinqAttachmentDownloadDriver } from "@murphai/inboxd/connectors/hosted-conversation";
+import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
+
+import type { NormalizedHostedAssistantRuntimeConfig } from "../models.ts";
+import {
+  toHostedRuntimeLogCode,
+  writeHostedRuntimeLogBestEffort,
+} from "../runtime-logs.ts";
 
 type HostedLinqAttachmentDownloadPart = {
   attachmentId?: string | null;
@@ -17,6 +24,36 @@ type HostedLinqAttachmentDownloadDriver =
     ): Promise<Uint8Array | null>;
   };
 
+type HostedLinqAttachmentDownloadLogPlatform =
+  Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+
+type HostedLinqAttachmentDownloadResult = "failed" | "not_downloaded" | "succeeded";
+
+interface HostedLinqAttachmentDownloadAttemptLog {
+  apiBaseKind?: string | null;
+  apiConfigured?: boolean | null;
+  attachmentKeyPresent?: boolean | null;
+  byteCountBucket?: string | null;
+  cdnBaseKind?: string | null;
+  declaredSizeBucket?: string | null;
+  directFetchAttempted?: boolean | null;
+  directFetchSucceeded?: boolean | null;
+  directLocatorAllowed?: boolean | null;
+  directLocatorPresent?: boolean | null;
+  downloadStatus?: number | null;
+  failureCode?: string | null;
+  metadataByteFetchAttempted?: boolean | null;
+  metadataByteFetchSucceeded?: boolean | null;
+  metadataLocatorAllowed?: boolean | null;
+  metadataLocatorPresent?: boolean | null;
+  metadataLookupAttempted?: boolean | null;
+  metadataStatus?: number | null;
+  mimeCategory?: string | null;
+  operation: "downloadPart" | "downloadUrl";
+  partKind?: string | null;
+  result: HostedLinqAttachmentDownloadResult;
+}
+
 // Hosted voice memo fetches routinely take longer than image/document fetches,
 // especially once the wake has crossed the web -> worker boundary.
 export const HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 15_000;
@@ -32,26 +69,77 @@ const HOSTED_LINQ_LOCAL_ATTACHMENT_CDN_HOSTNAMES = new Set([
   "localhost",
 ]);
 
-export function createHostedLinqAttachmentDownloadDriver(): HostedLinqAttachmentDownloadDriver | null {
+export function createHostedLinqAttachmentDownloadDriver(
+  options: {
+    platform?: HostedLinqAttachmentDownloadLogPlatform | null;
+  } = {},
+): HostedLinqAttachmentDownloadDriver | null {
   if (typeof globalThis.fetch !== "function") {
     return null;
   }
 
   const apiConfig = resolveHostedLinqAttachmentApiConfig();
+  const platform = options.platform ?? null;
 
   return {
     downloadUrl: async (url: string, signal?: AbortSignal) => {
+      const locatorPresent = typeof url === "string" && url.trim().length > 0;
       const normalizedUrl = normalizeHostedLinqAttachmentUrl(url);
       if (!normalizedUrl) {
+        await writeHostedLinqAttachmentDownloadAttemptLog({
+          attempt: {
+            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+            directLocatorAllowed: false,
+            directLocatorPresent: locatorPresent,
+            failureCode: "url_not_allowed",
+            operation: "downloadUrl",
+            result: "not_downloaded",
+          },
+          platform,
+        });
         return null;
       }
 
-      return downloadHostedLinqAttachmentBytes(normalizedUrl, { signal });
+      try {
+        const bytes = await downloadHostedLinqAttachmentBytes(normalizedUrl, { signal });
+        await writeHostedLinqAttachmentDownloadAttemptLog({
+          attempt: {
+            byteCountBucket: bucketHostedLinqAttachmentByteCount(bytes.byteLength),
+            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+            directFetchAttempted: true,
+            directFetchSucceeded: true,
+            directLocatorAllowed: true,
+            directLocatorPresent: true,
+            operation: "downloadUrl",
+            result: "succeeded",
+          },
+          platform,
+        });
+        return bytes;
+      } catch (error) {
+        const failure = classifyHostedLinqAttachmentDownloadError(error);
+        await writeHostedLinqAttachmentDownloadAttemptLog({
+          attempt: {
+            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+            directFetchAttempted: true,
+            directFetchSucceeded: false,
+            directLocatorAllowed: true,
+            directLocatorPresent: true,
+            downloadStatus: failure.status,
+            failureCode: failure.code,
+            operation: "downloadUrl",
+            result: "failed",
+          },
+          platform,
+        });
+        throw error;
+      }
     },
     downloadPart: async (part: HostedLinqAttachmentDownloadPart, signal?: AbortSignal) =>
       downloadHostedLinqAttachmentPart({
         apiConfig,
         part,
+        platform,
         signal,
       }),
   };
@@ -83,27 +171,82 @@ export function normalizeHostedLinqAttachmentUrl(value: string | null | undefine
 async function downloadHostedLinqAttachmentPart(input: {
   apiConfig: HostedLinqAttachmentApiConfig | null;
   part: HostedLinqAttachmentDownloadPart;
+  platform: HostedLinqAttachmentDownloadLogPlatform | null;
   signal?: AbortSignal;
 }): Promise<Uint8Array | null> {
   const declaredSize = normalizeHostedLinqAttachmentDeclaredSize(input.part.size);
-  assertHostedLinqAttachmentWithinByteLimit(declaredSize);
+  const baseAttempt: Omit<HostedLinqAttachmentDownloadAttemptLog, "result"> = {
+    apiBaseKind: input.apiConfig ? classifyHostedLinqApiBaseUrl(input.apiConfig.apiBaseUrl) : null,
+    apiConfigured: input.apiConfig !== null,
+    attachmentKeyPresent: Boolean(normalizeHostedLinqAttachmentId(input.part.attachmentId)),
+    cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+    declaredSizeBucket: bucketHostedLinqAttachmentByteCount(declaredSize),
+    directLocatorAllowed: false,
+    directLocatorPresent: typeof input.part.url === "string" && input.part.url.trim().length > 0,
+    metadataLookupAttempted: false,
+    mimeCategory: normalizeHostedLinqAttachmentMimeCategory(input.part.mimeType),
+    operation: "downloadPart",
+    partKind: input.part.type,
+  };
+
+  try {
+    assertHostedLinqAttachmentWithinByteLimit(declaredSize);
+  } catch (error) {
+    const failure = classifyHostedLinqAttachmentDownloadError(error);
+    await writeHostedLinqAttachmentDownloadAttemptLog({
+      attempt: {
+        ...baseAttempt,
+        failureCode: failure.code,
+        result: "failed",
+      },
+      platform: input.platform,
+    });
+    throw error;
+  }
 
   const directUrl = normalizeHostedLinqAttachmentUrl(input.part.url);
   let directError: unknown = null;
+  let directFailure: HostedLinqAttachmentFailureSummary | null = null;
 
   if (directUrl) {
     try {
-      return await downloadHostedLinqAttachmentBytes(directUrl, {
+      const bytes = await downloadHostedLinqAttachmentBytes(directUrl, {
         declaredSize,
         signal: input.signal,
       });
+      await writeHostedLinqAttachmentDownloadAttemptLog({
+        attempt: {
+          ...baseAttempt,
+          byteCountBucket: bucketHostedLinqAttachmentByteCount(bytes.byteLength),
+          directFetchAttempted: true,
+          directFetchSucceeded: true,
+          directLocatorAllowed: true,
+          result: "succeeded",
+        },
+        platform: input.platform,
+      });
+      return bytes;
     } catch (error) {
       directError = error;
+      directFailure = classifyHostedLinqAttachmentDownloadError(error);
     }
   }
 
   const attachmentId = normalizeHostedLinqAttachmentId(input.part.attachmentId);
   if (!attachmentId || !input.apiConfig) {
+    await writeHostedLinqAttachmentDownloadAttemptLog({
+      attempt: {
+        ...baseAttempt,
+        directFetchAttempted: Boolean(directUrl),
+        directFetchSucceeded: false,
+        directLocatorAllowed: Boolean(directUrl),
+        downloadStatus: directFailure?.status ?? null,
+        failureCode: directFailure?.code
+          ?? (!attachmentId ? "missing_attachment_key" : "api_not_configured"),
+        result: directError ? "failed" : "not_downloaded",
+      },
+      platform: input.platform,
+    });
     if (directError) {
       throw directError;
     }
@@ -111,16 +254,34 @@ async function downloadHostedLinqAttachmentPart(input: {
     return null;
   }
 
-  const refreshedUrl = await fetchHostedLinqAttachmentDownloadUrl({
+  const metadataResult = await fetchHostedLinqAttachmentDownloadUrl({
     apiBaseUrl: input.apiConfig.apiBaseUrl,
     apiToken: input.apiConfig.apiToken,
     attachmentId,
     signal: input.signal,
   });
-  const normalizedRefreshedUrl = normalizeHostedLinqAttachmentUrl(refreshedUrl)
-    ?? normalizeHostedLinqMetadataAttachmentUrl(refreshedUrl, input.apiConfig.apiBaseUrl);
+  const normalizedRefreshedUrl = normalizeHostedLinqAttachmentUrl(metadataResult.downloadLocator)
+    ?? normalizeHostedLinqMetadataAttachmentUrl(metadataResult.downloadLocator, input.apiConfig.apiBaseUrl);
 
   if (!normalizedRefreshedUrl) {
+    await writeHostedLinqAttachmentDownloadAttemptLog({
+      attempt: {
+        ...baseAttempt,
+        directFetchAttempted: Boolean(directUrl),
+        directFetchSucceeded: false,
+        directLocatorAllowed: Boolean(directUrl),
+        downloadStatus: directFailure?.status ?? null,
+        failureCode: directFailure?.code
+          ?? metadataResult.failureCode
+          ?? "metadata_locator_not_allowed",
+        metadataLocatorAllowed: false,
+        metadataLocatorPresent: metadataResult.downloadLocator !== null,
+        metadataLookupAttempted: true,
+        metadataStatus: metadataResult.status,
+        result: directError ? "failed" : "not_downloaded",
+      },
+      platform: input.platform,
+    });
     if (directError) {
       throw directError;
     }
@@ -128,10 +289,52 @@ async function downloadHostedLinqAttachmentPart(input: {
     return null;
   }
 
-  return downloadHostedLinqAttachmentBytes(normalizedRefreshedUrl, {
-    declaredSize,
-    signal: input.signal,
-  });
+  try {
+    const bytes = await downloadHostedLinqAttachmentBytes(normalizedRefreshedUrl, {
+      declaredSize,
+      signal: input.signal,
+    });
+    await writeHostedLinqAttachmentDownloadAttemptLog({
+      attempt: {
+        ...baseAttempt,
+        byteCountBucket: bucketHostedLinqAttachmentByteCount(bytes.byteLength),
+        directFetchAttempted: Boolean(directUrl),
+        directFetchSucceeded: false,
+        directLocatorAllowed: Boolean(directUrl),
+        downloadStatus: directFailure?.status ?? null,
+        metadataByteFetchAttempted: true,
+        metadataByteFetchSucceeded: true,
+        metadataLocatorAllowed: true,
+        metadataLocatorPresent: true,
+        metadataLookupAttempted: true,
+        metadataStatus: metadataResult.status,
+        result: "succeeded",
+      },
+      platform: input.platform,
+    });
+    return bytes;
+  } catch (error) {
+    const failure = classifyHostedLinqAttachmentDownloadError(error);
+    await writeHostedLinqAttachmentDownloadAttemptLog({
+      attempt: {
+        ...baseAttempt,
+        directFetchAttempted: Boolean(directUrl),
+        directFetchSucceeded: false,
+        directLocatorAllowed: Boolean(directUrl),
+        downloadStatus: failure.status ?? directFailure?.status ?? null,
+        failureCode: failure.code,
+        metadataByteFetchAttempted: true,
+        metadataByteFetchSucceeded: false,
+        metadataLocatorAllowed: true,
+        metadataLocatorPresent: true,
+        metadataLookupAttempted: true,
+        metadataStatus: metadataResult.status,
+        result: "failed",
+      },
+      platform: input.platform,
+    });
+    throw error;
+  }
 }
 
 async function downloadHostedLinqAttachmentBytes(
@@ -149,8 +352,10 @@ async function downloadHostedLinqAttachmentBytes(
   });
 
   if (!response.ok) {
-    throw new Error(
+    throw new HostedLinqAttachmentDownloadError(
+      "download_http_status",
       `Hosted Linq attachment download failed with ${response.status} ${response.statusText}.`,
+      response.status,
     );
   }
 
@@ -226,10 +431,27 @@ function assertHostedLinqAttachmentWithinByteLimit(byteSize: number | null): voi
     byteSize !== null
     && byteSize > HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES
   ) {
-    throw new Error(
+    throw new HostedLinqAttachmentDownloadError(
+      "download_exceeds_limit",
       `Hosted Linq attachment download exceeds ${HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES} bytes.`,
     );
   }
+}
+
+class HostedLinqAttachmentDownloadError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number | null = null,
+  ) {
+    super(message);
+    this.name = "HostedLinqAttachmentDownloadError";
+  }
+}
+
+interface HostedLinqAttachmentFailureSummary {
+  code: string;
+  status: number | null;
 }
 
 interface HostedLinqAttachmentApiConfig {
@@ -286,12 +508,18 @@ function normalizeHostedLinqAttachmentId(value: string | null | undefined): stri
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
+interface HostedLinqAttachmentMetadataLookupResult {
+  downloadLocator: string | null;
+  failureCode: string | null;
+  status: number | null;
+}
+
 async function fetchHostedLinqAttachmentDownloadUrl(input: {
   apiBaseUrl: string;
   apiToken: string;
   attachmentId: string;
   signal?: AbortSignal;
-}): Promise<string | null> {
+}): Promise<HostedLinqAttachmentMetadataLookupResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => {
     controller.abort();
@@ -310,13 +538,28 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
       },
     );
     if (!response.ok) {
-      return null;
+      return {
+        downloadLocator: null,
+        failureCode: "metadata_http_status",
+        status: response.status,
+      };
     }
 
     const payload = await response.json() as { download_url?: unknown; downloadUrl?: unknown };
-    return normalizeHostedAttachmentDownloadUrlField(payload.download_url ?? payload.downloadUrl);
-  } catch {
-    return null;
+    const downloadLocator = normalizeHostedAttachmentDownloadUrlField(
+      payload.download_url ?? payload.downloadUrl,
+    );
+    return {
+      downloadLocator,
+      failureCode: downloadLocator ? null : "metadata_empty_locator",
+      status: response.status,
+    };
+  } catch (error) {
+    return {
+      downloadLocator: null,
+      failureCode: classifyHostedLinqAttachmentMetadataError(error),
+      status: null,
+    };
   } finally {
     clearTimeout(timeout);
     releaseRelay();
@@ -418,4 +661,141 @@ function relayAbortSignal(source: AbortSignal, controller: AbortController): () 
   return () => {
     source.removeEventListener("abort", onAbort);
   };
+}
+
+function classifyHostedLinqAttachmentDownloadError(
+  error: unknown,
+): HostedLinqAttachmentFailureSummary {
+  if (error instanceof HostedLinqAttachmentDownloadError) {
+    return {
+      code: toHostedRuntimeLogCode(error.code),
+      status: error.status,
+    };
+  }
+
+  if (isAbortLikeHostedLinqAttachmentError(error)) {
+    return {
+      code: "download_aborted",
+      status: null,
+    };
+  }
+
+  return {
+    code: "download_fetch_failed",
+    status: null,
+  };
+}
+
+function classifyHostedLinqAttachmentMetadataError(error: unknown): string {
+  return isAbortLikeHostedLinqAttachmentError(error)
+    ? "metadata_aborted"
+    : "metadata_fetch_failed";
+}
+
+function isAbortLikeHostedLinqAttachmentError(error: unknown): boolean {
+  return (
+    error instanceof DOMException
+    && error.name === "AbortError"
+  ) || (
+    error instanceof Error
+    && error.name === "AbortError"
+  );
+}
+
+function normalizeHostedLinqAttachmentMimeCategory(
+  value: string | null | undefined,
+): string {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/u.test(normalized)
+    ? normalized
+    : "unknown";
+}
+
+function bucketHostedLinqAttachmentByteCount(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  if (value === 0) {
+    return "0";
+  }
+  if (value < 100_000) {
+    return "1-99k";
+  }
+  if (value < 1_000_000) {
+    return "100k-999k";
+  }
+  if (value < HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES) {
+    return "1m-19m";
+  }
+  return "20m+";
+}
+
+function resolveHostedLinqAttachmentCdnBaseKind(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const normalized = env.LINQ_ATTACHMENT_CDN_BASE_URL?.trim();
+  if (!normalized) {
+    return "default";
+  }
+
+  try {
+    const candidate = new URL(normalized.replace(/\/+$/u, ""));
+    return isHostedLinqAttachmentCdnOverrideAllowed(candidate)
+      ? "local_override"
+      : "default";
+  } catch {
+    return "default";
+  }
+}
+
+function classifyHostedLinqApiBaseUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return HOSTED_LINQ_LOCAL_ATTACHMENT_CDN_HOSTNAMES.has(url.hostname.toLowerCase())
+      ? "local"
+      : url.origin === new URL(DEFAULT_HOSTED_LINQ_API_BASE_URL).origin
+        ? "default"
+        : "custom";
+  } catch {
+    return "custom";
+  }
+}
+
+async function writeHostedLinqAttachmentDownloadAttemptLog(input: {
+  attempt: HostedLinqAttachmentDownloadAttemptLog;
+  platform: HostedLinqAttachmentDownloadLogPlatform | null;
+}): Promise<void> {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "mailbox",
+      ...(input.attempt.failureCode
+        ? { errorCode: toHostedRuntimeLogCode(input.attempt.failureCode) }
+        : {}),
+      eventCode: "mailbox.linq_attachment_download_finished",
+      level: input.attempt.result === "succeeded" ? "info" : "warn",
+      phase: "import",
+      redactedJson: toHostedLinqAttachmentDownloadRedactedJson(input.attempt),
+    },
+    platform: input.platform,
+  });
+}
+
+function toHostedLinqAttachmentDownloadRedactedJson(
+  attempt: HostedLinqAttachmentDownloadAttemptLog,
+): HostedRuntimeRedactedJson {
+  const output: HostedRuntimeRedactedJson = {};
+  for (const [key, value] of Object.entries(attempt)) {
+    if (value === undefined) {
+      continue;
+    }
+
+    output[key] = value;
+  }
+
+  return output;
 }

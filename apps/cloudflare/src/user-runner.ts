@@ -69,6 +69,8 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
+const ACTIVE_INVOCATION_DRAIN_WAIT_MS = 10_000;
+const ACTIVE_INVOCATION_DRAIN_RETRY_MS = 1_000;
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -442,7 +444,13 @@ export class HostedUserRunner {
   }): Promise<HostedWorkspaceInvocationResult> {
     const activeInvocation = this.invocationLock;
     if (activeInvocation) {
-      await activeInvocation.catch(() => undefined);
+      const rescheduledDrain = await this.rescheduleActiveInvocationDrainIfStillRunning(
+        activeInvocation,
+        input,
+      );
+      if (rescheduledDrain) {
+        return rescheduledDrain;
+      }
       const idleResult = await this.skipAlarmDrainIfActiveInvocationConsumedWork(input);
       if (idleResult) {
         return idleResult;
@@ -880,6 +888,51 @@ export class HostedUserRunner {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
     });
+  }
+
+  private async rescheduleActiveInvocationDrainIfStillRunning(
+    activeInvocation: Promise<void>,
+    input: {
+      reason: HostedWorkspaceInvocationReason;
+    },
+  ): Promise<HostedWorkspaceInvocationResult | null> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const settled = await new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => {
+        resolve(false);
+      }, ACTIVE_INVOCATION_DRAIN_WAIT_MS);
+      void activeInvocation.then(
+        () => resolve(true),
+        () => resolve(true),
+      );
+    });
+    if (timer) {
+      clearTimeout(timer);
+    }
+    if (settled) {
+      return null;
+    }
+
+    const record = await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: new Date(Date.now() + ACTIVE_INVOCATION_DRAIN_RETRY_MS).toISOString(),
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        activeInvocationDrainWaitMs: ACTIVE_INVOCATION_DRAIN_WAIT_MS,
+        pendingNudge: record.pendingNudge,
+        reason: input.reason,
+        runnerNextWakePresent: record.nextWakeAt !== null,
+      },
+      message: "Hosted runner active invocation still running; rescheduled wake drain.",
+      phase: "scheduled",
+      userId: record.userId,
+    });
+
+    return {
+      nextWakeAt: record.nextWakeAt,
+      status: "scheduled",
+    };
   }
 
   private async skipAlarmDrainIfActiveInvocationConsumedWork(input: {

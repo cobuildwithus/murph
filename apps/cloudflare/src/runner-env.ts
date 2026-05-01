@@ -16,9 +16,6 @@ import {
   filterHostedRunnerSecrets,
   rewriteHostedRunnerLoopbackUrlForContainer,
 } from "./hosted-env-policy.ts";
-import {
-  createHostedRunnerNativeParserToolchain,
-} from "./runner-native-parser-toolchain.ts";
 
 export function buildHostedRunnerSupervisorEnv(input: {
   port: number;
@@ -45,14 +42,13 @@ export function buildHostedRunnerJobRuntime(input: {
     ...(input.configSource ?? input.forwardedEnv),
     ...buildHostedRuntimePlatformEnv(input.platformEnv ?? input.forwardedEnv),
   };
-  const parserToolchain =
-    resolveHostedRunnerParserToolchain(input.parserToolchain);
+  const parserToolchain = readHostedRunnerParserToolchain(input.parserToolchain);
 
   return buildHostedRuntimeLaunchSpec({
     commitTimeoutMs: input.commitTimeoutMs ?? null,
     configSource: input.configSource,
     forwardedEnv: input.forwardedEnv,
-    parserToolchain,
+    ...(parserToolchain === undefined ? {} : { parserToolchain }),
     platformEnv: input.platformEnv,
     resolvedConfig: input.resolvedConfig,
     userEnv: filterHostedRunnerSecrets(
@@ -111,7 +107,6 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const parserToolchain = createHostedRunnerNativeParserToolchain();
   const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
@@ -122,24 +117,23 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     ),
     configSource,
     forwardedEnv: input.forwardedEnv,
-    parserToolchain,
     platformEnv: Object.keys(platformEnv).length === 0 ? undefined : platformEnv,
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: input.runnerSecrets,
   });
 }
 
-function resolveHostedRunnerParserToolchain(
+function readHostedRunnerParserToolchain(
   parserToolchain:
     | HostedAssistantRuntimeParserToolchainConfig
     | null
     | undefined,
-): HostedAssistantRuntimeParserToolchainConfig {
+): HostedAssistantRuntimeParserToolchainConfig | undefined {
   if (parserToolchain === null) {
     throw new TypeError(
       "Hosted runner parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
     );
   }
 
-  return parserToolchain ?? createHostedRunnerNativeParserToolchain();
+  return parserToolchain;
 }

@@ -42,7 +42,6 @@ import type {
 
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
 export {
-  JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS,
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   JUNCTION_LINK_PROVIDER_SLUGS,
@@ -502,7 +501,7 @@ function resolveJunctionLinkProviderFilter(
     return providerFilter;
   }
 
-  const [normalizedSource] = normalizeJunctionProviderFilter([requested]);
+  const normalizedSource = normalizeProviderSlug(requested);
   if (!normalizedSource || !providerFilter.includes(normalizedSource)) {
     throw deviceSyncError({
       code: "JUNCTION_SOURCE_PROVIDER_NOT_CONFIGURED",

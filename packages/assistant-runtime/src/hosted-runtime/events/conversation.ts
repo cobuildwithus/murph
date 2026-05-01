@@ -238,7 +238,9 @@ async function normalizeHostedConversationMessageWake(input: {
     return normalizeHostedLinqConversationCapture({
       accountId: input.wake.message.phoneLookupKey,
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
-      downloadDriver: createHostedLinqAttachmentDownloadDriver(),
+      downloadDriver: createHostedLinqAttachmentDownloadDriver({
+        platform: input.runtime.platform,
+      }),
       linqMessage: input.wake.message.linqMessage,
       occurredAt: input.wake.occurredAt,
     });

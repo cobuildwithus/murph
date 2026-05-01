@@ -17,9 +17,6 @@ import {
   buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
-import {
-  createHostedRunnerNativeParserToolchain,
-} from "../src/runner-native-parser-toolchain.ts";
 import { readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
 import {
   HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
@@ -369,7 +366,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       ),
       configSource,
       forwardedEnv,
-      parserToolchain: createHostedRunnerNativeParserToolchain(),
       platformEnv,
       userEnv: filterHostedRunnerSecrets(runnerSecrets, {
         ...configSource,
@@ -431,7 +427,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
-  it("does not derive typed parser config from forwarded env without a trusted config source", () => {
+  it("does not serialize parser config from stale forwarded env into the runtime envelope", () => {
     expect(buildHostedRunnerJobRuntime({
       forwardedEnv: {
         FFMPEG_COMMAND: "/stale/ffmpeg",
@@ -440,10 +436,10 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         WHISPER_MODEL_PATH: "/stale/model.bin",
       },
       runnerSecrets: {},
-    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+    }).parserToolchain).toBeUndefined();
   });
 
-  it("does not derive typed parser config through the runtime config wrapper without a trusted config source", () => {
+  it("does not serialize parser config through the runtime config wrapper", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
         FFMPEG_COMMAND: "/stale/ffmpeg",
@@ -452,10 +448,10 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         WHISPER_MODEL_PATH: "/stale/model.bin",
       },
       runnerSecrets: {},
-    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+    }).parserToolchain).toBeUndefined();
   });
 
-  it("uses image-owned native parser config even when platform config contains parser env", () => {
+  it("keeps parser config out of the worker runtime envelope even when platform config contains parser env", () => {
     const configSource = {
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,parsers",
@@ -474,7 +470,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       configSource,
       forwardedEnv: buildHostedRunnerContainerEnv(configSource),
       runnerSecrets: {},
-    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+    }).parserToolchain).toBeUndefined();
   });
 
   it("rejects parserToolchain:null at the hosted runner boundary", () => {
@@ -548,7 +544,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toMatchObject({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
-      parserToolchain: createHostedRunnerNativeParserToolchain(),
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -714,7 +709,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toEqual({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
-      parserToolchain: createHostedRunnerNativeParserToolchain(),
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",

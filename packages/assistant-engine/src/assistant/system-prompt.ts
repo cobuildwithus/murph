@@ -422,7 +422,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. Supported connect-link requests are handled by the hosted runtime before the model turn when possible. If no real link is present in the current turn, say you cannot create one right now instead of fabricating a URL.`;
+  return `- Hosted wearable connection links are available for ${providerList}. Supported connect-link requests must come from explicit hosted runtime context or helper results. If no real link is present in the current turn, say you cannot create one right now instead of fabricating a URL.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(): string {

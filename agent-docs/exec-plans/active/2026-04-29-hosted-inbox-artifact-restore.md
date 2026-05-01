@@ -12,7 +12,7 @@ Key decisions:
 - Do not change snapshot restore policy unless evidence shows deferred parser retry is the active failure.
 
 State:
-- Logging-only instrumentation added for hosted parser drain failures and observed failed parser job state while root-cause analysis continues.
+- Logging-only instrumentation added for hosted parser drain failures, observed failed parser job state, and redacted Linq attachment download outcomes while root-cause analysis continues.
 
 Done:
 - Traced Linq hosted conversation import, inbox persistence, parser drains, and hosted bundle restore.
@@ -25,13 +25,16 @@ Done:
 - Confirmed hosted-local Linq webhook E2E currently injects `/app/test-parser-toolchain/*`, so it cannot catch production ffmpeg/whisper or missing-restored-media failures.
 - Updated the failure hypothesis from "ingest did not materialize bytes" to "ingest wrote raw bytes, but snapshot restore skipped externalized raw artifacts."
 - Reverted the broad source/test changes after deciding eager raw-artifact restore is too blunt.
+- Added redacted hosted runtime logs for Linq attachment download outcomes (`mailbox.linq_attachment_download_finished`) covering direct CDN download, metadata fallback, local override rejection/failure, status codes, MIME category, byte-count buckets, and success/failure result without raw locators, attachment IDs, filenames, content, or tokens.
+- Ran focused Linq event tests and assistant-runtime typecheck after rebuilding the hosted-execution contract; both passed.
+- Restarted local hosted dev with `MURPH_DEV_FORCE_RESET_LOCAL_DB=1 pnpm dev`; local DB was force-reset, runner bundle rebuilt, Worker healthy on `127.0.0.1:8787`, web healthy on `localhost:3000`.
+- Caught and corrected a non-prod-faithful local override that pointed Linq API/CDN attachment downloads at an unavailable loopback stub; restarted again with the real Linq API base and default CDN allowlist, reusing the rebuilt runner bundle and force-resetting the local DB again.
 
 Now:
-- Reproduced the hosted-local Linq audio parser failure path with the current runner bundle. The assistant prompt still receives failed attachment state instead of transcript text when the parser toolchain is absent/mismatched.
-- Follow-up evidence: no parser-specific durable rows landed in the repro database, so the visible `parseState: failed` is not yet being surfaced by the parser-drain log point alone.
+- Waiting for a fresh local text/file send against the clean rebuilt stack, then inspect local runtime logs and DB rows for attachment download outcome and parser enqueue/drain behavior.
 
 Next:
-- Trace parser drain ordering, hosted checkpoint timing, and the assistant context path that surfaces failed attachment state before changing restore/materialization behavior.
+- Use the new `mailbox.linq_attachment_download_finished` rows to distinguish CDN allowlist/local override, metadata lookup, byte download, and parser enqueue failures before changing restore/materialization behavior.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: The reported capture exists only in a hosted runner snapshot not present on local disk.
@@ -39,7 +42,9 @@ Open questions (UNCONFIRMED if needed):
 Working set (files/ids/commands):
 - `packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts`
 - `packages/assistant-runtime/src/hosted-runtime/events/conversation.ts`
+- `packages/assistant-runtime/src/hosted-runtime/events/linq.ts`
 - `packages/assistant-runtime/test/hosted-runtime-conversation-event.test.ts`
+- `packages/assistant-runtime/test/hosted-runtime-linq-event.test.ts`
 - `packages/hosted-execution/src/runtime-control.ts`
 - `packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`
 - `packages/parsers/src/pipelines/resolve-attachment-artifact.ts`

@@ -226,7 +226,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["fitbit", "junction"],
+            providerFilter: ["fitbit"],
             region: "us",
           },
           whoop: {

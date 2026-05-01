@@ -106,6 +106,34 @@ test("hosted runtime config rejects parserToolchain:null", () => {
   );
 });
 
+test("hosted runtime config rejects null or empty parser tool paths", () => {
+  assert.throws(
+    () =>
+      normalizeHostedAssistantRuntimeConfig(
+        JSON.parse('{"parserToolchain":{"tools":{"whisper":{"command":null}}}}'),
+        createHostedRuntimePlatformStub(),
+      ),
+    /Hosted runtime parser toolchain command must be a non-empty absolute path/u,
+  );
+
+  assert.throws(
+    () =>
+      normalizeHostedAssistantRuntimeConfig(
+        {
+          parserToolchain: {
+            tools: {
+              whisper: {
+                command: "   ",
+              },
+            },
+          },
+        },
+        createHostedRuntimePlatformStub(),
+      ),
+    /Hosted runtime parser toolchain command must be a non-empty absolute path/u,
+  );
+});
+
 test("hosted runtime launch spec owns semantic env split and runtime config", () => {
   const spec = buildHostedRuntimeLaunchSpec({
     commitTimeoutMs: 45_000,

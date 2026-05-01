@@ -93,12 +93,6 @@ export function resolveAssistantProvider(
   throw createUnsupportedAssistantRuntimeTargetError()
 }
 
-export function inferAssistantProviderFromConfigInput(
-  input: AssistantProviderConfigInput | null | undefined,
-): AssistantProviderConfigInput['provider'] | null {
-  return input?.provider ?? null
-}
-
 export function normalizeAssistantProviderConfig(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderConfig {
@@ -107,9 +101,7 @@ export function normalizeAssistantProviderConfig(
     : input
 
   return sanitizeAssistantProviderConfig(
-    resolveAssistantProvider(
-      resolveAssistantProviderForNormalization(providerConfigInput),
-    ),
+    resolveAssistantProvider(providerConfigInput?.provider ?? 'codex-cli'),
     providerConfigInput,
   )
 }
@@ -166,9 +158,8 @@ export function mergeAssistantProviderConfigsForProvider(
   provider: AssistantProviderConfigInput['provider'],
   ...inputs: ReadonlyArray<AssistantProviderConfigLike | null | undefined>
 ): AssistantProviderConfig {
-  const merged: AssistantProviderConfigInput = {
-    provider,
-  }
+  resolveAssistantProvider(provider)
+  const merged: AssistantProviderConfigInput = {}
 
   for (const rawInput of inputs) {
     const input = isAssistantProviderConfig(rawInput)
@@ -176,6 +167,10 @@ export function mergeAssistantProviderConfigsForProvider(
       : rawInput
     if (!input) {
       continue
+    }
+
+    if (input.provider) {
+      resolveAssistantProvider(input.provider)
     }
 
     for (const field of ASSISTANT_PROVIDER_CONFIG_FIELDS) {
@@ -189,24 +184,13 @@ export function mergeAssistantProviderConfigsForProvider(
     }
   }
 
-  return sanitizeAssistantProviderConfig(provider, merged)
+  return sanitizeAssistantProviderConfig('codex-cli', merged)
 }
 
 export function mergeAssistantProviderConfigs(
   ...inputs: ReadonlyArray<AssistantProviderConfigLike | null | undefined>
 ): AssistantProviderConfig {
-  let provider: AssistantProviderConfigInput['provider'] = 'codex-cli'
-
-  for (const rawInput of inputs) {
-    const input = isAssistantProviderConfig(rawInput)
-      ? assistantProviderConfigToInput(rawInput)
-      : rawInput
-    if (input?.provider) {
-      provider = input.provider
-    }
-  }
-
-  return mergeAssistantProviderConfigsForProvider(provider, ...inputs)
+  return mergeAssistantProviderConfigsForProvider('codex-cli', ...inputs)
 }
 
 export function compactAssistantProviderConfigInput(
@@ -217,10 +201,6 @@ export function compactAssistantProviderConfigInput(
   }
 
   const compacted: AssistantProviderConfigInput = {}
-
-  if (input.provider) {
-    compacted.provider = input.provider
-  }
 
   for (const field of ASSISTANT_PROVIDER_CONFIG_FIELDS) {
     const value = input[field]
@@ -371,7 +351,6 @@ function assistantProviderConfigToInput(
   }
 
   return {
-    provider: 'codex-cli',
     approvalPolicy: config.policy.approvalPolicy,
     codexCommand: config.target.codexCommand,
     codexHome: config.target.codexHome,
@@ -393,28 +372,6 @@ function isAssistantProviderConfig(
     'policy' in input &&
     'target' in input
   )
-}
-
-function resolveAssistantProviderForNormalization(
-  input: AssistantProviderConfigInput | null | undefined,
-): AssistantProviderConfigInput['provider'] | null {
-  if (input?.provider) {
-    return input.provider
-  }
-
-  if (
-    normalizeNullableString(input?.codexCommand) ||
-    normalizeNullableString(input?.codexHome) ||
-    normalizeAssistantCodexModelProvider(input?.modelProvider) ||
-    normalizeNullableString(input?.profile) ||
-    input?.approvalPolicy !== null && input?.approvalPolicy !== undefined ||
-    input?.sandbox !== null && input?.sandbox !== undefined ||
-    input?.oss === true
-  ) {
-    return 'codex-cli'
-  }
-
-  return null
 }
 
 function canonicalizeAssistantHeaderName(key: string): string {

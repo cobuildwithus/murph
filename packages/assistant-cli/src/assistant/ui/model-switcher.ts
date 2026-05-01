@@ -30,6 +30,7 @@ export interface ModelSwitcherProps {
 }
 
 export interface ModelSwitcherState {
+  defaultReasoningOptions?: readonly CodexReasoningOption[]
   models: readonly CodexCatalogModel[]
   mode: 'model' | 'reasoning'
   modelIndex: number
@@ -113,6 +114,7 @@ function renderSwitcherRow(input: {
 export function createModelSwitcherState(input: {
   activeModel: string | null
   activeReasoningEffort: string | null
+  defaultReasoningOptions?: readonly CodexReasoningOption[]
   models: readonly CodexCatalogModel[]
   modelOptions: readonly CodexModelOption[]
 }): ModelSwitcherState {
@@ -120,11 +122,15 @@ export function createModelSwitcherState(input: {
     input.activeModel,
     input.modelOptions,
   )
-  const reasoningOptions = resolveCodexCatalogReasoningOptions(
-    input.models[modelIndex],
-  )
+  const reasoningOptions = resolveModelOptionReasoningOptions({
+    defaultReasoningOptions: input.defaultReasoningOptions,
+    modelIndex,
+    modelOptions: input.modelOptions,
+    models: input.models,
+  })
 
   return {
+    defaultReasoningOptions: input.defaultReasoningOptions,
     models: input.models,
     mode: 'model',
     modelIndex,
@@ -147,9 +153,12 @@ export function offsetModelSwitcherSelection(input: {
       input.state.modelIndex + input.delta,
       input.state.modelOptions.length,
     )
-    const reasoningOptions = resolveCodexCatalogReasoningOptions(
-      input.state.models[modelIndex],
-    )
+    const reasoningOptions = resolveModelOptionReasoningOptions({
+      defaultReasoningOptions: input.state.defaultReasoningOptions,
+      modelIndex,
+      modelOptions: input.state.modelOptions,
+      models: input.state.models,
+    })
 
     return {
       ...input.state,
@@ -193,10 +202,10 @@ export function resolveModelSwitcherSelection(input: {
   nextReasoningEffort: string | null
   selectedLabel: string
 } {
-  const nextModel =
-    input.selection.modelOptions[input.selection.modelIndex]?.value ??
-    input.activeModel ??
-    null
+  const selectedOption = input.selection.modelOptions[input.selection.modelIndex]
+  const nextModel = selectedOption
+    ? normalizeNullableString(selectedOption.value)
+    : normalizeNullableString(input.activeModel)
   const nextReasoningEffort =
     input.selection.reasoningOptions.length > 0
       ? input.selection.reasoningOptions[input.selection.reasoningIndex]?.value ??
@@ -204,7 +213,7 @@ export function resolveModelSwitcherSelection(input: {
         'medium'
       : null
   const selectedLabel = [
-    nextModel ?? 'the configured model',
+    nextModel ?? formatCodexModelOptionLabel(selectedOption) ?? 'Codex default',
     normalizeNullableString(nextReasoningEffort),
   ]
     .filter((value): value is string => Boolean(value))
@@ -253,7 +262,7 @@ export function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
   useInput(handleModelSwitcherInput)
 
   const selectedModelLabel =
-    props.modelOptions[props.modelIndex]?.value ??
+    formatCodexModelOptionLabel(props.modelOptions[props.modelIndex]) ??
     props.currentModel ??
     'the current model'
   const canChooseReasoning = props.reasoningOptions.length > 0
@@ -282,7 +291,7 @@ export function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
               normalizeNullableString(props.currentModel),
             description: option.description,
             index,
-            label: option.value,
+            label: formatCodexModelOptionLabel(option) ?? option.value,
             selected: index === props.modelIndex,
             theme: props.theme,
           }),
@@ -340,4 +349,32 @@ export function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
       helpText,
     ),
   )
+}
+
+function resolveModelOptionReasoningOptions(input: {
+  defaultReasoningOptions?: readonly CodexReasoningOption[]
+  modelIndex: number
+  modelOptions: readonly CodexModelOption[]
+  models: readonly CodexCatalogModel[]
+}): readonly CodexReasoningOption[] {
+  const modelId = normalizeNullableString(
+    input.modelOptions[input.modelIndex]?.value,
+  )
+  if (!modelId) {
+    return input.defaultReasoningOptions ?? []
+  }
+
+  return resolveCodexCatalogReasoningOptions(
+    input.models.find((model) => model.id === modelId),
+  )
+}
+
+function formatCodexModelOptionLabel(
+  option: CodexModelOption | null | undefined,
+): string | null {
+  if (!option) {
+    return null
+  }
+
+  return normalizeNullableString(option?.value) ?? 'Codex default'
 }

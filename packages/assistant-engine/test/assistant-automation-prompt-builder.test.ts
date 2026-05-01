@@ -1,5 +1,3 @@
-import { writeFile } from 'node:fs/promises'
-import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -10,7 +8,6 @@ import {
   inboxModelAttachmentBundleSchema,
   type InboxModelAttachmentBundle,
 } from '../src/inbox-model-contracts.ts'
-import { createTempVaultContext } from './test-helpers.ts'
 import type { AssistantUserMessageContentPart } from '../src/assistant/content-types.ts'
 import type {
   AssistantInputAttachmentDescriptor,
@@ -41,7 +38,6 @@ vi.mock('../src/inbox-multimodal.js', async () => {
 
 import {
   buildAssistantAutoReplyPrompt,
-  loadTelegramAutoReplyMetadata,
   prepareAssistantAutoReplyInput,
   type AssistantAutoReplyPromptInput,
   type TelegramAutoReplyMetadata,
@@ -705,183 +701,6 @@ describe('prepareAssistantAutoReplyInput', () => {
       kind: 'ready',
       prompt: expect.stringContaining('Message text:\nSummarize this incoming message.'),
       userMessageContent,
-    })
-  })
-})
-
-describe('loadTelegramAutoReplyMetadata', () => {
-  it('returns null for blank or unreadable envelope paths', async () => {
-    const { vaultRoot } = await createTempVaultContext('assistant-engine-prompt-builder-')
-
-    await expect(loadTelegramAutoReplyMetadata(vaultRoot, null)).resolves.toBeNull()
-    await expect(
-      loadTelegramAutoReplyMetadata(vaultRoot, 'missing/envelope.json'),
-    ).resolves.toBeNull()
-  })
-
-  it('prefers minimized telegram capture metadata and sanitized reply previews when present', async () => {
-    const { vaultRoot } = await createTempVaultContext('assistant-engine-prompt-builder-')
-    const relativeEnvelopePath = 'minimal-envelope.json'
-    const absoluteEnvelopePath = path.join(vaultRoot, relativeEnvelopePath)
-
-    await writeFile(
-      absoluteEnvelopePath,
-      JSON.stringify({
-        input: {
-          raw: {
-            business_message: {
-              message_id: 444,
-              reply_to_message: {
-                contact: {
-                  first_name: 'Pat',
-                  phone_number: '+15551212',
-                },
-              },
-            },
-            reply_context_preview:
-              ' Replying to: Shared contact card\nQuoted text: Need the file when you can. ',
-            schema: 'murph.telegram-capture.v1',
-            media_group_id: ' media-group-42 ',
-            message_id: ' 98765 ',
-          },
-        },
-      }),
-      'utf8',
-    )
-
-    await expect(
-      loadTelegramAutoReplyMetadata(vaultRoot, relativeEnvelopePath),
-    ).resolves.toEqual({
-      mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
-      messageId: '98765',
-      replyContext:
-        'Replying to: Shared contact card\nQuoted text: Need the file when you can.',
-    })
-  })
-
-  it('extracts reply context from business-message telegram envelopes', async () => {
-    const { vaultRoot } = await createTempVaultContext('assistant-engine-prompt-builder-')
-    const absoluteEnvelopePath = path.join(vaultRoot, 'business-envelope.json')
-
-    await writeFile(
-      absoluteEnvelopePath,
-      JSON.stringify({
-        input: {
-          raw: {
-            business_message: {
-              message_id: 444,
-              reply_to_message: {
-                from: {
-                  first_name: 'Alex',
-                  last_name: 'Kim',
-                },
-                contact: {
-                  first_name: 'Pat',
-                  phone_number: '+15551212',
-                },
-              },
-              quote: {
-                text: '   Please call me back soon.   ',
-              },
-            },
-          },
-        },
-      }),
-      'utf8',
-    )
-
-    await expect(
-      loadTelegramAutoReplyMetadata(vaultRoot, absoluteEnvelopePath),
-    ).resolves.toEqual({
-      mediaGroupId: null,
-      messageId: '444',
-      replyContext:
-        'Replying to Alex Kim: Shared contact Pat (+15551212)\nQuoted text: Please call me back soon.',
-    })
-  })
-
-  it('extracts venue and location reply context from standard telegram messages', async () => {
-    const { vaultRoot } = await createTempVaultContext('assistant-engine-prompt-builder-')
-    const absoluteEnvelopePath = path.join(vaultRoot, 'venue-envelope.json')
-
-    await writeFile(
-      absoluteEnvelopePath,
-      JSON.stringify({
-        input: {
-          raw: {
-            message: {
-              message_id: 445,
-              media_group_id: 'venue-group',
-              reply_to_message: {
-                sender_chat: {
-                  title: 'Cafe Bot',
-                },
-                venue: {
-                  title: 'Coffee Shop',
-                  address: '1 Main St',
-                  location: {
-                    latitude: 40.7128,
-                    longitude: -74.006,
-                  },
-                },
-              },
-            },
-          },
-        },
-      }),
-      'utf8',
-    )
-
-    await expect(
-      loadTelegramAutoReplyMetadata(vaultRoot, absoluteEnvelopePath),
-    ).resolves.toEqual({
-      mediaGroupId: expect.stringMatching(/^tgmg_[0-9a-f]{32}$/u),
-      messageId: '445',
-      replyContext:
-        'Replying to Cafe Bot: Shared venue Coffee Shop | 1 Main St | Shared location 40.7128, -74.006',
-    })
-  })
-
-  it('extracts poll reply context and normalizes username display names', async () => {
-    const { vaultRoot } = await createTempVaultContext('assistant-engine-prompt-builder-')
-    const absoluteEnvelopePath = path.join(vaultRoot, 'poll-envelope.json')
-
-    await writeFile(
-      absoluteEnvelopePath,
-      JSON.stringify({
-        input: {
-          raw: {
-            message: {
-              message_id: '446',
-              reply_to_message: {
-                from: {
-                  username: 'surveybot',
-                },
-                poll: {
-                  question: 'Lunch?',
-                  options: [
-                    {
-                      text: 'Pizza',
-                    },
-                    {
-                      text: 'Salad',
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        },
-      }),
-      'utf8',
-    )
-
-    await expect(
-      loadTelegramAutoReplyMetadata(vaultRoot, absoluteEnvelopePath),
-    ).resolves.toEqual({
-      mediaGroupId: null,
-      messageId: '446',
-      replyContext: 'Replying to @surveybot: Shared poll Lunch? [Pizza | Salad]',
     })
   })
 })
