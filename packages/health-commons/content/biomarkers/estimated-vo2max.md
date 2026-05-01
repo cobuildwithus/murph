@@ -109,7 +109,7 @@ biomarker:
       body: A lab cardiopulmonary exercise test with gas exchange is the reference context. Consumer wearables estimate VO₂ max from signals such as heart rate, pace, power, GPS, demographics, and device-specific algorithms.
     -
       title: How to read it
-      body: "Read same-device trends over weeks or months; sustained training-linked rises matter more than single updates."
+      body: "Use age/sex context; rising 6-12 week trends matter most with better pace, power, or easier efforts."
     -
       title: What moves it
       body: "Intervals, endurance training, detraining, illness, heat, altitude, sensors, GPS, body weight, heart-rate medications, and test protocol."

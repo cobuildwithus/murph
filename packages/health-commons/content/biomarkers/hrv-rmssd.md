@@ -73,7 +73,7 @@ biomarker:
       body: "Reflects autonomic regulation and recovery strain; useful for context around sleep, alcohol, stress, illness, and training."
     -
       title: How to read it
-      body: "Compare same-device overnight or quiet-morning readings. Avoid mixing posture, breathing, devices, or post-workout values."
+      body: "No universal good range; higher personal 7-30 day baseline is useful when RHR, sleep, and stress also improve."
     -
       title: What moves it
       body: "Aerobic training, sleep loss, alcohol, infection, stress, dehydration, hard training, heat, and device changes."

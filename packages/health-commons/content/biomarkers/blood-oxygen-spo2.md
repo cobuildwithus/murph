@@ -73,7 +73,7 @@ biomarker:
       body: "Contextualizes breathing during sleep, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings."
     -
       title: How to read it
-      body: "Compare same-device trends; use finger pulse oximetry for symptom-driven spot checks. Repeated lows matter more than one noisy reading."
+      body: "Typical sea-level range: 95-100%. Stable is expected; repeated drops or symptom-matched lows matter more than higher readings."
     -
       title: What moves it
       body: "Altitude, illness, sleep apnea, perfusion, movement, sensor fit, nail polish, skin pigmentation, smoke exposure, and device limits."

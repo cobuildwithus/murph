@@ -57,7 +57,7 @@ biomarker:
       body: "Reflects aerobic fitness, recovery load, stress, illness, alcohol, sleep disruption, and whether an experiment adds strain."
     -
       title: How to read it
-      body: "Compare same-device overnight or quiet-morning trends. Use multi-day medians, not one-off readings."
+      body: "Typical adult range: 60-100 bpm; lower trends matter when sleep, recovery, and training load are stable."
     -
       title: What moves it
       body: "Cardio training, sleep, alcohol, heat, illness, hard training, travel, dehydration, medications, stress, and device changes."
