@@ -40,9 +40,6 @@ relations:
     type: "parent_family"
     target: "experiment_family:consistent-wake-time"
   -
-    type: "primary_biomarker"
-    target: "biomarker:wake-time-variability"
-  -
     type: "secondary_biomarker"
     target: "biomarker:total-sleep-time"
   -
@@ -58,7 +55,7 @@ relations:
     type: "secondary_biomarker"
     target: "biomarker:sleep-onset-latency"
   -
-    type: "secondary_biomarker"
+    type: "primary_biomarker"
     target: "biomarker:daytime-sleepiness"
   -
     type: "cites"
@@ -323,14 +320,13 @@ testPlans:
     durationDays: 35
     baselineDays: 7
     interventionDays: 28
-    primaryBiomarkerKey: "biomarker:wake-time-variability"
+    primaryBiomarkerKey: "biomarker:daytime-sleepiness"
     secondaryBiomarkerKeys:
       - "biomarker:total-sleep-time"
       - "biomarker:sleep-efficiency"
       - "biomarker:resting-heart-rate"
       - "biomarker:hrv-rmssd"
       - "biomarker:sleep-onset-latency"
-      - "biomarker:daytime-sleepiness"
     minimumAdherenceSessions: 20
     targetAdherenceSessions: 28
     notes:
@@ -342,19 +338,6 @@ testPlans:
       - "Interpret the 20/28 minimum only after separating unsafe or medically appropriate safety overrides from ordinary missed adherence days."
 expectedSignalDescriptions:
 
-  -
-    biomarkerKey: "biomarker:wake-time-variability"
-    description: "A steady wake window removes recurring schedule drift, giving the body clock a more predictable morning anchor."
-    expected: "Wake times tighten"
-    estimatedChange:
-      kind: "absolute"
-      low: -45
-      high: -15
-      unit: "minutes"
-      window: "2-4 weeks"
-      confidence: "moderate"
-      basis: "Directly targeted behavior. A small 12-night regular-timing crossover reduced sleep-duration SD from 57 to 31 minutes; wake-time SD should move most when baseline drift exceeds the target window."
-    protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:total-sleep-time"
     description: "The wake anchor works only when bedtime protects enough sleep opportunity, keeping total sleep from being cut."
@@ -432,7 +415,7 @@ expectedSignalDescriptions:
       window: "4 weeks"
       confidence: "low"
       basis: "A 4-week regular-schedule study reported lower subjective sleepiness and better alertness when participants were not sleep deprived; scales vary across diaries."
-    protocolProminence: "context"
+    protocolProminence: "focus"
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

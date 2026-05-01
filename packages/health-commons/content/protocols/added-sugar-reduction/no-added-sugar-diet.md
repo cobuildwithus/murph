@@ -42,9 +42,6 @@ relations:
   type: secondary_biomarker
   target: biomarker:morning-blood-pressure
 -
-  type: secondary_biomarker
-  target: biomarker:added-sugar-intake
--
   type: cites
   target: source_artifact:acog-healthy-eating-pregnancy-2026-04-25
 -
@@ -476,7 +473,6 @@ testPlans:
   secondaryBiomarkerKeys:
   - biomarker:waist-circumference
   - biomarker:morning-blood-pressure
-  - biomarker:added-sugar-intake
   minimumAdherenceSessions: 14
   targetAdherenceSessions: 21
   notes:
@@ -484,18 +480,6 @@ testPlans:
   - Body weight is the first downstream home signal; waist and morning blood pressure are secondary signals, while glucose, cravings, and taste changes are exploratory context. Sleep or recovery should be logged as context/confounding unless a separate sleep protocol is active.
   - Track replacements and exceptions so the experiment can distinguish added-sugar reduction from juice substitution, sweetener substitution, lower total energy intake, or broader diet changes.
   - Use the 21-day intervention as a behavior and intake-fidelity test; longer windows or scheduled labs are needed for many cardiometabolic outcomes. The 21-day window and adherence thresholds are Murph run-quality defaults, not evidence-derived clinical thresholds.
--
-  planId: added-sugar-exposure-28d-no-weight
-  durationDays: 28
-  baselineDays: 7
-  interventionDays: 21
-  primaryBiomarkerKey: biomarker:added-sugar-intake
-  minimumAdherenceSessions: 14
-  targetAdherenceSessions: 21
-  notes:
-  - Use this fallback only when body-weight tracking is unavailable, unsafe, or likely to increase distress, restriction, or food-rule rigidity.
-  - This is a measurement fallback, not a return to treating intake reduction as the outcome win; added-sugar intake confirms exposure changed while the run mainly answers whether the rule was safe, livable, and interpretable.
-  - Keep weight out of the run, and use waist or morning blood pressure only as optional context when those measurements are safe and already available.
 -
   planId: added-sugar-intake-42d
   durationDays: 42
@@ -505,7 +489,6 @@ testPlans:
   secondaryBiomarkerKeys:
   - biomarker:waist-circumference
   - biomarker:morning-blood-pressure
-  - biomarker:added-sugar-intake
   minimumAdherenceSessions: 21
   targetAdherenceSessions: 28
   notes:
@@ -551,16 +534,6 @@ expectedSignalDescriptions:
     confidence: low
     basis: RCT synthesis comparing higher versus lower dietary sugar found the largest BP separation after at least 8 weeks; shorter home runs should use repeated morning averages.
   description: Lower sugar and sugary-drink exposure reduces energy load, high-fructose intake, vascular tone, and sodium-handling strain.
--
-  biomarkerKey: biomarker:added-sugar-intake
-  expected: Dose check
-  protocolProminence: context
-  estimatedChange:
-    kind: mixed_or_contextual
-    window: daily during intervention
-    confidence: high
-    basis: The gram drop depends on baseline intake, boundary choice, labels, and unlabeled foods; use baseline-relative change to confirm exposure rather than treating grams reduced as the outcome win.
-  description: Label reading and replacement choices reduce added-sugar intake, confirming the exposure changed enough to affect downstream signals.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -650,18 +623,7 @@ experimentOnboarding:
       - weight_tracking_fit
       requiredForRunSpec: true
       protocolReusable: false
-      guidance: Use the body-weight-primary default plan only when weekly weight tracking is safe and available. If weight tracking is unavailable or would increase distress, restriction, or unsafe behavior, select the no-weight fallback plan and keep scale weight out of required signals.
-    measurementPlan:
-      testPlanId: added-sugar-intake-28d
-      requiredSignals:
-      - biomarker:body-weight
-      optionalSignals:
-      - biomarker:waist-circumference
-      - biomarker:morning-blood-pressure
-      - biomarker:added-sugar-intake
-      notes:
-      - The default measurement plan assumes safe weekly weight tracking.
-      - When that assumption fails, use added-sugar-exposure-28d-no-weight and treat intake logging as exposure fidelity rather than a downstream outcome win.
+      guidance: Use the body-weight-primary default plan only when weekly weight tracking is safe and available. If weight tracking is unavailable or would increase distress, restriction, or unsafe behavior, record a no-biomarker-outcome measurement plan, keep scale weight out of required signals, and treat the run as exposure logging plus safety/livability review rather than a biomarker-outcome test.
   setupSlots:
 
   -
@@ -732,7 +694,7 @@ experimentOnboarding:
       field: weightTrackingFit
     notes:
     - Choose the body-weight-primary plan only for weekly_weight_safe_available.
-    - If the answer is avoid_weight_tracking, use added-sugar-exposure-28d-no-weight and do not ask for scale measurements.
+    - If the answer is avoid_weight_tracking, do not ask for scale measurements and do not promote added-sugar intake into a biomarker outcome.
   -
     id: daily_log_time
     label: Daily log time
@@ -766,7 +728,7 @@ experimentOnboarding:
     interventionDays: 21
     targetSessions: 21
     minimumUsefulSessions: 14
-    firstSessionGuidance: Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. Use the body-weight-primary plan only when weekly weight tracking is safe and available; otherwise switch to the no-weight fallback. The 7/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds.
+    firstSessionGuidance: Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. Use the body-weight-primary plan only when weekly weight tracking is safe and available; otherwise keep the run as exposure logging plus safety and livability review instead of a biomarker-outcome test. The 7/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds.
   logging:
     sessionFields:
     - daily_added_sugar_grams

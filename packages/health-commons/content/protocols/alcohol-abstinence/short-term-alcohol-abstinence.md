@@ -61,12 +61,6 @@ relations:
   type: secondary_biomarker
   target: biomarker:blood-glucose
 -
-  type: secondary_biomarker
-  target: biomarker:alcohol-free-days
--
-  type: secondary_biomarker
-  target: biomarker:alcohol-intake
--
   type: safety_biomarker
   target: biomarker:alcohol-withdrawal-symptoms
 -

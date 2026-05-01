@@ -1014,7 +1014,6 @@ testPlans:
       - biomarker:body-weight
       - biomarker:lean-body-mass
       - biomarker:gi-tolerance
-      - biomarker:training-volume
     minimumAdherenceSessions: 28
     targetAdherenceSessions: 42
     notes:
@@ -1087,16 +1086,6 @@ expectedSignalDescriptions:
       window: "during loading or dose changes"
       confidence: moderate
       basis: "A dose-dependence trial flags higher diarrhea risk with 10 g in one serving, while split 5 g doses are better tolerated; pooled symptom-score changes were not extractable."
-  -
-    biomarkerKey: biomarker:training-volume
-    expected: "Context signal"
-    protocolProminence: context
-    description: "Faster phosphocreatine recycling can make the last sets or intervals easier to finish, but completed volume only means something when the plan, loads, rest periods, and deloads stay comparable."
-    estimatedChange:
-      kind: mixed_or_contextual
-      window: "1-6 weeks"
-      confidence: low
-      basis: "Small repeated-set and overreaching studies show more completed work in some settings; equalized training programs and task-specific nulls make a single percent estimate misleading."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
