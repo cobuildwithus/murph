@@ -211,6 +211,25 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
   });
 
+  it("drops test-only Codex app-server stub values when the bridge is enabled", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
+      },
+      oidcIdentity,
+      overrides: {
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
+        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
+        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:5222/v1",
+      },
+    });
+
+    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBe("bridge-token");
+    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBe("tcp://127.0.0.1:4123");
+    expect(merged.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBeUndefined();
+  });
+
   it("preserves an explicit current worker bridge override instead of resetting to the listen host", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -569,5 +588,21 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.vars).toMatchObject({
       NODE_ENV: "test",
     });
+  });
+
+  it("declares local Codex app-server proxy env-file entries as local worker secrets", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
+      MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
+    });
+
+    expect(config.secrets).toEqual({
+      required: expect.arrayContaining([
+        "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN",
+        "MURPH_DEV_CODEX_APP_SERVER_PROXY_URL",
+      ]),
+    });
+    expect(config.vars).not.toHaveProperty("MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN");
+    expect(config.vars).not.toHaveProperty("MURPH_DEV_CODEX_APP_SERVER_PROXY_URL");
   });
 });

@@ -11,7 +11,7 @@ import {
 
 describe("mergeRequiredEnvProfile", () => {
   it("preserves the default hosted runner profiles when adding a required channel profile", () => {
-    expect(mergeRequiredEnvProfile(undefined, "linq")).toBe("assistant,parsers,linq");
+    expect(mergeRequiredEnvProfile(undefined, "linq")).toBe("assistant,linq");
   });
 
   it("adds the required profile without duplicating existing entries", () => {

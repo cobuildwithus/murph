@@ -27,6 +27,7 @@ import {
 } from "./environment.ts";
 import type {
   HostedAssistantRuntimeConfig,
+  HostedAssistantRuntimeParserToolchainConfig,
   HostedAssistantRuntimeResolvedConfig,
 } from "./models.ts";
 import {
@@ -63,7 +64,6 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   mapbox: [
     "MAPBOX_ACCESS_TOKEN",
   ],
-  parsers: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.parserToolingConfigured,
   telegram: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured,
 } as const;
 
@@ -78,7 +78,6 @@ export type HostedRuntimeEnvProfileName = keyof typeof HOSTED_RUNTIME_ENV_PROFIL
 
 const DEFAULT_HOSTED_RUNTIME_ENV_PROFILE_NAMES = [
   "assistant",
-  "parsers",
 ] as const satisfies readonly HostedRuntimeEnvProfileName[];
 
 type UnknownEnvSource = Readonly<Record<string, unknown>>;
@@ -91,6 +90,7 @@ export interface HostedRuntimeLaunchSpecInput {
   commitTimeoutMs?: number | null;
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
+  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
   platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   userEnv?: Readonly<Record<string, string>>;
@@ -112,6 +112,9 @@ export function buildHostedRuntimeLaunchSpec(
     runtime: {
       commitTimeoutMs: readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null),
       forwardedEnv: splitEnv.forwardedEnv,
+      ...(input.parserToolchain === undefined
+        ? {}
+        : { parserToolchain: input.parserToolchain }),
       ...(Object.keys(splitEnv.platformEnv).length === 0
         ? {}
         : { platformEnv: splitEnv.platformEnv }),
@@ -140,11 +143,11 @@ export function buildHostedRuntimeForwardedEnv(
   const enabledProfileNames = resolveHostedRuntimeEnvProfileNames(source);
   const allowedKeys = resolveHostedRuntimeEnvKeys(enabledProfileNames);
 
-  for (const [key, value] of Object.entries(source)) {
+  for (const key of allowedKeys) {
+    const value = source[key];
     if (
       typeof value !== "string"
       || value.length === 0
-      || !allowedKeys.has(key)
       || (
         isHostedAssistantConfigEnvKey(key)
         && !shouldForwardHostedCodexAssistantConfigEnv(source)

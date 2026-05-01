@@ -59,7 +59,6 @@ per-user Durable Object to invoke the container if needed. The Durable Object
 keeps lease, in-flight invocation, alarm, and short-lived coordination metadata
 only. It does not persist queue history, per-message completion, outbox truth,
 assistant channel enablement state, or checkpoint recovery truth.
-
 When the Durable Object is idle, the persisted nudge starts the runner drive
 directly and keeps the alarm as recovery. When an invocation is active, runtime
 liveness heartbeats surface that input is available so the active-turn refresh

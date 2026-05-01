@@ -3,6 +3,48 @@ import { describe, expect, it } from "vitest";
 import { parseHostedAssistantRuntimeConfig } from "../src/hosted-runtime/parsers.ts";
 
 describe("parseHostedAssistantRuntimeConfig", () => {
+  it("parses explicit hosted parser toolchain config", () => {
+    const parsed = parseHostedAssistantRuntimeConfig({
+      parserToolchain: {
+        tools: {
+          ffmpeg: {
+            command: "/usr/bin/ffmpeg",
+          },
+          whisper: {
+            command: "/usr/local/bin/whisper-cli",
+            modelPath: "/home/runner/.murph/models/whisper/ggml-base.en.bin",
+          },
+        },
+      },
+    });
+
+    expect(parsed.parserToolchain).toEqual({
+      tools: {
+        ffmpeg: {
+          command: "/usr/bin/ffmpeg",
+        },
+        whisper: {
+          command: "/usr/local/bin/whisper-cli",
+          modelPath: "/home/runner/.murph/models/whisper/ggml-base.en.bin",
+        },
+      },
+    });
+  });
+
+  it("rejects relative hosted parser toolchain paths", () => {
+    expect(() =>
+      parseHostedAssistantRuntimeConfig({
+        parserToolchain: {
+          tools: {
+            whisper: {
+              command: "whisper-cli",
+              modelPath: "/home/runner/.murph/models/whisper/ggml-base.en.bin",
+            },
+          },
+        },
+      })).toThrow(/parserToolchain\.tools\.whisper\.command must be an absolute path/u);
+  });
+
   it("parses hosted device-sync runtime config through the shared device-sync parser", () => {
     const parsed = parseHostedAssistantRuntimeConfig({
       resolvedConfig: {

@@ -238,10 +238,19 @@ function toHostedBrowserDeviceSyncConnectionSource(
   };
 }
 
+const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
+  "sourceInstanceKeyFallback",
+]);
+
 function countSourceResources(summary: HostedDeviceConnectionSource["resourceAvailabilitySummary"]): number {
   if (!summary) {
     return 0;
   }
 
-  return Object.values(summary).filter((value) => value !== false && value !== null && value !== undefined).length;
+  return Object.entries(summary).filter(([key, value]) =>
+    !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+    && value !== false
+    && value !== null
+    && value !== undefined
+  ).length;
 }

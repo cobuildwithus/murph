@@ -115,7 +115,6 @@ describe("hosted runner log categories", () => {
       assistantConfigured: true,
       hostedEmailConfigured: false,
       linqConfigured: false,
-      parserToolingConfigured: false,
       telegramConfigured: true,
     });
   });

@@ -39,6 +39,7 @@ export type {
   ParserDoctorReport,
   ParserToolDiscovery,
   ParserToolDiscoverySource,
+  ParserToolchainRuntimeConfig,
 } from "./toolchain/discover.js";
 export {
   createConfiguredParserRegistry,
@@ -51,6 +52,7 @@ export type {
   ParserToolchainConfig,
   ParserToolchainPaths,
   ParserToolchainToolConfig,
+  ParserToolchainTools,
   WriteParserToolchainConfigInput,
 } from "./toolchain/config.js";
 export {

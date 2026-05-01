@@ -33,7 +33,7 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
         cwd: launcherRoot,
         detached: process.platform !== "win32",
         env: createHostedRunnerChildProcessEnv({
-          forwardedEnv: readHostedNativeToolEnv(),
+          forwardedEnv: {},
           isTypeScriptChild,
           launcherDirectories,
         }),
@@ -74,23 +74,6 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
   } finally {
     await rm(launcherRoot, { force: true, recursive: true });
   }
-}
-
-function readHostedNativeToolEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const key of [
-    "FFMPEG_COMMAND",
-    "WHISPER_COMMAND",
-    "WHISPER_MODEL_PATH",
-  ] as const) {
-    const value = process.env[key];
-    if (typeof value === "string" && value.length > 0) {
-      env[key] = value;
-    }
-  }
-
-  return env;
 }
 
 async function main(): Promise<void> {

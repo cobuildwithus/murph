@@ -374,6 +374,55 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
 
+  it("passes explicit hosted parser toolchain config to parser registry without env fallback", async () => {
+    const parserToolchain = {
+      tools: {
+        ffmpeg: {
+          command: "/usr/bin/ffmpeg",
+        },
+        whisper: {
+          command: "/usr/local/bin/whisper-cli",
+          modelPath: "/home/runner/.murph/models/whisper/ggml-base.en.bin",
+        },
+      },
+    };
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValue({
+      source: "linq",
+    });
+
+    await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: {
+        ...createRuntime(),
+        parserToolchain,
+      },
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq",
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledWith({
+      allowEnvToolchain: false,
+      allowSystemToolchainLookup: false,
+      readVaultToolchainConfig: false,
+      toolchain: {
+        source: "platform",
+        tools: parserToolchain.tools,
+      },
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+    });
+  });
+
   it("marks inbound Linq chats read after post-checkpoint import effects without failing ingestion", async () => {
     const order: string[] = [];
     mocks.createInboxPipeline.mockImplementation(async (input) => ({

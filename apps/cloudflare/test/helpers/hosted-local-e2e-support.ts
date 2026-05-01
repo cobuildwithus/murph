@@ -9,7 +9,6 @@ const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedLocalE2eRunnerTimeoutMs = "240000";
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
-  "parsers",
 ] as const;
 export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "ANTHROPIC_API_KEY",

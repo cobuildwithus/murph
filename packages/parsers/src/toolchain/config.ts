@@ -18,9 +18,11 @@ export interface ParserToolchainToolConfig {
   modelPath?: string | null;
 }
 
+export type ParserToolchainTools = Partial<Record<ParserToolName, ParserToolchainToolConfig>>;
+
 export interface ParserToolchainConfig {
   updatedAt: string;
-  tools: Partial<Record<ParserToolName, ParserToolchainToolConfig>>;
+  tools: ParserToolchainTools;
 }
 
 export interface ParserToolchainPaths {
@@ -31,7 +33,7 @@ export interface ParserToolchainPaths {
 
 export interface WriteParserToolchainConfigInput {
   vaultRoot: string;
-  tools?: Partial<Record<ParserToolName, ParserToolchainToolConfig>>;
+  tools?: ParserToolchainTools;
   now?: Date;
 }
 
@@ -97,7 +99,7 @@ export async function writeParserToolchainConfig(
 
 async function validateParserToolchainPaths(
   vaultRoot: string,
-  tools: Partial<Record<ParserToolName, ParserToolchainToolConfig>>,
+  tools: ParserToolchainTools,
 ): Promise<void> {
   const whisperModelPath = normalizeNullableString(tools.whisper?.modelPath);
 
@@ -208,10 +210,10 @@ function parseToolConfig(value: unknown, toolName: ParserToolName): ParserToolch
 }
 
 function mergeToolConfigs(
-  current: Partial<Record<ParserToolName, ParserToolchainToolConfig>>,
-  updates: Partial<Record<ParserToolName, ParserToolchainToolConfig>>,
-): Partial<Record<ParserToolName, ParserToolchainToolConfig>> {
-  const merged: Partial<Record<ParserToolName, ParserToolchainToolConfig>> = {};
+  current: ParserToolchainTools,
+  updates: ParserToolchainTools,
+): ParserToolchainTools {
+  const merged: ParserToolchainTools = {};
 
   for (const toolName of parserToolNames) {
     const nextTool = mergeToolConfig(current[toolName], updates[toolName]);

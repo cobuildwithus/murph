@@ -18,6 +18,10 @@ import {
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { R2BucketLike } from "./bundle-store.js";
 import {
   hostedArtifactUserPrefix,
@@ -797,6 +801,21 @@ export class HostedUserRunner {
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
+        forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
+        hostedAssistantProviderConfigured:
+          typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string"
+          && forwardedEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
+        localCodexAppServerProxyConfigured:
+          typeof forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV] === "string"
+          && forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV].length > 0
+          && typeof forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV] === "string"
+          && forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV].length > 0,
+        modelCredentialConfigured:
+          typeof forwardedEnv.VERCEL_AI_API_KEY === "string"
+          && forwardedEnv.VERCEL_AI_API_KEY.length > 0,
+        nodeEnvConfigured:
+          typeof forwardedEnv.NODE_ENV === "string"
+          && forwardedEnv.NODE_ENV.length > 0,
         workspaceAttemptId: input.lease.attemptId,
         workspaceLeaseGeneration: input.lease.leaseGeneration,
         workspaceReason: input.reason,

@@ -33,4 +33,4 @@ This keeps parsing additive to `@murphai/inboxd`: raw inbox evidence remains can
 
 - `writeParserToolchainConfig(...)` persists local command and model-path overrides under `<vault>/.runtime/operations/parsers/toolchain.json`
 - `discoverParserToolchain(...)` reports which local tools are currently available plus where each setting came from (`FFMPEG_COMMAND`, `PDFINFO_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, or persisted config)
-- `createConfiguredParserRegistry(...)` builds a default registry from the discovered toolchain state
+- `createConfiguredParserRegistry(...)` builds a default registry from the discovered toolchain state, and can also accept an explicit platform toolchain so hosted runners can pass absolute native binary/model paths without relying on env or `PATH` discovery

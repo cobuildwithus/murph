@@ -57,7 +57,8 @@ export class HostedConversationInboxProjectionError extends Error {
 
 export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
+    & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   vaultRoot: string;
 }): Promise<HostedConversationWakeLocalImportResult> {
   const capture = await normalizeHostedConversationMessageWake(input);
@@ -82,6 +83,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     }
     const parserProcessed = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
+      parserToolchain: input.runtime.parserToolchain ?? null,
       platform: input.runtime.platform,
       runtime,
       vaultRoot: input.vaultRoot,
@@ -106,12 +108,24 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
 
 async function drainHostedConversationParsers(input: {
   captureId: string;
+  parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
   platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
   vaultRoot: string;
 }): Promise<number> {
   try {
     const parserConfig = await createConfiguredParserRegistry({
+      ...(input.parserToolchain
+        ? {
+            allowEnvToolchain: false,
+            allowSystemToolchainLookup: false,
+            readVaultToolchainConfig: false,
+            toolchain: {
+              source: "platform",
+              tools: input.parserToolchain.tools,
+            },
+          }
+        : {}),
       vaultRoot: input.vaultRoot,
     });
     const parserService = createInboxParserService({
@@ -217,7 +231,8 @@ function compactHostedParserErrorMessages(messages: readonly string[]): string[]
 
 async function normalizeHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
+    & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
     return normalizeHostedLinqConversationCapture({

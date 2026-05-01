@@ -1,5 +1,6 @@
 import type {
   HostedAssistantRuntimeConfig,
+  HostedAssistantRuntimeParserToolchainConfig,
   HostedAssistantRuntimeResolvedConfig,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -15,6 +16,9 @@ import {
   filterHostedRunnerSecrets,
   rewriteHostedRunnerLoopbackUrlForContainer,
 } from "./hosted-env-policy.ts";
+import {
+  createHostedRunnerNativeParserToolchain,
+} from "./runner-native-parser-toolchain.ts";
 
 export function buildHostedRunnerSupervisorEnv(input: {
   port: number;
@@ -32,6 +36,7 @@ export function buildHostedRunnerJobRuntime(input: {
   commitTimeoutMs?: number | null;
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
+  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
   platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   runnerSecrets?: Readonly<Record<string, string>>;
@@ -45,6 +50,9 @@ export function buildHostedRunnerJobRuntime(input: {
     commitTimeoutMs: input.commitTimeoutMs ?? null,
     configSource: input.configSource,
     forwardedEnv: input.forwardedEnv,
+    parserToolchain:
+      input.parserToolchain
+      ?? createHostedRunnerNativeParserToolchain(input.configSource ?? input.forwardedEnv),
     platformEnv: input.platformEnv,
     resolvedConfig: input.resolvedConfig,
     userEnv: filterHostedRunnerSecrets(
