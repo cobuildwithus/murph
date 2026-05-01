@@ -61,6 +61,7 @@ class TestHostedUserRunner extends HostedUserRunner {
   public readonly runCalls: HostedWorkspaceInvocationReason[] = [];
 
   override async runUntilIdleOrBudget(input: {
+    dueWake?: boolean;
     reason: HostedWorkspaceInvocationReason;
   }) {
     this.runCalls.push(input.reason);
@@ -79,11 +80,14 @@ describe("HostedUserRunner alarm routing", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("invokes the runtime directly when an alarm fires without a pending nudge", async () => {
+  it("invokes the runtime directly when a due alarm fires without a pending nudge", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerHarness();
     await runner.bindUser("member_123");
     sql.exec(
-      "UPDATE runner_meta SET next_wake_at = NULL, pending_nudge = 0 WHERE user_id = ?",
+      "UPDATE runner_meta SET next_wake_at = ?, pending_nudge = 0 WHERE user_id = ?",
+      FIXED_NOW,
       "member_123",
     );
 
@@ -132,6 +136,24 @@ describe("HostedUserRunner alarm routing", () => {
         userId: "member_123",
       }),
     );
+  });
+
+  it("treats stale duplicate alarms without pending work as no-ops", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      "UPDATE runner_meta SET next_wake_at = ?, pending_nudge = 0 WHERE user_id = ?",
+      FUTURE_WAKE_AT,
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual([FUTURE_WAKE_AT]);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
   });
 
   it("logs accepted nudges with scheduling state", async () => {
@@ -416,19 +438,31 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("marks a live invocation pending and schedules immediate alarm drain in the same isolate", async () => {
+  it("marks a live invocation pending, schedules recovery, and drains after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocation = createDeferred<{
       nextWakeAt: null;
       status: "idle";
     }>();
-    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
-      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return invocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner } = createRunnerBootstrapHarness(null, {
+      invoke,
     });
     await runner.bindUser("member_123");
 
-    const run = runner.runUntilIdleOrBudget({ reason: "nudge" });
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
 
     const nudge = await runner.nudgeHostedRunner();
@@ -436,35 +470,28 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       accepted: true,
       alreadyRunning: true,
       inFlight: true,
+      nextAlarmAt: "2026-04-27T00:00:45.100Z",
     });
-    expect(Date.parse(nudge.nextAlarmAt ?? "")).toBeGreaterThanOrEqual(Date.parse(FIXED_NOW));
-    expect(Date.parse(nudge.nextAlarmAt ?? "")).toBeLessThan(Date.parse(FIXED_NOW) + 1_000);
-    expect(alarms).toEqual([nudge.nextAlarmAt]);
+    expect(alarms).toEqual(["2026-04-27T00:00:45.100Z"]);
 
-    await vi.advanceTimersByTimeAsync(46_000);
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:01:31.100Z",
-      status: "scheduled",
-    });
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toEqual([
-      nudge.nextAlarmAt,
-      "2026-04-27T00:01:31.100Z",
-    ]);
+    expect(alarms).toEqual(["2026-04-27T00:00:45.100Z"]);
 
     invocation.resolve({
       nextWakeAt: null,
       status: "idle",
     });
-    await expect(run).resolves.toMatchObject({
+    await expect(activeRun).resolves.toMatchObject({
       status: "idle",
     });
-    expect(alarms).toHaveLength(3);
-    expect(Date.parse(alarms[2] ?? "")).toBeGreaterThanOrEqual(Date.parse(FIXED_NOW));
-    expect(Date.parse(alarms[2] ?? "")).toBeLessThan(Date.parse(FIXED_NOW) + 47_000);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:45.100Z",
+      "deleted",
+    ]);
   });
 
-  it("waits for a live invocation before draining an immediate nudge alarm", async () => {
+  it("waits for a live invocation while the active run drains a follow-up nudge", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -487,7 +514,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     const { runner } = createRunnerBootstrapHarness(null, { invoke });
     await runner.bindUser("member_123");
 
-    const activeRun = runner.runUntilIdleOrBudget({ reason: "nudge" });
+    await runner.nudgeHostedRunner();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     await runner.nudgeHostedRunner();
 
@@ -499,9 +526,6 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       nextWakeAt: null,
       status: "idle",
     });
-    await expect(activeRun).resolves.toMatchObject({
-      status: "idle",
-    });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
 
     secondInvocation.resolve({
@@ -509,6 +533,102 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       status: "idle",
     });
     await expect(alarmRun).resolves.toBeUndefined();
+  });
+
+  it("schedules a continuation when a pending nudge exhausts the drain budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "budget_exhausted";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner } = createRunnerBootstrapHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await runner.nudgeHostedRunner();
+
+    firstInvocation.resolve({
+      nextWakeAt: null,
+      status: "budget_exhausted",
+    });
+
+    const scheduledResult = await activeRun;
+    expect(scheduledResult).toMatchObject({
+      status: "scheduled",
+    });
+    expect(scheduledResult.nextWakeAt).not.toBeNull();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:45.100Z",
+      scheduledResult.nextWakeAt,
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          maxConsecutiveInvocationPasses: 3,
+          pendingNudge: true,
+        }),
+        message: "Hosted runner drain budget reached with pending nudge; scheduled continuation.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("drains a pending follow-up immediately even when the completed pass returned scheduled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      nextWakeAt: string;
+      status: "scheduled";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner } = createRunnerBootstrapHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await runner.nudgeHostedRunner();
+
+    firstInvocation.resolve({
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      status: "scheduled",
+    });
+
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:45.100Z",
+      "deleted",
+    ]);
   });
 
   it("keeps the idle nudge alarm as a fallback when the detached drive is active", async () => {
@@ -558,6 +678,42 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
           runnerNextWakePresent: false,
         }),
         message: "Hosted runner alarm skipped after active invocation consumed pending work.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("skips a stale duplicate alarm while an invocation is still active with no pending work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+    });
+    await runner.bindUser("member_123");
+
+    await runner.nudgeHostedRunner();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:30.000Z",
+      "2026-04-27T00:00:30.000Z",
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          pendingNudge: false,
+          runnerNextWakePresent: true,
+        }),
+        message: "Hosted runner stale alarm skipped because no work is pending.",
         phase: "wake.running",
         userId: "member_123",
       }),
@@ -704,7 +860,10 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     expect(invoke).not.toHaveBeenCalled();
 
     vi.setSystemTime(new Date("2026-04-27T00:00:46.000Z"));
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    })).resolves.toMatchObject({
       status: "idle",
     });
     expect(invoke).toHaveBeenCalledOnce();
@@ -733,7 +892,10 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       "member_123",
     );
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    })).resolves.toMatchObject({
       status: "idle",
     });
 
@@ -915,7 +1077,10 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       "member_123",
     );
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    })).resolves.toMatchObject({
       status: "idle",
     });
 
@@ -929,7 +1094,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     }));
     await runner.bindUser("member_123");
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
       status: "idle",
     });
 
@@ -957,7 +1122,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     const { invoke, runner } = createRunnerBootstrapHarness(null);
     await runner.bindUser("member_123");
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
       status: "idle",
     });
 
@@ -988,7 +1153,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     }));
     await runner.bindUser("member_123");
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).rejects.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
       name: "HostedUserCryptoRepairNeededError",
       reason: "missing-envelope",
     });
@@ -1004,7 +1169,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     }));
     await runner.bindUser("member_123");
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).rejects.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
       name: "HostedUserCryptoRepairNeededError",
       reason: "missing-envelope",
     });
@@ -1020,7 +1185,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     }));
     await runner.bindUser("member_123");
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).rejects.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
       name: "HostedUserCryptoRepairNeededError",
       reason: "missing-envelope",
     });
