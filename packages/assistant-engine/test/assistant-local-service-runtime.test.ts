@@ -872,6 +872,234 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
   })
 })
 
+test('sendAssistantMessageLocal rejects initial assistant-input refs before provider execution when the event is missing', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-initial-input-ref-missing-',
+  )
+  tempRoots.push(context.parentRoot)
+  const session = createAssistantSession({
+    sessionId: 'session-initial-input-ref-missing',
+  })
+  const startTypingIndicator = vi.fn(async () => ({
+    stop: vi.fn(async () => undefined),
+  }))
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator,
+    },
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    realAcceptedInputPersistence: true,
+    session,
+  })
+
+  await expect(
+    sendAssistantMessageLocal({
+      acceptedTurnInput: {
+        initialInputs: [
+          {
+            contentRef: {
+              kind: 'assistant-input-event',
+              refId: 'ain_00000000000000000000000000000004',
+              version: 'murph.assistant-input-event.v1',
+            },
+            id: 'ain_00000000000000000000000000000004',
+            source: 'assistant-input',
+          },
+        ],
+      },
+      deliverResponse: true,
+      prompt: 'Initial prompt',
+      vault: context.vaultRoot,
+    }),
+  ).rejects.toMatchObject({
+    code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+  })
+  expect(mocks.executeProviderTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.createAssistantTurnReceipt).not.toHaveBeenCalled()
+  expect(mocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
+  expect(mocks.persistFailedAssistantPromptAttempt).not.toHaveBeenCalled()
+  expect(startTypingIndicator).not.toHaveBeenCalled()
+
+  const transcriptEntries = await readAssistantTranscriptEntries(
+    resolveAssistantStatePaths(context.vaultRoot),
+    session.sessionId,
+  )
+  expect(
+    transcriptEntries.some((entry) => entry.text === 'Initial prompt'),
+  ).toBe(false)
+})
+
+test('sendAssistantMessageLocal rejects initial assistant-input refs before manual active-turn steering', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-manual-steer-input-ref-missing-',
+  )
+  tempRoots.push(context.parentRoot)
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+    sessionId: 'session-manual-steer-input-ref-missing',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    realAcceptedInputPersistence: true,
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const steer = vi.fn(async () => undefined)
+
+  mocks.executeProviderTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      providerSessionId: 'thread-live',
+      providerTurnId: 'turn-live-provider',
+      sessionId: session.sessionId,
+      steer,
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'final after attempted steer',
+        session,
+      },
+    }
+  })
+
+  const runningTurn = sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: context.vaultRoot,
+  })
+  await providerStarted.promise
+
+  await expect(
+    sendAssistantMessageLocal({
+      acceptedTurnInput: {
+        initialInputs: [
+          {
+            contentRef: {
+              kind: 'assistant-input-event',
+              refId: 'ain_00000000000000000000000000000007',
+              version: 'murph.assistant-input-event.v1',
+            },
+            id: 'ain_00000000000000000000000000000007',
+            source: 'assistant-input',
+          },
+        ],
+      },
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-1',
+      prompt: 'Follow-up while running',
+      vault: context.vaultRoot,
+    }),
+  ).rejects.toMatchObject({
+    code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+  })
+  expect(steer).not.toHaveBeenCalled()
+
+  providerRelease.resolve()
+  await runningTurn
+})
+
+test('sendAssistantMessageLocal rejects late assistant-input refs before transcript writes when the event is missing', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-late-input-ref-missing-',
+  )
+  tempRoots.push(context.parentRoot)
+  const session = createAssistantSession({
+    sessionId: 'session-late-input-ref-missing',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    realAcceptedInputPersistence: true,
+    session,
+  })
+  mocks.executeProviderTurnWithRecovery.mockResolvedValue({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: true,
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      response: 'draft before missing late input',
+      session,
+    },
+  })
+  const activeTurnCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
+  )
+
+  await expect(
+    sendAssistantMessageLocal({
+      activeTurnCheckpoint,
+      activeTurnInput: vi.fn()
+        .mockResolvedValueOnce({
+          acceptedInputs: [
+            {
+              contentRef: {
+                kind: 'assistant-input-event',
+                refId: 'ain_00000000000000000000000000000005',
+                version: 'murph.assistant-input-event.v1',
+              },
+              id: 'ain_00000000000000000000000000000005',
+              promptFallbackReason: 'manual-input',
+              promptFallbackText: 'Do not persist missing input text',
+              source: 'assistant-input',
+            },
+          ],
+          kind: 'accepted' as const,
+          prompt: 'Do not persist missing input text',
+          transcriptText: 'Do not persist missing input text',
+        })
+        .mockResolvedValue({
+          kind: 'no-new-input' as const,
+        }),
+      deliverResponse: true,
+      prompt: 'Initial prompt',
+      vault: context.vaultRoot,
+    }),
+  ).rejects.toMatchObject({
+    code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+  })
+  expect(activeTurnCheckpoint).not.toHaveBeenCalled()
+
+  const transcriptEntries = await readAssistantTranscriptEntries(
+    resolveAssistantStatePaths(context.vaultRoot),
+    session.sessionId,
+  )
+  expect(
+    transcriptEntries.some(
+      (entry) => entry.text === 'Do not persist missing input text',
+    ),
+  ).toBe(false)
+})
+
 test('sendAssistantMessageLocal steers same-conversation input into an active manual turn', async () => {
   const session = createAssistantSession({
     binding: {
@@ -1834,6 +2062,78 @@ test('active-turn controller keeps boundary input behind live-acknowledged input
   } finally {
     releaseLiveTurn()
     controller.fail(new Error('active-turn controller ordering test complete'))
+    controller.close()
+  }
+})
+
+test('active-turn controller validates hook input before live steering it to the provider', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    notifyAssistantActiveTurnInputAvailable,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const validationError = new Error('missing assistant input event')
+  const steer = vi.fn(async () => undefined)
+  const acceptedInputValidator = vi.fn(async () => {
+    throw validationError
+  })
+  const controller = createAssistantActiveTurnInputController({
+    acceptedInputValidator,
+    admissionHook: async () => ({
+      acceptedInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: 'ain_00000000000000000000000000000006',
+            version: 'murph.assistant-input-event.v1',
+          },
+          id: 'ain_00000000000000000000000000000006',
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: 'Unvalidated live input',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Unvalidated live input',
+      transcriptText: 'Unvalidated live input',
+    }),
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    providerSessionId: 'provider-session',
+    providerTurnId: 'provider-turn',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    await expect(
+      notifyAssistantActiveTurnInputAvailable({
+        conversation: {
+          channel: 'telegram',
+          identityId: 'identity-1',
+          threadId: 'thread-1',
+        },
+        sessionId: 'session-test',
+        vault: '/vaults/test',
+      }),
+    ).rejects.toThrow(/missing assistant input event/u)
+    expect(acceptedInputValidator).toHaveBeenCalledWith({
+      acceptedInputs: [
+        expect.objectContaining({
+          id: 'ain_00000000000000000000000000000006',
+          source: 'assistant-input',
+        }),
+      ],
+    })
+    expect(steer).not.toHaveBeenCalled()
+  } finally {
+    releaseLiveTurn()
+    controller.fail(new Error('active-turn controller validator test complete'))
     controller.close()
   }
 })

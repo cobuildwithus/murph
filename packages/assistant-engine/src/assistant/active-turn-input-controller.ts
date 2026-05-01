@@ -68,6 +68,9 @@ class AssistantActiveTurnInputController {
   constructor(
     private readonly input: {
       admissionHook?: AssistantActiveTurnInputAdmissionHook | null
+      acceptedInputValidator?: (input: {
+        acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+      }) => Promise<void>
       sessionId: string
       turnId: string
       vault: string
@@ -221,8 +224,8 @@ class AssistantActiveTurnInputController {
 
     const admissionInput = this.buildAdmissionInput(input)
     const admission = this.input.admissionHook(admissionInput)
-      .then((result) => {
-        this.queueHookAdmission(result)
+      .then(async (result) => {
+        await this.queueHookAdmission(result)
         return result
       })
       .finally(() => {
@@ -245,7 +248,7 @@ class AssistantActiveTurnInputController {
       ...input,
       ...this.resolveKnownAdmissionInput(),
     })
-    this.queueHookAdmission(result)
+    await this.queueHookAdmission(result)
     return result
   }
 
@@ -282,13 +285,16 @@ class AssistantActiveTurnInputController {
     }
   }
 
-  private queueHookAdmission(
+  private async queueHookAdmission(
     result: AssistantActiveTurnInputAdmissionResult | undefined,
-  ): void {
+  ): Promise<void> {
     if (result?.kind !== 'accepted') {
       return
     }
 
+    await this.input.acceptedInputValidator?.({
+      acceptedInputs: result.acceptedInputs ?? [],
+    })
     const queued = {
       admission: normalizeAcceptedActiveTurnInputAdmission(result),
       providerInputAcknowledged: false,
@@ -420,6 +426,9 @@ const activeTurnInputControllers = new Map<
 >()
 
 export function createAssistantActiveTurnInputController(input: {
+  acceptedInputValidator?: (validatorInput: {
+    acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+  }) => Promise<void>
   admissionHook?: AssistantActiveTurnInputAdmissionHook | null
   conversationKeys?: readonly string[] | null
   sessionId: string
@@ -439,6 +448,7 @@ export function createAssistantActiveTurnInputController(input: {
 } {
   const keys = resolveAssistantActiveTurnInputControllerKeys(input)
   const controller = new AssistantActiveTurnInputController({
+    acceptedInputValidator: input.acceptedInputValidator,
     admissionHook: input.admissionHook,
     sessionId: input.sessionId,
     turnId: input.turnId,

@@ -85,6 +85,10 @@ import type {
   AssistantAcceptedTurnInputTranscriptRef,
 } from './active-turn-input-journal.js'
 import {
+  assertAssistantAcceptedTurnInputAssistantInputEventsExist,
+  assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
+} from './active-turn-input-journal.js'
+import {
   appendAssistantActiveTurnProviderExchange,
   type AssistantActiveTurnProviderHistory,
 } from './active-turn-history.js'
@@ -201,6 +205,11 @@ export async function openAssistantConversationLocal(
 export async function sendAssistantMessageLocal(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
+  await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+    inputs: input.acceptedTurnInput?.initialInputs ?? [],
+    vault: input.vault,
+  })
+
   if (isManualAssistantTurnTrigger(input.turnTrigger)) {
     const steerResult = steerAssistantActiveTurnInputWithStatus(input)
     if (steerResult.kind === 'queued') {
@@ -285,6 +294,12 @@ export async function sendAssistantMessageLocal(
 
       try {
         activeTurnInputController = createAssistantActiveTurnInputController({
+          acceptedInputValidator: async ({ acceptedInputs }) => {
+            await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+              inputs: acceptedInputs,
+              vault: input.vault,
+            })
+          },
           admissionHook: input.activeTurnInput,
           conversationKeys: [
             resolved.session.binding.conversationKey,
@@ -304,10 +319,15 @@ export async function sendAssistantMessageLocal(
         })
         const initialUserPromptInputId =
           resolveInitialUserPromptAcceptedTurnInputId(input)
-        await runtimeState.turns.acceptedInputs.append({
-          inputs: initialAcceptedTurnInputItems,
-          sessionId: resolved.session.sessionId,
-          turnId: receipt.turnId,
+        const initialAcceptedInputJournal =
+          await runtimeState.turns.acceptedInputs.append({
+            inputs: initialAcceptedTurnInputItems,
+            sessionId: resolved.session.sessionId,
+            turnId: receipt.turnId,
+          })
+        await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
+          journal: initialAcceptedInputJournal,
+          vault: input.vault,
         })
         const turnContinuityPolicy = resolveAssistantProviderTurnContinuityPolicy({
           turnTrigger: input.turnTrigger ?? null,
@@ -474,6 +494,10 @@ export async function sendAssistantMessageLocal(
                 sessionId: resolved.session.sessionId,
                 turnId: currentUserTurn.turnId,
               })
+            await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
+              journal: acceptedInputJournal,
+              vault: currentInput.vault,
+            })
             const transcriptRefsByInputId =
               await appendAcceptedActiveTurnInputTranscriptEntries({
                 acceptedInput: activeTurnInput,
