@@ -1,6 +1,6 @@
 # Land hosted parser toolchain greenfield cut
 
-Status: active
+Status: completed
 Created: 2026-05-01
 Updated: 2026-05-01
 
@@ -91,3 +91,4 @@ Updated: 2026-05-01
 - Diff check passes.
 - Required audits report no blocking findings, or fixes are landed and checks
   are rerun.
+Completed: 2026-05-01
