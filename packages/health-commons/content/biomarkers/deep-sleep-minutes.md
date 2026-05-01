@@ -63,7 +63,7 @@ biomarker:
       body: "Reflects sleep depth and recovery biology; useful for trends, not diagnosis or guaranteed cognitive improvement."
     -
       title: How to read it
-      body: "Compare 14-to-30-day same-device trends alongside total sleep, awakenings, and how restored you feel."
+      body: "Typical range: about 45 minutes to 2 hours, or 10-20% of total sleep. Best when awakenings fall and recovery improves."
     -
       title: What moves it
       body: "Sleep opportunity, alcohol, illness, apnea, fragmentation, caffeine, late hard exercise, heat, stress, age, and device algorithms."

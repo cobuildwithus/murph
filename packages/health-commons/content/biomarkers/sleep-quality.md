@@ -70,8 +70,8 @@ biomarker:
       title: Why Murph uses it
       body: Morning-light evidence often uses sleep-quality or sleep-problem questionnaires, so a consistent daily rating is closer to the source outcomes than consumer sleep-stage metrics.
     -
-      title: How to interpret it
-      body: Look for a baseline-versus-intervention trend that agrees with timing, alertness, and confounder notes. A single bad night does not decide the experiment.
+      title: How to read it
+      body: Use one stable scale; higher ratings matter when timing, alertness, and confounder notes also improve.
   measurement:
     bestContext: Record the rating soon after waking, before the day changes your memory of the night.
     howToMeasure:

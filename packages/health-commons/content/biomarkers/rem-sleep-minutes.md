@@ -60,7 +60,7 @@ biomarker:
       body: "Tracks REM-related dreaming, emotion, memory, and autonomic physiology; useful as a trend, not an optimization target."
     -
       title: How to read it
-      body: "Read with total sleep, awakenings, timing, and subjective quality. Multi-night patterns beat single-night highs or lows."
+      body: "Typical range: about 90 minutes to 2 hours, or 20-25% of total sleep. Best with fewer awakenings and better daytime function."
     -
       title: What moves it
       body: "Sleep duration, early alarms, alcohol, medications, apnea, CPAP changes, substance withdrawal, stress, circadian disruption, illness, and algorithms."

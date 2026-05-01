@@ -65,7 +65,7 @@ biomarker:
       body: "Shows fasting control, post-meal spikes, overnight stability, hypoglycemia risk, and how lifestyle, illness, or medications affect metabolism."
     -
       title: How to read it
-      body: "Compare same-context readings: fasting with fasting, CGM with CGM, post-meal with post-meal. Avoid mixing devices or timing."
+      body: "Fasting lab reference: <100 mg/dL; post-meal readings need separate timing. Treat lows as safety signals."
     -
       title: What moves it
       body: "Carbohydrates, meal timing, activity, medications, illness, stress, sleep loss, alcohol, dehydration, sensor placement, and calibration changes."
