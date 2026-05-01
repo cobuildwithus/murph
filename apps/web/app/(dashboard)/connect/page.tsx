@@ -292,21 +292,19 @@ export function resolveConfiguredConnectSources(
   sources: readonly ConnectSource[],
   options: { connectedSourceIds?: ReadonlySet<string> } = {},
 ): ConnectSource[] {
-  const targets = new Set(
+  const connectTargetBySourceId = new Map(
     listConfiguredDeviceSyncConnectTargets(
       readConfiguredDeviceSyncProviderConfigs(process.env),
-    ).map((target) => target.connectTarget),
+    ).map((target) => [target.connectSourceId, target.connectTarget] as const),
   );
 
   return sources.map((source) => {
-    const connectTarget =
-      resolveJunctionConnectTargetForSourceId(source.id) ?? source.id.replace(/-/gu, "_");
-    const configured = targets.has(connectTarget);
+    const connectTarget = connectTargetBySourceId.get(source.id);
     const connected = options.connectedSourceIds?.has(source.id) === true;
 
     return {
       ...source,
-      ...(configured ? { connectTarget } : {}),
+      ...(connectTarget ? { connectTarget } : {}),
       ...(connected ? { connected } : {}),
     };
   });

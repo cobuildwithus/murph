@@ -77,12 +77,9 @@ export function buildHostedExecutionJobRuntime(
   const configSource = requestedRuntime.forwardedEnv === undefined
     ? process.env
     : requestedRuntime.forwardedEnv;
-  const parserToolchain =
-    requestedRuntime.parserToolchain === undefined
-      ? createHostedRunnerNativeParserToolchain(
-          requestedRuntime.forwardedEnv === undefined ? process.env : {},
-        )
-      : requestedRuntime.parserToolchain;
+  const parserToolchain = resolveHostedExecutionJobParserToolchain(
+    requestedRuntime.parserToolchain,
+  );
 
   // The worker-owned runtime envelope is the source of truth when present.
   // The container only falls back to ambient env for local/manual callers that omit it entirely.
@@ -95,6 +92,18 @@ export function buildHostedExecutionJobRuntime(
     resolvedConfig: requestedRuntime.resolvedConfig,
     runnerSecrets: requestedRuntime.userEnv ?? {},
   });
+}
+
+function resolveHostedExecutionJobParserToolchain(
+  parserToolchain: HostedAssistantRuntimeConfig["parserToolchain"] | null | undefined,
+): NonNullable<HostedAssistantRuntimeConfig["parserToolchain"]> {
+  if (parserToolchain === null) {
+    throw new TypeError(
+      "Hosted runner parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
+    );
+  }
+
+  return parserToolchain ?? createHostedRunnerNativeParserToolchain();
 }
 
 export function createHostedWorkspaceInvocationRunner(

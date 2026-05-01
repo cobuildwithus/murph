@@ -24,31 +24,35 @@ test("connect targets prefer Junction for Oura and Strava but keep WHOOP direct-
 
   assert.deepEqual(
     listConfiguredDeviceSyncConnectTargets(configs).map((target) => ({
+      connectSourceId: target.connectSourceId,
       connectTarget: target.connectTarget,
       provider: target.provider,
       sourceProviderSlug: target.sourceProviderSlug ?? null,
     })),
     [
-      { connectTarget: "oura", provider: "junction", sourceProviderSlug: "oura" },
-      { connectTarget: "whoop", provider: "whoop", sourceProviderSlug: null },
-      { connectTarget: "strava", provider: "junction", sourceProviderSlug: "strava" },
-      { connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
+      { connectSourceId: "oura", connectTarget: "oura", provider: "junction", sourceProviderSlug: "oura" },
+      { connectSourceId: "whoop", connectTarget: "whoop", provider: "whoop", sourceProviderSlug: null },
+      { connectSourceId: "strava", connectTarget: "strava", provider: "junction", sourceProviderSlug: "strava" },
+      { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
     ],
   );
 
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Oura"), {
+    connectSourceId: "oura",
     connectTarget: "oura",
     label: "Oura",
     provider: "junction",
     sourceProviderSlug: "oura",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), {
+    connectSourceId: "strava",
     connectTarget: "strava",
     label: "Strava",
     provider: "junction",
     sourceProviderSlug: "strava",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "WHOOP"), {
+    connectSourceId: "whoop",
     connectTarget: "whoop",
     label: "WHOOP",
     provider: "whoop",
@@ -70,18 +74,21 @@ test("connect targets apply the same Junction preference with the default Juncti
   });
 
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Oura"), {
+    connectSourceId: "oura",
     connectTarget: "oura",
     label: "Oura",
     provider: "junction",
     sourceProviderSlug: "oura",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), {
+    connectSourceId: "strava",
     connectTarget: "strava",
     label: "Strava",
     provider: "junction",
     sourceProviderSlug: "strava",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "WHOOP"), {
+    connectSourceId: "whoop",
     connectTarget: "whoop",
     label: "WHOOP",
     provider: "whoop",

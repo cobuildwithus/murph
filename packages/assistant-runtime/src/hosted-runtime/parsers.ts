@@ -110,6 +110,12 @@ export function parseHostedAssistantRuntimeConfig(
   rejectRemovedHostedAssistantRuntimeField(record, "sideEffectsBaseUrl");
   rejectRemovedHostedAssistantRuntimeField(record, "webControlPlane");
 
+  if (record.parserToolchain === null) {
+    throw new TypeError(
+      "Hosted assistant runtime config.parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
+    );
+  }
+
   return {
     ...(record.commitTimeoutMs === undefined
       ? {}
@@ -130,10 +136,8 @@ export function parseHostedAssistantRuntimeConfig(
             "Hosted assistant runtime config.forwardedEnv",
           ),
         }),
-    ...(record.parserToolchain === undefined || record.parserToolchain === null
-      ? record.parserToolchain === null
-        ? { parserToolchain: null }
-        : {}
+    ...(record.parserToolchain === undefined
+      ? {}
       : {
           parserToolchain: parseHostedAssistantRuntimeParserToolchainConfig(
             record.parserToolchain,

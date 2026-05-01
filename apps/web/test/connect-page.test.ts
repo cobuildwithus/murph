@@ -344,7 +344,7 @@ test("ConnectPage enables Garmin when Junction exposes Garmin as a connect targe
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 1);
 });
 
-test("ConnectPage enables every source exposed by the shared Junction defaults", async () => {
+test("ConnectPage enables every Link source exposed by the shared Junction defaults", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
   vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -356,8 +356,10 @@ test("ConnectPage enables every source exposed by the shared Junction defaults",
   );
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 32);
-  assert.doesNotMatch(markup, />Not available<\/button>/u);
+  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 27);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, 5);
+  assert.match(markup, /aria-label="Accu-Chek connection is not available yet"/u);
+  assert.match(markup, /aria-label="Samsung Health connection is not available yet"/u);
 
   const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
   assert.deepEqual(
@@ -380,12 +382,18 @@ test("ConnectPage enables every source exposed by the shared Junction defaults",
         description: "Workouts.",
         logo,
       },
+      {
+        id: "accuchek",
+        name: "Accu-Chek",
+        description: "Glucose meter.",
+        logo,
+      },
     ]).map((source) => source.connectTarget),
-    ["dexcom", "dexcom_v3", "map_my_fitness"],
+    ["dexcom", "dexcom_v3", "map_my_fitness", undefined],
   );
 });
 
-test("ConnectPage enables mapped Junction source slugs", async () => {
+test("ConnectPage enables mapped Junction Link source slugs only", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
   vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -396,8 +404,9 @@ test("ConnectPage enables mapped Junction source slugs", async () => {
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /aria-label="Connect MapMyFitness"/u);
-  assert.match(markup, /aria-label="Connect Accu-Chek"/u);
-  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 2);
+  assert.match(markup, /aria-label="Accu-Chek connection is not available yet"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Accu-Chek"/u);
+  assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 1);
 });
 
 test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {

@@ -52,7 +52,7 @@ export interface HostedAssistantRuntimeResolvedConfig {
 export interface HostedAssistantRuntimeConfig {
   commitTimeoutMs?: number | null;
   forwardedEnv?: Readonly<Record<string, string>>;
-  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
+  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig;
   platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   userEnv?: Readonly<Record<string, string>>;

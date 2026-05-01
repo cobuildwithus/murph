@@ -166,6 +166,16 @@ describe("buildHostedExecutionJobRuntime", () => {
 
     expect(runtime.parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
   });
+
+  it("rejects parserToolchain:null instead of falling back to ambient discovery", () => {
+    expect(() =>
+      buildHostedExecutionJobRuntime(JSON.parse(
+        '{"forwardedEnv":{},"parserToolchain":null}',
+      ))
+    ).toThrow(
+      "Hosted runner parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
+    );
+  });
 });
 
 function createWorkspaceRequest(

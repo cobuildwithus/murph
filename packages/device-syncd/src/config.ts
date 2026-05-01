@@ -180,8 +180,24 @@ export {
   resolveConfiguredDeviceSyncConnectTarget,
 } from "./config/connect-targets.ts";
 export {
+  DEVICE_CONNECT_SOURCE_BY_ID,
+  DEVICE_CONNECT_SOURCES,
+  listDefaultJunctionLinkProviderSlugs,
+  listDirectDeviceConnectRouteEntries,
+  listJunctionDeviceConnectRouteEntries,
+  listJunctionLinkDeviceConnectRouteEntries,
+  normalizeDeviceConnectSourceId,
+  normalizeJunctionLinkProviderFilter,
+  normalizeJunctionProviderSlug,
+  resolveDeviceConnectSourceById,
+  resolveDirectDeviceConnectRouteByProvider,
+  resolveJunctionDeviceConnectRouteByProviderSlug,
+  resolveJunctionLinkDeviceConnectRouteByProviderSlug,
+} from "./config/connect-routes.ts";
+export {
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
+  JUNCTION_LINK_PROVIDER_SLUGS,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
 } from "./providers/junction-connect-sources.ts";
@@ -194,6 +210,16 @@ export type {
 export type {
   DeviceSyncConnectTarget,
 } from "./config/connect-targets.ts";
+export type {
+  DeviceConnectDirectRoute,
+  DeviceConnectJunctionLinkRoute,
+  DeviceConnectJunctionSdkRoute,
+  DeviceConnectRoute,
+  DeviceConnectRouteEntry,
+  DeviceConnectSource,
+  DeviceConnectUnavailableRoute,
+  DirectDeviceConnectProvider,
+} from "./config/connect-routes.ts";
 export type {
   JunctionConnectSourceTarget,
 } from "./providers/junction-connect-sources.ts";

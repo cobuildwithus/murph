@@ -8,8 +8,10 @@ import {
   createJunctionDeviceSyncProvider,
 } from "../src/providers/junction.ts";
 import {
+  JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS,
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
+  JUNCTION_LINK_PROVIDER_SLUGS,
   normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
@@ -171,20 +173,50 @@ test("Junction provider exposes primitive handlers without OAuth compatibility m
   assert.equal("refreshTokens" in provider, false);
 });
 
-test("Junction default provider filter covers every shared connect source", () => {
+test("Junction default provider filter covers hosted Link connect routes", () => {
   assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 32);
+
   assert.deepEqual(
-    JUNCTION_DEFAULT_PROVIDER_FILTER,
-    JUNCTION_CONNECT_SOURCE_TARGETS.map((target) => target.providerSlug),
+    JUNCTION_LINK_PROVIDER_SLUGS,
+    JUNCTION_CONNECT_SOURCE_TARGETS
+      .filter((target) => target.connectMode === "junction_link")
+      .map((target) => target.providerSlug),
+  );
+  assert.deepEqual(JUNCTION_DEFAULT_PROVIDER_FILTER, JUNCTION_LINK_PROVIDER_SLUGS);
+  assert.deepEqual(
+    JUNCTION_BLOCKED_WEB_LINK_PROVIDER_SLUGS,
+    JUNCTION_CONNECT_SOURCE_TARGETS
+      .filter((target) => target.connectMode !== "junction_link")
+      .map((target) => target.providerSlug),
   );
   assert.deepEqual(normalizeJunctionProviderFilter(undefined), JUNCTION_DEFAULT_PROVIDER_FILTER);
+  assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("map_my_fitness"), true);
+  assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("dexcom_v3"), true);
+  for (const providerSlug of [
+    "samsung_health",
+    "freestyle_libre_ble",
+    "accuchek_ble",
+    "contour_ble",
+    "onetouch_ble",
+  ]) {
+    assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes(providerSlug), false);
+  }
+
+  assert.equal(resolveJunctionTarget("samsung_health")?.connectMode, "junction_sdk");
+  assert.equal(resolveJunctionTarget("freestyle_libre_ble")?.connectMode, "junction_sdk");
+  assert.equal(resolveJunctionTarget("accuchek_ble")?.connectMode, "junction_sdk");
+  assert.equal(resolveJunctionTarget("contour_ble")?.connectMode, "junction_sdk");
+  assert.equal(resolveJunctionTarget("onetouch_ble")?.connectMode, "junction_sdk");
+
   assert.equal(resolveJunctionConnectTargetForSourceId("dexcom-g6-and-older"), "dexcom");
   assert.equal(resolveJunctionConnectTargetForSourceId("dexcom"), "dexcom_v3");
   assert.equal(resolveJunctionConnectTargetForSourceId("mapmyfitness"), "map_my_fitness");
+  assert.equal(resolveJunctionConnectTargetForSourceId("accuchek"), "accuchek_ble");
+  assert.equal(resolveJunctionConnectTargetForSourceId("onetouch"), "onetouch_ble");
   assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
 });
 
-test("Junction provider filters mobile OS web Link providers", () => {
+test("Junction provider filters non-Link routes from hosted web Link", () => {
   assert.deepEqual(
     normalizeJunctionProviderFilter([
       "oura",
@@ -192,11 +224,16 @@ test("Junction provider filters mobile OS web Link providers", () => {
       "apple_healthkit",
       "health_connect",
       "samsung_health",
+      "accuchek_ble",
       "withings",
     ]),
-    ["oura", "samsung_health", "withings"],
+    ["oura", "withings"],
   );
 });
+
+function resolveJunctionTarget(providerSlug: string) {
+  return JUNCTION_CONNECT_SOURCE_TARGETS.find((target) => target.providerSlug === providerSlug);
+}
 
 test("Junction createLinkToken accepts documented Link web URL hosts", async () => {
   const linkWebUrl = "https://link.tryvital.io/?token=link-token-1&env=sandbox&region=us";

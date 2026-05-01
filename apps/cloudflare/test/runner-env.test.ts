@@ -379,11 +379,17 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   });
 
   it("preserves typed runtime fields when the caller already resolved them", () => {
-    const parserToolchain = createHostedRunnerNativeParserToolchain({
-      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
-      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
-      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
-    });
+    const parserToolchain = {
+      tools: {
+        ffmpeg: {
+          command: "/app/test-parser-toolchain/ffmpeg",
+        },
+        whisper: {
+          command: "/app/test-parser-toolchain/whisper-cli",
+          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        },
+      },
+    };
 
     expect(buildHostedRunnerJobRuntime({
       commitTimeoutMs: 45_000,
@@ -449,7 +455,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
   });
 
-  it("derives typed native parser config from platform config without forwarding parser env", () => {
+  it("uses image-owned native parser config even when platform config contains parser env", () => {
     const configSource = {
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,parsers",
@@ -468,7 +474,19 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       configSource,
       forwardedEnv: buildHostedRunnerContainerEnv(configSource),
       runnerSecrets: {},
-    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain(configSource));
+    }).parserToolchain).toEqual(createHostedRunnerNativeParserToolchain());
+  });
+
+  it("rejects parserToolchain:null at the hosted runner boundary", () => {
+    expect(() =>
+      buildHostedRunnerJobRuntime({
+        forwardedEnv: {},
+        parserToolchain: null,
+        runnerSecrets: {},
+      })
+    ).toThrow(
+      "Hosted runner parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
+    );
   });
 
   it("uses the shared config source for both timeout and allowed runner-secret filtering", () => {

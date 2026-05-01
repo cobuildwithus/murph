@@ -14,6 +14,7 @@ Key decisions:
 - Use `HOSTED_ASSISTANT_PROVIDER=local-codex` only for the local hosted Codex bridge.
 - Map `local-codex` to a Codex App Server profile with no explicit `modelProvider`, so host Codex uses its own configured provider.
 - Require the local app-server proxy URL/token for `local-codex`; it must not be valid in production without the bridge.
+- Treat `local-codex` as an assistant runtime config provider for env forwarding; otherwise the Worker strips the provider before the container starts.
 
 State:
 - in_progress
@@ -21,15 +22,18 @@ State:
 Done:
 - Root-caused `ASSISTANT_CODEX_FAILED` to host Codex rejecting `modelProvider=vercel-ai-gateway`.
 - Confirmed host Codex succeeds when no model provider override is passed.
+- Found second failure boundary in live local smoke: `HOSTED_ASSISTANT_PROVIDER=local-codex` was present on Worker vars but stripped from forwarded runner env, causing `HOSTED_ASSISTANT_CONFIG_INVALID` in the container.
+- Patched local provider forwarding and rebuilt `.deploy/runner-bundle`.
+- Restarted `pnpm dev`; local hosted dev is ready on localhost and waiting for a fresh Linq webhook.
 
 Now:
-- Patch local provider handling and focused tests.
+- Validate the next fresh inbound text through the corrected container path.
 
 Next:
-- Run focused tests/typecheck, then restart `pnpm dev` with the hosted local bridge and validate a real assistant turn.
+- If plain text succeeds, send an audio/PDF test and inspect parser/import logs.
 
 Open questions (UNCONFIRMED if needed):
-- Whether any stale local Vercel OIDC override remains in the shell after stack restart.
+- UNCONFIRMED: whether the next text webhook will arrive at the current local stack; no post-restart inbound has hit local yet.
 
 Working set (files/ids/commands):
 - `scripts/dev-hosted-local/stack.ts`
@@ -39,4 +43,6 @@ Working set (files/ids/commands):
 - `packages/operator-config/src/hosted-assistant-config.ts`
 - `packages/operator-config/test/hosted-assistant-bootstrap.test.ts`
 - `packages/assistant-runtime/src/hosted-runtime/codex-config.ts`
+- `packages/assistant-runtime/src/hosted-runtime/launch-spec.ts`
 - `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts`
+- `apps/cloudflare/test/runner-env.test.ts`
