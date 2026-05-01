@@ -4,8 +4,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
-  sanitizeHostedAssistantRuntimeForwardedEnv,
-} from "@murphai/assistant-runtime";
+  type HostedAssistantRuntimeParserToolchainConfig,
+  projectHostedRuntimeToChildEnv,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 const HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS = [
   "LANG",
@@ -47,19 +48,18 @@ export function createHostedRunnerChildProcessEnv(input: {
   forwardedEnv: Record<string, string>;
   isTypeScriptChild: boolean;
   launcherDirectories: HostedRunnerChildLauncherDirectories;
+  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
 }): Record<string, string> {
-  const env: Record<string, string> = {};
   const ambientEnv = input.ambientEnv ?? process.env;
+  const env = projectHostedRuntimeToChildEnv({
+    ambientEnv: Object.fromEntries(
+      HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS.map((key) => [key, ambientEnv[key]]),
+    ),
+    forwardedEnv: input.forwardedEnv,
+    parserToolchain: input.parserToolchain ?? null,
+  });
 
-  for (const key of HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS) {
-    const value = ambientEnv[key];
-
-    if (typeof value === "string" && value.length > 0) {
-      env[key] = value;
-    }
-  }
-
-  Object.assign(env, sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv), {
+  Object.assign(env, {
     HF_HOME: input.launcherDirectories.huggingFaceRoot,
     HOME: input.launcherDirectories.homeRoot,
     TEMP: input.launcherDirectories.tempRoot,

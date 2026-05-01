@@ -177,6 +177,43 @@ const hostedParserToolNames = [
   "pdftotext",
   "whisper",
 ] as const satisfies readonly HostedAssistantRuntimeParserToolName[];
+const hostedParserToolchainEnvProjections = [
+  {
+    envKey: "FFMPEG_COMMAND",
+    field: "command",
+    label: "ffmpeg.command",
+    toolName: "ffmpeg",
+  },
+  {
+    envKey: "PDFINFO_COMMAND",
+    field: "command",
+    label: "pdfinfo.command",
+    toolName: "pdfinfo",
+  },
+  {
+    envKey: "PDFTOTEXT_COMMAND",
+    field: "command",
+    label: "pdftotext.command",
+    toolName: "pdftotext",
+  },
+  {
+    envKey: "WHISPER_COMMAND",
+    field: "command",
+    label: "whisper.command",
+    toolName: "whisper",
+  },
+  {
+    envKey: "WHISPER_MODEL_PATH",
+    field: "modelPath",
+    label: "whisper.modelPath",
+    toolName: "whisper",
+  },
+] as const satisfies readonly {
+  envKey: string;
+  field: keyof HostedAssistantRuntimeParserToolConfig;
+  label: string;
+  toolName: HostedAssistantRuntimeParserToolName;
+}[];
 
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
@@ -216,6 +253,18 @@ export function buildHostedPlatformBackedRuntimeEnv(input: {
   return {
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
     ...sanitizeHostedAssistantRuntimeChannelPlatformEnv(input.platformEnv ?? {}),
+  };
+}
+
+export function projectHostedRuntimeToChildEnv(input: {
+  ambientEnv?: Readonly<Record<string, string | undefined>>;
+  forwardedEnv: Readonly<Record<string, string>>;
+  parserToolchain?: HostedAssistantRuntimeParserToolchainConfig | null;
+}): Record<string, string> {
+  return {
+    ...buildHostedBaseProcessEnvironment(input.ambientEnv ?? process.env),
+    ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
+    ...projectHostedParserToolchainToEnv(input.parserToolchain ?? null),
   };
 }
 
@@ -283,6 +332,43 @@ function normalizeHostedRuntimeString(value: string | null | undefined): string 
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function projectHostedParserToolchainToEnv(
+  parserToolchain: HostedAssistantRuntimeParserToolchainConfig | null,
+): Record<string, string> {
+  if (!parserToolchain) {
+    return {};
+  }
+
+  const env: Record<string, string> = {};
+  for (const projection of hostedParserToolchainEnvProjections) {
+    projectHostedParserCommandToolToEnv({
+      env,
+      envKey: projection.envKey,
+      label: projection.label,
+      value: parserToolchain.tools[projection.toolName]?.[projection.field],
+    });
+  }
+  return env;
+}
+
+function projectHostedParserCommandToolToEnv(input: {
+  env: Record<string, string>;
+  envKey: string;
+  label: string;
+  value: string | null | undefined;
+}): void {
+  const normalized = normalizeHostedRuntimeString(input.value);
+  if (!normalized) {
+    return;
+  }
+  if (!normalized.startsWith("/")) {
+    throw new TypeError(
+      `Hosted runtime parser toolchain ${input.label} must be an absolute path.`,
+    );
+  }
+  input.env[input.envKey] = normalized;
 }
 
 function cloneHostedAssistantRuntimeResolvedConfig(
@@ -382,9 +468,9 @@ async function runWithHostedProcessEnvironment<T>(input: {
 }
 
 function buildHostedBaseProcessEnvironment(
-  source: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
+  source: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
 
   for (const key of HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES) {
     const value = source[key];

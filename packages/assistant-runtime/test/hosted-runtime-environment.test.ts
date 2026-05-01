@@ -7,6 +7,7 @@ import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
   buildHostedPlatformBackedRuntimeEnv,
   normalizeHostedAssistantRuntimeConfig,
+  projectHostedRuntimeToChildEnv,
   withHostedProcessEnvironment,
 } from "../src/hosted-runtime/environment.ts";
 import {
@@ -170,6 +171,70 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       VERCEL_AI_API_KEY: "user-vercel-secret",
     },
   });
+});
+
+test("hosted runtime child env projects typed parser toolchain after sanitized forwarded env", () => {
+  const childEnv = projectHostedRuntimeToChildEnv({
+    ambientEnv: {
+      HOME: "/ambient/home",
+      PATH: "/usr/bin:/bin",
+      WHISPER_COMMAND: "/ambient/whisper-cli",
+    },
+    forwardedEnv: {
+      FFMPEG_COMMAND: "/stale/ffmpeg",
+      NODE_ENV: "production",
+      VERCEL_AI_API_KEY: "worker-vercel-secret",
+      WHISPER_COMMAND: "/stale/whisper-cli",
+      WHISPER_MODEL_PATH: "/stale/model.bin",
+    },
+    parserToolchain: {
+      tools: {
+        ffmpeg: {
+          command: "/runner/bin/ffmpeg",
+        },
+        pdfinfo: {
+          command: "/runner/bin/pdfinfo",
+        },
+        pdftotext: {
+          command: "/runner/bin/pdftotext",
+        },
+        whisper: {
+          command: "/runner/bin/whisper-cli",
+          modelPath: "/runner/models/whisper/model.bin",
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(childEnv, {
+    FFMPEG_COMMAND: "/runner/bin/ffmpeg",
+    NODE_ENV: "production",
+    PATH: "/usr/bin:/bin",
+    PDFINFO_COMMAND: "/runner/bin/pdfinfo",
+    PDFTOTEXT_COMMAND: "/runner/bin/pdftotext",
+    VERCEL_AI_API_KEY: "worker-vercel-secret",
+    WHISPER_COMMAND: "/runner/bin/whisper-cli",
+    WHISPER_MODEL_PATH: "/runner/models/whisper/model.bin",
+  });
+  assert.equal("HOME" in childEnv, false);
+});
+
+test("hosted runtime child env omits parser path env when no typed toolchain is present", () => {
+  assert.deepEqual(
+    projectHostedRuntimeToChildEnv({
+      ambientEnv: {},
+      forwardedEnv: {
+        FFMPEG_COMMAND: "/stale/ffmpeg",
+        NODE_ENV: "production",
+        PDFINFO_COMMAND: "/stale/pdfinfo",
+        PDFTOTEXT_COMMAND: "/stale/pdftotext",
+        WHISPER_COMMAND: "/stale/whisper-cli",
+      },
+    }),
+    {
+      NODE_ENV: "production",
+    },
+  );
 });
 
 test("hosted runtime launch spec derives platform env from forwarded env only when no explicit platform env is supplied", () => {

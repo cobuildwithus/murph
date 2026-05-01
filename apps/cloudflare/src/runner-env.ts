@@ -45,14 +45,16 @@ export function buildHostedRunnerJobRuntime(input: {
     ...(input.configSource ?? input.forwardedEnv),
     ...buildHostedRuntimePlatformEnv(input.platformEnv ?? input.forwardedEnv),
   };
+  const parserToolchain =
+    input.parserToolchain === undefined
+      ? createHostedRunnerNativeParserToolchain(input.configSource ?? {})
+      : input.parserToolchain;
 
   return buildHostedRuntimeLaunchSpec({
     commitTimeoutMs: input.commitTimeoutMs ?? null,
     configSource: input.configSource,
     forwardedEnv: input.forwardedEnv,
-    parserToolchain:
-      input.parserToolchain
-      ?? createHostedRunnerNativeParserToolchain(input.configSource ?? input.forwardedEnv),
+    parserToolchain,
     platformEnv: input.platformEnv,
     resolvedConfig: input.resolvedConfig,
     userEnv: filterHostedRunnerSecrets(
@@ -111,6 +113,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
+  const parserToolchain = createHostedRunnerNativeParserToolchain(input.configSource ?? {});
   const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
@@ -121,6 +124,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     ),
     configSource,
     forwardedEnv: input.forwardedEnv,
+    parserToolchain,
     platformEnv: Object.keys(platformEnv).length === 0 ? undefined : platformEnv,
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: input.runnerSecrets,

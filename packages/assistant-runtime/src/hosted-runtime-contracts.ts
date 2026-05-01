@@ -45,6 +45,9 @@ export {
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
 export {
+  projectHostedRuntimeToChildEnv,
+} from "./hosted-runtime/environment.ts";
+export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
 export type {
