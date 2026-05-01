@@ -96,6 +96,8 @@ export function createHostedGcpKmsClientFromEnv(
     });
   }
 
+  assertHostedGcpEndpointOverridesAllowed(source);
+
   return new HostedGcpKmsJsonClient({
     accessTokenProvider: createHostedGcpAccessTokenProviderFromEnv(source),
     apiRoot,
@@ -380,6 +382,22 @@ function isHostedCryptoProductionEnvironment(source: NodeJS.ProcessEnv): boolean
     || source.VERCEL_ENV === "production"
     || hostedCryptoEnv === "prod"
     || hostedCryptoEnv === "production";
+}
+
+function assertHostedGcpEndpointOverridesAllowed(source: NodeJS.ProcessEnv): void {
+  if (!isHostedCryptoProductionEnvironment(source)) {
+    return;
+  }
+
+  const overrideKeys = [
+    "HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT",
+    "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
+    "HOSTED_CRYPTO_GCP_STS_TOKEN_URI",
+  ] as const;
+  const configured = overrideKeys.find((key) => readOptionalEnv(source, key) !== null);
+  if (configured) {
+    throw new TypeError(`${configured} is not allowed in production.`);
+  }
 }
 
 class StaticHostedGcpAccessTokenProvider implements HostedGcpAccessTokenProvider {
