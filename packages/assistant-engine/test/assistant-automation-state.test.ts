@@ -281,7 +281,7 @@ test('readLatestAssistantInputSourceCursor orders same-timestamp hosted inputs b
     })
     const latest = await stageHostedAssistantInput({
       createdAt: '2026-04-10T03:00:01.000Z',
-      eventId: 'event_2',
+      eventId: 'event_3',
       laneSeq: '2',
       occurredAt: '2026-04-10T03:00:00.000Z',
       vault: vaultRoot,
@@ -301,7 +301,7 @@ test('readLatestAssistantInputSourceCursor orders same-timestamp hosted inputs b
     })
     assert.equal(
       cursor?.sourcePosition,
-      'hosted-mailbox:conversation:000000000000000000000000000000000000002:item_event_2',
+      'hosted-mailbox:conversation:000000000000000000000000000000000000002:item_event_3',
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

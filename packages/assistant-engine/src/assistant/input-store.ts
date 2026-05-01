@@ -251,6 +251,12 @@ export function createAssistantInputEventId(input: {
   return `ain_${sha256Hex(stableStringify(assistantInputSourceRefIdentity(input.sourceRef))).slice(0, 32)}`
 }
 
+function createLegacyAssistantInputEventId(input: {
+  sourceRef: AssistantInputSourceRef
+}): string {
+  return `ain_${sha256Hex(stableStringify(legacyAssistantInputSourceRefIdentity(input.sourceRef))).slice(0, 32)}`
+}
+
 export function resolveAssistantInputEventsDirectory(
   paths: AssistantStatePaths,
 ): string {
@@ -284,6 +290,9 @@ export async function upsertAssistantInputEvent(input: {
     const existing = await readAssistantInputEventAtPaths({
       inputId: next.inputId,
       paths,
+    }) ?? await findAssistantInputEventBySourceIdentityAtPaths({
+      paths,
+      sourceRef: next.sourceRef,
     })
 
     if (existing) {
@@ -562,12 +571,67 @@ function parseAssistantInputEventRecord(
   const expectedInputId = createAssistantInputEventId({
     sourceRef: record.sourceRef,
   })
-  if (record.inputId !== expectedInputId) {
+  const legacyInputId = createLegacyAssistantInputEventId({
+    sourceRef: record.sourceRef,
+  })
+  if (record.inputId !== expectedInputId && record.inputId !== legacyInputId) {
     throw new TypeError(
       'assistant input event record inputId must match its sourceRef.',
     )
   }
   return record
+}
+
+async function findAssistantInputEventBySourceIdentityAtPaths(input: {
+  paths: AssistantStatePaths
+  sourceRef: AssistantInputSourceRef
+}): Promise<AssistantInputEventRecord | null> {
+  if (input.sourceRef.kind !== 'hosted-mailbox') {
+    return null
+  }
+
+  const directory = resolveAssistantInputEventsDirectory(input.paths)
+  const expectedIdentity = stableStringify(
+    assistantInputSourceRefIdentity(input.sourceRef),
+  )
+
+  try {
+    const entries = await readdir(directory, {
+      withFileTypes: true,
+    })
+    const matches: AssistantInputEventRecord[] = []
+
+    for (const entry of entries) {
+      if (!entry.name.endsWith('.json')) {
+        continue
+      }
+      if (!entry.isFile()) {
+        throw new TypeError(
+          'Assistant input event entries must be regular JSON files.',
+        )
+      }
+      const filePath = path.join(directory, entry.name)
+      await assertAssistantStatePathHasNoSymlinks(filePath)
+      const raw = await readFile(filePath, 'utf8')
+      const record = parseAssistantInputEventFile(JSON.parse(raw))
+      if (
+        stableStringify(assistantInputSourceRefIdentity(record.sourceRef)) ===
+          expectedIdentity
+      ) {
+        matches.push(record)
+      }
+    }
+
+    matches.sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor),
+    )
+    return matches[0] ?? null
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
+  }
 }
 
 function buildAssistantInputEventRecord(input: {
@@ -637,7 +701,7 @@ function assistantInputEventImmutableIdentity(
     conversation: record.conversation,
     occurredAt: record.occurredAt,
     replyTarget: record.replyTarget,
-    sourceRef: record.sourceRef,
+    sourceRefIdentity: assistantInputSourceRefIdentity(record.sourceRef),
   }
 }
 
@@ -729,6 +793,19 @@ function assistantInputSourceRefIdentity(
       captureId: sourceRef.captureId,
       kind: sourceRef.kind,
     }
+  }
+  return {
+    identity: sourceRef.dedupeKey ?? sourceRef.eventId,
+    kind: sourceRef.kind,
+    lane: sourceRef.lane,
+  }
+}
+
+function legacyAssistantInputSourceRefIdentity(
+  sourceRef: AssistantInputSourceRef,
+): unknown {
+  if (sourceRef.kind === 'inbox-capture') {
+    return assistantInputSourceRefIdentity(sourceRef)
   }
   return {
     eventId: sourceRef.eventId,

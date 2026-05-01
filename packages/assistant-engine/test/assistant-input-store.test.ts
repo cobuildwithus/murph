@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -212,7 +213,7 @@ describe('assistant input event store', () => {
     })
   })
 
-  it('keys hosted mailbox events by envelope identity, not projection metadata', async () => {
+  it('keys hosted mailbox events by dedupe identity, not mailbox row or projection metadata', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-hosted-identity-',
     )
@@ -232,32 +233,217 @@ describe('assistant input event store', () => {
       },
     })
 
-    await expect(
-      upsertAssistantInputEvent({
-        vault: vaultRoot,
-        event: {
-          content: {
-            text: 'same mailbox text',
-          },
-          occurredAt: '2026-04-22T10:00:00.000Z',
-          sourceRef: {
-            ...sourceRef,
-            payloadSchema: 'murph.changed-payload.v1',
-          },
+    const duplicateMailboxRow = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'same mailbox text',
         },
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_INPUT_EVENT_CONFLICT',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: {
+          ...sourceRef,
+          eventId: 'evt_duplicate_projection',
+          itemId: 'item_duplicate_projection',
+          laneSeq: '43',
+          payloadSchema: 'murph.changed-payload.v1',
+          payloadSource: 'inline',
+        },
+      },
     })
 
+    expect(duplicateMailboxRow).toEqual(stored)
     expect(
       createAssistantInputEventId({
         sourceRef: {
           ...sourceRef,
+          eventId: 'evt_duplicate_projection',
+          itemId: 'item_duplicate_projection',
+          laneSeq: '43',
           payloadSchema: 'murph.changed-payload.v1',
+          payloadSource: 'inline',
         },
       }),
     ).toBe(stored.inputId)
+    expect(stored.sourceRef).toEqual(sourceRef)
+    expect(stored.cursor.sourcePosition).toBe(
+      'hosted-mailbox:conversation:000000000000000000000000000000000000042:item_same_mailbox',
+    )
+  })
+
+  it('keeps hosted mailbox lanes distinct even when dedupe identity matches', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-hosted-lane-identity-',
+    )
+    const conversationRef = createHostedMailboxSourceRef({
+      dedupeKey: 'dedupe_shared',
+      eventId: 'evt_lane_shared',
+      lane: 'conversation',
+      laneSeq: '42',
+    })
+    const systemRef = createHostedMailboxSourceRef({
+      dedupeKey: 'dedupe_shared',
+      eventId: 'evt_lane_shared',
+      lane: 'system',
+      laneSeq: '43',
+    })
+
+    const conversation = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'conversation lane text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: conversationRef,
+      },
+    })
+    const system = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'system lane text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: systemRef,
+      },
+    })
+
+    expect(conversation.inputId).not.toBe(system.inputId)
+    expect(
+      createAssistantInputEventId({
+        sourceRef: conversationRef,
+      }),
+    ).not.toBe(
+      createAssistantInputEventId({
+        sourceRef: systemRef,
+      }),
+    )
+    expect(conversationRef.lane).toBe('conversation')
+    expect(systemRef.lane).toBe('system')
+    await expect(
+      readAssistantInputEvent({
+        inputId: conversation.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(conversation)
+    await expect(
+      readAssistantInputEvent({
+        inputId: system.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(system)
+  })
+
+  it('falls back to hosted event identity when dedupe identity is absent', async () => {
+    const first = createHostedMailboxSourceRef({
+      dedupeKey: null,
+      eventId: 'evt_no_dedupe',
+      itemId: 'item_no_dedupe_a',
+      laneSeq: '42',
+    })
+    const duplicateItem = createHostedMailboxSourceRef({
+      dedupeKey: null,
+      eventId: 'evt_no_dedupe',
+      itemId: 'item_no_dedupe_b',
+      laneSeq: '43',
+    })
+    const differentEvent = createHostedMailboxSourceRef({
+      dedupeKey: null,
+      eventId: 'evt_no_dedupe_other',
+      itemId: 'item_no_dedupe_a',
+      laneSeq: '42',
+    })
+
+    expect(createAssistantInputEventId({ sourceRef: duplicateItem })).toBe(
+      createAssistantInputEventId({ sourceRef: first }),
+    )
+    expect(createAssistantInputEventId({ sourceRef: differentEvent })).not.toBe(
+      createAssistantInputEventId({ sourceRef: first }),
+    )
+  })
+
+  it('reuses legacy hosted mailbox input records after the identity cutover', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-legacy-hosted-identity-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_legacy_identity',
+      itemId: 'item_legacy_identity',
+      laneSeq: '42',
+    })
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'legacy identity text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef,
+      },
+    })
+    const legacyInputId = createLegacyHostedMailboxInputId(sourceRef)
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const currentPath = resolveAssistantInputEventPath({
+      inputId: stored.inputId,
+      paths,
+    })
+    const legacyRecord = {
+      ...stored,
+      cursor: {
+        ...stored.cursor,
+        inputId: legacyInputId,
+      },
+      idempotencyKey: `sha256:${sha256Hex(stableStringify({
+        eventId: sourceRef.eventId,
+        itemId: sourceRef.itemId,
+        kind: sourceRef.kind,
+        lane: sourceRef.lane,
+        laneSeq: sourceRef.laneSeq,
+      }))}`,
+      inputId: legacyInputId,
+    }
+    await rm(currentPath)
+    await writeFile(
+      resolveAssistantInputEventPath({
+        inputId: legacyInputId,
+        paths,
+      }),
+      `${JSON.stringify({
+        schema: 'murph.assistant-input-event.v1',
+        schemaVersion: 1,
+        value: legacyRecord,
+      })}\n`,
+      { mode: 0o600 },
+    )
+
+    const replay = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'legacy identity text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: {
+          ...sourceRef,
+          itemId: 'item_legacy_duplicate',
+          laneSeq: '43',
+        },
+      },
+    })
+
+    expect(replay.inputId).toBe(legacyInputId)
+    expect(
+      await readAssistantInputEvent({
+        inputId: legacyInputId,
+        vault: vaultRoot,
+      }),
+    ).toEqual(legacyRecord)
+    await expect(
+      readAssistantInputEvent({
+        inputId: stored.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBeNull()
   })
 
   it('lists inputs by conversation and leaves projection failures listable', async () => {
@@ -1439,13 +1625,16 @@ function createHostedMailboxEventInput(input: {
 }
 
 function createHostedMailboxSourceRef(input: {
+  dedupeKey?: string | null
   eventId: string
   itemId?: string
   lane?: 'conversation' | 'system'
   laneSeq: string
 }) {
   return {
-    dedupeKey: `${input.eventId}_dedupe`,
+    dedupeKey: input.dedupeKey === undefined
+      ? `${input.eventId}_dedupe`
+      : input.dedupeKey,
     eventId: input.eventId,
     itemId: input.itemId ?? `${input.eventId}_item`,
     kind: 'hosted-mailbox' as const,
@@ -1456,4 +1645,39 @@ function createHostedMailboxSourceRef(input: {
     source: 'hosted-mailbox' as const,
     wakeSchema: 'murph.hosted-wake.v1',
   }
+}
+
+function createLegacyHostedMailboxInputId(
+  sourceRef: ReturnType<typeof createHostedMailboxSourceRef>,
+): string {
+  return `ain_${sha256Hex(stableStringify({
+    eventId: sourceRef.eventId,
+    itemId: sourceRef.itemId,
+    kind: sourceRef.kind,
+    lane: sourceRef.lane,
+    laneSeq: sourceRef.laneSeq,
+  })).slice(0, 32)}`
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(stableJsonValue(value))
+}
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableJsonValue(item))
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value).sort(([left], [right]) =>
+      left.localeCompare(right),
+    )
+    return Object.fromEntries(
+      entries.map(([key, entryValue]) => [key, stableJsonValue(entryValue)]),
+    )
+  }
+  return value
 }
