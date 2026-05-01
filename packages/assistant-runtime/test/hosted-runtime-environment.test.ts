@@ -156,8 +156,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
     },
     platformEnv: {
-      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -172,13 +171,11 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
   assert.deepEqual(spec.runtime, {
     commitTimeoutMs: 45_000,
     forwardedEnv: {
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
       LINQ_API_TOKEN: "linq-token",
       VERCEL_AI_API_KEY: "worker-vercel-secret",
     },
     platformEnv: {
-      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -421,7 +418,6 @@ test("hosted runtime child env projection is a transport projection of forwarded
       },
     }),
     {
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
       VERCEL_AI_API_KEY: "worker-vercel-secret",
     },
   );
@@ -432,13 +428,15 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
     buildHostedRuntimePlatformEnv({
       HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
     }),
     {
-      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -639,7 +637,6 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
   );
 
   assert.deepEqual(normalized.forwardedEnv, {
-    HOSTED_WEB_BASE_URL: "https://web.example.test",
     VERCEL_AI_API_KEY: "vercel-secret",
   });
   assert.deepEqual(normalized.userEnv, {

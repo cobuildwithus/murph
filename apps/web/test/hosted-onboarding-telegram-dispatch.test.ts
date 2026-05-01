@@ -349,7 +349,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("preserves a richer persisted Telegram thread target when a later webhook only carries a plain DM thread", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const existingTelegramPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_telegram_123",
@@ -420,7 +420,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     };
 
     expect(
-      readHostedMemberRoutingTelegramPrivateState({
+      await readHostedMemberRoutingTelegramPrivateState({
         memberId: "member_telegram_123",
         telegramUserIdEncrypted: upsertCall.update.telegramUserIdEncrypted,
       }),

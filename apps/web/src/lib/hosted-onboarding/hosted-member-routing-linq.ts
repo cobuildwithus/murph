@@ -59,7 +59,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     );
   }
 
-  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: null,
     linqRecipientPhone: recipientPhone,
     memberId: input.memberId,
@@ -173,7 +173,7 @@ async function writeHostedMemberLinqBindingTx(input: {
 
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
-  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: input.kind === "home" ? input.linqChatId : null,
     linqRecipientPhone: input.kind === "home" ? recipientPhone : null,
     memberId: input.memberId,
@@ -226,7 +226,7 @@ function buildHostedMemberLinqBindingCreateData(input: {
   linqChatLookupKey: string;
   memberId: string;
   recipientPhoneLookupKey: string | null;
-  routingPrivateColumns: ReturnType<typeof buildHostedMemberRoutingPrivateColumns>;
+  routingPrivateColumns: Awaited<ReturnType<typeof buildHostedMemberRoutingPrivateColumns>>;
 }): Prisma.HostedMemberRoutingUncheckedCreateInput {
   return {
     linqChatIdEncrypted: input.kind === "home"
@@ -260,7 +260,7 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   kind: "home" | "pending";
   linqChatLookupKey: string;
   recipientPhoneLookupKey: string | null;
-  routingPrivateColumns: ReturnType<typeof buildHostedMemberRoutingPrivateColumns>;
+  routingPrivateColumns: Awaited<ReturnType<typeof buildHostedMemberRoutingPrivateColumns>>;
 }): Prisma.HostedMemberRoutingUncheckedUpdateInput {
   if (input.kind === "home") {
     return {

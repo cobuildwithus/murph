@@ -362,11 +362,11 @@ describe("createHostedBillingCheckout", () => {
     const prisma = makePrisma({
       billingRef: {
         memberId: "member_123",
-        ...buildHostedMemberBillingPrivateColumns({
+        ...(await buildHostedMemberBillingPrivateColumns({
           memberId: "member_123",
           stripeCustomerId: "cus_existing",
           stripeSubscriptionId: null,
-        }),
+        })),
         stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
         stripeSubscriptionLookupKey: null,
       },
@@ -525,11 +525,11 @@ describe("createHostedBillingCheckout", () => {
         null,
         {
           memberId: "member_123",
-          ...buildHostedMemberBillingPrivateColumns({
+          ...(await buildHostedMemberBillingPrivateColumns({
             memberId: "member_123",
             stripeCustomerId: "cus_existing",
             stripeSubscriptionId: null,
-          }),
+          })),
           stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
           stripeSubscriptionLookupKey: null,
         },

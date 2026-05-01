@@ -146,7 +146,7 @@ describe("hosted-member-store", () => {
       memberId: member.id,
       phoneLookupKey: "hbidx:phone:v1:abc123",
       phoneNumberVerifiedAt: null,
-      privyUserIdEncrypted: encryptHostedWebNullableString({
+      privyUserIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-identity.privy-user-id",
         memberId: member.id,
         value: "did:privy:user_123",
@@ -207,7 +207,7 @@ describe("hosted-member-store", () => {
           signupPhoneCodeSendAttemptId: null,
           signupPhoneCodeSendAttemptStartedAt: null,
           signupPhoneCodeSentAt: null,
-          signupPhoneNumberEncrypted: encryptHostedWebNullableString({
+          signupPhoneNumberEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-identity.signup-phone-number",
             memberId: member.id,
             value: "+15551234567",
@@ -299,7 +299,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: encryptHostedWebNullableString({
+          linqChatIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-routing.home-linq-chat-id",
             memberId: "member_123",
             value: "chat_123",
@@ -499,7 +499,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: encryptHostedWebNullableString({
+          linqChatIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-routing.home-linq-chat-id",
             memberId: "member_123",
             value: "chat_123",
@@ -533,7 +533,7 @@ describe("hosted-member-store", () => {
   });
 
   it("reads a persisted Telegram thread target alongside the raw Telegram user id", async () => {
-    const telegramPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    const telegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_123",
@@ -574,7 +574,7 @@ describe("hosted-member-store", () => {
   });
 
   it("fails closed when the persisted Telegram private payload uses an unknown schema", async () => {
-    const telegramUserIdEncrypted = encryptHostedWebNullableString({
+    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
       value: JSON.stringify({
@@ -584,66 +584,66 @@ describe("hosted-member-store", () => {
       }),
     });
 
-    expect(
+    await expect(
       readHostedMemberRoutingTelegramPrivateState({
         memberId: "member_123",
         telegramUserIdEncrypted,
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       telegramThreadId: null,
       telegramUserId: null,
     });
   });
 
   it("fails closed when the persisted Telegram private payload is not JSON", async () => {
-    const telegramUserIdEncrypted = encryptHostedWebNullableString({
+    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
       value: "456",
     });
 
-    expect(
+    await expect(
       readHostedMemberRoutingTelegramPrivateState({
         memberId: "member_123",
         telegramUserIdEncrypted,
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       telegramThreadId: null,
       telegramUserId: null,
     });
   });
 
   it("fails closed when the persisted Telegram private payload has the wrong JSON shape", async () => {
-    const telegramUserIdEncrypted = encryptHostedWebNullableString({
+    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
       value: JSON.stringify(456),
     });
 
-    expect(
+    await expect(
       readHostedMemberRoutingTelegramPrivateState({
         memberId: "member_123",
         telegramUserIdEncrypted,
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       telegramThreadId: null,
       telegramUserId: null,
     });
   });
 
   it("fails closed when a persisted Telegram private payload points at a bare group chat id", async () => {
-    const telegramUserIdEncrypted = encryptHostedWebNullableString({
+    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
       value: "-1009999999999",
     });
 
-    expect(
+    await expect(
       readHostedMemberRoutingTelegramPrivateState({
         memberId: "member_123",
         telegramUserIdEncrypted,
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       telegramThreadId: null,
       telegramUserId: null,
     });
@@ -1109,7 +1109,7 @@ describe("hosted-member-store", () => {
   });
 
   it("preserves an existing rich Telegram thread target during a user-id-only resync", async () => {
-    const existingTelegramPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_123",
@@ -1147,12 +1147,12 @@ describe("hosted-member-store", () => {
         telegramUserIdEncrypted: string;
       };
     };
-    expect(
+    await expect(
       readHostedMemberRoutingTelegramPrivateState({
         memberId: "member_123",
         telegramUserIdEncrypted: upsertCall.update.telegramUserIdEncrypted,
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       telegramThreadId: "456:business:biz-42:dm-topic:9",
       telegramUserId: "456",
     });
@@ -1215,14 +1215,14 @@ describe("hosted-member-store", () => {
       maskedPhoneNumberHint: "*** 4567",
       memberId: "member_123",
       phoneLookupKey: "hbidx:phone:v1:abc123",
-      phoneNumberEncrypted: encryptHostedWebNullableString({
+      phoneNumberEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-identity.phone-number",
         memberId: "member_123",
         value: "+15551234567",
       }),
       phoneNumberVerifiedAt: null,
       privyUserLookupKey: "hbidx:privy-user:v1:abc123",
-      privyUserIdEncrypted: encryptHostedWebNullableString({
+      privyUserIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-identity.privy-user-id",
         memberId: "member_123",
         value: "did:privy:user_123",
@@ -1232,7 +1232,7 @@ describe("hosted-member-store", () => {
       signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
       walletAddressLookupKey: "hbidx:wallet-address:v1:abc123",
-      walletAddressEncrypted: encryptHostedWebNullableString({
+      walletAddressEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-identity.wallet-address",
         memberId: "member_123",
         value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -1329,13 +1329,13 @@ describe("hosted-member-store", () => {
       hostedMemberBillingRef: {
         findUnique: vi.fn().mockResolvedValue({
           memberId: "member_123",
-          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-customer-id",
             memberId: "member_123",
             value: "cus_123",
           }),
           stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-          stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+          stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-subscription-id",
             memberId: "member_123",
             value: "sub_123",
@@ -1363,7 +1363,7 @@ describe("hosted-member-store", () => {
       .mockResolvedValueOnce([{
         member,
         memberId: member.id,
-        stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+        stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
           field: "hosted-member-billing-ref.stripe-customer-id",
           memberId: member.id,
           value: "cus_123",
@@ -1377,7 +1377,7 @@ describe("hosted-member-store", () => {
         memberId: member.id,
         stripeCustomerIdEncrypted: null,
         stripeCustomerLookupKey: null,
-        stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+        stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
           field: "hosted-member-billing-ref.stripe-subscription-id",
           memberId: member.id,
           value: "sub_123",
@@ -1456,7 +1456,7 @@ describe("hosted-member-store", () => {
           id: "member_v1",
         }),
         memberId: "member_v1",
-        stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+        stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
           field: "hosted-member-billing-ref.stripe-customer-id",
           memberId: "member_v1",
           value: "cus_123",
@@ -1470,7 +1470,7 @@ describe("hosted-member-store", () => {
           id: "member_v2",
         }),
         memberId: "member_v2",
-        stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+        stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
           field: "hosted-member-billing-ref.stripe-customer-id",
           memberId: "member_v2",
           value: "cus_123",
@@ -1518,13 +1518,13 @@ describe("hosted-member-store", () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({
       memberId: "member_123",
-      stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
         memberId: "member_123",
         value: "cus_123",
       }),
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-subscription-id",
         memberId: "member_123",
         value: "sub_123",
@@ -1654,13 +1654,13 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({
       lastStripeEventCreatedAt: freshnessAt,
       memberId: "member_123",
-      stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
         memberId: "member_123",
         value: "cus_123",
       }),
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-subscription-id",
         memberId: "member_123",
         value: "sub_123",
@@ -1735,7 +1735,7 @@ describe("hosted-member-store", () => {
   it("binds Stripe customer ids without mutating the member row", async () => {
     const upsert = vi.fn().mockResolvedValue({
       memberId: "member_123",
-      stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
         memberId: "member_123",
         value: "cus_123",
@@ -1798,13 +1798,13 @@ describe("hosted-member-store", () => {
   it("binds Stripe customer ids without clearing existing encrypted billing fields", async () => {
     const upsert = vi.fn().mockResolvedValue({
       memberId: "member_123",
-      stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
         memberId: "member_123",
         value: "cus_123",
       }),
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:new",
-      stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-subscription-id",
         memberId: "member_123",
         value: "sub_existing",
@@ -1821,7 +1821,7 @@ describe("hosted-member-store", () => {
           memberId: "member_123",
           stripeCustomerIdEncrypted: null,
           stripeCustomerLookupKey: null,
-          stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+          stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-subscription-id",
             memberId: "member_123",
             value: "sub_existing",
@@ -1873,7 +1873,7 @@ describe("hosted-member-store", () => {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
           memberId: "member_123",
-          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-customer-id",
             memberId: "member_123",
             value: "cus_existing",
@@ -1918,13 +1918,13 @@ describe("hosted-member-store", () => {
           ...createHostedMember(),
           billingRef: {
             memberId: "member_123",
-            stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+            stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-billing-ref.stripe-customer-id",
               memberId: "member_123",
               value: "cus_123",
             }),
             stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-            stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+            stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-billing-ref.stripe-subscription-id",
               memberId: "member_123",
               value: "sub_123",
@@ -1937,7 +1937,7 @@ describe("hosted-member-store", () => {
             phoneLookupKey: "hbidx:phone:v1:abc123",
             phoneNumberVerifiedAt: null,
             privyUserLookupKey: "hbidx:privy-user:v1:abc123",
-            privyUserIdEncrypted: encryptHostedWebNullableString({
+            privyUserIdEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-identity.privy-user-id",
               memberId: "member_123",
               value: "did:privy:user_123",
@@ -1947,7 +1947,7 @@ describe("hosted-member-store", () => {
             signupPhoneCodeSentAt: null,
             signupPhoneNumberEncrypted: null,
             walletAddressLookupKey: "hbidx:wallet-address:v1:abc123",
-            walletAddressEncrypted: encryptHostedWebNullableString({
+            walletAddressEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-identity.wallet-address",
               memberId: "member_123",
               value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
@@ -1957,7 +1957,7 @@ describe("hosted-member-store", () => {
             walletProvider: "privy",
           },
           routing: {
-            linqChatIdEncrypted: encryptHostedWebNullableString({
+            linqChatIdEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-routing.home-linq-chat-id",
               memberId: "member_123",
               value: "chat_123",
@@ -2022,7 +2022,7 @@ describe("hosted-member-store", () => {
   });
 
   it("reads only messaging setup state needed by Privy completion", async () => {
-    const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_123",

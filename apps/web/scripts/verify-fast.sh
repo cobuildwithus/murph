@@ -46,20 +46,8 @@ compose_hosted_contact_privacy_current_key_version_for_build() {
   printf '%s\n' "${HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION:-$hosted_web_default_hosted_key_version}"
 }
 
-compose_hosted_web_encryption_key_for_build() {
-  printf '%s\n' "${HOSTED_WEB_ENCRYPTION_KEY:-$hosted_web_default_hosted_key}"
-}
-
-compose_hosted_web_encryption_key_version_for_build() {
-  printf '%s\n' "${HOSTED_WEB_ENCRYPTION_KEY_VERSION:-$hosted_web_default_hosted_key_version}"
-}
-
-compose_hosted_wake_encryption_key_for_build() {
-  printf '%s\n' "${HOSTED_WAKE_ENCRYPTION_KEY:-$hosted_web_default_hosted_key}"
-}
-
-compose_hosted_wake_encryption_key_version_for_build() {
-  printf '%s\n' "${HOSTED_WAKE_ENCRYPTION_KEY_VERSION:-$hosted_web_default_hosted_key_version}"
+compose_hosted_mailbox_fingerprint_key_for_build() {
+  printf '%s\n' "${HOSTED_MAILBOX_FINGERPRINT_KEY:-$hosted_web_default_hosted_key}"
 }
 
 verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
@@ -227,29 +215,20 @@ run_next_build() {
   local build_database_url
   local build_contact_privacy_current_key_version
   local build_contact_privacy_keys
-  local build_hosted_web_encryption_key
-  local build_hosted_web_encryption_key_version
-  local build_hosted_wake_encryption_key
-  local build_hosted_wake_encryption_key_version
+  local build_hosted_mailbox_fingerprint_key
   local build_privy_app_id
 
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   build_database_url="$(compose_database_url_for_build)"
   build_contact_privacy_current_key_version="$(compose_hosted_contact_privacy_current_key_version_for_build)"
   build_contact_privacy_keys="$(compose_hosted_contact_privacy_keys_for_build)"
-  build_hosted_web_encryption_key="$(compose_hosted_web_encryption_key_for_build)"
-  build_hosted_web_encryption_key_version="$(compose_hosted_web_encryption_key_version_for_build)"
-  build_hosted_wake_encryption_key="$(compose_hosted_wake_encryption_key_for_build)"
-  build_hosted_wake_encryption_key_version="$(compose_hosted_wake_encryption_key_version_for_build)"
+  build_hosted_mailbox_fingerprint_key="$(compose_hosted_mailbox_fingerprint_key_for_build)"
   build_privy_app_id="$(compose_privy_app_id_for_build)"
 
   DATABASE_URL="$build_database_url" \
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION="$build_contact_privacy_current_key_version" \
     HOSTED_CONTACT_PRIVACY_KEYS="$build_contact_privacy_keys" \
-    HOSTED_WEB_ENCRYPTION_KEY="$build_hosted_web_encryption_key" \
-    HOSTED_WEB_ENCRYPTION_KEY_VERSION="$build_hosted_web_encryption_key_version" \
-    HOSTED_WAKE_ENCRYPTION_KEY="$build_hosted_wake_encryption_key" \
-    HOSTED_WAKE_ENCRYPTION_KEY_VERSION="$build_hosted_wake_encryption_key_version" \
+    HOSTED_MAILBOX_FINGERPRINT_KEY="$build_hosted_mailbox_fingerprint_key" \
     NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
     NODE_OPTIONS="$next_build_node_options" \
     next build

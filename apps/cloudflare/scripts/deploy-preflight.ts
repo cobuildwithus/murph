@@ -7,6 +7,9 @@ import {
 
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
 import {
+  HOSTED_WORKER_REQUIRED_VAR_NAMES,
+} from "./deploy-automation/worker-optional-vars.ts";
+import {
   normalizeOptionalString,
   readBooleanEnv,
 } from "./deploy-automation/shared.ts";
@@ -42,10 +45,7 @@ const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_BASE_URL",
   "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
   "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
-  "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",
-  "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
-  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
-  "HOSTED_CRYPTO_ENV",
+  ...HOSTED_WORKER_REQUIRED_VAR_NAMES,
 ] as const;
 
 const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
@@ -180,6 +180,14 @@ export function listHostedDeployEnvironmentInvariantErrors(
     return errors;
   }
 
+  const hostedCryptoEnv = normalizeOptionalString(source.HOSTED_CRYPTO_ENV);
+  if (
+    hostedCryptoEnv
+    && !HOSTED_DEPLOY_CONTEXT_SET.has(hostedCryptoEnv as HostedDeployContext)
+  ) {
+    errors.push("HOSTED_CRYPTO_ENV must be one of development, preview, or production.");
+  }
+
   const oidcEnvironment = normalizeHostedOidcEnvironment(
     source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT,
   );
@@ -194,6 +202,10 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   if (deployContext !== "production") {
     return errors;
+  }
+
+  if (hostedCryptoEnv && hostedCryptoEnv !== "production") {
+    errors.push("production deploys must set HOSTED_CRYPTO_ENV=production.");
   }
 
   if (oidcEnvironment && oidcEnvironment !== "production") {

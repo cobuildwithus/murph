@@ -139,7 +139,7 @@ export async function getHostedInviteStatus(input: {
       })
     : false;
   const inviteRouting = invite.member.routing
-    ? projectHostedMemberRoutingState(invite.member.routing)
+    ? await projectHostedMemberRoutingState(invite.member.routing)
     : null;
   const stage = deriveHostedOnboardingStage({
     activationPending,
@@ -154,7 +154,7 @@ export async function getHostedInviteStatus(input: {
     routing: inviteRouting,
   });
   const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(
-    projectHostedMemberIdentityState(inviteIdentity),
+    await projectHostedMemberIdentityState(inviteIdentity),
   );
   const verificationMode = resolveHostedInviteVerificationMode(phoneAuthTarget);
 
@@ -576,7 +576,7 @@ function resolveHostedInviteVerificationMode(
 }
 
 function resolveHostedInviteMurphPhoneNumber(input: {
-  routing: ReturnType<typeof projectHostedMemberRoutingState> | null;
+  routing: Awaited<ReturnType<typeof projectHostedMemberRoutingState>> | null;
   sessionMatchesInvite: boolean | undefined;
   stage: HostedInviteStatusPayload["stage"];
 }): string | null {

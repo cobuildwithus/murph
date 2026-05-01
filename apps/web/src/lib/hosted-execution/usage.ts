@@ -171,7 +171,7 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
 
   const candidates = await Promise.all(records.map(async (record) => {
     const stripeCustomerId = record.member.billingRef
-      ? readHostedMemberBillingPrivateState(record.member.billingRef).stripeCustomerId
+      ? (await readHostedMemberBillingPrivateState(record.member.billingRef)).stripeCustomerId
       : null;
 
     if (!stripeCustomerId || !isAssistantUsageCredentialSource(record.credentialSource)) {
@@ -843,7 +843,9 @@ async function readHostedAiUsageMemberStripeCustomerId(input: {
       stripeSubscriptionIdEncrypted: true,
     },
   }).then((billingRef) =>
-    billingRef ? readHostedMemberBillingPrivateState(billingRef).stripeCustomerId : null,
+    billingRef
+      ? readHostedMemberBillingPrivateState(billingRef).then((privateState) => privateState.stripeCustomerId)
+      : null,
   );
 
   input.stripeCustomerIdCache.set(input.memberId, pendingStripeCustomerId);

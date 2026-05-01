@@ -56,7 +56,7 @@ export interface HostedMemberBillingPrivateState {
   stripeSubscriptionId: string | null;
 }
 
-export function buildHostedMemberIdentityPrivateColumns(input: {
+export async function buildHostedMemberIdentityPrivateColumns(input: {
   memberId: string;
   phoneNumber: string | null;
   privyUserId: string | null;
@@ -66,34 +66,46 @@ export function buildHostedMemberIdentityPrivateColumns(input: {
   signupPhoneNumber: string | null;
   walletAddress: string | null;
 }) {
-  return {
-    phoneNumberEncrypted: encryptHostedWebNullableString({
+  const [
+    phoneNumberEncrypted,
+    privyUserIdEncrypted,
+    signupPhoneNumberEncrypted,
+    walletAddressEncrypted,
+  ] = await Promise.all([
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
       memberId: input.memberId,
       value: input.phoneNumber,
     }),
-    privyUserIdEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
       memberId: input.memberId,
       value: input.privyUserId,
     }),
-    signupPhoneCodeSendAttemptId: normalizeNullableString(input.signupPhoneCodeSendAttemptId),
-    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
-    signupPhoneNumberEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
       memberId: input.memberId,
       value: input.signupPhoneNumber,
     }),
-    walletAddressEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD,
       memberId: input.memberId,
       value: input.walletAddress,
     }),
+  ]);
+
+  return {
+    phoneNumberEncrypted,
+    privyUserIdEncrypted,
+    signupPhoneCodeSendAttemptId: normalizeNullableString(input.signupPhoneCodeSendAttemptId),
+    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
+    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
+    signupPhoneNumberEncrypted,
+    walletAddressEncrypted,
   } as const;
 }
 
-export function readHostedMemberIdentityPrivateState(
+export async function readHostedMemberIdentityPrivateState(
   identity: Pick<
     HostedMemberIdentity,
     | "memberId"
@@ -105,35 +117,47 @@ export function readHostedMemberIdentityPrivateState(
     | "signupPhoneNumberEncrypted"
     | "walletAddressEncrypted"
   >,
-): HostedMemberIdentityPrivateState {
-  return {
-    phoneNumber: decryptHostedWebNullableString({
+): Promise<HostedMemberIdentityPrivateState> {
+  const [
+    phoneNumber,
+    privyUserId,
+    signupPhoneNumber,
+    walletAddress,
+  ] = await Promise.all([
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
       memberId: identity.memberId,
       value: identity.phoneNumberEncrypted,
     }),
-    privyUserId: decryptHostedWebNullableString({
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
       memberId: identity.memberId,
       value: identity.privyUserIdEncrypted,
     }),
-    signupPhoneCodeSendAttemptId: normalizeNullableString(identity.signupPhoneCodeSendAttemptId),
-    signupPhoneCodeSendAttemptStartedAt: identity.signupPhoneCodeSendAttemptStartedAt,
-    signupPhoneCodeSentAt: identity.signupPhoneCodeSentAt,
-    signupPhoneNumber: decryptHostedWebNullableString({
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
       memberId: identity.memberId,
       value: identity.signupPhoneNumberEncrypted,
     }),
-    walletAddress: decryptHostedWebNullableString({
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD,
       memberId: identity.memberId,
       value: identity.walletAddressEncrypted,
     }),
+  ]);
+
+  return {
+    phoneNumber,
+    privyUserId,
+    signupPhoneCodeSendAttemptId: normalizeNullableString(identity.signupPhoneCodeSendAttemptId),
+    signupPhoneCodeSendAttemptStartedAt: identity.signupPhoneCodeSendAttemptStartedAt,
+    signupPhoneCodeSentAt: identity.signupPhoneCodeSentAt,
+    signupPhoneNumber,
+    walletAddress,
   };
 }
 
-export function buildHostedMemberRoutingPrivateColumns(input: {
+export async function buildHostedMemberRoutingPrivateColumns(input: {
   linqChatId: string | null;
   linqRecipientPhone: string | null;
   memberId: string;
@@ -142,28 +166,34 @@ export function buildHostedMemberRoutingPrivateColumns(input: {
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }) {
-  return {
-    linqChatIdEncrypted: encryptHostedWebNullableString({
+  const [
+    linqChatIdEncrypted,
+    linqRecipientPhoneEncrypted,
+    pendingLinqChatIdEncrypted,
+    pendingLinqRecipientPhoneEncrypted,
+    telegramUserIdEncrypted,
+  ] = await Promise.all([
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,
       memberId: input.memberId,
       value: input.linqChatId,
     }),
-    linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_HOME_LINQ_RECIPIENT_PHONE_FIELD,
       memberId: input.memberId,
       value: input.linqRecipientPhone,
     }),
-    pendingLinqChatIdEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_CHAT_FIELD,
       memberId: input.memberId,
       value: input.pendingLinqChatId,
     }),
-    pendingLinqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD,
       memberId: input.memberId,
       value: input.pendingLinqRecipientPhone,
     }),
-    telegramUserIdEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
       memberId: input.memberId,
       value: buildHostedMemberRoutingTelegramPrivateValue({
@@ -171,10 +201,18 @@ export function buildHostedMemberRoutingPrivateColumns(input: {
         telegramUserId: input.telegramUserId,
       }),
     }),
+  ]);
+
+  return {
+    linqChatIdEncrypted,
+    linqRecipientPhoneEncrypted,
+    pendingLinqChatIdEncrypted,
+    pendingLinqRecipientPhoneEncrypted,
+    telegramUserIdEncrypted,
   } as const;
 }
 
-export function readHostedMemberRoutingPrivateState(
+export async function readHostedMemberRoutingPrivateState(
   routing: Pick<
     HostedMemberRouting,
     | "linqChatIdEncrypted"
@@ -184,42 +222,54 @@ export function readHostedMemberRoutingPrivateState(
     | "pendingLinqRecipientPhoneEncrypted"
     | "telegramUserIdEncrypted"
   >,
-): HostedMemberRoutingPrivateState {
-  const telegramState = readHostedMemberRoutingTelegramPrivateState({
+): Promise<HostedMemberRoutingPrivateState> {
+  const [
+    telegramState,
+    linqChatId,
+    linqRecipientPhone,
+    pendingLinqChatId,
+    pendingLinqRecipientPhone,
+  ] = await Promise.all([
+    readHostedMemberRoutingTelegramPrivateState({
     memberId: routing.memberId,
     telegramUserIdEncrypted: routing.telegramUserIdEncrypted,
-  });
-
-  return {
-    linqChatId: decryptHostedWebNullableString({
+    }),
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,
       memberId: routing.memberId,
       value: routing.linqChatIdEncrypted,
     }),
-    linqRecipientPhone: decryptHostedWebNullableString({
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_HOME_LINQ_RECIPIENT_PHONE_FIELD,
       memberId: routing.memberId,
       value: routing.linqRecipientPhoneEncrypted,
     }),
-    pendingLinqChatId: decryptHostedWebNullableString({
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_CHAT_FIELD,
       memberId: routing.memberId,
       value: routing.pendingLinqChatIdEncrypted,
     }),
-    pendingLinqRecipientPhone: decryptHostedWebNullableString({
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD,
       memberId: routing.memberId,
       value: routing.pendingLinqRecipientPhoneEncrypted,
     }),
+  ]);
+
+  return {
+    linqChatId,
+    linqRecipientPhone,
+    pendingLinqChatId,
+    pendingLinqRecipientPhone,
     telegramThreadId: telegramState.telegramThreadId,
     telegramUserId: telegramState.telegramUserId,
   };
 }
 
-export function readHostedMemberRoutingTelegramPrivateState(
+export async function readHostedMemberRoutingTelegramPrivateState(
   routing: Pick<HostedMemberRouting, "memberId" | "telegramUserIdEncrypted">,
-): Pick<HostedMemberRoutingPrivateState, "telegramThreadId" | "telegramUserId"> {
-  const decryptedValue = decryptHostedWebNullableString({
+): Promise<Pick<HostedMemberRoutingPrivateState, "telegramThreadId" | "telegramUserId">> {
+  const decryptedValue = await decryptHostedWebNullableString({
     field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
     memberId: routing.memberId,
     value: routing.telegramUserIdEncrypted,
@@ -344,43 +394,53 @@ export function normalizeHostedTelegramDirectThreadTarget(
   return serializeTelegramThreadTarget(parsed);
 }
 
-export function buildHostedMemberBillingPrivateColumns(input: {
+export async function buildHostedMemberBillingPrivateColumns(input: {
   memberId: string;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
 }) {
-  return {
-    stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+  const [stripeCustomerIdEncrypted, stripeSubscriptionIdEncrypted] = await Promise.all([
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
       memberId: input.memberId,
       value: input.stripeCustomerId,
     }),
-    stripeSubscriptionIdEncrypted: encryptHostedWebNullableString({
+    encryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD,
       memberId: input.memberId,
       value: input.stripeSubscriptionId,
     }),
+  ]);
+
+  return {
+    stripeCustomerIdEncrypted,
+    stripeSubscriptionIdEncrypted,
   } as const;
 }
 
-export function readHostedMemberBillingPrivateState(
+export async function readHostedMemberBillingPrivateState(
   billingRef: Pick<
     HostedMemberBillingRef,
     | "memberId"
     | "stripeCustomerIdEncrypted"
     | "stripeSubscriptionIdEncrypted"
   >,
-): HostedMemberBillingPrivateState {
-  return {
-    stripeCustomerId: decryptHostedWebNullableString({
+): Promise<HostedMemberBillingPrivateState> {
+  const [stripeCustomerId, stripeSubscriptionId] = await Promise.all([
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
       memberId: billingRef.memberId,
       value: billingRef.stripeCustomerIdEncrypted,
     }),
-    stripeSubscriptionId: decryptHostedWebNullableString({
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD,
       memberId: billingRef.memberId,
       value: billingRef.stripeSubscriptionIdEncrypted,
     }),
+  ]);
+
+  return {
+    stripeCustomerId,
+    stripeSubscriptionId,
   };
 }

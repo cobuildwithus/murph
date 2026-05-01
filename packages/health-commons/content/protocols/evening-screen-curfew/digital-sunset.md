@@ -512,7 +512,7 @@ expectedSignalDescriptions:
     kind: "absolute"
     low: -1
     high: 3
-    unit: "percentage points"
+    unit: "%"
     window: "baseline vs 14-28 intervention nights"
     confidence: "low"
     basis: "Direct Digital Sunset evidence is strongest for sleep-onset and duration signals; sleep-efficiency support is indirect or preliminary, including in-bed smartphone associations and underpowered screen-restriction findings [source_artifact:pmid-32040492; source_artifact:pmid-39432278; source_artifact:pmid-36405389; source_artifact:pmid-28081034; source_artifact:pmid-30741866]."

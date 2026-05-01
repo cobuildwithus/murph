@@ -208,7 +208,7 @@ export async function readHostedMemberBillingSnapshot(input: {
   return composeHostedMemberBillingSnapshot(
     projectHostedMemberCoreState(memberRecord),
     memberRecord.billingRef
-      ? projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
+      ? await projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
       : null,
   );
 }
@@ -224,7 +224,7 @@ export async function readHostedMemberEmailAuthorization(input: {
     select: hostedMemberEmailAuthorizationStateSelect,
   });
 
-  return record ? projectHostedMemberEmailAuthorizationState(record) : null;
+  return record ? await projectHostedMemberEmailAuthorizationState(record) : null;
 }
 
 export async function readHostedMemberIdByAuthorizedDirectPublicSenderAddress(input: {
@@ -287,8 +287,8 @@ export async function upsertHostedMemberEmailAuthorization(
     where: {
       memberId: input.memberId,
     },
-    create: buildHostedMemberEmailAuthorizationCreateData(input),
-    update: buildHostedMemberEmailAuthorizationUpdateData(input),
+    create: await buildHostedMemberEmailAuthorizationCreateData(input),
+    update: await buildHostedMemberEmailAuthorizationUpdateData(input),
     select: hostedMemberEmailAuthorizationStateSelect,
   });
 
@@ -344,18 +344,18 @@ export async function readHostedMemberSnapshot(input: {
   }
 
   const identity = memberRecord.identity
-    ? projectHostedMemberIdentityState(memberRecord.identity)
+    ? await projectHostedMemberIdentityState(memberRecord.identity)
     : null;
   const emailAuthorization = memberRecord.emailAuthorization
-    ? projectHostedMemberEmailAuthorizationState(memberRecord.emailAuthorization)
+    ? await projectHostedMemberEmailAuthorizationState(memberRecord.emailAuthorization)
     : undefined;
   const routing = memberRecord.routing
-    ? projectHostedMemberRoutingState(memberRecord.routing)
+    ? await projectHostedMemberRoutingState(memberRecord.routing)
     : null;
   const billing = composeHostedMemberBillingSnapshot(
     projectHostedMemberCoreState(memberRecord),
     memberRecord.billingRef
-      ? projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
+      ? await projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
       : null,
   );
 
@@ -395,7 +395,7 @@ export async function readHostedMemberMessagingSetupState(input: {
   }
 
   const telegramRouting = memberRecord.routing
-    ? readHostedMemberRoutingTelegramPrivateState(memberRecord.routing)
+    ? await readHostedMemberRoutingTelegramPrivateState(memberRecord.routing)
     : null;
 
   return {
@@ -413,14 +413,14 @@ export async function readHostedMemberMessagingSetupState(input: {
   };
 }
 
-function projectHostedMemberEmailAuthorizationLookup(
+async function projectHostedMemberEmailAuthorizationLookup(
   record: Prisma.HostedMemberEmailAuthorizationGetPayload<{
     select: typeof hostedMemberEmailAuthorizationLookupSelect;
   }>,
-): HostedMemberEmailAuthorizationLookup {
+): Promise<HostedMemberEmailAuthorizationLookup> {
   return {
     core: record.member,
-    emailAuthorization: projectHostedMemberEmailAuthorizationState(record),
+    emailAuthorization: await projectHostedMemberEmailAuthorizationState(record),
     matchedBy: "verifiedEmail",
   };
 }
@@ -529,7 +529,7 @@ export function composeHostedMemberSnapshot(
   };
 }
 
-export function projectHostedMemberEmailAuthorizationState(
+export async function projectHostedMemberEmailAuthorizationState(
   record: {
     directPublicSenderAddressEncrypted: string | null;
     directPublicSenderAuthorizedAt: Date | null;
@@ -539,17 +539,19 @@ export function projectHostedMemberEmailAuthorizationState(
     verifiedEmailLookupKey: string | null;
     verifiedEmailVerifiedAt: Date | null;
   },
-): HostedMemberEmailAuthorizationState {
-  const verifiedEmailAddress = decryptHostedWebNullableString({
+): Promise<HostedMemberEmailAuthorizationState> {
+  const [verifiedEmailAddress, directPublicSenderAddress] = await Promise.all([
+    decryptHostedWebNullableString({
     field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
     memberId: record.memberId,
     value: record.verifiedEmailAddressEncrypted,
-  });
-  const directPublicSenderAddress = decryptHostedWebNullableString({
+    }),
+    decryptHostedWebNullableString({
     field: HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD,
     memberId: record.memberId,
     value: record.directPublicSenderAddressEncrypted,
-  });
+    }),
+  ]);
 
   return {
     directPublicSender:
@@ -595,29 +597,29 @@ function projectHostedMemberCoreState(
   };
 }
 
-function buildHostedMemberEmailAuthorizationCreateData(
+async function buildHostedMemberEmailAuthorizationCreateData(
   input: HostedMemberEmailAuthorizationWriteInput,
-): Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput {
-  const data = buildHostedMemberEmailAuthorizationMutationData(input);
+): Promise<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput> {
+  const data = await buildHostedMemberEmailAuthorizationMutationData(input);
   return {
     ...data,
     memberId: input.memberId,
   };
 }
 
-function buildHostedMemberEmailAuthorizationUpdateData(
+async function buildHostedMemberEmailAuthorizationUpdateData(
   input: HostedMemberEmailAuthorizationWriteInput,
-): Prisma.HostedMemberEmailAuthorizationUncheckedUpdateInput {
+): Promise<Prisma.HostedMemberEmailAuthorizationUncheckedUpdateInput> {
   return buildHostedMemberEmailAuthorizationMutationData(input);
 }
 
-function buildHostedMemberEmailAuthorizationMutationData(
+async function buildHostedMemberEmailAuthorizationMutationData(
   input: HostedMemberEmailAuthorizationWriteInput,
-): Omit<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput, "memberId"> {
+): Promise<Omit<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput, "memberId">> {
   const data: Omit<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput, "memberId"> = {};
 
   if (input.verifiedEmail !== undefined) {
-    const fact = buildHostedMemberEmailFactColumns({
+    const fact = await buildHostedMemberEmailFactColumns({
       address: input.verifiedEmail?.address ?? null,
       field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
       memberId: input.memberId,
@@ -631,7 +633,7 @@ function buildHostedMemberEmailAuthorizationMutationData(
   }
 
   if (input.directPublicSender !== undefined) {
-    const fact = buildHostedMemberEmailFactColumns({
+    const fact = await buildHostedMemberEmailFactColumns({
       address: input.directPublicSender?.address ?? null,
       field: HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD,
       memberId: input.memberId,
@@ -647,7 +649,7 @@ function buildHostedMemberEmailAuthorizationMutationData(
   return data;
 }
 
-function buildHostedMemberEmailFactColumns(input: {
+async function buildHostedMemberEmailFactColumns(input: {
   address: string | null;
   field: string;
   label: string;
@@ -673,7 +675,7 @@ function buildHostedMemberEmailFactColumns(input: {
   }
 
   return {
-    addressEncrypted: encryptHostedWebNullableString({
+    addressEncrypted: await encryptHostedWebNullableString({
       field: input.field,
       memberId: input.memberId,
       value: input.address,

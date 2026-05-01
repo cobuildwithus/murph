@@ -199,7 +199,7 @@ expectedSignalDescriptions:
     kind: absolute
     low: -2
     high: 2
-    unit: percentage points
+    unit: "%"
     window: intervention nights vs baseline nights
     confidence: low
     basis: Sleep evidence is mostly adjacent to athletes, cryotherapy, or post-exercise recovery and includes null findings; stable sleep efficiency is the best supported expectation.

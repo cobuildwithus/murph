@@ -81,7 +81,7 @@ describe("Tabata 20/10 signal cards", () => {
           high: 2,
           kind: "absolute",
           low: -2,
-          unit: "percentage points",
+          unit: "%",
           window: "6 weeks",
         }),
         protocolProminence: "context",

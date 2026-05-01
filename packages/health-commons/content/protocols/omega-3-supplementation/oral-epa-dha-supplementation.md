@@ -604,7 +604,7 @@ expectedSignalDescriptions:
     kind: absolute
     low: 1.5
     high: 3.5
-    unit: percentage points
+    unit: "%"
     window: 12 weeks
     confidence: high
     basis: Pooled participant modeling rose about 4.9% to 8.1%, and an 8-week 1 g/day RCT rose about 5.7% to 7.6%; baseline status, dose, formulation, and diet explain much of the spread.

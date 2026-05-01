@@ -1,5 +1,6 @@
 import {
   HOSTED_WORKER_OPTIONAL_VAR_NAMES,
+  HOSTED_WORKER_REQUIRED_VAR_NAMES,
 } from "./worker-optional-vars.ts";
 
 import {
@@ -136,12 +137,20 @@ export function readHostedDeployAutomationEnvironment(
 }
 
 function readHostedWorkerVars(source: EnvSource): Record<string, string> {
-  return Object.fromEntries(
-    HOSTED_WORKER_OPTIONAL_VAR_NAMES.flatMap((key) => {
-      const value = resolveHostedWorkerVar(source, key);
-      return value ? [[key, value] as const] : [];
-    }),
-  );
+  return {
+    ...Object.fromEntries(
+      HOSTED_WORKER_REQUIRED_VAR_NAMES.map((key) => [
+        key,
+        requireConfiguredString(source[key], key),
+      ]),
+    ),
+    ...Object.fromEntries(
+      HOSTED_WORKER_OPTIONAL_VAR_NAMES.flatMap((key) => {
+        const value = resolveHostedWorkerVar(source, key);
+        return value ? [[key, value] as const] : [];
+      }),
+    ),
+  };
 }
 
 function normalizePositiveInteger(

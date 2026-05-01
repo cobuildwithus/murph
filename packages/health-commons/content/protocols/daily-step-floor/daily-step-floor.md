@@ -190,7 +190,7 @@ expectedSignalDescriptions:
     kind: absolute
     low: -1
     high: 2
-    unit: percentage points
+    unit: "%"
     window: 4 weeks
     confidence: low
     basis: 'Daily-step and walking-intervention sleep evidence is mixed, with stronger signals for self-reported sleep quality than wearable sleep efficiency. Source keys: source_artifact:pmid-41352200; source_artifact:pmid-31358470; source_artifact:pmid-26100101.'

@@ -87,6 +87,50 @@ test("Cloudflare hosted runtime crypto context verifies signatures and unwraps i
   ).rejects.toThrow(/unexpected Cloudflare automation key/u);
 });
 
+test("Cloudflare hosted runtime crypto context requires an authority key version in production", async () => {
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const signer = await generateP256SigningKeyPair();
+  const keyVersionName =
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+  const env = {
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+      cloudflareRecipient.privateJwk,
+    ),
+    HOSTED_CRYPTO_ENV: "production",
+  };
+  const ingress = await createSignedWorkerEnvelope({
+    domain: "ingress",
+    keyVersionName,
+    cryptoEnv: "production",
+    publicJwk: cloudflareRecipient.publicJwk,
+    rootKey: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    signer: signer.privateKey,
+    userId: "user-1",
+  });
+  const runtime = await createSignedWorkerEnvelope({
+    domain: "runtime",
+    keyVersionName,
+    cryptoEnv: "production",
+    publicJwk: cloudflareRecipient.publicJwk,
+    rootKey: Uint8Array.from({ length: 32 }, (_, index) => 100 + index),
+    signer: signer.privateKey,
+    userId: "user-1",
+  });
+
+  await expect(
+    unwrapHostedWorkerRuntimeRoots({
+      context: {
+        envelopes: { ingress, runtime },
+        schema: "murph.hosted-runtime-crypto-context.v1",
+        userId: "user-1",
+      },
+      env,
+    }),
+  ).rejects.toThrow(/HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION is required in production/u);
+});
+
 test("Cloudflare hosted runtime crypto context is fetched from signed web control", async () => {
   const cloudflareRecipient = await generateP256EcdhKeyPair();
   const signer = await generateP256SigningKeyPair();
@@ -158,6 +202,7 @@ test("Cloudflare hosted runtime crypto context is fetched from signed web contro
 async function createSignedWorkerEnvelope(input: {
   domain: "ingress" | "runtime";
   keyVersionName: string;
+  cryptoEnv?: string;
   publicJwk: JsonWebKey;
   rootKey: Uint8Array;
   signer: CryptoKey;
@@ -168,7 +213,7 @@ async function createSignedWorkerEnvelope(input: {
   const wrap = await wrapHostedDomainRootKeyWithP256Ecdh({
     encryptionContext: buildHostedDomainRootWrapContext({
       domain: input.domain,
-      env: "test",
+      env: input.cryptoEnv ?? "test",
       recipient: "cloudflare-automation-secret",
       rootKeyId,
       userId: input.userId,

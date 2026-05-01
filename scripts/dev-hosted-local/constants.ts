@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   HOSTED_WORKER_OPTIONAL_VAR_NAMES,
+  HOSTED_WORKER_REQUIRED_VAR_NAMES,
 } from "../../apps/cloudflare/scripts/deploy-automation/worker-optional-vars.ts";
 
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
@@ -89,6 +90,7 @@ export const HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES = [
 ] as const;
 
 export const WRANGLER_VAR_ALLOWLIST = [
+  ...HOSTED_WORKER_REQUIRED_VAR_NAMES,
   ...HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   "ALLOW_LOCAL_INTERNAL_PROXY",
   "LINQ_ATTACHMENT_CDN_BASE_URL",

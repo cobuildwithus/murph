@@ -21,7 +21,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"secret\",\"x\":\"public-x\",\"y\":\"public-y\"}",
-    HOSTED_CRYPTO_ENV: "prod",
+    HOSTED_CRYPTO_ENV: "production",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
@@ -172,6 +172,28 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("rejects non-canonical hosted crypto deploy environment names", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_CRYPTO_ENV: "prod",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain("HOSTED_CRYPTO_ENV must be one of development, preview, or production.");
+  });
+
+  it("requires production hosted crypto env on production deploys", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_CRYPTO_ENV: "preview",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain("production deploys must set HOSTED_CRYPTO_ENV=production.");
+  });
+
   it("rejects malformed deploy contexts before deployment", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "prod",
@@ -183,6 +205,7 @@ describe("deploy preflight helpers", () => {
   it("keeps local development worker deploy preflight tolerant of localhost web origins", () => {
     expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       CF_PUBLIC_BASE_URL: "http://localhost:8787",
+      HOSTED_CRYPTO_ENV: "development",
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       HOSTED_WEB_PRODUCTION_BASE_URL: undefined,

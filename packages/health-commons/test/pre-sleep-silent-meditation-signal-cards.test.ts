@@ -50,7 +50,7 @@ describe("Silent Meditation Before Bed signal cards", () => {
           high: 2,
           kind: "absolute",
           low: 0,
-          unit: "percentage points",
+          unit: "%",
           window: "14 nights vs 7-night baseline",
         }),
         protocolProminence: "context",

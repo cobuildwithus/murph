@@ -251,7 +251,7 @@ describe("hosted-onboarding member-identity-service", () => {
       memberId: member.id,
       phoneLookupKey: "hbidx:phone:v1:member_123",
       phoneNumberVerifiedAt: NOW,
-      privyUserIdEncrypted: encryptHostedWebNullableString({
+      privyUserIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-identity.privy-user-id",
         memberId: member.id,
         value: "did:privy:user_123",
@@ -260,7 +260,7 @@ describe("hosted-onboarding member-identity-service", () => {
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
-      walletAddressEncrypted: encryptHostedWebNullableString({
+      walletAddressEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-identity.wallet-address",
         memberId: member.id,
         value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",

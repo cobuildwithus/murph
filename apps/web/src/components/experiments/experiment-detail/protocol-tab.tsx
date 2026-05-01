@@ -590,7 +590,7 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
           <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
             <MarkdownView
               content={whyItWorksParagraphs.join("\n\n")}
-              className="prose prose-neutral dark:prose-invert max-w-3xl text-pretty [&>h2]:font-serif [&>h2]:text-[19px]/7 [&>h2]:font-normal [&>p]:text-base/7"
+              className="flex max-w-3xl flex-col gap-5 text-pretty [&>h2]:font-serif [&>h2]:text-xl/7 [&>h2]:font-normal [&>h2]:text-foreground [&>h2]:mt-2 [&>h2:first-child]:mt-0 [&>p]:text-base/7 [&>p]:text-foreground [&>p:first-child]:font-serif [&>p:first-child]:text-[19px]/7"
             />
             <MechanismCausalChain experimentId={experiment.id} />
           </div>

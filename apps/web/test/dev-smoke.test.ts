@@ -95,10 +95,7 @@ test("hosted web smoke falls back to the local database url when none is configu
   delete environment.DATABASE_URL;
   delete environment.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
   delete environment.HOSTED_CONTACT_PRIVACY_KEYS;
-  delete environment.HOSTED_WEB_ENCRYPTION_KEY;
-  delete environment.HOSTED_WEB_ENCRYPTION_KEY_VERSION;
-  delete environment.HOSTED_WAKE_ENCRYPTION_KEY;
-  delete environment.HOSTED_WAKE_ENCRYPTION_KEY_VERSION;
+  delete environment.HOSTED_MAILBOX_FINGERPRINT_KEY;
   delete environment.NEXT_PUBLIC_PRIVY_APP_ID;
   const smokeEnv = createHostedWebSmokeEnvironment(environment);
 
@@ -108,10 +105,7 @@ test("hosted web smoke falls back to the local database url when none is configu
   );
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v1");
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
-  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY, "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
-  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY_VERSION, "v1");
-  assert.equal(smokeEnv.HOSTED_WAKE_ENCRYPTION_KEY, "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
-  assert.equal(smokeEnv.HOSTED_WAKE_ENCRYPTION_KEY_VERSION, "v1");
+  assert.equal(smokeEnv.HOSTED_MAILBOX_FINGERPRINT_KEY, "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
   assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_smoke_placeholder1");
   assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID?.length, 25);
 });
@@ -121,19 +115,13 @@ test("hosted web smoke preserves an existing database url", () => {
     DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:1/murph_test",
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v9",
     HOSTED_CONTACT_PRIVACY_KEYS: "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    HOSTED_WEB_ENCRYPTION_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-    HOSTED_WEB_ENCRYPTION_KEY_VERSION: "v8",
-    HOSTED_WAKE_ENCRYPTION_KEY: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-    HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "v7",
+    HOSTED_MAILBOX_FINGERPRINT_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
     NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_real",
   }));
 
   assert.equal(smokeEnv.DATABASE_URL, "postgresql://postgres:postgres@127.0.0.1:1/murph_test");
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v9");
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
-  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY_VERSION, "v8");
-  assert.equal(smokeEnv.HOSTED_WAKE_ENCRYPTION_KEY, "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC");
-  assert.equal(smokeEnv.HOSTED_WAKE_ENCRYPTION_KEY_VERSION, "v7");
+  assert.equal(smokeEnv.HOSTED_MAILBOX_FINGERPRINT_KEY, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
   assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_real");
 });

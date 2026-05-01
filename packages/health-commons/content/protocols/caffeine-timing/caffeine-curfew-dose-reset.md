@@ -144,7 +144,7 @@ expectedSignalDescriptions:
     kind: absolute
     low: 2
     high: 7
-    unit: percentage points
+    unit: "%"
     window: 14 intervention days
     confidence: moderate
     basis: Quantitative caffeine sleep syntheses report about 5-7 percentage-point lower sleep efficiency after caffeine challenges; athlete late-caffeine synthesis reported about 4.9 points lower with sensitivity limitations.

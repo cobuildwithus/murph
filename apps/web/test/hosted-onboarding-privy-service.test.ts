@@ -463,7 +463,7 @@ describe("completeHostedPrivyVerification", () => {
       directPublicSenderLookupKey: null,
       member: existingMember,
       memberId: existingMember.id,
-      verifiedEmailAddressEncrypted: encryptHostedWebNullableString({
+      verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-email-authorization.verified-email",
         memberId: existingMember.id,
         value: "user@example.com",
@@ -570,7 +570,7 @@ describe("completeHostedPrivyVerification", () => {
           memberId: existingMember.id,
           pendingLinqChatIdEncrypted: null,
           pendingLinqRecipientPhoneEncrypted: null,
-          telegramUserIdEncrypted: encryptHostedWebNullableString({
+          telegramUserIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-routing.telegram-user-id",
             memberId: existingMember.id,
             value: "456",
@@ -586,7 +586,7 @@ describe("completeHostedPrivyVerification", () => {
                 memberId: existingMember.id,
                 pendingLinqChatIdEncrypted: null,
                 pendingLinqRecipientPhoneEncrypted: null,
-                telegramUserIdEncrypted: encryptHostedWebNullableString({
+                telegramUserIdEncrypted: await encryptHostedWebNullableString({
                   field: "hosted-member-routing.telegram-user-id",
                   memberId: existingMember.id,
                   value: "456",
@@ -1303,7 +1303,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
               return inviteMember;
             }
 
-            return projectHostedMemberFindUniqueResult({
+            return await projectHostedMemberFindUniqueResult({
               include,
               member: inviteMember,
               routingRecordsByMemberId,
@@ -1350,7 +1350,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
             return result;
           }
 
-          return projectHostedMemberFindUniqueResult({
+          return await projectHostedMemberFindUniqueResult({
             include,
             member: result,
             routingRecordsByMemberId,
@@ -1503,7 +1503,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
       }) => {
         const invite = await hostedInvite?.findUnique?.({ where: {} });
         const inviteMember = (invite as { member?: unknown } | null)?.member ?? null;
-        const inviteIdentity = readMemberIdentity(inviteMember);
+        const inviteIdentity = await readMemberIdentity(inviteMember);
         if (
           inviteIdentity &&
           (where.memberId === inviteIdentity.memberId ||
@@ -1515,7 +1515,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         }
 
         const member = await hostedMember?.findUnique?.({ where });
-        const identity = readMemberIdentity(member);
+        const identity = await readMemberIdentity(member);
         return identity && include?.member ? { ...identity, member } : identity;
       }),
       upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
@@ -1551,7 +1551,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
               where,
             },
           ]);
-          const identity = readMemberIdentity(result);
+          const identity = await readMemberIdentity(result);
 
           if (!identity) {
             return result;
@@ -1796,7 +1796,7 @@ function readHostedMemberEmailAuthorizationDelegate(
   };
 }
 
-function projectHostedMemberFindUniqueResult(input: {
+async function projectHostedMemberFindUniqueResult(input: {
   include?: HostedMemberFindUniqueInclude;
   member: Record<string, unknown>;
   routingRecordsByMemberId: Map<string, Record<string, unknown>>;
@@ -1805,7 +1805,7 @@ function projectHostedMemberFindUniqueResult(input: {
   const memberId = typeof input.member.id === "string" ? input.member.id : null;
   const identity = isPlainRecord(input.member.identity)
     ? input.member.identity
-    : readMemberIdentity(input.member);
+    : await readMemberIdentity(input.member);
   const routing = isPlainRecord(input.member.routing)
     ? input.member.routing
     : memberId
@@ -1851,7 +1851,7 @@ function projectHostedMemberFindUniqueResult(input: {
   };
 }
 
-function readMemberIdentity(member: unknown) {
+async function readMemberIdentity(member: unknown) {
   if (!isPlainRecord(member)) {
     return null;
   }
@@ -1884,7 +1884,7 @@ function readMemberIdentity(member: unknown) {
     maskedPhoneNumberHint:
       typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
     memberId,
-    phoneNumberEncrypted: encryptHostedWebNullableString({
+    phoneNumberEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.phone-number",
       memberId,
       value: phoneNumber,
@@ -1892,7 +1892,7 @@ function readMemberIdentity(member: unknown) {
     phoneLookupKey,
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
-    privyUserIdEncrypted: encryptHostedWebNullableString({
+    privyUserIdEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.privy-user-id",
       memberId,
       value: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
@@ -1906,7 +1906,7 @@ function readMemberIdentity(member: unknown) {
     signupPhoneCodeSentAt: null,
     signupPhoneNumberEncrypted: null,
     updatedAt: identity.updatedAt instanceof Date ? identity.updatedAt : NOW,
-    walletAddressEncrypted: encryptHostedWebNullableString({
+    walletAddressEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.wallet-address",
       memberId,
       value: typeof identity.walletAddress === "string" ? identity.walletAddress : null,

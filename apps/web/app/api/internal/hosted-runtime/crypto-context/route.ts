@@ -5,8 +5,23 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
+  const prisma = getPrisma();
+  const member = await prisma.hostedMember.findUnique({
+    select: { billingStatus: true, suspendedAt: true },
+    where: { id: userId },
+  });
+  if (!member || member.billingStatus !== "active" || member.suspendedAt !== null) {
+    return Response.json({ error: "hosted_member_not_active" }, { status: 403 });
+  }
+  const workspace = await prisma.hostedWorkspace.findUnique({
+    select: { userId: true },
+    where: { userId },
+  });
+  if (!workspace) {
+    return Response.json({ error: "hosted_workspace_not_provisioned" }, { status: 403 });
+  }
   const context = await readHostedRuntimeCryptoContextForWorker({
-    prisma: getPrisma(),
+    prisma,
     userId,
   });
   return jsonOk({ ...context, fetchedAt: new Date().toISOString() });

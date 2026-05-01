@@ -70,7 +70,7 @@ describe("ensureHostedMemberForPhone", () => {
       id: "member_123",
       suspendedAt: null,
     });
-    const currentIdentity = makeIdentityRecord({
+    const currentIdentity = await makeIdentityRecord({
       memberId: "member_123",
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_existing",
@@ -179,7 +179,7 @@ describe("ensureHostedMemberForPhone", () => {
 
   it("creates new members with blind phone lookup storage plus encrypted signup phone state", async () => {
     const identityUpsert = vi.fn().mockResolvedValue(
-      makeIdentityRecord({
+      await makeIdentityRecord({
         memberId: "member_123",
         phoneLookupKey: "hbidx:phone:v1:new",
         signupPhoneNumber: "+15551234567",
@@ -240,7 +240,7 @@ describe("ensureHostedMemberForPhone", () => {
       id: "member_123",
       suspendedAt: null,
     });
-    const currentIdentity = makeIdentityRecord({
+    const currentIdentity = await makeIdentityRecord({
       memberId: "member_123",
       phoneLookupKey: "hbidx:phone:v1:existing",
       signupPhoneNumber: "+15550001111",
@@ -337,7 +337,7 @@ describe("hosted-onboarding member-service barrel", () => {
 describe("prepareHostedInvitePhoneCode", () => {
   it("returns a stored phone for the Privy client send and records the transient send attempt", async () => {
     const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
         memberId: "member_123",
         signupPhoneNumber: "+15551234567",
       })),
@@ -381,7 +381,7 @@ describe("prepareHostedInvitePhoneCode", () => {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
           memberId: "member_123",
           signupPhoneNumber: null,
         })),
@@ -403,7 +403,7 @@ describe("prepareHostedInvitePhoneCode", () => {
 
   it("reuses the canonical verified phone hint after the signup-only phone has been cleared", async () => {
     const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
         memberId: "member_123",
         phoneNumber: "+15557654321",
         signupPhoneNumber: null,
@@ -439,7 +439,7 @@ describe("prepareHostedInvitePhoneCode", () => {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
           memberId: "member_123",
           signupPhoneCodeSentAt: new Date("2026-04-07T01:00:30.000Z"),
           signupPhoneNumber: "+15551234567",
@@ -469,7 +469,7 @@ describe("prepareHostedInvitePhoneCode", () => {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
           memberId: "member_123",
           signupPhoneCodeSendAttemptId: "hbpc_in_flight",
           signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:30.000Z"),
@@ -497,7 +497,7 @@ describe("prepareHostedInvitePhoneCode", () => {
 describe("confirmHostedInvitePhoneCode", () => {
   it("clears the pending attempt after a successful Privy send confirmation", async () => {
     const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
         memberId: "member_123",
         signupPhoneCodeSendAttemptId: "hbpc_confirm",
         signupPhoneCodeSendAttemptStartedAt: NOW,
@@ -545,7 +545,7 @@ describe("confirmHostedInvitePhoneCode", () => {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
           memberId: "member_123",
           signupPhoneCodeSendAttemptId: "hbpc_current",
           signupPhoneCodeSendAttemptStartedAt: NOW,
@@ -574,7 +574,7 @@ describe("confirmHostedInvitePhoneCode", () => {
 describe("abortHostedInvitePhoneCode", () => {
   it("clears only the pending attempt after a failed Privy send", async () => {
     const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
         memberId: "member_123",
         signupPhoneCodeSendAttemptId: "hbpc_abort",
         signupPhoneCodeSendAttemptStartedAt: NOW,
@@ -621,7 +621,7 @@ describe("abortHostedInvitePhoneCode", () => {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
           memberId: "member_123",
           signupPhoneCodeSendAttemptId: "hbpc_current",
           signupPhoneCodeSendAttemptStartedAt: NOW,
@@ -774,7 +774,7 @@ function asRootPrisma<T extends object>(tx: T): T & {
   };
 }
 
-function makeIdentityRecord(input: {
+async function makeIdentityRecord(input: {
   memberId: string;
   phoneLookupKey?: string;
   phoneNumber?: string | null;
@@ -795,13 +795,13 @@ function makeIdentityRecord(input: {
     maskedPhoneNumberHint: "*** 4567",
     memberId: input.memberId,
     phoneLookupKey: input.phoneLookupKey ?? "hbidx:phone:v1:existing",
-    phoneNumberEncrypted: encryptHostedWebNullableString({
+    phoneNumberEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.phone-number",
       memberId: input.memberId,
       value: input.phoneNumber ?? null,
     }),
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt ?? null,
-    privyUserIdEncrypted: encryptHostedWebNullableString({
+    privyUserIdEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.privy-user-id",
       memberId: input.memberId,
       value: input.privyUserId ?? null,
@@ -810,12 +810,12 @@ function makeIdentityRecord(input: {
     signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId ?? null,
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt ?? null,
     signupPhoneCodeSentAt: input.signupPhoneCodeSentAt ?? null,
-    signupPhoneNumberEncrypted: encryptHostedWebNullableString({
+    signupPhoneNumberEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.signup-phone-number",
       memberId: input.memberId,
       value: input.signupPhoneNumber ?? null,
     }),
-    walletAddressEncrypted: encryptHostedWebNullableString({
+    walletAddressEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.wallet-address",
       memberId: input.memberId,
       value: input.walletAddress ?? null,

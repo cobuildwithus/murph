@@ -25,6 +25,15 @@ import {
   HOSTED_WORKER_OPTIONAL_VAR_NAMES,
 } from "../scripts/deploy-automation/worker-optional-vars.ts";
 
+const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+  HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+    "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
+  HOSTED_CRYPTO_ENV: "production",
+} as const;
+
 describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking unrelated worker vars or parser selectors", () => {
     expect(buildHostedRunnerContainerEnv({
@@ -568,8 +577,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       },
       platformEnv: {
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-        HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       } as Record<string, string>,
@@ -580,8 +587,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         VERCEL_AI_API_KEY: "sk-worker",
       },
       platformEnv: {
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-        HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
       resolvedConfig: {
@@ -599,7 +605,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
         VERCEL_AI_API_KEY: "sk-worker",
@@ -607,11 +612,12 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       runnerSecrets: {},
     })).toMatchObject({
       forwardedEnv: {
-        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         VERCEL_AI_API_KEY: "sk-worker",
       },
       platformEnv: {
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
+        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
       },
       userEnv: {},
     });
@@ -797,7 +803,6 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
     })).toEqual({
-      HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
       VERCEL_AI_API_KEY: "sk-test",
     });
   });
@@ -890,6 +895,7 @@ describe("hosted deploy automation device-sync surface", () => {
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_WORKER_NAME: "murph-runner",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
 
     expect(deployEnv.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(

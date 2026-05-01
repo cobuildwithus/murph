@@ -127,6 +127,9 @@ async function unwrapWorkerDomainRoot(input: {
     envelope: input.envelope,
     userId: input.userId,
   });
+  if (!input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION && isHostedCryptoProductionEnv(input.env.HOSTED_CRYPTO_ENV)) {
+    throw new Error("HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION is required in production.");
+  }
   if (
     input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION
     && input.envelope.authoritySignature.keyVersionName
@@ -169,6 +172,10 @@ async function unwrapWorkerDomainRoot(input: {
     throw new Error(`Hosted ${input.domain} root envelope decrypted to an invalid root length.`);
   }
   return { envelope: input.envelope, rootKey };
+}
+
+function isHostedCryptoProductionEnv(value: string): boolean {
+  return value === "production";
 }
 
 function assertEnvelopeMatches(input: {

@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -24,12 +24,12 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
-import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import {
   decryptHostedMailboxNullableString,
   encryptHostedMailboxNullableString,
 } from "./encryption";
+import { hashHostedMailboxStoredPayload } from "./fingerprint";
 
 export {
   HOSTED_MAILBOX_KINDS,
@@ -366,7 +366,7 @@ export async function appendHostedMailboxEnvelopeTx(input: {
       userId: envelope.userId,
     },
   });
-  const encodedPayload = encodeHostedMailboxStoredPayload({
+  const encodedPayload = await encodeHostedMailboxStoredPayload({
     userId: envelope.userId,
     value: envelope,
   });
@@ -780,21 +780,21 @@ export function projectHostedMailboxPayload(
   };
 }
 
-export function decodeHostedMailboxStoredPayload(input: {
+export async function decodeHostedMailboxStoredPayload(input: {
   payloadCiphertext?: string | null;
   payloadInlineCiphertext?: string | null;
   userId: string;
-}): unknown | null {
+}): Promise<unknown | null> {
   const inlineCiphertext = normalizeNullableString(input.payloadInlineCiphertext);
   const refCiphertext = normalizeNullableString(input.payloadCiphertext);
   const serialized = inlineCiphertext
-    ? decryptHostedMailboxNullableString({
+    ? await decryptHostedMailboxNullableString({
         field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
         userId: input.userId,
         value: inlineCiphertext,
       })
     : refCiphertext
-      ? decryptHostedMailboxNullableString({
+      ? await decryptHostedMailboxNullableString({
           field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
           userId: input.userId,
           value: refCiphertext,
@@ -824,10 +824,10 @@ const HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD = "hosted-mailbox-inline-payload";
 const HOSTED_MAILBOX_REF_PAYLOAD_FIELD = "hosted-mailbox-ref-payload";
 const HOSTED_MAILBOX_PAYLOAD_REF_PREFIX = "hosted-mailbox-payload:";
 
-function encodeHostedMailboxStoredPayload(input: {
+async function encodeHostedMailboxStoredPayload(input: {
   userId: string;
   value: unknown;
-}): EncodedHostedMailboxStoredPayload {
+}): Promise<EncodedHostedMailboxStoredPayload> {
   const serialized = JSON.stringify(input.value);
 
   if (typeof serialized !== "string" || serialized.length === 0) {
@@ -841,7 +841,7 @@ function encodeHostedMailboxStoredPayload(input: {
   });
 
   if (payloadBytes <= HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES) {
-    const payloadInlineCiphertext = encryptHostedMailboxNullableString({
+    const payloadInlineCiphertext = await encryptHostedMailboxNullableString({
       field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
       userId: input.userId,
       value: serialized,
@@ -859,7 +859,7 @@ function encodeHostedMailboxStoredPayload(input: {
     };
   }
 
-  const payloadRefCiphertext = encryptHostedMailboxNullableString({
+  const payloadRefCiphertext = await encryptHostedMailboxNullableString({
     field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
     userId: input.userId,
     value: serialized,
@@ -942,25 +942,6 @@ function hasHostedMailboxDedupeConflict(input: {
     || normalizeNullableString(input.existing.payloadHash) !== normalizeNullableString(input.payloadHash)
     || input.existing.payloadSchema !== input.payloadSchema
   );
-}
-
-function hashHostedMailboxStoredPayload(input: {
-  serialized: string;
-  userId: string;
-}): string {
-  const encryptionKey = normalizeNullableString(process.env.HOSTED_WAKE_ENCRYPTION_KEY);
-
-  if (!encryptionKey) {
-    throw new TypeError("HOSTED_WAKE_ENCRYPTION_KEY must be configured for hosted mailbox payload fingerprinting.");
-  }
-
-  return `hmac-sha256:${createHmac("sha256", decodeHostedEncryptionKey(encryptionKey))
-    .update("murph.hosted-mailbox-payload-fingerprint.v1", "utf8")
-    .update("\0", "utf8")
-    .update(input.userId, "utf8")
-    .update("\0", "utf8")
-    .update(input.serialized, "utf8")
-    .digest("base64url")}`;
 }
 
 function resolveHostedMailboxPayloadRef(payloadRef: string): string {

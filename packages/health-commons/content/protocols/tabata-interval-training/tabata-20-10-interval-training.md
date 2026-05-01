@@ -496,7 +496,7 @@ expectedSignalDescriptions:
       kind: absolute
       low: -2
       high: 2
-      unit: percentage points
+      unit: "%"
       window: 6 weeks
       confidence: low
       basis: "Sleep is included as a recovery/context signal; wearable sleep-efficiency changes from a small twice-weekly interval dose are likely modest and bidirectional."
