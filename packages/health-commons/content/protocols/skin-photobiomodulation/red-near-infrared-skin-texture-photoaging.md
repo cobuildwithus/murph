@@ -239,6 +239,15 @@ protocol:
   durationMinutes:
     min: 10
     max: 10
+  sessionShape:
+    label: One mask session
+    segments:
+    - label: red/NIR exposure
+      kind: stimulus
+      durationMinutes: 10
+    ticks:
+    - "0"
+    - "10 min"
   interventionSessionsMinimum: 24
   interventionSessionsTarget: 30
   steps:

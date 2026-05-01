@@ -22,6 +22,11 @@ categories:
 - circulation
 - comfort
 - murph-canonical
+media:
+- kind: image
+  relativePath: design-assets/hero-pneumatic-compression-pants.jpg
+  mediaType: image/jpeg
+  caption: Pneumatic Compression Pants
 relations:
 - type: parent_family
   target: experiment_family:intermittent-pneumatic-compression
@@ -182,6 +187,15 @@ protocol:
   durationMinutes:
     min: 20
     max: 30
+  sessionShape:
+    label: One session
+    segments:
+    - label: compression
+      kind: stimulus
+      durationMinutes: 20
+    ticks:
+    - "0"
+    - "20 min minimum"
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:

@@ -148,6 +148,51 @@ protocol:
   durationMinutes:
     min: 35
     max: 45
+  sessionShape:
+    label: One session
+    segments:
+      - label: warm-up
+        kind: preparation
+        durationMinutes: 10
+      - label: hard
+        kind: stimulus
+        durationMinutes: 4
+      - label: easy
+        kind: recovery
+        durationMinutes: 3
+      - label: hard
+        kind: stimulus
+        durationMinutes: 4
+      - label: easy
+        kind: recovery
+        durationMinutes: 3
+      - label: hard
+        kind: stimulus
+        durationMinutes: 4
+      - label: easy
+        kind: recovery
+        durationMinutes: 3
+      - label: hard
+        kind: stimulus
+        durationMinutes: 4
+      - label: cool-down
+        kind: cooldown
+        durationMinutes: 5
+    summarySegments:
+      - label: warm-up
+        kind: preparation
+        durationMinutes: 10
+      - label: 4 × hard / easy
+        kind: stimulus
+        durationMinutes: 25
+      - label: cool-down
+        kind: cooldown
+        durationMinutes: 5
+    ticks:
+      - "0"
+      - "10 min"
+      - "35 min"
+      - "40 min"
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:
@@ -203,6 +248,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:estimated-vo2max
     expected: up_or_stable
+    expectedDirection: up_or_stable
     protocolProminence: focus
     estimatedChange:
       kind: relative_percent
@@ -216,6 +262,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: down_or_stable
+    expectedDirection: down_or_stable
     protocolProminence: focus
     estimatedChange:
       kind: absolute
@@ -229,6 +276,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:morning-blood-pressure
     expected: down_or_stable
+    expectedDirection: down_or_stable
     protocolProminence: focus
     estimatedChange:
       kind: absolute
@@ -242,6 +290,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: mixed_or_contextual
+    expectedDirection: mixed_or_contextual
     protocolProminence: context
     estimatedChange:
       kind: mixed_or_contextual
@@ -252,6 +301,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: mixed_or_contextual
+    expectedDirection: mixed_or_contextual
     protocolProminence: context
     estimatedChange:
       kind: mixed_or_contextual

@@ -124,6 +124,9 @@ function toExperimentProtocolTabProjection(
     protocolFacts: protocolTab.protocolFacts.map(cleanExperimentProtocolFact),
     protocolTips: cleanHealthCommonsUserFacingCopyList(protocolTab.protocolTips),
     safety: cleanExperimentSafety(protocolTab.safety),
+    ...(protocolTab.sessionShape
+      ? { sessionShape: cleanExperimentSessionShape(protocolTab.sessionShape) }
+      : {}),
     title: cleanHealthCommonsUserFacingCopy(protocolTab.title),
     whyItWorks: cleanHealthCommonsUserFacingCopy(protocolTab.whyItWorks),
   };
@@ -135,6 +138,29 @@ function cleanExperimentMechanismChainStep(
   return {
     content: cleanHealthCommonsUserFacingCopy(step.content),
     label: cleanHealthCommonsUserFacingCopy(step.label),
+  };
+}
+
+function cleanExperimentSessionShape(
+  shape: NonNullable<HealthCommonsWebExperimentProtocolTab["sessionShape"]>,
+): NonNullable<HealthCommonsWebExperimentProtocolTab["sessionShape"]> {
+  return {
+    ...(shape.label ? { label: cleanHealthCommonsUserFacingCopy(shape.label) } : {}),
+    segments: shape.segments.map(cleanExperimentSessionShapeSegment),
+    ...(shape.summarySegments
+      ? { summarySegments: shape.summarySegments.map(cleanExperimentSessionShapeSegment) }
+      : {}),
+    ...(shape.ticks ? { ticks: cleanHealthCommonsUserFacingCopyList(shape.ticks) } : {}),
+  };
+}
+
+function cleanExperimentSessionShapeSegment(
+  segment: NonNullable<HealthCommonsWebExperimentProtocolTab["sessionShape"]>["segments"][number],
+): NonNullable<HealthCommonsWebExperimentProtocolTab["sessionShape"]>["segments"][number] {
+  return {
+    durationMinutes: segment.durationMinutes,
+    kind: segment.kind,
+    label: cleanHealthCommonsUserFacingCopy(segment.label),
   };
 }
 

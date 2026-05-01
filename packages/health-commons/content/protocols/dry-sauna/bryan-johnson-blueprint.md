@@ -147,6 +147,22 @@ protocol:
   durationMinutes:
     min: 20
     max: 20
+  sessionShape:
+    label: Per day
+    segments:
+      - label: workout
+        kind: context
+        durationMinutes: 30
+      - label: sauna 93 °C
+        kind: stimulus
+        durationMinutes: 20
+      - label: rehydrate
+        kind: cooldown
+        durationMinutes: 10
+    ticks:
+      - start
+      - after workout
+      - end
   temperatureC:
     min: 93
     max: 93
@@ -206,6 +222,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Possible change
+    expectedDirection: mixed_or_contextual
     protocolProminence: focus
     estimatedChange:
       kind: absolute
@@ -219,6 +236,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:morning-blood-pressure
     expected: Could trend lower
+    expectedDirection: down_or_stable
     protocolProminence: focus
     estimatedChange:
       kind: absolute
@@ -232,6 +250,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Worth watching
+    expectedDirection: mixed_or_contextual
     protocolProminence: focus
     estimatedChange:
       kind: mixed_or_contextual
@@ -242,6 +261,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:estimated-vo2max
     expected: Could improve
+    expectedDirection: up_or_stable
     protocolProminence: context
     estimatedChange:
       kind: absolute

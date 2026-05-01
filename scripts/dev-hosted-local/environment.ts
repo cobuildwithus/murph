@@ -183,14 +183,6 @@ export function mergeCloudflareLocalEnv(input: {
   const callbackSigningPublicJwkJson = JSON.stringify(
     toPublicEcP256Jwk(parsePrivateEcP256Jwk(callbackSigningPrivateJwkJson)),
   );
-  const hostedWakeEncryptionKeyVersion =
-    readHostedLocalKey("HOSTED_WAKE_ENCRYPTION_KEY_VERSION") ?? "v1";
-  const hostedWakeEncryptionKey =
-    readHostedLocalKey("HOSTED_WAKE_ENCRYPTION_KEY") ?? createEnvelopeKey();
-  const hostedWebEncryptionKeyVersion =
-    readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEY_VERSION") ?? "v1";
-  const hostedWebEncryptionKey =
-    readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEY") ?? createEnvelopeKey();
   const hostedDeviceRoutingIndexKey =
     readHostedLocalKey("HOSTED_DEVICE_ROUTING_INDEX_KEY") ?? createEnvelopeKey();
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
@@ -256,21 +248,11 @@ export function mergeCloudflareLocalEnv(input: {
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
       ?? workerOrigin,
-    HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
-    HOSTED_WAKE_ENCRYPTION_KEY_VERSION: hostedWakeEncryptionKeyVersion,
-    HOSTED_WAKE_ENCRYPTION_KEYRING_JSON:
-      readHostedLocalKey("HOSTED_WAKE_ENCRYPTION_KEYRING_JSON")
-      ?? buildEncodedKeyringJson(hostedWakeEncryptionKeyVersion, hostedWakeEncryptionKey),
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackSigningKeyId,
     HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON:
       readHostedLocalKey("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON")
       ?? buildJsonKeyringJson(callbackSigningKeyId, callbackSigningPublicJwkJson),
-    HOSTED_WEB_ENCRYPTION_KEY: hostedWebEncryptionKey,
-    HOSTED_WEB_ENCRYPTION_KEY_VERSION: hostedWebEncryptionKeyVersion,
-    HOSTED_WEB_ENCRYPTION_KEYRING_JSON:
-      readHostedLocalKey("HOSTED_WEB_ENCRYPTION_KEYRING_JSON")
-      ?? buildEncodedKeyringJson(hostedWebEncryptionKeyVersion, hostedWebEncryptionKey),
     HOSTED_WEB_BASE_URL: webOrigin,
   };
 
@@ -346,10 +328,6 @@ function stripHostedLocalGeneratedStateEnv(env: Record<string, string | undefine
 
 function isTruthy(value: string | undefined): boolean {
   return value === "1" || value?.toLowerCase() === "true";
-}
-
-function buildEncodedKeyringJson(keyId: string, encodedKey: string): string {
-  return JSON.stringify({ [keyId]: encodedKey });
 }
 
 function buildJsonKeyringJson(keyId: string, jsonValue: string): string {
@@ -446,11 +424,6 @@ export function buildHostedLocalDevOverrides(
     ?? (callbackPublicJwkJson && callbackKeyId
       ? buildJsonKeyringJson(callbackKeyId, callbackPublicJwkJson)
       : null);
-  const hostedWakeEncryptionKey = cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY?.trim();
-  const hostedWakeEncryptionKeyVersion =
-    cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION?.trim();
-  const hostedWakeEncryptionKeyringJson =
-    cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON?.trim();
 
   return {
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,
@@ -466,24 +439,6 @@ export function buildHostedLocalDevOverrides(
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_DEVICE_ROUTING_INDEX_KEY"),
-    ...(hostedWakeEncryptionKey
-      ? {
-        HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
-      }
-      : {}),
-    ...(hostedWakeEncryptionKeyVersion
-      ? {
-        HOSTED_WAKE_ENCRYPTION_KEY_VERSION: hostedWakeEncryptionKeyVersion,
-      }
-      : {}),
-    ...(hostedWakeEncryptionKeyringJson
-      ? {
-        HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: hostedWakeEncryptionKeyringJson,
-      }
-      : {}),
-    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_WEB_ENCRYPTION_KEY"),
-    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_WEB_ENCRYPTION_KEY_VERSION"),
-    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_WEB_ENCRYPTION_KEYRING_JSON"),
     HOSTED_WEB_BASE_URL: webOrigin,
     ...(!cloudflareDevVars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK?.trim()
       && cloudflareAutomationPrivateJwkJson

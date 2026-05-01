@@ -45,7 +45,7 @@ describe("opaque storage path rotation", () => {
     expect(await reader.readRunnerSecrets(userId)).toBeNull();
   });
 
-  it("requires a rewrite before runner secrets survive platform root-key rotation", async () => {
+  it("reads runner secrets across runtime root-key rotation when the old root remains in the keyring", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(5);
     const nextKey = createTestRootKey(6);
@@ -67,13 +67,7 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await rotatedReader.readRunnerSecrets(userId)).toBeNull();
-    expect(await createHostedRunnerSecretsReader({
-      bucket,
-      key: oldKey,
-      keyId: "old",
-      keysById: { next: nextKey, old: oldKey },
-    }).readRunnerSecrets(userId)).toEqual(plaintext);
+    expect(await rotatedReader.readRunnerSecrets(userId)).toEqual(plaintext);
   });
 
   it("ignores removed raw-path per-user artifacts", async () => {
@@ -121,10 +115,12 @@ describe("opaque storage path rotation", () => {
 
     expect(await store.readArtifact(sha256)).toBeNull();
     await store.deleteArtifact(sha256);
-    expectOpaqueStrings(bucket.deleted, [objectKey]);
+    expect(bucket.deleted).toHaveLength(1);
+    expect(bucket.deleted[0]).not.toBe(objectKey);
+    expectOpaqueStrings(bucket.deleted, [objectKey, userId, sha256]);
   });
 
-  it("requires a rewrite before per-user artifacts survive platform root-key rotation", async () => {
+  it("reads per-user artifacts across runtime root-key rotation when the old root remains in the keyring", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(11);
     const nextKey = createTestRootKey(12);
@@ -159,17 +155,10 @@ describe("opaque storage path rotation", () => {
       userId,
     });
 
-    expect(await rotatedStore.readArtifact(sha256)).toBeNull();
+    expect(await rotatedStore.readArtifact(sha256)).toEqual(plaintext);
     await rotatedStore.deleteArtifact(sha256);
     expect(await rotatedStore.readArtifact(sha256)).toBeNull();
     expect(bucket.deleted).toHaveLength(1);
-    expect(await createHostedArtifactStore({
-      bucket,
-      key: oldKey,
-      keyId: "old",
-      keysById: { next: nextKey, old: oldKey },
-      userId,
-    }).readArtifact(sha256)).toEqual(plaintext);
   });
 
   it("requires a rewrite before hosted raw email messages survive platform root-key rotation", async () => {

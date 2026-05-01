@@ -671,7 +671,7 @@ describe("cloudflare worker routes", () => {
       code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
       error: "Browser vault replica was not found.",
     });
-    expect(env.__bucketStore.getCalls.filter((key) => key.startsWith("users/browser-vault-replicas/"))).toEqual([
+    expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([
       replicaRef.objectKey,
     ]);
   });
@@ -704,7 +704,7 @@ describe("cloudflare worker routes", () => {
       code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
       error: "Browser vault replica was not found.",
     });
-    expect(env.__bucketStore.getCalls.filter((key) => key.startsWith("users/browser-vault-replicas/"))).toEqual([]);
+    expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([]);
   });
 
   it("nudges the hosted runner without enqueuing a normal-path wake", async () => {

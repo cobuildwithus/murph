@@ -7,6 +7,7 @@ title: "Finnish Dry Sauna"
 summary: "Traditional dry sauna at steady, tolerable heat, where the body opens blood vessels near the skin and the heart pumps harder to move heat out while defending core temperature."
 status: "field-testing"
 quality: "usable"
+preferredRouteId: "finnish-sauna"
 aliases:
   - "dry sauna protocol"
   - "Finnish sauna protocol"
@@ -59,6 +60,23 @@ protocol:
   durationMinutes:
     min: 5
     max: 20
+  sessionShape:
+    label: One session
+    segments:
+      - label: settle
+        kind: preparation
+        durationMinutes: 2
+      - label: sauna 80–100 °C
+        kind: stimulus
+        durationMinutes: 18
+      - label: cool-down
+        kind: cooldown
+        durationMinutes: 3
+    ticks:
+      - "0"
+      - "2 min"
+      - "20 min"
+      - "23 min"
   temperatureC:
     min: 70
     max: 90
@@ -140,6 +158,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:morning-blood-pressure"
     expected: "Small drop possible"
+    expectedDirection: "down_or_stable"
     protocolProminence: "focus"
     estimatedChange:
       kind: "absolute"
@@ -153,6 +172,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:resting-heart-rate"
     expected: "Small change possible"
+    expectedDirection: "mixed_or_contextual"
     protocolProminence: "focus"
     estimatedChange:
       kind: "absolute"
@@ -166,6 +186,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:hrv-rmssd"
     expected: "May rise or fall"
+    expectedDirection: "mixed_or_contextual"
     protocolProminence: "context"
     estimatedChange:
       kind: "mixed_or_contextual"
@@ -176,6 +197,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:sleep-efficiency"
     expected: "Could rise slightly"
+    expectedDirection: "mixed_or_contextual"
     protocolProminence: "context"
     estimatedChange:
       kind: "absolute"
@@ -189,6 +211,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:deep-sleep-minutes"
     expected: "Algorithm-sensitive"
+    expectedDirection: "mixed_or_contextual"
     protocolProminence: "context"
     estimatedChange:
       kind: "mixed_or_contextual"

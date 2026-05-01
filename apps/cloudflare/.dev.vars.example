@@ -2,24 +2,14 @@
 # This local scaffold mirrors the current hosted architecture:
 # - Vercel OIDC authenticates the web -> Cloudflare control edge.
 # - Dedicated callback signing keys authenticate the narrow Cloudflare -> web callback seam.
-# - Hosted bundle/env/journal objects use the platform envelope key.
-# - Managed user provisioning creates automation + recovery recipients today and may add tee-automation later.
-# - Future browser-generated user-unlock recipients are intentionally not worker env material and are preserved on envelope reconciliation.
+# - Runtime plaintext roots are fetched from hosted-web as signed per-user ingress/runtime envelopes.
+# - Cloudflare unwraps only the cloudflare-automation-secret recipient and never stores canonical user roots.
 
-HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=replace-me-with-a-base64-32-byte-key
-HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID=v1
-HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID=automation:v1
-HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK={"kty":"EC","crv":"P-256","d":"replace-me-base64url-private-scalar","x":"replace-me-base64url-x-coordinate","y":"replace-me-base64url-y-coordinate"}
-HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK={"kty":"EC","crv":"P-256","x":"replace-me-base64url-x-coordinate","y":"replace-me-base64url-y-coordinate"}
-HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID=recovery:v1
-HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK={"kty":"EC","crv":"P-256","x":"replace-me-base64url-x-coordinate","y":"replace-me-base64url-y-coordinate"}
-# Optional overlapping private-key rotation set. Entries are keyed by recipient key id.
-# HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON={"automation:v0":{"kty":"EC","crv":"P-256","d":"replace-me-base64url-private-scalar","x":"replace-me-base64url-x-coordinate","y":"replace-me-base64url-y-coordinate"}}
-# Optional overlapping platform-envelope rotation set. Entries are keyed by platform key id.
-# HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON={"v0":"replace-me-with-a-base64-32-byte-key"}
-# Optional future enclave-only automation recipient. Configure both fields together or leave both unset.
-# HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID=tee-automation:v1
-# HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK={"kty":"EC","crv":"P-256","x":"replace-me-base64url-x-coordinate","y":"replace-me-base64url-y-coordinate"}
+HOSTED_CRYPTO_ENV=development
+HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION=projects/your-gcp-project/locations/global/keyRings/murph-hosted/cryptoKeys/hosted-authority-sign/cryptoKeyVersions/1
+HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----\nreplace-me\n-----END PUBLIC KEY-----"
+HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
+HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK={"kty":"EC","crv":"P-256","d":"replace-me-base64url-private-scalar","x":"replace-me-base64url-x-coordinate","y":"replace-me-base64url-y-coordinate"}
 
 HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=replace-me-with-your-vercel-team-slug
 HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=replace-me-with-your-vercel-project-name

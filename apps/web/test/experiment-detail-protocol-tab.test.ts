@@ -145,6 +145,8 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("Sleep Efficiency");
     expect(markup).toContain("Deep Sleep");
+    expect(markup).toContain("sauna 80–100 °C");
+    expect(markup).toContain("23 min");
     expect(researchMarkup).toContain("Bottom line");
     expect(researchMarkup).toContain("Mixed");
     expect(researchMarkup).not.toContain("Evidence backbone and claim calibration");
@@ -169,6 +171,8 @@ describe("ProtocolTab", () => {
     expect(markup).toContain('data-card="Resting Heart Rate"');
     expect(markup).toContain('data-card="Morning Blood Pressure"');
     expect(markup).toContain("VO₂ Max");
+    expect(markup).toContain("sauna 93 °C");
+    expect(markup).toContain("after workout");
   });
 
   it("prioritizes aerobic adaptation signals for Norwegian 4x4 and leaves slower proxies in context", () => {
@@ -192,6 +196,8 @@ describe("ProtocolTab", () => {
     expect(markup).toContain('data-card="Resting Heart Rate"');
     expect(markup).toContain('data-card="Morning Blood Pressure"');
     expect(markup).toContain("4-minute rep is dose");
+    expect(markup).toContain("4 × hard / easy");
+    expect(markup).toContain("35 min");
     expect(markup).toContain("During each rep");
     expect(markup).toContain("High blood flow · shear stress · lactate turnover");
     expect(markup).not.toContain('data-card="HRV / RMSSD"');
@@ -313,6 +319,8 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Resting Heart Rate");
     expect(markup).toContain("Sleep Efficiency");
     expect(markup).toContain("Sleep Onset Latency");
+    expect(markup).toContain("glasses on");
+    expect(markup).toContain("−120 min");
   });
 
   it("keeps expected signals outcome-only while rendering measurement paths separately", () => {

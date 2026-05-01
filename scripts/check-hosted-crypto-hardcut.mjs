@@ -45,12 +45,6 @@ const allowedFindingLabelsByFile = new Map([
     ]),
   ],
   [
-    "apps/cloudflare/src/hosted-mailbox-encryption.ts",
-    new Set([
-      "legacy hosted wake/mailbox data-encryption env",
-    ]),
-  ],
-  [
     "apps/web/src/lib/hosted-encryption-shared.ts",
     new Set([
       "legacy device-sync secret codec import",

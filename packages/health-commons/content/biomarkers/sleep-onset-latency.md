@@ -26,6 +26,12 @@ unit: minutes
 interpretationFrame:
   principle: Compare repeated baseline and intervention windows rather than one-night changes.
   caveat: Wearables and actigraphy can misclassify quiet wakefulness, reading in bed, meditation, alcohol-related sleep fragmentation, and irregular bedtimes.
+biomarker:
+  unit: minutes
+  direction:
+    desired: lower_or_stable
+    label: Lower or stable can be better when bedtime and wake time stay consistent.
+    nuance: Reading, meditation, alcohol, irregular schedules, and wearable sleep/wake classification can make latency look better or worse than it felt.
 ---
 
 Sleep onset latency is the practical signal for red-light glasses before bed because the experiment is meant to change the last part of the evening, not the entire sleep architecture.

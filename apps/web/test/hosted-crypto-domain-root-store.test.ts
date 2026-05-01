@@ -189,8 +189,36 @@ test("web runtime crypto context fails closed instead of provisioning missing wo
   assert.equal(signCalls.length, 0);
 });
 
-test("hosted web private-field encryption uses the supplied transaction for lazy domain roots", async () => {
+test("hosted web private-field encryption fails closed when control roots are missing", async () => {
   const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture();
+
+  await expect(encryptHostedWebNullableString({
+    field: "hosted-member-identity.phone-number",
+    memberId: "member-test-missing-control",
+    prisma: tx.prisma,
+    value: "redacted-phone-token",
+  })).rejects.toThrow(/control domain root envelope is not provisioned/u);
+
+  assert.equal(tx.persistedEnvelopes.length, 0);
+  assert.equal(encryptCalls.length, 0);
+  assert.equal(signCalls.length, 0);
+});
+
+test("hosted web private-field encryption uses already-provisioned control roots", async () => {
+  const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture();
+  const { getOrCreateActiveHostedDomainRootEnvelope } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+
+  await getOrCreateActiveHostedDomainRootEnvelope({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.provision",
+    userId: "member-test-transaction",
+  });
+  assert.equal(tx.persistedEnvelopes.length, 1);
+  assert.equal(encryptCalls.length, 1);
+  assert.equal(signCalls.length, 1);
 
   const ciphertext = await encryptHostedWebNullableString({
     field: "hosted-member-identity.phone-number",
@@ -218,9 +246,19 @@ test("hosted member identity upsert keeps private-field crypto inside the caller
   const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture(
     createHostedMemberIdentityTransaction,
   );
+  const { getOrCreateActiveHostedDomainRootEnvelope } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
   const { upsertHostedMemberIdentity } = await import(
     "../src/lib/hosted-onboarding/hosted-member-identity-store"
   );
+
+  await getOrCreateActiveHostedDomainRootEnvelope({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.provision",
+    userId: "member-test-upsert",
+  });
 
   await expect(upsertHostedMemberIdentity({
     maskedPhoneNumberHint: "redacted-phone-hint",
@@ -298,10 +336,12 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
       const values = args.slice(1);
       const userId = values.find((value): value is string =>
         typeof value === "string" && value.startsWith("member-"));
+      const rootKeyId = values.find((value): value is string =>
+        typeof value === "string" && value.startsWith("udrk:"));
       const domain = values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
         value === "control" || value === "device" || value === "ingress" || value === "runtime");
       const envelope = persistedEnvelopes.find((candidate) =>
-        candidate.userId === userId && candidate.domain === domain);
+        candidate.userId === userId && candidate.domain === domain && (!rootKeyId || candidate.rootKeyId === rootKeyId));
       return (envelope
         ? [{
           domain: envelope.domain,

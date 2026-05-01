@@ -512,6 +512,9 @@ export const healthCommonsExpectedSignalDescriptionSchema = z
     biomarkerKey: healthCommonsKeySchema,
     description: longStringSchema,
     expected: shortStringSchema.optional(),
+    expectedDirection: z
+      .enum(HEALTH_COMMONS_BIOMARKER_PROTOCOL_EXPECTED_DIRECTIONS)
+      .optional(),
     estimatedChange: healthCommonsExpectedSignalEstimateSchema.optional(),
     protocolProminence: z.enum(["focus", "context"]).optional(),
   })
@@ -766,6 +769,46 @@ export type HealthCommonsMeasurementPlan = z.infer<
   typeof healthCommonsMeasurementPlanSchema
 >;
 
+export const HEALTH_COMMONS_PROTOCOL_SESSION_SHAPE_SEGMENT_KINDS = [
+  "preparation",
+  "stimulus",
+  "recovery",
+  "cooldown",
+  "transition",
+  "context",
+] as const;
+
+export type HealthCommonsProtocolSessionShapeSegmentKind =
+  (typeof HEALTH_COMMONS_PROTOCOL_SESSION_SHAPE_SEGMENT_KINDS)[number];
+
+export const healthCommonsProtocolSessionShapeSegmentSchema = z
+  .object({
+    label: shortStringSchema,
+    kind: z.enum(HEALTH_COMMONS_PROTOCOL_SESSION_SHAPE_SEGMENT_KINDS),
+    durationMinutes: z.number().positive(),
+  })
+  .strict();
+
+export type HealthCommonsProtocolSessionShapeSegment = z.infer<
+  typeof healthCommonsProtocolSessionShapeSegmentSchema
+>;
+
+export const healthCommonsProtocolSessionShapeSchema = z
+  .object({
+    label: shortStringSchema.optional(),
+    segments: z.array(healthCommonsProtocolSessionShapeSegmentSchema).min(1),
+    summarySegments: z
+      .array(healthCommonsProtocolSessionShapeSegmentSchema)
+      .min(1)
+      .optional(),
+    ticks: z.array(shortStringSchema).min(2).optional(),
+  })
+  .strict();
+
+export type HealthCommonsProtocolSessionShape = z.infer<
+  typeof healthCommonsProtocolSessionShapeSchema
+>;
+
 export const healthCommonsProtocolSpecSchema = z
   .object({
     doseSignature: shortStringSchema,
@@ -784,6 +827,7 @@ export const healthCommonsProtocolSpecSchema = z
       })
       .strict()
       .optional(),
+    sessionShape: healthCommonsProtocolSessionShapeSchema.optional(),
     temperatureC: z
       .object({
         min: z.number().optional(),
@@ -1739,6 +1783,7 @@ export const healthCommonsPageFrontmatterSchema = z
     status: z.enum(["draft", "field-testing", "reviewed", "deprecated", "community"]).optional(),
     quality: z.enum(["stub", "usable", "reviewed", "excellent"]).optional(),
     hidden: z.boolean().optional(),
+    preferredRouteId: healthCommonsStableIdSchema.optional(),
     aliases: z.array(shortStringSchema).optional(),
     categories: z.array(shortStringSchema).optional(),
     relations: z.array(healthCommonsRelationSchema).optional(),

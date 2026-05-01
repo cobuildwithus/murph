@@ -136,16 +136,14 @@ export async function decryptHostedWebString(input: {
   if (serializedEnvelope.domain !== domain) {
     throw new Error(`Hosted secure-box envelope domain mismatch for lane ${input.lane}.`);
   }
-  const { unwrapHostedDomainRootForWeb } = await import("./domain-root-store");
-  const { envelope, rootKey } = await unwrapHostedDomainRootForWeb({
+  const { unwrapHostedDomainRootForWebByRootKeyId } = await import("./domain-root-store");
+  const { rootKey } = await unwrapHostedDomainRootForWebByRootKeyId({
     domain,
     prisma: input.prisma,
+    rootKeyId: serializedEnvelope.rootKeyId,
     userId: input.userId,
   });
   try {
-    if (serializedEnvelope.rootKeyId !== envelope.rootKeyId) {
-      throw new Error("Hosted secure-box root rotation is not implemented in greenfield hard-cut mode.");
-    }
     const aad = buildHostedSecureBoxAad({
       ...input.aad,
       domain,
@@ -159,7 +157,7 @@ export async function decryptHostedWebString(input: {
       envelope: serializedEnvelope,
       expectedDomain: domain,
       expectedLane: input.lane,
-      expectedRootKeyId: envelope.rootKeyId,
+      expectedRootKeyId: serializedEnvelope.rootKeyId,
       expectedScope: input.scope,
       rootKey,
     });

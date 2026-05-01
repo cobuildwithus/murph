@@ -382,6 +382,68 @@ protocol:
   durationMinutes:
     min: 12
     max: 25
+  sessionShape:
+    label: 20/10 block
+    segments:
+      - label: round 1 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 1 rest
+        kind: recovery
+        durationMinutes: 0.167
+      - label: round 2 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 2 rest
+        kind: recovery
+        durationMinutes: 0.167
+      - label: round 3 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 3 rest
+        kind: recovery
+        durationMinutes: 0.167
+      - label: round 4 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 4 rest
+        kind: recovery
+        durationMinutes: 0.167
+      - label: round 5 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 5 rest
+        kind: recovery
+        durationMinutes: 0.167
+      - label: round 6 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 6 rest
+        kind: recovery
+        durationMinutes: 0.167
+      - label: round 7 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 7 rest
+        kind: recovery
+        durationMinutes: 0.167
+      - label: round 8 work
+        kind: stimulus
+        durationMinutes: 0.333
+      - label: round 8 rest
+        kind: recovery
+        durationMinutes: 0.167
+    summarySegments:
+      - label: 8 hard intervals
+        kind: stimulus
+        durationMinutes: 2.667
+      - label: 8 true rests
+        kind: recovery
+        durationMinutes: 1.333
+    ticks:
+      - "0"
+      - "2 min"
+      - "4 min"
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:

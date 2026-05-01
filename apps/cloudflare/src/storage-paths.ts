@@ -1,28 +1,36 @@
+import { createHash } from "node:crypto";
+
 import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
-import { deriveHostedStorageOpaqueId } from "./crypto-context.js";
+type HostedStorageNamespaceInput = Uint8Array | string | null | undefined;
+
+const HOSTED_STORAGE_NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9_-]{3,63}$/u;
+const HOSTED_STORAGE_NAMESPACE_SALT = "murph.hosted.storage-namespace.v1";
+const HOSTED_STORAGE_PATH_SALT = "murph.hosted.storage-path.v1";
+
+export function createHostedStorageNamespaceId(userId: string): string {
+  return `hsn_${digestHex(HOSTED_STORAGE_NAMESPACE_SALT, requireStoragePathString(userId, "Hosted storage userId")).slice(0, 24)}`;
+}
 
 export async function hostedBundleObjectKey(
-  rootKey: Uint8Array,
+  storageNamespace: HostedStorageNamespaceInput,
   kind: HostedExecutionBundleKind,
   hash: string,
   userId?: string | null,
 ): Promise<string> {
   if (typeof userId === "string" && userId.length > 0) {
-    const userSegment = await deriveHostedBundleUserSegment(rootKey, userId);
-    const bundleSegment = await deriveHostedStorageOpaqueId({
+    const userSegment = resolveHostedStorageNamespaceId(storageNamespace, userId);
+    const bundleSegment = deriveHostedStoragePathId({
       length: 48,
-      rootKey,
       scope: "bundle-path",
-      value: `bundle:${userId}:${kind}:${hash}`,
+      value: `bundle:${userSegment}:${kind}:${hash}`,
     });
 
-    return `users/bundles/${userSegment}/${kind}/${bundleSegment}.bundle.json`;
+    return `users/${userSegment}/bundles/${kind}/${bundleSegment}.bundle.json`;
   }
 
-  const bundleSegment = await deriveHostedStorageOpaqueId({
+  const bundleSegment = deriveHostedStoragePathId({
     length: 48,
-    rootKey,
     scope: "bundle-path",
     value: `bundle:${kind}:${hash}`,
   });
@@ -31,111 +39,108 @@ export async function hostedBundleObjectKey(
 }
 
 export function isUserScopedHostedBundleObjectKey(key: string): boolean {
-  return /^users\/bundles\/[0-9a-f]{24}\/[^/]+\/[0-9a-f]{48}\.bundle\.json$/u.test(key);
+  return /^users\/[a-z0-9][a-z0-9_-]{3,63}\/bundles\/[^/]+\/[0-9a-f]{48}\.bundle\.json$/u.test(key);
 }
 
 export async function hostedBundleUserPrefix(
-  rootKey: Uint8Array,
+  storageNamespace: HostedStorageNamespaceInput,
   userId: string,
 ): Promise<string> {
-  return `users/bundles/${await deriveHostedBundleUserSegment(rootKey, userId)}/`;
+  return `users/${resolveHostedStorageNamespaceId(storageNamespace, userId)}/bundles/`;
 }
 
 export async function hostedArtifactObjectKey(
-  rootKey: Uint8Array,
+  storageNamespace: HostedStorageNamespaceInput,
   userId: string,
   sha256: string,
 ): Promise<string> {
-  const userSegment = await deriveHostedArtifactUserSegment(rootKey, userId);
-  const artifactSegment = await deriveHostedStorageOpaqueId({
+  const userSegment = resolveHostedStorageNamespaceId(storageNamespace, userId);
+  const artifactSegment = deriveHostedStoragePathId({
     length: 48,
-    rootKey,
     scope: "artifact-path",
-    value: `artifact:${userId}:${sha256}`,
+    value: `artifact:${userSegment}:${sha256}`,
   });
 
-  return `users/artifacts/${userSegment}/${artifactSegment}.artifact.bin`;
+  return `users/${userSegment}/artifacts/${artifactSegment}.artifact.bin`;
 }
 
 export async function hostedArtifactUserPrefix(
-  rootKey: Uint8Array,
+  storageNamespace: HostedStorageNamespaceInput,
   userId: string,
 ): Promise<string> {
-  return `users/artifacts/${await deriveHostedArtifactUserSegment(rootKey, userId)}/`;
+  return `users/${resolveHostedStorageNamespaceId(storageNamespace, userId)}/artifacts/`;
 }
 
 export async function hostedRunnerSecretsObjectKey(
-  rootKey: Uint8Array,
+  storageNamespace: HostedStorageNamespaceInput,
   userId: string,
 ): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "runner-secrets-path",
-    value: `user:${userId}`,
-  });
+  const userSegment = resolveHostedStorageNamespaceId(storageNamespace, userId);
 
-  return `users/runner-secrets/${userSegment}.json`;
+  return `users/${userSegment}/runner-secrets.json`;
 }
 
 export async function hostedBrowserVaultReplicaObjectKey(input: {
   dataVersion: string;
-  rootKey: Uint8Array;
+  rootKey?: Uint8Array;
+  storageNamespaceId?: string | null;
   userId: string;
 }): Promise<string> {
-  const userSegment = await deriveHostedBrowserVaultReplicaUserSegment(input.rootKey, input.userId);
-  const replicaSegment = await deriveHostedStorageOpaqueId({
+  const userSegment = resolveHostedStorageNamespaceId(input.storageNamespaceId ?? input.rootKey, input.userId);
+  const replicaSegment = deriveHostedStoragePathId({
     length: 48,
-    rootKey: input.rootKey,
     scope: "browser-vault-replica-path",
-    value: `replica:${input.userId}:${input.dataVersion}`,
+    value: `replica:${userSegment}:${input.dataVersion}`,
   });
 
-  return `users/browser-vault-replicas/${userSegment}/${replicaSegment}.json`;
+  return `users/${userSegment}/browser-vault-replicas/${replicaSegment}.json`;
 }
 
 export async function hostedBrowserVaultReplicaUserPrefix(input: {
-  rootKey: Uint8Array;
+  rootKey?: Uint8Array;
+  storageNamespaceId?: string | null;
   userId: string;
 }): Promise<string> {
-  return `users/browser-vault-replicas/${await deriveHostedBrowserVaultReplicaUserSegment(
-    input.rootKey,
-    input.userId,
-  )}/`;
+  return `users/${resolveHostedStorageNamespaceId(input.storageNamespaceId ?? input.rootKey, input.userId)}/browser-vault-replicas/`;
 }
 
-async function deriveHostedArtifactUserSegment(
-  rootKey: Uint8Array,
+function resolveHostedStorageNamespaceId(
+  storageNamespace: HostedStorageNamespaceInput,
   userId: string,
-): Promise<string> {
-  return deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "artifact-path",
-    value: `user:${userId}`,
-  });
+): string {
+  if (typeof storageNamespace === "string" && storageNamespace.trim().length > 0) {
+    const normalized = storageNamespace.trim();
+    if (!HOSTED_STORAGE_NAMESPACE_PATTERN.test(normalized)) {
+      throw new TypeError("Hosted storage namespace id is invalid.");
+    }
+    return normalized;
+  }
+
+  void storageNamespace;
+  return createHostedStorageNamespaceId(userId);
 }
 
-async function deriveHostedBundleUserSegment(
-  rootKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  return deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "bundle-path",
-    value: `user:${userId}`,
-  });
+function deriveHostedStoragePathId(input: {
+  length: number;
+  scope: string;
+  value: string;
+}): string {
+  return digestHex(HOSTED_STORAGE_PATH_SALT, input.scope, input.value).slice(0, input.length);
 }
 
-async function deriveHostedBrowserVaultReplicaUserSegment(
-  rootKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  return deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "browser-vault-replica-path",
-    value: `user:${userId}`,
-  });
+function digestHex(...parts: string[]): string {
+  const hash = createHash("sha256");
+  for (const part of parts) {
+    hash.update(part, "utf8");
+    hash.update("\0", "utf8");
+  }
+  return hash.digest("hex");
+}
+
+function requireStoragePathString(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+  return normalized;
 }

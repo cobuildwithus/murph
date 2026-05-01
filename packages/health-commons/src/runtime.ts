@@ -1762,6 +1762,10 @@ function assertGeneratedWebExperimentProtocolTab(
     value["route"]["entityType"] !== "protocol_variant" ||
     !isGeneratedWebSafety(value["safety"]) ||
     typeof value["title"] !== "string" ||
+    (
+      value["sessionShape"] !== undefined &&
+      !isGeneratedWebSessionShape(value["sessionShape"])
+    ) ||
     typeof value["whyItWorks"] !== "string"
   ) {
     throw new Error(`Health Commons generated experiment protocol tab is invalid: ${artifactPath}.`);
@@ -2149,6 +2153,53 @@ function isGeneratedWebProtocolStep(value: unknown): boolean {
     typeof value["detail"] === "string" &&
     typeof value["number"] === "number" &&
     typeof value["title"] === "string"
+  );
+}
+
+function isGeneratedWebSessionShape(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value["label"] === undefined || typeof value["label"] === "string") &&
+    Array.isArray(value["segments"]) &&
+    value["segments"].every(isGeneratedWebSessionShapeSegment) &&
+    (
+      value["summarySegments"] === undefined ||
+      (
+        Array.isArray(value["summarySegments"]) &&
+        value["summarySegments"].every(isGeneratedWebSessionShapeSegment)
+      )
+    ) &&
+    (
+      value["ticks"] === undefined ||
+      (Array.isArray(value["ticks"]) && value["ticks"].every(isString))
+    )
+  );
+}
+
+function isGeneratedWebSessionShapeSegment(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value["durationMinutes"] === "number" &&
+    value["durationMinutes"] > 0 &&
+    isGeneratedWebSessionShapeSegmentKind(value["kind"]) &&
+    typeof value["label"] === "string"
+  );
+}
+
+function isGeneratedWebSessionShapeSegmentKind(value: unknown): boolean {
+  return (
+    value === "preparation" ||
+    value === "stimulus" ||
+    value === "recovery" ||
+    value === "cooldown" ||
+    value === "transition" ||
+    value === "context"
   );
 }
 
