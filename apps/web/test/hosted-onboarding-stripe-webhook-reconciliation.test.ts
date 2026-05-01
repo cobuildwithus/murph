@@ -10,6 +10,7 @@ import {
 const mocks = vi.hoisted(() => ({
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   reconcileHostedStripeEventById: vi.fn(),
+  stripeEventsRetrieve: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
@@ -20,8 +21,17 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedStripeApi: () => ({
+    events: {
+      retrieve: mocks.stripeEventsRetrieve,
+    },
+  }),
+}));
+
 import {
   nudgeHostedStripeWebhookActivationRunner,
+  processRecordedHostedStripeWebhookEvent,
   reconcileRecordedHostedStripeWebhookEvent,
 } from "@/src/lib/hosted-onboarding/stripe-webhook-reconciliation";
 
@@ -42,6 +52,15 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       errorCode: null,
       inFlight: false,
       nextAlarmAtPresent: false,
+    });
+    mocks.stripeEventsRetrieve.mockResolvedValue({
+      data: {
+        object: {
+          id: "in_123",
+        },
+      },
+      id: "evt_123",
+      type: "invoice.paid",
     });
   });
 
@@ -93,6 +112,59 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     });
   });
 
+  it("rederives completed activation pointers from the mailbox for nudge retries", async () => {
+    const prisma = createPrisma({
+      hostedMailboxItem: {
+        findFirst: vi.fn().mockResolvedValue({
+          dedupeKey: "member.activated:stripe.invoice.paid:member_123:invoice:in_123",
+          userId: "member_123",
+        }),
+      },
+      hostedStripeEvent: {
+        findUnique: vi.fn().mockResolvedValue({
+          claimExpiresAt: null,
+          nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+          status: HostedStripeEventStatus.completed,
+          type: "invoice.paid",
+          updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        }),
+      },
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_123",
+      prisma: prisma as never,
+      timeoutMs: 5_000,
+    })).resolves.toEqual({
+      accepted: true,
+      required: true,
+    });
+
+    expect(mocks.stripeEventsRetrieve).toHaveBeenCalledWith("evt_123");
+    expect(prisma.hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        dedupeKey: true,
+        userId: true,
+      },
+      where: {
+        dedupeKey: {
+          endsWith: ":invoice:in_123",
+          startsWith: "member.activated:stripe.invoice.paid:",
+        },
+        kind: "member.activated",
+      },
+    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "stripe.webhook:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+  });
+
   it("nudges activated members without requiring member ids in workflow input", async () => {
     await expect(nudgeHostedStripeWebhookActivationRunner({
       activatedMemberId: "member_123",
@@ -134,7 +206,14 @@ function createPrisma(
     status: HostedStripeEventStatus;
     type: string;
     updatedAt: Date;
-  } | null = {
+  } | null | {
+    hostedMailboxItem: {
+      findFirst: ReturnType<typeof vi.fn>;
+    };
+    hostedStripeEvent: {
+      findUnique: ReturnType<typeof vi.fn>;
+    };
+  } = {
     claimExpiresAt: null,
     nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
     status: HostedStripeEventStatus.pending,
@@ -142,7 +221,18 @@ function createPrisma(
     updatedAt: new Date("2026-04-23T00:00:00.000Z"),
   },
 ) {
+  if (
+    storedEvent
+    && "hostedStripeEvent" in storedEvent
+    && "hostedMailboxItem" in storedEvent
+  ) {
+    return storedEvent;
+  }
+
   return {
+    hostedMailboxItem: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     hostedStripeEvent: {
       findUnique: vi.fn().mockResolvedValue(storedEvent),
     },
