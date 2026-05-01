@@ -1009,7 +1009,42 @@ function readJunctionWebhookResourceFromEventType(eventType: string): string | n
 }
 
 function extractJunctionWebhookSourceProviderSlug(data: Record<string, unknown> | null): string | null {
-  return normalizeProviderSlug(resolveJunctionOrigin(data ?? undefined).sourceProviderSlug) ?? null;
+  return (
+    normalizeProviderSlug(resolveJunctionOrigin(data ?? undefined).sourceProviderSlug)
+    ?? extractJunctionWebhookSourceProviderSlugFallback(data)
+  );
+}
+
+function extractJunctionWebhookSourceProviderSlugFallback(data: Record<string, unknown> | null): string | null {
+  if (!data) {
+    return null;
+  }
+
+  const source = readPlainObject(data.source);
+  const provider = readPlainObject(data.provider);
+
+  return (
+    normalizeJunctionWebhookSourceProviderCandidate(source?.provider)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(source?.providerSlug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(source?.provider_slug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(source?.slug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(data.sourceProviderSlug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(data.source_provider_slug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(data.sourceProvider)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(data.source_provider)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(data.provider)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(data.providerSlug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(data.provider_slug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(provider?.provider)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(provider?.providerSlug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(provider?.provider_slug)
+    ?? normalizeJunctionWebhookSourceProviderCandidate(provider?.slug)
+  );
+}
+
+function normalizeJunctionWebhookSourceProviderCandidate(value: unknown): string | null {
+  const slug = normalizeProviderSlug(value);
+  return slug && slug !== "junction" ? slug : null;
 }
 
 function extractJunctionWebhookObjectId(data: Record<string, unknown> | null): string | null {

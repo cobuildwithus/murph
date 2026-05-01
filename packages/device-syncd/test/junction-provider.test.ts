@@ -636,6 +636,136 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   assert.equal(typeof parsed.jobs[0]?.dedupeKey, "string");
 });
 
+test("Junction webhook source-provider extraction covers documented payload shapes", async () => {
+  const cases: Array<{
+    label: string;
+    eventType: string;
+    data: Record<string, unknown>;
+    expectedSourceProviderSlug: string;
+    expectedResource: string;
+  }> = [
+    {
+      label: "historical data.provider",
+      eventType: "historical.data.workouts.created",
+      data: {
+        id: "workout-zwift-1",
+        provider: "zwift",
+      },
+      expectedSourceProviderSlug: "zwift",
+      expectedResource: "workouts",
+    },
+    {
+      label: "daily data.source.provider",
+      eventType: "daily.data.workouts.created",
+      data: {
+        id: "workout-zwift-2",
+        source: {
+          provider: "zwift",
+        },
+      },
+      expectedSourceProviderSlug: "zwift",
+      expectedResource: "workouts",
+    },
+    {
+      label: "daily data.source.slug",
+      eventType: "daily.data.steps.created",
+      data: {
+        id: "steps-fitbit-1",
+        source: {
+          slug: "fitbit",
+        },
+      },
+      expectedSourceProviderSlug: "fitbit",
+      expectedResource: "steps",
+    },
+    {
+      label: "nested provider slug",
+      eventType: "daily.data.workouts.created",
+      data: {
+        id: "workout-zwift-3",
+        provider: {
+          slug: "zwift",
+        },
+      },
+      expectedSourceProviderSlug: "zwift",
+      expectedResource: "workouts",
+    },
+    {
+      label: "nested provider provider",
+      eventType: "daily.data.workouts.created",
+      data: {
+        id: "workout-zwift-4",
+        provider: {
+          provider: "zwift",
+        },
+      },
+      expectedSourceProviderSlug: "zwift",
+      expectedResource: "workouts",
+    },
+    {
+      label: "aggregator provider only",
+      eventType: "daily.data.steps.created",
+      data: {
+        id: "steps-aggregator-1",
+        provider: "junction",
+      },
+      expectedSourceProviderSlug: "",
+      expectedResource: "steps",
+    },
+    {
+      label: "nested source beats aggregator provider",
+      eventType: "daily.data.steps.created",
+      data: {
+        id: "steps-fitbit-2",
+        provider: "junction",
+        source: {
+          provider: "fitbit",
+        },
+      },
+      expectedSourceProviderSlug: "fitbit",
+      expectedResource: "steps",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const provider = createJunctionProvider(
+      async (input) => {
+        throw new Error(`Unexpected request: ${readUrl(input)}`);
+      },
+      {
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      },
+    );
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: testCase.eventType,
+        user_id: `junction-user-${testCase.label.replace(/[^a-z0-9]+/giu, "-")}`,
+        data: testCase.data,
+      },
+      messageId: `msg_${testCase.label.replace(/[^a-z0-9]+/giu, "_")}`,
+      timestamp: "1775174400",
+    });
+
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+
+    const job = parsed.jobs[0];
+    assert.ok(job, testCase.label);
+    assert.equal(job.kind, "resource", testCase.label);
+    const payload = job.payload;
+    assert.ok(payload, testCase.label);
+    assert.equal(payload.resource, testCase.expectedResource, testCase.label);
+    assert.equal(
+      payload.sourceProviderSlug,
+      testCase.expectedSourceProviderSlug,
+      testCase.label,
+    );
+  }
+});
+
 test("Junction accepts nested webhook user ids and comma-delivered Svix signatures", async () => {
   const provider = createJunctionProvider(
     async (input) => {

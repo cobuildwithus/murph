@@ -126,7 +126,9 @@ const TIMESERIES_RESOURCE_ALLOWLIST = new Set<string>([
 ]);
 const FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "abbott-libreview",
+  "abbott_libreview",
   "freestyle-libre",
+  "freestyle_libre",
 ]);
 const RAW_SOURCE_IDENTIFIER_KEYS = new Set([
   "sourceName",
@@ -839,13 +841,14 @@ function resolveRecordTimestamp(
   const timestampSemantics = hasSourceSpecificFloatingTime
     ? "floating"
     : explicitSemantics ?? inferTimestampSemantics(rawObservedAt);
+  const fallbackOccurredAt = context.windowEnd ?? context.windowStart ?? context.importedAt;
   const occurredAt = hasSourceSpecificFloatingTime
     ? undefined
     : timestampSemantics === "floating"
-      ? context.windowEnd ?? context.windowStart ?? context.importedAt
-      : resolveSafeTimestamp(rawObservedAt, sourceProviderSlug) ?? context.windowEnd ?? context.windowStart ?? context.importedAt;
+      ? fallbackOccurredAt
+      : resolveSafeTimestamp(rawObservedAt, sourceProviderSlug) ?? fallbackOccurredAt;
   const recordedAt = hasSourceSpecificFloatingTime
-    ? context.importedAt
+    ? undefined
     : resolveSafeTimestamp(
       firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]),
       sourceProviderSlug,

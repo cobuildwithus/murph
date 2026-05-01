@@ -766,6 +766,47 @@ test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until tim
   assert.deepEqual(canonicalArtifactContent?.records, []);
 });
 
+test("Junction importer skips source-specific floating summary records instead of using window fallback", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2023-09-27T12:00:00.000Z",
+      windowStart: "2023-09-27T00:00:00.000Z",
+      windowEnd: "2023-09-27T23:59:59.000Z",
+      summaries: {
+        body: [
+          {
+            sourceProviderSlug: "freestyle_libre",
+            observedAt: "2023-09-27T07:48:00+00:00",
+            weight_kg: 82,
+          },
+          {
+            sourceProviderSlug: "abbott_libreview",
+            observedAt: "2023-09-27T07:48:00+00:00",
+            weight_kg: 83,
+          },
+        ],
+      },
+    },
+  });
+
+  const bodyArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-body");
+  const canonicalArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role.startsWith("wearable-canonical-records:")
+  );
+  const canonicalArtifactContent = canonicalArtifact?.content as { records?: unknown[] } | undefined;
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["body"]);
+  assert.deepEqual(payload.events, []);
+  assert.deepEqual(payload.canonicalWearableRecords, []);
+  assert.ok(bodyArtifact);
+  assert.ok(canonicalArtifact);
+  assert.deepEqual(canonicalArtifactContent?.records, []);
+});
+
 test("Junction normalizer does not use source-specific floating timestamps as window times", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2023-09-27T12:00:00.000Z",
