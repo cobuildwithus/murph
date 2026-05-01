@@ -29,6 +29,7 @@ import {
   requireRefreshToken,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
+  withOAuthCompatibilityHandlers,
 } from "./shared-oauth.ts";
 import { createOuraWebhookSubscriptionClient, OURA_DEFAULT_WEBHOOK_TARGETS } from "./oura-webhooks.ts";
 
@@ -36,7 +37,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncWebhookPreflightResponse,
   DeviceSyncJobRecord,
-  DeviceSyncProvider,
+  DeviceSyncOAuthCompatibilityProvider,
   ProviderWebhookAdminCapability,
   ProviderAuthTokens,
   ProviderCallbackContext,
@@ -48,6 +49,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
 import type { OuraWebhookSubscriptionClient } from "./oura-webhooks.ts";
 
 const OURA_AUTH_BASE_URL = "https://cloud.ouraring.com";
@@ -578,7 +580,7 @@ function buildOuraApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
-export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfig): DeviceSyncProvider {
+export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfig): DeviceSyncOAuthCompatibilityProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = (config.authBaseUrl ?? OURA_AUTH_BASE_URL).replace(/\/+$/u, "");
   const apiBaseUrl = (config.apiBaseUrl ?? OURA_API_BASE_URL).replace(/\/+$/u, "");
@@ -933,7 +935,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     return {};
   }
 
-  const provider: DeviceSyncProvider = {
+  const provider = withOAuthCompatibilityHandlers({
     provider: descriptor.provider,
     descriptor,
     webhookAdmin,
@@ -1049,7 +1051,12 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       });
     },
     async revokeAccess(account: DeviceSyncAccount): Promise<void> {
-      await revokeOuraAccessToken(account.accessToken);
+      const tokens = getDeviceSyncAccountOAuthTokens(account);
+      if (!tokens?.accessToken) {
+        return;
+      }
+
+      await revokeOuraAccessToken(tokens.accessToken);
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
       const signature = normalizeString(context.headers.get("x-oura-signature"));
@@ -1192,7 +1199,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         retryable: false,
       });
     },
-  };
+  });
 
   return provider;
 }

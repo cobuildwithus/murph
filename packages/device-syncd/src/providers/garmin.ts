@@ -24,12 +24,13 @@ import {
   refreshOAuthTokens,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
+  withOAuthCompatibilityHandlers,
 } from "./shared-oauth.ts";
 
 import type {
   DeviceSyncAccount,
   DeviceSyncJobRecord,
-  DeviceSyncProvider,
+  DeviceSyncOAuthCompatibilityProvider,
   ProviderAuthTokens,
   ProviderCallbackContext,
   ProviderConnectionResult,
@@ -38,6 +39,7 @@ import type {
   ProviderScheduleResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
 
 const DEFAULT_GARMIN_AUTH_BASE_URL = "https://connect.garmin.com";
 const DEFAULT_GARMIN_TOKEN_BASE_URL = "https://connectapi.garmin.com";
@@ -348,7 +350,7 @@ function createGarminApiSession(input: {
   });
 }
 
-export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderConfig): DeviceSyncProvider {
+export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderConfig): DeviceSyncOAuthCompatibilityProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = garminAuthBaseUrl(config);
   const apiBaseUrl = garminApiBaseUrl(config);
@@ -565,7 +567,7 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
     return {};
   }
 
-  return {
+  return withOAuthCompatibilityHandlers({
     provider: descriptor.provider,
     descriptor,
     buildConnectUrl(context) {
@@ -646,10 +648,15 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
       });
     },
     async revokeAccess(account: DeviceSyncAccount): Promise<void> {
+      const tokens = getDeviceSyncAccountOAuthTokens(account);
+      if (!tokens?.accessToken) {
+        return;
+      }
+
       const response = await fetchImpl(`${apiBaseUrl}${buildGarminApiPath("/user/registration")}`, {
         method: "DELETE",
         headers: {
-          Authorization: `Bearer ${account.accessToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
         },
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -695,7 +702,7 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
         retryable: false,
       });
     },
-  };
+  });
 }
 
 function hasGarminSnapshotEntries(value: unknown): boolean {

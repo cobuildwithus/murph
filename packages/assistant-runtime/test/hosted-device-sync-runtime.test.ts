@@ -11,6 +11,7 @@ import {
   type DeviceSyncJobRecord,
   type DeviceSyncProvider,
   type ProviderAuthTokens,
+  type StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
@@ -34,6 +35,22 @@ import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
 const DEVICE_SYNC_SECRET = "secret-for-tests";
 type ApplyUpdatesRequest = Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0];
+
+function requireStoredOAuthCredential(
+  account: StoredDeviceSyncAccount | null | undefined,
+): Extract<StoredDeviceSyncAccount["credential"], { kind: "oauth_tokens" }> {
+  assert.ok(account);
+  assert.equal(account.credential.kind, "oauth_tokens");
+  return account.credential;
+}
+
+function assertStoredCredentialKind(
+  account: StoredDeviceSyncAccount | null | undefined,
+  kind: StoredDeviceSyncAccount["credential"]["kind"],
+): void {
+  assert.ok(account);
+  assert.equal(account.credential.kind, kind);
+}
 
 function getStore(service: DeviceSyncService) {
   return requireHostedRuntimeDeviceSyncStore(service);
@@ -318,6 +335,38 @@ function setAccountUpdatedAtForTesting(
   }
 }
 
+function clearAccountCredentialForTesting(service: DeviceSyncService, accountId: string): void {
+  const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+  const now = "2026-04-06T10:00:00.000Z";
+
+  try {
+    database.exec("begin immediate transaction");
+    database.prepare(`
+      update device_credential_state
+      set credential_kind = 'none',
+          provider_config_key = null,
+          access_token_encrypted = null,
+          refresh_token_encrypted = null,
+          access_token_expires_at = null,
+          credential_metadata_json = '{}',
+          updated_at = ?
+      where account_id = ?
+    `).run(now, accountId);
+    database.prepare(`
+      update device_observation_state
+      set local_token_revision = local_token_revision + 1,
+          updated_at = ?
+      where account_id = ?
+    `).run(now, accountId);
+    database.exec("commit");
+  } catch (error) {
+    database.exec("rollback");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
 describe("hosted device-sync runtime", () => {
   test("sync returns an empty state when no device-sync client is available", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
@@ -487,8 +536,7 @@ describe("hosted device-sync runtime", () => {
         hosted: true,
       });
       assert.deepEqual(stored.scopes, ["offline", "read:data"]);
-      assert.equal(stored.accessTokenEncrypted, "");
-      assert.equal(stored.refreshTokenEncrypted, null);
+      assertStoredCredentialKind(stored, "none");
       assert.equal(stored.accessTokenExpiresAt, null);
       assert.equal(stored.lastWebhookAt, "2026-04-06T09:01:00.000Z");
       assert.equal(stored.lastSyncStartedAt, "2026-04-06T09:02:00.000Z");
@@ -587,8 +635,7 @@ describe("hosted device-sync runtime", () => {
       const disconnected = getStore(service).getAccountById(connected.account.id);
       assert.ok(disconnected);
       assert.equal(disconnected.status, "disconnected");
-      assert.equal(disconnected.accessTokenEncrypted, "");
-      assert.equal(disconnected.refreshTokenEncrypted, null);
+      assertStoredCredentialKind(disconnected, "none");
       assert.equal(disconnected.hostedObservedTokenVersion, null);
 
       currentSnapshot = buildRuntimeSnapshot({
@@ -621,10 +668,11 @@ describe("hosted device-sync runtime", () => {
       assert.equal(stored.status, "active");
       assert.equal(stored.displayName, "Hosted Reconnected");
       assert.equal(stored.hostedObservedTokenVersion, 1);
+      const storedCredential = requireStoredOAuthCredential(stored);
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
       assert.equal(
         codec.decrypt(
-          stored.accessTokenEncrypted,
+          storedCredential.accessTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -633,10 +681,10 @@ describe("hosted device-sync runtime", () => {
         ),
         "hosted-access-v1",
       );
-      assert.ok(stored.refreshTokenEncrypted);
+      assert.ok(storedCredential.refreshTokenEncrypted);
       assert.equal(
         codec.decrypt(
-          stored.refreshTokenEncrypted,
+          storedCredential.refreshTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -750,14 +798,13 @@ describe("hosted device-sync runtime", () => {
       assert.equal(stored.status, "active");
       assert.equal(stored.setupPhase, "pending_link");
       assert.equal(stored.setupExpiresAt, "2026-04-06T09:45:00.000Z");
-      assert.equal(stored.credentialKind, "provider_config");
-      assert.equal(stored.providerConfigKey, "demo");
-      assert.deepEqual(stored.credentialMetadata, {
+      assert.equal(stored.credential.kind, "provider_config");
+      assert.equal(stored.credential.providerConfigKey, "demo");
+      assert.deepEqual(stored.credential.credentialMetadata, {
         clientUserIdHash: "hash_client_user",
       });
       assert.equal(stored.hostedObservedTokenVersion, null);
-      assert.equal(stored.accessTokenEncrypted, "");
-      assert.equal(stored.refreshTokenEncrypted, null);
+      assert.equal(stored.accessTokenExpiresAt, null);
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -844,9 +891,10 @@ describe("hosted device-sync runtime", () => {
       assert.ok(stored);
       assert.equal(stored.nextReconcileAt, "2026-04-04T12:00:00.000Z");
       assert.equal(stored.hostedObservedTokenVersion, 4);
+      const storedCredential = requireStoredOAuthCredential(stored);
       assert.equal(
         createSecretCodec(DEVICE_SYNC_SECRET).decrypt(
-          stored.accessTokenEncrypted,
+          storedCredential.accessTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -858,7 +906,7 @@ describe("hosted device-sync runtime", () => {
       assert.throws(
         () =>
           createSecretCodec(DEVICE_SYNC_SECRET).decrypt(
-            stored.accessTokenEncrypted,
+            storedCredential.accessTokenEncrypted,
             buildDeviceSyncTokenCipherOptions({
               externalAccountId: stored.externalAccountId,
               provider: stored.provider,
@@ -866,9 +914,10 @@ describe("hosted device-sync runtime", () => {
             }),
           ),
       );
+      assert.ok(storedCredential.refreshTokenEncrypted);
       assert.equal(
         createSecretCodec(DEVICE_SYNC_SECRET).decrypt(
-          stored.refreshTokenEncrypted ?? "",
+          storedCredential.refreshTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -1607,9 +1656,10 @@ describe("hosted device-sync runtime", () => {
       assert.equal(stored.nextReconcileAt, "2026-04-06T11:00:00.000Z");
       assert.equal(stored.hostedObservedUpdatedAt, "2026-04-06T09:10:00.000Z");
       assert.equal(stored.hostedObservedTokenVersion, 5);
+      const storedCredential = requireStoredOAuthCredential(stored);
       assert.equal(
         codec.decrypt(
-          stored.accessTokenEncrypted,
+          storedCredential.accessTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -1618,10 +1668,10 @@ describe("hosted device-sync runtime", () => {
         ),
         "local-access-refresh",
       );
-      assert.ok(stored.refreshTokenEncrypted);
+      assert.ok(storedCredential.refreshTokenEncrypted);
       assert.equal(
         codec.decrypt(
-          stored.refreshTokenEncrypted,
+          storedCredential.refreshTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -1781,9 +1831,10 @@ describe("hosted device-sync runtime", () => {
       assert.equal(stored.hostedObservedUpdatedAt, "2026-04-06T09:10:00.000Z");
       assert.equal(stored.hostedObservedTokenVersion, 5);
       assert.equal(stored.lastErrorCode, "REPLAY_IGNORED");
+      const storedCredential = requireStoredOAuthCredential(stored);
       assert.equal(
         codec.decrypt(
-          stored.accessTokenEncrypted,
+          storedCredential.accessTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -1792,10 +1843,10 @@ describe("hosted device-sync runtime", () => {
         ),
         "local-access-refresh",
       );
-      assert.ok(stored.refreshTokenEncrypted);
+      assert.ok(storedCredential.refreshTokenEncrypted);
       assert.equal(
         codec.decrypt(
-          stored.refreshTokenEncrypted,
+          storedCredential.refreshTokenEncrypted,
           buildDeviceSyncTokenCipherOptions({
             externalAccountId: stored.externalAccountId,
             provider: stored.provider,
@@ -2643,12 +2694,7 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_clear_tokens");
       assert.ok(localAccountId);
 
-      getStore(service).updateAccountTokens(localAccountId, {
-        accessToken: "",
-        accessTokenEncrypted: "",
-        refreshToken: null,
-        refreshTokenEncrypted: null,
-      });
+      clearAccountCredentialForTesting(service, localAccountId);
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -2720,12 +2766,7 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_clear_oauth_credential");
       assert.ok(localAccountId);
 
-      getStore(service).updateAccountTokens(localAccountId, {
-        accessToken: "",
-        accessTokenEncrypted: "",
-        refreshToken: null,
-        refreshTokenEncrypted: null,
-      });
+      clearAccountCredentialForTesting(service, localAccountId);
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -2845,26 +2886,35 @@ describe("hosted device-sync runtime", () => {
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
       const storedLocalAccount = getStore(service).getAccountById(localAccountId);
       assert.ok(storedLocalAccount);
-      const updated = getStore(service).updateAccountTokens(localAccountId, {
-        accessToken: "local-first-access",
-        accessTokenEncrypted: codec.encrypt(
-          "local-first-access",
-          buildDeviceSyncTokenCipherOptions({
-            externalAccountId: storedLocalAccount.externalAccountId,
-            provider: storedLocalAccount.provider,
-            purpose: "device-sync-access-token",
-          }),
-        ),
-        accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-        refreshToken: "local-first-refresh",
-        refreshTokenEncrypted: codec.encrypt(
-          "local-first-refresh",
-          buildDeviceSyncTokenCipherOptions({
-            externalAccountId: storedLocalAccount.externalAccountId,
-            provider: storedLocalAccount.provider,
-            purpose: "device-sync-refresh-token",
-          }),
-        ),
+      const updated = getStore(service).upsertAccount({
+        connectedAt: storedLocalAccount.connectedAt,
+        displayName: "Local Null Fence",
+        externalAccountId: storedLocalAccount.externalAccountId,
+        metadata: storedLocalAccount.metadata,
+        provider: storedLocalAccount.provider,
+        scopes: storedLocalAccount.scopes,
+        status: storedLocalAccount.status,
+        tokens: {
+          accessToken: "local-first-access",
+          accessTokenEncrypted: codec.encrypt(
+            "local-first-access",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: storedLocalAccount.externalAccountId,
+              provider: storedLocalAccount.provider,
+              purpose: "device-sync-access-token",
+            }),
+          ),
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          refreshToken: "local-first-refresh",
+          refreshTokenEncrypted: codec.encrypt(
+            "local-first-refresh",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: storedLocalAccount.externalAccountId,
+              provider: storedLocalAccount.provider,
+              purpose: "device-sync-refresh-token",
+            }),
+          ),
+        },
       });
       assert.ok(updated);
 

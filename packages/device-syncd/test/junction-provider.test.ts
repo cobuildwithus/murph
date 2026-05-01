@@ -8,6 +8,11 @@ import {
   createJunctionDeviceSyncProvider,
   normalizeJunctionProviderFilter,
 } from "../src/providers/junction.ts";
+import {
+  isAllowedJunctionLinkHost,
+  JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
+  JunctionClient,
+} from "../src/providers/junction-client.ts";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
 import type {
@@ -17,15 +22,19 @@ import type {
   ProviderJobContext,
 } from "../src/types.ts";
 
-function createAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAccount {
+function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">> & {
+  credential?: DeviceSyncAccount["credential"];
+} = {}): DeviceSyncAccount {
   return {
     id: "acct-junction-1",
     provider: "junction",
     externalAccountId: "junction-user-1",
     disconnectGeneration: 0,
-    credentialKind: "provider_config",
-    providerConfigKey: "junction",
-    credentialMetadata: {},
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+      credentialMetadata: {},
+    },
     displayName: "Junction",
     status: "active",
     scopes: [],
@@ -41,8 +50,6 @@ function createAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAc
     nextReconcileAt: null,
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
-    accessToken: "",
-    refreshToken: null,
     ...overrides,
   };
 }
@@ -87,6 +94,24 @@ function createJunctionProvider(
   });
 }
 
+function executeJunctionJob(
+  provider: ReturnType<typeof createJunctionProvider>,
+  context: ProviderJobContext,
+  job: DeviceSyncJobRecord,
+) {
+  const executor = provider.jobExecutor;
+  assert.ok(executor, "Junction provider should expose a job executor.");
+  return executor.executeJob(context, job);
+}
+
+function requireJunctionConnectionHandler(provider: ReturnType<typeof createJunctionProvider>) {
+  return requireValue(provider.connectionHandler, "Junction provider should expose a connection handler.");
+}
+
+function requireJunctionWebhookHandler(provider: ReturnType<typeof createJunctionProvider>) {
+  return requireValue(provider.webhookHandler, "Junction provider should expose a webhook handler.");
+}
+
 function createJunctionSvixWebhook(input: {
   body: Record<string, unknown>;
   messageId?: string;
@@ -127,6 +152,19 @@ test("Junction client_user_id is deterministic, bounded, and owner-blinded", () 
   );
 });
 
+test("Junction provider exposes primitive handlers without OAuth compatibility methods", () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+
+  assert.ok(provider.connectionHandler);
+  assert.ok(provider.webhookHandler);
+  assert.ok(provider.jobExecutor);
+  assert.equal(provider.buildConnectUrl, undefined);
+  assert.equal(provider.exchangeAuthorizationCode, undefined);
+  assert.equal(provider.refreshTokens, undefined);
+});
+
 test("Junction provider filters SDK-only web Link providers", () => {
   assert.deepEqual(
     normalizeJunctionProviderFilter([
@@ -138,6 +176,93 @@ test("Junction provider filters SDK-only web Link providers", () => {
       "withings",
     ]),
     ["oura", "withings"],
+  );
+});
+
+test("Junction createLinkToken accepts documented Link web URL hosts", async () => {
+  const linkWebUrl = "https://link.tryvital.io/?token=link-token-1&env=sandbox&region=us";
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input, init) => {
+      assert.equal(readUrl(input), "https://api.sandbox.us.junction.com/v2/link/token");
+      assert.equal(new Headers(init?.headers).get("x-vital-api-key"), "sk_us_test_123");
+      return createJsonResponse({ link_web_url: linkWebUrl });
+    },
+  });
+
+  const token = await client.createLinkToken({
+    userId: "junction-user-1",
+    callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+  });
+
+  assert.equal(token.linkWebUrl, linkWebUrl);
+  assert.equal(
+    isAllowedJunctionLinkHost(new URL(token.linkWebUrl).hostname, JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS),
+    true,
+  );
+});
+
+test("Junction createLinkToken rejects unexpected Link web URL hosts", async () => {
+  assert.equal(isAllowedJunctionLinkHost("link.tryvital.io"), true);
+  assert.equal(isAllowedJunctionLinkHost("tryvital.io"), true);
+  assert.equal(isAllowedJunctionLinkHost(".tryvital.io"), false);
+  assert.equal(isAllowedJunctionLinkHost("link.tryvital.io.example.test"), false);
+
+  for (const linkWebUrl of [
+    "https://link.example.test/session/link-token-1",
+    "https://.tryvital.io/session/link-token-1",
+    "https://link.tryvital.io.example.test/session/link-token-1",
+    "http://link.tryvital.io/session/link-token-1",
+  ]) {
+    const client = new JunctionClient({
+      apiKey: "sk_us_test_123",
+      environment: "sandbox",
+      region: "us",
+      fetchImpl: async () => createJsonResponse({ link_web_url: linkWebUrl }),
+    });
+
+    await assert.rejects(
+      () => client.createLinkToken({
+        userId: "junction-user-1",
+        callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      }),
+      (error) => error instanceof DeviceSyncError
+        && error.code === "JUNCTION_LINK_TOKEN_INVALID",
+    );
+  }
+});
+
+test("Junction createLinkToken honors configured allowed Link hosts", async () => {
+  const createClient = (allowedLinkHosts: readonly string[]) => new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    allowedLinkHosts,
+    fetchImpl: async () => createJsonResponse({
+      link_web_url: "https://link.tryvital.io/?token=link-token-1&env=sandbox&region=us",
+    }),
+  });
+
+  await assert.doesNotReject(() =>
+    createClient(["tryvital.io"]).createLinkToken({
+      userId: "junction-user-1",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    }));
+
+  await assert.rejects(
+    () => createClient(["junction.com"]).createLinkToken({
+      userId: "junction-user-1",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    }),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_LINK_TOKEN_INVALID",
+  );
+
+  assert.throws(
+    () => createClient([]),
+    /Junction allowedLinkHosts must include at least one host/u,
   );
 });
 
@@ -164,7 +289,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
     throw new Error(`Unexpected request: ${url}`);
   });
 
-  const started = await requireValue(provider.beginConnection)({
+  const started = await requireJunctionConnectionHandler(provider).beginConnection({
     state: "state-1",
     callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -238,7 +363,7 @@ test("Junction beginConnection narrows Link to the requested source provider", a
     throw new Error(`Unexpected request: ${url}`);
   });
 
-  await requireValue(provider.beginConnection)({
+  await requireJunctionConnectionHandler(provider).beginConnection({
     state: "state-1",
     callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -263,7 +388,7 @@ test("Junction beginConnection rejects disabled source providers before external
   });
 
   await assert.rejects(
-    () => requireValue(provider.beginConnection)({
+    () => requireJunctionConnectionHandler(provider).beginConnection({
       state: "state-1",
       callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
       publicBaseUrl: "https://sync.example.test/device-sync",
@@ -281,7 +406,7 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
     throw new Error(`Unexpected request: ${readUrl(input)}`);
   });
 
-  const connection = await requireValue(provider.completeConnection)({
+  const connection = await requireJunctionConnectionHandler(provider).completeConnection({
     callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
     state: "state-1",
     seededExternalAccountId: "junction-user-1",
@@ -309,7 +434,7 @@ test("Junction completeConnection falls back to the callback user_id when no see
     throw new Error(`Unexpected request: ${readUrl(input)}`);
   });
 
-  const connection = await requireValue(provider.completeConnection)({
+  const connection = await requireJunctionConnectionHandler(provider).completeConnection({
     callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
     state: "state-1",
     query: new URLSearchParams({
@@ -331,7 +456,7 @@ test("Junction completeConnection rejects a callback user_id that differs from t
   });
 
   await assert.rejects(
-    requireValue(provider.completeConnection)({
+    requireJunctionConnectionHandler(provider).completeConnection({
       callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
       state: "state-1",
       seededExternalAccountId: "junction-user-seeded",
@@ -351,7 +476,7 @@ test("Junction completeConnection rejects failed Link callbacks", async () => {
   const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
 
   await assert.rejects(
-    requireValue(provider.completeConnection)({
+    requireJunctionConnectionHandler(provider).completeConnection({
       callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
       state: "state-1",
       query: new URLSearchParams({
@@ -384,7 +509,7 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
         date: "2026-04-02",
         resource: "activity",
         source: {
-          slug: "oura",
+          provider: "oura",
         },
       },
     },
@@ -392,7 +517,7 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
     timestamp: "1775174400",
   });
 
-  const parsed = await requireValue(provider.verifyAndParseWebhook)({
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
     headers: webhook.headers,
     rawBody: webhook.rawBody,
     now: "2026-04-03T00:00:00.000Z",
@@ -442,7 +567,7 @@ test("Junction rejects webhooks with invalid Svix signatures", async () => {
   });
 
   await assert.rejects(
-    requireValue(provider.verifyAndParseWebhook)({
+    requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
       headers: webhook.headers,
       rawBody: Buffer.from(JSON.stringify({
         event_type: "provider.connection.created",
@@ -457,6 +582,69 @@ test("Junction rejects webhooks with invalid Svix signatures", async () => {
 
 test("Junction polling updates source projection and imports bounded summary/timeseries snapshots", async () => {
   const requests: string[] = [];
+  const groupedTimeseriesPayloads: Record<string, unknown> = {
+    steps: {
+      groups: {
+        oura: [{
+          data: [{
+            accountId: "junction-account-timeseries-1",
+            account: { id: "nested-account-timeseries-1" },
+            app: { id: "nested-app-timeseries-1", name: "Nested Timeseries App" },
+            device: { id: "nested-device-timeseries-1", name: "Nested Timeseries Device" },
+            end: "2026-04-02T14:57:24+00:00",
+            start: "2026-04-02T14:30:52+00:00",
+            unit: "count",
+            user_id: "junction-user-timeseries-1",
+            value: 123,
+          }],
+          source: {
+            provider: "oura",
+            type: "ring",
+            name: "Timeseries Oura Ring",
+            device_id: "timeseries-device-oura-ring-1",
+            app_id: "timeseries-app-oura-cloud-1",
+          },
+        }],
+      },
+    },
+    distance: {
+      groups: {
+        oura: [{
+          data: [{
+            end: "2026-04-02T14:57:24+00:00",
+            start: "2026-04-02T14:30:52+00:00",
+            unit: "m",
+            value: 5.6,
+          }],
+          source: { provider: "oura", type: "ring" },
+        }],
+      },
+    },
+    heartrate: {
+      groups: {
+        oura: [{
+          data: [{
+            timestamp: "2026-04-02T14:30:52+00:00",
+            unit: "bpm",
+            value: 70,
+          }],
+          source: { provider: "oura", type: "ring" },
+        }],
+      },
+    },
+    hrv: {
+      groups: {
+        oura: [{
+          data: [{
+            timestamp: "2026-04-02T14:30:52+00:00",
+            unit: "rmssd",
+            value: 48,
+          }],
+          source: { provider: "oura", type: "ring" },
+        }],
+      },
+    },
+  };
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
@@ -465,13 +653,39 @@ test("Junction polling updates source projection and imports bounded summary/tim
       return createJsonResponse({
         providers: [
           {
-            slug: "oura",
+            id: "provider-connection-oura-ring-1",
             name: "Oura Ring",
             status: "connected",
+            source: {
+              provider: "oura",
+              device_id: "device-oura-ring-1",
+              app_id: "app-oura-cloud-1",
+            },
             resource_availability: {
               sleep: true,
               connectedSources: ["oura"],
+              source: "Oura Ring",
+              provider: "oura",
+              provider_connection_id: "provider-connection-oura-ring-1",
+              provider_name: "Oura Cloud",
+              device_id: "device-oura-ring-1",
+              deviceName: "Oura Ring",
+              app_id: "app-oura-cloud-1",
+              app_name: "Oura App",
               user_id: "blocked",
+            },
+          },
+          {
+            id: "provider-connection-oura-ring-2",
+            slug: "oura",
+            name: "Oura Ring 2",
+            status: "connected",
+            source: {
+              device_id: "device-oura-ring-2",
+              app_id: "app-oura-cloud-1",
+            },
+            resource_availability: {
+              activity: true,
             },
           },
         ],
@@ -481,20 +695,41 @@ test("Junction polling updates source projection and imports bounded summary/tim
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
       const cursor = new URL(url).searchParams.get("cursor");
       if (cursor === "page-2") {
-        return createJsonResponse({ data: [{ id: "summary-2", steps: 2000 }] });
+        return createJsonResponse({
+          data: [{
+            id: "summary-2",
+            accountId: "junction-account-raw-2",
+            providerConnectionId: "provider-connection-oura-ring-2",
+            userId: "junction-user-raw-2",
+            steps: 2000,
+          }],
+        });
       }
 
       return createJsonResponse({
-        data: [{ id: "summary-1", steps: 1000 }],
+        data: [{
+          id: "summary-1",
+          Source: { id: "nested-source-summary-1", name: "Nested Source Summary" },
+          account_id: "junction-account-raw-1",
+          account: { id: "nested-account-summary-1" },
+          app: { id: "nested-app-summary-1", name: "Nested Summary App" },
+          client_user_id: "client-user-raw-1",
+          device: { id: "nested-device-summary-1", name: "Nested Summary Device" },
+          provider_connection_id: "provider-connection-oura-ring-1",
+          steps: 1000,
+        }],
         next_cursor: "page-2",
       });
     }
 
-    if (url.includes("/v2/timeseries/junction-user-1/heartrate")) {
-      return createJsonResponse({ data: [{ timestamp: "2026-04-02T00:00:00Z", value: 60 }] });
+    const timeseriesResource = new URL(url).pathname.match(/\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
+    if (timeseriesResource && timeseriesResource in groupedTimeseriesPayloads) {
+      return createJsonResponse(groupedTimeseriesPayloads[timeseriesResource]);
     }
 
     throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["steps", "distance", "heartrate", "hrv"],
   });
   const sources: DeviceConnectionSourceRecord[] = [];
   const importedSnapshots: unknown[] = [];
@@ -525,7 +760,8 @@ test("Junction polling updates source projection and imports bounded summary/tim
     logger: {},
   };
 
-  const result = await provider.executeJob(
+  const result = await executeJunctionJob(
+    provider,
     context,
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
@@ -534,18 +770,167 @@ test("Junction polling updates source projection and imports bounded summary/tim
   );
 
   assert.equal(result.metadataPatch, undefined);
-  assert.equal(sources.length, 1);
+  assert.equal(sources.length, 2);
   assert.equal(sources[0]?.sourceProviderSlug, "oura");
+  assert.equal(sources[1]?.sourceProviderSlug, "oura");
   assert.equal(sources[0]?.status, "connected");
+  assert.match(sources[0]?.sourceInstanceKey ?? "", /^jxn_[a-f0-9]{32}$/u);
+  assert.match(sources[1]?.sourceInstanceKey ?? "", /^jxn_[a-f0-9]{32}$/u);
+  assert.notEqual(sources[0]?.sourceInstanceKey, sources[1]?.sourceInstanceKey);
+  assert.doesNotMatch(sources[0]?.sourceInstanceKey ?? "", /provider|device|oura|ring|app/u);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.sourceInstanceKeyFallback, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.sleep, true);
   assert.equal(sources[0]?.resourceAvailabilitySummary.connectedSources, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.source, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.provider, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.provider_connection_id, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.provider_name, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.device_id, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.deviceName, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.user_id, undefined);
   assert.equal(importedSnapshots.length, 1);
   assert.match(JSON.stringify(importedSnapshots[0]), /"provider":"junction"/u);
+  const snapshotJson = JSON.stringify(importedSnapshots[0]);
+  assert.doesNotMatch(snapshotJson, /provider-connection-oura-ring|device-oura-ring|app-oura-cloud/u);
+  assert.doesNotMatch(snapshotJson, /junction-user-1|junction-account-raw|junction-user-raw|client-user-raw|junction-account-timeseries|junction-user-timeseries/u);
+  assert.doesNotMatch(snapshotJson, /nested-(source|account|device|app)-summary|Nested Summary|nested-(account|device|app)-timeseries|Nested Timeseries/u);
+  const snapshot = importedSnapshots[0] as {
+    accountId?: string;
+    connections?: Array<Record<string, unknown>>;
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.match(snapshot.accountId ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
+  const importedConnection = snapshot.connections?.[0] as
+    | {
+        provider?: unknown;
+        source?: unknown;
+        sourceInstanceId?: string;
+        sourceProviderSlug?: string;
+      }
+    | undefined;
+  assert.match(
+    importedConnection?.sourceInstanceId ?? "",
+    /^source-[a-f0-9]{24}$/u,
+  );
+  assert.deepEqual(Object.keys(importedConnection ?? {}).sort(), [
+    "sourceInstanceId",
+    "sourceProviderSlug",
+  ]);
+  assert.equal(importedConnection?.sourceProviderSlug, "oura");
+  assert.equal((importedConnection as { source?: unknown } | undefined)?.source, undefined);
+  assert.equal((importedConnection as { provider?: unknown } | undefined)?.provider, undefined);
+  assert.equal(snapshot.summaries?.activity?.[0]?.account_id, undefined);
+  assert.equal(snapshot.summaries?.activity?.[0]?.Source, undefined);
+  assert.equal(snapshot.summaries?.activity?.[0]?.account, undefined);
+  assert.equal(snapshot.summaries?.activity?.[0]?.app, undefined);
+  assert.equal(snapshot.summaries?.activity?.[0]?.client_user_id, undefined);
+  assert.equal(snapshot.summaries?.activity?.[0]?.device, undefined);
+  assert.equal(snapshot.summaries?.activity?.[0]?.provider_connection_id, undefined);
+  assert.equal(snapshot.summaries?.activity?.[1]?.accountId, undefined);
+  assert.equal(snapshot.summaries?.activity?.[1]?.providerConnectionId, undefined);
+  assert.equal(snapshot.summaries?.activity?.[1]?.userId, undefined);
+  assert.deepEqual(Object.keys(snapshot.timeseries ?? {}).sort(), ["distance", "heartrate", "hrv", "steps"]);
+  const stepRecord = snapshot.timeseries?.steps?.[0];
+  assert.equal(stepRecord?.accountId, undefined);
+  assert.equal(stepRecord?.account, undefined);
+  assert.equal(stepRecord?.app, undefined);
+  assert.equal(stepRecord?.device, undefined);
+  assert.equal(stepRecord?.sourceProviderSlug, "oura");
+  assert.equal(stepRecord?.sourceType, "ring");
+  assert.equal(stepRecord?.sourceName, undefined);
+  assert.equal(stepRecord?.sourceDeviceId, undefined);
+  assert.equal(stepRecord?.sourceAppId, undefined);
+  assert.equal(stepRecord?.user_id, undefined);
+  assert.equal((stepRecord as { source?: unknown } | undefined)?.source, undefined);
+  assert.equal((stepRecord as { provider?: unknown } | undefined)?.provider, undefined);
+  assert.equal(typeof stepRecord?.sourceInstanceId, "string");
+  assert.match(String(stepRecord?.sourceInstanceId), /^source-[a-f0-9]{24}$/u);
+  assert.equal(snapshot.timeseries?.distance?.[0]?.sourceType, "ring");
+  assert.equal(snapshot.timeseries?.heartrate?.[0]?.junctionResource, "heartrate");
+  assert.equal(snapshot.timeseries?.hrv?.[0]?.unit, "rmssd");
+  assert.doesNotMatch(
+    JSON.stringify(snapshot.timeseries),
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1/u,
+  );
   assert.equal(requests.filter((url) => url.includes("/v2/summary/")).length, 2);
   assert.equal(requests.some((url) => url.includes("cursor=page-2")), true);
-  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/")).length, 2);
+  const timeseriesRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
+  assert.equal(timeseriesRequests.length, 8);
+  assert.equal(timeseriesRequests.every((url) => url.includes("/grouped?")), true);
+  assert.equal(timeseriesRequests.some((url) => url.includes("/heartrate?")), false);
   assert.equal(requests.every((url) => !url.includes("glucose") && !url.includes("cgm")), true);
+});
+
+test("Junction source projection marks the slug-only instance-key fallback", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "withings",
+            name: "Withings",
+            status: "connected",
+            resource_availability: {
+              body: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/heartrate")) {
+      return createJsonResponse({ data: [] });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const sources: DeviceConnectionSourceRecord[] = [];
+  const context: ProviderJobContext = {
+    account: createAccount(),
+    now: "2026-04-03T00:00:00.000Z",
+    importSnapshot: async () => ({ imported: true }),
+    upsertConnectionSource: (input) => {
+      const source: DeviceConnectionSourceRecord = {
+        id: `src-${sources.length + 1}`,
+        connectionId: "acct-junction-1",
+        ...input,
+        displayName: input.displayName ?? null,
+        resourceAvailabilitySummary: input.resourceAvailabilitySummary ?? {},
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        createdAt: input.lastSeenAt,
+        updatedAt: input.lastSeenAt,
+      };
+      sources.push(source);
+      return source;
+    },
+    refreshAccountTokens: async () => createAccount(),
+    logger: {},
+  };
+
+  await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(sources.length, 1);
+  assert.match(sources[0]?.sourceInstanceKey ?? "", /^jxn_[a-f0-9]{32}$/u);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.body, true);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.sourceInstanceKeyFallback, true);
 });
 
 test("Junction resource jobs fetch only the hinted resource window", async () => {
@@ -602,7 +987,8 @@ test("Junction resource jobs fetch only the hinted resource window", async () =>
     logger: {},
   };
 
-  await provider.executeJob(
+  await executeJunctionJob(
+    provider,
     context,
     createJob("resource", {
       eventType: "daily.data.activity.created",
@@ -681,7 +1067,8 @@ test("Junction resource jobs skip opt-in glucose when it is not configured", asy
     },
   };
 
-  await provider.executeJob(
+  await executeJunctionJob(
+    provider,
     context,
     createJob("resource", {
       eventType: "daily.data.glucose.created",
@@ -722,8 +1109,15 @@ test("Junction resource jobs infer opt-in glucose as timeseries", async () => {
       });
     }
 
-    if (url.includes("/v2/timeseries/junction-user-1/glucose")) {
-      return createJsonResponse({ data: [{ timestamp: "2026-04-02T00:00:00Z", value: 101 }] });
+    if (url.includes("/v2/timeseries/junction-user-1/glucose/grouped")) {
+      return createJsonResponse({
+        groups: {
+          dexcom_v3: [{
+            data: [{ timestamp: "2026-04-02T00:00:00Z", value: 101 }],
+            source: { provider: "dexcom_v3", type: "cgm" },
+          }],
+        },
+      });
     }
 
     throw new Error(`Unexpected request: ${url}`);
@@ -757,7 +1151,8 @@ test("Junction resource jobs infer opt-in glucose as timeseries", async () => {
     logger: {},
   };
 
-  await provider.executeJob(
+  await executeJunctionJob(
+    provider,
     context,
     createJob("resource", {
       eventType: "daily.data.glucose.created",
@@ -770,7 +1165,7 @@ test("Junction resource jobs infer opt-in glucose as timeseries", async () => {
     }),
   );
 
-  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/glucose")).length, 2);
+  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/glucose/grouped")).length, 2);
   assert.equal(requests.some((url) => url.includes("/v2/summary/glucose/")), false);
   assert.equal(importedSnapshots.length, 1);
   assert.match(JSON.stringify(importedSnapshots[0]), /"glucose"/u);

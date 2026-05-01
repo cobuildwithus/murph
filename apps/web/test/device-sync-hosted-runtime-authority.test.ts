@@ -123,15 +123,24 @@ function buildStoredAccount(
     tokenVersion: number;
   }> = {},
 ) {
+  const accessToken = overrides.accessToken ?? "stored-access-token";
+  const accessTokenExpiresAt = overrides.accessTokenExpiresAt ?? record.accessTokenExpiresAt ?? null;
+  const refreshToken = overrides.refreshToken ?? "stored-refresh-token";
+
   return {
     ...buildPublicConnection(record),
-    accessToken: "stored-access-token",
-    accessTokenExpiresAt: record.accessTokenExpiresAt ?? null,
+    accessTokenExpiresAt,
+    credential: {
+      kind: "oauth_tokens" as const,
+      tokens: {
+        accessToken,
+        accessTokenExpiresAt,
+        refreshToken,
+      },
+    },
     disconnectGeneration: 0,
-    keyVersion: "kv_stored",
-    refreshToken: "stored-refresh-token",
-    tokenVersion: 3,
-    ...overrides,
+    keyVersion: overrides.keyVersion ?? "kv_stored",
+    tokenVersion: overrides.tokenVersion ?? 3,
   };
 }
 
@@ -352,7 +361,12 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(harness.record.displayName).toBe("Hosted Device");
-    expect(harness.storedAccount?.accessToken).toBe("stored-access-token");
+    expect(harness.storedAccount?.credential).toMatchObject({
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken: "stored-access-token",
+      },
+    });
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
@@ -495,9 +509,14 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
     );
     expect(harness.storedAccount).toMatchObject({
-      accessToken: "fresh-access-token",
+      credential: {
+        kind: "oauth_tokens",
+        tokens: {
+          accessToken: "fresh-access-token",
+          refreshToken: "fresh-refresh-token",
+        },
+      },
       externalAccountId: "acct_123",
-      refreshToken: "fresh-refresh-token",
       tokenVersion: 1,
     });
   });
@@ -857,7 +876,12 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.persistStoredConnectionTokenBundle).toHaveBeenCalledTimes(1);
     expect(harness.record.updatedAt).toBe("2026-04-06T10:11:00.000Z");
     expect(harness.storedAccount).toMatchObject({
-      accessToken: "fresh-access-token",
+      credential: {
+        kind: "oauth_tokens",
+        tokens: {
+          accessToken: "fresh-access-token",
+        },
+      },
       tokenVersion: 1,
     });
   });

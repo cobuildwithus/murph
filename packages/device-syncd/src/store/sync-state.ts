@@ -147,7 +147,15 @@ export function markConnectionSetupFailed(
 
     database.prepare(`
       update device_credential_state
-      set access_token_encrypted = '',
+      set credential_kind = case
+            when credential_kind = 'oauth_tokens' then 'none'
+            else credential_kind
+          end,
+          provider_config_key = case
+            when credential_kind = 'oauth_tokens' then null
+            else provider_config_key
+          end,
+          access_token_encrypted = null,
           refresh_token_encrypted = null,
           access_token_expires_at = null,
           updated_at = ?

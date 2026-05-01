@@ -521,8 +521,8 @@ function buildHostedDeviceSyncRuntimeCredentialSnapshotFromAccount(input: {
 function buildHostedDeviceSyncRuntimeStoredCredentialSnapshot(
   account: StoredDeviceSyncAccount,
 ): HostedDeviceSyncRuntimeCredentialSnapshot | null {
-  if (account.credentialKind === "provider_config") {
-    const providerConfigKey = account.providerConfigKey?.trim();
+  if (account.credential.kind === "provider_config") {
+    const providerConfigKey = account.credential.providerConfigKey.trim();
     if (!providerConfigKey) {
       return {
         kind: "none",
@@ -530,7 +530,7 @@ function buildHostedDeviceSyncRuntimeStoredCredentialSnapshot(
     }
 
     const credentialMetadata = sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
-      account.credentialMetadata,
+      account.credential.credentialMetadata,
     );
     return {
       kind: "provider_config",
@@ -541,7 +541,7 @@ function buildHostedDeviceSyncRuntimeStoredCredentialSnapshot(
     };
   }
 
-  if (account.credentialKind === "none") {
+  if (account.credential.kind === "none") {
     return {
       kind: "none",
     };
@@ -556,22 +556,24 @@ function buildHostedDeviceSyncRuntimeTokenBundleFromAccount(input: {
   keyVersion?: string;
   observedTokenVersion: number | null;
 }): HostedDeviceSyncRuntimeTokenBundle | null {
-  const hasLocalTokenEscrow = input.account.accessTokenEncrypted.length > 0;
+  const credential = input.account.credential.kind === "oauth_tokens"
+    ? input.account.credential
+    : null;
 
-  if (input.account.status === "disconnected" || !hasLocalTokenEscrow) {
+  if (input.account.status === "disconnected" || !credential) {
     return null;
   }
 
   return {
     accessToken: input.codec.decrypt(
-      input.account.accessTokenEncrypted,
+      credential.accessTokenEncrypted,
       buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-access-token"),
     ),
-    accessTokenExpiresAt: input.account.accessTokenExpiresAt ?? null,
+    accessTokenExpiresAt: credential.accessTokenExpiresAt ?? null,
     keyVersion: input.keyVersion ?? "local-runtime",
-    refreshToken: input.account.refreshTokenEncrypted
+    refreshToken: credential.refreshTokenEncrypted
       ? input.codec.decrypt(
-        input.account.refreshTokenEncrypted,
+        credential.refreshTokenEncrypted,
         buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-refresh-token"),
       )
       : null,

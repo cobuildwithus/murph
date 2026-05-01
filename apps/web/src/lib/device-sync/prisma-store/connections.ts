@@ -535,13 +535,16 @@ export class PrismaHostedConnectionStore {
 
     return {
       ...publicConnection,
-      accessToken: tokenBundle.accessToken,
-      credentialKind: "oauth_tokens",
-      credentialMetadata: mappedRecord.credentialMetadata,
+      credential: {
+        kind: "oauth_tokens",
+        tokens: {
+          accessToken: tokenBundle.accessToken,
+          accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt ?? null,
+          refreshToken: tokenBundle.refreshToken,
+        },
+      },
       disconnectGeneration: 0,
       keyVersion: tokenBundle.keyVersion,
-      providerConfigKey: null,
-      refreshToken: tokenBundle.refreshToken,
       tokenVersion: tokenBundle.tokenVersion,
     } satisfies HostedStoredDeviceSyncAccount;
   }

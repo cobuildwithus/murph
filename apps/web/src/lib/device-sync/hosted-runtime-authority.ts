@@ -21,6 +21,7 @@ import {
   buildHostedPublicDeviceSyncAccount,
   type HostedStaticDeviceSyncConnectionRecord,
 } from "./internal-runtime";
+import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import {
   hostedConnectionRecordArgs,
   mapHostedConnectionRecord,
@@ -433,16 +434,12 @@ function buildHostedRuntimeCredentialSnapshot(input: {
   record: HostedStaticDeviceSyncConnectionRecord;
   storedAccount: HostedStoredDeviceSyncAccount | null;
 }): HostedExecutionDeviceSyncRuntimeCredentialSnapshot {
-  if (input.storedAccount) {
+  const storedTokenBundle = buildStoredTokenBundle(input.storedAccount);
+
+  if (storedTokenBundle) {
     return {
       kind: "oauth_tokens",
-      tokenBundle: {
-        accessToken: input.storedAccount.accessToken,
-        accessTokenExpiresAt: input.storedAccount.accessTokenExpiresAt ?? null,
-        keyVersion: input.storedAccount.keyVersion,
-        refreshToken: input.storedAccount.refreshToken,
-        tokenVersion: input.storedAccount.tokenVersion,
-      },
+      tokenBundle: storedTokenBundle,
     };
   }
 

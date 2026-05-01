@@ -23,7 +23,21 @@ import {
 
 import type { DeviceSyncAccount } from "../src/types.ts";
 
-function createAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAccount {
+type DeviceSyncAccountOverrides = Partial<Omit<DeviceSyncAccount, "credential">> & {
+  accessToken?: string;
+  refreshToken?: string | null;
+  credential?: DeviceSyncAccount["credential"];
+};
+
+function createAccount(overrides: DeviceSyncAccountOverrides = {}): DeviceSyncAccount {
+  const {
+    accessToken = "access-token",
+    refreshToken = "refresh-token",
+    credential,
+    ...accountOverrides
+  } = overrides;
+  const accessTokenExpiresAt = accountOverrides.accessTokenExpiresAt ?? null;
+
   return {
     id: "acct-shared-oauth-1",
     provider: "demo",
@@ -44,10 +58,24 @@ function createAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAc
     nextReconcileAt: null,
     createdAt: "2026-03-16T00:00:00.000Z",
     updatedAt: "2026-03-16T00:00:00.000Z",
-    accessToken: "access-token",
-    refreshToken: "refresh-token",
-    ...overrides,
+    credential: credential ?? {
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresAt,
+      },
+    },
+    ...accountOverrides,
   };
+}
+
+function requireOAuthTokens(account: DeviceSyncAccount) {
+  if (account.credential.kind !== "oauth_tokens") {
+    throw new TypeError("Expected OAuth account.");
+  }
+
+  return account.credential.tokens;
 }
 
 test("shared oauth helpers normalize response parsing, retry metadata, scopes, and expiry helpers", async () => {
@@ -435,7 +463,7 @@ test("shared oauth refreshing sessions reuse refreshed credentials and rethrow n
   });
 
   assert.deepEqual(await session.requestJson("/resource"), { ok: true });
-  assert.equal(session.account.accessToken, "fresh-access-token");
+  assert.equal(requireOAuthTokens(session.account).accessToken, "fresh-access-token");
   assert.deepEqual(requestedTokens, ["fresh-access-token:/resource"]);
 
   await assert.rejects(
@@ -476,7 +504,7 @@ test("shared oauth refreshing sessions update their current account and schedule
   const response = await session.requestJson<{ ok: boolean }>("/collection");
 
   assert.deepEqual(response, { ok: true });
-  assert.equal(session.account.accessToken, "fresh-access-token");
+  assert.equal(requireOAuthTokens(session.account).accessToken, "fresh-access-token");
   assert.deepEqual(accessTokens, ["fresh-access-token:/collection"]);
 
   assert.equal(

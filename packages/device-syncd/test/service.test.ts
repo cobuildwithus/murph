@@ -35,6 +35,7 @@ import type {
   DeviceSyncJobRecord,
   DeviceSyncProvider,
   ProviderAuthTokens,
+  StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
 const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
@@ -200,6 +201,22 @@ function encryptStoredAccessToken(provider: string, externalAccountId: string, a
 function requireCallback(callback: (() => void) | null, message: string): () => void {
   assert.ok(callback, message);
   return callback;
+}
+
+function requireStoredOAuthCredential(
+  account: StoredDeviceSyncAccount | null | undefined,
+): Extract<StoredDeviceSyncAccount["credential"], { kind: "oauth_tokens" }> {
+  assert.ok(account);
+  assert.equal(account.credential.kind, "oauth_tokens");
+  return account.credential;
+}
+
+function assertStoredCredentialKind(
+  account: StoredDeviceSyncAccount | null | undefined,
+  kind: StoredDeviceSyncAccount["credential"]["kind"],
+): void {
+  assert.ok(account);
+  assert.equal(account.credential.kind, kind);
 }
 
 test("device sync service facade does not expose privileged store or control methods", async () => {
@@ -1437,8 +1454,7 @@ test("sqlite device-sync store disconnect clears mirrored tokens and stale error
     const disconnected = store.disconnectAccount(account.id, "2026-03-16T10:10:00.000Z");
 
     assert.equal(disconnected.status, "disconnected");
-    assert.equal(disconnected.accessTokenEncrypted, "");
-    assert.equal(disconnected.refreshTokenEncrypted, null);
+    assertStoredCredentialKind(disconnected, "none");
     assert.equal(disconnected.accessTokenExpiresAt, null);
     assert.equal(disconnected.lastErrorCode, null);
     assert.equal(disconnected.lastErrorMessage, null);
@@ -1888,8 +1904,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   assert.ok(storedAccount);
   assert.equal(storedAccount.status, "disconnected");
   assert.equal(storedAccount.disconnectGeneration, (accountBeforeDisconnect?.disconnectGeneration ?? 0) + 1);
-  assert.equal(storedAccount.accessTokenEncrypted, "");
-  assert.equal(storedAccount.refreshTokenEncrypted, null);
+  assertStoredCredentialKind(storedAccount, "none");
   assert.equal(storedAccount.accessTokenExpiresAt, null);
   assert.equal(storedAccount.lastSyncCompletedAt, null);
   assert.equal(service.summarize().jobsQueued, 0);
@@ -2127,8 +2142,10 @@ test("device sync service does not persist refreshed tokens after the job lease 
   const accountAfter = store.getAccountById(connected.account.id);
 
   assert.ok(accountAfter);
-  assert.equal(accountAfter?.accessTokenEncrypted, tokensBefore.accessTokenEncrypted);
-  assert.equal(accountAfter?.refreshTokenEncrypted, tokensBefore.refreshTokenEncrypted);
+  const credentialBefore = requireStoredOAuthCredential(tokensBefore);
+  const credentialAfter = requireStoredOAuthCredential(accountAfter);
+  assert.equal(credentialAfter.accessTokenEncrypted, credentialBefore.accessTokenEncrypted);
+  assert.equal(credentialAfter.refreshTokenEncrypted, credentialBefore.refreshTokenEncrypted);
   assert.equal(persistedJob?.status, "running");
   assert.equal(persistedJob?.leaseOwner, "worker-b");
   assert.equal(persistedJob?.lastErrorCode, null);
@@ -2497,8 +2514,7 @@ test("sqlite store hosted hydration replaces mirrored metadata and clears local 
   assert.equal(hydrated?.hostedObservedUpdatedAt, "2026-03-27T08:00:00.000Z");
   assert.equal(hydrated?.hostedObservedTokenVersion, null);
   assert.equal(hydrated?.updatedAt, "2026-03-27T08:00:00.000Z");
-  assert.equal(hydrated?.accessTokenEncrypted, "");
-  assert.equal(hydrated?.refreshTokenEncrypted, null);
+  assertStoredCredentialKind(hydrated, "none");
   assert.equal(hydrated?.accessTokenExpiresAt, null);
 
   store.close();
@@ -2702,7 +2718,7 @@ test("sqlite store reopens an existing split-schema database at the current sche
 
   assert.ok(reopened);
   assert.equal(reopened?.displayName, "Reopen Account");
-  assert.equal(reopened?.accessTokenEncrypted, "enc:reopen-access");
+  assert.equal(requireStoredOAuthCredential(reopened).accessTokenEncrypted, "enc:reopen-access");
 
   reopenedStore.markWebhookReceived(created.id, "2026-03-21T12:00:00.000Z");
   assert.equal(reopenedStore.getAccountById(created.id)?.lastWebhookAt, "2026-03-21T12:00:00.000Z");

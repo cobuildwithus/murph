@@ -30,13 +30,14 @@ import {
   requireRefreshToken,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
+  withOAuthCompatibilityHandlers,
 } from "./shared-oauth.ts";
 
 import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
-  DeviceSyncProvider,
+  DeviceSyncOAuthCompatibilityProvider,
   ProviderAuthTokens,
   ProviderCallbackContext,
   ProviderConnectionResult,
@@ -47,6 +48,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
 
 const WHOOP_AUTH_PATH = "/oauth/oauth2/auth";
 const WHOOP_TOKEN_PATH = "/oauth/oauth2/token";
@@ -352,7 +354,7 @@ function buildWhoopApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
-export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncProvider {
+export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthCompatibilityProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = whoopBaseUrl(config);
   const scopes = buildWhoopScopes(config.scopes);
@@ -639,7 +641,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     return {};
   }
 
-  const provider: DeviceSyncProvider = {
+  const provider = withOAuthCompatibilityHandlers({
     provider: descriptor.provider,
     descriptor,
     buildConnectUrl(context) {
@@ -726,10 +728,15 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       });
     },
     async revokeAccess(account: DeviceSyncAccount): Promise<void> {
+      const tokens = getDeviceSyncAccountOAuthTokens(account);
+      if (!tokens?.accessToken) {
+        return;
+      }
+
       const response = await fetchImpl(`${baseUrl}${WHOOP_API_PREFIX}/v2/user/access`, {
         method: "DELETE",
         headers: {
-          Authorization: `Bearer ${account.accessToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
         },
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -861,7 +868,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         retryable: false,
       });
     },
-  };
+  });
 
   return provider;
 }

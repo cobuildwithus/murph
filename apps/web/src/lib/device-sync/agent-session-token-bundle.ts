@@ -36,15 +36,17 @@ export function buildTokenExport(
 export function buildStoredTokenBundle(
   account: HostedStoredDeviceSyncAccount | null,
 ): HostedStoredTokenBundle | null {
-  if (!account) {
+  if (!account || account.credential.kind !== "oauth_tokens") {
     return null;
   }
 
+  const tokens = account.credential.tokens;
+
   return {
-    accessToken: account.accessToken,
-    accessTokenExpiresAt: account.accessTokenExpiresAt ?? null,
+    accessToken: tokens.accessToken,
+    accessTokenExpiresAt: tokens.accessTokenExpiresAt ?? account.accessTokenExpiresAt ?? null,
     keyVersion: account.keyVersion,
-    refreshToken: account.refreshToken,
+    refreshToken: tokens.refreshToken ?? null,
     tokenVersion: account.tokenVersion,
   };
 }

@@ -2,16 +2,34 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
 import { resolveStravaWebhookPreflightResponse } from "../src/providers/strava.ts";
-import type { DeviceSyncAccount } from "../src/types.ts";
+import type { DeviceSyncAccount, StoredDeviceSyncAccount } from "../src/types.ts";
 
-function buildStravaAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAccount {
+type DeviceSyncAccountOverrides = Partial<Omit<DeviceSyncAccount, "credential">> & {
+  accessToken?: string;
+  refreshToken?: string | null;
+  credential?: DeviceSyncAccount["credential"];
+};
+
+type StoredDeviceSyncAccountOverrides = Partial<Omit<StoredDeviceSyncAccount, "credential">> & {
+  accessTokenEncrypted?: string;
+  refreshTokenEncrypted?: string | null;
+  credential?: StoredDeviceSyncAccount["credential"];
+};
+
+function buildStravaAccount(overrides: DeviceSyncAccountOverrides = {}): DeviceSyncAccount {
+  const {
+    accessToken = "token",
+    refreshToken = "refresh",
+    credential,
+    ...accountOverrides
+  } = overrides;
+  const accessTokenExpiresAt = accountOverrides.accessTokenExpiresAt ?? null;
+
   return {
     id: "connection-1",
     provider: "strava",
     externalAccountId: "123456",
     status: "active",
-    accessToken: "token",
-    refreshToken: "refresh",
     accessTokenExpiresAt: null,
     connectedAt: "2026-04-16T00:00:00.000Z",
     disconnectGeneration: 0,
@@ -27,8 +45,52 @@ function buildStravaAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceS
     scopes: ["activity:read"],
     createdAt: "2026-04-16T00:00:00.000Z",
     updatedAt: "2026-04-16T00:00:00.000Z",
-    ...overrides,
+    credential: credential ?? {
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresAt,
+      },
+    },
+    ...accountOverrides,
   };
+}
+
+function buildStravaStoredAccount(overrides: StoredDeviceSyncAccountOverrides = {}): StoredDeviceSyncAccount {
+  const {
+    accessTokenEncrypted = "ciphertext",
+    refreshTokenEncrypted = "refresh-ciphertext",
+    credential,
+    ...accountOverrides
+  } = overrides;
+  const { credential: _decryptedCredential, ...publicAccount } = buildStravaAccount();
+
+  return {
+    ...publicAccount,
+    ...accountOverrides,
+    credential: credential ?? {
+      kind: "oauth_tokens",
+      accessTokenEncrypted,
+      refreshTokenEncrypted,
+      accessTokenExpiresAt: accountOverrides.accessTokenExpiresAt ?? null,
+      credentialMetadata: {},
+    },
+    hostedObservedConnectionRevision: accountOverrides.hostedObservedConnectionRevision ?? 0,
+    hostedObservedTokenRevision: accountOverrides.hostedObservedTokenRevision ?? 0,
+    hostedObservedTokenVersion: accountOverrides.hostedObservedTokenVersion ?? null,
+    hostedObservedUpdatedAt: accountOverrides.hostedObservedUpdatedAt ?? null,
+    localConnectionRevision: accountOverrides.localConnectionRevision ?? 0,
+    localTokenRevision: accountOverrides.localTokenRevision ?? 0,
+  };
+}
+
+function requireStravaOAuthTokens(account: DeviceSyncAccount) {
+  if (account.credential.kind !== "oauth_tokens") {
+    throw new TypeError("Expected OAuth token account.");
+  }
+
+  return account.credential.tokens;
 }
 
 describe("Strava device-sync provider", () => {
@@ -67,35 +129,11 @@ describe("Strava device-sync provider", () => {
       throw new TypeError("Strava provider must define createScheduledJobs.");
     }
 
-    const schedule = createScheduledJobs({
-      id: "connection-1",
-      provider: "strava",
+    const schedule = createScheduledJobs(buildStravaStoredAccount({
       externalAccountId: "12345",
       displayName: "Runner",
-      status: "active",
-      scopes: ["activity:read"],
-      metadata: {},
-      connectedAt: "2026-04-16T00:00:00.000Z",
-      lastWebhookAt: null,
-      lastSyncStartedAt: null,
-      lastSyncCompletedAt: null,
-      lastSyncErrorAt: null,
-      lastErrorCode: null,
-      lastErrorMessage: null,
       nextReconcileAt: "2026-04-16T06:00:00.000Z",
-      createdAt: "2026-04-16T00:00:00.000Z",
-      updatedAt: "2026-04-16T00:00:00.000Z",
-      accessTokenExpiresAt: null,
-      disconnectGeneration: 0,
-      accessTokenEncrypted: "ciphertext",
-      hostedObservedConnectionRevision: 0,
-      hostedObservedTokenRevision: 0,
-      hostedObservedTokenVersion: null,
-      hostedObservedUpdatedAt: null,
-      localConnectionRevision: 0,
-      localTokenRevision: 0,
-      refreshTokenEncrypted: "refresh-ciphertext",
-    }, "2026-04-16T06:00:00.000Z");
+    }), "2026-04-16T06:00:00.000Z");
 
     expect(schedule.jobs).toEqual([
       expect.objectContaining({
@@ -522,29 +560,9 @@ describe("Strava device-sync provider", () => {
     await expect(
       provider.executeJob(
         {
-          account: {
-            id: "connection-1",
-            provider: "strava",
-            externalAccountId: "123456",
-            status: "active",
-            accessToken: "token",
-            refreshToken: "refresh",
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-04-16T00:00:00.000Z",
-            disconnectGeneration: 0,
+          account: buildStravaAccount({
             displayName: "Runner",
-            metadata: {},
-            lastWebhookAt: null,
-            lastSyncStartedAt: null,
-            lastSyncCompletedAt: null,
-            lastSyncErrorAt: null,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            nextReconcileAt: null,
-            scopes: ["activity:read"],
-            createdAt: "2026-04-16T00:00:00.000Z",
-            updatedAt: "2026-04-16T00:00:00.000Z",
-          },
+          }),
           now: "2026-04-16T00:00:00.000Z",
           importSnapshot: async () => undefined,
           refreshAccountTokens: async () => {
@@ -608,29 +626,9 @@ describe("Strava device-sync provider", () => {
     await expect(
       provider.executeJob(
         {
-          account: {
-            id: "connection-1",
-            provider: "strava",
-            externalAccountId: "123456",
-            status: "active",
-            accessToken: "token",
-            refreshToken: "refresh",
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-04-16T00:00:00.000Z",
-            disconnectGeneration: 0,
+          account: buildStravaAccount({
             displayName: "Runner",
-            metadata: {},
-            lastWebhookAt: null,
-            lastSyncStartedAt: null,
-            lastSyncCompletedAt: null,
-            lastSyncErrorAt: null,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            nextReconcileAt: null,
-            scopes: ["activity:read"],
-            createdAt: "2026-04-16T00:00:00.000Z",
-            updatedAt: "2026-04-16T00:00:00.000Z",
-          },
+          }),
           now: "2026-04-16T00:00:00.000Z",
           importSnapshot,
           refreshAccountTokens: async () => {
@@ -740,7 +738,7 @@ describe("Strava device-sync provider", () => {
       const refreshed = await provider.refreshTokens(expiringAccount);
       return buildStravaAccount({
         accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken ?? expiringAccount.refreshToken,
+        refreshToken: refreshed.refreshToken ?? requireStravaOAuthTokens(expiringAccount).refreshToken,
         accessTokenExpiresAt:
           refreshed.accessTokenExpiresAt ?? expiringAccount.accessTokenExpiresAt,
       });

@@ -16,9 +16,30 @@ import type {
   ProviderAuthTokens,
   ProviderConnectionResult,
   ProviderJobContext,
+  StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
-function createAccount(scopes: string[]): DeviceSyncAccount {
+type DeviceSyncAccountOverrides = Partial<Omit<DeviceSyncAccount, "credential">> & {
+  accessToken?: string;
+  refreshToken?: string | null;
+  credential?: DeviceSyncAccount["credential"];
+};
+
+type StoredDeviceSyncAccountOverrides = Partial<Omit<StoredDeviceSyncAccount, "credential">> & {
+  accessTokenEncrypted?: string;
+  refreshTokenEncrypted?: string | null;
+  credential?: StoredDeviceSyncAccount["credential"];
+};
+
+function createAccount(scopes: string[], overrides: DeviceSyncAccountOverrides = {}): DeviceSyncAccount {
+  const {
+    accessToken = "access-token",
+    refreshToken = "refresh-token",
+    credential,
+    ...accountOverrides
+  } = overrides;
+  const accessTokenExpiresAt = accountOverrides.accessTokenExpiresAt ?? null;
+
   return {
     id: "acct-oura-1",
     provider: "oura",
@@ -39,8 +60,43 @@ function createAccount(scopes: string[]): DeviceSyncAccount {
     nextReconcileAt: null,
     createdAt: "2026-03-16T00:00:00.000Z",
     updatedAt: "2026-03-16T00:00:00.000Z",
-    accessToken: "access-token",
-    refreshToken: "refresh-token",
+    credential: credential ?? {
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresAt,
+      },
+    },
+    ...accountOverrides,
+  };
+}
+
+function createStoredAccount(scopes: string[], overrides: StoredDeviceSyncAccountOverrides = {}): StoredDeviceSyncAccount {
+  const {
+    accessTokenEncrypted = "encrypted-access-token",
+    refreshTokenEncrypted = "encrypted-refresh-token",
+    credential,
+    ...accountOverrides
+  } = overrides;
+  const { credential: _decryptedCredential, ...publicAccount } = createAccount(scopes);
+
+  return {
+    ...publicAccount,
+    ...accountOverrides,
+    credential: credential ?? {
+      kind: "oauth_tokens",
+      accessTokenEncrypted,
+      refreshTokenEncrypted,
+      accessTokenExpiresAt: accountOverrides.accessTokenExpiresAt ?? null,
+      credentialMetadata: {},
+    },
+    hostedObservedConnectionRevision: accountOverrides.hostedObservedConnectionRevision ?? 0,
+    hostedObservedTokenRevision: accountOverrides.hostedObservedTokenRevision ?? 0,
+    hostedObservedTokenVersion: accountOverrides.hostedObservedTokenVersion ?? null,
+    hostedObservedUpdatedAt: accountOverrides.hostedObservedUpdatedAt ?? null,
+    localConnectionRevision: accountOverrides.localConnectionRevision ?? 0,
+    localTokenRevision: accountOverrides.localTokenRevision ?? 0,
   };
 }
 
@@ -232,10 +288,9 @@ test("Oura provider requires an existing refresh token before attempting refresh
   });
 
   await assert.rejects(
-    provider.refreshTokens({
-      ...createAccount(["personal"]),
+    provider.refreshTokens(createAccount(["personal"], {
       refreshToken: null,
-    }),
+    })),
     (error) =>
       error instanceof DeviceSyncError &&
       error.code === "OURA_REFRESH_TOKEN_MISSING" &&
@@ -267,10 +322,9 @@ test("Oura provider revokes access tokens through the OAuth revoke endpoint", as
   const revokeAccess = requireValue(provider.revokeAccess);
 
   await revokeAccess(createAccount(["personal"]));
-  await revokeAccess({
-    ...createAccount(["personal"]),
+  await revokeAccess(createAccount(["personal"], {
     accessToken: "stale-token",
-  });
+  }));
 
   assert.deepEqual(requests, [
     "GET https://api.ouraring.com/oauth/revoke?access_token=access-token",
@@ -1496,18 +1550,9 @@ test("Oura provider rejects invalid webhook payloads, schedules reconcile jobs, 
   );
 
   const scheduled = reconcileProvider.createScheduledJobs?.(
-    {
-      ...createAccount(["personal"]),
+    createStoredAccount(["personal"], {
       nextReconcileAt: "2026-03-16T09:00:00.000Z",
-      accessTokenEncrypted: "encrypted-access-token",
-      hostedObservedConnectionRevision: 0,
-      hostedObservedTokenRevision: 0,
-      refreshTokenEncrypted: "encrypted-refresh-token",
-      hostedObservedTokenVersion: null,
-      hostedObservedUpdatedAt: null,
-      localConnectionRevision: 0,
-      localTokenRevision: 0,
-    },
+    }),
     "2026-03-16T10:00:00.000Z",
   );
   assert.equal(scheduled?.jobs[0]?.kind, "reconcile");

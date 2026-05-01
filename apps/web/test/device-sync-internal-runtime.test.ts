@@ -91,13 +91,19 @@ describe("device-sync hosted runtime helpers", () => {
       },
       tokenBundle,
     })).toEqual(expect.objectContaining({
-      accessToken: "access-token",
+      credential: {
+        kind: "oauth_tokens",
+        tokens: {
+          accessToken: "access-token",
+          accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
+          refreshToken: "refresh-token",
+        },
+      },
       disconnectGeneration: 0,
       externalAccountId: "oura_alice",
       metadata: {
         source: "oauth",
       },
-      refreshToken: "refresh-token",
     }));
   });
 

@@ -88,10 +88,16 @@ export function composeHostedRuntimeDeviceSyncAccount(input: {
 }): DeviceSyncAccount {
   return {
     ...input.connection,
-    accessToken: input.tokenBundle.accessToken,
-    refreshToken: input.tokenBundle.refreshToken,
     disconnectGeneration: 0,
     accessTokenExpiresAt: input.tokenBundle.accessTokenExpiresAt,
+    credential: {
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken: input.tokenBundle.accessToken,
+        accessTokenExpiresAt: input.tokenBundle.accessTokenExpiresAt,
+        refreshToken: input.tokenBundle.refreshToken,
+      },
+    },
     metadata: sanitizeStoredDeviceSyncMetadata(input.connection.metadata ?? {}),
   };
 }
