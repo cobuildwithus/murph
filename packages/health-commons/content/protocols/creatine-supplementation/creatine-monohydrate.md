@@ -970,11 +970,11 @@ protocol:
     - Weigh under similar conditions and interpret early weight or lean-mass changes as hydration-sensitive unless paired with stronger body-composition and performance context.
     - Pause or seek clinician guidance if the safety screen, symptoms, abnormal kidney labs, pregnancy/lactation, pediatric status, bipolar/mania risk, kidney disease, or a non-monohydrate product makes the default adult protocol a poor fit.
   tips:
-    - Use the no-loading path when simplicity or GI tolerance matters more than fast saturation.
-    - Use optional loading only when faster saturation is worth the extra servings and logging burden.
-    - Post-workout dosing is fine if convenient, but consistency matters more than the clock.
-    - A small scoop is easy to forget; pair it with a repeatable daily routine.
-    - For a fair experiment, keep resistance training or high-intensity sessions consistent enough that changes are not just a new training-program effect.
+    - No-loading path when simplicity or GI tolerance matters more than speed.
+    - Loading only when faster saturation is worth the extra servings and logging.
+    - Post-workout timing is fine, but daily consistency matters more than the clock.
+    - Small scoop is easy to forget — anchor it to a repeatable daily routine.
+    - Keep training consistent so gains are not just a new-program effect.
   keepInMind:
     - This is a healthy-adult exercise-performance and tolerance experiment, not a default cognition, endurance, fat-loss, bone-density, pregnancy, pediatric, or disease-treatment protocol.
     - Scale-weight increases can reflect water or fat-free-mass changes and are not automatically fat gain or new contractile tissue.
@@ -3515,21 +3515,27 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-    - Known kidney disease, kidney transplant, dialysis, single-kidney status, unresolved proteinuria/albuminuria, or abnormal creatinine/eGFR.
-    - Pregnancy, trying to become pregnant, postpartum, lactation, or use by minors.
-    - Bipolar disorder, mania/hypomania history, significant psychiatric instability, muscle disorders, McArdle disease, metabolic myopathy.
-    - Nephrotoxic medication/supplement stacks, or clinician concern about kidney safety.
-    - Use of non-monohydrate creatine forms or multi-ingredient blends when the goal is to test the monohydrate protocol.
+    - kidney_disease_or_transplant
+    - dialysis_or_single_kidney
+    - proteinuria_or_abnormal_egfr
+    - pregnancy_or_trying_to_conceive
+    - postpartum_or_lactation
+    - use_by_minors
+    - bipolar_or_mania_history
+    - psychiatric_instability
+    - muscle_disorder_or_metabolic_myopathy
+    - nephrotoxic_medication_stack
+    - non_monohydrate_or_blend_product
   stopIf:
     - Severe or persistent GI symptoms, severe headache, allergic-type symptoms, dark urine with muscle pain, severe weakness,.
     - Unexpected abnormal kidney labs or clinician concern about renal function.
     - Mania/hypomania symptoms or meaningful psychiatric destabilization.
     - Unwanted weight gain, edema-like symptoms, or adherence burden makes the experiment unacceptable.
   notes:
-    - 'Studied users generally tolerate recommended creatine doses, but this is not a blanket safety guarantee for unscreened users or high-risk populations.'
-    - 'Creatine can raise serum creatinine or creatinine-based eGFR flags without proving kidney injury; interpret kidney labs with baseline context, urine markers, cystatin C or measured GFR when clinically relevant.'
-    - 'GI symptoms and weight/water changes are practical tracking endpoints, especially with loading or large single servings.'
-    - 'Recommended-dose creatine is not supported as a dehydration, cramping, or heat-intolerance hazard by the extracted evidence, but ordinary exercise heat and hydration precautions still apply.'
+    - 'Generally well tolerated at recommended doses — not a blanket guarantee for unscreened or high-risk users.'
+    - 'Creatine can raise creatinine without kidney injury — interpret labs with baseline, urine markers, or cystatin C.'
+    - 'Track GI symptoms and weight/water changes, especially with loading or large single servings.'
+    - 'No evidence creatine causes dehydration or cramping — normal exercise heat precautions still apply.'
 researchCoverage:
   protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
   familyKey: experiment_family:creatine-supplementation

@@ -112,10 +112,10 @@ protocol:
     - "Product quality is part of the protocol because commercial products can vary in monacolin content and may carry contaminant or hidden-drug concerns."
     - "Routine self-experiment use is not appropriate for pregnancy, trying to conceive, lactation, children or teenagers, older/frail adults with polypharmacy, active or unexplained liver disease, untreated hypothyroidism, significant kidney disease or kidney failure, renal-transplant or immunosuppressed states, unexplained muscle symptoms or prior statin-associated muscle symptoms/rhabdomyolysis, known allergy to lovastatin/statins/red yeast rice, or people using interacting medicines without clinician supervision."
   tips:
-    - "Prefer a product with current, lot-specific documentation for monacolin content and citrinin testing; a capsule weight alone is not an active-dose measure."
-    - "Keep a photo or scan of the Supplement Facts panel, ingredient list, lot code, and any certificate of analysis with the experiment record."
-    - "Schedule the follow-up lab before starting so the 8–12 week window does not drift."
-    - "A null or small LDL-C change may reflect product potency, adherence, baseline LDL-C, diet changes, lab variability, or a short test window."
+    - "Prefer lot-specific monacolin and citrinin documentation; capsule weight alone is not an active-dose measure."
+    - Photo the Supplement Facts panel, lot code, and any COA for the experiment record.
+    - Schedule the follow-up lab before starting so the 8-12 week window does not drift.
+    - "Null LDL-C change? Could be product potency, adherence, baseline level, diet shift, or lab variability."
   keepInMind:
     - "Direct evidence supports product-specific short-term LDL-C and total-cholesterol lowering in some RYR preparations, but modern commercial products are not interchangeable."
     - "Evidence for triglycerides, HDL-C, ApoB, and lipid ratios is more mixed or less consistently direct than for LDL-C and total cholesterol."
@@ -694,18 +694,28 @@ claims:
 safety:
   cautionLevel: "high"
   avoidOrGetClinicianGuidance:
-    - "pregnancy, trying to conceive, breastfeeding, child or teenager"
-    - "older or frail adult, especially with polypharmacy"
-    - "known ASCVD, prior heart attack or stroke, familial hypercholesterolemia, very high LDL-C, very high triglycerides, diabetes, chronic kidney disease, or another clinician-directed lipid-care indication"
-    - "active liver disease, unexplained liver symptoms, abnormal liver enzymes, heavy alcohol use, or untreated hypothyroidism"
-    - "significant kidney disease, kidney failure, kidney transplant, immunosuppressed state, abnormal kidney function, or history of acute kidney injury"
-    - "unexplained muscle pain, tenderness, cramps, or weakness; prior CK elevation; prior rhabdomyolysis; any prior statin-associated muscle symptoms or statin intolerance"
-    - "known allergy or prior serious reaction to lovastatin, statins, or red yeast rice"
-    - "current or likely start of statin, fibrate/gemfibrozil, niacin, ezetimibe, PCSK9 therapy, bile-acid sequestrant, or another lipid-lowering product"
-    - "cyclosporine, transplant/immunosuppressive therapy, macrolide antibiotic, azole antifungal, HIV/HCV antiviral, warfarin/coumarin, strong CYP3A4/P-gp medicine, or regular grapefruit product"
-    - "intent to replace, pause, or avoid prescribed lipid-lowering therapy or cardiovascular-risk management"
-    - "product lacks exact identity, lot/batch, expiration, retailer/country, warning-label status, recall/safety-notice check, hidden-drug/adulteration warning check, or local-law check"
-    - "product lacks citrinin, contaminant, or COA documentation needed to interpret safety and attribution"
+    - pregnancy_trying_to_conceive_or_breastfeeding
+    - pediatric_or_adolescent
+    - older_or_frail_adult_with_polypharmacy
+    - known_ascvd_or_prior_heart_attack_stroke
+    - familial_hypercholesterolemia
+    - very_high_ldl_or_triglycerides
+    - diabetes
+    - chronic_kidney_disease_or_kidney_failure
+    - active_liver_disease_or_abnormal_liver_enzymes
+    - heavy_alcohol_use_or_untreated_hypothyroidism
+    - kidney_transplant_or_immunosuppressed
+    - unexplained_muscle_pain_or_prior_rhabdomyolysis
+    - statin_intolerance_or_prior_ck_elevation
+    - lovastatin_statin_or_ryr_allergy
+    - concurrent_lipid_lowering_therapy
+    - cyclosporine_or_strong_cyp3a4_inhibitor
+    - warfarin_or_coumarin_anticoagulant
+    - macrolide_azole_or_hiv_hcv_antiviral
+    - regular_grapefruit_consumption
+    - intent_to_replace_prescribed_lipid_therapy
+    - product_lacks_identity_or_batch_verification
+    - product_lacks_citrinin_or_coa_documentation
   stopIf:
     - "severe, unusual, or unexplained muscle pain, tenderness, cramps, weakness, fever with muscle symptoms, unusual tiredness with muscle symptoms, dark/cola urine, or suspected rhabdomyolysis"
     - "jaundice, right-upper-abdominal pain, severe nausea or vomiting, marked fatigue, pale stools, or other liver concern"
@@ -719,10 +729,10 @@ safety:
     - "product recall, contamination notice, hidden-drug/adulteration warning, failed local-law/warning-label check, suspected adulteration, or inability to verify product identity"
     - "do not restart after any stop signal unless a clinician evaluates and explicitly clears restarting"
   notes:
-    - "Safety guidance is intentionally stronger than efficacy messaging because RYR can be pharmacologically active and product-variable."
-    - "Safety labs are not LDL-C endpoints and should not be used to self-clear risk; abnormal or worsening ALT, AST, CK, creatinine, or eGFR should route to care."
-    - "Pharmacovigilance and case reports show plausible serious events but generally do not provide incidence rates for a specific product or user."
-    - "Beni-koji kidney injury and contamination events are product-specific safety context and not efficacy evidence for generic RYR."
+    - "Safety intentionally stronger than efficacy — RYR is pharmacologically active and product-variable."
+    - "Safety labs are not LDL-C endpoints — abnormal or worsening ALT, AST, CK, creatinine, or eGFR routes to care."
+    - "Case reports show plausible serious events but cannot provide incidence rates for a specific product."
+    - "Beni-koji kidney injury events are product-specific safety context, not efficacy evidence for generic RYR."
 researchLandscape:
   bottomLine: "The direct protocol evidence is moderate for short-term LDL-C and total-cholesterol lowering with some RYR preparations, but the protocol must be product-specific and high-caution because monacolin exposure, commercial quality, regulatory status, and adverse-event risk vary."
   confidenceLabel: "mixed"

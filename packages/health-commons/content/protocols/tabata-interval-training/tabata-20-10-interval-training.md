@@ -394,11 +394,11 @@ protocol:
     - Stop immediately if any stop condition occurs. Do not restart that day after a stop-condition symptom.
     - Cool down only if safe, then log symptoms, rounds completed, modality, environment, intensity, and delayed recovery or red flags over the next 24-72 hours.
   tips:
-    - Leave at least 48 hours between Tabata sessions during the first experiment.
-    - Start with one block only; do not stack multi-block WODs, strength circuits, or extra finishers in the first Murph experiment unless you label them as a different variant.
-    - A low-impact machine is usually easier to dose and safer to stop than jumping or loaded functional-fitness movements.
-    - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule stable.
-    - Use the same wearable or heart-rate setup across baseline and intervention; a chest strap is preferable if heart-rate fidelity matters.
+    - At least 48 hours between sessions in the first experiment.
+    - One block only — no stacked WODs, circuits, or finishers in the first run.
+    - A low-impact machine is easier to dose and safer to stop than jumping or loaded movements.
+    - Keep other training, caffeine, alcohol, supplements, diet, and sleep stable.
+    - Same wearable or HR setup across baseline and intervention; chest strap if HR fidelity matters.
   keepInMind:
     - The strongest direct evidence is small, supervised, and cycle-ergometer-based; this protocol is not a generic guarantee for every workout labeled Tabata.
     - The historical supramaximal intensity reference is not a home prescription. Repeatable completion, safe mechanics, and recovery are the first fidelity targets.
@@ -1682,22 +1682,39 @@ researchLandscape:
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
-    - Known cardiovascular, metabolic, or kidney disease; uncontrolled blood pressure; low activity with warning symptoms; or exertional chest pain, near-fainting, palpitations, neurologic symptoms, or unusual shortness of breath.
-    - Asthma, exercise-induced bronchoconstriction, unexplained wheeze, cough, chest tightness, rescue-medication uncertainty, or no current clinician-directed plan for respiratory symptoms during hard exercise.
-    - Current fever or significant illness; recent severe dehydration; recent or prior exertional heat illness; dark urine after exercise; exertional rhabdomyolysis; or prior heat/rhabdo episode without graded return guidance.
-    - Recent viral or post-infectious symptoms, suspected myocarditis or pericarditis, or post-exertional symptom flares. Do not provide return-to-exercise timing on this page; route to clinician-guided variant until dedicated sources are added.
-    - Pregnancy or postpartum status. Route to a pregnancy/postpartum-specific clinician-guided variant until dedicated sources are added.
-    - Medications or conditions that may affect heart rate, blood pressure, glucose or hypoglycemia risk, hydration, heat tolerance, or safe exercise intensity. Ask the prescribing clinician; do not change medication here.
-    - Current injury, severe soreness, prior injury site, balance or fall risk, or movement limitations that make sprinting, jumping, loaded, treadmill, or complex movements unsafe when fatigued.
-    - Minors/adolescents, frail or high-fall-risk older adults, adaptive athletes or wheelchair users, and users seeking CrossFit/HIFT/loaded/plyometric circuits require a separate variant rather than this ordinary adult starter protocol.
+    - cardiovascular_metabolic_or_kidney_disease
+    - uncontrolled_blood_pressure
+    - exertional_chest_pain_or_palpitations
+    - near_fainting_or_neurologic_symptoms
+    - unusual_shortness_of_breath
+    - asthma_or_exercise_induced_bronchoconstriction
+    - unexplained_wheeze_cough_or_tightness
+    - rescue_medication_uncertainty
+    - current_fever_or_significant_illness
+    - recent_severe_dehydration
+    - exertional_heat_illness_or_rhabdomyolysis
+    - dark_urine_after_exercise
+    - recent_viral_or_post_infectious_symptoms
+    - suspected_myocarditis_or_pericarditis
+    - post_exertional_symptom_flares
+    - pregnancy_or_postpartum
+    - heart_rate_or_bp_affecting_medications
+    - hypoglycemia_risk_medications
+    - hydration_or_heat_tolerance_medications
+    - current_injury_or_severe_soreness
+    - balance_or_fall_risk
+    - movement_limitations_when_fatigued
+    - minors_or_adolescents
+    - frail_or_high_fall_risk_older_adults
+    - adaptive_athletes_or_wheelchair_users
   stopIf:
     - Chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual rhythm symptoms, neurologic symptoms, or unusual shortness of breath, wheeze, or chest tightness.
     - Heat-illness symptoms, severe or worsening musculoskeletal pain, unsafe form breakdown, or inability to recover enough during a 10-second rest.
     - Severe muscle pain, swelling, weakness, dark urine, any cardiopulmonary, neurologic, heat-illness, rhabdomyolysis, or unsafe-movement red flag, or recovery that feels unusually impaired for more than 24–48 hours.
   notes:
-    - This is not a treatment protocol and does not replace medical clearance for people with disease, symptoms, pregnancy/postpartum context, medication complexity, or recent illness.
-    - Short duration does not remove risk; vigorous exertion can still create cardiopulmonary strain, heat burden, severe soreness, musculoskeletal injury, or rhabdomyolysis risk in susceptible or unaccustomed contexts.
-    - Prefer a low-impact, easy-to-stop modality for first exposure. Make safety and recovery stronger than efficacy when evidence or personal context is uncertain.
+    - Wellness experiment, not a treatment plan — does not replace medical clearance.
+    - Short duration does not remove risk — vigorous effort can strain heart, heat, or muscle in unaccustomed users.
+    - First exposure: pick a low-impact, easy-to-stop modality and prioritize recovery over performance.
 sessionLoggingFields:
   - baseline_activity_status
   - recent_vigorous_interval_experience

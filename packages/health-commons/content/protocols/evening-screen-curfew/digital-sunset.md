@@ -403,11 +403,11 @@ protocol:
   - If you use a screen after the cutoff, log it neutrally as a breach or planned exception, then return to the rule instead of treating the whole night as failed.
   - The next morning, log actual screen-stop time, bedtime or lights-out, estimated sleep-onset latency, sleep quality, pre-sleep wiredness, next-day sleepiness, and any major confounders.
   tips:
-  - Start with 30 minutes if you are unsure. A consistent smaller window is more interpretable than an ambitious rule that delays bedtime or causes anxiety.
-  - Move social, work, and entertainment decisions earlier in the evening; do not leave the curfew window empty if that makes scrolling more tempting.
-  - Keep caffeine, alcohol, exercise timing, room light, screen brightness or filter settings, bedtime target, sleep supplements, and other sleep routines as stable as practical during the test.
-  - App locks or reminders are allowed only if they reduce friction, do not block emergency, medical, accessibility, alarm, caregiving, or on-call functions, and do not increase anxiety or resentment. If they create stress or block safety functions, disable them and treat the run as a softer or supported variant.
-  - This is not a blue-light-filter test. Do not count Night Shift, dimming, amber glasses, or screen-temperature tools as equivalent to no personal screens.
+  - Start with 30 minutes. A consistent smaller window beats an ambitious rule that delays bedtime.
+  - Move social/work/entertainment decisions earlier so the curfew window is not empty and tempting.
+  - Hold caffeine, alcohol, exercise, room light, screen filters, bedtime, and sleep supplements stable during the test.
+  - App locks are fine only if they reduce friction without blocking safety functions or increasing anxiety.
+  - Not a blue-light-filter test — Night Shift, dimming, or amber glasses are not equivalent to no screens.
   keepInMind:
   - The best-fit direct evidence is promising for some high-phone-use or poor-sleeping users, but the overall direct evidence is small, mixed, and population-specific.
   - Screen-stop timing verifies adherence and attribution, but the main outcome signals are easier sleep onset and better sleep efficiency, not a guaranteed wearable sleep-stage, HRV, or resting-heart-rate change.
@@ -1276,22 +1276,25 @@ safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
   - persistent_or_severe_insomnia
-  - suspected_sleep_apnea_or_other_sleep_disorder
-  - unsafe_daytime_sleepiness_or_drowsy_driving
+  - suspected_sleep_apnea
+  - unsafe_daytime_sleepiness
   - current_clinical_sleep_treatment
-  - bipolar_disorder_or_history_of_mania_or_hypomania
+  - bipolar_or_history_of_mania
   - active_severe_mood_instability
-  - circadian_rhythm_sleep_wake_disorder
-  - shift_work_or_irregular_sleep_schedule
-  - high_phone_separation_anxiety_or_withdrawal_like_distress
-  - acute_suicidal_thoughts_self_harm_psychosis_or_crisis_level_distress
-  - severe_panic_problematic_smartphone_use_nomophobia_or_compulsive_checking
-  - required_on_call_caregiving_medical_or_safety_contact_without_exception_plan
-  - medical_accessibility_alarm_or_emergency_device_dependence_without_tested_exception
-  - children_or_adolescents_without_guardian_or_clinical_context
-  - pediatric_sleep_red_flags_or_child_adolescent_self_harm_concern
-  - pregnancy_postpartum_new_infant_or_major_caregiving_sleep_disruption
-  - safety_critical_work_or_driving_risk_without_sleep_opportunity_plan
+  - circadian_rhythm_disorder
+  - shift_work_or_irregular_schedule
+  - high_phone_separation_anxiety
+  - acute_suicidal_thoughts_or_self_harm
+  - psychosis_or_crisis_level_distress
+  - severe_panic_or_nomophobia
+  - compulsive_phone_checking
+  - on_call_or_caregiving_without_plan
+  - medical_alarm_device_dependence
+  - children_or_adolescents
+  - pediatric_sleep_red_flags
+  - pregnancy_or_postpartum
+  - new_infant_or_major_caregiving_load
+  - safety_critical_work_or_driving
   stopIf:
   - curfew_delays_bedtime_or_reduces_sleep_opportunity
   - dangerous_next_day_sleepiness
@@ -1308,10 +1311,10 @@ safety:
   - sleep_opportunity_worsens_on_nights_before_driving_caregiving_or_safety_critical_work
   - tracking_anxiety_or_sleep_score_fixation
   notes:
-  - This is a bounded wellness self-experiment, not treatment for insomnia, circadian rhythm disorder, depression, mania, phone addiction, crisis-level distress, self-harm risk, psychosis, or a sleep disorder.
-  - Necessary work, caregiving, medical, accessibility, safety, crisis-support, alarm, and emergency communication should be handled as planned exceptions rather than nonadherence.
-  - Do not use silent mode, Do Not Disturb, app locks, headphones, or phone placement that blocks medical, accessibility, alarm, caregiving, on-call, emergency, or safety-critical channels.
-  - Do not combine the test with new melatonin, sleep supplements, CBT-I exercises, morning bright light, blue-blocker glasses, app-lock coaching, caffeine changes, or major room-light changes unless the run is explicitly labeled as a bundled variant.
+  - Wellness experiment only — not treatment for insomnia, mood disorders, phone addiction, or crisis-level distress.
+  - Necessary work, caregiving, medical, and emergency communication are planned exceptions, not nonadherence.
+  - Never let DND, app locks, or phone placement block medical, alarm, caregiving, or emergency channels.
+  - Do not add melatonin, sleep supplements, CBT-I, blue-blockers, or major light changes unless explicitly labeled as bundled.
 researchCoverage:
   bibliographyKey: "source_artifact:evening-screen-curfew-bibliography"
   corpusStats:

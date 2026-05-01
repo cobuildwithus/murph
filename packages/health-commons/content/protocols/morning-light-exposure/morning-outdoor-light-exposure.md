@@ -265,11 +265,11 @@ protocol:
     - Use shade, hat, sunscreen, sunglasses, cooler timing, or skipping when UV, glare, symptoms, heat, medication, or skin/eye safety calls for it.
     - Log wake time, exposure start time, minutes outdoors, weather or brightness context, sunglasses/hat/sunscreen, activity during exposure, symptoms, and next-night sleep quality.
   tips:
-    - Keep evening light, caffeine, alcohol, exercise, bedtime, and wake time as stable as reasonably possible during the test.
-    - Cloudy outdoor light can still be meaningfully brighter than typical indoor light, so do not skip solely because the day is overcast.
-    - If you can only use window light, log it as a backup or adjacent variant rather than full outdoor adherence.
-    - Use the same rough morning window across the intervention so timing is not drifting.
-    - If outdoor light feels too intense, use open shade or shorten the session instead of pushing through symptoms.
+    - Hold evening light, caffeine, alcohol, exercise, bedtime, and wake time stable during the test.
+    - Overcast still counts — cloudy outdoor light is far brighter than typical indoor light.
+    - Window-only light? Log it as a backup variant, not full outdoor adherence.
+    - Same rough morning window each day so timing does not drift.
+    - Too bright? Use open shade or shorten the session rather than pushing through.
   keepInMind:
     - The direct outdoor evidence is limited and mostly older-adult/institutional; this is a self-experiment, not a sleep, mood, or circadian-disorder treatment.
     - The 10-30 minute target is a practical Murph dose band, not a proven universal duration or lux threshold.
@@ -903,16 +903,18 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-    - bipolar_disorder_or_mania_hypomania_history
-    - rapid_cycling_mixed_symptoms_recent_severe_mood_instability_or_suicidal_thoughts
-    - current_clinician_guided_light_therapy_or_circadian_treatment
-    - known_eye_disease_new_visual_symptoms_or_ocular_vulnerability
-    - migraine_photophobia_or_unusual_light_triggered_head_or_eye_pain
-    - photosensitizing_medication_known_photosensitivity_or_sun_allergy
-    - prior_phototoxic_or_photoallergic_reaction
-    - skin_condition_or_history_where_sun_exposure_requires_medical_guidance
-    - unsafe_heat_uv_air_quality_weather_or_route_conditions
-    - night_or_rotating_shift_work_recent_major_jet_lag_or_active_time_zone_adaptation
+    - bipolar_disorder_or_mania_history
+    - rapid_cycling_or_severe_mood_instability
+    - suicidal_thoughts
+    - clinician_guided_light_therapy
+    - known_eye_disease_or_new_visual_symptoms
+    - migraine_or_light_triggered_pain
+    - photosensitizing_medication
+    - known_photosensitivity_or_sun_allergy
+    - prior_phototoxic_reaction
+    - sun_sensitive_skin_condition
+    - unsafe_heat_uv_or_air_quality
+    - shift_work_or_active_jet_lag_adaptation
   stopIf:
     - eye_pain_visual_symptoms_or_unusual_photophobia
     - migraine_headache_nausea_or_light_triggered_pain
@@ -923,10 +925,10 @@ safety:
     - suicidal_thoughts_or_severe_mood_symptoms
     - unsafe_weather_uv_heat_air_quality_route_or_traffic_conditions
   notes:
-    - This is ambient outdoor light exposure, not sun-gazing.
+    - Ambient outdoor light exposure, not sun-gazing.
     - UV, heat, eye, skin, migraine, and mood safety override adherence targets.
-    - Window light, light boxes, dawn simulators, and clinician-guided light therapy are adjacent variants, not full adherence to this protocol.
-    - The protocol is not a treatment plan for insomnia, depression, bipolar disorder, seasonal affective disorder, or circadian rhythm sleep-wake disorders.
+    - Light boxes, dawn simulators, and window light are adjacent variants, not this protocol.
+    - Not a treatment plan for insomnia, depression, bipolar, SAD, or circadian disorders.
 researchCoverage:
   bibliographyKey: source_artifact:morning-light-exposure-bibliography
   corpusStats:

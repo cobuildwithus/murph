@@ -93,8 +93,8 @@ export function ExperimentSchedule({ schedule }: ExperimentScheduleProps) {
           ?
         </span>
         <span>
-          Want to change the schedule? Ask Murph in the chat, it knows your
-          cadence, baseline, and the sessions you have logged so far.
+          Want to change the schedule? Ask Murph — your cadence, baseline,
+          and logged sessions are already loaded.
         </span>
       </p>
     </section>

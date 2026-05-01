@@ -89,14 +89,14 @@ export function SafetySection({
                 Stay safe before, during, and after each session.
               </h2>
             </div>
-            <ul role="list" className="flex flex-1 flex-col justify-around">
+            <ul role="list" className="flex flex-1 flex-col">
               {precautions.map((item, idx) => {
                 const Icon = precautionIcon(item);
                 return (
                   <li
                     key={item}
                     className={cn(
-                      "flex items-start gap-3 py-2.5",
+                      "flex items-start gap-3 py-2",
                       idx > 0 && "border-t border-foreground/8",
                     )}
                   >

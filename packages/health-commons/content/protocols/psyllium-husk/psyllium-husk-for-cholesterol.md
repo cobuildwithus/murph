@@ -84,12 +84,12 @@ protocol:
     - "Psyllium can affect timing for oral prescriptions, OTC medicines, supplements, minerals, and vitamin B12; medication conflicts are a setup issue, not an afterthought."
     - "GI symptoms such as bloating, fullness, gas, dry stool, or stool changes are common enough to track; severe pain, vomiting, choking, swallowing symptoms, breathing symptoms, or allergic symptoms are stop signals."
   tips:
-    - "Powder or granules mixed in liquid are usually easier to dose accurately than capsules; capsule regimens may require many capsules to reach evidence-aligned grams and should be swallowed one at a time with adequate liquid."
-    - "Use the same product throughout the experiment unless a product change is logged as a confounder."
-    - "Pre-measure servings and keep water visible at the dosing location to reduce missed or under-hydrated doses."
-    - "If mild bloating or fullness appears, step down temporarily and titrate more slowly rather than pushing the full target immediately."
-    - "Use the same lab and similar fasting/non-fasting conditions for baseline and follow-up when practical."
-    - "Food/cereal forms are not automatically equivalent to powder or capsules and still require adequate liquid; do not use food mixing as a workaround for swallowing difficulty."
+    - Powder or granules dose easiest; swallow capsules one at a time with full liquid.
+    - Same product throughout the run unless a switch is logged as a confounder.
+    - Pre-measure servings and keep water visible at the dosing spot.
+    - "Mild bloating? Step down and titrate more slowly rather than pushing through."
+    - Same lab and similar fasting conditions for baseline and follow-up.
+    - "Food/cereal forms still need adequate liquid and are not a workaround for swallowing difficulty."
   keepInMind:
     - "LDL-C is the primary endpoint; non-HDL-C, ApoB, and total cholesterol are the most useful lab companions, while HDL-C and triglycerides are context metrics."
     - "This is a diet-adjunct experiment, not a replacement for lipid-lowering medication or cardiovascular-risk care; do not delay, stop, or change clinician-directed medication to preserve attribution."
@@ -1075,12 +1075,16 @@ researchLandscape:
 safety:
   cautionLevel: "moderate"
   avoidOrGetClinicianGuidance:
-    - "swallowing difficulty or prior choking with powders/capsules"
-    - "esophageal narrowing, bowel obstruction/narrowing, fecal impaction, severe constipation, or reduced gut motility"
-    - "known or suspected psyllium/ispaghula/isabgol allergy"
-    - "pregnancy or lactation, pediatric use, or clinician-supervised cardiovascular, diabetes, or bowel care"
-    - "high-stakes oral medications or inability to separate medications from psyllium"
-    - "inability to take every dose with at least 8 oz / 240 mL liquid, drink mixed powder/granules promptly, or swallow capsules one at a time with adequate liquid"
+    - swallowing_difficulty_or_prior_choking
+    - esophageal_narrowing_or_bowel_obstruction
+    - fecal_impaction_or_severe_constipation
+    - reduced_gut_motility
+    - psyllium_or_ispaghula_allergy
+    - pregnancy_or_lactation
+    - pediatric_use
+    - clinician_supervised_cardiovascular_or_diabetes
+    - high_stakes_medication_spacing_unable
+    - unable_to_take_dose_with_adequate_liquid
   stopIf:
     - "choking, trouble swallowing, throat/chest obstruction sensation, breathing difficulty, wheezing, facial/tongue swelling, or anaphylaxis-type symptoms"
     - "severe or persistent abdominal pain, vomiting, severe constipation, dry stool or constipation after inadequate liquid, no bowel movement with pain, or suspected bowel obstruction/bezoar"
@@ -1089,9 +1093,9 @@ safety:
     - "GI symptoms remain unacceptable despite slower titration or lower dose"
     - "desire to escalate above 10.5 g/day active psyllium husk without clinician-guided adaptation"
   notes:
-    - "Safety evidence includes product labels, regulatory full-liquid warnings, medication-spacing guidance, and rare serious case reports; treat these as protocol boundaries, not optional fine print."
-    - "Mild gas, bloating, fullness, stool changes, or nausea can occur and should be logged, but severe, persistent, respiratory, allergic, choking, or obstruction symptoms should stop the run."
-    - "This protocol does not replace clinician-directed lipid management or medication decisions, and medication-care changes should be followed and logged rather than resisted for a cleaner experiment."
+    - "Labels, full-liquid warnings, spacing guidance, and case reports are protocol boundaries — not optional fine print."
+    - "Mild gas, bloating, or stool changes get logged — severe, respiratory, allergic, choking, or obstruction symptoms stop the run."
+    - "Not a replacement for clinician-directed lipid care — follow and log medication changes rather than resisting them for attribution."
 ---
 ## What this protocol is
 

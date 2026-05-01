@@ -70,10 +70,10 @@ protocol:
     - Take the same daily dose for 8–12 weeks only while no stop condition is present, logging missed doses, extra doses, dose changes, product changes, new supplements or medications, calcium products, major sun/UV or travel changes, diet/fortified-food changes, and symptoms that could suggest calcium or kidney-stone issues.
     - Recheck 25(OH)D after the stable dosing window if you are using lab feedback. If risk factors, high dose, calcium co-use, symptoms, prior abnormal calcium/urine-calcium/kidney labs, or clinician-directed treatment are present, do not manage this as an ordinary wellness experiment; use clinician guidance and risk-based labs such as calcium, creatinine/eGFR, or urine calcium when clinically indicated.
   tips:
-    - Use the same lab and units when comparing baseline and follow-up 25(OH)D.
-    - Keep sun exposure, travel, diet, and other supplement habits visible in the log so the 25(OH)D change is interpretable.
-    - A missed day is a log entry, not a reason to double up unless your clinician explicitly told you to do so.
-    - Store the product away from children and avoid unlabeled compounded or repackaged products.
+    - Same lab and units for baseline and follow-up 25(OH)D.
+    - Log sun exposure, travel, diet, and supplement changes so the result is interpretable.
+    - A missed day is a log entry, not a reason to double up unless clinician-directed.
+    - Store away from children; avoid unlabeled compounded or repackaged products.
   keepInMind:
     - The strongest expected signal is a change in 25(OH)D, not guaranteed changes in symptoms, fractures, falls, infections, mood, fatigue, or cardiovascular outcomes.
     - Response varies by baseline 25(OH)D, body size, season, sun exposure, diet, ethnicity/population context, adherence, and assay differences.
@@ -1210,11 +1210,28 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-    - Kidney disease/reduced kidney function, kidney stones, high serum or urine calcium, hypercalcemia/hypercalciuria, hyperparathyroidism, or unexplained calcium/PTH abnormalities.
-    - Sarcoidosis/granulomatous disease, clinician warnings about vitamin D/calcium handling, pregnancy/trying to conceive/breastfeeding, pediatric/adolescent use, diagnosed deficiency, or clinician-managed repletion/loading.
-    - Malabsorption, cystic fibrosis, bariatric surgery/Roux-en-Y, short bowel, intestinal rehabilitation, or another absorption problem.
-    - Current use of D2, calcifediol, calcitriol, alfacalcidol, paricalcitol, prescription/high-dose vitamin D, weekly/monthly/bolus schedules, UVB, or fortified-food protocols.
-    - High-dose calcium products, calcium co-use with stone/CKD/high-calcium risk, total vitamin D above 4000 IU/day, unknown total intake, product-dose uncertainty, or medication/supplement plans needing calcium/kidney review.
+    - kidney_disease_or_reduced_function
+    - kidney_stones
+    - hypercalcemia_or_hypercalciuria
+    - hyperparathyroidism
+    - unexplained_calcium_or_pth_abnormality
+    - sarcoidosis_or_granulomatous_disease
+    - clinician_vitamin_d_calcium_warnings
+    - pregnancy_trying_to_conceive_lactation
+    - pediatric_or_adolescent_use
+    - diagnosed_deficiency_clinician_managed
+    - malabsorption_or_cystic_fibrosis
+    - bariatric_surgery_or_short_bowel
+    - intestinal_rehabilitation
+    - current_d2_calcifediol_or_calcitriol
+    - alfacalcidol_or_paricalcitol
+    - prescription_or_high_dose_vitamin_d
+    - weekly_monthly_or_bolus_schedules
+    - uvb_or_fortified_food_protocols
+    - high_dose_calcium_products
+    - calcium_with_stone_or_ckd_risk
+    - total_vitamin_d_above_4000_iu_per_day
+    - unknown_total_intake_or_dose_uncertainty
   stopIf:
     - Symptoms suggesting hypercalcemia or kidney stone occur.
     - Seek urgent care for severe confusion, severe dehydration, persistent vomiting, inability to keep fluids down, severe flank pain, blood in urine, fever with stone symptoms, or rapidly worsening weakness.
@@ -1224,10 +1241,10 @@ safety:
     - Calcium products, calcifediol, active vitamin D analogues, prescription/high-dose vitamin D, weekly/monthly/bolus/loading schedules, or medication changes requiring calcium/kidney review are started.
     - A new kidney, calcium, urine-calcium, parathyroid, granulomatous, pregnancy/lactation, pediatric/adolescent, malabsorption/bariatric, clinician-flagged vitamin D/calcium risk, deficiency-treatment, or active-analogue context arises.
   notes:
-    - The 4000 IU/day adult upper-intake value is a ceiling, not a protocol target.
-    - Hypercalcemia and hypercalciuria are the main extracted adverse-event signals, especially with upper-end daily dosing, calcium co-use, or higher-risk contexts.
-    - Kidney-stone risk is mixed and context-dependent: vitamin-D-only pooled evidence did not show a statistically significant stone increase, calcium plus D evidence increased stones in WHI/USPSTF-reviewed evidence, and stone-former evidence is small and clinically specific.
-    - Named medication-interaction tables were not supported by this extraction; keep medication and supplement review broad unless source-specific appraisals are added.
+    - 4000 IU/day is a safety ceiling, not a target.
+    - Hypercalcemia and hypercalciuria are the main adverse signals — especially at upper-end doses or with calcium co-use.
+    - Kidney-stone risk is context-dependent — D-only pooled evidence was null, but calcium-plus-D increased stones.
+    - No named drug-interaction table supported here — keep medication and supplement review broad.
 ---
 Daily Vitamin D3 Supplementation is a simple daily oral cholecalciferol experiment whose main measurable outcome is **serum 25(OH)D**. The useful question is whether a consistent daily D3 dose changes vitamin D status for this person under logged conditions, not whether vitamin D becomes a guaranteed cure or disease-prevention intervention.
 

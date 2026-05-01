@@ -147,9 +147,9 @@ protocol:
   - Safety gating should take priority over efficacy interpretation.
   - People with diabetes or glucose-lowering medication, pregnancy or breastfeeding, current underweight, unexplained weight loss, eating-disorder history, adolescent status, athlete low-energy-availability risk, CKD/frailty, gallbladder-risk symptoms, or clinician-directed meal timing should not start self-directed 18:6 without clinician guidance.
   tips:
-  - A slightly later 6-hour window that you can repeat safely is preferable to an early window that repeatedly causes missed days, underfueling, social disruption, or sleep disruption.
-  - Plan the first meal and protein intake before the fast starts; large unplanned meals can confound weight, glucose, hunger, and adherence interpretation.
-  - 'Compare like with like: analyze target-window days separately from travel, illness, unusual training, alcohol, medication changes, or major sleep disruption.'
+  - A repeatable later window beats an early window that causes missed days, underfueling, or sleep disruption.
+  - Plan the first meal and protein before the fast; unplanned large meals confound every signal.
+  - 'Compare like with like: analyze target-window days separately from travel, illness, or major disruptions.'
   keepInMind:
   - The direct 6-hour evidence base is relevant but small, short-term, and selected-population; adjacent evidence should remain adjacent rather than being promoted to direct 18:6 proof.
   - Early 6-hour windows have the clearest direct timing-specific rationale, but later 6-hour windows may still affect weight and are not proven ineffective.
@@ -360,13 +360,28 @@ claims:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - Pregnant, trying to conceive, or breastfeeding.
-  - Adolescent, older frail adult, clinically underweight, or current unexplained/unintended weight loss.
-  - Active or recent eating disorder, purging, binge-restrict cycling, obsessive food preoccupation, or high distress around food restriction.
-  - Diabetes, recurrent hypoglycemia, insulin, sulfonylurea, GLP-1 plus restricted intake, or other hypoglycemia-relevant medication context.
-  - CKD, dialysis, transplant, electrolyte/fluid restriction, active medical treatment, recent surgery, or clinician-directed meal timing.
-  - Athlete low-energy-availability or RED-S risk, high training load with underfueling, or inability to reliably meet calorie/protein needs inside the window.
-  - Gallbladder disease history, right-upper-quadrant abdominal pain, or rapid-weight-loss risk.
+  - pregnancy_or_trying_to_conceive
+  - breastfeeding
+  - adolescent
+  - older_frail_adult
+  - clinically_underweight
+  - unexplained_or_unintended_weight_loss
+  - active_or_recent_eating_disorder
+  - purging_or_binge_restrict_cycling
+  - obsessive_food_preoccupation
+  - diabetes
+  - recurrent_hypoglycemia
+  - insulin_or_sulfonylurea_use
+  - glp1_plus_restricted_intake
+  - ckd_dialysis_or_transplant
+  - electrolyte_or_fluid_restriction
+  - active_medical_treatment_or_surgery
+  - clinician_directed_meal_timing
+  - athlete_low_energy_or_red_s_risk
+  - high_training_load_with_underfueling
+  - gallbladder_disease_history
+  - right_upper_quadrant_abdominal_pain
+  - rapid_weight_loss_risk
   stopIf:
   - Hypoglycemia symptoms, measured low glucose, dizziness, fainting, near-fainting, or unsafe weakness.
   - Binge-restrict cycling, purging, obsessive food preoccupation, or clinically meaningful mood worsening.
@@ -374,10 +389,10 @@ safety:
   - Unexplained or rapid weight loss, acute illness, dehydration, new pregnancy, medication changes requiring food, or clinician advice to stop.
   - Severe abdominal pain or gallbladder-risk symptoms.
   notes:
-  - Potentially reasonable only as a safety-screened self-experiment for medically stable adults, with rollback rules. It is not ordinary wellness framing for pregnancy, active or recent eating disorder, underweight status, youth, frailty, insulin/sulfonylurea users, or other hypoglycemia-relevant medication contexts.
-  - 'Log confounders: calories, protein, meal timing, caffeine/alcohol, training load, sleep, medications, menstrual cycle where relevant, and weight change.'
-  - RHR and HRV may be optional personal context only; they are not evidence-backed TRE safety biomarkers in this landed source set.
-  - Use water during the fasting interval as the evidence-safe default; other zero-calorie beverage rules are product-policy choices unless explicitly verified.
+  - Safety-screened self-experiment for stable adults only — not ordinary wellness for pregnancy, eating disorder, underweight, youth, frailty, or hypoglycemia-medication contexts.
+  - 'Log confounders: calories, protein, meal timing, caffeine/alcohol, training, sleep, meds, cycle, and weight change.'
+  - RHR and HRV are optional personal context — not evidence-backed TRE safety biomarkers here.
+  - Water is the evidence-safe fasting default — other zero-cal beverage rules are product-policy choices.
 researchLandscape:
   bottomLine: The direct 6-hour evidence base is relevant but small, short-term, and selected-population. Adjacent-window, calorie-confounding, behavioral, clinical, safety-only, mechanistic, observational, registry, and protocol-only sources should remain separate evidence groups so the page does not convert context into direct 18:6 proof.
   confidenceLabel: limited

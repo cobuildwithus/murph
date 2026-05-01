@@ -71,11 +71,11 @@ protocol:
   - Each evening, log daily steps, selected floor, whether the floor was hit, device gaps or device changes, intentional walking or exercise, pain, safety symptoms, fatigue/recovery, sleep disruption, illness, injury/recovery status, footwear, terrain, occupational walking, and other major confounders.
   - Review weekly. Keep the floor only if steps rise or stay meaningfully higher without worsening pain, recovery, safety symptoms, sleep, or life friction; otherwise lower the floor, slow the ramp, or stop the experiment.
   tips:
-  - Make the first floor repeatable rather than heroic; a smaller repeatable floor is more informative than a large number that requires pushing through symptoms.
-  - Use a weekly median or average plus floor-hit days; do not overinterpret one unusually active or unusually inactive day.
-  - Keep the device source stable. If you switch devices or stop carrying the phone, flag the day instead of treating the number as comparable.
-  - Separate “I walked more” from “I hit a public guideline.” The canonical experiment tests total daily steps, not cadence, MVPA, or training intensity.
-  - Keep concurrent changes stable where feasible, especially new exercise programs, major diet or weight-loss efforts, medication changes, travel, illness, pain flares, and unusual work demands.
+  - First floor should be repeatable, not heroic — a sustainable number beats pushing through symptoms.
+  - Use weekly median plus floor-hit days; one outlier day is not a signal.
+  - Same device throughout. Switched or forgot it? Flag the day, do not compare the number.
+  - This tests total daily steps, not cadence, MVPA, or a public guideline threshold.
+  - Hold exercise programs, diet efforts, meds, travel, and illness stable where feasible.
   safetyNotes:
   - 'For low baseline activity, frailty, injury recovery, pregnancy/postpartum status, acute illness, pain, or cardiopulmonary symptoms, use baseline-only observation, a lower floor, a slower ramp, or clinician-guided adaptation rather than forcing a fixed public target. Source keys: source_artifact:pmid-29961442; source_artifact:healthgov-physical-activity-guidelines-americans-2018-11-12; source_artifact:govuk-physical-activity-guidelines-2019-09-07; source_artifact:who-physical-activity-guidelines-2020-11-25.'
   keepInMind:
@@ -746,13 +746,18 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-  - active foot wound, diabetic-foot risk, neuropathy, or offloading requirement
-  - unstable or unexplained cardiopulmonary symptoms
-  - recent falls, serious balance limitation, or unsafe gait change
-  - pregnancy, early postpartum, or clinician activity restriction
-  - low baseline activity, frailty, injury recovery, or deconditioning that makes a step increase hard to repeat safely
-  - acute illness, fever, heat-illness risk, or dehydration concern
-  - new or worsening musculoskeletal pain that changes gait or persists
+  - active_foot_wound_or_diabetic_foot
+  - neuropathy_or_offloading_requirement
+  - unstable_cardiopulmonary_symptoms
+  - recent_falls_or_balance_limitation
+  - unsafe_gait_change
+  - pregnancy_or_early_postpartum
+  - clinician_activity_restriction
+  - low_baseline_frailty_or_deconditioning
+  - injury_recovery
+  - acute_illness_or_fever
+  - heat_illness_risk_or_dehydration
+  - new_or_worsening_musculoskeletal_pain
   stopIf:
   - chest pain or pressure, syncope or near-syncope, severe dizziness, confusion, severe unusual shortness of breath, or neurologic symptoms
   - fall, repeated near-fall, or unsafe balance change
@@ -760,9 +765,9 @@ safety:
   - pain in the foot, ankle, knee, hip, shin, or back that worsens across days or changes gait
   - heat-illness symptoms, fever, acute illness, or recovery debt that makes the floor require pushing through symptoms
   notes:
-  - 'Safety claims use extracted safety and clinical-boundary sources conservatively: source_artifact:pmid-15921486; source_artifact:daily-step-floor-pmid-17521443; source_artifact:pmid-26289360; source_artifact:pmid-18801859; source_artifact:doi-10.1016-j.bjpt.2023.100500; source_artifact:doi-10.1016-j.diabres.2021.108733; source_artifact:pmid-29961442; source_artifact:healthgov-physical-activity-guidelines-americans-2018-11-12; source_artifact:govuk-physical-activity-guidelines-2019-09-07; source_artifact:who-physical-activity-guidelines-2020-11-25.'
-  - Batch 012 guideline and special-population records are preserved as metadata-only stubs because extraction artifacts were missing; do not invent detailed adverse-event rates from them.
-  - A lower floor, slower ramp, time-based substitution, indoor route, or pause is preferred over forcing the number when low baseline capacity, frailty, injury recovery, safety, recovery, or life obligations make the floor brittle.
+  - Safety claims use extracted clinical-boundary sources conservatively — no invented adverse-event rates.
+  - Batch 012 guideline stubs are metadata-only; do not infer detailed rates from them.
+  - Lower floor, slower ramp, or pause beats forcing the number when capacity or safety is marginal.
 researchCoverage:
   bibliographyKey: source_artifact:daily-step-floor-bibliography
   corpusStats:

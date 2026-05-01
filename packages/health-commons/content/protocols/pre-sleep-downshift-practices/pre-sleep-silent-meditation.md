@@ -76,13 +76,12 @@ protocol:
     - "When the timer ends, stop the practice; do not repeat or extend the session to chase sleep."
     - "Make a quick log entry for minutes practiced, pre-bed wiredness, estimated sleep-onset latency, and any adverse or activating effects. If no stop condition occurred, proceed with the normal bedtime routine."
   tips:
-    - "Keep caffeine timing, alcohol, late exercise, screens, bedtime, wake time, and sleep environment as stable as possible across baseline and intervention nights."
-    - Use a neutral timer and avoid checking sleep scores during the session window.
-    - "If silent attention practice makes you try harder to sleep, shorten the next session to 5 minutes or stop the experiment rather than increasing the dose."
-    - "If in-bed practice makes wearable sleep-onset estimates hard to interpret, switch to a chair or edge-of-bed posture and log the location."
-    - "Do not use the practice as a way to force sleep. If you are awake and frustrated after the timer, stop meditating and follow your usual insomnia plan or do a quiet low-light activity outside the bed."
-    - "If the practice feels physically uncomfortable, creates pain, shortness of breath, dizziness, or chest symptoms, stop and do not restart that night."
-    - "Do not increase the duration after a bad night. A worse night means shorten, pause, or stop, not meditate harder."
+    - Keep caffeine, alcohol, exercise, screens, bedtime, and sleep environment stable across baseline and intervention.
+    - Neutral timer only; skip sleep-score checks during the session window.
+    - "If effort or sleep worsens, shorten, pause, or stop."
+    - "In-bed practice confusing wearable sleep-onset? Switch to a chair and log the change."
+    - "Never force sleep; after the timer, stop or do a quiet low-light activity."
+    - "Pain, shortness of breath, dizziness, or chest symptoms — stop and do not restart that night."
   keepInMind:
     - "The direct evidence base for unguided silent meditation immediately before bed is not established; this is a low-burden personal experiment, not a treatment claim."
     - "Guided apps, CBT-I, sleep hygiene, breathwork, progressive muscle relaxation, yoga nidra, mindfulness courses, and commercial sleep programs are adjacent variants and should not be merged into this protocol’s efficacy claim."
@@ -1171,16 +1170,18 @@ researchLandscape:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-    - "Bipolar disorder, mania or hypomania history, psychosis vulnerability, hallucinations, unusual beliefs, altered reality testing, marked agitation, or reduced need for sleep."
-    - "Current suicidal thoughts, self-harm thoughts, severe depression, or major functional impairment."
-    - "PTSD or trauma history with flashbacks, re-experiencing, dissociation, depersonalization, derealization, panic, fear of losing control, or past adverse meditation reactions."
-    - "Persistent insomnia, suspected untreated sleep apnea, loud snoring with breathing pauses, or daytime sleepiness causing impairment."
-    - "Epilepsy, seizure disorder, cognitive impairment, dementia, major neurologic disease, or a condition requiring caregiver-supported practice."
-    - Pregnancy/postpartum sleep disturbance or perinatal mental-health complexity.
-    - "Active substance-use disorder, withdrawal, intoxication, or addiction destabilization."
-    - "Major medical conditions where pain, shortness of breath, cardiopulmonary symptoms, cancer-related symptoms, stroke/heart disease, MS, or other neurologic/medical issues are driving sleep."
-    - "Children or adolescents; use a youth-specific, caregiver-aware variant instead."
-    - Any uncertainty about whether meditation is safe for you.
+    - bipolar_mania_or_psychosis_vulnerability
+    - suicidal_thoughts_or_severe_depression
+    - ptsd_trauma_dissociation_or_depersonalization
+    - prior_adverse_meditation_experience
+    - persistent_insomnia_or_untreated_sleep_apnea
+    - epilepsy_seizure_or_major_neurologic_disease
+    - cognitive_impairment_or_dementia
+    - pregnancy_postpartum_or_perinatal_mental_health
+    - active_substance_use_disorder_or_withdrawal
+    - major_medical_condition_driving_sleep_problems
+    - pediatric_or_adolescent
+    - uncertainty_whether_meditation_is_safe
   stopIf:
     - "Meditation increases arousal, anxiety, panic, rumination, intrusive thoughts, frustration, sleep effort, or compulsive tracking."
     - "Sleep is clearly worse for 3 consecutive intervention nights, total sleep time drops meaningfully, or daytime functioning deteriorates."
@@ -1190,8 +1191,8 @@ safety:
     - "Pain, shortness of breath, dizziness, chest symptoms, or other physical symptoms appear during the session."
     - The user repeats or extends the session in bed to force sleep.
   notes:
-    - Safety evidence is broad and heterogeneous; it justifies screening and stop rules but does not estimate the incidence of adverse events for this exact brief bedtime protocol.
-    - "This protocol is not a substitute for CBT-I, medical sleep evaluation, or mental-health care."
+    - Safety evidence justifies screening and stop rules — not adverse-event incidence estimates for this brief bedtime protocol.
+    - Not a substitute for CBT-I, medical sleep evaluation, or mental-health care.
 ---
 Silent Meditation Before Bed is a **brief, unguided, no-audio pre-sleep downshift test**. The practical question is not “does meditation cure insomnia?” It is: over a stable two-week window, does a short silent practice make your own pre-bed wiredness or perceived sleep-onset latency better, worse, or unchanged?
 

@@ -227,10 +227,10 @@ protocol:
     - Missed sessions are acceptable; do not complete an adherence target by continuing through symptoms.
     - Compare intervention averages against your own baseline instead of reading too much into single-night changes.
   tips:
-    - Parameter reporting matters here more than marketing language. Wavelength alone is not the whole dose, and nonthermal PBM is separate from sauna, tanning, IPL, laser, and heat protocols.
-    - Keep device, duration, timing, coverage, and exposure setup steady enough that a null or mixed result is still interpretable.
-    - Pair wearable outcomes with one-tap subjective ratings for sleep quality, next-day sleepiness, and overall recovery.
-    - Treat a flat, mixed, or negative result as useful information, not as proof that you did the protocol wrong.
+    - Report parameters, not marketing language. Wavelength alone is not the whole dose.
+    - Keep device, duration, timing, and coverage steady so a null result is still interpretable.
+    - Pair wearable data with one-tap subjective ratings for sleep, sleepiness, and recovery.
+    - A flat or negative result is useful information, not proof you did it wrong.
   keepInMind:
     - Direct human evidence for this exact general whole-body variant is limited.
     - The closest controlled wellness record is a partial-body daytime 850 nm trial, not a literal whole-body light-bed trial.
@@ -1155,25 +1155,44 @@ researchLandscape:
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
-    - pregnancy lactation or breastfeeding
-    - under 18 years old
-    - active cancer treatment known active cancer recent cancer treatment history of skin cancer or concerning changing skin lesions
-    - recent systemic or topical photodynamic therapy drug exposure
-    - photosensitizing medication use known photosensitivity photophobia or light-triggered symptoms
-    - retinoid steroid or other medication use that may impair skin healing
-    - seizure disorder seizure history or photosensitive epilepsy
-    - eye disease retinal disease recent eye surgery or unresolved visual symptoms
-    - implanted electrical device pacemaker or other implanted medical device
-    - arrhythmia decompensated cardiovascular disease severe hypertension or unstable cardiometabolic disease
-    - diabetes with severe complications insulin dependence unstable glucose control or planned medication holds
-    - unstable neurologic disease Parkinson's disease severe cognitive impairment or major sensory impairment
-    - clinically significant pulmonary disease dyspnea at rest resting hypoxemia or recent respiratory exacerbation
-    - thyroid disease or monitored thyroid or parathyroid condition when the neck is exposed
-    - severe psychiatric instability bipolar or mania or hypomania risk severe mood instability or worsening sleep
-    - diagnosed sleep disorder night-shift work or recent travel across more than two time zones when sleep is the primary outcome
-    - open wounds burns sunburn active rash active skin infection herpes outbreak or concerning lesions in exposed areas
-    - inability to detect or report heat pain skin symptoms visual symptoms or follow device instructions
-    - device fit weight limit or positioning constraints that prevent safe use
+    - pregnancy_lactation_or_breastfeeding
+    - under_18_years_old
+    - active_or_recent_cancer_treatment
+    - skin_cancer_history
+    - concerning_or_changing_skin_lesions
+    - recent_photodynamic_therapy_drug
+    - photosensitizing_medication
+    - photosensitivity_or_photophobia
+    - light_triggered_symptoms
+    - retinoid_or_steroid_impairing_healing
+    - seizure_disorder_or_photosensitive_epilepsy
+    - eye_disease_or_retinal_disease
+    - recent_eye_surgery
+    - unresolved_visual_symptoms
+    - implanted_electrical_or_medical_device
+    - pacemaker
+    - arrhythmia_or_unstable_cardiovascular
+    - severe_hypertension
+    - unstable_cardiometabolic_disease
+    - diabetes_with_severe_complications
+    - insulin_dependence_unstable_glucose
+    - planned_medication_holds
+    - unstable_neurologic_disease
+    - severe_cognitive_or_sensory_impairment
+    - significant_pulmonary_disease
+    - dyspnea_at_rest_or_hypoxemia
+    - thyroid_or_parathyroid_with_neck_exposed
+    - severe_psychiatric_instability
+    - bipolar_or_mania_hypomania_risk
+    - diagnosed_sleep_disorder
+    - night_shift_or_recent_timezone_travel
+    - open_wounds_burns_or_sunburn
+    - active_rash_or_skin_infection
+    - herpes_outbreak_in_exposed_areas
+    - concerning_lesions_in_exposed_areas
+    - inability_to_detect_heat_or_pain
+    - unable_to_follow_device_instructions
+    - device_fit_or_positioning_constraints
   stopIf:
     - eye pain blurred vision visual disturbance unusual light sensitivity new floaters or persistent afterimage
     - accidental direct gaze into emitters followed by lingering visual symptoms
@@ -1185,12 +1204,12 @@ safety:
     - chest pain chest tightness palpitations wheezing dyspnea at rest or unusual shortness of breath
     - repeated worsening sleep insomnia agitation irritability hypomania or mania-like symptoms lowered mood or unstable mood
   notes:
-    - This page is for a bounded field-testing protocol with gated onboarding, not for disease treatment or automatic experiment creation.
-    - Use only documented non-UV non-tanning nonthermal red/NIR PBM devices; do not substitute sauna tanning IPL laser or heat protocols.
-    - Avoid direct gaze into emitters and use device-appropriate eye protection unless the manufacturer explicitly states it is not required.
-    - Do not stop hold or change prescribed medication for this protocol.
-    - Missed sessions are acceptable; never push through symptoms to meet adherence.
-    - Keep safety language stronger than efficacy language because the direct evidence base is still sparse.
+    - Bounded field test with gated onboarding — not disease treatment or auto-experiment creation.
+    - Use only documented non-UV, nonthermal red/NIR PBM devices — no sauna, tanning, IPL, laser, or heat.
+    - Wear device-appropriate eye protection every session and avoid direct emitter gaze.
+    - Do not stop, hold, or change prescribed medication for this protocol.
+    - Missed sessions are fine — never push through symptoms to meet adherence.
+    - Safety language stays stronger than efficacy language — direct evidence is still sparse.
 ---
 
 Red Light Therapy is plausible enough for cautious field testing when implemented as whole-body red and near-infrared photobiomodulation, but the direct evidence for this exact Murph variant is much thinner than the broader PBM internet narrative suggests.

@@ -470,12 +470,12 @@ protocol:
   - Log each day whether the serving was taken, missed, doubled, or changed; total EPA+DHA taken; dose time; whether it was taken with food/fat; GI or fishy-taste symptoms; palpitations or irregular heartbeat; dizziness/syncope; unusual bleeding/bruising; nosebleeds/gum bleeding/heavier menstrual bleeding; allergic symptoms; gout flares or edema; and major diet/medication/supplement changes.
   - Retest with the same lab and sample matrix after the intervention window. Treat omega-3 index/RBC EPA+DHA as an exposure/status endpoint and lipid results as clinical-context information, not proof of disease-risk reduction or justification to change prescribed therapy.
   tips:
-  - Use one product rather than stacking multiple omega-3 products, so dose and source are interpretable.
-  - Save a label photo or product page with the exact EPA and DHA amounts; capsule count alone is not enough.
-  - Take the supplement with the same meal pattern each day if you choose to take it with food, because meal context and formulation can affect exposure.
-  - Swallow capsules or softgels according to product instructions; do not crush, chew, dissolve, or open capsules unless the specific product label or clinician says to.
-  - Keep seafood intake stable during the run unless the experiment is explicitly about changing seafood intake, which is a separate variant.
-  - Prefer products with transparent quality testing when available, but do not treat marketing claims as evidence of clinical benefit.
+  - One product, not stacked — keeps dose and source interpretable.
+  - Save a label photo with exact EPA and DHA mg; capsule count alone is not enough.
+  - Same meal pattern each day if taking with food.
+  - Swallow intact per product instructions — do not crush, chew, or open unless labeled safe.
+  - Keep seafood intake stable unless the experiment is explicitly about changing it.
+  - Prefer products with transparent third-party quality testing.
   keepInMind:
   - This protocol is a measurable-status and lipid-context experiment, not a cardiovascular-event-prevention or disease-treatment claim.
   - EPA and DHA amounts, source, and formulation should not be collapsed into “fish oil” without logging details.
@@ -1308,25 +1308,29 @@ safety:
   avoidOrGetClinicianGuidance:
   - age_under_18_or_child_adolescent_use
   - pregnancy_trying_to_conceive_or_lactation
-  - fish_shellfish_allergy_or_capsule_ingredient_hypersensitivity
+  - fish_or_shellfish_allergy
+  - capsule_ingredient_hypersensitivity
   - prior_omega3_product_reaction
   - anticoagulant_or_antiplatelet_use
   - warfarin_or_doac_use
-  - regular_nsaid_or_high_dose_aspirin_use
-  - ssri_snri_or_other_bleeding_relevant_drug_use
-  - vitamin_e_garlic_ginkgo_ginger_turmeric_nattokinase_or_bleeding_supplement_use
-  - bleeding_disorder_thrombocytopenia_or_hematologic_disorder
-  - history_of_serious_bleeding_or_easy_unexplained_bruising_or_bleeding
-  - planned_surgery_dental_extraction_endoscopy_biopsy_or_invasive_procedure
+  - regular_nsaid_or_high_dose_aspirin
+  - ssri_snri_or_bleeding_relevant_drug
+  - bleeding_relevant_supplement_use
+  - bleeding_disorder_or_thrombocytopenia
+  - history_of_serious_bleeding
+  - unexplained_bruising_or_bleeding
+  - planned_surgery_or_invasive_procedure
   - prior_atrial_fibrillation_or_flutter
-  - clinically_significant_arrhythmia_unexplained_palpitations_or_syncope
-  - high_af_risk_high_cardiovascular_risk_or_clinician_managed_cvd
-  - severe_hypertriglyceridemia_pancreatitis_history_or_clinician_managed_dyslipidemia
-  - liver_disease_elevated_alt_ast_or_ldl_c_requiring_monitoring
+  - significant_arrhythmia_or_syncope
+  - high_af_or_cardiovascular_risk
+  - severe_hypertriglyceridemia
+  - pancreatitis_history
+  - liver_disease_or_elevated_enzymes
+  - ldl_c_requiring_monitoring
   - gout_or_recurrent_gout_flares
-  - immunocompromised_or_immunosuppressive_therapy_for_high_dose_or_long_duration_use
-  - planned_multi_gram_high_dose_or_prescription_omega3_use
-  - cod_liver_oil_or_retinol_containing_product_use
+  - immunocompromised_or_on_immunosuppressants
+  - planned_high_dose_omega3_use
+  - cod_liver_oil_or_retinol_product
   - multiple_omega3_product_stacking
   stopIf:
   - serious_allergic_symptoms_hives_swelling_wheezing_or_trouble_breathing
@@ -1342,11 +1346,11 @@ safety:
   - pregnancy_breastfeeding_or_planned_procedure_emerges_during_run
   - starting_or_increasing_anticoagulants_antiplatelets_regular_nsaids_or_bleeding_relevant_supplements
   notes:
-  - Most low-risk adults tolerate common supplement doses, but the evidence base includes important high-dose and cardiovascular-risk safety signals that should control the onboarding screen.
-  - This page is not a substitute for clinician-guided treatment of hypertriglyceridemia, pancreatitis risk, cardiovascular disease, pregnancy/lactation nutrition, pediatric supplementation, allergy management, liver/LDL monitoring, gout, immunosuppression, or prescription omega-3 therapy.
-  - Fishy taste/burps, heartburn/dyspepsia, nausea, abdominal discomfort, bloating, diarrhea or constipation, and headache should be logged as tolerability outcomes.
-  - Do not stop, replace, reduce, or delay prescribed medications or clinician-directed procedures because of this protocol.
-  - Do not normalize 4 g/day or prescription-style dosing for wellness; multi-gram use belongs in a clinician-guided variant.
+  - Common doses are well tolerated, but high-dose and CV-risk signals control the screen.
+  - Not a substitute for clinician-guided treatment of hypertriglyceridemia, CV disease, pregnancy, allergy, liver/LDL, gout, or prescription omega-3 therapy.
+  - Log fishy taste, GI symptoms, and headache as tolerability outcomes.
+  - Never stop or delay prescribed meds or procedures because of this protocol.
+  - Multi-gram or prescription-style dosing belongs in a clinician-guided variant.
 ---
 
 ## Question this experiment answers

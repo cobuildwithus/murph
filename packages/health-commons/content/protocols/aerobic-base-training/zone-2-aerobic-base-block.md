@@ -84,9 +84,9 @@ protocol:
     - If speech becomes forced, you can only say a few words, RPE climbs, or heart rate seems out of proportion but you have no symptoms, slow down or shorten the session.
     - If symptoms appear, glucose safety concerns appear, heat-illness signs appear, or the environment/equipment becomes unsafe, stop the session and follow the stop rules.
   tips:
-    - Treat wearable Zone 2 labels as optional context; the talk test and symptom response are the fidelity anchor.
-    - Stationary cycling, treadmill, elliptical, rowing, easy jogging, or outdoor cycling can fit only when the setup is safe for that modality and does not create pain, traffic, footing, equipment, or technique problems.
-    - In hot or humid conditions, move indoors, shorten, or skip rather than treating planned duration as mandatory. Hydrate normally for the conditions and avoid both dehydration and forced overhydration.
+    - Wearable Zone 2 labels are optional context — talk test and symptoms are the anchor.
+    - Other modalities fit only when the setup is safe and pain-free for that mode.
+    - Hot or humid? Move indoors, shorten, or skip — planned duration is not mandatory.
   keepInMind:
     - The exact 4-week, 3x/week, 35-60 minute conversational protocol is evidence-adjacent; nearby evidence often uses longer programs, broader guidelines, or different populations.
     - Modality options are logistics substitutions, not proof of identical physiology or injury load; keep the talk test, symptoms, and pain response primary when switching modes.
@@ -174,8 +174,17 @@ expectedSignalDescriptions:
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
-    - known cardiovascular, metabolic, renal, respiratory, diabetes, or blood-pressure context; exertional symptoms; diabetes medication or glucose risk; dyspnea; or clinician-directed exercise restrictions
-    - pregnancy or postpartum status, prior serious exercise-related adverse event, inability to complete 35 minutes comfortably, chronic musculoskeletal pain, or mobility limitation
+    - cardiovascular_disease
+    - metabolic_or_renal_disease
+    - respiratory_disease_or_dyspnea
+    - diabetes_or_glucose_medication
+    - uncontrolled_blood_pressure
+    - exertional_symptoms
+    - clinician_directed_exercise_restriction
+    - pregnancy_or_postpartum
+    - prior_serious_exercise_adverse_event
+    - chronic_musculoskeletal_pain
+    - mobility_limitation
   stopIf:
     - chest pain, anginal-equivalent symptoms, fainting, unexplained exercise-related dizziness, severe breathlessness, palpitations, neurologic symptoms, glucose safety symptoms, pain that does not settle, or heat illness signs occur
 claims:

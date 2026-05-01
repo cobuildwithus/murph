@@ -159,10 +159,10 @@ protocol:
     - Cool down for about 5 minutes.
     - Log the modality, completed intervals, peak heart rates, effort, symptoms, and next-day recovery.
   tips:
-    - Leave at least 48 hours between hard interval sessions when possible.
-    - Use heart rate, perceived exertion, and symptoms together instead of sprinting from the start to chase a number.
-    - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule stable.
-    - Make the first session conservative; repeatable hard aerobic work matters more than maximal suffering.
+    - 48+ hours between hard interval sessions.
+    - Use heart rate, exertion, and symptoms together — don't sprint to chase a number.
+    - Keep training, caffeine, alcohol, supplements, and sleep stable during the test.
+    - First session conservative — repeatable beats maximal.
   keepInMind:
     - Wearable VO2max is a proxy, not lab gas-exchange testing, and may update slowly or not at all during the experiment.
     - The 6-week window is intentional because the main target is cardiorespiratory fitness, not a next-day recovery score.
@@ -733,11 +733,11 @@ safety:
     - severe_or_worsening_joint_or_muscle_pain
     - abnormal_recovery_for_more_than_24_to_48_hours
   notes:
-    - This is a bounded wellness self-experiment, not a treatment plan.
-    - Use a low-impact modality if injury risk or running load is a concern.
-    - Keep the first session conservative; the target is repeatable hard aerobic work, not maximal sprinting.
-    - Do not run this protocol while acutely ill, febrile, or recovering from a significant infection.
-    - People on heart-rate-limiting medication may need clinician-guided intensity targets because HR zones can be misleading.
+    - Wellness experiment, not a treatment plan.
+    - Switch to low-impact if injury risk is elevated.
+    - First session conservative — aim for repeatable effort, not a sprint.
+    - Skip sessions when ill, febrile, or recovering from infection.
+    - HR-limiting meds can distort zone targets — get clinician guidance on intensity.
 researchCoverage:
   bibliographyKey: source_artifact:norwegian-4x4-bibliography
   corpusStats:

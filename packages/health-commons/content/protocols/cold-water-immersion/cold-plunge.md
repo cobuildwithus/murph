@@ -77,11 +77,11 @@ protocol:
   - Recent self-harm/suicide risk, severe or unstable mental-health symptoms, or using cold plunging as treatment for depression/anxiety requires a clinician-guided mental-health variant or safer alternative; the default protocol only tracks acute subjective mood as a wellness signal.
   - Pregnancy/postpartum, cold-urticaria/anaphylaxis, alcohol/sedative, and medication-related cautions are safety-screening boundaries rather than efficacy claims.
   tips:
-  - 'Make the first session the easiest: warmer end of the range, shorter duration, and no attempt to prove toughness.'
-  - 'General experiment-control guidance, not a safety-evidence claim: keep time of day, caffeine, exercise timing, sleep, alcohol, illness, and stress as stable as reasonably possible during the baseline and intervention windows.'
-  - Prefer a simple same-scale mood rating before and 30–180 minutes after the session; wearable metrics are context, not the primary verdict.
-  - Separate this from post-workout recovery experiments. If the goal is soreness after training, use a recovery-specific CWI protocol instead.
-  - Use a lower-risk alternative, such as a cool shower or skipping the experiment, when supervision, exit, or medical context is uncertain.
+  - 'First session = easiest: warmer water, shorter duration, no proving toughness.'
+  - Keep time of day, caffeine, exercise, sleep, alcohol, and stress stable across the test window.
+  - Simple same-scale mood before and 30-180 min after — wearables are context, not verdict.
+  - Post-workout soreness goal? Use a recovery-specific CWI protocol instead.
+  - Uncertain supervision, exit, or medical context? Cool shower or skip.
   keepInMind:
   - Evidence is mixed and early. Acute mood signals are plausible, but durable immune, cardiometabolic, sleep, cognition, or performance benefits are not established for this protocol.
   - Reduced discomfort after repeated exposure can mean habituation, not necessarily health improvement.
@@ -953,14 +953,42 @@ researchLandscape:
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
-  - under 18, pregnancy or early postpartum, older adult with frailty, limited mobility, fall risk, or inability to exit/dress/rewarm independently
-  - known cardiovascular disease, coronary artery disease, angina, arrhythmia, Long QT/channelopathy, family sudden-cardiac-event history, heart failure, recent heart attack or stroke, unexplained fainting/near-fainting, exertional chest symptoms, significant palpitations, uncontrolled blood pressure, medication-treated high blood pressure if uncertain, or clinician advice to avoid sudden cold exposure
-  - peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, diabetes with hypoglycemia risk or impaired sensation, cold agglutinin disease, prior frostbite or non-freezing cold injury, severe Raynaud-type cold reaction, or prior unsafe cold-water reaction
-  - cold urticaria, cold-triggered hives, swelling, wheeze, throat tightness, angioedema, anaphylaxis history, or any cold-triggered systemic reaction
-  - severe asthma/COPD symptoms, cold-triggered respiratory symptoms, seizure disorder/epilepsy, kidney failure or serious kidney disease, or medication affecting heart rate, blood pressure, rhythm, alertness, thermoregulation, glucose, balance, or safe exit
-  - recent self-harm/suicide risk, severe or unstable mental-health symptoms, or using cold plunging to treat depression/anxiety rather than as a wellness self-tracking experiment
-  - fever, acute illness, dehydration, recent heat illness, major sleep deprivation, alcohol, sedatives, recreational drugs, or any impairment of judgment, balance, breathing control, or safe exit today
-  - open water, swimming challenge, breathwork in or near water, deliberate hyperventilation, breath-holding, face submersion, underwater challenge, sauna-to-plunge contrast stack, locked/covered tub, slippery setup, unmeasured water temperature, water below 10 °C for the first default Murph run, or inability to exit immediately
+  - under_18
+  - pregnancy_or_early_postpartum
+  - older_adult_with_frailty_or_fall_risk
+  - inability_to_exit_or_rewarm_alone
+  - coronary_artery_disease_or_angina
+  - arrhythmia_or_long_qt
+  - family_sudden_cardiac_event_history
+  - heart_failure
+  - recent_heart_attack_or_stroke
+  - unexplained_fainting
+  - uncontrolled_blood_pressure
+  - peripheral_artery_disease
+  - peripheral_neuropathy_or_poor_circulation
+  - diabetes_with_hypoglycemia_or_neuropathy
+  - cold_agglutinin_disease
+  - prior_frostbite_or_cold_injury
+  - severe_raynaud_reaction
+  - cold_urticaria_or_cold_anaphylaxis
+  - cold_triggered_angioedema
+  - severe_asthma_or_copd
+  - cold_triggered_respiratory_symptoms
+  - seizure_disorder_or_epilepsy
+  - kidney_failure_or_serious_kidney_disease
+  - medication_affecting_hr_bp_or_rhythm
+  - medication_affecting_thermoregulation
+  - recent_self_harm_or_suicide_risk
+  - unstable_mental_health_symptoms
+  - fever_or_acute_illness
+  - dehydration_or_recent_heat_illness
+  - alcohol_sedatives_or_recreational_drugs
+  - open_water_or_swimming_challenge
+  - breathwork_or_breath_holding_in_water
+  - sauna_to_plunge_contrast_stack
+  - unmeasured_water_temperature
+  - water_below_10c_on_first_run
+  - inability_to_exit_immediately
   stopIf:
   - water temperature is unmeasured, below the default first-run range, setup changed, no safe exit, no adult nearby for first exposure, or any safety screen is positive or uncertain
   - controlled breathing is not restored within 15–30 seconds, inability to speak in short sentences, uncontrolled gasping, hyperventilation, panic, or loss of breathing control
@@ -970,7 +998,7 @@ safety:
   - unsafe footing, stuck cover/door, open-water conditions, unsafe water, alcohol/sedatives/recreational drugs, or being alone when supervision is needed
   - 'any stop condition occurs: exit immediately, end the session, do not repeat the next session until the cause is resolved; seek urgent/emergency help for chest symptoms, fainting, confusion, severe breathlessness, swelling/throat tightness/wheeze, suspected submersion/aspiration, or inability to rewarm'
   notes:
-  - Older/frailty/fall-risk, circulation, diabetes/neuropathy, pregnancy/postpartum, alcohol/impairment, and mental-health-treatment boundaries are safety-screening boundaries, not efficacy claims.
+  - Screening boundaries are safety gates, not efficacy claims.
 researchCoverage:
   researchRun: output-packages/research/cold-plunge-research-restart-20260427
   canonicalLedgerSourceCount: 262

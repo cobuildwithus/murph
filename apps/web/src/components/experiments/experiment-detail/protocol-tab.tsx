@@ -576,9 +576,8 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
               ?
             </span>
             <span>
-              Anything unclear during the protocol? Ask Murph in the chat,
-              it knows the plan, your baseline, and the signals you are
-              tracking.
+              Anything unclear during the protocol? Ask Murph — your plan,
+              baseline, and tracked signals are already loaded.
             </span>
           </p>
         </section>
@@ -587,10 +586,10 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
       {whyItWorksParagraphs.length > 0 && (
         <section className="flex flex-col gap-6 rounded-xl border border-secondary/25 bg-card/90 p-7">
           <SectionLabel>Why it works</SectionLabel>
-          <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
             <MarkdownView
               content={whyItWorksParagraphs.join("\n\n")}
-              className="flex max-w-3xl flex-col gap-5 text-pretty [&>h2]:font-serif [&>h2]:text-xl/7 [&>h2]:font-normal [&>h2]:text-foreground [&>h2]:mt-2 [&>h2:first-child]:mt-0 [&>p]:text-base/7 [&>p]:text-foreground [&>p:first-child]:font-serif [&>p:first-child]:text-[19px]/7"
+              className="flex max-w-3xl flex-col gap-4 text-pretty [&>h2]:font-serif [&>h2]:text-lg/6 [&>h2]:font-normal [&>h2]:text-foreground [&>h2]:mt-1 [&>h2:first-child]:mt-0 [&>p]:text-[15px]/6 [&>p]:text-foreground"
             />
             <MechanismCausalChain experimentId={experiment.id} />
           </div>
@@ -1058,22 +1057,15 @@ function ProtocolShapeRail({
 
 const CAUSAL_CHAINS: Record<string, ReadonlyArray<{ label: string; content: string }>> = {
   "norwegian-4x4": [
-    { label: "Session", content: "4 hard aerobic reps, each sustaining high oxygen demand" },
-    { label: "During each rep", content: "Heart pumps near capacity; working muscle pulls hard on oxygen" },
-    {
-      label: "Repeated signal",
-      content: "High blood flow, shear stress, lactate turnover, oxygen extraction repeat",
-    },
-    {
-      label: "Adaptation",
-      content: "Can support stroke volume, capillary delivery, and mitochondrial oxygen use",
-    },
+    { label: "Session", content: "4 × (4′ hard · 3′ easy)" },
+    { label: "Acute physiology", content: "HR 85–95% HRmax · sustained aerobic stress" },
+    { label: "Adaptation", content: "heart pumps more per beat · more capillaries · muscles build more and stronger mitochondria" },
   ],
   "finnish-sauna": [
-    { label: "Session", content: "80–100 °C dry sauna · ~15–20 min · 3×/week" },
-    { label: "Acute physiology", content: "skin vessels dilate · sweat · HR ↑ · core temp climbs" },
-    { label: "Adaptation", content: "plasma volume ↑ · earlier sweating · HSP-70 · endothelial tone" },
-    { label: "Outcome", content: "resting HR ↓ · calmer post-sauna downshift" },
+    { label: "Session", content: "3×/week dry heat · 5–20 min · tolerable enough to cool down cleanly" },
+    { label: "Heat load", content: "Skin vessels open; heart rate rises; sweat carries heat out" },
+    { label: "Recovery", content: "Cooldown restores pressure, temperature, fluid balance, and alertness" },
+    { label: "Adaptation", content: "Earlier sweating; steadier vascular tone; lower resting strain" },
   ],
   "bryan-johnson-blueprint": [
     { label: "Session", content: "93 °C dry sauna · daily · post-workout · groin ice" },

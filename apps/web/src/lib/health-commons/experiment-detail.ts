@@ -856,9 +856,7 @@ function toSafety(safety: HealthCommonsSafety | undefined): ExperimentProtocol["
     whoShouldAvoid: (safety.avoidOrGetClinicianGuidance ?? []).map(humanizeToken),
     precautions: cleanHealthCommonsUserFacingCopyList([
       ...(safety.notes ?? []),
-      ...(safety.stopIf && safety.stopIf.length > 0
-        ? [`Stop if: ${safety.stopIf.map(humanizeToken).join(", ")}.`]
-        : []),
+      ...(safety.stopIf ?? []).map((item) => `Stop if: ${humanizeToken(item)}`),
     ]),
   };
 }
