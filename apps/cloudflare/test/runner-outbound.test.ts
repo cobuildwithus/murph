@@ -218,8 +218,10 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("records active invocation heartbeats through the runner-control host", async () => {
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true as const,
+      pendingNudge: true,
     }));
     const response = await handleRunnerOutboundRequest(
       new Request(HEARTBEAT_URL, {
@@ -251,8 +253,10 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true,
+      pendingNudge: true,
     });
     expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
       attemptId: "workspace-invocation-1",
@@ -770,8 +774,10 @@ function createRunnerOutboundEnv(
         },
         async recordActiveInvocationHeartbeat() {
           return {
+            inputAvailable: false,
             nextAlarmAt: null,
             ok: true as const,
+            pendingNudge: false,
           };
         },
         async recordActiveInvocationWorkspaceCheckpoint() {

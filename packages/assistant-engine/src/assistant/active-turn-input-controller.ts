@@ -536,6 +536,31 @@ export async function notifyAssistantActiveTurnInputAvailable(
   return undefined
 }
 
+export async function notifyAssistantActiveTurnInputsAvailableForVault(input: {
+  signal?: AbortSignal
+  vault: string
+}): Promise<readonly AssistantActiveTurnInputAdmissionResult[]> {
+  const keyPrefix = `${input.vault}\u0000`
+  const controllers = new Set<AssistantActiveTurnInputController>()
+  for (const [key, controller] of activeTurnInputControllers.entries()) {
+    if (key.startsWith(keyPrefix)) {
+      controllers.add(controller)
+    }
+  }
+
+  const results: AssistantActiveTurnInputAdmissionResult[] = []
+  for (const controller of controllers) {
+    const result = await controller.notifyInputAvailable({
+      signal: input.signal,
+    })
+    if (result) {
+      results.push(result)
+    }
+  }
+
+  return results
+}
+
 function resolveAssistantActiveTurnInputControllerKeys(
   input: AssistantActiveTurnInputControllerKeyInput,
 ): AssistantActiveTurnInputControllerKey[] {

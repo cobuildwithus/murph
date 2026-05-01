@@ -26,7 +26,7 @@ Public routes:
 
 Internal control routes:
 
-- `POST /internal/users/:userId/nudge` persists a runner nudge for a user, enqueues an immediate runner wake, and returns the runner nudge result
+- `POST /internal/users/:userId/nudge` persists a runner nudge for a user, starts an idle Durable Object runner drive immediately, and returns the runner nudge result
 - `POST /internal/users/:userId/browser-vault/session`
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
@@ -53,7 +53,7 @@ Bindings:
 - `USER_RUNNER`
 - `RUNNER_CONTAINER`
 - `BUNDLES`
-- `RUNNER_WAKE_QUEUE` Queue producer/consumer binding for immediate hosted-runner wake delivery after a persisted Durable Object nudge
+- `RUNNER_WAKE_QUEUE` Queue consumer binding for legacy queued runner wake delivery and operational fallback; normal nudges drive through the per-user Durable Object plus alarm recovery
 - `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request
 - optional `HOSTED_EMAIL` native `send_email` binding for outbound hosted email
 

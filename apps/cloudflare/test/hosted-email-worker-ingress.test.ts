@@ -75,9 +75,6 @@ import {
   writeHostedEmailRawMessage,
 } from "../src/hosted-email.ts";
 import { handleHostedEmailIngress } from "../src/hosted-email/worker-ingress.ts";
-import {
-  HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
-} from "../src/runner-wake-queue.ts";
 import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
 
 import {
@@ -258,7 +255,7 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
-  it("persists and queues alias ingress only after the web-owned verified-email authorization succeeds", async () => {
+  it("persists and nudges alias ingress only after the web-owned verified-email authorization succeeds", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(
@@ -313,12 +310,7 @@ describe("hosted email worker ingress", () => {
     });
     expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.RUNNER_WAKE_QUEUE.send).toHaveBeenCalledWith({
-      reason: "nudge",
-      requestedAt: expect.any(String),
-      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
-      userId: "user_123",
-    });
+    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
     expect(typeof rawMessageKey).toBe("string");
@@ -445,10 +437,7 @@ describe("hosted email worker ingress", () => {
     }));
     expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.RUNNER_WAKE_QUEUE.send).toHaveBeenCalledWith(expect.objectContaining({
-      reason: "nudge",
-      userId: "user_456",
-    }));
+    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
@@ -489,9 +478,10 @@ describe("hosted email worker ingress", () => {
     expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
   });
 
-  it("accepts email ingress when queue send fails because the Durable Object alarm remains armed", async () => {
+  it("accepts email ingress when the post-append Durable Object nudge fails", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
 
+    mocks.nudgeHostedRunner.mockRejectedValueOnce(new Error("nudge failed"));
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
         userId: "user_456",
@@ -504,7 +494,6 @@ describe("hosted email worker ingress", () => {
       },
     ));
     const env = createWorkerEnv(bucket);
-    env.RUNNER_WAKE_QUEUE.send.mockRejectedValueOnce(new Error("queue failed"));
 
     await handleHostedEmailIngress({
       authenticatedSender: AUTHENTICATED_SENDER,
@@ -518,7 +507,17 @@ describe("hosted email worker ingress", () => {
 
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
-    expect(env.RUNNER_WAKE_QUEUE.send).toHaveBeenCalledTimes(1);
+    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.email",
+        details: expect.objectContaining({
+          reason: "runner-nudge-failed",
+        }),
+        level: "warn",
+        message: "Hosted email runner nudge failed after appending the canonical ingress event.",
+      }),
+    );
   });
 
   it("deletes newly written raw email blobs when the canonical append fails with a permanent client HTTP response", async () => {

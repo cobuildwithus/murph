@@ -1082,14 +1082,51 @@ function readOptionalStringField(value: unknown, field: string): string | null {
   return entry;
 }
 
+function readOptionalBooleanField(value: unknown, field: string): boolean | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime response must be an object.");
+  }
+
+  const entry = (value as Record<string, unknown>)[field];
+  if (entry === undefined || entry === null) {
+    return null;
+  }
+
+  if (typeof entry !== "boolean") {
+    throw new TypeError(`Hosted runtime response.${field} must be a boolean.`);
+  }
+
+  return entry;
+}
+
 function parseRuntimeLivenessTouchResult(value: unknown): RuntimeLivenessTouchResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Runtime liveness response must be an object.");
   }
 
-  const ok = (value as { ok?: unknown }).ok;
+  const record = value as Record<string, unknown>;
+  const ok = record.ok;
   if (ok === true) {
-    return { ok: true };
+    const response: {
+      inputAvailable?: boolean;
+      nextAlarmAt?: string | null;
+      ok: true;
+      pendingNudge?: boolean;
+    } = { ok: true };
+
+    const inputAvailable = readOptionalBooleanField(value, "inputAvailable");
+    if (inputAvailable !== null) {
+      response.inputAvailable = inputAvailable;
+    }
+    const pendingNudge = readOptionalBooleanField(value, "pendingNudge");
+    if (pendingNudge !== null) {
+      response.pendingNudge = pendingNudge;
+    }
+    if ("nextAlarmAt" in record) {
+      response.nextAlarmAt = readOptionalStringField(value, "nextAlarmAt");
+    }
+
+    return response;
   }
   if (ok !== false) {
     throw new TypeError("Runtime liveness response.ok must be a boolean.");

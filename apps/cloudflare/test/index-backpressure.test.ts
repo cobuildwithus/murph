@@ -102,10 +102,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.bindUser).toHaveBeenCalledWith("member_123");
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(env.RUNNER_WAKE_QUEUE.send).toHaveBeenCalledWith(expect.objectContaining({
-      reason: "nudge",
-      userId: "member_123",
-    }));
+    expect(env.RUNNER_WAKE_QUEUE.send).not.toHaveBeenCalled();
   });
 });
 

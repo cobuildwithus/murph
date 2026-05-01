@@ -6,8 +6,15 @@ export type RuntimeLivenessRejectionReason =
   | "unauthorized"
   | "wrong_user";
 
+export type RuntimeLivenessAcceptedResult = {
+  inputAvailable?: boolean;
+  nextAlarmAt?: string | null;
+  ok: true;
+  pendingNudge?: boolean;
+};
+
 export type RuntimeLivenessTouchResult =
-  | { ok: true }
+  | RuntimeLivenessAcceptedResult
   | {
     ok: false;
     reason: RuntimeLivenessRejectionReason;
@@ -28,6 +35,7 @@ export interface RuntimeLivenessHeartbeat {
 export function startRuntimeLivenessHeartbeat(input: {
   intervalMs?: number;
   onError?: (error: unknown) => void;
+  onInputAvailable?: (result: RuntimeLivenessAcceptedResult) => Promise<void> | void;
   onRejected?: (reason: RuntimeLivenessRejectionReason) => void;
   port?: RuntimeLivenessPort | null;
   requestId: string;
@@ -122,6 +130,14 @@ export function startRuntimeLivenessHeartbeat(input: {
         return;
       }
       settleInitialTouch(result);
+      if (result.inputAvailable === true && !stopped && !input.signal?.aborted) {
+        void Promise.resolve(input.onInputAvailable?.(result))
+          .catch((error: unknown) => {
+            if (!stopped && !input.signal?.aborted) {
+              input.onError?.(error);
+            }
+          });
+      }
     } catch (error) {
       if (!timeoutReported && !stopped && !input.signal?.aborted) {
         input.onError?.(error);

@@ -37,6 +37,43 @@ describe("startRuntimeLivenessHeartbeat", () => {
     assert.equal(touches.length, 2);
   });
 
+  test("reports accepted touches with available input without blocking later heartbeats", async () => {
+    vi.useFakeTimers();
+    const touches: string[] = [];
+    const available: string[] = [];
+    const port: RuntimeLivenessPort = {
+      async touch(input) {
+        touches.push(input.requestId);
+        return {
+          inputAvailable: true,
+          nextAlarmAt: "2026-04-27T00:00:45.000Z",
+          ok: true,
+          pendingNudge: true,
+        };
+      },
+    };
+
+    const heartbeat = startRuntimeLivenessHeartbeat({
+      intervalMs: 1_000,
+      onInputAvailable(result) {
+        available.push(result.nextAlarmAt ?? "none");
+      },
+      port,
+      requestId: "request_123",
+    });
+
+    assert.deepEqual(await heartbeat.initialTouch, {
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+      pendingNudge: true,
+    });
+    await vi.waitFor(() => assert.deepEqual(available, ["2026-04-27T00:00:45.000Z"]));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => assert.equal(touches.length, 2));
+    await heartbeat.stop();
+  });
+
   test("skips overlapping touches and reports rejected liveness", async () => {
     vi.useFakeTimers();
     let releaseFirstTouch!: () => void;

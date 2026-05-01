@@ -793,7 +793,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
 
-      return new Response(JSON.stringify({ ok: true }), {
+      return new Response(JSON.stringify({
+        inputAvailable: true,
+        nextAlarmAt: "2026-04-27T00:00:45.000Z",
+        ok: true,
+        pendingNudge: true,
+      }), {
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -827,7 +832,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
     await expect(platform.runtimeLivenessPort?.touch({
       requestId: "hosted-workspace-invocation:attempt_1",
-    })).resolves.toEqual({ ok: true });
+    })).resolves.toEqual({
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+      pendingNudge: true,
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const heartbeatRequest = requireFetchRequest(fetchMock.mock.calls[1], "heartbeat");
