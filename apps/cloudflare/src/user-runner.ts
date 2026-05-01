@@ -213,7 +213,7 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId,
       });
-      await this.runUntilIdleOrBudget({ reason: "alarm" });
+      await this.runWhenIdleOrBudget({ reason: "alarm" });
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -328,18 +328,28 @@ export class HostedUserRunner {
       }
     }
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
+    const nowMs = Date.now();
     const record = await this.markPendingNudgeAndApplyAlarm({
-      preferredWakeAt: resolvePendingNudgeWakeAt({
-        nowMs: Date.now(),
-        record: runningRecord,
-        runnerTimeoutMs: this.env.runnerTimeoutMs,
-      }),
+      preferredWakeAt: activeInThisIsolate || !runningRecord.inFlight
+        ? new Date(nowMs).toISOString()
+        : resolvePendingNudgeWakeAt({
+            nowMs,
+            record: runningRecord,
+            runnerTimeoutMs: this.env.runnerTimeoutMs,
+          }),
     });
+    const immediateDriveStarted = alreadyRunning
+      ? false
+      : this.startDetachedRunnerDrive({
+          reason: "nudge",
+          userId: runningRecord.userId,
+        });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
         alarmScheduled: record.nextWakeAt !== null,
         alreadyRunning,
+        immediateDriveStarted,
         pendingNudge: record.pendingNudge,
       },
       message: "Hosted runner nudge accepted.",
@@ -375,8 +385,10 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<
     | {
+      inputAvailable: boolean;
       nextAlarmAt: string | null;
       ok: true;
+      pendingNudge: boolean;
     }
     | {
       ok: false;
@@ -395,10 +407,13 @@ export class HostedUserRunner {
       };
     }
 
-    const record = await this.reschedulePendingNudgeAfterInvocationLiveness(result.record);
+    const record = await this.reschedulePendingNudgeAfterInvocationLiveness(result.record)
+      ?? result.record;
     return {
-      nextAlarmAt: record?.nextWakeAt ?? result.record.nextWakeAt,
+      inputAvailable: record.pendingNudge,
+      nextAlarmAt: record.nextWakeAt,
       ok: true,
+      pendingNudge: record.pendingNudge,
     };
   }
 
@@ -413,6 +428,17 @@ export class HostedUserRunner {
       await this.reschedulePendingNudgeAfterInvocationLiveness(result.record);
     }
     return { recorded: result.recorded };
+  }
+
+  async runWhenIdleOrBudget(input: {
+    reason: HostedWorkspaceInvocationReason;
+  }): Promise<HostedWorkspaceInvocationResult> {
+    const activeInvocation = this.invocationLock;
+    if (activeInvocation) {
+      await activeInvocation.catch(() => undefined);
+    }
+
+    return this.runUntilIdleOrBudget(input);
   }
 
   async runUntilIdleOrBudget(input: {
@@ -636,12 +662,15 @@ export class HostedUserRunner {
       return null;
     }
 
+    const nowMs = Date.now();
     return await this.markPendingNudgeAndApplyAlarm({
-      preferredWakeAt: resolvePendingNudgeWakeAt({
-        nowMs: Date.now(),
-        record,
-        runnerTimeoutMs: this.env.runnerTimeoutMs,
-      }),
+      preferredWakeAt: this.invocationLock !== null
+        ? new Date(nowMs).toISOString()
+        : resolvePendingNudgeWakeAt({
+            nowMs,
+            record,
+            runnerTimeoutMs: this.env.runnerTimeoutMs,
+          }),
     });
   }
 
@@ -825,6 +854,48 @@ export class HostedUserRunner {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
     });
+  }
+
+  private startDetachedRunnerDrive(input: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  }): boolean {
+    if (this.invocationLock !== null) {
+      return false;
+    }
+
+    void this.runUntilIdleOrBudget({ reason: input.reason })
+      .catch(async (error) => {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            reason: input.reason,
+          },
+          error,
+          level: "warn",
+          message: "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled.",
+          phase: "failed",
+          userId: input.userId,
+        });
+
+        try {
+          await this.scheduleHostedWakeRetryAlarm();
+        } catch (retryError) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              reason: input.reason,
+            },
+            error: retryError,
+            level: "warn",
+            message: "Hosted runner immediate wake retry alarm scheduling failed.",
+            phase: "failed",
+            userId: input.userId,
+          });
+        }
+      });
+
+    return true;
   }
 
   private readAllowedRunnerSecretsSource(): Readonly<Record<string, string | undefined>> {

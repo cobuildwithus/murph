@@ -106,7 +106,7 @@ export async function handleHostedRunnerWakeQueue(
 
     try {
       const stub = await resolveUserRunnerStub(env, body.userId);
-      const result = await stub.runUntilIdleOrBudget({ reason: body.reason });
+      const result = await stub.runWhenIdleOrBudget({ reason: body.reason });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {

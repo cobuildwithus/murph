@@ -61,7 +61,6 @@ import type { HostedExecutionContainerNamespaceLike } from "./runner-container.t
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import {
-  enqueueHostedRunnerWake,
   handleHostedRunnerWakeQueue,
 } from "./runner-wake-queue.ts";
 import {
@@ -306,6 +305,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.runUntilIdleOrBudget(input);
   }
 
+  async runWhenIdleOrBudget(input: {
+    reason: HostedWorkspaceInvocationReason;
+  }): Promise<HostedWorkspaceInvocationResult> {
+    return this.runner.runWhenIdleOrBudget(input);
+  }
+
   async fetch(): Promise<Response> {
     return notFound();
   }
@@ -533,17 +538,6 @@ async function handleRunnerNudgeRoute(
 
   const stub = await resolveUserRunnerStub(context.env, userId);
   const nudge = await stub.nudgeHostedRunner();
-  if (!nudge.alreadyRunning) {
-    await enqueueHostedRunnerWake({
-      component: "hosted.runner",
-      details: buildWorkerRouteLogDetails({
-        reason: "runner-wake-queue",
-        routeName: "runner-nudge",
-      }, context.request, userId),
-      env: context.env,
-      userId,
-    });
-  }
 
   return json(nudge, 202);
 }

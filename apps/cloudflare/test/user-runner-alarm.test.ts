@@ -151,6 +151,7 @@ describe("HostedUserRunner alarm routing", () => {
         details: expect.objectContaining({
           alarmScheduled: true,
           alreadyRunning: false,
+          immediateDriveStarted: true,
           pendingNudge: true,
         }),
         message: "Hosted runner nudge accepted.",
@@ -160,22 +161,22 @@ describe("HostedUserRunner alarm routing", () => {
     );
   });
 
-  it("runs the workspace invocation when an idle nudge alarm fires", async () => {
+  it("starts the workspace invocation immediately when an idle nudge is accepted", async () => {
     const { runner } = createRunnerHarness();
     await runner.bindUser("member_123");
 
     await runner.nudgeHostedRunner();
-    await runner.alarm();
 
-    expect(runner.runCalls).toEqual(["alarm"]);
+    expect(runner.runCalls).toEqual(["nudge"]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
+          immediateDriveStarted: true,
           pendingNudge: true,
         }),
-        message: "Hosted runner alarm starting workspace invocation.",
-        phase: "wake.running",
+        message: "Hosted runner nudge accepted.",
+        phase: "scheduled",
         userId: "member_123",
       }),
     );
@@ -415,7 +416,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("marks a live invocation pending without scheduling another immediate alarm", async () => {
+  it("marks a live invocation pending and schedules immediate alarm drain in the same isolate", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocation = createDeferred<{
@@ -436,7 +437,8 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       alreadyRunning: true,
       inFlight: true,
     });
-    expect(nudge.nextAlarmAt).toBe("2026-04-27T00:00:45.100Z");
+    expect(Date.parse(nudge.nextAlarmAt ?? "")).toBeGreaterThanOrEqual(Date.parse(FIXED_NOW));
+    expect(Date.parse(nudge.nextAlarmAt ?? "")).toBeLessThan(Date.parse(FIXED_NOW) + 1_000);
     expect(alarms).toEqual([nudge.nextAlarmAt]);
 
     await vi.advanceTimersByTimeAsync(46_000);
@@ -446,7 +448,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     });
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
-      "2026-04-27T00:00:45.100Z",
+      nudge.nextAlarmAt,
       "2026-04-27T00:01:31.100Z",
     ]);
 
@@ -460,6 +462,53 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     expect(alarms).toHaveLength(3);
     expect(Date.parse(alarms[2] ?? "")).toBeGreaterThanOrEqual(Date.parse(FIXED_NOW));
     expect(Date.parse(alarms[2] ?? "")).toBeLessThan(Date.parse(FIXED_NOW) + 47_000);
+  });
+
+  it("waits for a live invocation before draining an immediate nudge alarm", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const secondInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return secondInvocation.promise;
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { runner } = createRunnerBootstrapHarness(null, { invoke });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "nudge" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await runner.nudgeHostedRunner();
+
+    const alarmRun = runner.alarm();
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledOnce();
+
+    firstInvocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+
+    secondInvocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(alarmRun).resolves.toBeUndefined();
   });
 
   it("keeps a newly observed persisted-only invocation pending until the orphan grace deadline", async () => {
@@ -701,8 +750,10 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
       leaseGeneration: "1",
       userId: "member_123",
     })).resolves.toEqual({
+      inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true,
+      pendingNudge: true,
     });
 
     expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
