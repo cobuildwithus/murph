@@ -386,7 +386,7 @@ export function createJunctionDeviceSyncProvider(
       occurredAt,
       resourceCategory: resource?.category ?? null,
       jobs,
-      unknownAccountAction: "accept",
+      unknownAccountAction: "retry",
     };
   }
 
