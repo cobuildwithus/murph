@@ -727,6 +727,7 @@ function assistantInputEventImmutableIdentity(
     conversation: record.conversation,
     occurredAt: record.occurredAt,
     replyTarget: record.replyTarget,
+    sourceMetadata: record.sourceMetadata,
     sourceRefIdentity: assistantInputSourceRefIdentity(record.sourceRef),
   }
 }
