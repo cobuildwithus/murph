@@ -289,11 +289,8 @@ describe("Health Commons experiment protocol metadata", () => {
       "resting-heart-rate",
       "estimated-vo2max",
       "sleep-efficiency",
-      "walking-cadence",
-      "moderate-to-vigorous-activity-minutes",
       "morning-blood-pressure",
       "sedentary-time",
-      "walking-bout-minutes",
       "musculoskeletal-pain",
       "walking-safety-events",
     ];

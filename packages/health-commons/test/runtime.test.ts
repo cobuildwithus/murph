@@ -465,24 +465,23 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       title: "Consistent Wake Time",
     }));
     expect(protocolTab?.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual([
-      "wake-time-variability",
+      "daytime-sleepiness",
       "total-sleep-time",
       "sleep-efficiency",
       "resting-heart-rate",
       "hrv-rmssd",
       "sleep-onset-latency",
-      "daytime-sleepiness",
     ]);
     expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
-      biomarkerRouteId: "wake-time-variability",
-      expected: "Wake times tighten",
+      biomarkerRouteId: "daytime-sleepiness",
+      expected: "Should fall, not rise",
       estimatedChange: expect.objectContaining({
-        confidence: "moderate",
-        high: -15,
+        confidence: "low",
+        high: 0,
         kind: "absolute",
-        low: -45,
-        unit: "minutes",
-        window: "2-4 weeks",
+        low: -2,
+        unit: "score points",
+        window: "4 weeks",
       }),
       protocolProminence: "focus",
     }));
@@ -515,11 +514,8 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       "resting-heart-rate",
       "estimated-vo2max",
       "sleep-efficiency",
-      "walking-cadence",
-      "moderate-to-vigorous-activity-minutes",
       "morning-blood-pressure",
       "sedentary-time",
-      "walking-bout-minutes",
       "musculoskeletal-pain",
       "walking-safety-events",
     ]);

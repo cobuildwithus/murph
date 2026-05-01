@@ -39,10 +39,6 @@ relations:
 - type: secondary_biomarker
   target: biomarker:sleep-efficiency
 - type: secondary_biomarker
-  target: biomarker:walking-cadence
-- type: secondary_biomarker
-  target: biomarker:moderate-to-vigorous-activity-minutes
-- type: secondary_biomarker
   target: biomarker:musculoskeletal-pain
 - type: secondary_biomarker
   target: biomarker:walking-safety-events
@@ -50,8 +46,6 @@ relations:
   target: biomarker:morning-blood-pressure
 - type: secondary_biomarker
   target: biomarker:sedentary-time
-- type: secondary_biomarker
-  target: biomarker:walking-bout-minutes
 - type: cites
   target: source_artifact:daily-step-floor-bibliography
 lineage:
@@ -129,11 +123,8 @@ testPlans:
   secondaryBiomarkerKeys:
   - biomarker:estimated-vo2max
   - biomarker:sleep-efficiency
-  - biomarker:walking-cadence
-  - biomarker:moderate-to-vigorous-activity-minutes
   - biomarker:morning-blood-pressure
   - biomarker:sedentary-time
-  - biomarker:walking-bout-minutes
   - biomarker:musculoskeletal-pain
   safetyOutcomeKeys:
   - biomarker:walking-safety-events
@@ -230,39 +221,6 @@ expectedSignalDescriptions:
     window: 4 weeks
     confidence: low
     basis: 'Step-counter meta-analysis estimated about 23 fewer sedentary minutes per day, but effects depend on goals, reminders, and baseline sitting. Source keys: source_artifact:pmid-26334900; source_artifact:pmid-33036635; source_artifact:pmid-22843637.'
-- biomarkerKey: biomarker:moderate-to-vigorous-activity-minutes
-  expected: mixed_or_contextual
-  protocolProminence: context
-  description: 'Added steps become moderate activity only when the pace is brisk enough.'
-  estimatedChange:
-    kind: absolute
-    low: 0
-    high: 60
-    unit: minutes/week
-    window: 4 weeks
-    confidence: low
-    basis: 'A 1,000-2,000-step gap could equal roughly 10-20 brisk minutes/day at cadence thresholds, but many step-floor minutes will be easy. Source keys: source_artifact:pmid-28459099; source_artifact:pmid-30654810; source_artifact:pmid-33168018.'
-- biomarkerKey: biomarker:walking-cadence
-  expected: mixed_or_contextual
-  protocolProminence: context
-  description: 'Cadence reflects how the gap was filled: brisk walks raise it, errands and breaks leave it flatter.'
-  estimatedChange:
-    kind: mixed_or_contextual
-    window: 4 weeks
-    confidence: low
-    basis: 'Cadence thresholds help interpret intensity, but this protocol deliberately does not prescribe cadence. Source keys: source_artifact:pmid-28459099; source_artifact:pmid-30654810; source_artifact:pmid-33168018.'
-- biomarkerKey: biomarker:walking-bout-minutes
-  expected: mixed_or_contextual
-  protocolProminence: context
-  description: 'Higher floors create more intentional or detected walking bouts, showing how the step dose was accumulated.'
-  estimatedChange:
-    kind: absolute
-    low: 5
-    high: 20
-    unit: min/day
-    window: 4 weeks
-    confidence: low
-    basis: 'Common baseline-plus floors add about 1,000-2,000 steps/day; converted to easy walking, that is usually a small bout-minute increase. Source keys: source_artifact:pmid-33036635; source_artifact:pmid-18029834; source_artifact:pmid-28459099.'
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
