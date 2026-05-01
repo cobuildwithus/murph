@@ -7,7 +7,11 @@ type BiomarkerFitLabel =
   | "Context"
   | "Exploratory"
   | "Good"
-  | "Strong";
+  | "High"
+  | "Low"
+  | "Medium"
+  | "Strong"
+  | "Unknown";
 
 export function biomarkerFitToneClassName(
   fitLabel: BiomarkerFitLabel,

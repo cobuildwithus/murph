@@ -1403,7 +1403,6 @@ async function createMissingBrowserVaultReplicaRefForTest(
     keyId: "browser-vault-replica:d",
     objectKey: await hostedBrowserVaultReplicaObjectKey({
       dataVersion,
-      rootKey: crypto.rootKey,
       userId,
     }),
     replicaSchema: "murph.browser-vault-replica.v1",
@@ -1417,8 +1416,8 @@ async function hostedArtifactObjectKeyForTest(
   userId: string,
   sha256: string,
 ): Promise<string> {
-  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
-  return hostedArtifactObjectKey(crypto.rootKey, userId, sha256);
+  await resolveHostedUserCryptoContextForTest(env, userId);
+  return hostedArtifactObjectKey({ sha256, userId });
 }
 
 async function resolveHostedUserCryptoContextForTest(
