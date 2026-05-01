@@ -1058,10 +1058,16 @@ function ProtocolShapeRail({
 
 const CAUSAL_CHAINS: Record<string, ReadonlyArray<{ label: string; content: string }>> = {
   "norwegian-4x4": [
-    { label: "Session", content: "4 × (4′ hard · 3′ easy)" },
-    { label: "Acute physiology", content: "HR 85–95% HRmax · sustained aerobic stress" },
-    { label: "Adaptation", content: "stroke volume · capillaries · mitochondria" },
-    { label: "Outcome", content: "VO₂max ↑ · resting HR ↓" },
+    { label: "Session", content: "4 hard aerobic reps, each sustaining high oxygen demand" },
+    { label: "During each rep", content: "Heart pumps near capacity; working muscle pulls hard on oxygen" },
+    {
+      label: "Repeated signal",
+      content: "High blood flow, shear stress, lactate turnover, oxygen extraction repeat",
+    },
+    {
+      label: "Adaptation",
+      content: "Can support stroke volume, capillary delivery, and mitochondrial oxygen use",
+    },
   ],
   "finnish-sauna": [
     { label: "Session", content: "80–100 °C dry sauna · ~15–20 min · 3×/week" },

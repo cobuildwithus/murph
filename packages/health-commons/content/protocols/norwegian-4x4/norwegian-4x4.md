@@ -477,9 +477,9 @@ experimentOnboarding:
     missedLogFollowupCopy: "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate."
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, the chosen testPlanId, the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-  - "## Why Four Minutes\n\nA four-minute interval is long enough for oxygen demand, heart rate, ventilation, stroke volume, and cardiac output to climb toward a high steady load — rather than peaking for only a few sprint seconds. You spend repeated minutes near the top of your aerobic system."
-  - "## Why Three-Minute Recoveries\n\nThe active recoveries are part of the mechanism. They lower effort enough to repeat the next interval but keep the aerobic system warm. The session accumulates more total time near high oxygen uptake than one unsustainably hard continuous effort would allow."
-  - "## Expected Adaptations\n\nAcross weeks, the changes are both central and peripheral: the heart may pump more blood per beat (stroke volume), muscles may improve capillary delivery and mitochondrial oxygen use, and lactate handling may become less limiting. These are the physiology behind lab-measured VO2max improvements in the 4x4 evidence base."
+  - "## The 4-minute rep is the dose\n\nShort sprints end before the aerobic system is fully loaded. Four minutes is long enough for heart rate, ventilation, cardiac output, and muscle oxygen extraction to climb and stay high. The work is not a burst; it is sustained pressure on the oxygen-delivery system."
+  - "## Recovery keeps the next rep useful\n\nThe three-minute easy block is not filler. It drops effort enough to repeat the next four-minute rep, while heart rate, temperature, and oxygen demand stay elevated. The session creates more total high-oxygen work than one continuous effort most people would have to abandon."
+  - "## Repeated sessions improve delivery and extraction\n\nThe heart may adapt by pumping more blood per beat. Blood vessels can adapt to repeated high flow. Working muscle can build better capillary delivery, mitochondrial oxygen use, and lactate handling. VO2max can rise when more oxygen can be moved from air to blood to muscle and actually used there."
 claims:
 
   -
