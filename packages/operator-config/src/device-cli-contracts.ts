@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   configuredDeviceSyncProviderKeys,
   type ConfiguredDeviceSyncProviderKey,
+  normalizeDeviceSyncConnectTargetKey as normalizeConfiguredDeviceSyncConnectTargetKey,
 } from '@murphai/device-syncd/config'
 import { httpBaseUrlSchema, httpUrlSchema } from './command-helpers.js'
 import { isoTimestampSchema, pathSchema } from './vault-cli-contracts.js'
@@ -26,11 +27,29 @@ export function normalizeDeviceSyncProviderKey(
     : null
 }
 
+export function normalizeDeviceSyncConnectTargetKey(
+  value: string,
+): string | null {
+  return normalizeConfiguredDeviceSyncConnectTargetKey(value)
+}
+
 export const deviceSyncProviderKeySchema = z
   .string()
   .min(1)
   .refine((value) => normalizeDeviceSyncProviderKey(value) !== null, {
     message: `Unsupported device-sync provider. Supported providers: ${formatDeviceSyncProviderKeyList()}.`,
+  })
+
+export const deviceSyncConnectTargetSchema = z
+  .string()
+  .min(1)
+  .refine((value) => {
+    const normalized = normalizeDeviceSyncConnectTargetKey(value)
+
+    return normalized !== null && normalized !== 'junction'
+  }, {
+    message:
+      'Expected a device connect target such as garmin, whoop, oura, or fitbit.',
   })
 
 export const deviceSyncAccountStatusSchema = z.enum([

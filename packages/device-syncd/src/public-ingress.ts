@@ -492,6 +492,7 @@ export class DeviceSyncPublicIngress {
       scopes: descriptor.defaultScopes,
       now,
       ownerId: input.ownerId ?? null,
+      sourceProviderSlug: input.sourceProviderSlug ?? null,
     });
 
     let seededAccount: PublicDeviceSyncAccount | null = null;

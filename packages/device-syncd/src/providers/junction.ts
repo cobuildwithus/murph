@@ -148,12 +148,16 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
+    const linkProviderFilter = resolveJunctionLinkProviderFilter(
+      providerFilter,
+      context.sourceProviderSlug,
+    );
     const clientUserId = buildJunctionClientUserId(config.clientUserIdSecret, ownerId);
     const user = await client.createOrResolveUser(clientUserId);
     const linkToken = await client.createLinkToken({
       userId: user.userId,
       callbackUrl: buildJunctionRedirectUrl(context.callbackUrl, context.state),
-      providerFilter,
+      providerFilter: linkProviderFilter,
     });
 
     return {
@@ -514,6 +518,28 @@ export function buildJunctionClientUserId(secret: string, ownerId: string): stri
 
 export function normalizeJunctionProviderFilter(value: string[] | undefined): string[] {
   return normalizeProviderFilter(value);
+}
+
+function resolveJunctionLinkProviderFilter(
+  providerFilter: string[],
+  sourceProviderSlug: string | null | undefined,
+): string[] {
+  const requested = normalizeString(sourceProviderSlug);
+  if (!requested) {
+    return providerFilter;
+  }
+
+  const [normalizedSource] = normalizeProviderFilter([requested]);
+  if (!normalizedSource || !providerFilter.includes(normalizedSource)) {
+    throw deviceSyncError({
+      code: "JUNCTION_SOURCE_PROVIDER_NOT_CONFIGURED",
+      message: "Junction source provider is not enabled for this connection target.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return [normalizedSource];
 }
 
 function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClientConfig {

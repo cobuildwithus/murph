@@ -13,11 +13,8 @@ import {
   markAssistantAutoReplyLinqCleanupQueued,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
-  listConfiguredDeviceSyncProviderNames,
+  listConfiguredDeviceSyncConnectTargets,
 } from "@murphai/device-syncd/config";
-import {
-  formatDeviceSyncProviderLabel,
-} from "@murphai/device-syncd/provider-label";
 
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -750,9 +747,9 @@ function resolveHostedWorkspaceDeviceConnectProviders(
     return [];
   }
 
-  return listConfiguredDeviceSyncProviderNames(providerConfigs).map((provider) => ({
-    label: formatDeviceSyncProviderLabel(provider),
-    provider,
+  return listConfiguredDeviceSyncConnectTargets(providerConfigs).map((target) => ({
+    label: target.label,
+    provider: target.connectTarget,
   }));
 }
 
@@ -778,8 +775,8 @@ function resolveHostedWorkspaceIssueDeviceConnectLink(input: {
 
     try {
       const result = await deviceSyncPort.createConnectLink({
+        connectTarget: provider,
         ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
-        provider,
       });
       await writeHostedDeviceConnectRuntimeLog({
         deviceConnectProviders: input.deviceConnectProviders,

@@ -554,8 +554,8 @@ function createHostedWebDeviceSyncPort(input: {
       return parseHostedExecutionDeviceSyncRuntimeApplyResponse(payload);
     },
     async createConnectLink(runtimeInput: {
+      connectTarget: string;
       messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
-      provider: string;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         ...(runtimeInput.messagingReturnTarget
@@ -566,10 +566,10 @@ function createHostedWebDeviceSyncPort(input: {
             }
           : {}),
         boundUserId: input.boundUserId,
-        description: `Hosted device-sync connect link ${runtimeInput.provider}`,
+        description: `Hosted device-sync connect link ${runtimeInput.connectTarget}`,
         fetchImpl: input.fetchImpl,
         method: "POST",
-        path: buildHostedExecutionDeviceSyncConnectLinkPath(runtimeInput.provider),
+        path: buildHostedExecutionDeviceSyncConnectLinkPath(runtimeInput.connectTarget),
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

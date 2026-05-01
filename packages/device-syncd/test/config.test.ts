@@ -13,8 +13,10 @@ import {
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
   hasConfiguredDeviceSyncProviderConfigs,
+  listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
+  resolveConfiguredDeviceSyncConnectTarget,
   parseConfiguredDeviceSyncRuntimeConfig,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncRuntimeConfig,
@@ -135,6 +137,36 @@ test("shared provider-config helpers preserve descriptor order and report presen
   assert.equal(hasConfiguredDeviceSyncProviderConfigs({}), false);
   assert.equal(hasConfiguredDeviceSyncProviderConfigs(configs), true);
   assert.deepEqual(listConfiguredDeviceSyncProviderNames(configs), ["oura", "whoop"]);
+});
+
+test("connect targets expose direct providers plus Junction-backed sources", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    GARMIN_CLIENT_ID: "garmin-client-id",
+    GARMIN_CLIENT_SECRET: "garmin-client-secret",
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "fitbit,garmin,junction,dexcom_v3",
+    JUNCTION_REGION: "us",
+  });
+
+  assert.deepEqual(
+    listConfiguredDeviceSyncConnectTargets(configs).map((target) => ({
+      connectTarget: target.connectTarget,
+      provider: target.provider,
+      sourceProviderSlug: target.sourceProviderSlug ?? null,
+    })),
+    [
+      { connectTarget: "garmin", provider: "garmin", sourceProviderSlug: null },
+      { connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
+      { connectTarget: "dexcom_v3", provider: "junction", sourceProviderSlug: "dexcom_v3" },
+    ],
+  );
+  assert.equal(
+    resolveConfiguredDeviceSyncConnectTarget(configs, "Fitbit")?.provider,
+    "junction",
+  );
+  assert.equal(resolveConfiguredDeviceSyncConnectTarget(configs, "junction"), null);
 });
 
 test("shared provider runtime env key lists stay aligned with the configured providers", () => {

@@ -349,7 +349,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const connectLink = await platform.deviceSyncPort!.createConnectLink({
-      provider: "oura",
+      connectTarget: "oura",
     });
 
     expect(connectLink.provider).toBe("oura");
@@ -358,7 +358,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchMock.mock.calls[0],
       "device-sync connect-link fetch",
     );
-    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/providers/oura/connect-link");
+    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/connect-targets/oura/connect-link");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
     const headers = new Headers(init?.headers);
@@ -392,7 +392,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await platform.deviceSyncPort!.createConnectLink({
       messagingReturnTarget: "telegram",
-      provider: "whoop",
+      connectTarget: "whoop",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -400,7 +400,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchMock.mock.calls[0],
       "device-sync connect-link fetch",
     );
-    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/providers/whoop/connect-link");
+    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/connect-targets/whoop/connect-link");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({
       messagingReturnTarget: "telegram",

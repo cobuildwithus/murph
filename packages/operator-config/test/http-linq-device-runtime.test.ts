@@ -904,6 +904,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
       open: true,
       provider: 'oura',
       returnTo: 'https://murph.example.test/return',
+      sourceProviderSlug: 'fitbit',
     }),
     {
       authorizationUrl: 'https://example.test/oauth',
@@ -939,6 +940,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
   ])
   assert.deepEqual(JSON.parse(seenRequests[1]?.body ?? '{}'), {
     returnTo: 'https://murph.example.test/return',
+    sourceProviderSlug: 'fitbit',
   })
 
   const successfulSpawn = vi.fn((_command: string, _args: string[]) => {

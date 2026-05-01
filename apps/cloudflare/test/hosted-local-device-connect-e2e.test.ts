@@ -90,7 +90,7 @@ describe("hosted local device connect e2e", () => {
     });
     const connectLink = await platform.deviceSyncPort?.createConnectLink({
       messagingReturnTarget: "telegram",
-      provider: "whoop",
+      connectTarget: "whoop",
     });
 
     expect(connectLink).toMatchObject({

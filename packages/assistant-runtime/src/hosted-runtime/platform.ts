@@ -62,8 +62,8 @@ export interface HostedRuntimeDeviceSyncPort {
     updates: HostedExecutionDeviceSyncRuntimeApplyRequest["updates"];
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   createConnectLink(input: {
+    connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
-    provider: string;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;

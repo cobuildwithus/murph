@@ -9,6 +9,9 @@ import {
   createDeviceSyncClient,
   DEVICE_SYNC_BASE_URL_ENV,
 } from '@murphai/operator-config/device-sync-client'
+import {
+  VaultCliError,
+} from '@murphai/operator-config/vault-cli-errors'
 import type {
   DeviceAccountDisconnectResult,
   DeviceAccountListResult,
@@ -24,6 +27,7 @@ import {
   listConfiguredDeviceSyncProviderNames,
   listDeviceSyncProviderCatalog,
   readConfiguredDeviceSyncProviderConfigs,
+  resolveConfiguredDeviceSyncConnectTarget,
 } from '@murphai/device-syncd/config'
 import {
   createUnwiredMethod,
@@ -117,12 +121,14 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       return {
         configuredProviderSet: new Set<string>(configuredProviders),
         configuredProviders,
+        configs,
         errorMessage: null,
       }
     } catch (error) {
       return {
         configuredProviderSet: new Set<string>(),
         configuredProviders: [],
+        configs: null,
         errorMessage: error instanceof Error
           ? error.message
           : 'Local provider configuration could not be inspected.',
@@ -210,11 +216,20 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async connect(input) {
+      if (input.provider === 'junction') {
+        throw new VaultCliError(
+          'device_connect_target_unsupported',
+          'Expected a device connect target such as garmin, whoop, oura, or fitbit.',
+        )
+      }
+
+      const localTarget = resolveLocalConnectTarget(input.provider)
       const client = await createControlPlaneClient(input)
       const result = await client.beginConnection({
-        provider: input.provider,
+        provider: localTarget.provider,
         returnTo: input.returnTo,
         open: input.open,
+        sourceProviderSlug: localTarget.sourceProviderSlug,
       })
 
       return {
@@ -322,6 +337,24 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       })
     },
   } satisfies DeviceSyncServices
+
+  function resolveLocalConnectTarget(connectTarget: string): {
+    provider: string
+    sourceProviderSlug?: string | null
+  } {
+    const { configs } = readLocalProviderConfig()
+    if (!configs) {
+      return { provider: connectTarget }
+    }
+
+    const target = resolveConfiguredDeviceSyncConnectTarget(configs, connectTarget)
+    return target
+      ? {
+          provider: target.provider,
+          sourceProviderSlug: target.sourceProviderSlug ?? null,
+        }
+      : { provider: connectTarget }
+  }
 }
 
 function requireDeviceVault(vault: string | null | undefined): string {
