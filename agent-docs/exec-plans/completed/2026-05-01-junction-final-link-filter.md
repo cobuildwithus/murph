@@ -1,4 +1,4 @@
-# Junction Connect Defaults
+# Junction Final Link Filter
 
 ## Goal
 
@@ -18,9 +18,14 @@ Land the final Junction Link provider-filter guardrail so explicit `JUNCTION_PRO
 - `packages/device-syncd/src/providers/junction.ts`
 - Focused device-syncd and hosted web connect tests.
 
-## Verification Plan
+## Verification
 
-- Run the focused Junction config/provider tests.
-- Run the focused hosted `/connect` page test.
-- Run typecheck unless blocked by unrelated dirty-tree state.
-- Run required completion audits for health/provider connection behavior and coverage.
+- Focused Junction config/provider tests passed.
+- Focused hosted `/connect` page test passed.
+- Focused hosted runtime assistant phase test passed.
+- Device-syncd typecheck passed.
+- Repo-wide typecheck and diff-aware verification were blocked by unrelated active hosted-local/operator-config work.
+
+Status: completed
+Updated: 2026-05-01
+Completed: 2026-05-01

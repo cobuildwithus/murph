@@ -1,5 +1,6 @@
 import {
   DEVICE_CONNECT_SOURCES,
+  listDefaultJunctionLinkProviderSlugs,
   normalizeJunctionLinkProviderFilter,
   normalizeJunctionProviderSlug,
   resolveDeviceConnectSourceById,
@@ -41,7 +42,9 @@ export const JUNCTION_LINK_PROVIDER_SLUGS: readonly string[] = Object.freeze(
     .map(({ providerSlug }) => providerSlug),
 );
 
-export const JUNCTION_DEFAULT_PROVIDER_FILTER: readonly string[] = JUNCTION_LINK_PROVIDER_SLUGS;
+export const JUNCTION_DEFAULT_PROVIDER_FILTER: readonly string[] = Object.freeze(
+  listDefaultJunctionLinkProviderSlugs(),
+);
 
 export function resolveJunctionConnectTargetForSourceId(sourceId: string): string | null {
   const source = resolveDeviceConnectSourceById(sourceId);

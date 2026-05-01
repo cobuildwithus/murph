@@ -181,7 +181,7 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
       .filter((target) => target.connectMode === "junction_link")
       .map((target) => target.providerSlug),
   );
-  assert.deepEqual(JUNCTION_DEFAULT_PROVIDER_FILTER, JUNCTION_LINK_PROVIDER_SLUGS);
+  assert.deepEqual(JUNCTION_DEFAULT_PROVIDER_FILTER, normalizeJunctionProviderFilter(undefined));
   assert.deepEqual(normalizeJunctionProviderFilter(undefined), JUNCTION_DEFAULT_PROVIDER_FILTER);
   assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("map_my_fitness"), true);
   assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("dexcom_v3"), true);
