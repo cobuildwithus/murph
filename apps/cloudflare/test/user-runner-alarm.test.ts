@@ -487,7 +487,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
       "2026-04-27T00:00:45.100Z",
-      "2026-04-27T00:00:30.100Z",
+      "2026-04-27T00:00:01.100Z",
       "deleted",
     ]);
   });
@@ -578,7 +578,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
       "2026-04-27T00:00:45.100Z",
-      "2026-04-27T00:00:30.100Z",
+      "2026-04-27T00:00:01.100Z",
       "deleted",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -587,7 +587,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
         details: expect.objectContaining({
           pendingNudge: true,
         }),
-        message: "Hosted runner queued follow-up drive for pending nudge and synced watchdog alarm.",
+        message: "Hosted runner queued follow-up drive for pending nudge and scheduled delayed continuation alarm.",
         phase: "scheduled",
         userId: "member_123",
       }),
@@ -635,7 +635,7 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
       "2026-04-27T00:00:45.100Z",
-      "2026-04-27T00:00:30.100Z",
+      "2026-04-27T00:00:01.100Z",
       "deleted",
     ]);
   });
