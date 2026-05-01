@@ -213,6 +213,51 @@ describe('assistant input event store', () => {
     })
   })
 
+  it('rejects changed source metadata for the same source reference', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-source-metadata-conflict-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_source_metadata_conflict',
+      laneSeq: '42',
+    })
+    await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'metadata-sensitive text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceMetadata: {
+          kind: 'telegram',
+          mediaGroupId: null,
+          replyContext: 'replying to earlier photo',
+        },
+        sourceRef,
+      },
+    })
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            text: 'metadata-sensitive text',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceMetadata: {
+            kind: 'telegram',
+            mediaGroupId: 'album_1',
+            replyContext: 'replying to earlier photo',
+          },
+          sourceRef,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_INPUT_EVENT_CONFLICT',
+    })
+  })
+
   it('keys hosted mailbox events by dedupe identity, not mailbox row or projection metadata', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-hosted-identity-',
