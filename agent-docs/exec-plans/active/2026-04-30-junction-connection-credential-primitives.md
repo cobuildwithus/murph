@@ -42,7 +42,7 @@ Out of scope for this slice:
 - Keep existing OAuth callback routes as aliases while adding generic connection callback names.
 - Do not store raw Junction client user ids or API keys in account metadata.
 - Do not let provider state metadata override the ingress-owned owner/user id.
-- Junction config will use `JUNCTION_ENV` and `JUNCTION_REGION` plus API-key/base-URL validation; `JUNCTION_BASE_URL` is only an override.
+- Junction config uses `JUNCTION_ENV` and `JUNCTION_REGION` plus API-key/canonical-base-URL validation; tests and mocks should inject `fetchImpl` rather than configuring an alternate runtime host.
 - Timeseries backfills will use narrower defaults than summary backfills.
 - Unknown-account Junction webhooks should become signed orphan traces plus delayed bind/reconcile, not forced provider retry loops.
 
