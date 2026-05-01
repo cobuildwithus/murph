@@ -51,8 +51,6 @@ export interface JunctionDeviceSyncProviderConfig {
   reconcileDays?: number;
   reconcileIntervalMs?: number;
   requestTimeoutMs?: number;
-  perAccountConcurrency?: number;
-  globalConcurrency?: number;
   webhookSecret?: string;
   webhookTimestampToleranceMs?: number;
   fetchImpl?: typeof fetch;

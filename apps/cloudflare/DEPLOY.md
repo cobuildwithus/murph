@@ -157,8 +157,6 @@ Opt-in runtime integrations and tool overrides:
 - `JUNCTION_RECONCILE_DAYS`
 - `JUNCTION_RECONCILE_INTERVAL_MS`
 - `JUNCTION_REQUEST_TIMEOUT_MS`
-- `JUNCTION_PER_ACCOUNT_CONCURRENCY`
-- `JUNCTION_GLOBAL_CONCURRENCY`
 
 Device-sync provider runtime overrides:
 

@@ -207,8 +207,6 @@ describe("deviceSyncProviderManifests", () => {
         reconcileDays: 7,
         reconcileIntervalMs: 3_600_000,
         requestTimeoutMs: 10_000,
-        perAccountConcurrency: 1,
-        globalConcurrency: 4,
       },
       oura: {
         apiBaseUrl: "https://api.oura.com",
