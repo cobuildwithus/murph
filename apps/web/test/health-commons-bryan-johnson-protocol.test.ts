@@ -412,13 +412,18 @@ describe("Health Commons experiment protocol metadata", () => {
     }
 
     const expectedSignalRouteIds = [
+      "daily-step-count",
+      "step-floor-days",
       "resting-heart-rate",
       "estimated-vo2max",
-      "sleep-efficiency",
       "morning-blood-pressure",
-      "sedentary-time",
+      "sleep-efficiency",
       "musculoskeletal-pain",
       "walking-safety-events",
+      "sedentary-time",
+      "moderate-to-vigorous-activity-minutes",
+      "walking-bout-minutes",
+      "walking-cadence",
     ];
     expect(fullProtocol.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
       expectedSignalRouteIds,
