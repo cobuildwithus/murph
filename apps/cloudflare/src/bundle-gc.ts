@@ -20,9 +20,9 @@ import {
 export class HostedBundleGarbageCollector {
   constructor(
     private readonly bucket: R2BucketLike,
-    private readonly platformEnvelopeKey: Uint8Array,
-    private readonly platformEnvelopeKeyId: string,
-    private readonly platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>,
+    private readonly runtimeRootKey: Uint8Array,
+    private readonly runtimeRootKeyId: string,
+    private readonly runtimeRootKeysById?: Readonly<Record<string, Uint8Array>>,
   ) {}
 
   async cleanupBundleTransition(input: {
@@ -40,9 +40,9 @@ export class HostedBundleGarbageCollector {
 
     const bundleStore = createHostedBundleStore({
       bucket: this.bucket,
-      key: this.platformEnvelopeKey,
-      keyId: this.platformEnvelopeKeyId,
-      keysById: this.platformEnvelopeKeysById,
+      key: this.runtimeRootKey,
+      keyId: this.runtimeRootKeyId,
+      keysById: this.runtimeRootKeysById,
       userId: input.userId,
     });
 
@@ -86,9 +86,9 @@ export class HostedBundleGarbageCollector {
     }
     const artifactStore = createHostedArtifactStore({
       bucket: this.bucket,
-      key: this.platformEnvelopeKey,
-      keyId: this.platformEnvelopeKeyId,
-      keysById: this.platformEnvelopeKeysById,
+      key: this.runtimeRootKey,
+      keyId: this.runtimeRootKeyId,
+      keysById: this.runtimeRootKeysById,
       userId: input.userId,
     });
 

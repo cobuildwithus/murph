@@ -136,6 +136,19 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-red-light-glasses-before-bed.jpeg");
   });
 
+  it("projects protocol session shapes from Health Commons content", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocolTab = resolveHealthCommonsExperimentProtocolTab("norwegian-4x4");
+
+    expect(protocol?.sessionShape?.summarySegments?.map((segment) => segment.label)).toEqual([
+      "warm-up",
+      "4 × hard / easy",
+      "cool-down",
+    ]);
+    expect(protocol?.sessionShape?.ticks).toEqual(["0", "10 min", "35 min", "40 min"]);
+    expect(protocolTab?.sessionShape).toEqual(protocol?.sessionShape);
+  });
+
   it("uses the dedicated caffeine curfew artwork", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("caffeine-curfew-dose-reset");
 

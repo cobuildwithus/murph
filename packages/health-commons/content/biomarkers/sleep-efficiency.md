@@ -23,6 +23,12 @@ unit: percent
 interpretationFrame:
   principle: Look for stable trend changes, not one-night perfection.
   caveat: Device estimates can be affected by time in bed, awakenings, sensor placement, illness, alcohol, and travel.
+biomarker:
+  unit: percent
+  direction:
+    desired: higher_or_stable
+    label: Higher or stable can be better when time in bed and schedule are consistent.
+    nuance: Wearables can misclassify quiet wakefulness, and sleep efficiency can rise for the wrong reason if time in bed is cut too aggressively.
 ---
 
 Sleep efficiency can be a useful secondary signal for experiments that may change relaxation, thermoregulation, or recovery.

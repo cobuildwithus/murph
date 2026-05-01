@@ -342,6 +342,9 @@ function toExperimentDetail(
       ? { experimentOnboarding: protocol.experimentOnboarding }
       : {}),
     mechanismChain: (protocol.mechanismChain ?? []).map(cleanMechanismChainStepCopy),
+    ...(protocol.protocol?.sessionShape
+      ? { sessionShape: cleanSessionShapeCopy(protocol.protocol.sessionShape) }
+      : {}),
     whyItWorks: cleanHealthCommonsUserFacingCopy(toWhyItWorks(protocol, claims)),
     experts: sourcePeople.map(toExpert),
     researchStats: toResearchStats({
@@ -405,6 +408,29 @@ function cleanMechanismChainStepCopy(
   return {
     content: cleanHealthCommonsUserFacingCopy(step.content),
     label: cleanHealthCommonsUserFacingCopy(step.label),
+  };
+}
+
+function cleanSessionShapeCopy(
+  shape: NonNullable<ExperimentProtocol["sessionShape"]>,
+): NonNullable<ExperimentProtocol["sessionShape"]> {
+  return {
+    ...(shape.label ? { label: cleanHealthCommonsUserFacingCopy(shape.label) } : {}),
+    segments: shape.segments.map(cleanSessionShapeSegmentCopy),
+    ...(shape.summarySegments
+      ? { summarySegments: shape.summarySegments.map(cleanSessionShapeSegmentCopy) }
+      : {}),
+    ...(shape.ticks ? { ticks: cleanHealthCommonsUserFacingCopyList(shape.ticks) } : {}),
+  };
+}
+
+function cleanSessionShapeSegmentCopy(
+  segment: NonNullable<ExperimentProtocol["sessionShape"]>["segments"][number],
+): NonNullable<ExperimentProtocol["sessionShape"]>["segments"][number] {
+  return {
+    durationMinutes: segment.durationMinutes,
+    kind: segment.kind,
+    label: cleanHealthCommonsUserFacingCopy(segment.label),
   };
 }
 

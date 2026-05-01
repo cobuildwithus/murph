@@ -509,6 +509,23 @@ protocol:
   durationMinutes:
     min: 4
     max: 12
+  sessionShape:
+    label: One target area
+    segments:
+    - label: hold 1
+      kind: stimulus
+      durationMinutes: 0.5
+    - label: hold 2
+      kind: stimulus
+      durationMinutes: 0.5
+    - label: optional hold 3
+      kind: stimulus
+      durationMinutes: 0.5
+    ticks:
+    - "0"
+    - "30 sec"
+    - "60 sec"
+    - "90 sec"
   interventionSessionsMinimum: 20
   interventionSessionsTarget: 30
   steps:

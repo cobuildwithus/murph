@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -20,6 +20,9 @@ import type {
   ExperimentProtocolFact,
   ExperimentProtocolStep,
   ExperimentSafety,
+  ExperimentSessionShape,
+  ExperimentSessionShapeSegment,
+  ExperimentSessionShapeSegmentKind,
   ExperimentSignal,
   ExperimentSignalEstimatedChange,
 } from "@/src/types/experiments";
@@ -45,6 +48,7 @@ export interface ProtocolTabExperiment {
   protocolFacts: ExperimentProtocolFact[];
   protocolTips: string[];
   safety: ExperimentSafety;
+  sessionShape?: ExperimentSessionShape;
   whyItWorks: string;
 }
 
@@ -443,7 +447,7 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
         <section className="flex flex-col gap-6 rounded-xl border border-secondary/25 bg-card/90 p-7">
           <SectionLabel>Run the protocol</SectionLabel>
-          <ProtocolShapeDiagram experimentId={experiment.id} />
+          <ProtocolShapeDiagram sessionShape={experiment.sessionShape} />
           {protocol.length > 0 && (
             <ol role="list" className="flex flex-col divide-y divide-border/50">
               {protocol.map((step) => {
@@ -838,166 +842,52 @@ function parseSessionCounts(detail: string): Array<{ label: string; value: strin
   return entries;
 }
 
-type SegmentKind = "primary" | "secondary" | "muted";
-
-interface ProtocolShape {
-  kicker: string;
-  formula: ReactNode;
-  segments: ReadonlyArray<{ width: number; kind: SegmentKind; label?: string }>;
-  labelRow?: ReadonlyArray<{ width: number; text: string; kind: SegmentKind }>;
-  ticks: ReadonlyArray<string>;
-}
-
-const PROTOCOL_SHAPES: Record<string, ProtocolShape> = {
-  "norwegian-4x4": {
-    kicker: "One session",
-    formula: (
-      <>
-        10′<span className="text-muted-foreground"> warm-up </span>
-        <span className="text-chart-5">+</span>{" "}
-        <span className="text-primary">4 × (4′ hard / 3′ easy)</span>{" "}
-        <span className="text-chart-5">+</span> 5′
-        <span className="text-muted-foreground"> cool-down </span>
-        <span className="text-chart-5">=</span>{" "}
-        <span className="tabular-nums">48 min</span>
-      </>
-    ),
-    segments: [
-      { width: 10, kind: "muted" },
-      { width: 4, kind: "primary" },
-      { width: 3, kind: "secondary" },
-      { width: 4, kind: "primary" },
-      { width: 3, kind: "secondary" },
-      { width: 4, kind: "primary" },
-      { width: 3, kind: "secondary" },
-      { width: 4, kind: "primary" },
-      { width: 5, kind: "muted" },
-    ],
-    labelRow: [
-      { width: 10, text: "warm-up", kind: "muted" },
-      { width: 25, text: "4 × hard / easy", kind: "primary" },
-      { width: 5, text: "cool-down", kind: "muted" },
-    ],
-    ticks: ["0", "10 min", "35 min", "40 min"],
-  },
-  "finnish-sauna": {
-    kicker: "One session",
-    formula: (
-      <>
-        2′<span className="text-muted-foreground"> settle </span>
-        <span className="text-chart-5">+</span>{" "}
-        <span className="text-primary">15–20′ at 80–100 °C</span>{" "}
-        <span className="text-chart-5">+</span> 3′
-        <span className="text-muted-foreground"> cool-down</span>
-      </>
-    ),
-    segments: [
-      { width: 2, kind: "muted" },
-      { width: 18, kind: "primary" },
-      { width: 3, kind: "muted" },
-    ],
-    labelRow: [
-      { width: 2, text: "settle", kind: "muted" },
-      { width: 18, text: "sauna 80–100 °C", kind: "primary" },
-      { width: 3, text: "cool-down", kind: "muted" },
-    ],
-    ticks: ["0", "2 min", "20 min", "23 min"],
-  },
-  "bryan-johnson-blueprint": {
-    kicker: "Per day",
-    formula: (
-      <>
-        <span className="text-muted-foreground">morning workout </span>
-        <span className="text-chart-5">→</span>{" "}
-        <span className="text-primary">20′ at 93 °C</span>{" "}
-        <span className="text-chart-5">→</span>{" "}
-        <span className="text-muted-foreground">rehydrate</span>
-      </>
-    ),
-    segments: [
-      { width: 30, kind: "secondary" },
-      { width: 20, kind: "primary" },
-      { width: 10, kind: "muted" },
-    ],
-    labelRow: [
-      { width: 30, text: "workout", kind: "secondary" },
-      { width: 20, text: "sauna 93 °C", kind: "primary" },
-      { width: 10, text: "rehydrate", kind: "muted" },
-    ],
-    ticks: ["start", "after workout", "end"],
-  },
-  "red-light-glasses-before-bed": {
-    kicker: "Evening window",
-    formula: (
-      <>
-        <span className="text-primary">90–120′ with glasses</span>{" "}
-        <span className="text-chart-5">→</span>{" "}
-        <span className="text-muted-foreground">remove </span>
-        <span className="text-chart-5">→</span>{" "}
-        <span className="tabular-nums">bedtime</span>
-      </>
-    ),
-    segments: [
-      { width: 120, kind: "primary" },
-      { width: 5, kind: "muted" },
-    ],
-    labelRow: [
-      { width: 120, text: "glasses on", kind: "primary" },
-      { width: 5, text: "bedtime", kind: "muted" },
-    ],
-    ticks: ["−120 min", "bedtime"],
-  },
-};
-
-function ProtocolShapeDiagram({ experimentId }: { experimentId: string }) {
-  const shape = PROTOCOL_SHAPES[experimentId];
-  if (!shape) return null;
+function ProtocolShapeDiagram({
+  sessionShape,
+}: {
+  sessionShape?: ExperimentSessionShape;
+}) {
+  if (!sessionShape) return null;
   return (
     <ProtocolShapeRail
-      segments={shape.segments}
-      labelRow={shape.labelRow}
-      ticks={shape.ticks}
+      segments={sessionShape.segments}
+      summarySegments={sessionShape.summarySegments}
+      ticks={sessionShape.ticks ?? deriveSessionShapeTicks(sessionShape.segments)}
     />
   );
 }
 
 function ProtocolShapeRail({
   segments,
-  labelRow,
+  summarySegments,
   ticks,
 }: {
-  segments: ReadonlyArray<{ width: number; kind: SegmentKind; label?: string }>;
-  labelRow?: ReadonlyArray<{ width: number; text: string; kind: SegmentKind }>;
+  segments: readonly ExperimentSessionShapeSegment[];
+  summarySegments?: readonly ExperimentSessionShapeSegment[];
   ticks: ReadonlyArray<string>;
 }) {
-  const total = segments.reduce((sum, s) => sum + s.width, 0);
-  const effectiveLabels =
-    labelRow ??
-    (segments.some((s) => s.label)
-      ? segments.map((s) => ({
-          width: s.width,
-          text: s.label ?? "",
-          kind: s.kind,
-        }))
-      : undefined);
-  const labelTotal = effectiveLabels?.reduce((sum, l) => sum + l.width, 0) ?? 0;
+  const total = segments.reduce((sum, s) => sum + s.durationMinutes, 0);
+  if (total <= 0) return null;
+  const effectiveLabels = summarySegments ?? segments;
+  const labelTotal =
+    effectiveLabels.reduce((sum, l) => sum + l.durationMinutes, 0);
 
   return (
     <div className="flex flex-col gap-1.5">
-      {effectiveLabels && labelTotal > 0 && (
+      {labelTotal > 0 && (
         <div className="hidden gap-px sm:flex">
           {effectiveLabels.map((entry, i) => {
             const color =
-              entry.kind === "primary"
+              entry.kind === "stimulus"
                 ? "text-primary"
                 : "text-muted-foreground";
             return (
               <p
                 key={i}
                 className={`truncate text-center font-mono text-[10px] uppercase tracking-[0.08em] ${color}`}
-                style={{ width: `${(entry.width / labelTotal) * 100}%` }}
+                style={{ width: `${(entry.durationMinutes / labelTotal) * 100}%` }}
               >
-                {entry.text}
+                {entry.label}
               </p>
             );
           })}
@@ -1005,17 +895,11 @@ function ProtocolShapeRail({
       )}
       <div className="flex h-3.5">
         {segments.map((segment, i) => {
-          const cls =
-            segment.kind === "primary"
-              ? "bg-primary"
-              : segment.kind === "secondary"
-                ? "bg-primary/30"
-                : "bg-secondary";
           return (
             <div
               key={i}
-              className={`${cls} mr-px last:mr-0`}
-              style={{ width: `${(segment.width / total) * 100}%` }}
+              className={`${sessionShapeSegmentClass(segment.kind)} mr-px last:mr-0`}
+              style={{ width: `${(segment.durationMinutes / total) * 100}%` }}
             />
           );
         })}
@@ -1025,24 +909,21 @@ function ProtocolShapeRail({
           <span key={i}>{tick}</span>
         ))}
       </div>
-      {effectiveLabels && labelTotal > 0 && (
+      {labelTotal > 0 && (
         <ul role="list" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 sm:hidden">
           {effectiveLabels
-            .filter((entry) => entry.text)
+            .filter((entry) => entry.label)
             .map((entry, i) => {
-              const dotCls =
-                entry.kind === "primary"
-                  ? "bg-primary"
-                  : entry.kind === "secondary"
-                    ? "bg-primary/30"
-                    : "bg-secondary";
               return (
                 <li
                   key={i}
                   className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground"
                 >
-                  <span aria-hidden="true" className={`size-1.5 rounded-full ${dotCls}`} />
-                  <span>{entry.text}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`size-1.5 rounded-full ${sessionShapeSegmentClass(entry.kind)}`}
+                  />
+                  <span>{entry.label}</span>
                 </li>
               );
             })}
@@ -1050,6 +931,34 @@ function ProtocolShapeRail({
       )}
     </div>
   );
+}
+
+function sessionShapeSegmentClass(kind: ExperimentSessionShapeSegmentKind): string {
+  switch (kind) {
+    case "stimulus":
+      return "bg-primary";
+    case "context":
+    case "recovery":
+      return "bg-primary/30";
+    case "cooldown":
+    case "preparation":
+    case "transition":
+      return "bg-secondary";
+  }
+}
+
+function deriveSessionShapeTicks(
+  segments: readonly ExperimentSessionShapeSegment[],
+): string[] {
+  const total = segments.reduce((sum, segment) => sum + segment.durationMinutes, 0);
+  if (total <= 0) {
+    return [];
+  }
+  return ["0", `${formatSessionShapeDuration(total)} min`];
+}
+
+function formatSessionShapeDuration(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function MechanismCausalChain({

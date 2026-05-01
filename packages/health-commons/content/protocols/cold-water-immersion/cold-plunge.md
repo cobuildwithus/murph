@@ -23,6 +23,11 @@ categories:
 - autonomic
 - safety-first
 - murph-canonical
+media:
+- kind: image
+  relativePath: design-assets/cold-plunge-tub.jpeg
+  mediaType: image/jpeg
+  caption: Cold Plunge
 relations:
 - type: parent_family
   target: experiment_family:cold-water-immersion

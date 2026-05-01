@@ -160,6 +160,7 @@ describe("experiment page projections", () => {
     expect(experiment.protocol).toEqual(fullProtocol.protocol);
     expect(experiment.protocolFacts).toEqual(fullProtocol.protocolFacts);
     expect(experiment.protocolTips).toEqual(fullProtocol.protocolTips);
+    expect(experiment.sessionShape).toEqual(fullProtocol.sessionShape);
     expect(experiment.whyItWorks).toBe(fullProtocol.whyItWorks);
     expect(experiment.expectedSignals).toEqual(
       fullProtocol.expectedSignals.map((signal) => expect.objectContaining({

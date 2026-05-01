@@ -1,5 +1,7 @@
 import type {
   HealthCommonsCatalog,
+  HealthCommonsBiomarkerDesiredDirection,
+  HealthCommonsBiomarkerProtocolExpectedDirection,
   HealthCommonsCatalogEntity,
   HealthCommonsClaim,
   HealthCommonsEntityType,
@@ -10,6 +12,7 @@ import type {
   HealthCommonsRedirect,
   HealthCommonsRelation,
   HealthCommonsProtocolSpec,
+  HealthCommonsProtocolSessionShape,
   HealthCommonsResearchEvidence,
   HealthCommonsResearchLandscapeGroup,
   HealthCommonsSafety,
@@ -388,6 +391,8 @@ export interface HealthCommonsWebExperimentSafety {
   whoShouldAvoid: string[];
 }
 
+export type HealthCommonsWebExperimentSessionShape = HealthCommonsProtocolSessionShape;
+
 export interface HealthCommonsWebExperimentProtocolTab {
   baselineDays: number;
   catalogHash: string;
@@ -410,6 +415,7 @@ export interface HealthCommonsWebExperimentProtocolTab {
   };
   safety: HealthCommonsWebExperimentSafety;
   schemaVersion: typeof HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION;
+  sessionShape?: HealthCommonsWebExperimentSessionShape;
   title: string;
   whyItWorks: string;
 }
@@ -786,6 +792,9 @@ function buildExperimentProtocolTab(input: {
     },
     safety: toSafety(input.protocol.safety),
     schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION,
+    ...(input.protocol.protocol?.sessionShape
+      ? { sessionShape: toSessionShape(input.protocol.protocol.sessionShape) }
+      : {}),
     title: input.protocol.title,
     whyItWorks: toWhyItWorks(input.protocol, input.protocol.claims ?? []),
   };
@@ -975,117 +984,6 @@ const DEFAULT_BIOMARKER_DISPLAY_HINTS: Record<string, BiomarkerDisplayHint> = {
   },
 };
 
-const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
-  string,
-  Record<string, Partial<BiomarkerDisplayHint>>
-> = {
-  "protocol_variant:dry-sauna/bryan-johnson-blueprint": {
-    "biomarker:hrv-rmssd": {
-      description:
-        "Because this routine is both hot and frequent, HRV is a tolerability check: recovery may improve, but overload can suppress it.",
-      protocolProminence: "focus",
-    },
-    "biomarker:resting-heart-rate": {
-      description:
-        "This daily, very hot post-workout dose piles heat on top of training; resting pulse helps show whether your body adapts or stays strained.",
-      protocolProminence: "focus",
-    },
-  },
-  "protocol_variant:dry-sauna/murph-finnish-standard-3x-week": {
-    "biomarker:deep-sleep-minutes": {
-      description:
-        "A calming warm-to-cool transition may make sleep feel more settled, but Finnish dry sauna has not shown reliable deep-sleep gains, so keep this as background.",
-      protocolProminence: "context",
-    },
-    "biomarker:hrv-rmssd": {
-      description:
-        "Sauna first adds heat stress, then a cooling and relaxation phase; if the rebound is easy to recover from, HRV may rise or stabilize, but too much heat can push it lower.",
-      protocolProminence: "focus",
-    },
-    "biomarker:morning-blood-pressure": {
-      description:
-        "Heat widens blood vessels during the session; repeated tolerable exposure may ease vascular tone slightly, so blood pressure could drift lower.",
-      protocolProminence: "focus",
-    },
-    "biomarker:resting-heart-rate": {
-      description:
-        "Repeated heat sessions make the heart work harder during cooling; over time, adaptation may show as a steadier or lower resting pulse.",
-      direction: "neutral",
-      protocolProminence: "focus",
-    },
-    "biomarker:sleep-efficiency": {
-      description:
-        "A warm-to-cool transition can feel sedating for some people, but a strong heat dose can also leave the body too activated for smooth sleep.",
-      direction: "neutral",
-      protocolProminence: "context",
-    },
-  },
-  "protocol_variant:norwegian-4x4/norwegian-4x4": {
-    "biomarker:estimated-vo2max": {
-      description:
-        "Hard four-minute intervals repeatedly stress oxygen delivery and use, which is the training stimulus most likely to nudge VO2 max or same-device wearable cardio-fitness upward.",
-      protocolProminence: "focus",
-    },
-    "biomarker:hrv-rmssd": {
-      description:
-        "Intervals can improve fitness but also add nervous-system stress, so HRV is useful for spotting whether the dose is recoverable.",
-      protocolProminence: "focus",
-    },
-    "biomarker:morning-blood-pressure": {
-      description:
-        "Better aerobic fitness can help vascular function, but home blood pressure moves slowly and depends heavily on timing, salt, stress, and caffeine.",
-      protocolProminence: "context",
-    },
-    "biomarker:resting-heart-rate": {
-      description:
-        "If the aerobic system adapts, your heart may need slightly less work at rest; fatigue, illness, or under-recovery can hide that.",
-      protocolProminence: "focus",
-    },
-    "biomarker:sleep-efficiency": {
-      description:
-        "Poor sleep can blunt interval recovery and make the fitness signal harder to read, so treat sleep efficiency as context.",
-      protocolProminence: "context",
-    },
-  },
-  "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed": {
-    "biomarker:deep-sleep-minutes": {
-      description:
-        "Better-timed light may support a steadier night, but wearables can misread sleep stages; treat deep sleep only as background context.",
-      expected: "Can be noisy",
-      protocolProminence: "context",
-    },
-    "biomarker:hrv-rmssd": {
-      description:
-        "A calmer pre-bed window can support overnight recovery, but HRV is also sensitive to stress, alcohol, illness, and short sleep.",
-      expected: "Can be noisy",
-      protocolProminence: "context",
-    },
-    "biomarker:resting-heart-rate": {
-      description:
-        "Less evening alerting may reduce overnight strain for some people, but resting pulse is exploratory because many factors move it.",
-      expected: "Can be noisy",
-      protocolProminence: "context",
-    },
-    "biomarker:sleep-efficiency": {
-      description:
-        "If evenings feel less wired, more of your time in bed may become actual sleep rather than quiet wakefulness or clock-watching.",
-      expected: "Could improve",
-      protocolProminence: "focus",
-    },
-    "biomarker:sleep-onset-latency": {
-      description:
-        "Blocking evening blue-rich light may lower the brain's daytime signal, making it easier to feel sleepy near your intended bedtime.",
-      expected: "May fall asleep sooner",
-      protocolProminence: "focus",
-    },
-  },
-};
-
-const SOURCE_PERSON_EXPERT_QUOTES: Partial<Record<string, string>> = {
-  "source_person:bryan-johnson":
-    "Founder of Blueprint and Don't Die. Trying to live forever.",
-};
-
 function listProtocolBiomarkers(
   protocol: HealthCommonsCatalogEntity,
   entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
@@ -1141,21 +1039,27 @@ function toExpectedSignal(
   protocol: HealthCommonsCatalogEntity,
   biomarker: HealthCommonsCatalogEntity,
 ): HealthCommonsWebExperimentSignal {
-  const hint = resolveBiomarkerDisplayHint(protocol.key, biomarker.key);
+  const hint = resolveBiomarkerDisplayHint(biomarker);
   const protocolSignal = protocol.expectedSignalDescriptions?.find(
     (signal) => signal.biomarkerKey === biomarker.key,
   );
   const protocolProminence =
     protocolSignal?.protocolProminence ?? hint.protocolProminence;
+  const direction =
+    directionForExpectedSignal(protocolSignal?.expectedDirection)
+    ?? directionForExpectedSignal(protocolSignal?.expected)
+    ?? hint.direction;
   const expected = normalizeExpectedSignalLabel(
-    protocolSignal?.expected ?? hint.expected,
+    protocolSignal?.expected
+    ?? expectedLabelForExpectedSignal(protocolSignal?.expectedDirection)
+    ?? hint.expected,
   );
 
   return omitUndefined({
     label: biomarker.title,
     value: "",
     delta: "",
-    direction: hint.direction,
+    direction,
     biomarkerRouteId: biomarker.key.replace(/^biomarker:/u, ""),
     estimatedChange: protocolSignal?.estimatedChange,
     expected,
@@ -1170,10 +1074,12 @@ function toExpectedSignal(
 
 function normalizeExpectedSignalLabel(expected: string): string {
   switch (expected) {
+    case "down":
     case "mixed_or_contextual":
       return "Possible change";
     case "down_or_stable":
       return "Could trend lower";
+    case "up":
     case "up_or_stable":
       return "Could improve";
     case "stable":
@@ -1184,17 +1090,77 @@ function normalizeExpectedSignalLabel(expected: string): string {
 }
 
 function resolveBiomarkerDisplayHint(
-  protocolKey: string,
-  biomarkerKey: string,
+  biomarker: HealthCommonsCatalogEntity,
 ): BiomarkerDisplayHint {
+  const biomarkerKey = biomarker.key;
   const baseHint = DEFAULT_BIOMARKER_DISPLAY_HINTS[biomarkerKey] ?? {
     direction: "neutral" as const,
     expected: "Worth watching",
   };
-  const override =
-    PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES[protocolKey]?.[biomarkerKey];
+  const direction = directionForBiomarkerDesiredDirection(
+    biomarker.biomarker?.direction?.desired,
+  );
 
-  return override ? { ...baseHint, ...override } : baseHint;
+  return direction
+    ? {
+        ...baseHint,
+        direction,
+        expected: expectedLabelForBiomarkerDirection(direction),
+      }
+    : baseHint;
+}
+
+function directionForExpectedSignal(
+  expected: HealthCommonsBiomarkerProtocolExpectedDirection | string | undefined,
+): ExperimentSignalDirection | null {
+  switch (expected) {
+    case "down":
+    case "down_or_stable":
+      return "down";
+    case "up":
+    case "up_or_stable":
+      return "up";
+    case "mixed_or_contextual":
+    case "stable":
+      return "neutral";
+    default:
+      return null;
+  }
+}
+
+function expectedLabelForExpectedSignal(
+  expected: HealthCommonsBiomarkerProtocolExpectedDirection | undefined,
+): string | null {
+  return expected ? normalizeExpectedSignalLabel(expected) : null;
+}
+
+function directionForBiomarkerDesiredDirection(
+  desired: HealthCommonsBiomarkerDesiredDirection | undefined,
+): ExperimentSignalDirection | null {
+  switch (desired) {
+    case "higher":
+    case "higher_or_stable":
+      return "up";
+    case "lower":
+    case "lower_or_stable":
+      return "down";
+    case "mixed_or_contextual":
+    case "stable":
+      return "neutral";
+    default:
+      return null;
+  }
+}
+
+function expectedLabelForBiomarkerDirection(direction: ExperimentSignalDirection): string {
+  switch (direction) {
+    case "down":
+      return "Could trend lower";
+    case "up":
+      return "Could improve";
+    case "neutral":
+      return "Worth watching";
+  }
 }
 
 function toMeasurementPaths(
@@ -1365,6 +1331,29 @@ function toMechanismChain(
     content: step.content,
     label: step.label,
   }));
+}
+
+function toSessionShape(
+  shape: HealthCommonsProtocolSessionShape,
+): HealthCommonsWebExperimentSessionShape {
+  return {
+    ...(shape.label ? { label: shape.label } : {}),
+    segments: shape.segments.map(toSessionShapeSegment),
+    ...(shape.summarySegments
+      ? { summarySegments: shape.summarySegments.map(toSessionShapeSegment) }
+      : {}),
+    ...(shape.ticks ? { ticks: [...shape.ticks] } : {}),
+  };
+}
+
+function toSessionShapeSegment(
+  segment: HealthCommonsProtocolSessionShape["segments"][number],
+): HealthCommonsProtocolSessionShape["segments"][number] {
+  return {
+    durationMinutes: segment.durationMinutes,
+    kind: segment.kind,
+    label: segment.label,
+  };
 }
 
 function toWhyItWorks(
@@ -1578,10 +1567,7 @@ function toExpert(entity: HealthCommonsCatalogEntity): HealthCommonsWebExperimen
     initials,
     name: entity.title,
     profileImageUrl: readOptionalProfileImageUrl(entity),
-    quote:
-      SOURCE_PERSON_EXPERT_QUOTES[entity.key]
-      ?? entity.summary
-      ?? summarizeBody(entity.body),
+    quote: entity.summary ?? summarizeBody(entity.body),
   });
 }
 

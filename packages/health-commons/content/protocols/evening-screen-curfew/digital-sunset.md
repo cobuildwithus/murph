@@ -391,6 +391,15 @@ protocol:
   durationMinutes:
     min: 30
     max: 60
+  sessionShape:
+    label: One night
+    segments:
+    - label: no screens
+      kind: stimulus
+      durationMinutes: 30
+    ticks:
+    - "0"
+    - "30 min minimum"
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:

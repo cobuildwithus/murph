@@ -16,6 +16,11 @@ categories:
 - metabolic-health
 - circadian
 - weight-management
+media:
+- kind: image
+  relativePath: design-assets/hero-intermittent-fasting.jpg
+  mediaType: image/jpeg
+  caption: Intermittent Fasting
 relations:
 - type: parent_family
   target: experiment_family:time-restricted-eating
@@ -132,6 +137,19 @@ protocol:
   target: All calories inside one consistent 6-hour window on target days; water during the fasting interval. Other zero-calorie beverage rules are product-policy choices unless an underlying source explicitly verifies them.
   frequency:
     sessionsPerWeek: 5
+  sessionShape:
+    label: Target day
+    segments:
+    - label: fasting window
+      kind: context
+      durationMinutes: 1080
+    - label: eating window
+      kind: stimulus
+      durationMinutes: 360
+    ticks:
+    - "0"
+    - "18 h"
+    - "24 h"
   interventionSessionsMinimum: 16
   interventionSessionsTarget: 20
   steps:

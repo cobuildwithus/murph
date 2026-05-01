@@ -60,7 +60,8 @@ export function isMissingHostedBundleError(error: unknown): error is MissingHost
 }
 
 export function isStoredHostedBundleObjectKey(key: string): boolean {
-  return /^users\/bundles\/[0-9a-f]{24}\/vault\/[0-9a-f]{48}\.bundle\.json$/u.test(key)
+  return /^users\/[a-z0-9][a-z0-9_-]{3,63}\/bundles\/vault\/[0-9a-f]{48}\.bundle\.json$/u.test(key)
+    || /^users\/bundles\/[0-9a-f]{24}\/vault\/[0-9a-f]{48}\.bundle\.json$/u.test(key)
     || /^bundles\/vault\/[0-9a-f]{48}\.bundle\.json$/u.test(key);
 }
 
@@ -329,7 +330,8 @@ function pendingBundleRefKey(kind: HostedExecutionBundleKind): string {
 }
 
 function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
-  const userScopedMatch = /^users\/bundles\/[0-9a-f]{24}\/([^/]+)\//u.exec(key);
+  const userScopedMatch = /^users\/[a-z0-9][a-z0-9_-]{3,63}\/bundles\/([^/]+)\//u.exec(key)
+    ?? /^users\/bundles\/[0-9a-f]{24}\/([^/]+)\//u.exec(key);
   if (userScopedMatch?.[1] === "vault") {
     return "vault";
   }

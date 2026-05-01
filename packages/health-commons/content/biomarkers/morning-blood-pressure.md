@@ -41,6 +41,12 @@ components:
 interpretationFrame:
   principle: Use the same cuff, posture, rest period, and time window, then compare baseline averages against intervention averages.
   caveat: Single post-sauna readings are not the same as stable morning home blood-pressure trends.
+biomarker:
+  unit: mmHg
+  direction:
+    desired: lower_or_stable
+    label: Lower or stable is usually better when measured consistently.
+    nuance: Cuff fit, posture, stress, caffeine, sodium, hydration, illness, medication changes, and single rushed readings can all move the number.
 ---
 
 Morning blood pressure is optional for this dry-sauna experiment, but it is worth collecting if you already have a validated home cuff and can measure it the same way each time.

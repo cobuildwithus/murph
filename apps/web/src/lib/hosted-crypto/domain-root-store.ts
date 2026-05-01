@@ -109,12 +109,25 @@ export async function unwrapHostedDomainRootForWeb(input: {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
     throw new Error(`Web is not allowed to unwrap hosted ${input.domain} domain roots.`);
   }
-  const envelope = await getOrCreateActiveHostedDomainRootEnvelope({
+  const envelope = await readActiveHostedDomainRootEnvelopeOrThrow({
     domain: input.domain,
     prisma: input.prisma,
-    reason: "hosted-crypto.web-unwrap",
     userId: input.userId,
   });
+  const rootKey = await unwrapEnvelopeForWeb({ envelope });
+  return { envelope, rootKey };
+}
+
+export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
+  domain: HostedCryptoDomain;
+  prisma?: HostedCryptoClient;
+  rootKeyId: string;
+  userId: string;
+}): Promise<UnwrappedHostedDomainRoot> {
+  if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
+    throw new Error(`Web is not allowed to unwrap hosted ${input.domain} domain roots.`);
+  }
+  const envelope = await readHostedDomainRootEnvelopeByRootKeyIdOrThrow(input);
   const rootKey = await unwrapEnvelopeForWeb({ envelope });
   return { envelope, rootKey };
 }
@@ -131,12 +144,12 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   userId: string;
 }> {
   const prisma = input.prisma ?? getPrisma();
-  const ingress = await readRequiredActiveHostedDomainRootEnvelope({
+  const ingress = await readActiveHostedDomainRootEnvelopeOrThrow({
     domain: "ingress",
     prisma,
     userId: input.userId,
   });
-  const runtime = await readRequiredActiveHostedDomainRootEnvelope({
+  const runtime = await readActiveHostedDomainRootEnvelopeOrThrow({
     domain: "runtime",
     prisma,
     userId: input.userId,
@@ -434,14 +447,40 @@ async function readActiveHostedDomainRootEnvelopeRow(input: {
   return rows[0] ?? null;
 }
 
-async function readRequiredActiveHostedDomainRootEnvelope(input: {
+async function readDecryptableHostedDomainRootEnvelopeRow(input: {
   domain: HostedCryptoDomain;
-  prisma: HostedCryptoClient;
+  rootKeyId: string;
+  tx: HostedCryptoClient;
+  userId: string;
+}): Promise<HostedUserCryptoEnvelopeRow | null> {
+  const rows = await input.tx.$queryRaw<HostedUserCryptoEnvelopeRow[]>`
+    SELECT
+      id,
+      user_id AS "userId",
+      domain::text AS domain,
+      root_key_id AS "rootKeyId",
+      status::text AS status,
+      signed_envelope_json AS "signedEnvelopeJson"
+    FROM hosted_user_crypto_envelope
+    WHERE user_id = ${input.userId}
+      AND domain = ${input.domain}::hosted_crypto_domain
+      AND root_key_id = ${input.rootKeyId}
+      AND status IN ('active'::hosted_crypto_envelope_status, 'decrypt_only'::hosted_crypto_envelope_status)
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+export async function readActiveHostedDomainRootEnvelopeOrThrow(input: {
+  domain: HostedCryptoDomain;
+  prisma?: HostedCryptoClient;
   userId: string;
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
+  const prisma = input.prisma ?? getPrisma();
   const row = await readActiveHostedDomainRootEnvelopeRow({
     domain: input.domain,
-    tx: input.prisma,
+    tx: prisma,
     userId: input.userId,
   });
   if (!row) {
@@ -450,13 +489,35 @@ async function readRequiredActiveHostedDomainRootEnvelope(input: {
   return parseAssertAndVerifyEnvelope(row, input);
 }
 
+export async function readHostedDomainRootEnvelopeByRootKeyIdOrThrow(input: {
+  domain: HostedCryptoDomain;
+  prisma?: HostedCryptoClient;
+  rootKeyId: string;
+  userId: string;
+}): Promise<HostedDomainRootKeyEnvelopeV1> {
+  const prisma = input.prisma ?? getPrisma();
+  const row = await readDecryptableHostedDomainRootEnvelopeRow({
+    domain: input.domain,
+    rootKeyId: input.rootKeyId,
+    tx: prisma,
+    userId: input.userId,
+  });
+  if (!row) {
+    throw new Error(`Hosted ${input.domain} domain root envelope ${input.rootKeyId} is not available for decrypt.`);
+  }
+  return parseAssertAndVerifyEnvelope(row, input);
+}
+
 async function parseAssertAndVerifyEnvelope(
   row: HostedUserCryptoEnvelopeRow,
-  expected: { domain: HostedCryptoDomain; userId: string },
+  expected: { domain: HostedCryptoDomain; rootKeyId?: string | null; userId: string },
 ): Promise<HostedDomainRootKeyEnvelopeV1> {
   const envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
   if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
     throw new Error("Hosted domain root envelope row does not match requested user/domain.");
+  }
+  if (expected.rootKeyId && envelope.rootKeyId !== expected.rootKeyId) {
+    throw new Error("Hosted domain root envelope row does not match requested rootKeyId.");
   }
   if (envelope.rootKeyId !== row.rootKeyId) {
     throw new Error("Hosted domain root envelope row rootKeyId mismatch.");

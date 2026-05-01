@@ -20,6 +20,11 @@ categories:
 - evening-light
 - wearable-measured
 - murph-canonical
+media:
+- kind: image
+  relativePath: design-assets/hero-red-light-glasses-before-bed.jpeg
+  mediaType: image/jpeg
+  caption: Red Light Glasses Before Bed
 relations:
 - type: parent_family
   target: experiment_family:evening-light-reduction
@@ -47,6 +52,18 @@ protocol:
   durationMinutes:
     min: 90
     max: 120
+  sessionShape:
+    label: Evening window
+    segments:
+    - label: glasses on
+      kind: stimulus
+      durationMinutes: 120
+    - label: bedtime
+      kind: transition
+      durationMinutes: 5
+    ticks:
+    - "−120 min"
+    - bedtime
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
@@ -121,6 +138,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-onset-latency
   description: "Filtering blue-green evening light weakens retinal alerting and melatonin suppression, letting the brain shift toward sleep sooner."
   expected: down_or_stable
+  expectedDirection: down_or_stable
   estimatedChange:
     kind: absolute
     low: -10
@@ -133,6 +151,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-efficiency
   description: "Earlier sleep onset reduces awake time in bed when time in bed stays stable."
   expected: up_or_stable
+  expectedDirection: up_or_stable
   estimatedChange:
     kind: absolute
     low: -1
@@ -145,6 +164,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:resting-heart-rate
   description: "Lower late circadian alerting reduces nighttime strain after sleep begins, lowering resting pulse."
   expected: down_or_stable
+  expectedDirection: down_or_stable
   estimatedChange:
     kind: absolute
     low: -2
@@ -157,6 +177,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:hrv-rmssd
   description: "Less late-light signaling reduces pre-bed alertness, supporting parasympathetic recovery during less fragmented sleep."
   expected: up_or_stable
+  expectedDirection: up_or_stable
   estimatedChange:
     kind: relative_percent
     low: 0
@@ -169,6 +190,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:deep-sleep-minutes
   description: "Reduced evening alerting improves sleep continuity first; deeper sleep changes follow only when fragmentation drops."
   expected: mixed_or_contextual
+  expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: mixed_or_contextual
     window: baseline vs 7-14 intervention nights

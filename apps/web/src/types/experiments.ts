@@ -140,6 +140,27 @@ export interface ExperimentMechanismChainStep {
   label: string;
 }
 
+export type ExperimentSessionShapeSegmentKind =
+  | "preparation"
+  | "stimulus"
+  | "recovery"
+  | "cooldown"
+  | "transition"
+  | "context";
+
+export interface ExperimentSessionShapeSegment {
+  durationMinutes: number;
+  kind: ExperimentSessionShapeSegmentKind;
+  label: string;
+}
+
+export interface ExperimentSessionShape {
+  label?: string;
+  segments: ExperimentSessionShapeSegment[];
+  summarySegments?: ExperimentSessionShapeSegment[];
+  ticks?: string[];
+}
+
 export interface ExperimentMeasurementMethodReference {
   href?: string;
   key: string;
@@ -239,6 +260,7 @@ export interface ExperimentProtocol {
   protocolLogFields: string[];
   experimentOnboarding?: ExperimentOnboarding;
   mechanismChain: ExperimentMechanismChainStep[];
+  sessionShape?: ExperimentSessionShape;
   whyItWorks: string;
   experts: Expert[];
   researchStats: ExperimentResearchStat[];
