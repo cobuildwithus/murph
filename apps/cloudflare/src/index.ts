@@ -60,6 +60,7 @@ export { RunnerContainer } from "./runner-container.ts";
 import type { HostedExecutionContainerNamespaceLike } from "./runner-container.ts";
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
+import { handleLegacyHostedRunnerWakeQueue } from "./legacy-runner-wake-queue.ts";
 import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
@@ -72,6 +73,7 @@ import {
 import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
 import {
   asWorkerStringEnvironment,
+  type WorkerQueueMessageBatchLike,
 } from "./worker-contracts.ts";
 import {
   decodeRouteParam,
@@ -229,6 +231,13 @@ export default {
     assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
 
     await handleHostedEmailIngress(message, env);
+  },
+  async queue(
+    batch: WorkerQueueMessageBatchLike,
+    env: WorkerEnvironmentSource,
+  ): Promise<void> {
+    assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
+    await handleLegacyHostedRunnerWakeQueue(batch, env);
   },
 };
 
