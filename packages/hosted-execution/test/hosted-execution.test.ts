@@ -53,6 +53,29 @@ describe("hosted execution coverage gaps", () => {
     };
 
     expect(parseHostedBrowserVaultReplicaRef(ref)).toEqual(ref);
+    const dataKeyRef = {
+      ...ref,
+      dataKeyEnvelope: {
+        alg: "AES-256-GCM-HKDF-SHA256" as const,
+        dataKeyId: "hdk:browser-vault-replica:test",
+        domain: "runtime" as const,
+        lane: "browser-vault-replica" as const,
+        resource: {
+          objectKey: ref.objectKey,
+          purpose: "browser-vault-replica",
+          userId: "user-1",
+        },
+        rootKeyId: ref.runtimeRootKeyId,
+        schema: "murph.hosted-data-key-envelope.v1" as const,
+        wraps: [{
+          ciphertext: "ciphertext",
+          iv: "iv",
+          kind: "domain-root" as const,
+          rootKeyId: ref.runtimeRootKeyId,
+        }],
+      },
+    };
+    expect(parseHostedBrowserVaultReplicaRef(dataKeyRef)).toEqual(dataKeyRef);
     expect(parseHostedBrowserVaultReplicaRef(null)).toBeNull();
     expect(parseHostedExecutionSnapshotRef(undefined)).toBeNull();
     expect(() => parseHostedBrowserVaultReplicaRef({

@@ -45,6 +45,16 @@ test("browser vault replica ref matching is exact across immutable object fields
     }),
     false,
   );
+  assert.equal(
+    browserVaultReplicaRefsMatch(ref, {
+      ...ref,
+      dataKeyEnvelope: {
+        ...ref.dataKeyEnvelope,
+        dataKeyId: "hdk:browser-vault-replica:other",
+      },
+    }),
+    false,
+  );
   assert.equal(browserVaultReplicaRefsMatch(ref, null), false);
 });
 
@@ -61,6 +71,25 @@ test("browser vault abort detection accepts DOM-style abort errors", () => {
 function createReplicaRef() {
   return {
     byteLength: 128,
+    dataKeyEnvelope: {
+      alg: "AES-256-GCM-HKDF-SHA256" as const,
+      dataKeyId: "hdk:browser-vault-replica:d",
+      domain: "runtime" as const,
+      lane: "browser-vault-replica" as const,
+      resource: {
+        objectKey: "users/browser-vault-replicas/opaque/replica.json",
+        purpose: "browser-vault-replica",
+        userId: "user_123",
+      },
+      rootKeyId: "udrk:runtime:test-root",
+      schema: "murph.hosted-data-key-envelope.v1" as const,
+      wraps: [{
+        ciphertext: "wrapped-data-key",
+        iv: "wrap-iv",
+        kind: "domain-root" as const,
+        rootKeyId: "udrk:runtime:test-root",
+      }],
+    },
     dataVersion: "d".repeat(64),
     generatedAt: "2026-04-20T08:00:00.000Z",
     keyId: "browser-vault-replica:d",

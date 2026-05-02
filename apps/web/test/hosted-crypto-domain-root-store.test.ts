@@ -92,6 +92,8 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
 
   assert.equal(context.schema, "murph.hosted-runtime-crypto-context.v1");
   assert.equal(context.userId, "member-test-1");
+  assert.equal(context.cacheMaxAgeMs, 5 * 60 * 1000);
+  assert.match(context.cryptoContextVersion, /^hccv_[0-9a-f]{32}$/u);
   assert.equal(context.envelopes.ingress.domain, "ingress");
   assert.equal(context.envelopes.runtime.domain, "runtime");
   assert.equal(tx.persistedEnvelopes.length, persistedBeforeRead);
