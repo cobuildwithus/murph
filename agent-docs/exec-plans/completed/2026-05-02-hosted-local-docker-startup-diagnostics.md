@@ -12,10 +12,11 @@ Constraints/Assumptions:
 
 Key decisions:
 - The Docker diagnostics block was secondary output from `appendStartupDiagnostics`; the actual failure was Linq registration returning HTTP 500 for a duplicate `POST /webhook-subscriptions`.
-- Keep registration enabled by default, but make it idempotent by listing existing Linq webhook subscriptions first and treating an active exact target/event/phone-number match as already registered.
+- Keep registration enabled by default, but make it idempotent by listing existing Linq webhook subscriptions first.
+- Treat only an active exact target/event/phone-number match with a verified signing secret as cacheable. If Linq omits the signing secret or the existing target has a different event set or phone filter, skip duplicate creation and emit an explicit warning without seeding the trusted local cache.
 
 State:
-- in_progress
+- completed
 
 Done:
 - Read required repo workflow, architecture, product, verification, security, reliability, and testing docs.
@@ -25,12 +26,14 @@ Done:
 - Focused tests for Linq tunnel registration and hosted-local stack passed.
 - Live startup with registration enabled reached the ready token after logging that the target was already registered.
 - Security/privacy and simplify audits found the same medium issue: remote matching accepted subscriptions with extra events; patched to require exact event-set equality and added regression coverage.
+- Final review found that remote subscription reuse did not validate the signing secret. Patched remote matching to distinguish verified, mismatched, unavailable, event-different, and phone-filter-different states.
+- Live Linq registration probe confirmed the current remote subscription avoids the duplicate POST path and reports a phone-filter warning instead.
 
 Now:
-- Running final completion review.
+- Complete; archiving plan and creating scoped commit.
 
 Next:
-- Apply any final review fixes, then create scoped commit.
+- None.
 
 Open questions (UNCONFIRMED if needed):
 - None currently.
@@ -47,3 +50,9 @@ Verification:
 - Live focused startup command with runner bundle/smoke and Stripe listener disabled reached hosted-local ready token with Linq registration enabled.
 - `pnpm exec vitest run --config scripts/vitest.config.ts scripts/dev-hosted-local/linq-webhook-tunnel.test.ts scripts/dev-hosted-local/stack.test.ts --no-coverage` passed after audit fix.
 - `pnpm typecheck` passed after audit fix.
+- `pnpm exec vitest run --config scripts/vitest.config.ts scripts/dev-hosted-local/linq-webhook-tunnel.test.ts scripts/dev-hosted-local/stack.test.ts --no-coverage` passed after final review fix.
+- Direct live Linq registration probe with local env loaded returned `ok: true`, skipped new registration, and reported the phone-filter warning path.
+- `pnpm typecheck` passed after final review fix.
+Status: completed
+Updated: 2026-05-03
+Completed: 2026-05-03

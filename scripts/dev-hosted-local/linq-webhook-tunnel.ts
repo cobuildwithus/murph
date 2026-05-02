@@ -49,6 +49,8 @@ interface LinqWebhookSubscriptionSummary {
 }
 
 interface LinqWebhookSubscriptionMatch {
+  eventStatus: "different" | "exact";
+  phoneNumberStatus: "different" | "exact";
   secretStatus: "mismatch" | "unavailable" | "verified";
   subscription: LinqWebhookSubscriptionSummary;
 }
@@ -201,6 +203,30 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
           "Update the local secret to the subscription secret, or recreate the subscription expected by this environment.",
         ].join(" "),
       );
+    }
+    if (existingRegistration.eventStatus === "different") {
+      (input.stderrTarget ?? process.stderr).write(
+        [
+          `[linq] Local webhook target ${input.setup.targetUrl} already has an active Linq subscription,`,
+          "but its event set differs from local hosted onboarding registration.",
+          "Continuing without creating a duplicate subscription or updating the local registration cache.",
+          "Update or recreate the Linq webhook subscription if local message delivery does not match this environment.",
+          "\n",
+        ].join(" "),
+      );
+      return;
+    }
+    if (existingRegistration.phoneNumberStatus === "different") {
+      (input.stderrTarget ?? process.stderr).write(
+        [
+          `[linq] Local webhook target ${input.setup.targetUrl} already has an active Linq subscription,`,
+          "but its phone-number filter differs from local hosted onboarding registration.",
+          "Continuing without creating a duplicate subscription or updating the local registration cache.",
+          "Update or recreate the Linq webhook subscription if local message delivery does not match this environment.",
+          "\n",
+        ].join(" "),
+      );
+      return;
     }
     if (existingRegistration.secretStatus === "unavailable") {
       (input.stderrTarget ?? process.stderr).write(
@@ -411,36 +437,74 @@ async function findExistingLinqWebhookSubscription(input: {
   const candidates = subscriptions.filter((subscription) =>
     subscription.isActive
     && subscription.targetUrl === input.targetUrl
-    && eventSetsEqual(subscription.subscribedEvents, input.subscribedEvents)
-    && phoneNumberSetsEqual(subscription.phoneNumbers, input.phoneNumbers)
   );
   if (candidates.length === 0) {
     return null;
   }
 
-  const verified = candidates.find((subscription) =>
-    subscription.signingSecret === input.webhookSecret
+  const matches = candidates.map((subscription) =>
+    createLinqWebhookSubscriptionMatch({
+      expectedPhoneNumbers: input.phoneNumbers,
+      expectedSubscribedEvents: input.subscribedEvents,
+      subscription,
+      webhookSecret: input.webhookSecret,
+    })
+  );
+  const verified = matches.find((match) =>
+    match.eventStatus === "exact"
+    && match.phoneNumberStatus === "exact"
+    && match.secretStatus === "verified"
   );
   if (verified) {
-    return {
-      secretStatus: "verified",
-      subscription: verified,
-    };
+    return verified;
   }
 
-  const mismatched = candidates.find((subscription) =>
-    subscription.signingSecret !== null
-  );
+  const mismatched = matches.find((match) =>
+    match.eventStatus === "exact"
+    && match.phoneNumberStatus === "exact"
+    && match.secretStatus === "mismatch"
+  ) ?? matches.find((match) => match.secretStatus === "mismatch");
   if (mismatched) {
-    return {
-      secretStatus: "mismatch",
-      subscription: mismatched,
-    };
+    return mismatched;
+  }
+
+  return matches.find((match) =>
+    match.eventStatus === "exact"
+    && match.phoneNumberStatus === "exact"
+  )
+    ?? matches.find((match) => match.eventStatus === "exact")
+    ?? matches[0]
+    ?? null;
+}
+
+function createLinqWebhookSubscriptionMatch(input: {
+  expectedPhoneNumbers: readonly string[] | null;
+  expectedSubscribedEvents: readonly string[];
+  subscription: LinqWebhookSubscriptionSummary;
+  webhookSecret: string;
+}): LinqWebhookSubscriptionMatch {
+  let secretStatus: LinqWebhookSubscriptionMatch["secretStatus"] = "unavailable";
+  if (input.subscription.signingSecret === input.webhookSecret) {
+    secretStatus = "verified";
+  } else if (input.subscription.signingSecret !== null) {
+    secretStatus = "mismatch";
   }
 
   return {
-    secretStatus: "unavailable",
-    subscription: candidates[0],
+    eventStatus: eventSetsEqual(
+      input.subscription.subscribedEvents,
+      input.expectedSubscribedEvents,
+    )
+      ? "exact"
+      : "different",
+    phoneNumberStatus: phoneNumberSetsEqual(
+      input.subscription.phoneNumbers,
+      input.expectedPhoneNumbers,
+    )
+      ? "exact"
+      : "different",
+    secretStatus,
+    subscription: input.subscription,
   };
 }
 

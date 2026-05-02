@@ -590,10 +590,11 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     }
   });
 
-  it("creates a new Linq webhook subscription when the remote target has extra events", async () => {
+  it("continues without duplicate create when the remote target has extra events", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "./linq-webhook-tunnel.ts"
     );
+    const stderrTarget = new CapturingWritable();
     const fetchImplementation = vi.fn<typeof fetch>(async () =>
       Response.json({
         subscriptions: [
@@ -624,9 +625,57 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
         tunnelName: "dev",
       },
+      stderrTarget,
     });
 
-    expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
+    expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
+    expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
+      "event set differs",
+    ));
+  });
+
+  it("continues without duplicate create when the remote target has a different phone filter", async () => {
+    const { registerHostedLocalLinqWebhookSubscription } = await import(
+      "./linq-webhook-tunnel.ts"
+    );
+    const stderrTarget = new CapturingWritable();
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        subscriptions: [
+          {
+            id: "subscription-filtered",
+            is_active: true,
+            phone_numbers: ["+15550000001"],
+            subscribed_events: ["message.received"],
+            target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+          },
+        ],
+      })
+    );
+
+    await registerHostedLocalLinqWebhookSubscription({
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      },
+      fetchImplementation,
+      registrationCachePath: null,
+      setup: {
+        phoneNumbers: null,
+        publicBaseUrl: "https://tunnel.example.test",
+        shouldRegister: true,
+        shouldStartTunnel: true,
+        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+        tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+        tunnelName: "dev",
+      },
+      stderrTarget,
+    });
+
+    expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
+    expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
+      "phone-number filter differs",
+    ));
   });
 
   it("waits for the public webhook target before Linq registration", async () => {
