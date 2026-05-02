@@ -16,7 +16,7 @@ next to a vault without turning that state into canonical product truth.
 
 Inside the vault, `.runtime/**` is now split by durability/rebuildability and by portability:
 
-- `.runtime/operations/**`: durable local operational state. Hosted workspace snapshots include this bucket by default because it is the continuity layer for one-shot hosted runs. The snapshot filter is denylist-based: known credential roots, device-sync runtime state, parser executable-selector config, repair/quarantine bins, locks, pid/socket/temp files, and other process-local residue stay out even when they live under operations.
+- `.runtime/operations/**`: durable local operational state. Hosted workspace snapshots include this bucket by default because it is the continuity layer for bounded hosted workspace invocations. The snapshot filter is denylist-based: known credential roots, device-sync runtime state, parser executable-selector config, repair/quarantine bins, locks, pid/socket/temp files, and other process-local residue stay out even when they live under operations.
 - `.runtime/projections/**`: rebuildable local projections and indexes such as inbox capture indexes, the query-owned canonical read/search projection, and the gateway source-backed projection store. These are `machine_local`.
 - `.runtime/cache/**` and `.runtime/tmp/**`: ephemeral scratch state that may be deleted freely. These are `machine_local`.
 

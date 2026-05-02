@@ -8,7 +8,7 @@ Canonical Zod contract sources live in `packages/contracts/src/zod.ts`. The JSON
 
 Canonical record ids and importer batch ids use one format: `<prefix>_<ULID>`.
 Derived export-pack directories use a path-safe pack name and are not canonical vault record ids.
-Legacy `bank/memory.md` comment metadata may still contain historical `mem_<16 lowercase hex>` ids on read, but new canonical memory ids emitted by write helpers remain `mem_<ULID>`.
+Memory record metadata uses only canonical `mem_<ULID>` ids.
 
 | Family | Prefix | Notes |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ Legacy `bank/memory.md` comment metadata may still contain historical `mem_<16 l
 - Assessment response records:
   `schemaVersion`, `id`, `assessmentType`, `recordedAt`, `source`, `rawPath`, `responses`
 - Memory document:
-  `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`
+  `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`. Each stored memory bullet carries a hidden `murph-memory` metadata comment with canonical id, creation time, and update time.
 - Preferences singleton:
   `schemaVersion`, `updatedAt`, `workoutUnitPreferences`
 - Markdown frontmatter:
@@ -114,7 +114,6 @@ Sample records may also carry optional `externalRef` provenance with the same sh
   `schemaVersion`, `docType`, `workoutFormatId`, `slug`, `title`, `status`, `activityType`, required `template`, optional `durationMinutes`, optional `distanceKm`, optional `templateText`
 - Memory frontmatter:
   `docType: "memory"`, `schemaVersion: "murph.frontmatter.memory.v1"`, `title`, `updatedAt`
-  Legacy `docType: "murph.memory.v1"` plus `schemaVersion: 1` remain read-compatible only.
 - Goal frontmatter:
   `schemaVersion`, `docType`, `goalId`, `slug`, `status`, `title`
 - Condition frontmatter:

@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-05-01
+Last verified: 2026-05-02
 
 ## Purpose
 
@@ -58,7 +58,6 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/active/` | In-flight execution plans for current work. | Active work coordination | Medium | 2026-04-02 |
 | `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` | Active-work ledger for concurrent repo tasks. | Concurrency coordination | High | 2026-04-06 |
-| `agent-docs/exec-plans/completed/` | Historical execution-plan snapshots kept as process records rather than live architecture docs; individual completed plans are not indexed separately. | Completed plan archive | Low | 2026-05-01 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow. | Workflow prompt library | Low | 2026-04-23 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |
@@ -72,6 +71,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `packages/hosted-execution/README.md` | Shared hosted execution contracts, auth, env, and client seam. | `packages/hosted-execution/**` | Medium | 2026-03-28 |
 | `packages/messaging-ingress/README.md` | Shared stateless messaging ingress boundary. | `packages/messaging-ingress/**` | Medium | 2026-04-02 |
 | `packages/runtime-state/README.md` | `.runtime` taxonomy, portability, and local/hosted state rules. | `packages/runtime-state/**` | Medium | 2026-04-01 |
+| `packages/vault-usecases/README.md` | CLI/headless vault usecase orchestration boundary over core, importers, and query. | `packages/vault-usecases/**` | Medium | 2026-05-02 |
 
 ## Conventions
 

@@ -1,40 +1,51 @@
 Goal (incl. success criteria):
-- Land the first safe greenfield-v1 cleanup batch before public 1.0: package manifests use 1.0.0, the touched internal schemas/stores reset to v1, selected old-shape readers and compatibility aliases are removed, and directly coupled docs/tests describe the current design.
+- Historical/completed handoff for the Greenfield v1 hard-cut cleanup. This file is not an active architecture source, execution plan, or current follow-up tracker.
+- Success criteria are met when readers can tell the Greenfield cleanup is complete, know where current architecture lives, and do not find unresolved one-shot-vs-warm runner questions here.
+
+Status:
+- Historical/completed.
+- Last verified: 2026-05-01.
+
+Current architecture links:
+- `ARCHITECTURE.md`
+- `docs/architecture.md`
+- `agent-docs/references/hosted-runtime-protocol.md`
+- `apps/web/README.md`
+- `apps/cloudflare/README.md`
 
 Constraints/Assumptions:
-- No deploys/users to preserve; destructive storage/schema resets are allowed.
-- Current checkout has overlapping active dirty rows, especially Cloudflare deploy/runtime and hosted assistant provider config. Do not overwrite unrelated edits.
-- External provider/API versions are exempt from the "everything v1" rule.
+- Treat this file as a point-in-time continuity artifact only.
+- Use the current architecture links above for live hosted runtime, package-boundary, control-plane, and execution-plane behavior.
+- Do not revive removed Greenfield compatibility or migration questions from this handoff without checking the current architecture docs first.
 
 Key decisions:
-- Treat the cleanup as phased and commit only exact touched paths.
-- First batch should avoid files currently dirty or explicitly owned by active rows unless the integration owner reviews the overlap.
-- Hosted execution terminology, Prisma baseline squashing, CLI alias removal, and broader hosted web cleanup remain follow-up batches, not completion criteria for this plan.
+- The Greenfield cleanup was completed as a hard cut rather than a compatibility-preserving migration.
+- Current live docs own the architecture; this handoff records only resolved historical context.
+- Hosted execution no longer uses the old run protocol as a live design source.
 
 State:
-- First implementation batch complete and verified. Full release readiness checks pass for the final diff state.
+- Historical/completed. No active work remains in this continuity file.
 
 Done:
-- Five high-reasoning review subagents completed the initial audit and produced the cutover map.
-- Registered the greenfield-v1 execution plan and ledger row.
-- Set workspace package manifests to `1.0.0`.
-- Reset hosted email, assistant cron runtime state, research orchestrator, and experiment protocol contract versions to v1.
-- Replaced automation schema with `murph.frontmatter.automation.v1` and removed schedule `timeZone` compatibility.
-- Removed hosted-execution generic side-effect aliases.
-- Deleted one historical hosted-run review doc and removed package/research no-op compatibility flags.
-- Added a literal apps/web proof that the experiment protocol contract is pinned to v1.
-- Ran required coverage-write, simplify, and task-finish-review audits; addressed the doc/process and web-proof findings.
+- Completed the Greenfield v1 hard-cut cleanup record.
+- Reframed this file away from active implementation planning.
+- Pointed readers to current architecture sources instead of embedding live architecture here.
+
+Resolved:
+- Hosted execution uses a warm per-user Cloudflare runner shell with bounded isolated workspace invocations.
+- Each isolated invocation uses invocation-local writable cache and temp roots, scoped child environment, and bounded lifecycle handling inside the warm shell.
+- The old run protocol is removed and is not a current extension target.
+- The previous one-shot-only versus warm-runner question is resolved by the current warm-shell plus isolated-invocation architecture.
 
 Now:
-- Close and commit the first batch through the repo finish path, excluding unrelated active-lane edits.
+- No current work is tracked here.
 
 Next:
-- Open follow-up plans for hosted execution terminology, Prisma baseline reset, hosted web cleanup, CLI alias removal, and release execution once unrelated dirty lanes no longer block the clean-tree release script.
+- None. Use active execution plans and the coordination ledger for any new work.
 
 Open questions (UNCONFIRMED if needed):
-- Whether runner containers should remain one-shot only or keep any warm-container operational seam.
+- None for this historical handoff.
 
 Working set (files/ids/commands):
-- Plan: agent-docs/exec-plans/active/2026-04-23-greenfield-v1-hard-cut.md
-- Ledger: agent-docs/exec-plans/active/COORDINATION_LEDGER.md
-- Verification target after implementation: pnpm typecheck, pnpm verify:acceptance, pnpm release:check, plus focused owner checks.
+- Historical continuity file: `CONTINUITY_greenfield-v1-hard-cut.md`
+- Current routing/architecture sources: see "Current architecture links" above.

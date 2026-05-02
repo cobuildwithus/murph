@@ -14,7 +14,7 @@
 
 ## Assistant Boundary
 
-- Agent layers, MCP surfaces, and future UIs call `vault-cli` or exported package APIs.
+- Agent layers, MCP surfaces, and future UIs call `murph`, `vault-cli`, or exported package APIs.
 - Assistant runtime state is stored under `vault/.runtime/operations/assistant/**`.
 - Durable user-facing memory and scheduled prompt configuration live in canonical vault records, not assistant runtime state.
 - If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical vault records or explicit derived materializations, never in assistant runtime state.
@@ -28,27 +28,36 @@
 
 ## Deferred Complexity
 
-- No SQLite as canonical storage.
-- No vector database.
+- No SQLite as canonical storage. SQLite is allowed only for rebuildable local/runtime projections under `.runtime/**`.
+- Lexical search is allowed through the query projection.
+- Vector search is deferred unless it is explicitly added to the contract.
 - No OCR-heavy lab parser.
-- No semantic search.
 - No local-model requirement.
 - No automatic promotion of local or provider chat transcripts into canonical health state.
 
-## Frozen Bootstrap Choices
+## Frozen Current Choices
 
-- Package names:
+- Product CLI: `murph`
+- Raw explicit-vault CLI and operator surface: `vault-cli`
+- Public packages:
+  - `@murphai/murph`
+  - `@murphai/openclaw-plugin`
   - `@murphai/contracts`
-  - `@murphai/core`
-  - `@murphai/cli`
-  - `@murphai/importers`
-  - `@murphai/query`
-- Command namespace root: `vault-cli`
-- Recommended branch lanes:
-  - `track/contracts`
-  - `track/core`
-  - `track/cli`
-  - `track/importers`
-  - `track/query-export`
-  - `track/qa-release`
-  - `track/integration`
+  - `@murphai/hosted-execution`
+  - `@murphai/gateway-core`
+- Workspace-private package families:
+  - `core`
+  - `query`
+  - `importers`
+  - `device-syncd`
+  - `inboxd`
+  - `runtime-state`
+  - `assistant-engine`
+  - `assistant-runtime`
+  - `assistantd`
+  - `operator-config`
+  - `gateway-local`
+  - `messaging-ingress`
+  - `vault-usecases`
+  - `assistant-cli`
+  - `setup-cli`

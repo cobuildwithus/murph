@@ -6,24 +6,30 @@ This guide is the downstream integration reference for extending the Murph vault
 
 ## Non-Negotiable Boundaries
 
-- Keep `vault-cli` as the only public command namespace.
+- Treat `murph` as the product-facing CLI for the current active vault.
+- Treat `vault-cli` as the raw explicit-vault/operator surface for development, automation, assistant/runtime integration, and the OpenClaw plugin.
 - Keep canonical vault writes inside `@murphai/core` only.
 - Keep human-facing truth in Markdown (`CORE.md`, `journal/`, `bank/`).
 - Keep machine-facing truth in append-only JSONL ledgers (`ledger/events`, `ledger/samples`, `audit`).
 - Keep imported source artifacts immutable under `raw/`.
+- Keep SQLite out of canonical storage. SQLite is allowed only for explicit owners under `.runtime/projections/**` or `.runtime/operations/**`, with schema migration/versioning and owner classification documented through `@murphai/runtime-state`.
 - Keep assistant or session runtime state under `vault/.runtime/operations/assistant/**`, and keep durable user-facing memory plus scheduled assistant configuration in canonical vault records rather than assistant runtime state.
-- If a datum is user-facing, queryable, or something future product features will build on, make it a canonical vault noun or an explicit derived materialization immediately; do not prototype it in assistant runtime first.
-- Do not introduce SQLite, vector storage, OCR-heavy parsing, semantic search, canonical transcript storage inside the vault, or automatic promotion of chat logs into canonical health state in the current contract.
+- If a datum is user-facing, queryable, or something future product features will build on, make it a canonical vault record or an explicit derived materialization immediately; do not prototype it in assistant runtime first.
+- Do not introduce vector storage, OCR-heavy parsing, semantic search, canonical transcript storage inside the vault, or automatic promotion of chat logs into canonical health state in the current contract.
 
-## Package Roles
+## Package Families And Public Posture
 
-| Package | Allowed to do | Must not do |
-| --- | --- | --- |
-| `@murphai/contracts` | Define shared schemas, types, error codes, and generated contract artifacts | Reach into runtime filesystem behavior |
-| `@murphai/core` | Bootstrap vaults, validate state, emit audit records, and perform canonical mutations | Expose an alternate public CLI namespace |
-| `@murphai/importers` | Parse external inputs and prepare normalized payloads for core | Write canonical vault files directly |
-| `@murphai/query` | Read canonical state and build derived export packs | Mutate vault state |
-| `@murphai/cli` | Validate operator input, call package APIs, and format structured output | Bypass core for writes |
+Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin`. Other workspace packages are private owner packages. Public tarballs may bundle private owners when needed, but those private packages are not standalone public API.
+
+| Family | Public posture | Allowed to do | Must not do |
+| --- | --- | --- | --- |
+| Contract and shared gateway packages (`@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`) | Published, narrow entrypoints | Define shared schemas, hosted/control-plane contracts, and transport-neutral gateway contracts | Reach into app/package internals or become canonical write owners |
+| Product CLI package (`@murphai/murph`) | Published; ships both `murph` and `vault-cli` | Present the product CLI, raw vault CLI, onboarding/setup, local daemon composition, and operator formatting over owner packages | Bypass owner packages for canonical writes or expose private workspace packages as public API |
+| OpenClaw bundle (`@murphai/openclaw-plugin`) | Published skill bundle | Teach OpenClaw to use the existing `vault-cli` surface against the operator's configured vault | Start a second Murph assistant runtime or invent an OpenClaw-owned storage contract |
+| Vault contract and mutation owners (`@murphai/core`, `@murphai/vault-usecases`, private health/usecase owners) | Workspace-private | Validate state, perform canonical mutations, compose command-shaped usecases, and keep write paths behind owner seams | Publish ad hoc public APIs or let callers mutate canonical files directly |
+| Import, inbox, parser, query, and projection owners (`@murphai/importers`, `@murphai/inboxd`, `@murphai/parsers`, `@murphai/query`, `@murphai/health-commons`) | Workspace-private | Normalize external evidence, persist raw/canonical intake through core, publish derived artifacts, and build read-only projections | Decide new canonical storage rules or mutate vault truth from read/projection paths |
+| Runtime-state and local daemon owners (`@murphai/runtime-state`, `@murphai/device-syncd`, `@murphai/assistantd`, `@murphai/gateway-local`) | Workspace-private | Own explicit `.runtime/operations/**` and `.runtime/projections/**` paths, daemon control planes, local projections, and runtime path/versioning policy | Hide durable state in undocumented runtime paths or store canonical product truth in runtime state |
+| Assistant and hosted runtime owners (`@murphai/assistant-engine`, `@murphai/assistant-cli`, `@murphai/assistant-runtime`, `@murphai/operator-config`, hosted apps) | Workspace-private or app-local | Orchestrate assistant turns, bounded hosted workspace invocations, provider config, and hosted control/execution planes over explicit contracts | Treat assistant/session/runtime residue as canonical health or product truth |
 
 ## Safe Extension Patterns
 
@@ -49,11 +55,18 @@ Importers may prepare payloads, but they do not decide new canonical storage rul
 ### Add a new assistant-facing feature
 
 1. Decide whether the feature creates durable product state or only runtime residue.
-2. If it creates durable product state, give it a canonical vault home and owner before implementation.
+2. If it creates durable product state, give it a canonical vault home or explicit derived materialization and owner before implementation.
 3. If it is only runtime residue, keep it under `vault/.runtime/operations/assistant/**` with an explicit schema/schemaVersion seam.
 4. Do not ship user-facing or queryable feature data in assistant runtime as a temporary shortcut.
 
 Assistant runtime is for sessions, transcripts, receipts, outbox state, diagnostics, locks, and similar execution artifacts. It is not a product-state incubator.
+
+### Add a new runtime projection or operation store
+
+1. Decide whether the store is durable operational state under `.runtime/operations/**` or rebuildable projection state under `.runtime/projections/**`.
+2. Document the owning package, portability class, hosted snapshot behavior, and versioning/migration seam in `@murphai/runtime-state`.
+3. Use SQLite only inside those explicit runtime roots, never as canonical storage.
+4. Keep rebuild inputs clear: projections must be rebuildable from canonical vault evidence plus documented durable operational state.
 
 ### Add a new device/provider connector
 
@@ -73,10 +86,11 @@ If a query needs to "fix up" data while reading, move that logic into core migra
 
 ### Add a new CLI command
 
-1. Keep the command under `vault-cli`.
-2. Validate arguments at the edge.
-3. Delegate the actual operation to core, importers, or query packages.
-4. Return structured output and normalized contract errors.
+1. Put product-facing flows under `murph` when they operate on the active vault.
+2. Keep raw explicit-vault, automation, assistant/runtime, and integration flows available through `vault-cli`.
+3. Validate arguments at the edge.
+4. Delegate the actual operation to core, importers, or query packages.
+5. Return structured output and normalized contract errors.
 
 Do not let CLI commands write files directly, even for convenience helpers.
 
@@ -94,7 +108,7 @@ Storage and authority rules for this extension:
 CLI and package-boundary rules for this extension:
 
 - Keep generic health nouns on the `scaffold`, explicit `import-json`, `show`, and `list` pattern. For high-value agent-facing writes, prefer typed args/options with an explicit `import-json` fallback for advanced payloads; current examples include typed event adds, `samples add`, `supplement save`, `regimen save`, and blood-test `save`. Keep private Health Commons-backed adaptations on the `protocol import-json/show/list` surface, and keep public Health Commons lookup under `commons protocol`.
-- Keep canonical writes in `@murphai/core` even when health nouns originate from `@murphai/importers` or `@murphai/cli`.
+- Keep canonical writes in `@murphai/core` even when health nouns originate from `@murphai/importers` or the CLI surface.
 - Keep `@murphai/query` read-only. If the health read model needs repair logic, move that work into core mutation or validation paths instead.
 - If this area looks duplicated, simplify selector/helper plumbing around the seam rather than collapsing the seam itself. Any cleanup has to preserve the split between canonical memory, canonical typed preferences, stable reference docs, and derived wiki pages.
 - Do not introduce a generic "apply this assessment" mutation. This extension keeps assessment projection separate from noun-specific writes so operators can review proposals before they become canonical state.
@@ -109,8 +123,9 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 ## Integration Checklist
 
 - Contract docs still describe the new behavior truthfully.
-- Package ownership remains one-way: `contracts` -> `core`/`importers`/`query`/`cli`, with canonical writes only through core.
+- Package ownership remains one-way, with canonical writes only through core-owned mutation seams.
 - New paths under the vault root preserve Markdown truth, append-only JSONL, and immutable `raw/`, including provider snapshots under `raw/integrations/**`.
+- New runtime stores live only under documented `.runtime/operations/**` or `.runtime/projections/**` owners and are registered through `@murphai/runtime-state`.
 - Health-extension changes keep Markdown for curated current state and JSONL for append-only assessments, event-ledger health records, samples, and audit.
 - Device/provider connectors keep upstream provenance on canonical records via shared `externalRef` metadata rather than implicit importer-only state.
 - Fixtures and smoke flows cover the new behavior at the public surface, not just internals.
@@ -119,14 +134,12 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 
 ## Red Flags
 
-- Direct filesystem writes from `@murphai/cli`, `@murphai/importers`, or `@murphai/query`
+- Direct canonical filesystem writes from CLI, importer, assistant, runtime, or query packages outside core-owned mutation seams
 - Canonical state stored outside the documented vault layout
+- Canonical state stored in SQLite
 - Mutable artifacts under `raw/`
 - Assistant state written into the vault root
 - User-facing or queryable feature state landing in assistant runtime instead of canonical vault records
-- New public commands outside `vault-cli`
+- Product flows hidden behind `vault-cli` only when they should be available through `murph`
+- Raw explicit-vault/operator flows exposed only through `murph` when integrations need `vault-cli`
 - Cross-package imports that let non-core packages mutate canonical state implicitly
-
-## Current Integration Status
-
-As of 2026-03-16, the contract fence covers canonical device/provider imports as well: `@murphai/importers` can normalize provider payloads into a shared device-batch seam, while `@murphai/core` persists immutable provider snapshots under `raw/integrations/**` plus append-only events/samples with explicit upstream provenance. The remaining integration gap is still the TypeScript CLI runtime: its source now delegates to real package functions, but this workspace still lacks the `incur` toolchain needed to execute or typecheck `vault-cli` end to end.

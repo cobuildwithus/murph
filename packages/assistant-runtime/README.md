@@ -6,7 +6,7 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 
 Current responsibilities:
 
-- run one-shot hosted assistant/inbox/device-sync passes behind an explicit runtime context object
+- run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
