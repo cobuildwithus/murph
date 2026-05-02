@@ -38,17 +38,10 @@ biomarker:
     label: Symptoms should be absent or mild and improving; escalation is a stop condition.
     nuance: 'The safest interpretation is conservative: new or worsening withdrawal-like symptoms mean pause the self-experiment and seek appropriate care.'
   privateMetricBindings:
-
   -
-    source: browser_vault_metric
-    domain: body_state
-    metric: withdrawalSymptoms
-    unit: ordinal
-    preferred: true
-  -
-    source: browser_vault_signal_summary
-    accessor: alcohol.withdrawalSymptoms
-    unit: ordinal
+    source: metric
+    metricKey: withdrawal-symptoms
+    role: primary
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 7

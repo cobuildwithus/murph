@@ -37,17 +37,10 @@ biomarker:
     label: More can be useful, but stable sufficient deep sleep alongside good continuity is the target.
     nuance: Do not chase deep sleep minutes at the expense of total sleep, regular timing, or feeling restored. A higher number from a wearable is not automatically a healthier night.
   privateMetricBindings:
-
     -
-      source: browser_vault_metric
-      domain: sleep
-      metric: deepMinutes
-      unit: minutes
-      preferred: true
-    -
-      source: browser_vault_signal_summary
-      accessor: sleep.deepMinutes
-      unit: minutes
+      source: metric
+      metricKey: deep-sleep-minutes
+      role: primary
   trendDefaults:
     latestWindowDays: 14
     comparisonWindowDays: 30

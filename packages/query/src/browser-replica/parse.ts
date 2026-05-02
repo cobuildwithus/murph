@@ -29,7 +29,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     assistantSummary: parseAssistantSummary(record.assistantSummary, `${label}.assistantSummary`),
     entities: requireArray(record.entities, `${label}.entities`).map((entry, index) => parseEntity(entry, `${label}.entities[${index}]`)),
     generatedAt: requireIsoDateTime(record.generatedAt, `${label}.generatedAt`),
-    metricGoalProgressRows: readOptionalArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
+    metricGoalProgressRows: requireArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
     metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) => parseMetricRow(entry, `${label}.metricRows[${index}]`)),
     metricSelectionRows: requireArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) => parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)),
     policy: parsePolicy(record.policy, `${label}.policy`),
@@ -238,9 +238,6 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
   return value.slice();
-}
-function readOptionalArray(value: unknown, label: string): unknown[] {
-  return value === undefined ? [] : requireArray(value, label);
 }
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) throw new TypeError(`${label} must be a non-empty string.`);

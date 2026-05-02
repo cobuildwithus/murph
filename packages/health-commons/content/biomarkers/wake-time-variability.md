@@ -72,17 +72,10 @@ biomarker:
       - "caffeine"
       - "light exposure"
   privateMetricBindings:
-
     -
-      source: "browser_vault_metric"
-      domain: "sleep"
-      metric: "wakeTime"
-      unit: "local_time"
-      preferred: true
-    -
-      source: "browser_vault_signal_summary"
-      accessor: "sleep.finalWakeTime"
-      unit: "local_time"
+      source: metric
+      metricKey: wake-time
+      role: primary
 ---
 
 Wake-Time Variability is included for the Consistent Wake Time protocol because the run needs a measurable sleep-timing or safety signal.

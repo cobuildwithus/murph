@@ -51,6 +51,44 @@ describe("assertHostedOnboardingMutationOrigin", () => {
     ).not.toThrow();
   });
 
+  it("allows same-origin localhost development even when a canonical public origin is configured", async () => {
+    const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
+
+    expect(() =>
+      assertHostedOnboardingMutationOrigin(
+        new Request("http://localhost:3000/api/hosted-onboarding/invites", {
+          method: "POST",
+          headers: {
+            origin: "http://localhost:3000",
+          },
+        }),
+      )
+    ).not.toThrow();
+  });
+
+  it("rejects localhost development fallback in production when a canonical public origin is configured", async () => {
+    mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
+      isProduction: true,
+      publicBaseUrl: "https://app.example.test",
+    }));
+
+    const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
+
+    expect(() =>
+      assertHostedOnboardingMutationOrigin(
+        new Request("http://localhost:3000/api/hosted-onboarding/invites", {
+          method: "POST",
+          headers: {
+            origin: "http://localhost:3000",
+          },
+        }),
+      )
+    ).toThrowError(expect.objectContaining({
+      code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
+      httpStatus: 403,
+    }));
+  });
+
   it("rejects requests without an Origin header", async () => {
     const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
 

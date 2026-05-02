@@ -218,90 +218,14 @@ export const HEALTH_COMMONS_SOURCE_EXTRACTION_STATUSES = [
 export type HealthCommonsSourceExtractionStatus =
   (typeof HEALTH_COMMONS_SOURCE_EXTRACTION_STATUSES)[number];
 
-export const HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS = [
-  "activity",
-  "body_state",
-  "recovery",
-  "sleep",
+export const HEALTH_COMMONS_BIOMARKER_METRIC_BINDING_ROLES = [
+  "primary",
+  "secondary",
+  "context",
 ] as const;
 
-export type HealthCommonsBiomarkerMetricDomain =
-  (typeof HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS)[number];
-
-export const HEALTH_COMMONS_BROWSER_VAULT_METRIC_BINDINGS = {
-  activity: [
-    "activeCalories",
-    "activityScore",
-    "altitudeChangeMeters",
-    "averageHeartRate",
-    "dayStrain",
-    "distanceKm",
-    "estimatedVo2Max",
-    "maxHeartRate",
-    "percentRecorded",
-    "sessionCount",
-    "sessionMinutes",
-    "steps",
-    "totalCalories",
-    "totalElevationGainMeters",
-    "workoutStrain",
-  ],
-  body_state: [
-    "alcoholFreeDay",
-    "alt",
-    "ast",
-    "bmi",
-    "bodyFatPercentage",
-    "craving",
-    "drinks",
-    "ggt",
-    "glucose",
-    "mood",
-    "stressLevel",
-    "temperature",
-    "temperatureDeviation",
-    "weightKg",
-    "withdrawalSymptoms",
-  ],
-  recovery: [
-    "hrv",
-    "lowestHeartRate",
-    "readinessScore",
-    "recoveryScore",
-    "respiratoryRate",
-    "restingHeartRate",
-    "spo2",
-    "temperatureDeviation",
-  ],
-  sleep: [
-    "awakeMinutes",
-    "deepMinutes",
-    "hrv",
-    "lightMinutes",
-    "remMinutes",
-    "respiratoryRate",
-    "sleepConsistency",
-    "sleepEfficiency",
-    "sleepPerformance",
-    "sleepScore",
-    "spo2",
-    "timeInBedMinutes",
-    "totalMinutes",
-    "totalSleepMinutes",
-    "wakeTime",
-  ],
-} as const satisfies Record<HealthCommonsBiomarkerMetricDomain, readonly string[]>;
-
-export type HealthCommonsBrowserVaultMetricBinding =
-  (typeof HEALTH_COMMONS_BROWSER_VAULT_METRIC_BINDINGS)[HealthCommonsBiomarkerMetricDomain][number];
-
-export function isKnownHealthCommonsBrowserVaultMetricBinding(
-  domain: HealthCommonsBiomarkerMetricDomain,
-  metric: string,
-): boolean {
-  const metrics: readonly string[] = HEALTH_COMMONS_BROWSER_VAULT_METRIC_BINDINGS[domain];
-  return metrics.includes(metric);
-}
+export type HealthCommonsBiomarkerMetricBindingRole =
+  (typeof HEALTH_COMMONS_BIOMARKER_METRIC_BINDING_ROLES)[number];
 
 export const HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS = [
   "higher",
@@ -1593,55 +1517,12 @@ export type HealthCommonsBiomarkerDirection = z.infer<
 
 export const healthCommonsBiomarkerPrivateMetricBindingSchema = z
   .object({
-    source: z.enum(["browser_vault_metric", "browser_vault_signal_summary"]),
-    domain: z.enum(HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS).optional(),
-    metric: shortStringSchema.optional(),
-    accessor: shortStringSchema.optional(),
+    source: z.literal("metric"),
+    metricKey: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+    role: z.enum(HEALTH_COMMONS_BIOMARKER_METRIC_BINDING_ROLES).optional(),
     unit: shortStringSchema.optional(),
-    preferred: z.boolean().optional(),
   })
-  .strict()
-  .superRefine((binding, context) => {
-    if (binding.source === "browser_vault_metric") {
-      if (!binding.domain) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "browser_vault_metric bindings must include domain.",
-          path: ["domain"],
-        });
-      }
-      if (!binding.metric) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "browser_vault_metric bindings must include metric.",
-          path: ["metric"],
-        });
-      } else if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(binding.metric)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "browser_vault_metric bindings must use canonical browser-vault metric keys, not provider field paths.",
-          path: ["metric"],
-        });
-      } else if (
-        binding.domain
-        && !isKnownHealthCommonsBrowserVaultMetricBinding(binding.domain, binding.metric)
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "browser_vault_metric bindings must reference a known browser-vault domain/metric pair.",
-          path: ["metric"],
-        });
-      }
-    }
-
-    if (binding.source === "browser_vault_signal_summary" && !binding.accessor) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "browser_vault_signal_summary bindings must include accessor.",
-        path: ["accessor"],
-      });
-    }
-  });
+  .strict();
 
 export type HealthCommonsBiomarkerPrivateMetricBinding = z.infer<
   typeof healthCommonsBiomarkerPrivateMetricBindingSchema

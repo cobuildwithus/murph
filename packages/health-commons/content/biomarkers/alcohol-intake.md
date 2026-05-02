@@ -38,17 +38,10 @@ biomarker:
     label: Lower intake or more alcohol-free days may be a goal after the challenge, but the protocol itself focuses on a defined alcohol-free interval.
     nuance: A post-challenge increase, rebound, or unsafe pattern is a reason to review the off-ramp or seek support rather than to treat the experiment as a success.
   privateMetricBindings:
-
   -
-    source: browser_vault_metric
-    domain: body_state
-    metric: drinks
-    unit: drinks
-    preferred: true
-  -
-    source: browser_vault_signal_summary
-    accessor: alcohol.drinksPerWeek
-    unit: drinks/week
+    source: metric
+    metricKey: drinks
+    role: primary
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 30

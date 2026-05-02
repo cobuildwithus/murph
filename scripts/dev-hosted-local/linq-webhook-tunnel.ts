@@ -33,6 +33,7 @@ interface LocalHostedWebTarget {
 
 interface LinqWebhookRegistrationCache {
   fingerprint: string;
+  secretVerified: true;
   subscriptionId: string | null;
   targetUrl: string;
   updatedAt: string;
@@ -42,8 +43,14 @@ interface LinqWebhookSubscriptionSummary {
   id: string | null;
   isActive: boolean;
   phoneNumbers: readonly string[] | null;
+  signingSecret: string | null;
   subscribedEvents: readonly string[];
   targetUrl: string | null;
+}
+
+interface LinqWebhookSubscriptionMatch {
+  secretStatus: "mismatch" | "unavailable" | "verified";
+  subscription: LinqWebhookSubscriptionSummary;
 }
 
 export interface HostedLocalLinqWebhookSetup {
@@ -184,12 +191,34 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
     phoneNumbers: input.setup.phoneNumbers,
     subscribedEvents: [HOSTED_LOCAL_LINQ_WEBHOOK_EVENT],
     targetUrl: input.setup.targetUrl,
+    webhookSecret,
   });
   if (existingRegistration !== null) {
+    if (existingRegistration.secretStatus === "mismatch") {
+      throw new Error(
+        [
+          "Existing Linq webhook subscription uses a signing secret that does not match local LINQ_WEBHOOK_SECRET.",
+          "Update the local secret to the subscription secret, or recreate the subscription expected by this environment.",
+        ].join(" "),
+      );
+    }
+    if (existingRegistration.secretStatus === "unavailable") {
+      (input.stderrTarget ?? process.stderr).write(
+        [
+          `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel},`,
+          "but Linq did not return its signing secret; continuing without updating the local registration cache.",
+          "If webhook callbacks fail signature verification, recreate the Linq webhook subscription for this environment.",
+          "\n",
+        ].join(" "),
+      );
+      return;
+    }
+
     if (cachePath) {
       await writeLinqWebhookRegistrationCache(cachePath, {
         fingerprint: registrationFingerprint,
-        subscriptionId: existingRegistration.id,
+        secretVerified: true,
+        subscriptionId: existingRegistration.subscription.id,
         targetUrl: input.setup.targetUrl,
         updatedAt: new Date().toISOString(),
       });
@@ -223,6 +252,7 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   if (cachePath) {
     await writeLinqWebhookRegistrationCache(cachePath, {
       fingerprint: registrationFingerprint,
+      secretVerified: true,
       subscriptionId: normalizeOptionalString(result.id),
       targetUrl: input.setup.targetUrl,
       updatedAt: new Date().toISOString(),
@@ -358,7 +388,8 @@ async function findExistingLinqWebhookSubscription(input: {
   phoneNumbers: readonly string[] | null;
   subscribedEvents: readonly string[];
   targetUrl: string;
-}): Promise<LinqWebhookSubscriptionSummary | null> {
+  webhookSecret: string;
+}): Promise<LinqWebhookSubscriptionMatch | null> {
   const token = normalizeOptionalString(input.env.LINQ_API_TOKEN);
   if (!token) {
     throw new Error("LINQ_API_TOKEN must be set before listing Linq webhooks.");
@@ -377,12 +408,40 @@ async function findExistingLinqWebhookSubscription(input: {
 
   const payload: unknown = await response.json();
   const subscriptions = parseLinqWebhookSubscriptionList(payload);
-  return subscriptions.find((subscription) =>
+  const candidates = subscriptions.filter((subscription) =>
     subscription.isActive
     && subscription.targetUrl === input.targetUrl
     && eventSetsEqual(subscription.subscribedEvents, input.subscribedEvents)
     && phoneNumberSetsEqual(subscription.phoneNumbers, input.phoneNumbers)
-  ) ?? null;
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const verified = candidates.find((subscription) =>
+    subscription.signingSecret === input.webhookSecret
+  );
+  if (verified) {
+    return {
+      secretStatus: "verified",
+      subscription: verified,
+    };
+  }
+
+  const mismatched = candidates.find((subscription) =>
+    subscription.signingSecret !== null
+  );
+  if (mismatched) {
+    return {
+      secretStatus: "mismatch",
+      subscription: mismatched,
+    };
+  }
+
+  return {
+    secretStatus: "unavailable",
+    subscription: candidates[0],
+  };
 }
 
 async function fetchLinqWebhookSubscriptions(input: {
@@ -461,6 +520,7 @@ function parseLinqWebhookSubscriptionSummary(
     id: normalizeOptionalString(value.id),
     isActive: value.is_active === true,
     phoneNumbers: normalizeLinqOptionalStringList(value.phone_numbers),
+    signingSecret: normalizeOptionalString(value.signing_secret),
     subscribedEvents: normalizeLinqOptionalStringList(value.subscribed_events) ?? [],
     targetUrl: normalizeOptionalString(value.target_url),
   };
@@ -582,6 +642,7 @@ function parseLinqWebhookRegistrationCache(
   }
   if (
     typeof value.fingerprint !== "string"
+    || value.secretVerified !== true
     || typeof value.targetUrl !== "string"
     || typeof value.updatedAt !== "string"
   ) {
@@ -593,6 +654,7 @@ function parseLinqWebhookRegistrationCache(
 
   return {
     fingerprint: value.fingerprint,
+    secretVerified: true,
     subscriptionId: value.subscriptionId,
     targetUrl: value.targetUrl,
     updatedAt: value.updatedAt,

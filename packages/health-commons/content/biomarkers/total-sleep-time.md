@@ -82,17 +82,10 @@ biomarker:
       - "caffeine"
       - "light exposure"
   privateMetricBindings:
-
     -
-      source: "browser_vault_metric"
-      domain: "sleep"
-      metric: "totalMinutes"
-      unit: "minutes"
-      preferred: true
-    -
-      source: "browser_vault_signal_summary"
-      accessor: "sleep.totalMinutes"
-      unit: "minutes"
+      source: metric
+      metricKey: total-sleep-minutes
+      role: primary
 ---
 
 Total Sleep Time is included for the Consistent Wake Time protocol because the run needs a measurable sleep-timing or safety signal.

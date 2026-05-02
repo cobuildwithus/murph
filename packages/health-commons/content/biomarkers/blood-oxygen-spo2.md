@@ -42,22 +42,10 @@ biomarker:
     label: "Stable in your normal range is usually the goal."
     nuance: "For many healthy sea-level adults, SpO₂ already sits near a physiological ceiling. Higher is not an experiment target; repeated lows, drops from baseline, or lows paired with shortness of breath, chest pain, confusion, bluish lips or nails, or unusual fatigue deserve medical context."
   privateMetricBindings:
-
     -
-      source: browser_vault_metric
-      domain: sleep
-      metric: spo2
-      unit: "%"
-      preferred: true
-    -
-      source: browser_vault_metric
-      domain: recovery
-      metric: spo2
-      unit: "%"
-    -
-      source: browser_vault_signal_summary
-      accessor: sleep.spo2
-      unit: "%"
+      source: metric
+      metricKey: spo2
+      role: primary
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 30

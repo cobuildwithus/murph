@@ -27,10 +27,10 @@ Done:
 - Security/privacy and simplify audits found the same medium issue: remote matching accepted subscriptions with extra events; patched to require exact event-set equality and added regression coverage.
 
 Now:
-- Rerunning verification after audit fix.
+- Running final completion review.
 
 Next:
-- Run final completion review and scoped commit.
+- Apply any final review fixes, then create scoped commit.
 
 Open questions (UNCONFIRMED if needed):
 - None currently.
@@ -45,4 +45,5 @@ Verification:
 - `pnpm exec vitest run --config scripts/vitest.config.ts scripts/dev-hosted-local/linq-webhook-tunnel.test.ts --no-coverage` passed.
 - `pnpm exec vitest run --config scripts/vitest.config.ts scripts/dev-hosted-local/stack.test.ts --no-coverage` passed.
 - Live focused startup command with runner bundle/smoke and Stripe listener disabled reached hosted-local ready token with Linq registration enabled.
-- `pnpm typecheck` passed before audit fix; rerun pending.
+- `pnpm exec vitest run --config scripts/vitest.config.ts scripts/dev-hosted-local/linq-webhook-tunnel.test.ts scripts/dev-hosted-local/stack.test.ts --no-coverage` passed after audit fix.
+- `pnpm typecheck` passed after audit fix.

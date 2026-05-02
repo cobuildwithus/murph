@@ -565,6 +565,43 @@ export const measurementEntrySchema = z
   })
   .strict();
 
+const goalMetricTargetComparatorSchema = z.enum(["<", "<=", ">", ">=", "between"]);
+const goalMetricTargetEvaluationSchema = z.union([
+  z.object({ kind: z.literal("selected-value") }).strict(),
+  z.object({ kind: z.literal("latest-lab") }).strict(),
+  z.object({
+    kind: z.literal("rolling-window"),
+    statistic: z.enum(["mean", "median"]),
+    windowDays: integerSchema(1, 365),
+  }).strict(),
+]);
+
+export const goalMetricTargetSchema = z
+  .object({
+    targetId: patternedString(SLUG_PATTERN),
+    kind: z.literal("metric"),
+    metricKey: patternedString(SLUG_PATTERN),
+    biomarkerKey: healthCommonsKeySchema.optional(),
+    comparator: goalMetricTargetComparatorSchema,
+    value: numberSchema(),
+    unit: patternedString(UNIT_PATTERN),
+    highValue: numberSchema().optional(),
+    evaluation: goalMetricTargetEvaluationSchema.default({ kind: "selected-value" }),
+    startAt: isoDateString().optional(),
+    targetAt: isoDateString().optional(),
+    note: boundedString(1, 4000).optional(),
+  })
+  .strict()
+  .superRefine((target, context) => {
+    if (target.comparator === "between" && target.highValue === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Metric targets using between require highValue.",
+        path: ["highValue"],
+      });
+    }
+  });
+
 export const workoutUnitPreferenceValuesSchema = z
   .object({
     weight: workoutWeightUnitPreferenceValueSchema.optional(),

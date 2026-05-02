@@ -64,7 +64,9 @@ it("renders a compact latest private value when available", () => {
 });
 
 it("wires browser-vault metric selections into biomarker browse cards", async () => {
-  const { BiomarkersPageClient } = await import("../app/biomarkers/biomarkers-page-client");
+  const { BiomarkersPageClient } = await import(
+    "../app/(dashboard)/biomarkers/biomarkers-page-client"
+  );
 
   browserVaultMock.value = {
     client: {

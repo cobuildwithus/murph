@@ -1,14 +1,22 @@
 import { Buffer } from "node:buffer";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedGcpKmsClientFromEnv } from "../src/lib/hosted-crypto/gcp-kms";
+
+vi.mock("@vercel/oidc", () => ({
+  getVercelOidcToken: vi.fn(async () => "vercel-oidc-token"),
+}));
 
 const LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
 const LOCAL_KMS_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
 const LOCAL_SIGN_KEY_VERSION =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("hosted crypto GCP KMS access-token guard", () => {
   it("rejects static GCP access tokens in production", () => {
@@ -56,6 +64,86 @@ describe("hosted crypto GCP KMS access-token guard", () => {
         [key]: value,
       })).toThrow(new RegExp(`${key}.*not allowed in production`, "u"));
     }
+  });
+});
+
+describe("hosted crypto GCP Workload Identity Federation", () => {
+  it("uses an IAMCredentials-capable federated token before minting a KMS-scoped service-account token", async () => {
+    const seenRequests: Array<{ body: string; headers: Headers; url: string }> = [];
+    const fetchMock: typeof fetch = async (input, init) => {
+      const url = String(input);
+      seenRequests.push({
+        body: typeof init?.body === "string" ? init.body : String(init?.body ?? ""),
+        headers: new Headers(init?.headers),
+        url,
+      });
+
+      if (url === "https://sts.googleapis.com/v1/token") {
+        return jsonResponse({
+          access_token: "federated-access-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        });
+      }
+
+      if (url === "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/hosted-crypto%40example.test:generateAccessToken") {
+        return jsonResponse({
+          accessToken: "kms-service-account-token",
+          expireTime: "2099-01-01T00:00:00Z",
+        });
+      }
+
+      if (url === `${LOCAL_KMS_KEY_NAME}:encrypt`.replace(
+        "projects/",
+        "https://cloudkms.googleapis.com/v1/projects/",
+      )) {
+        return jsonResponse({
+          ciphertext: "encrypted-root-key",
+          name: LOCAL_KMS_KEY_NAME,
+        });
+      }
+
+      return jsonResponse({ error: { message: `unexpected test URL ${url}` } }, { status: 404 });
+    };
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ENV: "production",
+      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
+      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
+      NODE_ENV: "test",
+    });
+
+    await expect(client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: LOCAL_KMS_KEY_NAME,
+      plaintext: new Uint8Array([1, 2, 3]),
+    })).resolves.toEqual({
+      ciphertext: "encrypted-root-key",
+      keyName: LOCAL_KMS_KEY_NAME,
+    });
+
+    const stsRequest = seenRequests.find((request) =>
+      request.url === "https://sts.googleapis.com/v1/token"
+    );
+    const iamRequest = seenRequests.find((request) =>
+      request.url.includes(":generateAccessToken")
+    );
+    const kmsRequest = seenRequests.find((request) =>
+      request.url.includes(":encrypt")
+    );
+
+    expect(stsRequest).toBeDefined();
+    expect(new URLSearchParams(stsRequest?.body).get("scope")).toBe(
+      "https://www.googleapis.com/auth/iam",
+    );
+    expect(iamRequest?.headers.get("authorization")).toBe("Bearer federated-access-token");
+    expect(JSON.parse(iamRequest?.body ?? "{}")).toMatchObject({
+      scope: ["https://www.googleapis.com/auth/cloudkms"],
+    });
+    expect(kmsRequest?.headers.get("authorization")).toBe("Bearer kms-service-account-token");
   });
 });
 
@@ -155,4 +243,12 @@ async function createLocalSigningKey(): Promise<{
     privateJwkJson: JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.privateKey)),
     publicKey: keyPair.publicKey,
   };
+}
+
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(body), {
+    headers: { "Content-Type": "application/json" },
+    status: init?.status ?? 200,
+    statusText: init?.statusText,
+  });
 }

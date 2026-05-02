@@ -256,6 +256,9 @@ const checkedHealthEntityDefinitions = [
             relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
             relatedExperimentIds: helpers.firstStringArray(attributes, ["relatedExperimentIds"]),
             domains: helpers.firstStringArray(attributes, ["domains"]),
+            metricTargets: Array.isArray(attributes.metricTargets)
+              ? attributes.metricTargets
+              : [],
           };
         },
       },

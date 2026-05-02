@@ -34,14 +34,9 @@ biomarker:
     label: Higher or stable can be better when safety and burden are acceptable.
     nuance: Read mood alongside stop conditions, recovery burden, sleep, and adherence. A mood lift that requires unsafe exposure is not a positive result.
   privateMetricBindings:
-  - source: browser_vault_signal_summary
-    accessor: self_report.mood
-    unit: score
-    preferred: true
-  - source: browser_vault_metric
-    domain: body_state
-    metric: mood
-    unit: score
+  - source: metric
+    metricKey: mood
+    role: primary
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 7

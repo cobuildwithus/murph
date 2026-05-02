@@ -31,17 +31,10 @@ biomarker:
     label: Lower can be better, but context matters.
     nuance: Illness, under-recovery, alcohol, travel, dehydration, medication changes, and device changes can all raise resting heart rate temporarily.
   privateMetricBindings:
-
     -
-      source: browser_vault_metric
-      domain: recovery
-      metric: restingHeartRate
-      unit: bpm
-      preferred: true
-    -
-      source: browser_vault_signal_summary
-      accessor: recovery.restingHeartRate
-      unit: bpm
+      source: metric
+      metricKey: resting-heart-rate
+      role: primary
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 30

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -33,11 +34,16 @@ vi.mock("@/src/components/dashboard/sidebar", () => ({
   },
 }));
 
-import BiomarkersLayout from "../app/biomarkers/layout";
+import DashboardLayout from "../app/(dashboard)/layout";
 
-test("BiomarkersLayout renders biomarker pages inside the shared dashboard shell", async () => {
+test("the dashboard layout is the single shell owner for biomarker pages", async () => {
+  assert.equal(
+    existsSync(new URL("../app/(dashboard)/biomarkers/layout.tsx", import.meta.url)),
+    false,
+  );
+
   const markup = renderToStaticMarkup(
-    await BiomarkersLayout({
+    await DashboardLayout({
       children: createElement(
         "div",
         { "data-biomarker-page": "true" },

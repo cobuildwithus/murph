@@ -31,6 +31,9 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
     resolveMetricDefinitionForBiomarker("biomarker:deep-sleep-minutes")?.biomarkerKey,
     "biomarker:deep-sleep-minutes",
   );
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:blood-oxygen-spo2")?.key, "spo2");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:estimated-vo2max")?.key, "estimated-vo2-max");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:apolipoprotein-b")?.key, "apob");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],
@@ -127,6 +130,16 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "beats/minute",
     value: 58,
   }).warnings[0]?.code, "UNIT_NOT_NORMALIZED");
+  assert.equal(normalizeMetricValue({
+    metricKey: "spo2",
+    unit: "%",
+    value: 97.2,
+  }).canonicalValue, 97.2);
+  assert.equal(normalizeMetricValue({
+    metricKey: "estimated-vo2-max",
+    unit: "ml/kg/min",
+    value: 42.4,
+  }).canonicalValue, 42.4);
   assert.deepEqual(normalizeMetricValue({
     metricKey: "custom score",
     unit: "",
@@ -138,13 +151,13 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     warnings: [],
   });
 
-  const unsupported = normalizeMetricValue({
+  const apoB = normalizeMetricValue({
     metricKey: "apob",
     unit: "g/L",
     value: 0.87,
   });
-  assert.equal(unsupported.canonicalValue, null);
-  assert.equal(unsupported.warnings[0]?.code, "UNIT_NOT_NORMALIZED");
+  assert.equal(apoB.canonicalValue, 87);
+  assert.deepEqual(apoB.warnings, []);
 });
 
 test("selects metric points by policy and exposes provenance warnings", () => {

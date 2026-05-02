@@ -31,6 +31,9 @@ import {
 } from "./search-shared.ts";
 import { summarizeDailySamples } from "./summaries.ts";
 import {
+  normalizeMetricKey,
+  resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
   selectMetricValue,
   type GoalMetricTarget,
@@ -38,7 +41,10 @@ import {
   type MetricPoint,
   type MetricSelection,
 } from "@murphai/health-metrics";
-import { extractMetricPointsFromCanonicalEntities } from "./metrics/index.ts";
+import {
+  extractMetricPointsFromCanonicalEntities,
+  extractMetricPointsFromSampleSummaries,
+} from "./metrics/index.ts";
 import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
@@ -267,7 +273,7 @@ export async function listMetricPointsRuntime(
   filters: QueryMetricPointFilters = {},
 ): Promise<MetricPoint[]> {
   const location = await ensureFreshQueryProjection(vaultRoot);
-  return listStoredMetricPoints(location, filters);
+  return listStoredMetricPoints(location, normalizeMetricPointFilters(filters));
 }
 
 export async function selectMetricRuntime(input: {
@@ -276,13 +282,14 @@ export async function selectMetricRuntime(input: {
   now?: string;
   vaultRoot: string;
 }): Promise<MetricSelection> {
-  const points = await listMetricPointsRuntime(input.vaultRoot, {
+  const filters = normalizeMetricPointFilters({
     biomarkerKey: input.biomarkerKey,
     metricKey: input.metricKey,
   });
+  const points = await listMetricPointsRuntime(input.vaultRoot, filters);
   return selectMetricValue({
-    biomarkerKey: input.biomarkerKey,
-    metricKey: input.metricKey,
+    biomarkerKey: filters.biomarkerKey,
+    metricKey: filters.metricKey,
     now: input.now,
     points,
   });
@@ -325,11 +332,20 @@ async function rebuildQueryProjectionWithManifest(
   const snapshot = await readVaultSourceStrict(vaultRoot);
   const projectedEntities = snapshot.entities.filter((entity) => entity.family !== "sample");
   const sampleEntities = snapshot.entities.filter((entity) => entity.family === "sample");
-  const metricPoints = extractMetricPointsFromCanonicalEntities(snapshot.entities);
+  const snapshotReadModel = createVaultReadModel({
+    metadata: snapshot.metadata,
+    vaultRoot,
+    entities: snapshot.entities,
+  });
+  const dailySampleSummaries = summarizeDailySamples(snapshotReadModel);
+  const metricPoints = [
+    ...extractMetricPointsFromCanonicalEntities(snapshot.entities),
+    ...extractMetricPointsFromSampleSummaries(dailySampleSummaries),
+  ];
   const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
   const searchDocuments = [
     ...materializeSearchDocuments(projectedEntities),
-    ...materializeSampleSummarySearchDocuments(snapshot),
+    ...materializeSummaryDocuments(dailySampleSummaries),
   ];
   const database = openQueryProjectionDatabase(location, { create: true });
 
@@ -792,6 +808,20 @@ function normalizeMetricPointLimit(value: number): number {
     return 1_000;
   }
   return Math.min(value, 10_000);
+}
+
+function normalizeMetricPointFilters(filters: QueryMetricPointFilters): QueryMetricPointFilters {
+  const definition = filters.metricKey
+    ? resolveMetricDefinition(filters.metricKey)
+    : filters.biomarkerKey
+      ? resolveMetricDefinitionForBiomarker(filters.biomarkerKey)
+      : null;
+  return {
+    ...filters,
+    ...(filters.metricKey || definition ? {
+      metricKey: definition?.key ?? (filters.metricKey ? normalizeMetricKey(filters.metricKey) : undefined),
+    } : {}),
+  };
 }
 
 function listStoredMetricTargets(location: QueryProjectionLocation): QueryMetricTargetRow[] {

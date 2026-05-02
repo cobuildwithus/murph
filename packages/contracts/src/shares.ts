@@ -19,6 +19,7 @@ import {
 } from "./constants.ts";
 import {
   foodNutritionSchema,
+  goalMetricTargetSchema,
   workoutTemplateSchema,
   FAMILY_MEMBER_LIMITS,
   GENETIC_VARIANT_LIMITS,
@@ -264,6 +265,7 @@ export const goalUpsertPayloadSchema = withContractMetadata(
       }).optional(),
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
+      metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/goal-upsert-payload.schema.json",
@@ -293,6 +295,7 @@ export const goalUpsertPatchPayloadSchema = withContractMetadata(
       }).optional(),
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
+      metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/goal-upsert-patch-payload.schema.json",
