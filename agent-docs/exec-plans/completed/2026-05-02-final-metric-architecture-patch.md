@@ -1,8 +1,8 @@
 # Land final production metric architecture patch
 
-Status: active
+Status: completed
 Created: 2026-05-02
-Updated: 2026-05-02
+Updated: 2026-05-03
 
 ## Goal
 
@@ -65,10 +65,19 @@ Updated: 2026-05-02
 
 ## Verification
 
-- Commands to run:
+- Passed:
   - `pnpm --filter @murphai/health-metrics typecheck`
-  - `pnpm --filter @murphai/query test browser-vault`
+  - `pnpm --filter @murphai/contracts typecheck`
+  - `pnpm --filter @murphai/query typecheck`
   - `pnpm --filter @murphai/query test metric-points`
+  - `pnpm --filter @murphai/query test browser-vault`
   - `pnpm typecheck`
-- Expected outcomes:
-  - All pass, or failures are identified as unrelated pre-existing blockers with focused evidence for this diff.
+  - `pnpm test:smoke`
+  - `git diff --check -- packages/query/src/metrics/index.ts`
+
+## Completion notes
+
+- Bulk patch landed in `21dae046b`.
+- Follow-up local fix adds the required `grain: "day"` field to glucose sample-summary `MetricPoint` extraction.
+- Unrelated hosted-onboarding files remain dirty and are not part of this plan closeout.
+Completed: 2026-05-03
