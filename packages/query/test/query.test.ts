@@ -47,6 +47,10 @@ import {
   summarizeWearableSourceHealth,
 } from "../src/index.ts";
 import {
+  listMetricTargetsRuntime,
+  selectMetricGoalProgressRuntime,
+} from "../src/query-projection.ts";
+import {
   type CanonicalEntity,
   linkTargetIds,
   normalizeCanonicalLinks,
@@ -3421,6 +3425,237 @@ test("rebuildQueryProjection materializes the shared query projection and status
     assert.equal(statusAfter.entityCount, rebuilt.entityCount);
     assert.equal(statusAfter.searchDocumentCount, rebuilt.searchDocumentCount);
     assert.equal(statusAfter.fresh, true);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("query projection runtime goal progress resolves stored metric targets and metric-point rows", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const target = {
+    biomarkerKey: "biomarker:apob",
+    comparator: "<",
+    evaluation: {
+      kind: "latest-lab",
+      preferCollectedAt: true,
+    },
+    kind: "metric",
+    metricKey: "apob",
+    selectionPolicyOverride: {
+      kind: "latest-lab",
+      preferCollectedAt: true,
+    },
+    targetId: "apob-under-85",
+    unit: "mg/dL",
+    value: 85,
+  } as const;
+  const labPoint = {
+    biomarkerKey: "biomarker:apob",
+    canonicalUnit: "mg/dL",
+    canonicalValue: 82,
+    comparator: null,
+    confidence: "high",
+    context: { fastingStatus: "fasting" },
+    effectiveDate: "2026-04-29",
+    grain: "event",
+    id: "metric-point:apob:2026-04-29:lab:0",
+    metricKey: "apob",
+    observedAt: "2026-04-29T07:30:00.000Z",
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: "Function Health",
+      provider: null,
+      rawRefs: [],
+      sourceLabel: "Function Health",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point",
+    source: {
+      family: "event",
+      kind: "test-result",
+      path: "ledger/events/2026/2026-04.jsonl",
+      recordId: "evt_apob_lab",
+      resultIndex: 0,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: "mg/dL",
+    value: 82,
+  } as const;
+  const wearablePoint = {
+    biomarkerKey: "biomarker:apob",
+    canonicalUnit: "mg/dL",
+    canonicalValue: 90,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    effectiveDate: "2026-04-30",
+    grain: "day",
+    id: "metric-point:apob:2026-04-30:wearable-summary:0",
+    metricKey: "apob",
+    observedAt: "2026-04-30T08:00:00.000Z",
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: null,
+      rawRefs: [],
+      sourceLabel: "Wearable summary",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point",
+    source: {
+      family: "derived",
+      kind: "wearable-summary",
+      path: "ledger/events/2026/2026-04.jsonl",
+      recordId: "device_apob",
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: "mg/dL",
+    value: 90,
+  } as const;
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      const insertMetricPoint = database.prepare(`
+        INSERT INTO query_metric_points (
+          id,
+          sort_rank,
+          metric_key,
+          biomarker_key,
+          value,
+          text_value,
+          comparator,
+          unit,
+          canonical_value,
+          canonical_unit,
+          observed_at,
+          effective_date,
+          recorded_at,
+          reported_at,
+          grain,
+          statistic,
+          source_family,
+          source_kind,
+          source_record_id,
+          source_result_index,
+          source_path,
+          confidence,
+          provenance_json,
+          context_json,
+          metric_point_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insertMetricPoint.run(
+        labPoint.id,
+        0,
+        labPoint.metricKey,
+        labPoint.biomarkerKey,
+        labPoint.value,
+        labPoint.textValue,
+        labPoint.comparator,
+        labPoint.unit,
+        labPoint.canonicalValue,
+        labPoint.canonicalUnit,
+        labPoint.observedAt,
+        labPoint.effectiveDate,
+        labPoint.recordedAt,
+        labPoint.reportedAt,
+        labPoint.grain,
+        labPoint.statistic,
+        labPoint.source.family,
+        labPoint.source.kind,
+        labPoint.source.recordId,
+        labPoint.source.resultIndex,
+        labPoint.source.path,
+        labPoint.confidence,
+        JSON.stringify(labPoint.provenance),
+        JSON.stringify(labPoint.context),
+        JSON.stringify(labPoint),
+      );
+      insertMetricPoint.run(
+        wearablePoint.id,
+        1,
+        wearablePoint.metricKey,
+        wearablePoint.biomarkerKey,
+        wearablePoint.value,
+        wearablePoint.textValue,
+        wearablePoint.comparator,
+        wearablePoint.unit,
+        wearablePoint.canonicalValue,
+        wearablePoint.canonicalUnit,
+        wearablePoint.observedAt,
+        wearablePoint.effectiveDate,
+        wearablePoint.recordedAt,
+        wearablePoint.reportedAt,
+        wearablePoint.grain,
+        wearablePoint.statistic,
+        wearablePoint.source.family,
+        wearablePoint.source.kind,
+        wearablePoint.source.recordId,
+        wearablePoint.source.resultIndex,
+        wearablePoint.source.path,
+        wearablePoint.confidence,
+        JSON.stringify(wearablePoint.provenance),
+        JSON.stringify(wearablePoint.context),
+        JSON.stringify(wearablePoint),
+      );
+
+      database.prepare(`
+        INSERT INTO query_metric_targets (
+          id,
+          goal_id,
+          metric_key,
+          biomarker_key,
+          comparator,
+          target_value,
+          target_unit,
+          target_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "goal_apob:apob-under-85",
+        "goal_apob",
+        target.metricKey,
+        target.biomarkerKey,
+        target.comparator,
+        target.value,
+        target.unit,
+        JSON.stringify(target),
+      );
+    } finally {
+      database.close();
+    }
+
+    const targets = await listMetricTargetsRuntime(vaultRoot);
+    assert.equal(targets.length, 1);
+    assert.equal(targets[0]?.goalId, "goal_apob");
+    assert.deepEqual(targets[0]?.target, target);
+
+    const progress = await selectMetricGoalProgressRuntime({
+      goalId: "goal_apob",
+      targetId: "apob-under-85",
+      vaultRoot,
+    });
+
+    assert.ok(progress);
+    assert.equal(progress.goalId, "goal_apob");
+    assert.equal(progress.metricKey, "apob");
+    assert.equal(progress.currentValue, 82);
+    assert.equal(progress.currentValueLabel, "82");
+    assert.equal(progress.deltaToTarget, -3);
+    assert.equal(progress.selectedPointIds[0], labPoint.id);
+    assert.equal(progress.status, "met");
+    assert.equal(progress.targetValueLabel, "<85 mg/dL");
+    assert.deepEqual(progress.warnings.map((warning) => warning.code), ["MIXED_SOURCES"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

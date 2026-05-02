@@ -142,7 +142,11 @@ function createBasePanel(input: SelectBrowserVaultBiomarkerPanelInput, generated
     primary: null,
     privacy: { containsPrivateHealthData: true, defaultShare: "private", shareRequiresExplicitAction: true },
     schema: BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
-    sources: [],
+    sources: (input.client?.replica.sourceHealthRows ?? []).map((row) => ({
+      displayName: row.providerDisplayName,
+      freshness: row.latestRecordedAt === null ? "never_synced" : row.stalenessVsNewestDays !== null && row.stalenessVsNewestDays > DEFAULT_STALE_AFTER_DAYS ? "stale" : "fresh",
+      latestRecordedAt: row.latestRecordedAt,
+    })),
     status: "error",
     warnings: [],
   };

@@ -40,16 +40,24 @@ export function generateMockedBiomarkerRows(
     const raw = profile.baseline + trend + noise;
     const value = Number(raw.toFixed(biomarker.valuePrecision));
     rows.push({
+      biomarkerKey: null,
       confidence: "high",
+      context: {},
       date: date.toISOString().slice(0, 10),
-      domain: "recovery",
+      grain: "day",
       id: `mock-${biomarker.routeId}-${i}`,
-      metric: biomarker.routeId,
+      metricKey: biomarker.routeId,
+      observedAt: `${date.toISOString().slice(0, 10)}T00:00:00.000Z`,
+      pointIds: [],
       recordIds: [],
-      sourceFamily: "wearable",
-      sourceKind: "demo wearable",
+      rowSchema: "murph.browser-vault.metric-row",
+      sourceFamily: "derived",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Demo wearable",
+      statistic: "value",
       unit: biomarker.unit,
       value,
+      valueLabel: String(value),
     });
   }
   return rows;

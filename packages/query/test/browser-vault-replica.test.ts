@@ -172,7 +172,7 @@ test("browser vault replicas validate schema", () => {
     () => parseBrowserVaultReplica({
       schema: "murph.browser-vault-replica.wrong",
     }),
-    /Browser vault replica\.schema must be murph\.browser-vault-replica\.v1\./u,
+    /Browser vault replica\.schema must be murph\.browser-vault-replica\./u,
   );
 });
 

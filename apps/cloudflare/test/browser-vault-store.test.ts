@@ -148,7 +148,7 @@ describe("hosted browser vault replica store", () => {
         },
         "Browser vault replica",
       ),
-    ).toThrow("Browser vault replica.schema must be murph.browser-vault-replica.v1.");
+    ).toThrow("Browser vault replica.schema must be murph.browser-vault-replica.");
   });
 
   it("derives browser-vault replica keys from the ref runtime root id across rotation", async () => {

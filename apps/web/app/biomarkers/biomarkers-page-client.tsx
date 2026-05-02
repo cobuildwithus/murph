@@ -139,7 +139,7 @@ function resolvePrivateBiomarkerValue(input: {
   }
 
   return {
-    dateLabel: formatDateLabel(selection.date),
+    dateLabel: formatDateLabel(selection.effectiveDate),
     sourceLabel: selection.sourceLabel,
     stale: selection.status === "stale",
     unit: selection.unit,
@@ -147,10 +147,22 @@ function resolvePrivateBiomarkerValue(input: {
   };
 }
 
+type DisplayableMetricSelection = BrowserVaultMetricSelectionRow & {
+  effectiveDate: string;
+  value: number;
+  valueLabel: string;
+};
+
 function isDisplayableMetricSelection(
   selection: BrowserVaultMetricSelectionRow | null,
-): selection is BrowserVaultMetricSelectionRow {
-  return Boolean(selection && Number.isFinite(selection.value) && selection.valueLabel.length > 0);
+): selection is DisplayableMetricSelection {
+  return Boolean(
+    selection &&
+      typeof selection.effectiveDate === "string" &&
+      Number.isFinite(selection.value) &&
+      typeof selection.valueLabel === "string" &&
+      selection.valueLabel.length > 0,
+  );
 }
 
 function formatDateLabel(date: string): string {

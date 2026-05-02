@@ -368,7 +368,7 @@ function createBrowserVaultReplicaRef() {
     generatedAt: "2026-04-26T00:00:00.000Z",
     keyId: "browser-key-1",
     objectKey: "browser_projection_1",
-    replicaSchema: "murph.browser-vault-replica.v1",
+    replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: "udrk:runtime:workspace-test",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash: "snapshot_2_hash",
