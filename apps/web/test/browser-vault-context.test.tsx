@@ -151,9 +151,11 @@ test("browser-vault selector returns projected data only after the client is rea
 
 test("browser-vault provider aborts in-flight loads on unmount", async () => {
   const response = createDeferred<Response>();
-  let requestSignal: AbortSignal | null = null;
+  const requestSignals: AbortSignal[] = [];
   const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
-    requestSignal = init?.signal ?? null;
+    if (init?.signal) {
+      requestSignals.push(init.signal);
+    }
     return response.promise;
   });
 
@@ -169,7 +171,9 @@ test("browser-vault provider aborts in-flight loads on unmount", async () => {
 
   await rendered.cleanup();
 
-  assert.equal(requestSignal?.aborted, true);
+  const requestSignal = requestSignals.at(0);
+  assert.ok(requestSignal);
+  assert.equal(requestSignal.aborted, true);
 
   response.resolve(jsonResponse({
     encryptedReplica: createReplicaEnvelope(),
