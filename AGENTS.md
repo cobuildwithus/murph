@@ -2,14 +2,14 @@
 
 ## Purpose
 
-This file is the routing map for agent work in this repository.
-Durable guidance lives in `agent-docs/`.
+This file is the compact routing map for agent work in this repository.
+Durable guidance lives in `agent-docs/`; keep detailed policy there instead of expanding this file.
 
 ## Precedence
 
 1. Explicit user instruction in the current chat turn.
 2. `Hard Rules (Non-Negotiable)` in this file.
-3. `agent-docs/operations/agent-workflow-routing.md`
+3. `agent-docs/operations/agent-workflow-routing.md`.
 4. Other detailed docs under `agent-docs/**`.
 
 If instructions still conflict after applying this order, ask the user before acting.
@@ -27,57 +27,51 @@ Always read these before repo code/docs/test/config work:
 
 ## Task Router
 
-| If the task is about...                                       | Also read                                                                                           | Notes                                                                                                                               |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Review-only inspection with no planned file edits             | `agent-docs/operations/verification-and-runtime.md`                                                 | No repo ledger or repo-wide checks by default. Only add runtime proof when the user asks for it or static inspection is not enough. |
-| Docs or process only                                          | `agent-docs/operations/verification-and-runtime.md`                                                 | No audit subagents by default unless the routed completion workflow explicitly requires them.                                       |
-| Repo code, tests, or config                                   | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Follow the task classes in the workflow-routing doc. When that workflow requires `coverage-write`, `frontend-review`, and/or `task-finish-review`, treat this file plus the workflow docs as standing user approval to spawn those required completion subagents. |
-| User-facing frontend/UI work in `apps/web`                    | `agent-docs/FRONTEND.md`                                                                            | Read the frontend guidance before implementation. Treat the completion workflow's frontend-review pass as mandatory when the change touches user-facing pages, components, or design-system-facing UI. |
-| Auth, secrets, trust boundaries, or external runtime surfaces | `agent-docs/SECURITY.md`                                                                            | Treat as higher risk by default.                                                                                                    |
-| Retries, queues, cron, concurrency, or failure handling       | `agent-docs/RELIABILITY.md`                                                                         | Capture direct proof for operational changes.                                                                                       |
-| Test selection or verification changes                        | `agent-docs/references/testing-ci-map.md`                                                           | Keep test coverage and doc claims aligned.                                                                                          |
-| Product behavior or UX tradeoffs                              | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`                                 | These docs are already part of the always-read set. Prefer repo-local durable specs over chat memory.                              |
-| Marketing, positioning, copy, or experiment library work      | `agent-docs/product-marketing-context.md`                                                           | Use the repo marketing context for positioning, differentiation, customer language, and brand voice.                                |
+| If the task is about... | Also read | Notes |
+| --- | --- | --- |
+| Review-only inspection with no planned file edits | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default. Add runtime proof only when requested or when static inspection leaves a material gap. |
+| Docs or process only | `agent-docs/operations/verification-and-runtime.md` | Follow the docs/process task class in the workflow router. |
+| Repo code, tests, or config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the workflow router for task class, ledger/plan needs, audits, verification, and commit path. |
+| User-facing frontend/UI work in `apps/web` | `agent-docs/FRONTEND.md` | The completion workflow controls required frontend review. |
+| Auth, secrets, trust boundaries, or external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher risk by default. |
+| Retries, queues, cron, concurrency, or failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
+| Test selection or verification changes | `agent-docs/references/testing-ci-map.md` | Keep test coverage and doc claims aligned. |
+| Product behavior or UX tradeoffs | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md` | Prefer repo-local durable specs over chat memory. |
+| Marketing, positioning, copy, or experiment library work | `agent-docs/product-marketing-context.md` | Use the repo marketing context for positioning, differentiation, customer language, and brand voice. |
+| Health Commons content or experiment library structure | `agent-docs/product-specs/health-commons.md` | Generated catalog artifacts are ignored build outputs; commit authored content and intentional generator/schema/test changes only. |
+| Dependency changes | `agent-docs/SECURITY.md` | Follow the dependency supply-chain rules before handoff. |
 
 ## Hard Rules (Non-Negotiable)
 
+- Do not include or expose legal names, local account usernames, home directory paths, secrets, raw credentials, or full `Authorization` headers in commits, code, docs, generated files, comments, logs, examples, or quoted output. Redact unavoidable identifiers with neutral placeholders such as `<REDACTED_USER>` or `<HOME_DIR>`.
 - Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
-- Never print or commit secrets, raw credentials, or full `Authorization` headers.
-- When writing assistant/provider prompts, avoid automated-outreach framing: acquisition/signup language, "new user" labels, delivery/notification wording, and imperative exact-send phrasing in the same prompt. Prefer in-chat, user-facing task framing; the 2026-04-24 hosted first-contact welcome hit Azure OpenAI content filtering when signup/outbound wording was combined with the notification tool path.
-- Import sibling workspace packages by package name through declared public entrypoints only. Do not reach into another package's `src/` or `dist/`.
-- Workspace package dependencies must remain one-way and acyclic. Do not make package `A` depend on package `B` while `B` depends on `A`, whether directly, through public subpaths, or through compatibility shims.
-- Compatibility shims must be temporary and legacy-facing only. Keep the shim on the old path pointing at the new owner; never make the owning package depend on the legacy package to provide the same surface.
-- Shared runtime or domain logic must live below CLI/app packages in one owning package. If multiple siblings need the same code, move it to a shared owner instead of cross-importing sibling internals, building helper grab-bags across layers, or using sibling-to-sibling re-exports.
+- When writing assistant/provider prompts, avoid automated-outreach framing: acquisition/signup language, `new user` labels, delivery/notification wording, and imperative exact-send phrasing in the same prompt. Prefer in-chat, user-facing task framing.
+- Import sibling workspace packages by package name through declared public entrypoints only; do not reach into another package's `src/` or `dist/`.
+- Keep workspace package dependencies one-way and acyclic. Put shared runtime/domain logic in a lower owning package instead of cross-importing sibling internals or using sibling-to-sibling re-exports.
+- Compatibility shims must be temporary and legacy-facing only. Keep them on the old path pointing at the new owner, and never make the owning package depend on the legacy package for the same surface.
 - Do not reintroduce custom Turbopack loader-based rewriting for repo-local workspace sources.
-- Dependency changes are high-risk: do not add or update npm packages unless the same change also updates the committed lockfile, uses the public registry instead of git/url/file/alias specs, and records why a repo-local helper or built-in API was not sufficient.
-- After dependency updates on a trusted machine, review blocked install scripts with `pnpm deps:ignored-builds` / `pnpm deps:approve-builds`, keep `allowBuilds` entries minimal, and never set `dangerouslyAllowAllBuilds: true`.
-- When a hotfix needs a pnpm supply-chain exception, prefer version-scoped `minimumReleaseAgeExclude` or `trustPolicyExclude` entries over package-wide carve-outs, and document the reason in the handoff.
-- Outside intentional dependency-edit flows, installs and setup paths must use the committed lockfile with `pnpm install --frozen-lockfile`.
-- Do not bypass pnpm's dependency-verification guard with `--config.verify-deps-before-run=false`; fix the underlying workspace state or report the blocker instead.
-- Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors; prove the type with control flow or helpers, or isolate the boundary with a narrow documented assertion.
-- Do not paper over bugs, unclear behavior, or architectural friction by adding more complexity. Work diligently to identify the root cause first, fix the underlying issue where feasible, and choose the simplest durable correction that preserves system invariants.
+- Dependency changes are high-risk: use public-registry specs, update the committed lockfile in the same change, keep pnpm supply-chain exceptions narrow, and do not bypass pnpm dependency verification.
+- Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors. Prove the type with control flow/helpers, or isolate the boundary with a narrow documented assertion.
+- Do not paper over bugs or architectural friction with speculative complexity. Identify the root cause first and choose the simplest durable correction that preserves system invariants.
+- Do not invent compatibility, deployment, or runtime requirements. Document them in the matching durable docs and scripts in the same change that introduces them.
+- Do not weaken production runtime, auth, or env invariants for tests, smoke checks, or builds. Fix harnesses with test-only config or wrappers instead.
+- Follow the persisted-state placement gate in `agent-docs/operations/agent-workflow-routing.md` and `ARCHITECTURE.md`; user-facing or queryable product truth must not start in assistant runtime state.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
-- Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
-- Do not weaken production runtime, auth, or env invariants to satisfy test, smoke, or build harnesses. Fix the harness with test-only config or wrapper scripts instead of adding bypass branches to app code.
-- Follow the persisted-state placement gate in the workflow docs and `ARCHITECTURE.md`; do not put user-facing or queryable product truth in assistant runtime first.
-- Do not create, switch to, or land work in separate git worktrees or helper checkouts unless the user explicitly asks for that in the current task. Work in the current checkout and coordinate through the ledger instead.
+- Do not create, switch to, or land work in separate git worktrees or helper checkouts unless explicitly requested in the current task.
 
 ## Workflow Defaults
 
-- Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default.
+- Use `agent-docs/operations/agent-workflow-routing.md` to classify task type, ledger/plan needs, audit requirements, verification, and commit path.
+- Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default. Preserve unrelated ledger or working-tree edits.
 - Preserve unrelated working-tree edits in the current checkout. Do not overwrite, discard, or revert work you did not make.
-- For broad content-only sweeps, treat Health Commons generated catalog artifacts as ignored build outputs rather than branch-by-branch truth. Commit authored source files (`packages/health-commons/content/**/*.md`, `packages/health-commons/content/**/*.json`, `packages/health-commons/content/**/*.jsonl`) plus any intentional generator/schema/test changes; do not commit regenerated `packages/health-commons/generated/**` files.
-- If verification or build commands introduce tracked edits outside the intended task scope, check `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before removing or reverting them. If another active row plausibly owns those files, stop and coordinate instead of cleaning them up unilaterally.
-- Document architecture-significant changes in the matching durable docs.
-- Use the completion and verification docs for detailed workflow and command selection.
-- Required completion-workflow audit passes are mandatory for repo task classes that require them. They are repo-policy pre-authorized and constitute standing user approval to spawn the required local Codex subagents, even when general agent instructions say to avoid subagents unless the user explicitly asks. Run them before handoff rather than treating them as optional close-out checks after implementation, verification, or even a scoped commit.
+- Use `agent-docs/operations/completion-workflow.md` for mandatory completion audits. Required local Codex audit subagents are repo-policy pre-authorized; run them when the routed task class requires them.
+- Always run the verification required by `agent-docs/operations/verification-and-runtime.md` unless the user explicitly asks not to. If a required check is blocked by a credibly unrelated pre-existing failure, report the command, failing target, and why the current diff did not cause it.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
-- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` while the task's active plan still exists under `agent-docs/exec-plans/active/`; that helper removes the exact matching ledger row, archives the plan under `agent-docs/exec-plans/completed/`, and creates the scoped commit. Use `scripts/committer` only when no active plan is involved. In dirty trees, commit only the exact touched paths and note overlapping pre-existing edits in handoff.
-- If a plan-bearing task is done or abandoned but a safe scoped commit is blocked by overlapping dirty work, still clear the exact ledger row and archive the plan with `scripts/close-exec-plan.sh` instead of leaving it stranded under `agent-docs/exec-plans/active/`.
-- If a required check fails for a credibly unrelated pre-existing reason, still commit the exact touched paths and hand off with the failing command, failing target, and why the current diff did not cause it.
-- Update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
+- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` for active-plan work and `scripts/committer` when no active plan is involved.
+- If a plan-bearing task is done or abandoned but a safe scoped commit is blocked by overlapping dirty work, clear the exact ledger row and archive the plan with `scripts/close-exec-plan.sh`.
+- Document architecture-significant changes in the matching durable docs, and update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
 
 ## Notes
 
-- This file should stay a compact router, not a policy manual. Target roughly 100 lines or less and keep the structure limited to: purpose, precedence, read-first docs, task router, non-negotiables, workflow defaults, and notes.
 - Keep this file short and route-oriented. Move durable detail into `agent-docs/`.
+- Target roughly 100 lines or fewer and preserve these sections: purpose, precedence, read-first docs, task router, non-negotiables, workflow defaults, and notes.
