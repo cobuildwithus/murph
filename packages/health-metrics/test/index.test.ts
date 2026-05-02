@@ -319,6 +319,37 @@ test("supports daily aggregate policy selections with contributing provenance", 
   assert.deepEqual(selected.provenance.pointIds, points.map((point) => point.id));
   assert.deepEqual(selected.provenance.recordIds, ["wearable_rhr_1", "wearable_rhr_2", "wearable_rhr_3"]);
 
+  const mixedUnitAggregate = selectMetricValue({
+    metricKey: "body-weight",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-28",
+        id: "metric-point:body-weight:2026-04-28:manual:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-28T07:00:00.000Z",
+        recordId: "body_weight_unsupported_unit",
+        sourceKind: "measurement",
+        unit: "stone",
+        value: 12,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:body-weight:2026-04-29:manual:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "body_weight_kg",
+        sourceKind: "measurement",
+        unit: "kg",
+        value: 81,
+      }),
+    ],
+    policyOverride: { kind: "daily-aggregate", latestWindowDays: 2, statistic: "mean" },
+  });
+  assert.equal(mixedUnitAggregate.status, "ready");
+  assert.equal(mixedUnitAggregate.value, 81);
+  assert.equal(mixedUnitAggregate.unit, "kg");
+  assert.equal(mixedUnitAggregate.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"), true);
+
   const insufficient = selectMetricValue({
     metricKey: "resting-heart-rate",
     points,
