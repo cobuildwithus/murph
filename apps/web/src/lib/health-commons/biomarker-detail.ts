@@ -52,6 +52,13 @@ const DEFAULT_TREND_DEFAULTS: BiomarkerTrendDefaults = {
   minimumPoints: 5,
 };
 
+const BIOMARKER_ROUTE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  "deep-sleep": "deep-sleep-minutes",
+  hrv: "hrv-rmssd",
+  rem: "rem-sleep-minutes",
+  rhr: "resting-heart-rate",
+});
+
 export interface BiomarkerTrendDefaults {
   aggregation: HealthCommonsBiomarkerTrendAggregation;
   comparisonWindowDays: number;
@@ -166,10 +173,12 @@ export function resolveHealthCommonsBiomarkerDetail(
   biomarkerId: string,
   catalog?: HealthCommonsCatalogReader,
 ): BiomarkerPageModel | null {
+  const routeId = resolveBiomarkerRouteId(biomarkerId);
+
   if (!catalog) {
     const bundle = loadGeneratedHealthCommonsWebRouteBundle({
       entityType: "biomarker",
-      routeId: normalizeRouteId(biomarkerId),
+      routeId,
     });
     if (!bundle) {
       return null;
@@ -186,7 +195,7 @@ export function resolveHealthCommonsBiomarkerDetail(
 
   const biomarker = catalog.findByRouteId({
     entityType: "biomarker",
-    routeId: normalizeRouteId(biomarkerId),
+    routeId,
   });
 
   if (!biomarker || biomarker.entityType !== "biomarker") {
@@ -198,6 +207,11 @@ export function resolveHealthCommonsBiomarkerDetail(
   }
 
   return toBiomarkerPageModel(biomarker, catalog);
+}
+
+function resolveBiomarkerRouteId(biomarkerId: string): string {
+  const normalized = normalizeRouteId(biomarkerId);
+  return BIOMARKER_ROUTE_ALIASES[normalized] ?? normalized;
 }
 
 function toBiomarkerPageModel(

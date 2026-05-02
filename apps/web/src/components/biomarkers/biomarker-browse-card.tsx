@@ -4,12 +4,21 @@ import { ArrowRight } from "lucide-react";
 import { BiomarkerIcon } from "./biomarker-icon";
 import { cn } from "@/src/lib/utils";
 
+export interface BiomarkerBrowsePrivateValue {
+  dateLabel: string;
+  sourceLabel: string | null;
+  stale: boolean;
+  unit: string | null;
+  valueLabel: string;
+}
+
 export interface BiomarkerBrowseCardProps {
   routeId: string;
   title: string;
   category: string | null;
   unit: string | null;
   summary: string | null;
+  privateValue?: BiomarkerBrowsePrivateValue | null;
   className?: string;
 }
 
@@ -19,6 +28,7 @@ export function BiomarkerBrowseCard({
   category,
   unit,
   summary,
+  privateValue,
   className,
 }: BiomarkerBrowseCardProps) {
   return (
@@ -53,6 +63,23 @@ export function BiomarkerBrowseCard({
         <p className="text-sm/6 text-muted-foreground text-pretty line-clamp-3">
           {summary}
         </p>
+      ) : null}
+
+      {privateValue ? (
+        <div className="border-t border-border/60 pt-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              Your latest
+            </span>
+            <span className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+              {privateValue.valueLabel}{privateValue.unit ? ` ${privateValue.unit}` : ""}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {privateValue.sourceLabel ?? "Private vault"} - {privateValue.dateLabel}
+            {privateValue.stale ? " - stale" : ""}
+          </p>
+        </div>
       ) : null}
 
       <div className="mt-auto flex items-center justify-between border-t border-border/60 pt-3">

@@ -112,6 +112,53 @@ export interface BrowserVaultMetricRow {
   value: number | null;
 }
 
+export type BrowserVaultMetricPointStatus = "ready" | "stale";
+export type BrowserVaultMetricPointGrain = "instant" | "event" | "day" | "week" | "month" | "window";
+export type BrowserVaultMetricPointStatistic = "value" | "latest" | "mean" | "median" | "min" | "max" | "sum" | "count";
+
+export interface BrowserVaultMetricPoint {
+  biomarkerKey: string | null;
+  confidence: WearableConfidenceLevel;
+  date: string;
+  grain: BrowserVaultMetricPointGrain;
+  id: string;
+  metricKey: string;
+  observedAt: string;
+  pointSchema: "murph.browser-vault.metric-point.v1";
+  recordIds: string[];
+  sourceFamily: string | null;
+  sourceKind: string | null;
+  sourceLabel: string | null;
+  sourceMetricRowId: string;
+  statistic: BrowserVaultMetricPointStatistic;
+  unit: string | null;
+  value: number;
+  valueLabel: string;
+}
+
+export interface BrowserVaultMetricSelectionWarning {
+  code: "LOW_SAMPLE_COUNT" | "MIXED_SOURCES" | "SOURCE_STALE" | "UNIT_NOT_NORMALIZED" | "METHOD_CHANGED";
+  message: string;
+}
+
+export interface BrowserVaultMetricSelectionRow {
+  biomarkerKey: string | null;
+  confidence: WearableConfidenceLevel;
+  date: string;
+  id: string;
+  metricKey: string;
+  observedAt: string;
+  pointIds: string[];
+  recordIds: string[];
+  selectionSchema: "murph.browser-vault.metric-selection.v1";
+  sourceLabel: string | null;
+  status: BrowserVaultMetricPointStatus;
+  unit: string | null;
+  value: number;
+  valueLabel: string;
+  warnings: BrowserVaultMetricSelectionWarning[];
+}
+
 export interface BrowserVaultMetricDayRow {
   attributes: Record<string, unknown>;
   confidence: WearableConfidenceLevel;
@@ -174,6 +221,8 @@ export interface BrowserVaultReplica {
   generatedAt: string;
   metricDayRows: BrowserVaultMetricDayRow[];
   metricRows: BrowserVaultMetricRow[];
+  metricPoints?: BrowserVaultMetricPoint[];
+  metricSelectionRows?: BrowserVaultMetricSelectionRow[];
   policy: BrowserVaultReplicaPolicy;
   schema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   searchRows: BrowserVaultSearchRow[];
@@ -207,6 +256,15 @@ export interface BrowserVaultMetricFilters {
   to?: string;
 }
 
+export interface BrowserVaultMetricPointFilters {
+  biomarkerKey?: string;
+  from?: string;
+  metricKey?: string;
+  to?: string;
+}
+
+export type BrowserVaultMetricSelectionFilters = Pick<BrowserVaultMetricPointFilters, "biomarkerKey" | "metricKey">;
+
 export interface BrowserVaultTimelineFilters {
   families?: readonly string[];
   from?: string;
@@ -231,6 +289,16 @@ export interface BrowserVaultQueryClient {
     latest(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow | null;
     list(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow[];
     series(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow[];
+  };
+  metricPoints: {
+    latest(filters?: BrowserVaultMetricPointFilters): BrowserVaultMetricPoint | null;
+    list(filters?: BrowserVaultMetricPointFilters): BrowserVaultMetricPoint[];
+    series(filters?: BrowserVaultMetricPointFilters): BrowserVaultMetricPoint[];
+  };
+  metricSelections: {
+    get(idOrMetricKey: string): BrowserVaultMetricSelectionRow | null;
+    getByBiomarker(biomarkerKey: string): BrowserVaultMetricSelectionRow | null;
+    list(filters?: BrowserVaultMetricSelectionFilters): BrowserVaultMetricSelectionRow[];
   };
   replica: BrowserVaultReplica;
   search(query: string, filters?: BrowserVaultSearchFilters): BrowserVaultSearchRow[];

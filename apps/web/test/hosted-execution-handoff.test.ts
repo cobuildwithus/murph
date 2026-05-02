@@ -110,21 +110,26 @@ describe("nudgeHostedRunnerBestEffort", () => {
     });
   });
 
-  it("rejects webhook handoff when the workflow cannot start", async () => {
+  it("keeps webhook handoff best-effort when the workflow cannot start", async () => {
     workflowMocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(
       new Error("workflow unavailable"),
     );
 
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    })).rejects.toThrow("workflow unavailable");
+    await expect(
+      maybeHandoffHostedExecutionWebhookWake({
+        eventId: "evt_inline_gap",
+        mailboxItemId: "mailbox_123",
+        response: {
+          ok: true,
+          reason: "wake-appended-active-member",
+        },
+        source: "linq",
+        userId: "user-123",
+      }),
+    ).resolves.toMatchObject({
+      reason: "workflow-start-failed",
+      started: false,
+    });
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
@@ -133,20 +138,20 @@ describe("nudgeHostedRunnerBestEffort", () => {
     });
   });
 
-  it("rejects webhook handoff when no mailbox pointer exists", async () => {
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    })).rejects.toMatchObject({
-      code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
-      httpStatus: 503,
-      message: "Webhook processing is temporarily unavailable.",
-      retryable: true,
+  it("keeps webhook handoff best-effort when no mailbox pointer exists", async () => {
+    await expect(
+      maybeHandoffHostedExecutionWebhookWake({
+        eventId: "evt_inline_gap",
+        response: {
+          ok: true,
+          reason: "wake-appended-active-member",
+        },
+        source: "linq",
+        userId: "user-123",
+      }),
+    ).resolves.toMatchObject({
+      reason: "missing-mailbox-item",
+      started: false,
     });
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
@@ -165,7 +170,10 @@ describe("nudgeHostedRunnerBestEffort", () => {
       },
       source: "telegram",
       userId: "user-123",
-    })).resolves.toBeUndefined();
+    })).resolves.toMatchObject({
+      reason: "workflow-started",
+      started: true,
+    });
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({

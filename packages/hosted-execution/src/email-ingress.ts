@@ -15,6 +15,9 @@ const HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS = 4_000;
 const HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_CHARS = 160;
+const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
+const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
+const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS = 2_048;
 
 export interface HostedEmailIngressWakeAppendRequest {
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
@@ -75,9 +78,10 @@ export function parseHostedEmailIngressWakeAppendRequest(
     ...(record.messageId === undefined
       ? {}
       : {
-          messageId: readOptionalNullableString(
+          messageId: readBoundedOptionalNullableString(
             record.messageId,
             "Hosted email ingress wake append request messageId",
+            HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS,
           ),
         }),
     occurredAt: requireString(
@@ -91,9 +95,10 @@ export function parseHostedEmailIngressWakeAppendRequest(
     ...(record.selfAddress === undefined
       ? {}
       : {
-          selfAddress: readOptionalNullableString(
+          selfAddress: readBoundedOptionalNullableString(
             record.selfAddress,
             "Hosted email ingress wake append request selfAddress",
+            HOSTED_EMAIL_PROMPT_ADDRESS_MAX_CHARS,
           ),
         }),
     ...(record.subject === undefined
@@ -117,17 +122,19 @@ export function parseHostedEmailIngressWakeAppendRequest(
     ...(record.threadKey === undefined
       ? {}
       : {
-          threadKey: readOptionalNullableString(
+          threadKey: readBoundedOptionalNullableString(
             record.threadKey,
             "Hosted email ingress wake append request threadKey",
+            HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
           ),
         }),
     ...(record.threadTarget === undefined
       ? {}
       : {
-          threadTarget: readOptionalNullableString(
+          threadTarget: readBoundedOptionalNullableString(
             record.threadTarget,
             "Hosted email ingress wake append request threadTarget",
+            HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS,
           ),
         }),
     ...(record.to === undefined

@@ -19,6 +19,7 @@ export default function BiomarkersPage() {
   const biomarkers: BiomarkerBrowseEntry[] = index.biomarkers
     .filter((entry) => entry.published && !entry.hidden)
     .map((entry) => ({
+      key: entry.key,
       routeId: entry.routeId,
       title: entry.title,
       shortName: entry.shortName,

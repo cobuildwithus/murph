@@ -1,13 +1,26 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type {
+  BrowserVaultMetricSelectionRow,
+  BrowserVaultQueryClient,
+} from "@murphai/query/browser";
 
-import { BiomarkerBrowseCard } from "@/src/components/biomarkers/biomarker-browse-card";
+import {
+  BiomarkerBrowseCard,
+  type BiomarkerBrowsePrivateValue,
+} from "@/src/components/biomarkers/biomarker-browse-card";
 import { CategoryFilter } from "@/src/components/experiments/category-filter";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { PageHeader } from "@/src/components/ui/page-header";
+import {
+  BrowserVaultProvider,
+  useBrowserVault,
+  type BrowserVaultStatus,
+} from "@/src/lib/browser-vault/context";
 
 export interface BiomarkerBrowseEntry {
+  key: string;
   routeId: string;
   title: string;
   shortName: string;
@@ -22,7 +35,16 @@ interface BiomarkersPageClientProps {
 }
 
 export function BiomarkersPageClient({ biomarkers }: BiomarkersPageClientProps) {
+  return (
+    <BrowserVaultProvider>
+      <BiomarkersPageContent biomarkers={biomarkers} />
+    </BrowserVaultProvider>
+  );
+}
+
+function BiomarkersPageContent({ biomarkers }: BiomarkersPageClientProps) {
   const [category, setCategory] = useState("All");
+  const { client, status } = useBrowserVault();
 
   const cards = useMemo(
     () =>
@@ -92,12 +114,48 @@ export function BiomarkersPageClient({ biomarkers }: BiomarkersPageClientProps) 
                 category={card.primaryCategory}
                 unit={card.unit}
                 summary={card.summary}
+                privateValue={resolvePrivateBiomarkerValue({ biomarkerKey: card.key, client, status })}
               />
             ))}
           </div>
         )}
       </section>
     </div>
+  );
+}
+
+function resolvePrivateBiomarkerValue(input: {
+  biomarkerKey: string;
+  client: BrowserVaultQueryClient | null;
+  status: BrowserVaultStatus;
+}): BiomarkerBrowsePrivateValue | null {
+  if (input.status !== "ready" || !input.client) {
+    return null;
+  }
+
+  const selection = input.client.metricSelections.getByBiomarker(input.biomarkerKey);
+  if (!isDisplayableMetricSelection(selection)) {
+    return null;
+  }
+
+  return {
+    dateLabel: formatDateLabel(selection.date),
+    sourceLabel: selection.sourceLabel,
+    stale: selection.status === "stale",
+    unit: selection.unit,
+    valueLabel: selection.valueLabel,
+  };
+}
+
+function isDisplayableMetricSelection(
+  selection: BrowserVaultMetricSelectionRow | null,
+): selection is BrowserVaultMetricSelectionRow {
+  return Boolean(selection && Number.isFinite(selection.value) && selection.valueLabel.length > 0);
+}
+
+function formatDateLabel(date: string): string {
+  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", timeZone: "UTC" }).format(
+    new Date(`${date}T00:00:00.000Z`),
   );
 }
 

@@ -34,9 +34,14 @@ import {
   startHostedEmailIngressNudgeWorkflowInWeb,
 } from "../web-control-plane-email-ingress.ts";
 
+export interface HostedEmailIngressExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
+  ctx?: HostedEmailIngressExecutionContext,
 ): Promise<void> {
   const stringEnv = asWorkerStringEnvironment(env);
   const environment = readHostedExecutionEnvironment(stringEnv);
@@ -168,12 +173,24 @@ export async function handleHostedEmailIngress(
       ...promptProjection,
       eventId,
       identityId: route.identityId,
-      messageId: parsedMessage.messageId,
+      messageId: normalizeHostedEmailPromptMetadataScalar(
+        parsedMessage.messageId,
+        HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS,
+      ),
       occurredAt,
       rawMessageKey,
-      selfAddress: route.routeAddress,
-      threadKey,
-      threadTarget,
+      selfAddress: normalizeHostedEmailPromptMetadataScalar(
+        route.routeAddress,
+        HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
+      ),
+      threadKey: normalizeHostedEmailPromptMetadataScalar(
+        threadKey,
+        HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
+      ),
+      threadTarget: normalizeHostedEmailPromptMetadataScalar(
+        threadTarget,
+        HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS,
+      ),
     },
     boundUserId: route.userId,
     callbackSigning: environment.webCallbackSigning,
@@ -212,7 +229,7 @@ export async function handleHostedEmailIngress(
     throw error;
   });
 
-  await startHostedEmailRunnerNudgeWorkflow({
+  const nudgeWorkflow = startHostedEmailRunnerNudgeWorkflow({
     eventId,
     identityId: route.identityId,
     routeAddress: route.routeAddress,
@@ -225,6 +242,12 @@ export async function handleHostedEmailIngress(
       timeoutMs: environment.webControlTimeoutMs,
     },
   });
+
+  if (ctx) {
+    ctx.waitUntil(nudgeWorkflow);
+  } else {
+    await nudgeWorkflow;
+  }
 }
 
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT = 8;
@@ -233,6 +256,10 @@ const HOSTED_EMAIL_PROMPT_SUBJECT_MAX_CHARS = 240;
 const HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS = 4_000;
 const HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
+const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
+const HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS = 320;
+const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
+const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS = 2_048;
 
 async function startHostedEmailRunnerNudgeWorkflow(input: {
   eventId: string;
@@ -268,11 +295,10 @@ async function startHostedEmailRunnerNudgeWorkflow(input: {
       }),
       error,
       level: "warn",
-      message: "Hosted email runner nudge workflow failed to start after appending the canonical ingress event.",
-      phase: "failed",
+      message: "Hosted email runner nudge workflow failed to start after appending the canonical ingress event; ingress append remains committed.",
+      phase: "outbox",
       userId: input.userId,
     });
-    throw error;
   }
 }
 
@@ -347,6 +373,19 @@ function normalizeHostedEmailPromptScalar(
     : `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
+function normalizeHostedEmailPromptMetadataScalar(
+  value: string | null | undefined,
+  maxChars: number,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+  return normalized.length <= maxChars
+    ? normalized
+    : `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
 function isDefinitiveHostedEmailIngressAppendFailure(
   error: unknown,
 ): error is Error & { status: number } {
@@ -363,6 +402,7 @@ function isDefinitiveHostedEmailIngressAppendFailure(
     && error.status < 500
     && error.status !== 408
     && error.status !== 409
+    && error.status !== 413
     && error.status !== 429;
 }
 

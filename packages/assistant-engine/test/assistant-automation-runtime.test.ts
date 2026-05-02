@@ -5173,6 +5173,16 @@ describe('assistant auto-reply runtime', () => {
       ],
       '/tmp/assistant-automation-vault',
     )
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'real_thread_projected',
+        conversation: expect.objectContaining({
+          threadId: 'hid_thread_projected',
+        }),
+        deliveryTarget: 'real_thread_projected',
+        deliveryReplyToMessageId: 'real_msg_projected',
+      }),
+    )
   })
 
   it.each([

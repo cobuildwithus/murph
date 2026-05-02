@@ -45,6 +45,10 @@ import {
   type BrowserVaultTimelineRow,
   type CreateBrowserVaultReplicaInput,
 } from "./shared.ts";
+import {
+  createBrowserVaultMetricPoints,
+  createBrowserVaultMetricSelectionRows,
+} from "./metric-points.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -72,6 +76,11 @@ export async function createBrowserVaultReplica(
     ...glucoseSampleMetricDayRows,
   ]);
   const metricRows = metricDayRows.flatMap((day) => dayToMetricRows(day));
+  const metricPoints = createBrowserVaultMetricPoints(metricRows);
+  const metricSelectionRows = createBrowserVaultMetricSelectionRows({
+    generatedAt,
+    metricPoints,
+  });
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const replicaWithoutVersion: BrowserVaultReplica = {
@@ -80,6 +89,8 @@ export async function createBrowserVaultReplica(
     generatedAt,
     metricDayRows,
     metricRows,
+    metricPoints,
+    metricSelectionRows,
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectSearchRow),

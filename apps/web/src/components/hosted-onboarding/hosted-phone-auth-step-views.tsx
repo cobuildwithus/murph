@@ -306,7 +306,9 @@ function CountryCodePicker({
     <Combobox
       items={options}
       value={selectedCountry}
-      itemToStringValue={(option) => `${option.label} (${option.dialCode})`}
+      itemToStringValue={(option) =>
+        `${option.label} ${option.dialCode} ${option.dialCode.replace("+", "")}`
+      }
       onValueChange={(option) => {
         if (option) {
           onCountryChange(option.code);
@@ -350,12 +352,13 @@ function CountryCodeDrawer({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
+  const digits = search.replace(/[^0-9]/g, "");
   const normalizedSearch = search.toLowerCase();
   const filtered = search
     ? options.filter(
         (o) =>
           o.label.toLowerCase().includes(normalizedSearch) ||
-          o.dialCode.includes(search),
+          (digits.length > 0 && o.dialCode.replace("+", "").startsWith(digits)),
       )
     : options;
 

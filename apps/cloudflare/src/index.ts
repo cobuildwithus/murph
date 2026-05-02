@@ -229,10 +229,11 @@ export default {
   async email(
     message: HostedEmailWorkerRequest,
     env: WorkerEnvironmentSource,
+    ctx?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<void> {
     assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
 
-    await handleHostedEmailIngress(message, env);
+    await handleHostedEmailIngress(message, env, ctx);
   },
   async queue(
     batch: WorkerQueueMessageBatchLike,

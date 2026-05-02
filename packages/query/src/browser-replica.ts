@@ -11,9 +11,14 @@ export type {
   BrowserVaultEntityFilters,
   BrowserVaultEntityLink,
   BrowserVaultMetricDayRow,
+  BrowserVaultMetricPoint,
+  BrowserVaultMetricPointFilters,
+  BrowserVaultMetricSelectionFilters,
+  BrowserVaultMetricSelectionRow,
   BrowserVaultMetricDomain,
   BrowserVaultMetricFilters,
   BrowserVaultMetricRow,
+  BrowserVaultMetricSelectionWarning,
   BrowserVaultMetricSelection,
   BrowserVaultOverviewView,
   BrowserVaultQueryClient,
@@ -48,6 +53,13 @@ export {
   BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
   selectBrowserVaultBiomarkerPanel,
 } from "./browser-replica/biomarker-panel.ts";
+export {
+  BROWSER_VAULT_METRIC_POINT_SCHEMA,
+  BROWSER_VAULT_METRIC_SELECTION_SCHEMA,
+  createBrowserVaultMetricPoints,
+  createBrowserVaultMetricSelectionRows,
+  resolveBrowserVaultMetricKey,
+} from "./browser-replica/metric-points.ts";
 export type {
   BrowserVaultBiomarkerMetricBinding,
   BrowserVaultBiomarkerMetricPanel,

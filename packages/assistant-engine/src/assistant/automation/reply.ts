@@ -404,6 +404,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     onEvent: input.onEvent,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: decision.operatorAuthority,
+    conversationCaptureRef: readAutoReplyConversationCaptureRef(context),
     primaryCapture: decision.primaryCapture,
     prompt: decision.prompt,
     replyInputId: primaryAutoReplyInputId(context),
@@ -1042,6 +1043,7 @@ async function executeAssistantAutoReply(input: {
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority: AssistantOperatorAuthority
+  conversationCaptureRef?: AssistantConversationCaptureRef | null
   primaryCapture: InboxShowResult['capture']
   prompt: string
   replyInputId: string
@@ -1049,7 +1051,9 @@ async function executeAssistantAutoReply(input: {
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
   const watchdog = createAssistantProviderWatchdog(input)
-  const conversation = conversationRefFromCapture(input.primaryCapture)
+  const conversation = conversationRefFromCapture(
+    input.conversationCaptureRef ?? input.primaryCapture,
+  )
 
   try {
     const result = await sendAssistantMessage({

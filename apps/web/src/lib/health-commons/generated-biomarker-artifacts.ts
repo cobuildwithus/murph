@@ -46,6 +46,13 @@ type GeneratedBiomarkerProjection =
 let cachedRouteIndex: GeneratedRouteIndex | null = null;
 const cachedBiomarkerProjections = new Map<string, GeneratedBiomarkerProjection | null>();
 
+const GENERATED_BIOMARKER_ROUTE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  "deep-sleep": "deep-sleep-minutes",
+  hrv: "hrv-rmssd",
+  rem: "rem-sleep-minutes",
+  rhr: "resting-heart-rate",
+});
+
 export function loadGeneratedBiomarkerShell(
   biomarkerId: string,
 ): HealthCommonsWebBiomarkerShell | null {
@@ -123,13 +130,14 @@ function resolveGeneratedBiomarkerRoute(
   biomarkerId: string,
 ): GeneratedRouteIndexEntry | null {
   const normalized = normalizeRouteId(biomarkerId);
+  const aliased = GENERATED_BIOMARKER_ROUTE_ALIASES[normalized] ?? normalized;
   return getGeneratedRouteIndex().routes.find((route) =>
     route.entityType === "biomarker"
       && (
-        route.routeId === normalized
-        || route.slug === normalized
-        || route.slug.split("/").at(-1) === normalized
-        || route.aliases.includes(normalized)
+        route.routeId === aliased
+        || route.slug === aliased
+        || route.slug.split("/").at(-1) === aliased
+        || route.aliases.includes(aliased)
       )
   ) ?? null;
 }
