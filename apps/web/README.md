@@ -191,6 +191,19 @@ Hosted managed crypto:
 - local/dev escape hatch: `HOSTED_CRYPTO_GCP_ACCESS_TOKEN` with
   `HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV=1`; production must use
   Vercel OIDC / GCP Workload Identity Federation
+- production IAM setup must stay least-privilege:
+  - bind only the Vercel production project/environment principal, for example
+    `principal://iam.googleapis.com/projects/<project-number>/locations/global/workloadIdentityPools/<pool-id>/subject/owner:<vercel-team>:project:<vercel-project>:environment:production`;
+    do not bind all pool members
+  - grant that principal `roles/iam.workloadIdentityUser` on the hosted crypto
+    service account so the app can call IAMCredentials `generateAccessToken`
+    without a service-account key
+  - grant the hosted crypto service account Cloud KMS access only on the
+    specific keys it uses: `roles/cloudkms.cryptoKeyEncrypterDecrypter` on
+    `HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME` and `roles/cloudkms.signer` on the
+    key containing `HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION`
+  - do not grant project-wide Owner/Editor, broad Cloud KMS admin, or
+    `cloud-platform`-only access as a substitute for the IAM/KMS split
 - optional future recipients:
   `HOSTED_CRYPTO_TEE_RUNTIME_PUBLIC_JWK`,
   `HOSTED_CRYPTO_TEE_RUNTIME_KEY_ID`,
