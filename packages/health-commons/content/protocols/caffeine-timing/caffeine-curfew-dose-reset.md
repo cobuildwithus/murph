@@ -692,6 +692,14 @@ researchLandscape:
     - source_artifact:pmid-36870101
     - source_artifact:pmid-26899133
     - source_artifact:pmid-41124973
+    - source_artifact:pmid-25759402
+    - source_artifact:doi-10.1016-j.jarlif.2025.100005
+    - source_artifact:pmid-1475567
+    - source_artifact:pmid-30573997
+    - source_artifact:pmid-22454948
+    - source_artifact:doi-10.1002-sici-1099-1077-199605-11-3-185-aid-hup786-3.0.co-2-m
+    - source_artifact:pmid-21531247
+    - source_artifact:anzctr-actrn12621001625864-2021-11-29
     defaultOpen: true
   - id: mixed-reset-and-abstinence
     label: Mixed reset and abstinence evidence
@@ -705,6 +713,9 @@ researchLandscape:
     - source_artifact:pmid-33633278
     - source_artifact:pmid-34024173
     - source_artifact:pmid-35187019
+    - source_artifact:pmid-15696321
+    - source_artifact:pmid-11057520
+    - source_artifact:clinicaltrials-nct01376882-caffeine-abstinence-maintenance-2026-04-26
     defaultOpen: true
   - id: all-source-dose-audit
     label: All-source caffeine audit
@@ -724,6 +735,34 @@ researchLandscape:
     - source_artifact:pmid-25560302
     - source_artifact:pmid-31317857
     - source_artifact:pmid-33211984
+    - source_artifact:pmid-12519715
+    - source_artifact:pmid-28603504
+    - source_artifact:doi-10.2903-j.efsa.2015.4102
+    - source_artifact:pmid-39125266
+    - source_artifact:pmid-16620542
+    - source_artifact:pmid-30678328
+    - source_artifact:pmid-17412475
+    - source_artifact:pmid-17676317
+    - source_artifact:pmid-19007524
+    - source_artifact:pmid-22963537
+    - source_artifact:pmid-25818465
+    - source_artifact:pmid-36297100
+    - source_artifact:pmid-35057494
+    - source_artifact:usda-fooddata-central-caffeine-2026-04-26
+    - source_artifact:pmid-37444212
+    - source_artifact:pmid-11296156
+    - source_artifact:pmid-23303430
+    - source_artifact:pmid-24189158
+    - source_artifact:pmid-30580203
+    - source_artifact:pmid-33388079
+    - source_artifact:pmid-36862943
+    - source_artifact:pmid-38262632
+    - source_artifact:doi-10.1111-j.1365-2621.1980.tb02603.x
+    - source_artifact:pmid-34509583
+    - source_artifact:pmid-32723415
+    - source_artifact:pmid-28605236
+    - source_artifact:pmid-30445721
+    - source_artifact:pmid-8603790
     defaultOpen: false
   - id: pharmacology-individual-differences
     label: Pharmacology and individual differences
@@ -744,6 +783,33 @@ researchLandscape:
     - source_artifact:pmid-7612156
     - source_artifact:pmid-3838675
     - source_artifact:pmid-16996309
+    - source_artifact:pmid-4029248
+    - source_artifact:pmid-38221756
+    - source_artifact:pmid-23368828
+    - source_artifact:pmid-15257305
+    - source_artifact:pmid-31817803
+    - source_artifact:pmid-6101960
+    - source_artifact:pmid-39686012
+    - source_artifact:pmid-6124991
+    - source_artifact:pmid-41622288
+    - source_artifact:pmid-28323455
+    - source_artifact:pmid-29367845
+    - source_artifact:pmid-14592218
+    - source_artifact:pmid-15588154
+    - source_artifact:pmid-35575450
+    - source_artifact:pmid-6734698
+    - source_artifact:ncbi-bookshelf-caffeine-cns-behavioral-effects-2026-04-26
+    - source_artifact:pmid-39438936
+    - source_artifact:pmid-22754033
+    - source_artifact:pmid-6687705
+    - source_artifact:pmid-30387917
+    - source_artifact:pmid-3608349
+    - source_artifact:pmid-8738764
+    - source_artifact:pmid-10233211
+    - source_artifact:pmid-10376760
+    - source_artifact:pmid-10233204
+    - source_artifact:pmid-37269785
+    - source_artifact:clinicaltrials-nct03855774-2019-02-28
     defaultOpen: false
   - id: measurement-wearables-psg-actigraphy
     label: Sleep measurement, PSG, actigraphy, and wearables
@@ -758,6 +824,40 @@ researchLandscape:
     - source_artifact:pmid-24179309
     - source_artifact:pmid-37917155
     - source_artifact:pmid-38276327
+    - source_artifact:pmid-16184581
+    - source_artifact:pmid-29991438
+    - source_artifact:pmid-39460013
+    - source_artifact:pmid-31154154
+    - source_artifact:pmid-40834291
+    - source_artifact:doi-10.1038-s41598-025-93774-z
+    - source_artifact:pmid-31778122
+    - source_artifact:pmid-31641776
+    - source_artifact:pmid-38499793
+    - source_artifact:pmid-31901524
+    - source_artifact:pmid-38557808
+    - source_artifact:pmid-30789439
+    - source_artifact:pmid-34063579
+    - source_artifact:pmid-29668452
+    - source_artifact:pmid-31739855
+    - source_artifact:pmid-21447050
+    - source_artifact:pmid-36879665
+    - source_artifact:pmid-18274276
+    - source_artifact:pmid-38090797
+    - source_artifact:pmid-27164110
+    - source_artifact:pmid-21237680
+    - source_artifact:pmid-14592388
+    - source_artifact:pmid-17520797
+    - source_artifact:pmid-20374444
+    - source_artifact:pmid-29235907
+    - source_artifact:pmid-26969518
+    - source_artifact:pmid-38131698
+    - source_artifact:doi-10.1089-jcr.2013.0009
+    - source_artifact:pmid-29034226
+    - source_artifact:pmid-33134038
+    - source_artifact:doi-10.3389-fnins.2014.00402
+    - source_artifact:pmid-20663071
+    - source_artifact:pmid-21658979
+    - source_artifact:pmid-24137133
     defaultOpen: false
   - id: consumer-sleep-tools-not-diagnostics
     label: Consumer sleep tools are not clinical diagnostics
@@ -776,6 +876,16 @@ researchLandscape:
     - source_artifact:pmid-23108937
     - source_artifact:pmid-19241060
     - source_artifact:pmid-15678363
+    - source_artifact:pmid-39458438
+    - source_artifact:ncbi-bookshelf-caffeine-withdrawal-2026-04-26
+    - source_artifact:pmid-10672630
+    - source_artifact:pmid-16541243
+    - source_artifact:pmid-12601503
+    - source_artifact:pmid-17950009
+    - source_artifact:pmid-16001109
+    - source_artifact:pmid-9701720
+    - source_artifact:pmid-19342294
+    - source_artifact:pmid-31866308
     defaultOpen: false
   - id: withdrawal-offramp-and-tapering
     label: Withdrawal off-ramp and tapering
@@ -792,13 +902,16 @@ researchLandscape:
     - source_artifact:pmid-27699780
     - source_artifact:pmid-28480791
     - source_artifact:pmid-31822176
+    - source_artifact:pmid-22341956
+    - source_artifact:pmid-12204389
+    - source_artifact:pmid-9695448
+    - source_artifact:pmid-26933153
     defaultOpen: false
   - id: clinical-safety-cardiovascular-anxiety-pregnancy
     label: Clinical safety boundaries
     stance: safety_boundary
     summary: Safety sources support caution around withdrawal, migraine or severe headache, hypertension or cardiovascular symptoms, pregnancy or lactation, panic or severe anxiety, drug interactions, caffeine-use disorder, and suspected sleep disorders.
     sourceKeys:
-    - source_artifact:pmid-15448977
     - source_artifact:pmid-21880846
     - source_artifact:pmid-20664420
     - source_artifact:ncbi-lactmed-caffeine-2025-09-15
@@ -806,8 +919,6 @@ researchLandscape:
     - source_artifact:pmid-38016484
     - source_artifact:pmid-24761279
     - source_artifact:dailymed-ciprofloxacin-caffeine-2022-06-01
-    - source_artifact:pmid-28162150
-    - source_artifact:doi-10.2903-j.efsa.2015.4102
     - source_artifact:who-caffeine-pregnancy-2023-08-09
     - source_artifact:pmid-28438661
     - source_artifact:pmid-38350307
@@ -820,6 +931,37 @@ researchLandscape:
     - source_artifact:pmid-18305461
     - source_artifact:pmid-33069664
     - source_artifact:pmid-20520601
+    - source_artifact:pmid-11503005
+    - source_artifact:pmid-25179792
+    - source_artifact:pmid-25238871
+    - source_artifact:pmid-26329421
+    - source_artifact:pmid-26358647
+    - source_artifact:pmid-6954898
+    - source_artifact:pmid-38362247
+    - source_artifact:pmid-15834273
+    - source_artifact:pmid-20164571
+    - source_artifact:pmid-22369218
+    - source_artifact:pmid-24009307
+    - source_artifact:doi-10.1001-jamanetworkopen.2021.3238
+    - source_artifact:pmid-20844077
+    - source_artifact:pmid-32843532
+    - source_artifact:pmid-36833216
+    - source_artifact:pmid-28756014
+    - source_artifact:pmid-36947466
+    - source_artifact:pmid-20532872
+    - source_artifact:pmid-37029915
+    - source_artifact:pmid-10024321
+    - source_artifact:pmid-24680173
+    - source_artifact:pmid-41206802
+    - source_artifact:pmid-3768258
+    - source_artifact:pmid-30257492
+    - source_artifact:pmid-28609150
+    - source_artifact:pmid-3131789
+    - source_artifact:clinicaltrials-nct01951872-caffeine-dependence-2026-04-26
+    - source_artifact:pmid-10073894
+    - source_artifact:pmid-25089257
+    - source_artifact:pmid-34000324
+    - source_artifact:pmid-26501499
     defaultOpen: false
   - id: toxicity-concentrated-product-boundary
     label: Caffeine toxicity and concentrated-product boundary
@@ -845,6 +987,32 @@ researchLandscape:
     - source_artifact:pmid-29029309
     - source_artifact:pmid-31480553
     - source_artifact:pmid-41003623
+    - source_artifact:pmid-29431593
+    - source_artifact:clinicaltrials-nct07090421-2026-04-26
+    - source_artifact:hubermanlab-improve-your-sleep-2026-04-26
+    - source_artifact:hubermanlab-toolkit-for-sleep-2021-09-20
+    - source_artifact:pmid-10713298
+    - source_artifact:pmid-10823400
+    - source_artifact:pmid-11683484
+    - source_artifact:pmid-16313140
+    - source_artifact:pmid-16936703
+    - source_artifact:pmid-24682207
+    - source_artifact:pmid-25527035
+    - source_artifact:pmid-33401238
+    - source_artifact:pmid-34132880
+    - source_artifact:pmid-34340214
+    - source_artifact:pmid-41477315
+    - source_artifact:pmid-19351801
+    - source_artifact:pmid-15887055
+    - source_artifact:pmid-35894958
+    - source_artifact:pmid-39551351
+    - source_artifact:pmid-40579619
+    - source_artifact:pmid-24859426
+    - source_artifact:pmid-33364521
+    - source_artifact:pmid-19088794
+    - source_artifact:pmid-29876876
+    - source_artifact:pmid-30977054
+    - source_artifact:pmid-30926628
     defaultOpen: false
   - id: external-guidelines-and-protocol-claims
     label: External sleep-hygiene and caffeine-cutoff guidance
@@ -857,6 +1025,25 @@ researchLandscape:
     - source_artifact:cdc-about-sleep-2024-05-15
     - source_artifact:harvardhealth-sleep-hygiene-2025-01-31
     - source_artifact:medlineplus-healthy-sleep-2025-12-09
+    - source_artifact:doi-10.1186-s41606-026-00175-w
+    - source_artifact:pmid-31386152
+    - source_artifact:pmid-34710040
+    - source_artifact:pmid-7636092
+    - source_artifact:pmid-35010906
+    - source_artifact:pmid-38201961
+    - source_artifact:pmid-27377580
+    - source_artifact:pmid-41792005
+    - source_artifact:pmid-27527212
+    - source_artifact:pmid-28265249
+    - source_artifact:aasm-scoring-manual-v3-2023-06-03
+    - source_artifact:pmid-8438665
+    - source_artifact:sleephealthfoundation-caffeine-and-sleep-2024-01-12
+    - source_artifact:va-cbti-sleep-hygiene-2025-02-01
+    - source_artifact:sleepeducation-healthy-sleep-habits-2021-04-02
+    - source_artifact:health-10-3-2-1-0-sleep-rule-2026-03-29
+    - source_artifact:timesofindia-10-3-2-1-sleep-rule-2025-11-24
+    - source_artifact:pmid-12927121
+    - source_artifact:pmid-25454674
     defaultOpen: false
 safety:
   cautionLevel: moderate
