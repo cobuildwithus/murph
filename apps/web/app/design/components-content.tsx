@@ -378,7 +378,7 @@ export function ComponentsContent() {
         <Separator />
 
         <Section title="Next Step Card">
-          <NextStepCard title="Sauna session · 15–20 min @ 80–100°C" when="Today evening" instructions="Stay hydrated, replace electrolytes after" context="Session 2 of 3 this week" nextSession="Friday" />
+          <NextStepCard title="Sauna session · 15–20 min @ 80–100°C" when="Today evening" instructions="Stay hydrated, electrolytes after" context="Session 2 of 3 this week" nextSession="Friday" />
         </Section>
 
         <Separator />

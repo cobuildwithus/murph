@@ -101,11 +101,11 @@ function getLandingAuthClasses(context: LandingAuthContext) {
       return {
         container: "flex items-center gap-2 sm:gap-3",
         login:
-          "inline-flex items-center justify-center rounded-lg border border-white/25 bg-white/8 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/14 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:px-4 sm:text-sm",
+          "inline-flex items-center justify-center rounded-lg border border-white/25 bg-white/8 px-4 py-2 text-sm font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/14 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60",
         settings:
-          "inline-flex items-center rounded-lg bg-[#5a6e32] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#4d5f2a] sm:px-4 sm:text-sm",
+          "inline-flex items-center rounded-lg bg-[#5a6e32] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#4d5f2a]",
         signup:
-          "inline-flex items-center justify-center rounded-lg bg-[#5a6e32] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a] sm:px-4 sm:text-sm",
+          "inline-flex items-center justify-center rounded-lg bg-[#5a6e32] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]",
       };
     case "footer":
       return {

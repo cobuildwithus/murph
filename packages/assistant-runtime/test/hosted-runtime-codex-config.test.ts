@@ -218,6 +218,51 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
   }
 });
 
+test("hosted Codex runtime local E2E app-server stub preserves resumed assistant context", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseTexts: ["first assistant reply", "second assistant reply"],
+  });
+
+  try {
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          `${readServerBaseUrl(server)}/v1`,
+        NODE_ENV: "test",
+        PATH: process.env.PATH ?? "",
+        VERCEL_AI_API_KEY: "secret-vercel-key",
+      },
+    });
+    const child = spawn(path.join(result.codexHome!, "bin", "codex"), ["app-server"], {
+      env: {
+        ...process.env,
+        PATH: result.runtimeEnv.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    await runHostedLocalCodexStubTurn(child, [
+      "first hosted local prompt",
+      "second hosted local prompt",
+    ]);
+
+    assert.equal(requests.length, 2);
+    assert.match(readResponsesRequestInput(requests[0]!), /first hosted local prompt/u);
+    assert.match(readResponsesRequestInput(requests[1]!), /second hosted local prompt/u);
+    assert.match(
+      readResponsesRequestInput(requests[1]!),
+      /Conversation so far:\nAssistant:\nfirst assistant reply/u,
+    );
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
 test("hosted Codex runtime local dev app-server proxy bridges JSON-RPC without provider key env", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const requests: string[] = [];
@@ -586,8 +631,10 @@ async function createTemporaryDirectory(): Promise<string> {
 
 async function startResponsesStubServer(input: {
   requests: string[];
-  responseText: string;
+  responseText?: string;
+  responseTexts?: readonly string[];
 }): Promise<Server> {
+  const responseTexts = [...(input.responseTexts ?? [])];
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk) => {
@@ -603,12 +650,13 @@ async function startResponsesStubServer(input: {
       }
 
       response.setHeader("content-type", "application/json; charset=utf-8");
+      const responseText = responseTexts.shift() ?? input.responseText ?? "shim response";
       response.end(JSON.stringify({
         output: [
           {
             content: [
               {
-                text: input.responseText,
+                text: responseText,
               },
             ],
           },
@@ -626,6 +674,11 @@ async function startResponsesStubServer(input: {
   });
 
   return server;
+}
+
+function readResponsesRequestInput(body: string): string {
+  const parsed = JSON.parse(body) as Record<string, unknown>;
+  return typeof parsed.input === "string" ? parsed.input : "";
 }
 
 function readServerBaseUrl(server: Server): string {
@@ -789,6 +842,7 @@ async function closeNetServer(server: NetServer): Promise<void> {
 
 async function runHostedLocalCodexStubTurn(
   child: ReturnType<typeof spawn>,
+  prompts: readonly string[] = ["hello hosted local"],
 ): Promise<Record<string, unknown>[]> {
   const childStdin = child.stdin;
   const childStdout = child.stdout;
@@ -848,7 +902,19 @@ async function runHostedLocalCodexStubTurn(
         const parsed = JSON.parse(trimmed) as Record<string, unknown>;
         messages.push(parsed);
         if (parsed.method === "turn/completed") {
-          finish();
+          const completedTurns = messages.filter((message) =>
+            message.method === "turn/completed"
+          ).length;
+          if (completedTurns >= prompts.length) {
+            finish();
+            continue;
+          }
+          writeHostedLocalCodexStubResume(childStdin, 20 + completedTurns);
+          writeHostedLocalCodexStubTurnStart(
+            childStdin,
+            30 + completedTurns,
+            prompts[completedTurns]!,
+          );
         }
       }
     });
@@ -858,19 +924,7 @@ async function runHostedLocalCodexStubTurn(
     childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({ id: 2, method: "thread/start", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({
-      id: 3,
-      method: "turn/start",
-      params: {
-        input: [
-          {
-            text: "hello hosted local",
-            type: "text",
-          },
-        ],
-        threadId: "thread_test",
-      },
-    })}\n`);
+    writeHostedLocalCodexStubTurnStart(childStdin, 3, prompts[0]!);
 
     await completed;
     return messages;
@@ -878,4 +932,37 @@ async function runHostedLocalCodexStubTurn(
     childStdin.end();
     child.kill();
   }
+}
+
+function writeHostedLocalCodexStubResume(
+  childStdin: NonNullable<ReturnType<typeof spawn>["stdin"]>,
+  id: number,
+): void {
+  childStdin.write(`${JSON.stringify({
+    id,
+    method: "thread/resume",
+    params: {
+      threadId: "thread_test",
+    },
+  })}\n`);
+}
+
+function writeHostedLocalCodexStubTurnStart(
+  childStdin: NonNullable<ReturnType<typeof spawn>["stdin"]>,
+  id: number,
+  prompt: string,
+): void {
+  childStdin.write(`${JSON.stringify({
+    id,
+    method: "turn/start",
+    params: {
+      input: [
+        {
+          text: prompt,
+          type: "text",
+        },
+      ],
+      threadId: "thread_test",
+    },
+  })}\n`);
 }

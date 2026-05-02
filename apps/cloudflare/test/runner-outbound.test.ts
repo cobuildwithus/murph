@@ -11,13 +11,11 @@ import {
   type HostedDomainRootKeyEnvelopeV1,
 } from "@murphai/runtime-state";
 import {
+  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
-
 import { readHostedExecutionEnvironment } from "../src/env.ts";
-import {
-  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-} from "@murphai/hosted-execution/routes";
 import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
@@ -125,6 +123,14 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     body: undefined,
     name: "hosted runtime crypto context",
     path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  },
+  {
+    body: {
+      domain: "ingress",
+      rootKeyId: "udrk:ingress:test-root",
+    },
+    name: "hosted runtime crypto root",
+    path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   },
   {
     body: {

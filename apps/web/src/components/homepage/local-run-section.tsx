@@ -7,7 +7,7 @@ export function LocalRunSection({
 }) {
   const installCommand = `curl -fsSL ${installCommandUrl} | bash`;
   return (
-    <section className="bg-[#ede3d0] px-4 pb-16 pt-10 sm:px-10 sm:pb-20 sm:pt-12 lg:px-16 lg:pb-24 lg:pt-14">
+    <section className="bg-[#ede3d0] px-5 pb-16 pt-10 sm:px-10 sm:pb-20 sm:pt-12 lg:px-16 lg:pb-24 lg:pt-14">
       <div className="mx-auto max-w-[1080px]">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
           Optional · Open source

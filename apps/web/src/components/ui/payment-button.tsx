@@ -1,33 +1,31 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 
-import { AuthButton, type AuthButtonProps } from "@/src/components/ui/auth-button";
-import { buttonVariants } from "@/src/components/ui/button";
-import { PaymentProgressMark, type PaymentButtonStatus } from "@/src/components/ui/payment-button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import { cn } from "@/src/lib/utils";
 import type { VariantProps } from "class-variance-authority";
 
-type CheckoutButtonStatus = PaymentButtonStatus;
+type PaymentButtonStatus = "idle" | "pending" | "success";
 
-interface CheckoutButtonProps
-  extends Omit<AuthButtonProps, "onClick" | "render" | "children">,
+interface PaymentButtonProps
+  extends Omit<ComponentProps<typeof Button>, "onClick" | "children">,
     Pick<VariantProps<typeof buttonVariants>, "size" | "variant"> {
-  onCheckout: () => Promise<void> | void;
+  onClick: () => Promise<void> | void;
   idleLabel: ReactNode;
-  connectLabel?: ReactNode;
   idleAdornment?: ReactNode;
+  pendingLabel?: ReactNode;
   successHoldMs?: number;
   onSuccess?: () => void;
   onError?: (error: unknown) => void;
-  status?: CheckoutButtonStatus;
+  status?: PaymentButtonStatus;
 }
 
-export function CheckoutButton({
-  onCheckout,
+function PaymentButton({
+  onClick,
   idleLabel,
-  connectLabel,
   idleAdornment,
+  pendingLabel,
   successHoldMs = 650,
   onSuccess,
   onError,
@@ -36,18 +34,15 @@ export function CheckoutButton({
   className,
   size = "lg",
   variant = "default",
-  onConnect,
   ...rest
-}: CheckoutButtonProps) {
-  const [internalStatus, setInternalStatus] = useState<CheckoutButtonStatus>("idle");
+}: PaymentButtonProps) {
+  const [internalStatus, setInternalStatus] = useState<PaymentButtonStatus>("idle");
   const status = controlledStatus ?? internalStatus;
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
-      if (successTimerRef.current) {
-        clearTimeout(successTimerRef.current);
-      }
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
     };
   }, []);
 
@@ -63,7 +58,7 @@ export function CheckoutButton({
     if (status !== "idle") return;
     if (controlledStatus === undefined) setInternalStatus("pending");
     try {
-      await onCheckout();
+      await onClick();
       if (controlledStatus === undefined) setInternalStatus("success");
     } catch (error) {
       if (controlledStatus === undefined) setInternalStatus("idle");
@@ -76,29 +71,20 @@ export function CheckoutButton({
   const isBusy = isPending || isSuccess;
 
   return (
-    <AuthButton
+    <Button
       type="button"
       disabled={disabled || isBusy}
       onClick={handleClick}
-      onConnect={onConnect}
       size={size}
       variant={variant}
       data-status={status}
       aria-live="polite"
       className={cn(className)}
-      connectLabel={
-        <>
-          <span className="flex-1 text-center">{connectLabel ?? idleLabel}</span>
-          {idleAdornment ? (
-            <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
-              {idleAdornment}
-            </span>
-          ) : null}
-        </>
-      }
       {...rest}
     >
-      <span className="flex-1 text-center">{idleLabel}</span>
+      <span className="flex-1 text-center">
+        {isPending && pendingLabel ? pendingLabel : idleLabel}
+      </span>
       <span className="relative flex size-6 shrink-0 items-center justify-center" aria-hidden>
         <span
           className={cn(
@@ -117,6 +103,56 @@ export function CheckoutButton({
           <PaymentProgressMark status={status} />
         </span>
       </span>
-    </AuthButton>
+    </Button>
   );
 }
+
+function PaymentProgressMark({ status }: { status: PaymentButtonStatus }) {
+  const isSuccess = status === "success";
+  return (
+    <svg
+      viewBox="0 0 36 36"
+      className="size-6"
+      fill="none"
+      role="status"
+      aria-label={isSuccess ? "Complete" : "Processing"}
+    >
+      <circle
+        cx="18"
+        cy="18"
+        r="14"
+        stroke="currentColor"
+        strokeOpacity={isSuccess ? 1 : 0.25}
+        strokeWidth="2.75"
+        className="transition-[stroke-opacity] duration-200"
+      />
+      {!isSuccess ? (
+        <circle
+          cx="18"
+          cy="18"
+          r="14"
+          stroke="currentColor"
+          strokeWidth="2.75"
+          strokeLinecap="round"
+          strokeDasharray="22 66"
+          className="origin-center animate-[payment-spin_900ms_linear_infinite]"
+        />
+      ) : null}
+      <path
+        d="M11.5 18.5 L16 23 L24.5 13.5"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        pathLength={1}
+        strokeDasharray={1}
+        strokeDashoffset={isSuccess ? 0 : 1}
+        className="transition-[stroke-dashoffset] duration-[450ms] ease-[cubic-bezier(0.65,0,0.35,1)]"
+      />
+      <style>{`@keyframes payment-spin { to { transform: rotate(360deg); } }`}</style>
+    </svg>
+  );
+}
+
+export { PaymentButton, PaymentProgressMark };
+export type { PaymentButtonProps, PaymentButtonStatus };
