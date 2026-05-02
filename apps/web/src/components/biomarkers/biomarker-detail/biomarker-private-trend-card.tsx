@@ -302,15 +302,11 @@ function resolvePrivateTrend(input: {
 function emptyStateAction(status: BrowserVaultBiomarkerPanelStatus): { href: string; label: string } | null {
   const normalizedStatus = String(status);
 
-  if (normalizedStatus === "permission_missing") {
-    return { href: "/settings", label: "Review connection" };
-  }
-
-  if (normalizedStatus === "syncing" || normalizedStatus === "stale") {
+  if (normalizedStatus === "stale") {
     return { href: "/settings", label: "View sync status" };
   }
 
-  if (new Set(["no_connection", "no_data", "no_private_vault"]).has(normalizedStatus)) {
+  if (new Set(["no_data", "no_private_vault"]).has(normalizedStatus)) {
     return { href: "/connect", label: "Connect a device" };
   }
 

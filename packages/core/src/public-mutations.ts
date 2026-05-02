@@ -1,3 +1,10 @@
+import type { MetricSampleRecord } from "@murphai/contracts";
+import {
+  metricSampleRecordSchema,
+  safeParseContract,
+  VAULT_LAYOUT,
+} from "@murphai/contracts";
+
 import {
   addMeal as addMealInternal,
   importDeviceBatch as importDeviceBatchInternal,
@@ -71,6 +78,8 @@ import {
   repairVault as repairVaultInternal,
   validateVault as validateVaultInternal,
 } from "./vault.ts";
+import { toMonthlyShardRelativePath } from "./jsonl.ts";
+import { sanitizePathSegment } from "./path-safety.ts";
 
 import type { DateInput, ValidationIssue } from "./types.ts";
 
@@ -228,6 +237,40 @@ export async function appendJsonlRecord<TRecord extends Record<string, unknown>>
   });
 
   return input.record;
+}
+
+export async function appendMetricSample(input: {
+  vaultRoot: string;
+  record: MetricSampleRecord;
+}): Promise<MetricSampleRecord> {
+  const result = safeParseContract(metricSampleRecordSchema, input.record);
+  if (!result.success) {
+    throw new VaultError("SAMPLE_INVALID", `Metric sample failed contract validation. ${JSON.stringify(result.errors)}`, {
+      errors: result.errors,
+    });
+  }
+
+  const metricSegment = sanitizePathSegment(input.record.metric, "metric sample metric");
+  const relativePath = toMonthlyShardRelativePath(
+    `${VAULT_LAYOUT.metricSampleLedgerDirectory}/${metricSegment}`,
+    input.record.recordedAt,
+    "recordedAt",
+  );
+
+  return appendJsonlRecord({
+    vaultRoot: input.vaultRoot,
+    relativePath,
+    record: input.record,
+  });
+}
+
+export async function appendMetricSamples(input: {
+  vaultRoot: string;
+  records: readonly MetricSampleRecord[];
+}): Promise<MetricSampleRecord[]> {
+  const output: MetricSampleRecord[] = [];
+  for (const record of input.records) output.push(await appendMetricSample({ vaultRoot: input.vaultRoot, record }));
+  return output;
 }
 
 export async function applyCanonicalWriteBatch(

@@ -1,11 +1,18 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 export function HeroBackground() {
   const [videoReady, setVideoReady] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useCallback((el: HTMLVideoElement | null) => {
+    if (!el) return;
+    if (el.readyState >= 3) {
+      setVideoReady(true);
+    } else {
+      el.addEventListener("canplay", () => setVideoReady(true), { once: true });
+    }
+  }, []);
 
   return (
     <>
@@ -25,7 +32,6 @@ export function HeroBackground() {
         loop
         playsInline
         preload="auto"
-        onCanPlay={() => setVideoReady(true)}
         className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 sm:[object-position:center] ${
           videoReady ? "opacity-100" : "opacity-0"
         }`}
