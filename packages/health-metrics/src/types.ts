@@ -9,8 +9,6 @@ export type MetricCategory = "activity" | "body" | "custom" | "fitness" | "lab" 
 export type MetricSourceFamily = "derived" | "event" | "sample";
 export type MetricSourceKind =
   | "activity-summary"
-  | "compat-body-measurement"
-  | "compat-observation"
   | "measurement"
   | "metric-sample"
   | "sample-summary"
@@ -146,24 +144,24 @@ export type MetricSeriesDuplicatePolicy =
 export type MetricSeriesAggregation = "mean" | "median" | "min" | "max" | "sum" | "count";
 
 export interface MetricSeriesPoint {
-  biomarkerKey: string | null;
-  confidence: MetricConfidence;
-  context: MetricPointContext;
+  biomarkerKey?: string | null;
+  confidence?: MetricConfidence;
+  context?: MetricPointContext;
   date: string;
-  grain: MetricGrain;
-  id: string;
+  grain?: MetricGrain;
+  id?: string;
   metricKey: string;
-  observedAt: string;
-  pointIds: string[];
-  recordIds: string[];
-  sourceFamily: MetricSourceFamily | null;
-  sourceKind: MetricSourceKind | null;
-  sourceKinds: string[];
-  sourceLabel: string | null;
-  statistic: MetricStatistic;
+  observedAt?: string;
+  pointIds?: string[];
+  recordIds?: string[];
+  sourceFamily?: MetricSourceFamily | null;
+  sourceKind?: MetricSourceKind | null;
+  sourceKinds?: string[];
+  sourceLabel?: string | null;
+  statistic?: MetricStatistic;
   unit: string | null;
   value: number | null;
-  valueLabel: string | null;
+  valueLabel?: string | null;
 }
 
 export interface MetricSeries {

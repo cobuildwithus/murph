@@ -94,10 +94,6 @@ function metricEvidence(
   const selection = resolved.selection;
   const sourceCandidate = selectWearableSourceCandidate(resolved);
   const provider = selection.provider ?? sourceCandidate?.provider ?? null;
-  const recordIds = uniqueStrings([
-    ...selection.recordIds,
-    ...(sourceCandidate?.recordIds ?? []),
-  ]);
   const rawRefs = uniqueStrings([
     ...selection.paths,
     ...(sourceCandidate?.paths ?? []),
@@ -111,6 +107,7 @@ function metricEvidence(
       exactDuplicateCount: resolved.confidence.exactDuplicateCount,
       recordedAt: selection.recordedAt,
       sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
+      sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
     },
     dataOrigin: sourceCandidate?.dataOrigin ?? null,
     date,
@@ -118,9 +115,9 @@ function metricEvidence(
     metricKey,
     provider,
     rawRefs,
-    recordIds: recordIds.length > 0 ? recordIds : [`${sourceKind}:${metricKey}:${date}`],
-    sourceFamily: mapWearableSourceFamily(selection.sourceFamily ?? sourceCandidate?.sourceFamily),
-    sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? sourceKind,
+    recordIds: [`${sourceKind}:${metricKey}:${date}`],
+    sourceFamily: "derived",
+    sourceKind,
     sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
     unit: selection.unit ?? sourceCandidate?.unit ?? null,
     value: selection.value,
@@ -136,11 +133,6 @@ function selectWearableSourceCandidate(resolved: WearableResolvedMetric): Wearab
     ?? resolved.candidates.find((candidate) => candidate.provider === resolved.selection.provider)
     ?? resolved.candidates[0]
     ?? null;
-}
-
-function mapWearableSourceFamily(sourceFamily: WearableResolvedMetric["selection"]["sourceFamily"]): MetricRowEvidence["sourceFamily"] {
-  if (sourceFamily === "canonical") return "sample";
-  return sourceFamily ?? "derived";
 }
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {

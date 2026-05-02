@@ -1,6 +1,6 @@
 import { createCustomMetricDefinition, resolveMetricDefinition, resolveMetricInputKey } from "./catalog.ts";
 import { formatNumber, formatTargetValue } from "./format.ts";
-import { buildMetricSeries } from "./series.ts";
+import { listMetricPoints } from "./series.ts";
 import { selectMetricValue } from "./selectors.ts";
 import type {
   GoalMetricTarget,
@@ -144,7 +144,7 @@ function selectRollingWindowGoalMetricValue(input: {
     }));
   }
 
-  const candidates = buildMetricSeries({
+  const candidates = listMetricPoints({
     biomarkerKey: input.target.biomarkerKey,
     metricKey: input.metricKey,
     points: input.points,

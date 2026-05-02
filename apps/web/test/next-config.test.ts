@@ -155,6 +155,20 @@ test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops"
   });
 });
 
+test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
+    [
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
+    ],
+  );
+  assert.doesNotMatch(
+    JSON.stringify(productionNextConfig.outputFileTracingIncludes),
+    /generated\/catalog\.json/u,
+  );
+});
+
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 

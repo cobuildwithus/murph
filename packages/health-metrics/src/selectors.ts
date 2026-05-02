@@ -144,8 +144,6 @@ function sourcePriority(point: MetricPoint): number {
   switch (point.source.kind) {
     case "test-result": return 0;
     case "measurement": return 1;
-    case "compat-body-measurement":
-    case "compat-observation": return 2;
     case "wearable-summary": return 3;
     case "activity-summary": return 4;
     case "sleep-summary": return 5;

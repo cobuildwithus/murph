@@ -9,9 +9,9 @@ import {
   type HealthCommonsMeasurementMethodTier,
 } from "@murphai/contracts";
 import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
+import { createHealthCommonsCatalogReader } from "@murphai/health-commons/runtime";
 
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
-import { createHealthCommonsCatalogReader } from "@/src/lib/health-commons/catalog";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import { resolveHealthCommonsExperimentProtocolTab } from "@/src/lib/health-commons/experiment-projections";
 import type { ExperimentResearchGroup } from "@/src/types/experiments";

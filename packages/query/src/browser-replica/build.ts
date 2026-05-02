@@ -63,7 +63,7 @@ export async function createBrowserVaultReplica(
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
   const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
-  const metricSelectionRows = createBrowserVaultMetricSelectionRows({ generatedAt, metricPoints, metricRowPointIds, requestedMetrics });
+  const metricSelectionRows = createBrowserVaultMetricSelectionRows({ generatedAt, metricPoints: allMetricPoints, metricRowPointIds, requestedMetrics });
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const replicaWithoutVersion: BrowserVaultReplica = {

@@ -8,12 +8,13 @@ import type {
   HealthCommonsMeasurementMethodProcedure,
   HealthCommonsMeasurementMethodTier,
 } from "@murphai/contracts";
-
 import {
-  healthCommonsCatalog,
+  createHealthCommonsRouteBundleReader,
+  getGeneratedHealthCommonsWebRouteIndex,
+  loadGeneratedHealthCommonsWebRouteBundle,
   type HealthCommonsCatalogReader,
   type HealthCommonsEntity,
-} from "./catalog";
+} from "@murphai/health-commons/runtime";
 
 const STATUS_LABELS: Record<string, string> = {
   community: "Community",
@@ -71,8 +72,12 @@ export interface MeasurementMethodPageModel {
 }
 
 export function listHealthCommonsMeasurementMethodRoutes(
-  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+  catalog?: HealthCommonsCatalogReader,
 ): string[] {
+  if (!catalog) {
+    return listGeneratedHealthCommonsMeasurementMethodRoutes();
+  }
+
   return catalog
     .listByEntityType("measurement_method")
     .filter(isPublishedMeasurementMethod)
@@ -82,8 +87,12 @@ export function listHealthCommonsMeasurementMethodRoutes(
 
 export function resolveHealthCommonsMeasurementMethodDetail(
   measurementMethodId: string,
-  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+  catalog?: HealthCommonsCatalogReader,
 ): MeasurementMethodPageModel | null {
+  if (!catalog) {
+    return resolveGeneratedHealthCommonsMeasurementMethodDetail(measurementMethodId);
+  }
+
   const routeId = normalizeRouteId(measurementMethodId);
   const method = catalog.findByRouteId({
     entityType: "measurement_method",
@@ -99,6 +108,86 @@ export function resolveHealthCommonsMeasurementMethodDetail(
   }
 
   return toMeasurementMethodPageModel(method, catalog);
+}
+
+function listGeneratedHealthCommonsMeasurementMethodRoutes(): string[] {
+  return getGeneratedMeasurementMethodRoutes()
+    .flatMap((route) => {
+      const reader = loadGeneratedMeasurementMethodRouteReader(route.routeId);
+      if (!reader) {
+        return [];
+      }
+
+      const method = reader.findByRouteId({
+        entityType: "measurement_method",
+        routeId: route.routeId,
+      });
+
+      return isPublishedMeasurementMethod(method) ? [toMeasurementMethodRouteId(method)] : [];
+    })
+    .sort();
+}
+
+function resolveGeneratedHealthCommonsMeasurementMethodDetail(
+  measurementMethodId: string,
+): MeasurementMethodPageModel | null {
+  const routeId = normalizeRouteId(measurementMethodId);
+  const route = findGeneratedMeasurementMethodRoute(routeId);
+  if (!route) {
+    return null;
+  }
+
+  const reader = loadGeneratedMeasurementMethodRouteReader(route.routeId);
+  if (!reader) {
+    return null;
+  }
+
+  const method = reader.findByRouteId({
+    entityType: "measurement_method",
+    routeId,
+  });
+
+  if (!isPublishedMeasurementMethod(method)) {
+    return null;
+  }
+
+  if (toMeasurementMethodRouteId(method) !== routeId) {
+    return null;
+  }
+
+  return toMeasurementMethodPageModel(method, reader);
+}
+
+type GeneratedHealthCommonsRoute = ReturnType<
+  typeof getGeneratedHealthCommonsWebRouteIndex
+>["routes"][number];
+
+function getGeneratedMeasurementMethodRoutes(): GeneratedHealthCommonsRoute[] {
+  return getGeneratedHealthCommonsWebRouteIndex().routes.filter((route) =>
+    route.entityType === "measurement_method"
+  );
+}
+
+function findGeneratedMeasurementMethodRoute(
+  routeId: string,
+): GeneratedHealthCommonsRoute | null {
+  return getGeneratedMeasurementMethodRoutes().find((route) =>
+    route.routeId === routeId
+      || route.slug === routeId
+      || route.slug.split("/").at(-1) === routeId
+      || route.aliases.includes(routeId)
+  ) ?? null;
+}
+
+function loadGeneratedMeasurementMethodRouteReader(
+  routeId: string,
+): HealthCommonsCatalogReader | null {
+  const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+    entityType: "measurement_method",
+    routeId,
+  });
+
+  return bundle ? createHealthCommonsRouteBundleReader(bundle) : null;
 }
 
 export function isPublishedMeasurementMethod(

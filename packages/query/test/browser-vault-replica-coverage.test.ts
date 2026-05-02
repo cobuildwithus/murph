@@ -8,7 +8,6 @@ import {
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   parseBrowserVaultReplica,
-  selectBrowserVaultSignals,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
@@ -17,16 +16,15 @@ import { createVaultReadModel } from "../src/model.ts";
 test("browser vault query clients parse final metric-key replicas and filter metrics", () => {
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplicaFixture()));
 
-  assert.equal(client.metrics.latest({ metricKey: "steps" })?.value, 920);
+  assert.equal(client.metrics.latestRow({ metricKey: "steps" })?.value, 920);
   assert.deepEqual(client.metrics.series({ metricKey: "steps" }).map((row) => row.date), ["2026-04-19", "2026-04-20"]);
   assert.deepEqual(client.metrics.seriesMany([{ metricKey: "steps" }, { metricKey: "sleep-score" }]).map((series) => series.at(-1)?.value), [920, 91]);
   assert.equal(client.metricSelections.get("steps")?.value, 920);
+  assert.equal(client.metricSelections.get("dailyStepCount")?.value, 920);
+  assert.equal(client.metrics.latestRow({ metricKey: "dailyStepCount" })?.value, 920);
   assert.equal(client.metricGoals.progress({ goalId: "goal_rhr" }).length, 1);
+  assert.equal(client.metricGoals.progress({ metricKey: "rhr" }).length, 1);
   assert.deepEqual(client.search("steady", { families: ["experiment"] }).map((row) => row.entityId), ["exp_browser"]);
-
-  const signals = selectBrowserVaultSignals(client);
-  assert.equal(signals.activity[0]?.steps.selection.value, 920);
-  assert.equal(signals.sleep[0]?.sleepScore.selection.value, 91);
 });
 
 test("browser vault replica parsing requires final goal progress rows", () => {

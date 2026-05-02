@@ -4,15 +4,16 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
-  buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
+  listMetricPoints,
   listMetricDefinitions,
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
+  selectMetricSeries,
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
@@ -228,7 +229,7 @@ test("selects metric points by policy and exposes provenance warnings", () => {
 
   assert.equal(apoB.status, "ready");
   assert.equal(apoB.value, 87);
-  assert.deepEqual(buildMetricSeries({
+  assert.deepEqual(listMetricPoints({
     biomarkerKey: "biomarker:apolipoprotein-b",
     points: [apoB.point].filter((point): point is MetricPoint => point !== null),
   }).map((point) => point.id), ["metric-point:apob:2026-04-29:lab:0"]);
@@ -316,12 +317,21 @@ test("sorts source priorities and custom metrics through selection and series he
   assert.equal(customSelected.metricKey, "hydration-score");
   assert.equal(customSelected.valueLabel, "92");
 
-  assert.deepEqual(buildMetricSeries({
+  assert.deepEqual(listMetricPoints({
     from: "2026-04-29",
     metricKey: "body-fat-percentage",
     points: [custom, sameDayDevice, latestMeasurement],
     to: "2026-04-29",
   }).map((point) => point.id), [latestMeasurement.id, sameDayDevice.id]);
+
+  const series = selectMetricSeries({
+    duplicatePolicy: "selection-policy",
+    metricKey: "bodyFatPercentage",
+    points: [sameDayDevice, latestMeasurement],
+  });
+  assert.equal(series.status, "ready");
+  assert.deepEqual(series.rows.map((point) => point.pointIds), [[latestMeasurement.id]]);
+  assert.equal(series.warnings.some((warning) => warning.code === "MIXED_SOURCES"), true);
 });
 
 test("formats text-only metric values and missing numeric values", () => {
@@ -368,10 +378,37 @@ test("builds chronological metric series and formats display values", () => {
     value: 82.2,
   });
 
-  assert.deepEqual(buildMetricSeries({
+  assert.deepEqual(listMetricPoints({
     metricKey: "body-weight",
     points: [newer, older],
   }).map((point) => point.id), [older.id, newer.id]);
+  assert.deepEqual(listMetricPoints({
+    metricKey: "weightKg",
+    points: [newer, older],
+  }).map((point) => point.id), [older.id, newer.id]);
+
+  const averaged = selectMetricSeries({
+    aggregation: "mean",
+    metricKey: "body-weight",
+    points: [
+      newer,
+      older,
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:body-weight:2026-04-29:measurement:1",
+        metricKey: "body-weight",
+        observedAt: "2026-04-29T09:00:00.000Z",
+        recordId: "weight_newer_2",
+        sourceKind: "measurement",
+        unit: "kg",
+        value: 82.16,
+      }),
+    ],
+  });
+  assert.deepEqual(averaged.rows.map((point) => ({ date: point.date, value: point.value })), [
+    { date: "2026-04-20", value: 82.2 },
+    { date: "2026-04-29", value: 81.9 },
+  ]);
   assert.equal(formatMetricDisplayValue(newer), "81.6");
 });
 
@@ -432,7 +469,7 @@ test("goal progress reports neutral not_met for unscheduled selected-value targe
 
   const progress = selectMetricGoalProgress({
     goalId: "goal_rhr",
-    now: "2026-05-10T00:00:00.000Z",
+    now: "2026-04-30T00:00:00.000Z",
     points: [
       metricPoint({
         effectiveDate: "2026-04-29",
