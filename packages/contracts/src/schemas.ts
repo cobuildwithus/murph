@@ -21,6 +21,7 @@ import {
   regimenFrontmatterSchema as regimenFrontmatterContract,
   providerFrontmatterSchema as providerFrontmatterContract,
   recipeFrontmatterSchema as recipeFrontmatterContract,
+  metricSampleRecordSchema as metricSampleRecordContract,
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
   workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
@@ -56,6 +57,7 @@ function withDependentRequired(
 export const vaultMetadataSchema = toJsonSchema(vaultMetadataContract);
 export const eventRecordSchema = toJsonSchema(eventRecordContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
+export const metricSampleRecordSchema = toJsonSchema(metricSampleRecordContract);
 export const auditRecordSchema = toJsonSchema(auditRecordContract);
 export const inboxCaptureRecordSchema = toJsonSchema(inboxCaptureRecordContract);
 export const automationFrontmatterSchema = toJsonSchema(automationFrontmatterContract);
@@ -89,6 +91,7 @@ export const schemaCatalog = Object.freeze({
   "audit-record": auditRecordSchema,
   "event-record": eventRecordSchema,
   "inbox-capture-record": inboxCaptureRecordSchema,
+  "metric-sample-record": metricSampleRecordSchema,
   "frontmatter-allergy": allergyFrontmatterSchema,
   "frontmatter-automation": automationFrontmatterSchema,
   "frontmatter-condition": conditionFrontmatterSchema,
