@@ -1,6 +1,6 @@
 # Fix hosted web Vercel build OOM
 
-Status: active
+Status: completed
 Created: 2026-05-03
 Updated: 2026-05-03
 
@@ -59,12 +59,16 @@ Updated: 2026-05-03
 
 ## Verification
 
-- Commands to run:
+- Commands run:
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/health-commons-route-bundle-boundary.test.ts apps/web/test/health-commons-measurement-method-detail.test.ts apps/web/test/next-config.test.ts`
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/health-commons-route-bundle-boundary.test.ts apps/web/test/health-commons-measurement-method-detail.test.ts apps/web/test/health-commons-measurement-method-page.test.ts apps/web/test/health-commons-experiment-experts.test.ts apps/web/test/next-config.test.ts`
   - `pnpm --dir apps/web lint`
   - `pnpm --dir apps/web typecheck`
-  - `pnpm --dir apps/web build` or the narrowest equivalent production build proof if local resource limits block it.
-- Expected outcomes:
-  - Focused tests pass.
-  - Lint/typecheck pass or fail only on named unrelated dirty-tree blockers.
-  - Production build completes locally with lower memory pressure or exposes the next concrete blocker.
+  - `pnpm --dir apps/web build`
+- Outcomes:
+  - Focused tests passed.
+  - Lint passed with two pre-existing warnings in `protocol-tab.tsx` and `http.test.ts`.
+  - Typecheck passed.
+  - Hosted web production build passed end to end; Turbopack compiled in 16.9s and the Health Commons trace checker inspected 99 trace files.
+  - Measurement-method route trace includes 3 measurement-method bundles and 0 non-measurement bundles.
+Completed: 2026-05-03
