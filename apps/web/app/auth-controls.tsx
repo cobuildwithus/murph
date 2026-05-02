@@ -124,14 +124,40 @@ function LandingAuthDialogButton({
                 {authPanelLoadError}
               </div>
             ) : (
-              <div className="rounded-lg border border-border bg-card/60 p-4 text-sm text-muted-foreground">
-                Loading sign in...
-              </div>
+              <AuthPanelSkeleton />
             )
           ) : null}
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function AuthPanelSkeleton() {
+  return (
+    <div className="animate-pulse space-y-4">
+      <div className="space-y-3">
+        <div className="space-y-3">
+          <div className="h-3.5 w-20 rounded-full bg-muted" />
+          <div className="flex gap-3">
+            <div className="h-14 w-28 shrink-0 rounded-2xl bg-muted" />
+            <div className="h-14 flex-1 rounded-2xl bg-muted" />
+          </div>
+        </div>
+        <div className="h-14 w-full rounded-2xl bg-muted" />
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-border" />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+          OR
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="h-11 rounded-2xl bg-muted" />
+        <div className="h-11 rounded-2xl bg-muted" />
+      </div>
+    </div>
   );
 }
 
