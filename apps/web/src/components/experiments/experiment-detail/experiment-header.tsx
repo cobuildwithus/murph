@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { StartExperimentButton } from "@/src/components/experiments/experiment-detail/start-experiment-button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/src/components/ui/tooltip";
 import type { ExperimentStartContactChannels } from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentStatus } from "@/src/types/experiments";
 
@@ -9,7 +10,6 @@ interface ExperimentHeaderProps {
   category: string;
   durationDays: number;
   evidenceLevel: number;
-  evidenceLabel: string;
   matchPercent?: number;
   status: ExperimentStatus;
   day?: number;
@@ -28,7 +28,6 @@ export function ExperimentHeader({
   category,
   durationDays,
   evidenceLevel,
-  evidenceLabel,
   matchPercent,
   status,
   day,
@@ -65,14 +64,16 @@ export function ExperimentHeader({
               {protocolDays} DAYS
             </span>
             <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
-            <div className="flex gap-[3px]">
-              {Array.from({ length: evidenceLevel }, (_, i) => (
-                <div key={i} className="size-1.5 shrink-0 rounded-full bg-ring" />
-              ))}
-            </div>
-            <span className="shrink-0 font-mono text-[11px]/3.5 text-ring">
-              {evidenceLabel}
-            </span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger className="flex gap-[3px]">
+                  {Array.from({ length: evidenceLevel }, (_, i) => (
+                    <div key={i} className="size-1.5 shrink-0 rounded-full bg-ring" />
+                  ))}
+                </TooltipTrigger>
+                <TooltipContent>Evidence level {evidenceLevel} of 5</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {matchPercent && (
               <>
                 <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>

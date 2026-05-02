@@ -72,7 +72,7 @@ export function BiomarkerLayoutClient({
 
       <div className="w-full">
         <div ref={sentinelRef} aria-hidden="true" className="h-px" />
-        <div className="sticky top-0 z-20 -mx-6 bg-background/95 px-6 backdrop-blur-md md:-mx-14 md:px-14">
+        <div className="sticky top-0 z-20 -mx-4 bg-background/95 px-4 backdrop-blur-md md:-mx-14 md:px-14">
           <div className="flex items-center gap-4 border-b border-border">
             <RouteTabs
               ariaLabel="Biomarker tabs"

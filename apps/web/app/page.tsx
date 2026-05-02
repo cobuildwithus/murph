@@ -57,7 +57,6 @@ export default async function HomePage() {
         eyebrow: "Sign up",
         metaItems: [
           `${launchPricingSummary}`,
-          "Oura, WHOOP, Strava, and Garmin",
         ],
         note: null,
         signupLabel: "Get started",

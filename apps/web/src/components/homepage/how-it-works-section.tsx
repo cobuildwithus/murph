@@ -30,7 +30,7 @@ export function HowItWorksSection() {
   return (
     <section
       id="how"
-      className="bg-[#f5f0e8] px-6 py-16 sm:px-10 lg:px-16 lg:py-24"
+      className="bg-[#f5f0e8] px-4 py-16 sm:px-10 lg:px-16 lg:py-24"
     >
       <div className="mx-auto max-w-[1080px]">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#5a6e32]">
@@ -245,7 +245,7 @@ function RunCard() {
             Next step · Today evening
           </span>
           <p className="mt-1.5 text-[0.9375rem] font-semibold text-[#2d3436]">
-            Sauna session · 15–20 min @ 80–100°C
+            Sauna · 15–20 min @ 80–100°C
           </p>
           <p className="mt-1 text-[0.75rem] text-[#736a58]">
             Stay hydrated, replace electrolytes after · Session 2 of 3
