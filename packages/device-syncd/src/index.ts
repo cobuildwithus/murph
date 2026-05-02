@@ -1,4 +1,4 @@
-export { createSecretCodec } from "./crypto.ts";
+export { createSecretCodec } from "./local-secret-codec.ts";
 export { redactPublicDeviceSyncMetadata, toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export {
   DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS,

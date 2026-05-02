@@ -544,9 +544,22 @@ experimentOnboarding:
     missedLogFollowupCopy: "No psyllium dose was logged for the planned window. Should Murph mark it missed, partial, or taken?"
     confirmationPrompt: "Confirm only after baseline lab status, product dose, full-liquid rule, medication spacing, and stop conditions are clear."
 whyItWorks:
-  - "Psyllium is a viscous, gel-forming soluble fiber; human and mechanistic sources link it to bile-acid/sterol handling and gel effects, but the mechanism is not a single settled pathway."
-  - "Psyllium-specific lipid trials and meta-analyses make LDL-C and total cholesterol the most defensible endpoints for this variant."
-  - "The experiment remains interpretable only if product, dose, lab timing, diet, weight, and lipid-medication changes are visible."
+  - "## Viscous gel traps bile acids in the gut\n\nPsyllium forms a thick gel in the intestine that binds bile acids and cholesterol, blocking reabsorption. The liver compensates by pulling LDL particles from the bloodstream to rebuild bile-acid supply. LDL-C and total cholesterol are the most consistent lipid signals across psyllium-specific trials and meta-analyses."
+  - "## Daily divided dosing sustains the bile-acid drain\n\nSplitting 7-10.5 g/day of active psyllium husk across meals keeps viscous gel present throughout the day. Each dose renews the bile-acid trapping cycle rather than leaving gaps where reabsorption resumes."
+  - "## Lab follow-up separates real change from noise\n\nLDL-C movement is a lab biomarker, not a same-day symptom. A baseline and 8-12 week repeat lipid panel, with product, dose, adherence, diet, weight, and medication context visible, is the only way to interpret whether the intervention shifted cholesterol handling."
+mechanismChain:
+  -
+    label: "Dose"
+    content: "7-10.5 g/day active psyllium husk · divided with meals · 8 oz liquid per dose"
+  -
+    label: "Acute effect"
+    content: "Viscous gel forms in gut; bile acids and cholesterol trapped instead of reabsorbed"
+  -
+    label: "Repeated signal"
+    content: "Daily bile-acid loss forces liver to upregulate LDL-receptor clearance"
+  -
+    label: "Adaptation"
+    content: "LDL-C and total cholesterol fall over 8-12 weeks; HDL-C and triglycerides stay mostly flat"
 claims:
 
   -

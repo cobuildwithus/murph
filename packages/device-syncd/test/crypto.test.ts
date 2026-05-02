@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/crypto.ts";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 
 test("secret codec round-trips encrypted values and rejects malformed payloads", () => {
   const codec = createSecretCodec("secret-for-tests");

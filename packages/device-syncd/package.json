@@ -34,10 +34,6 @@
       "types": "./dist/config.d.ts",
       "default": "./dist/config.js"
     },
-    "./crypto": {
-      "types": "./dist/crypto.d.ts",
-      "default": "./dist/crypto.js"
-    },
     "./local-secret-codec": {
       "types": "./dist/local-secret-codec.d.ts",
       "default": "./dist/local-secret-codec.js"

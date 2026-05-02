@@ -4,7 +4,7 @@ import {
   normalizeConfiguredDeviceSyncJobInput,
   normalizeConfiguredDeviceSyncJobRecord,
 } from "./config/provider-manifests.ts";
-import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./crypto.ts";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import { registerDeviceSyncServiceInternals } from "./service-internals.ts";

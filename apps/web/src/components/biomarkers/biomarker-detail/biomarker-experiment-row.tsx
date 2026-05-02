@@ -14,7 +14,7 @@ const ROW_GRID =
 export function BiomarkerExperimentRowHeader() {
   return (
     <div
-      className={`grid ${ROW_GRID} gap-x-6 bg-muted/30 px-5 py-3 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground`}
+      className={`grid ${ROW_GRID} gap-x-3 bg-muted/30 px-5 py-3 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground md:gap-x-6`}
     >
       <span aria-hidden="true" />
       <span>Experiment</span>
@@ -25,7 +25,7 @@ export function BiomarkerExperimentRowHeader() {
       <span className="justify-self-end whitespace-nowrap text-right md:justify-self-auto md:text-left">
         Fit
       </span>
-      <span aria-hidden="true" className="hidden md:inline" />
+      <span aria-hidden="true" />
     </div>
   );
 }
@@ -45,7 +45,7 @@ export function BiomarkerExperimentRow({
   return (
     <Link
       href={protocol.href}
-      className={`group grid ${ROW_GRID} items-center gap-x-6 px-5 py-4 transition-colors hover:bg-muted/30`}
+      className={`group grid ${ROW_GRID} items-center gap-x-3 px-5 py-4 transition-colors hover:bg-muted/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-[-2px] md:gap-x-6`}
     >
       <div className="relative size-10 shrink-0 overflow-hidden rounded-md">
         {imageSrc ? (

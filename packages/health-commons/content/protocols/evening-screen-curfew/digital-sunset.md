@@ -846,7 +846,7 @@ mechanismChain:
     label: "Session"
     content: "30–60 min no personal screens before bed"
   -
-    label: "Inputs removed"
+    label: "Arousal drop"
     content: "Less melanopic light · fewer notifications · less cognitive arousal"
   -
     label: "Repeated signal"

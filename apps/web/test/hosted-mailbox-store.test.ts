@@ -1,8 +1,11 @@
+import { Buffer } from "node:buffer";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
+  decodeHostedMailboxStoredPayload,
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -11,6 +14,7 @@ import {
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
 } from "@/src/lib/hosted-mailbox/store";
+import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
 
 const FIXED_NOW = new Date("2026-04-26T00:00:00.000Z");
 const MAILBOX_REF_1_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_ref_1";
@@ -23,14 +27,15 @@ describe("appendHostedMailboxItemTx", () => {
       hostedMailboxItem,
       hostedMailboxPayload,
     });
+    const payloadSerializedJson = JSON.stringify({ kind: "inline-test" });
+    const payloadBytes = Buffer.byteLength(payloadSerializedJson, "utf8");
 
     const result = await appendHostedMailboxItemTx({
       dedupeKey: "dedupe_inline_1",
       kind: "conversation.message",
       lane: "conversation",
       occurredAt: "2026-04-26T00:00:00.000Z",
-      payloadBytes: 64,
-      payloadSerializedJson: JSON.stringify({ kind: "inline-test" }),
+      payloadSerializedJson,
       tx,
       userId: "member_mailbox_1",
     });
@@ -54,7 +59,8 @@ describe("appendHostedMailboxItemTx", () => {
         kind: "conversation.message",
         lane: "conversation",
         laneSeq: 1n,
-        payloadBytes: 64,
+        payloadBytes,
+        payloadHash: expect.stringMatching(/^hmac-sha256:[A-Za-z0-9_-]+$/u),
         payloadInlineCiphertext: expect.any(String),
         payloadRef: null,
         payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -72,7 +78,7 @@ describe("appendHostedMailboxItemTx", () => {
         mailboxSeqStart: 1n,
         phase: "import",
         redactedJson: expect.objectContaining({
-          bytes: 64,
+          bytes: payloadBytes,
           dedupeKeyPresent: true,
           duplicate: false,
           inserted: true,
@@ -85,6 +91,44 @@ describe("appendHostedMailboxItemTx", () => {
     });
   });
 
+  it("ignores caller-supplied payload metadata when selecting storage and inserting metadata", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+    const payloadSerializedJson = JSON.stringify({ kind: "spoof-test" });
+    const payloadBytes = Buffer.byteLength(payloadSerializedJson, "utf8");
+    const inputWithSpoofedMetadata = {
+      dedupeKey: "dedupe_spoof_1",
+      kind: "conversation.message",
+      lane: "conversation",
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      payloadBytes: 128_000,
+      payloadHash: "hmac-sha256:caller-supplied-spoof",
+      payloadSerializedJson,
+      tx,
+      userId: "member_mailbox_1",
+    };
+
+    const result = await appendHostedMailboxItemTx(inputWithSpoofedMetadata);
+    const createCall = hostedMailboxItem.create.mock.calls[0]?.[0];
+
+    expect(result.item).toMatchObject({
+      payloadInlineCiphertext: expect.any(String),
+      payloadRef: null,
+    });
+    expect(createCall?.data).toMatchObject({
+      payloadBytes,
+      payloadHash: expect.stringMatching(/^hmac-sha256:[A-Za-z0-9_-]+$/u),
+      payloadInlineCiphertext: expect.any(String),
+      payloadRef: null,
+    });
+    expect(createCall?.data.payloadHash).not.toBe("hmac-sha256:caller-supplied-spoof");
+    expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
+  });
+
   it("stores oversized opaque payload ciphertext in the payload table", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
@@ -92,14 +136,18 @@ describe("appendHostedMailboxItemTx", () => {
       hostedMailboxItem,
       hostedMailboxPayload,
     });
+    const payloadSerializedJson = JSON.stringify({
+      body: "x".repeat(100_000),
+      kind: "sidecar-test",
+    });
+    const payloadBytes = Buffer.byteLength(payloadSerializedJson, "utf8");
 
     const result = await appendHostedMailboxItemTx({
       dedupeKey: "dedupe_ref_1",
       kind: "assistant.notification.requested",
       lane: "system",
       occurredAt: FIXED_NOW,
-      payloadBytes: 128_000,
-      payloadSerializedJson: JSON.stringify({ kind: "sidecar-test" }),
+      payloadSerializedJson,
       tx,
       userId: "member_mailbox_1",
     });
@@ -112,6 +160,7 @@ describe("appendHostedMailboxItemTx", () => {
     expect(result.item).not.toHaveProperty("payloadCiphertext");
     expect(createCall?.data.payloadRef).toBe(`hosted-mailbox-payload:${createCall?.data.id}`);
     expect(createCall?.data.payloadSchema).toBe(HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA);
+    expect(createCall?.data.payloadBytes).toBe(payloadBytes);
     expect(result.item.payloadRef).toBe(`hosted-mailbox-payload:${result.item.id}`);
     expect(hostedMailboxPayload.create).toHaveBeenCalledWith({
       data: {
@@ -121,6 +170,92 @@ describe("appendHostedMailboxItemTx", () => {
         userId: "member_mailbox_1",
       },
     });
+  });
+
+  it("decrypts inline payloads with item-schema AAD and sidecar payloads with payload-schema AAD", async () => {
+    installAadCheckingHostedSecureBoxTestCodec();
+
+    try {
+      const inlineTx = createHostedMailboxTx({
+        hostedMailboxItem: createHostedMailboxItemDelegate(),
+        hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+      });
+      const inlinePayload = { kind: "inline-aad-test" };
+      const inlineResult = await appendHostedMailboxItemTx({
+        dedupeKey: "dedupe_inline_aad_1",
+        kind: "conversation.message",
+        lane: "conversation",
+        occurredAt: FIXED_NOW,
+        payloadSerializedJson: JSON.stringify(inlinePayload),
+        tx: inlineTx,
+        userId: "member_mailbox_1",
+      });
+      const inlineCiphertext = inlineResult.item.payloadInlineCiphertext;
+      if (!inlineCiphertext) {
+        throw new Error("Expected inline mailbox ciphertext.");
+      }
+
+      await expect(decodeHostedMailboxStoredPayload({
+        dedupeKey: "dedupe_inline_aad_1",
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: inlineResult.item.laneSeq,
+        mailboxItemId: inlineResult.item.id,
+        occurredAt: inlineResult.item.occurredAt,
+        payloadInlineCiphertext: inlineCiphertext,
+        payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+        userId: "member_mailbox_1",
+      })).resolves.toEqual(inlinePayload);
+      await expect(decodeHostedMailboxStoredPayload({
+        dedupeKey: "dedupe_inline_aad_1",
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: inlineResult.item.laneSeq,
+        mailboxItemId: inlineResult.item.id,
+        occurredAt: inlineResult.item.occurredAt,
+        payloadInlineCiphertext: inlineCiphertext,
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        userId: "member_mailbox_1",
+      })).rejects.toThrow("Hosted secure-box AAD mismatch.");
+
+      const sidecarMailboxPayload = createHostedMailboxPayloadDelegate();
+      const sidecarTx = createHostedMailboxTx({
+        hostedMailboxItem: createHostedMailboxItemDelegate(),
+        hostedMailboxPayload: sidecarMailboxPayload,
+      });
+      const sidecarPayload = {
+        body: "x".repeat(100_000),
+        kind: "sidecar-aad-test",
+      };
+      const sidecarResult = await appendHostedMailboxItemTx({
+        dedupeKey: "dedupe_sidecar_aad_1",
+        kind: "assistant.notification.requested",
+        lane: "system",
+        occurredAt: FIXED_NOW,
+        payloadSerializedJson: JSON.stringify(sidecarPayload),
+        tx: sidecarTx,
+        userId: "member_mailbox_1",
+      });
+      const sidecarCreateCall = sidecarMailboxPayload.create.mock.calls[0]?.[0];
+      if (!sidecarCreateCall || typeof sidecarCreateCall.data.payloadCiphertext !== "string") {
+        throw new Error("Expected sidecar mailbox ciphertext.");
+      }
+
+      await expect(decodeHostedMailboxStoredPayload({
+        dedupeKey: "dedupe_sidecar_aad_1",
+        kind: "assistant.notification.requested",
+        lane: "system",
+        laneSeq: sidecarResult.item.laneSeq,
+        mailboxItemId: sidecarResult.item.id,
+        occurredAt: sidecarResult.item.occurredAt,
+        payloadCiphertext: sidecarCreateCall.data.payloadCiphertext,
+        payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+        userId: "member_mailbox_1",
+      })).resolves.toEqual(sidecarPayload);
+      expect(sidecarCreateCall.data.payloadSchema).toBe(HOSTED_MAILBOX_PAYLOAD_SCHEMA);
+    } finally {
+      restoreDefaultHostedSecureBoxTestCodec();
+    }
   });
 
   it("returns the first item for duplicate dedupe keys without rewriting payload storage", async () => {
@@ -145,7 +280,6 @@ describe("appendHostedMailboxItemTx", () => {
       kind: "member.activated",
       lane: "system",
       occurredAt: FIXED_NOW,
-      payloadBytes: 256,
       payloadSerializedJson: JSON.stringify({ kind: "duplicate-test" }),
       tx,
       userId: "member_mailbox_1",
@@ -203,6 +337,69 @@ describe("appendHostedMailboxItemTx", () => {
     });
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
+  });
+
+  it("compares duplicate dedupe metadata derived from serialized payloads instead of caller spoof fields", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
+        const where = readHostedMailboxFindUniqueWhere(args);
+        return rows.find((row) => (
+          row.userId === where.userId && row.dedupeKey === where.dedupeKey
+        )) ?? null;
+      }),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+    const payloadSerializedJson = JSON.stringify({ kind: "duplicate-stable" });
+
+    const first = await appendHostedMailboxItemTx({
+      dedupeKey: "dedupe_duplicate_spoof_1",
+      kind: "conversation.message",
+      lane: "conversation",
+      occurredAt: FIXED_NOW,
+      payloadSerializedJson,
+      tx,
+      userId: "member_mailbox_1",
+    });
+    const duplicateInputWithSpoofedMetadata = {
+      dedupeKey: "dedupe_duplicate_spoof_1",
+      kind: "conversation.message",
+      lane: "conversation",
+      occurredAt: FIXED_NOW,
+      payloadBytes: 999_999,
+      payloadHash: "hmac-sha256:spoofed-duplicate-hash",
+      payloadSerializedJson,
+      tx,
+      userId: "member_mailbox_1",
+    };
+
+    const duplicate = await appendHostedMailboxItemTx(duplicateInputWithSpoofedMetadata);
+
+    expect(first.inserted).toBe(true);
+    expect(duplicate).toMatchObject({
+      duplicate: true,
+      dedupeConflict: false,
+      inserted: false,
+      item: {
+        id: first.item.id,
+        payloadInlineCiphertext: first.item.payloadInlineCiphertext,
+      },
+    });
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventCode: "mailbox.dedupe_conflict",
+      }),
+    });
   });
 });
 
@@ -873,4 +1070,104 @@ function createHostedMailboxClient(input: {
     hostedMailboxItem: input.hostedMailboxItem,
     hostedMailboxPayload: input.hostedMailboxPayload,
   }) as Parameters<typeof fetchHostedMailboxItemsAfterLaneCursors>[0]["prisma"];
+}
+
+function installAadCheckingHostedSecureBoxTestCodec(): void {
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(input) {
+      const decoded = parseHostedSecureBoxAadTestPayload(input.value);
+      const expectedAad = normalizeHostedSecureBoxTestValue(input.aad);
+      if (
+        decoded.lane !== input.lane
+        || decoded.scope !== input.scope
+        || decoded.userId !== input.userId
+        || JSON.stringify(decoded.aad) !== JSON.stringify(expectedAad)
+        || typeof decoded.value !== "string"
+      ) {
+        throw new Error("Hosted secure-box AAD mismatch.");
+      }
+      return decoded.value;
+    },
+    encrypt(input) {
+      return `hsb-aad-test:${Buffer.from(JSON.stringify({
+        aad: normalizeHostedSecureBoxTestValue(input.aad),
+        lane: input.lane,
+        scope: input.scope,
+        userId: input.userId,
+        value: input.value,
+      }), "utf8").toString("base64url")}`;
+    },
+  });
+}
+
+function restoreDefaultHostedSecureBoxTestCodec(): void {
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(input) {
+      const decoded = parseHostedSecureBoxDefaultTestPayload(input.value);
+      if (
+        decoded.lane !== input.lane
+        || decoded.scope !== input.scope
+        || decoded.userId !== input.userId
+        || typeof decoded.value !== "string"
+      ) {
+        throw new Error("Hosted secure-box test codec metadata mismatch.");
+      }
+      return decoded.value;
+    },
+    encrypt(input) {
+      return `hsb-test:${Buffer.from(JSON.stringify({
+        lane: input.lane,
+        scope: input.scope,
+        userId: input.userId,
+        value: input.value,
+      }), "utf8").toString("base64url")}`;
+    },
+  });
+}
+
+function parseHostedSecureBoxAadTestPayload(value: string): Record<string, unknown> {
+  return parseHostedSecureBoxTestPayload(value, "hsb-aad-test:");
+}
+
+function parseHostedSecureBoxDefaultTestPayload(value: string): Record<string, unknown> {
+  return parseHostedSecureBoxTestPayload(value, "hsb-test:");
+}
+
+function parseHostedSecureBoxTestPayload(
+  value: string,
+  prefix: "hsb-aad-test:" | "hsb-test:",
+): Record<string, unknown> {
+  if (!value.startsWith(prefix)) {
+    throw new Error("Hosted secure-box test payload has an unexpected prefix.");
+  }
+
+  const decoded: unknown = JSON.parse(
+    Buffer.from(value.slice(prefix.length), "base64url").toString("utf8"),
+  );
+
+  if (!decoded || typeof decoded !== "object") {
+    throw new Error("Hosted secure-box test payload must be an object.");
+  }
+
+  return decoded as Record<string, unknown>;
+}
+
+function normalizeHostedSecureBoxTestValue(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeHostedSecureBoxTestValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, normalizeHostedSecureBoxTestValue(item)]),
+    );
+  }
+
+  return value;
 }

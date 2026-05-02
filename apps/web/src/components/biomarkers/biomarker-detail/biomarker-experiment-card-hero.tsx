@@ -24,9 +24,9 @@ export function BiomarkerExperimentCardHero({
   return (
     <Link
       href={protocol.href}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border lg:flex-row"
+      className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 lg:flex-row"
     >
-      <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden lg:aspect-auto lg:w-[320px] lg:self-stretch">
+      <div className="relative aspect-[2/1] w-full shrink-0 overflow-hidden sm:aspect-[16/9] lg:aspect-auto lg:w-[320px] lg:self-stretch">
         {imageSrc ? (
           <Image
             src={imageSrc}
@@ -45,19 +45,19 @@ export function BiomarkerExperimentCardHero({
       </div>
 
       <div className="flex flex-1 flex-col gap-5 p-6 lg:p-7">
-        <div className="flex items-start justify-between gap-6">
+        <div className="flex items-start justify-between gap-4 sm:gap-6">
           <div className="flex flex-col gap-2 min-w-0">
             <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
               {protocol.category}
             </span>
-            <h3 className="font-serif text-2xl/tight font-semibold tracking-tight text-foreground text-balance sm:text-[26px]">
+            <h3 className="font-serif text-xl/tight font-semibold tracking-tight text-foreground text-pretty sm:text-2xl/tight lg:text-[26px]">
               {protocol.title}
             </h3>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <span
               className={cn(
-                "font-serif text-2xl/8 font-semibold",
+                "font-serif text-lg/6 font-semibold sm:text-2xl/8",
                 biomarkerFitToneClassName(protocol.fitLabel),
               )}
             >
@@ -69,11 +69,11 @@ export function BiomarkerExperimentCardHero({
           </div>
         </div>
 
-        <p className="max-w-[68ch] text-[15px]/7 text-muted-foreground text-pretty">
+        <p className="max-w-[68ch] text-sm/6 text-muted-foreground text-pretty sm:text-[15px]/7">
           {protocol.mechanism}
         </p>
 
-        <div className="mt-auto grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border/60 pt-5 sm:grid-cols-4">
+        <div className="mt-auto grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border/60 pt-5 sm:gap-x-6 sm:grid-cols-4">
           <Stat label="Exp. change" value={expectedHighlight} valueClassName="text-primary" />
           <Stat label="Duration" value={durationHighlight} />
           <Stat label="Burden" value={formatChipLabel(protocol.burdenLabel)} />
@@ -100,7 +100,7 @@ function Stat({
       </span>
       <span
         className={cn(
-          "font-serif text-base/6 font-semibold text-foreground text-pretty",
+          "font-serif text-sm/5 font-semibold text-foreground text-pretty sm:text-base/6",
           valueClassName,
         )}
       >

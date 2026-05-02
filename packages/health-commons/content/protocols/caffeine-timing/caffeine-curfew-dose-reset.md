@@ -467,7 +467,7 @@ whyItWorks:
   - "## Dose reset exposes the driver\n\nLogging all sources separates timing from total intake. Coffee, tea, energy drinks, decaf, chocolate, and medicines all count because the nervous system sees caffeine, not categories."
 mechanismChain:
   -
-    label: "Rule"
+    label: "Daily rule"
     content: "All caffeine before late morning or ≥8h before bed"
   -
     label: "Acute effect"

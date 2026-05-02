@@ -47,7 +47,7 @@ export function BiomarkerLayoutClient({
 
   return (
     <div className="flex flex-col gap-10">
-      <div className="flex items-start justify-between gap-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
         <PageHeader
           eyebrow={
             eyebrowParts.length > 0 ? (
@@ -61,7 +61,7 @@ export function BiomarkerLayoutClient({
         />
         <Link
           href="/biomarkers"
-          className="mt-1 inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:mt-1"
         >
           <ArrowLeft className="size-3.5" strokeWidth={1.75} aria-hidden />
           All biomarkers
