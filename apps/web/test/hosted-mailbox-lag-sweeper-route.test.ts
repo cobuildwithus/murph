@@ -27,10 +27,7 @@ describe("hosted mailbox lag sweeper cron route", () => {
     vi.clearAllMocks();
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.runHostedMailboxLagSweeper.mockResolvedValue({
-      candidateCounters: 4,
-      currentCounters: 2,
-      invalidLaneCounters: 0,
-      laggedCounters: 2,
+      highWaterRows: 4,
       laggedUsers: 1,
       nudgeAccepted: 1,
       nudgeAttempted: 1,
@@ -51,10 +48,7 @@ describe("hosted mailbox lag sweeper cron route", () => {
     expect(mocks.runHostedMailboxLagSweeper).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       sweeper: {
-        candidateCounters: 4,
-        currentCounters: 2,
-        invalidLaneCounters: 0,
-        laggedCounters: 2,
+        highWaterRows: 4,
         laggedUsers: 1,
         nudgeAccepted: 1,
         nudgeAttempted: 1,
