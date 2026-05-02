@@ -746,7 +746,6 @@ researchLandscape:
       summary: The April 2026 core-temperature posts change the interpretation of the original 20-minute routine: Johnson reports that reaching roughly 102.4 F / 39 C took closer to 31 minutes, and longer with face or neck cooling. Treat the threshold-targeted saunamaxx version as a higher-burden variant, with cooling used as a tolerability tactic rather than proof of safety.
       sourceKeys:
         - source_artifact:bryanjohns0n-saunamaxx-2026-04-14
-        - source_artifact:bryan-johnson-saunamaxx-2026-04-14
         - source_artifact:bryanjohns0n-core-temp-prototype-2026-04-03
         - source_artifact:x-bryan-johnson-fired-review-2026-04-06
         - source_artifact:pmid-14648127
