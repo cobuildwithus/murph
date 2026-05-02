@@ -979,6 +979,40 @@ export const sampleRecordSchema = withContractMetadata(
   "Murph Sample Record",
 );
 
+export const metricSampleQualifierValueSchema = z.union([
+  boundedString(1, 240),
+  numberSchema(),
+  z.boolean(),
+  z.null(),
+]);
+
+export const metricSampleQualifiersSchema = z.record(
+  patternedString(SLUG_PATTERN, 1, 80),
+  metricSampleQualifierValueSchema,
+);
+
+export const metricSampleRecordSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.metricSample),
+      id: idSchema(ID_PREFIXES.sample),
+      metric: patternedString(SLUG_PATTERN, 1, 120),
+      value: numberSchema(),
+      unit: patternedString(UNIT_PATTERN, 1, 80),
+      recordedAt: isoDateTimeString(),
+      dayKey: patternedString(DAY_KEY_PATTERN),
+      source: z.enum(SAMPLE_SOURCES),
+      quality: z.enum(SAMPLE_QUALITIES),
+      qualifiers: metricSampleQualifiersSchema.optional(),
+      externalRef: externalRefSchema.optional(),
+      dataOrigin: deviceDataOriginSchema.optional(),
+      timeZone: timeZoneString({ optional: true }),
+    })
+    .strict(),
+  "@murphai/contracts/metric-sample-record.schema.json",
+  "Murph Metric Sample Record",
+);
+
 export const auditRecordSchema = withContractMetadata(
   z
     .object({
@@ -1951,6 +1985,9 @@ export type RespiratoryRateSampleRecord = Extract<z.infer<typeof sampleRecordSch
 export type TemperatureSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "temperature" }>;
 export type GlucoseSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "glucose" }>;
 export type SampleRecord = z.infer<typeof sampleRecordSchema>;
+export type MetricSampleQualifierValue = z.infer<typeof metricSampleQualifierValueSchema>;
+export type MetricSampleQualifiers = z.infer<typeof metricSampleQualifiersSchema>;
+export type MetricSampleRecord = z.infer<typeof metricSampleRecordSchema>;
 export type AuditRecord = z.infer<typeof auditRecordSchema>;
 export type InboxCaptureAttachmentRecord = z.infer<typeof inboxCaptureAttachmentSchema>;
 export type InboxCaptureRecord = z.infer<typeof inboxCaptureRecordSchema>;
