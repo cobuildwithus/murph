@@ -163,6 +163,7 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
   }) => Promise<HostedLocalLinqWebhookSetup | null>
 >(async () => null);
 const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
+const waitForHostedLocalLinqWebhookTarget = vi.fn(async () => {});
 
 vi.mock("node:fs/promises", () => ({
   access: vi.fn(async () => {
@@ -269,6 +270,7 @@ vi.mock("./environment.ts", () => ({
 vi.mock("./linq-webhook-tunnel.ts", () => ({
   registerHostedLocalLinqWebhookSubscription,
   resolveHostedLocalLinqWebhookSetup,
+  waitForHostedLocalLinqWebhookTarget,
 }));
 
 vi.mock("./runtime.ts", () => ({
@@ -656,6 +658,14 @@ describe("hosted local dev stack", () => {
       }),
       stderrTarget: undefined,
     });
+    expect(waitForHostedLocalLinqWebhookTarget).toHaveBeenCalledWith({
+      setup: expect.objectContaining({
+        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      }),
+    });
+    expect(waitForHostedLocalLinqWebhookTarget.mock.invocationCallOrder[0]).toBeLessThan(
+      registerHostedLocalLinqWebhookSubscription.mock.invocationCallOrder[0],
+    );
     expect(stack.processes.linqTunnel?.name).toBe("linq-tunnel");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });

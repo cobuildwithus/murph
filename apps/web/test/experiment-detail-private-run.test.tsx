@@ -5,10 +5,7 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   type BrowserVaultQueryClient,
-  type BrowserVaultMetricDayRow,
-  type BrowserVaultMetricDomain,
   type BrowserVaultMetricRow,
-  type BrowserVaultResolvedMetric,
 } from "@murphai/query/browser";
 import { describe, expect, it } from "vitest";
 
@@ -67,7 +64,6 @@ async function createClient(input: {
 
   return createBrowserVaultQueryClient({
     ...replica,
-    metricDayRows: metricRowsToDayRows(input.metricRows),
     metricRows: input.metricRows,
   });
 }
@@ -913,8 +909,7 @@ function restingHeartRateRows(entries: readonly (readonly [string, number])[]): 
   return entries.map(([date, value]) =>
     metricRow({
       date,
-      domain: "recovery",
-      metric: "restingHeartRate",
+      metricKey: "resting-heart-rate",
       unit: "bpm",
       value,
     }),
@@ -923,52 +918,28 @@ function restingHeartRateRows(entries: readonly (readonly [string, number])[]): 
 
 function metricRow(input: {
   date: string;
-  domain: BrowserVaultMetricDomain;
-  metric: string;
+  metricKey: string;
   unit: string;
   value: number;
 }): BrowserVaultMetricRow {
   return {
+    biomarkerKey: input.metricKey === "resting-heart-rate" ? "biomarker:resting-heart-rate" : null,
     confidence: "medium",
+    context: {},
     date: input.date,
-    domain: input.domain,
-    id: `${input.domain}:${input.date}:${input.metric}`,
-    metric: input.metric,
+    grain: "day",
+    id: `metric-row:${input.metricKey}:${input.date}`,
+    metricKey: input.metricKey,
+    observedAt: `${input.date}T00:00:00.000Z`,
+    pointIds: [`metric-point:${input.metricKey}:${input.date}`],
     recordIds: [],
+    rowSchema: "murph.browser-vault.metric-row",
     sourceFamily: "derived",
-    sourceKind: "summary",
+    sourceKind: "wearable-summary",
+    sourceLabel: "Wearable summary",
+    statistic: "value",
     unit: input.unit,
     value: input.value,
+    valueLabel: String(input.value),
   };
-}
-
-function metricRowsToDayRows(rows: readonly BrowserVaultMetricRow[]): BrowserVaultMetricDayRow[] {
-  const dayRows = new Map<string, BrowserVaultMetricDayRow>();
-
-  for (const row of rows) {
-    const id = `${row.domain}:${row.date}`;
-    const existing = dayRows.get(id);
-    const metrics: Record<string, BrowserVaultResolvedMetric> = {
-      ...(existing?.metrics ?? {}),
-      [row.metric]: {
-        selection: {
-          unit: row.unit,
-          value: row.value,
-        },
-      },
-    };
-
-    dayRows.set(id, {
-      attributes: existing?.attributes ?? {},
-      confidence: existing?.confidence ?? row.confidence,
-      date: row.date,
-      domain: row.domain,
-      id,
-      metricIds: Object.keys(metrics).map((metric) => `${row.domain}:${row.date}:${metric}`),
-      metrics,
-      notes: existing?.notes ?? [],
-    });
-  }
-
-  return [...dayRows.values()].sort((left, right) => right.date.localeCompare(left.date));
 }

@@ -22,7 +22,6 @@ import {
   formatTrendDeltaSummary,
 } from "@/src/lib/browser-vault/trend-comparison";
 import type { BiomarkerOverviewProjection } from "@/src/lib/health-commons/biomarker-projections";
-import { isBrowserVaultMetricBinding } from "@/src/lib/health-commons/biomarker-bindings";
 
 interface TrendPoint {
   date: string;
@@ -247,14 +246,6 @@ function resolvePrivateTrend(input: {
 
   const panel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: input.biomarker.key,
-    bindings: input.biomarker.privateMetricBindings
-      .filter(isBrowserVaultMetricBinding)
-      .map((binding) => ({
-        domain: binding.domain,
-        metric: binding.metric,
-        preferred: binding.preferred,
-        unit: binding.unit,
-      })),
     client: input.client,
     label: input.biomarker.shortName,
     trendDefaults: input.biomarker.trendDefaults,

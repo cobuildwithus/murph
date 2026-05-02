@@ -15,6 +15,9 @@ export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENT = "message.received";
 const LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
   "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
+const LINQ_WEBHOOK_TARGET_READY_TIMEOUT_MS = 30_000;
+const LINQ_WEBHOOK_TARGET_READY_INTERVAL_MS = 1_000;
+const LINQ_WEBHOOK_TARGET_READY_REQUEST_TIMEOUT_MS = 5_000;
 
 interface CloudflaredIngressRule {
   hostname: string | null;
@@ -197,6 +200,44 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   );
 }
 
+export async function waitForHostedLocalLinqWebhookTarget(input: {
+  fetchImplementation?: typeof fetch;
+  intervalMs?: number;
+  setup: HostedLocalLinqWebhookSetup;
+  sleep?: (ms: number) => Promise<void>;
+  timeoutMs?: number;
+}): Promise<void> {
+  const fetchImplementation = input.fetchImplementation ?? fetch;
+  const timeoutMs = input.timeoutMs ?? LINQ_WEBHOOK_TARGET_READY_TIMEOUT_MS;
+  const intervalMs = input.intervalMs ?? LINQ_WEBHOOK_TARGET_READY_INTERVAL_MS;
+  const sleep = input.sleep ?? sleepDefault;
+  const deadline = Date.now() + timeoutMs;
+  let lastFailure = "no response";
+
+  while (true) {
+    const response = await fetchLinqWebhookTargetReadiness({
+      fetchImplementation,
+      targetUrl: input.setup.targetUrl,
+    });
+    if (response.ok) {
+      return;
+    }
+
+    lastFailure = response.failure;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        [
+          "Linq webhook tunnel target did not become reachable before registration.",
+          `Last readiness check: ${lastFailure}.`,
+          "Confirm the local web dev server is running and the cloudflared tunnel service points at it.",
+        ].join(" "),
+      );
+    }
+
+    await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
+  }
+}
+
 export function normalizeLinqWebhookPublicUrl(value: string): {
   publicBaseUrl: string;
   targetUrl: string;
@@ -275,6 +316,37 @@ function buildLinqWebhookRegistrationEnv(
     ...(linqApiBaseUrl ? { LINQ_API_BASE_URL: linqApiBaseUrl } : {}),
     LINQ_API_TOKEN: linqApiToken,
   };
+}
+
+async function fetchLinqWebhookTargetReadiness(input: {
+  fetchImplementation: typeof fetch;
+  targetUrl: string;
+}): Promise<{ ok: true } | { failure: string; ok: false }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, LINQ_WEBHOOK_TARGET_READY_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await input.fetchImplementation(input.targetUrl, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    if (response.status === 200) {
+      return { ok: true };
+    }
+    return {
+      failure: `HTTP ${response.status}`,
+      ok: false,
+    };
+  } catch (error) {
+    return {
+      failure: error instanceof Error ? error.message : String(error),
+      ok: false,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function createLinqWebhookRegistrationFingerprint(input: {
@@ -580,6 +652,10 @@ async function pathExistsDefault(filePath: string): Promise<boolean> {
 
 async function readTextFileDefault(filePath: string): Promise<string> {
   return await readFile(filePath, "utf8");
+}
+
+async function sleepDefault(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

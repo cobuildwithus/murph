@@ -364,6 +364,56 @@ describe("mergeCloudflareLocalEnv", () => {
     );
   });
 
+  it("repairs stale callback keyring entries for the current signing key", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_CRYPTO_ENV: "local",
+        HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
+        HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: JSON.stringify({
+          "callback:v0": {
+            crv: "P-256",
+            kty: "EC",
+            x: "older-x",
+            y: "older-y",
+          },
+          "callback:v1": {
+            crv: "P-256",
+            kty: "EC",
+            x: "stale-x",
+            y: "stale-y",
+          },
+        }),
+      },
+      oidcIdentity,
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(JSON.parse(merged.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON)).toEqual({
+      "callback:v0": {
+        crv: "P-256",
+        kty: "EC",
+        x: "older-x",
+        y: "older-y",
+      },
+      "callback:v1": {
+        crv: "P-256",
+        kty: "EC",
+        x: "callback-x",
+        y: "callback-y",
+      },
+    });
+  });
+
   it("allows explicitly opted-in remote hosted crypto keys", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -591,6 +641,36 @@ describe("buildHostedLocalDevOverrides", () => {
 
     expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
     expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBeUndefined();
+  });
+
+  it("derives web callback verifier keys from the current local signing key", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {
+      HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
+      HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: JSON.stringify({
+        "callback:v1": {
+          crv: "P-256",
+          kty: "EC",
+          x: "stale-x",
+          y: "stale-y",
+        },
+      }),
+    });
+
+    expect(JSON.parse(overrides.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK ?? "")).toEqual({
+      crv: "P-256",
+      kty: "EC",
+      x: "callback-x",
+      y: "callback-y",
+    });
+    expect(JSON.parse(overrides.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON ?? "")).toEqual({
+      "callback:v1": {
+        crv: "P-256",
+        kty: "EC",
+        x: "callback-x",
+        y: "callback-y",
+      },
+    });
   });
 });
 

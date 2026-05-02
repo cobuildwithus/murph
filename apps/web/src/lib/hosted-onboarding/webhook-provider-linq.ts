@@ -5,7 +5,6 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 
-import { hostedOnboardingError } from "./errors";
 import { issueHostedInviteTx } from "./invite-service";
 import {
   hasHostedMemberActiveAccess,
@@ -51,7 +50,6 @@ import type {
 } from "./webhook-provider-linq-types";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
-const HOSTED_LINQ_MESSAGE_MAX_SERIALIZED_PARTS_BYTES = 128 * 1024;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
 const HOSTED_LINQ_TEXT_PART_MAX_CHARS = 20_000;
 const HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS = 20_000;
@@ -127,8 +125,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
 
     if (routeDecision.kind === "redirect_to_home") {
-      assertHostedLinqMailboxPartsWithinSideEffectLimit(messageEvent.data.message.parts);
-
       return buildConversationHomeRedirectResponse({
         chatId: summary.chatId,
         homeRecipientPhone: routeDecision.homeRecipientPhone,
@@ -222,8 +218,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("non-imessage-first-contact");
   }
 
-  assertHostedLinqMailboxPartsWithinSideEffectLimit(messageEvent.data.message.parts);
-
   const member = existingMember ?? await ensureHostedMemberForPhoneTx({
     phoneNumber: participantPhoneNumber,
     prisma: input.prisma,
@@ -315,40 +309,120 @@ function buildHostedLinqConversationWakeForMailbox(input: {
 
 type HostedLinqMailboxPartCompactionMode = "normal" | "compact";
 
+type HostedLinqMailboxTextPartBuildResult = {
+  omittedParts: number;
+  part: HostedExecutionLinqConversationMessagePart | null;
+  truncatedContent: boolean;
+};
+
+type HostedLinqMailboxAttachmentPartsBuildResult = {
+  omittedParts: number;
+  parts: HostedExecutionLinqConversationMessagePart[];
+};
+
 function buildHostedLinqMailboxParts(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
   mode: HostedLinqMailboxPartCompactionMode,
 ): HostedExecutionLinqConversationMessagePart[] {
-  const maxParts = mode === "compact" ? Math.min(16, HOSTED_LINQ_MESSAGE_MAX_PARTS) : HOSTED_LINQ_MESSAGE_MAX_PARTS;
-  const mailboxParts: HostedExecutionLinqConversationMessagePart[] = [];
+  const textPart = buildHostedLinqMailboxTextPart(parts, mode);
+  const attachmentParts = buildHostedLinqMailboxAttachmentParts(parts, mode);
+  const mailboxParts = [
+    ...(textPart.part ? [textPart.part] : []),
+    ...attachmentParts.parts,
+  ];
+  const omittedParts = textPart.omittedParts + attachmentParts.omittedParts;
+
+  if (omittedParts > 0 || textPart.truncatedContent || mode === "compact") {
+    return appendHostedLinqStagingNote(mailboxParts, {
+      mode,
+      omittedAttachmentParts: attachmentParts.omittedParts,
+      omittedParts,
+      omittedTextParts: textPart.omittedParts,
+      truncatedContent: textPart.truncatedContent,
+    });
+  }
+
+  return mailboxParts;
+}
+
+function buildHostedLinqMailboxTextPart(
+  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
+  mode: HostedLinqMailboxPartCompactionMode,
+): HostedLinqMailboxTextPartBuildResult {
+  const textValues: string[] = [];
   let textBudget = mode === "compact"
     ? HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS
     : HOSTED_LINQ_TEXT_PART_MAX_CHARS;
-  const omittedParts = Math.max(0, parts.length - maxParts);
+  let omittedParts = 0;
   let truncatedContent = false;
 
-  for (const part of parts.slice(0, maxParts)) {
-    if (part.type === "text" || part.type === "link") {
-      const value = normalizeHostedLinqPartText(part.value);
-      if (!value) {
-        continue;
-      }
-
-      const truncated = truncateHostedLinqPartText(value, textBudget);
-      if (truncated.truncated) {
-        truncatedContent = true;
-      }
-      if (truncated.value) {
-        mailboxParts.push({
-          type: part.type,
-          value: truncated.value,
-        });
-        textBudget = Math.max(0, textBudget - truncated.value.length);
-      }
+  for (const part of parts) {
+    if (part.type !== "text" && part.type !== "link") {
       continue;
     }
 
-    mailboxParts.push({
+    const value = normalizeHostedLinqPartText(part.value);
+    if (!value) {
+      continue;
+    }
+
+    const separatorBudget = textValues.length > 0 ? 1 : 0;
+    const available = textBudget - separatorBudget;
+    if (available <= 0) {
+      omittedParts += 1;
+      truncatedContent = true;
+      continue;
+    }
+
+    const truncated = truncateHostedLinqPartText(value, available);
+    if (truncated.truncated) {
+      truncatedContent = true;
+    }
+
+    if (!truncated.value) {
+      omittedParts += 1;
+      continue;
+    }
+
+    textValues.push(truncated.value);
+    textBudget = Math.max(0, textBudget - separatorBudget - truncated.value.length);
+  }
+
+  const text = textValues.join("\n");
+
+  return {
+    omittedParts,
+    part: text
+      ? {
+          type: "text",
+          value: text,
+        }
+      : null,
+    truncatedContent,
+  };
+}
+
+function buildHostedLinqMailboxAttachmentParts(
+  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
+  mode: HostedLinqMailboxPartCompactionMode,
+): HostedLinqMailboxAttachmentPartsBuildResult {
+  const maxAttachmentParts = mode === "compact"
+    ? Math.min(16, HOSTED_LINQ_MESSAGE_MAX_PARTS)
+    : HOSTED_LINQ_MESSAGE_MAX_PARTS;
+  const attachmentParts: HostedExecutionLinqConversationMessagePart[] = [];
+  let omittedParts = 0;
+
+  for (const part of parts) {
+    if (part.type !== "media" && part.type !== "voice_memo") {
+      continue;
+    }
+
+    if (attachmentParts.length >= maxAttachmentParts) {
+      omittedParts += 1;
+      continue;
+    }
+
+    attachmentParts.push({
       ...(part.attachment_id === undefined
         ? {}
         : { attachmentId: truncateHostedLinqScalar(part.attachment_id, HOSTED_LINQ_ATTACHMENT_ID_MAX_CHARS) }),
@@ -364,58 +438,10 @@ function buildHostedLinqMailboxParts(
     });
   }
 
-  if (omittedParts > 0 || truncatedContent || mode === "compact") {
-    return appendHostedLinqStagingNote(mailboxParts, {
-      mode,
-      omittedParts,
-      truncatedContent,
-    });
-  }
-
-  return mailboxParts;
-}
-
-function assertHostedLinqMailboxPartsWithinSideEffectLimit(
-  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
-): void {
-  if (parts.length > HOSTED_LINQ_MESSAGE_MAX_PARTS) {
-    throw hostedOnboardingError({
-      code: "LINQ_MESSAGE_PARTS_TOO_MANY",
-      httpStatus: 413,
-      message: "Linq webhook message contains too many parts.",
-      retryable: false,
-    });
-  }
-
-  const mailboxParts = parts.map(buildHostedLinqMailboxPartForLimitCheck);
-  const serializedParts = JSON.stringify(mailboxParts);
-  const serializedPartsBytes = new TextEncoder().encode(serializedParts).byteLength;
-
-  if (serializedPartsBytes > HOSTED_LINQ_MESSAGE_MAX_SERIALIZED_PARTS_BYTES) {
-    throw hostedOnboardingError({
-      code: "LINQ_MESSAGE_PARTS_TOO_LARGE",
-      httpStatus: 413,
-      message: "Linq webhook message parts are too large.",
-      retryable: false,
-    });
-  }
-}
-
-function buildHostedLinqMailboxPartForLimitCheck(
-  part: HostedLinqMessageReceivedEvent["data"]["message"]["parts"][number],
-): HostedExecutionLinqConversationMessagePart {
-  return part.type === "text" || part.type === "link"
-    ? {
-        type: part.type,
-        value: part.value,
-      }
-    : {
-        ...(part.attachment_id === undefined ? {} : { attachmentId: part.attachment_id }),
-        ...(part.filename === undefined ? {} : { fileName: part.filename }),
-        ...(part.mime_type === undefined ? {} : { mimeType: part.mime_type }),
-        ...(part.size === undefined ? {} : { size: part.size }),
-        type: part.type,
-      };
+  return {
+    omittedParts,
+    parts: attachmentParts,
+  };
 }
 
 function buildMinimalHostedLinqMailboxParts(
@@ -450,13 +476,23 @@ function appendHostedLinqStagingNote(
   parts: HostedExecutionLinqConversationMessagePart[],
   input: {
     mode: HostedLinqMailboxPartCompactionMode;
+    omittedAttachmentParts?: number;
     omittedParts: number;
+    omittedTextParts?: number;
     truncatedContent: boolean;
   },
 ): HostedExecutionLinqConversationMessagePart[] {
   const details = [
     input.mode === "compact" ? "payload was compacted" : null,
-    input.omittedParts > 0 ? `${input.omittedParts} part(s) omitted` : null,
+    input.omittedTextParts && input.omittedTextParts > 0
+      ? `${input.omittedTextParts} text/link part(s) omitted`
+      : null,
+    input.omittedAttachmentParts && input.omittedAttachmentParts > 0
+      ? `${input.omittedAttachmentParts} attachment descriptor(s) omitted`
+      : null,
+    input.omittedParts > 0 && !input.omittedTextParts && !input.omittedAttachmentParts
+      ? `${input.omittedParts} part(s) omitted`
+      : null,
     input.truncatedContent ? "some content truncated" : null,
   ].filter((detail): detail is string => detail !== null);
 

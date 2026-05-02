@@ -134,6 +134,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     await maybeSendHostedLinqIngressReadReceipt({
       plan,
       signal: input.signal,
+      wakeHandoff,
     });
 
     finishHostedOnboardingTiming(timing, "completed", {
@@ -161,6 +162,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 async function maybeSendHostedLinqIngressReadReceipt(input: {
   plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
   signal?: AbortSignal;
+  wakeHandoff: Awaited<ReturnType<typeof maybeHandoffHostedExecutionWebhookWake>>;
 }): Promise<void> {
   const chatId = input.plan.ingressReadReceiptChatId?.trim() ?? "";
 
@@ -170,14 +172,28 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
 
   const responseReason = input.plan.response.reason ?? null;
   const timeoutMs = HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS;
+  const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
+  const wakeHandoffStarted = input.wakeHandoff?.started === true;
   const readReceiptTiming = startHostedOnboardingTiming(
     "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
       chatIdPresent: true,
       responseReason,
       timeoutMs,
+      wakeHandoffReason,
+      wakeHandoffStarted,
     },
   );
+
+  if (!wakeHandoffStarted) {
+    finishHostedOnboardingTiming(readReceiptTiming, "skipped-wake-handoff-not-started", {
+      responseReason,
+      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+      wakeHandoffReason,
+      wakeHandoffStarted,
+    });
+    return;
+  }
 
   try {
     const result = await sendHostedLinqReadReceipt({
@@ -190,12 +206,16 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       httpStatus: result.status,
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+      wakeHandoffReason,
+      wakeHandoffStarted,
     });
   } catch (error) {
     finishHostedOnboardingTiming(readReceiptTiming, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+      wakeHandoffReason,
+      wakeHandoffStarted,
     });
   }
 }

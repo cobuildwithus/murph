@@ -1,10 +1,8 @@
 import {
   type BrowserVaultEntity,
   type BrowserVaultEntityFilters,
-  type BrowserVaultMetricDayRow,
   type BrowserVaultMetricFilters,
-  type BrowserVaultMetricPoint,
-  type BrowserVaultMetricPointFilters,
+  type BrowserVaultMetricGoalProgressRow,
   type BrowserVaultMetricRow,
   type BrowserVaultMetricSelectionFilters,
   type BrowserVaultMetricSelectionRow,
@@ -14,6 +12,7 @@ import {
   type BrowserVaultTimelineFilters,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
+import { metricRowMatchesFilters } from "./metric-points.ts";
 
 export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): BrowserVaultQueryClient {
   const frozenReplica = deepFreezeBrowserVaultValue(replica);
@@ -27,10 +26,7 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
     }
   }
 
-  const metricPoints = frozenReplica.metricPoints ?? [];
-  const metricSelectionRows = frozenReplica.metricSelectionRows ?? [];
-
-  for (const selection of metricSelectionRows) {
+  for (const selection of frozenReplica.metricSelectionRows) {
     metricSelectionById.set(selection.id, selection);
     metricSelectionById.set(selection.metricKey, selection);
     if (selection.biomarkerKey) {
@@ -47,34 +43,23 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
         return frozenReplica.entities.filter((entity) => matchesEntityFilters(entity, filters));
       },
     },
-    metricDays: {
-      list(filters = {}) {
-        return frozenReplica.metricDayRows.filter((row) => matchesMetricDayFilters(row, filters));
+    metricGoals: {
+      progress(filters = {}) {
+        return frozenReplica.metricGoalProgressRows.filter((row) => matchesMetricGoalFilters(row, filters));
       },
     },
     metrics: {
       latest(filters = {}) {
-        return frozenReplica.metricRows.find((row) => matchesMetricFilters(row, filters)) ?? null;
+        return frozenReplica.metricRows.find((row) => metricRowMatchesFilters(row, filters)) ?? null;
       },
       list(filters = {}) {
-        return frozenReplica.metricRows.filter((row) => matchesMetricFilters(row, filters));
+        return frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters));
       },
       series(filters = {}) {
-        return frozenReplica.metricRows.filter((row) => matchesMetricFilters(row, filters)).slice().reverse();
+        return frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters)).slice().reverse();
       },
-    },
-    metricPoints: {
-      latest(filters = {}) {
-        return metricPoints.find((point) => matchesMetricPointFilters(point, filters)) ?? null;
-      },
-      list(filters = {}) {
-        return metricPoints.filter((point) => matchesMetricPointFilters(point, filters));
-      },
-      series(filters = {}) {
-        return metricPoints
-          .filter((point) => matchesMetricPointFilters(point, filters))
-          .slice()
-          .reverse();
+      seriesMany(filters) {
+        return filters.map((filter) => frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filter)).slice().reverse());
       },
     },
     metricSelections: {
@@ -85,7 +70,7 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
         return metricSelectionById.get(biomarkerKey) ?? null;
       },
       list(filters = {}) {
-        return metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, filters));
+        return frozenReplica.metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, filters));
       },
     },
     replica: frozenReplica,
@@ -114,116 +99,41 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
 }
 
 function matchesEntityFilters(entity: BrowserVaultEntity, filters: BrowserVaultEntityFilters): boolean {
-  if (filters.ids && !filters.ids.some((id) => entity.lookupIds.includes(id) || entity.id === id)) {
-    return false;
-  }
-  if (filters.families && !filters.families.includes(entity.family)) {
-    return false;
-  }
-  if (filters.kinds && !filters.kinds.includes(entity.kind)) {
-    return false;
-  }
-  if (filters.statuses && (!entity.status || !filters.statuses.includes(entity.status))) {
-    return false;
-  }
-  if (filters.tags && !filters.tags.every((tag) => entity.tags.includes(tag))) {
-    return false;
-  }
-  if (filters.from && (entity.date ?? "") < filters.from) {
-    return false;
-  }
-  if (filters.to && (entity.date ?? "9999-12-31") > filters.to) {
-    return false;
-  }
+  if (filters.ids && !filters.ids.some((id) => entity.lookupIds.includes(id) || entity.id === id)) return false;
+  if (filters.families && !filters.families.includes(entity.family)) return false;
+  if (filters.kinds && !filters.kinds.includes(entity.kind)) return false;
+  if (filters.statuses && (!entity.status || !filters.statuses.includes(entity.status))) return false;
+  if (filters.tags && !filters.tags.every((tag) => entity.tags.includes(tag))) return false;
+  if (filters.from && (entity.date ?? "") < filters.from) return false;
+  if (filters.to && (entity.date ?? "9999-12-31") > filters.to) return false;
   if (filters.text) {
     return normalizeSearch([entity.title, entity.bodyPreview, entity.tags.join(" ")].join(" "))
       .includes(normalizeSearch(filters.text));
   }
-
   return true;
 }
 
-function matchesMetricFilters(row: BrowserVaultMetricRow, filters: BrowserVaultMetricFilters): boolean {
-  if (filters.domain && row.domain !== filters.domain) {
-    return false;
-  }
-  if (filters.metric && row.metric !== filters.metric) {
-    return false;
-  }
-  if (filters.from && row.date < filters.from) {
-    return false;
-  }
-  if (filters.to && row.date > filters.to) {
-    return false;
-  }
-
+function matchesMetricSelectionFilters(row: BrowserVaultMetricSelectionRow, filters: BrowserVaultMetricSelectionFilters): boolean {
+  if (filters.metricKey && row.metricKey !== filters.metricKey) return false;
+  if (filters.biomarkerKey && row.biomarkerKey !== filters.biomarkerKey) return false;
   return true;
 }
 
-function matchesMetricDayFilters(row: BrowserVaultMetricDayRow, filters: BrowserVaultMetricFilters): boolean {
-  if (filters.domain && row.domain !== filters.domain) {
-    return false;
-  }
-  if (filters.metric && !Object.hasOwn(row.metrics, filters.metric)) {
-    return false;
-  }
-  if (filters.from && row.date < filters.from) {
-    return false;
-  }
-  if (filters.to && row.date > filters.to) {
-    return false;
-  }
-
-  return true;
-}
-
-function matchesMetricPointFilters(row: BrowserVaultMetricPoint, filters: BrowserVaultMetricPointFilters): boolean {
-  if (filters.metricKey && row.metricKey !== filters.metricKey) {
-    return false;
-  }
-  if (filters.biomarkerKey && row.biomarkerKey !== filters.biomarkerKey) {
-    return false;
-  }
-  if (filters.from && row.date < filters.from) {
-    return false;
-  }
-  if (filters.to && row.date > filters.to) {
-    return false;
-  }
-
-  return true;
-}
-
-function matchesMetricSelectionFilters(
-  row: BrowserVaultMetricSelectionRow,
-  filters: BrowserVaultMetricSelectionFilters,
+function matchesMetricGoalFilters(
+  row: BrowserVaultMetricGoalProgressRow,
+  filters: { goalId?: string; metricKey?: string },
 ): boolean {
-  if (filters.metricKey && row.metricKey !== filters.metricKey) {
-    return false;
-  }
-  if (filters.biomarkerKey && row.biomarkerKey !== filters.biomarkerKey) {
-    return false;
-  }
+  if (filters.goalId && row.goalId !== filters.goalId) return false;
+  if (filters.metricKey && row.metricKey !== filters.metricKey) return false;
   return true;
 }
 
 function matchesTimelineFilters(row: BrowserVaultTimelineRow, filters: BrowserVaultTimelineFilters): boolean {
-  if (filters.families && !filters.families.includes(row.family)) {
-    return false;
-  }
-  if (filters.kinds && !filters.kinds.includes(row.kind)) {
-    return false;
-  }
-  if (filters.tags && !filters.tags.every((tag) => row.tags.includes(tag))) {
-    return false;
-  }
-  if (filters.from && row.date < filters.from) {
-    return false;
-  }
-  if (filters.to && row.date > filters.to) {
-    return false;
-  }
-
+  if (filters.families && !filters.families.includes(row.family)) return false;
+  if (filters.kinds && !filters.kinds.includes(row.kind)) return false;
+  if (filters.tags && !filters.tags.every((tag) => row.tags.includes(tag))) return false;
+  if (filters.from && row.date < filters.from) return false;
+  if (filters.to && row.date > filters.to) return false;
   return true;
 }
 
@@ -232,20 +142,12 @@ function normalizeSearch(value: string): string {
 }
 
 function deepFreezeBrowserVaultValue<T>(value: T, seen = new WeakSet<object>()): T {
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
+  if (!value || typeof value !== "object") return value;
   const objectValue = value as object;
-  if (seen.has(objectValue)) {
-    return value;
-  }
-
+  if (seen.has(objectValue)) return value;
   seen.add(objectValue);
-
   for (const nestedValue of Object.values(objectValue as Record<string, unknown>)) {
     deepFreezeBrowserVaultValue(nestedValue, seen);
   }
-
   return Object.freeze(objectValue) as T;
 }

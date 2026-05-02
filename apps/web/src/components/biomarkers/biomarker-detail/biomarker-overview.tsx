@@ -6,7 +6,6 @@ import {
 } from "./biomarker-experiment-row";
 import { BiomarkerPrivateTrendCard } from "./biomarker-private-trend-card";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
-import { isBrowserVaultMetricBinding } from "@/src/lib/health-commons/biomarker-bindings";
 import type { BiomarkerOverviewProjection } from "@/src/lib/health-commons/biomarker-projections";
 
 export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewProjection }) {
@@ -14,15 +13,12 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewP
   const heroProtocols = protocols.slice(0, 2);
   const standardProtocols = protocols.slice(2, 5);
   const restProtocols = protocols.slice(5);
-  const hasPrivateTrendBinding = biomarker.privateMetricBindings.some(isBrowserVaultMetricBinding);
 
   return (
     <div className="flex flex-col gap-12 pb-12">
-      {hasPrivateTrendBinding ? (
-        <BrowserVaultProvider>
-          <BiomarkerPrivateTrendCard biomarker={biomarker} />
-        </BrowserVaultProvider>
-      ) : null}
+      <BrowserVaultProvider>
+        <BiomarkerPrivateTrendCard biomarker={biomarker} />
+      </BrowserVaultProvider>
 
       {heroProtocols.length > 0 ? (
         <section className="flex flex-col gap-6">

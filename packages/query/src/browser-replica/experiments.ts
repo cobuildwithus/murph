@@ -9,9 +9,12 @@ import {
   type BrowserVaultRunScheduleExpansionEvent,
   type BrowserVaultRunScheduleEventStatus,
 } from "./run-schedule.ts";
+import {
+  resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
+} from "../metrics/index.ts";
 import type {
   BrowserVaultEntity,
-  BrowserVaultMetricDomain,
   BrowserVaultMetricRow,
   BrowserVaultQueryClient,
   BrowserVaultSummaryConfidence,
@@ -109,15 +112,13 @@ export interface BrowserVaultExperimentResultRun {
 }
 
 export interface BrowserVaultExperimentMetricSource {
-  domain: BrowserVaultMetricDomain;
-  metric: string;
+  metricKey: string;
 }
 
 export interface BrowserVaultExperimentMetricPoint {
   confidence: BrowserVaultSummaryConfidence["level"];
   date: string;
-  domain: BrowserVaultMetricDomain;
-  metric: string;
+  metricKey: string;
   phase: "baseline" | "intervention";
   unit: string | null;
   value: number;
@@ -635,7 +636,7 @@ function collectMetricPoints(
   const byDate = new Map<string, BrowserVaultExperimentMetricPoint>();
 
   for (const row of client.replica.metricRows) {
-    if (row.domain !== sourceMetric.domain || row.metric !== sourceMetric.metric) {
+    if (row.metricKey !== sourceMetric.metricKey) {
       continue;
     }
 
@@ -647,34 +648,10 @@ function collectMetricPoints(
     byDate.set(row.date, {
       confidence: row.confidence,
       date: row.date,
-      domain: row.domain,
-      metric: row.metric,
+      metricKey: row.metricKey,
       phase,
       unit: row.unit,
       value: row.value,
-    });
-  }
-
-  for (const day of client.replica.metricDayRows) {
-    if (day.domain !== sourceMetric.domain || byDate.has(day.date)) {
-      continue;
-    }
-
-    const phase = resolveMetricPointPhase(day.date, metricWindow);
-    const resolved = day.metrics[sourceMetric.metric];
-    const value = resolved?.selection.value;
-    if (!phase || typeof value !== "number" || !Number.isFinite(value)) {
-      continue;
-    }
-
-    byDate.set(day.date, {
-      confidence: day.confidence,
-      date: day.date,
-      domain: day.domain,
-      metric: sourceMetric.metric,
-      phase,
-      unit: resolved.selection.unit,
-      value,
     });
   }
 
@@ -957,55 +934,12 @@ function resolveBiomarkerMetricSource(
     return null;
   }
 
-  if (slug.includes("resting-heart-rate")) {
-    return { domain: "recovery", metric: "restingHeartRate" };
-  }
+  const biomarkerDefinition = resolveMetricDefinitionForBiomarker(
+    normalized.startsWith("biomarker:") ? normalized : `biomarker:${slug}`,
+  );
+  const metricDefinition = biomarkerDefinition ?? resolveMetricDefinition(slug);
 
-  if (slug.includes("hrv") || slug.includes("rmssd")) {
-    return { domain: "recovery", metric: "hrv" };
-  }
-
-  if (slug.includes("sleep-efficiency")) {
-    return { domain: "sleep", metric: "sleepEfficiency" };
-  }
-
-  if (slug.includes("deep-sleep")) {
-    return { domain: "sleep", metric: "deepMinutes" };
-  }
-
-  if (slug.includes("respiratory-rate")) {
-    return { domain: "recovery", metric: "respiratoryRate" };
-  }
-
-  if (slug.includes("temperature")) {
-    return { domain: "recovery", metric: "temperatureDeviation" };
-  }
-
-  if (slug.includes("vo2")) {
-    return { domain: "activity", metric: "estimatedVo2Max" };
-  }
-
-  if (slug.includes("step-count") || slug === "steps" || slug.includes("daily-step")) {
-    return { domain: "activity", metric: "steps" };
-  }
-
-  if (slug.includes("body-weight") || slug === "weight") {
-    return { domain: "body_state", metric: "weightKg" };
-  }
-
-  if (slug.includes("glucose")) {
-    return { domain: "body_state", metric: "glucose" };
-  }
-
-  if (slug.includes("sleep-quality") || slug.includes("sleep-score")) {
-    return { domain: "sleep", metric: "sleepScore" };
-  }
-
-  if (slug.includes("total-sleep-time")) {
-    return { domain: "sleep", metric: "totalSleepMinutes" };
-  }
-
-  return null;
+  return metricDefinition ? { metricKey: metricDefinition.key } : null;
 }
 
 function readExpectedEffectInputs(attributes: JsonRecord): BrowserVaultExperimentExpectedEffectInput[] {

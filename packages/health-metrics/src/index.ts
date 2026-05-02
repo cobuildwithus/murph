@@ -31,13 +31,6 @@ export type MetricSelectionWarningCode =
 export type MetricSelectionPolicy =
   | { kind: "latest-valid"; staleAfterDays?: number }
   | { kind: "latest-lab"; preferCollectedAt: true; preferFasting?: boolean; staleAfterDays?: number }
-  | {
-      kind: "daily-aggregate";
-      latestWindowDays?: number;
-      minimumPoints?: number;
-      staleAfterDays?: number;
-      statistic: "mean" | "median" | "min" | "max" | "sum";
-    }
   | { kind: "latest-device-estimate"; staleAfterDays?: number }
   | {
       kind: "qualified-latest";
@@ -45,16 +38,23 @@ export type MetricSelectionPolicy =
       staleAfterDays?: number;
     };
 
+export interface MetricTrendPolicy {
+  aggregation: "mean" | "median" | "min" | "max" | "sum";
+  comparisonWindowDays?: number;
+  latestWindowDays?: number;
+  minimumPoints?: number;
+}
+
 export interface MetricDefinition {
   aliases: readonly string[];
   biomarkerKey: string | null;
-  browserBindings?: readonly { domain: string; metric: string }[];
   canonicalUnit: string | null;
   category: MetricCategory;
   displayName: string;
   displayUnit: string | null;
   key: string;
   selectionPolicy: MetricSelectionPolicy;
+  trendPolicy?: MetricTrendPolicy;
   valuePrecision: number;
 }
 
@@ -144,6 +144,39 @@ export interface MetricValueNormalization {
   warnings: MetricSelectionWarning[];
 }
 
+export interface GoalMetricTarget {
+  biomarkerKey?: string;
+  comparator: MetricComparator | "between";
+  evaluation:
+    | { kind: "latest-lab" }
+    | { kind: "rolling-window"; statistic: "mean" | "median"; windowDays: number }
+    | { kind: "selected-value" };
+  highValue?: number;
+  kind: "metric";
+  metricKey: string;
+  note?: string;
+  selectionPolicyOverride?: MetricSelectionPolicy;
+  startAt?: string;
+  targetAt?: string;
+  targetId: string;
+  unit: string;
+  value: number;
+}
+
+export interface MetricGoalProgress {
+  currentValue: number | null;
+  currentValueLabel: string | null;
+  deltaToTarget: number | null;
+  goalId: string;
+  metricKey: string;
+  selectedPointIds: string[];
+  status: "behind" | "met" | "no_data" | "on_track" | "stale" | "unsupported";
+  targetId: string;
+  targetValueLabel: string;
+  unit: string;
+  warnings: MetricSelectionWarning[];
+}
+
 const DEFAULT_STALE_AFTER_DAYS = 90;
 const ISO_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -151,55 +184,109 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   metric({
     aliases: ["rhr", "resting_heart_rate", "restingHeartRate", "resting-pulse"],
     biomarkerKey: "biomarker:resting-heart-rate",
-    browserBindings: [{ domain: "recovery", metric: "restingHeartRate" }],
     canonicalUnit: "bpm",
     category: "recovery",
     displayName: "Resting heart rate",
     displayUnit: "bpm",
     key: "resting-heart-rate",
-    selectionPolicy: { kind: "daily-aggregate", minimumPoints: 5, staleAfterDays: 14, statistic: "median" },
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 30, latestWindowDays: 7, minimumPoints: 5 },
     valuePrecision: 0,
   }),
   metric({
     aliases: ["hrv", "hrv_rmssd", "rmssd", "heart-rate-variability", "heart_rate_variability"],
     biomarkerKey: "biomarker:hrv-rmssd",
-    browserBindings: [{ domain: "recovery", metric: "hrv" }, { domain: "sleep", metric: "hrv" }],
     canonicalUnit: "ms",
     category: "recovery",
     displayName: "HRV",
     displayUnit: "ms",
     key: "hrv-rmssd",
-    selectionPolicy: { kind: "daily-aggregate", minimumPoints: 7, staleAfterDays: 14, statistic: "median" },
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 30, latestWindowDays: 7, minimumPoints: 7 },
     valuePrecision: 0,
   }),
   metric({
     aliases: ["deep", "deep_minutes", "deepMinutes", "deep-sleep", "deep_sleep"],
     biomarkerKey: "biomarker:deep-sleep-minutes",
-    browserBindings: [{ domain: "sleep", metric: "deepMinutes" }],
     canonicalUnit: "minutes",
     category: "sleep",
     displayName: "Deep sleep",
     displayUnit: "minutes",
     key: "deep-sleep-minutes",
-    selectionPolicy: { kind: "daily-aggregate", minimumPoints: 5, staleAfterDays: 14, statistic: "median" },
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 30, latestWindowDays: 7, minimumPoints: 5 },
     valuePrecision: 0,
   }),
   metric({
     aliases: ["rem", "rem_minutes", "remMinutes", "rem-sleep", "rem_sleep"],
     biomarkerKey: "biomarker:rem-sleep-minutes",
-    browserBindings: [{ domain: "sleep", metric: "remMinutes" }],
     canonicalUnit: "minutes",
     category: "sleep",
     displayName: "REM sleep",
     displayUnit: "minutes",
     key: "rem-sleep-minutes",
-    selectionPolicy: { kind: "daily-aggregate", minimumPoints: 5, staleAfterDays: 14, statistic: "median" },
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 30, latestWindowDays: 7, minimumPoints: 5 },
+    valuePrecision: 0,
+  }),
+  metric({
+    aliases: ["sleep_duration", "sleep-duration", "total-sleep-time", "total_sleep_time", "totalSleepMinutes", "total_sleep_minutes", "total-minutes", "totalMinutes"],
+    biomarkerKey: null,
+    canonicalUnit: "minutes",
+    category: "sleep",
+    displayName: "Total sleep",
+    displayUnit: "minutes",
+    key: "total-sleep-minutes",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    valuePrecision: 0,
+  }),
+  metric({
+    aliases: ["sleep-quality", "sleep_quality", "sleepScore", "sleep_score"],
+    biomarkerKey: null,
+    canonicalUnit: "score",
+    category: "sleep",
+    displayName: "Sleep score",
+    displayUnit: "score",
+    key: "sleep-score",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    valuePrecision: 0,
+  }),
+  metric({
+    aliases: ["readinessScore", "readiness_score", "recovery-score", "recoveryScore"],
+    biomarkerKey: null,
+    canonicalUnit: "score",
+    category: "recovery",
+    displayName: "Readiness score",
+    displayUnit: "score",
+    key: "readiness-score",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    valuePrecision: 0,
+  }),
+  metric({
+    aliases: ["daily-step-count", "daily_step_count", "step-count", "step_count", "steps"],
+    biomarkerKey: null,
+    canonicalUnit: "count",
+    category: "activity",
+    displayName: "Steps",
+    displayUnit: "steps",
+    key: "steps",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    valuePrecision: 0,
+  }),
+  metric({
+    aliases: ["sessionMinutes", "session_minutes", "activity-minutes"],
+    biomarkerKey: null,
+    canonicalUnit: "minutes",
+    category: "activity",
+    displayName: "Activity minutes",
+    displayUnit: "minutes",
+    key: "activity-minutes",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
     valuePrecision: 0,
   }),
   metric({
     aliases: ["weight", "body_weight", "bodyWeight", "bodyweight", "weightKg"],
     biomarkerKey: null,
-    browserBindings: [{ domain: "body_state", metric: "weightKg" }],
     canonicalUnit: "kg",
     category: "body",
     displayName: "Body weight",
@@ -211,7 +298,6 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   metric({
     aliases: ["body_fat", "bodyFat", "body_fat_pct", "body-fat-pct", "bodyFatPercentage", "body_fat_percentage"],
     biomarkerKey: null,
-    browserBindings: [{ domain: "body_state", metric: "bodyFatPercentage" }],
     canonicalUnit: "percent",
     category: "body",
     displayName: "Body fat",
@@ -223,7 +309,6 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   metric({
     aliases: ["blood-glucose", "blood_glucose", "fasting-glucose", "fasting_glucose"],
     biomarkerKey: "biomarker:blood-glucose",
-    browserBindings: [{ domain: "body_state", metric: "glucose" }],
     canonicalUnit: "mg/dL",
     category: "lab",
     displayName: "Glucose",
@@ -346,10 +431,14 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
 
 const DEFINITIONS_BY_KEY = new Map(METRIC_DEFINITIONS.map((definition) => [definition.key, definition]));
 const DEFINITIONS_BY_ALIAS = new Map<string, MetricDefinition>();
+const PRIMARY_METRIC_BY_BIOMARKER = new Map<string, MetricDefinition>();
 
 for (const definition of METRIC_DEFINITIONS) {
   for (const alias of [definition.key, ...definition.aliases]) {
     DEFINITIONS_BY_ALIAS.set(normalizeMetricKey(alias), definition);
+  }
+  if (definition.biomarkerKey && !PRIMARY_METRIC_BY_BIOMARKER.has(definition.biomarkerKey)) {
+    PRIMARY_METRIC_BY_BIOMARKER.set(definition.biomarkerKey, definition);
   }
 }
 
@@ -377,14 +466,8 @@ export function resolveMetricDefinition(value: string): MetricDefinition | null 
   return DEFINITIONS_BY_KEY.get(key) ?? DEFINITIONS_BY_ALIAS.get(key) ?? null;
 }
 
-export function resolveBrowserMetricBinding(input: { domain: string; metric: string }): MetricDefinition | null {
-  const domain = input.domain.trim();
-  const metric = normalizeMetricKey(input.metric);
-  return METRIC_DEFINITIONS.find((definition) =>
-    (definition.browserBindings ?? []).some((binding) =>
-      binding.domain === domain && normalizeMetricKey(binding.metric) === metric
-    )
-  ) ?? null;
+export function resolveMetricDefinitionForBiomarker(biomarkerKey: string): MetricDefinition | null {
+  return PRIMARY_METRIC_BY_BIOMARKER.get(biomarkerKey) ?? null;
 }
 
 export function createCustomMetricDefinition(metricKey: string, unit: string | null = null): MetricDefinition {
@@ -458,8 +541,10 @@ export function selectMetricValue(input: {
   biomarkerKey?: string;
   now?: string;
   points: readonly MetricPoint[];
+  policyOverride?: MetricSelectionPolicy;
 }): MetricSelection {
-  const metricKey = input.metricKey ? normalizeMetricKey(input.metricKey) : null;
+  const definitionFromBiomarker = input.biomarkerKey ? resolveMetricDefinitionForBiomarker(input.biomarkerKey) : null;
+  const metricKey = input.metricKey ? normalizeMetricKey(input.metricKey) : definitionFromBiomarker?.key ?? null;
   const points = input.points.filter((point) => {
     if (metricKey && point.metricKey !== metricKey) return false;
     if (input.biomarkerKey && point.biomarkerKey !== input.biomarkerKey) return false;
@@ -472,7 +557,7 @@ export function selectMetricValue(input: {
     return emptySelection(definition, input.biomarkerKey ?? definition.biomarkerKey ?? null, "no_data");
   }
 
-  const selected = selectPointByPolicy(points, definition.selectionPolicy);
+  const selected = selectPointByPolicy(points, input.policyOverride ?? definition.selectionPolicy);
   if (!selected) {
     return emptySelection(definition, input.biomarkerKey ?? definition.biomarkerKey ?? null, "no_data");
   }
@@ -519,6 +604,56 @@ export function buildMetricSeries(input: {
     .sort(compareMetricPointsAsc);
 }
 
+export function selectMetricGoalProgress(input: {
+  goalId: string;
+  now?: string;
+  points: readonly MetricPoint[];
+  target: GoalMetricTarget;
+}): MetricGoalProgress {
+  const metricKey = normalizeMetricKey(input.target.metricKey);
+  const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.target.unit);
+  const selection = selectMetricValue({
+    biomarkerKey: input.target.biomarkerKey,
+    metricKey,
+    now: input.now,
+    points: input.points,
+    policyOverride: input.target.selectionPolicyOverride,
+  });
+  const targetValueLabel = formatTargetValue(input.target, definition);
+
+  if (!selection.point || selection.value === null) {
+    return {
+      currentValue: null,
+      currentValueLabel: null,
+      deltaToTarget: null,
+      goalId: input.goalId,
+      metricKey,
+      selectedPointIds: [],
+      status: "no_data",
+      targetId: input.target.targetId,
+      targetValueLabel,
+      unit: input.target.unit,
+      warnings: selection.warnings,
+    };
+  }
+
+  const met = targetMet(selection.value, input.target);
+  const deltaToTarget = deltaForTarget(selection.value, input.target);
+  return {
+    currentValue: selection.value,
+    currentValueLabel: selection.valueLabel,
+    deltaToTarget,
+    goalId: input.goalId,
+    metricKey,
+    selectedPointIds: selection.provenance.pointIds,
+    status: selection.status === "stale" ? "stale" : met ? "met" : "behind",
+    targetId: input.target.targetId,
+    targetValueLabel,
+    unit: selection.unit ?? input.target.unit,
+    warnings: selection.warnings,
+  };
+}
+
 export function formatMetricDisplayValue(point: MetricPoint, definition: MetricDefinition | null = null): string {
   const resolved = definition ?? resolveMetricDefinition(point.metricKey) ?? createCustomMetricDefinition(point.metricKey, point.unit);
   if (point.textValue && point.value === null && point.canonicalValue === null) {
@@ -545,7 +680,6 @@ function selectPointByPolicy(points: readonly MetricPoint[], policy: MetricSelec
         .sort(compareMetricPointsForSelection)
         .at(0) ?? null;
     }
-    case "daily-aggregate":
     case "latest-device-estimate":
     case "latest-valid":
       return points.slice().sort(compareMetricPointsForSelection).at(0) ?? null;
@@ -690,7 +824,7 @@ function normalizeMassConcentration(
   label: string,
 ): MetricValueNormalization {
   if (!unit || unitsEquivalent(unit, canonicalUnit)) return { canonicalUnit, canonicalValue: value, unit: unit ?? canonicalUnit, warnings: [] };
-  if (unit === "mmol/l" || unit === "mmol/L") {
+  if (unit === "mmol/l") {
     return { canonicalUnit, canonicalValue: Number((value * mmolFactor).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, canonicalUnit)] };
@@ -757,6 +891,39 @@ function qualifiersMatch(
   return Object.entries(required).every(([key, value]) => actual[key] === value);
 }
 
+function formatTargetValue(target: GoalMetricTarget, definition: MetricDefinition): string {
+  const precision = definition.valuePrecision;
+  if (target.comparator === "between") {
+    return `${Number(target.value.toFixed(precision)).toString()}-${Number((target.highValue ?? target.value).toFixed(precision)).toString()} ${target.unit}`;
+  }
+  return `${target.comparator}${Number(target.value.toFixed(precision)).toString()} ${target.unit}`;
+}
+
+function targetMet(value: number, target: GoalMetricTarget): boolean {
+  switch (target.comparator) {
+    case "<": return value < target.value;
+    case "<=": return value <= target.value;
+    case ">": return value > target.value;
+    case ">=": return value >= target.value;
+    case "between": return value >= target.value && value <= (target.highValue ?? target.value);
+  }
+}
+
+function deltaForTarget(value: number, target: GoalMetricTarget): number {
+  switch (target.comparator) {
+    case "<":
+    case "<=": return value - target.value;
+    case ">":
+    case ">=": return target.value - value;
+    case "between": {
+      const high = target.highValue ?? target.value;
+      if (value < target.value) return target.value - value;
+      if (value > high) return value - high;
+      return 0;
+    }
+  }
+}
+
 function humanizeMetricKey(value: string): string {
   return value
     .split(/[-_\s]+/u)
@@ -766,6 +933,6 @@ function humanizeMetricKey(value: string): string {
 }
 
 function guessValuePrecision(unit: string | null): number {
-  const normalized = normalizeUnit(unit);
+  const normalized = unit ? normalizeUnit(unit) : null;
   return normalized === "percent" || normalized === "kg" ? 1 : 0;
 }

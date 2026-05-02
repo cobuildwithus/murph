@@ -131,7 +131,7 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.equal(apob.sourceLabel, "Function Health");
   assert.equal(apob.recordIds[0], "evt_blood_panel");
   assert.deepEqual(
-    client.metricPoints
+    client.metrics
       .series({ metricKey: "apob" })
       .map((point) => ({ unit: point.unit, value: point.value })),
     [{ unit: "mg/dL", value: 87 }],
@@ -144,7 +144,7 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.equal(glucose.sourceLabel, "Function Health");
   assert.equal(glucose.warnings.some((warning) => warning.code === "MIXED_SOURCES"), true);
   assert.deepEqual(
-    client.metricPoints
+    client.metrics
       .series({ metricKey: "glucose" })
       .map((point) => point.value)
       .sort((left, right) => left - right),
@@ -156,10 +156,10 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.equal(crp.valueLabel, "<0.3");
   assert.equal(crp.unit, "mg/L");
   assert.equal(client.metricSelections.get("unreviewed-private-panel-note"), null);
-  assert.deepEqual(client.metricPoints.series({ metricKey: "unreviewed-private-panel-note" }), []);
+  assert.deepEqual(client.metrics.series({ metricKey: "unreviewed-private-panel-note" }), []);
 
-  assert.equal(client.metricPoints.series({ metricKey: "body-weight" }).length, 2);
-  assert.equal(client.metricPoints.latest({ metricKey: "apob" })?.sourceKind, "test-result");
+  assert.equal(client.metrics.series({ metricKey: "body-weight" }).length, 2);
+  assert.equal(client.metrics.latest({ metricKey: "apob" })?.sourceKind, "test-result");
 });
 
 test("browser-vault metric points keep observation inputs while selecting the higher-priority stale reading", async () => {
@@ -206,7 +206,7 @@ test("browser-vault metric points keep observation inputs while selecting the hi
 
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
-  const bodyWeightPoints = client.metricPoints.series({ metricKey: "body-weight" });
+  const bodyWeightPoints = client.metrics.series({ metricKey: "body-weight" });
   assert.equal(bodyWeightPoints.some((point) => point.sourceKind === "measurement"), true);
   assert.equal(bodyWeightPoints.some((point) => point.sourceKind === "compat-observation"), true);
   assert.equal(bodyWeightPoints.some((point) => point.recordIds.includes("evt_old_weight")), false);
