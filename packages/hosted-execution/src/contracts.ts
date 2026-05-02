@@ -321,7 +321,7 @@ export interface HostedBrowserVaultReplicaRef {
   keyId: string;
   objectKey: string;
   replicaSchema: "murph.browser-vault-replica.v1";
-  runtimeRootKeyId?: string;
+  runtimeRootKeyId: string;
   schema: typeof HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA;
   sourceBundleHash: string;
 }
