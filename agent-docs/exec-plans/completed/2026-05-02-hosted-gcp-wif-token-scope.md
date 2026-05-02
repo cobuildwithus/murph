@@ -1,8 +1,8 @@
 # Fix hosted GCP WIF IAMCredentials token scope
 
-Status: verifying
+Status: completed
 Created: 2026-05-02
-Updated: 2026-05-02
+Updated: 2026-05-03
 
 ## Goal
 
@@ -78,3 +78,4 @@ Updated: 2026-05-02
   - `pnpm --dir apps/web exec tsc -p tsconfig.json --pretty false` fails on an
     unrelated active metrics type mismatch in `packages/query/src/metrics/index.ts`
     where a `MetricPoint` construction is missing `grain`.
+Completed: 2026-05-03

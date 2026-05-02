@@ -139,11 +139,11 @@ describe("hosted crypto GCP Workload Identity Federation", () => {
     expect(new URLSearchParams(stsRequest?.body).get("scope")).toBe(
       "https://www.googleapis.com/auth/iam",
     );
-    expect(iamRequest?.headers.get("authorization")).toBe("Bearer federated-access-token");
+    expect(readBearerToken(iamRequest?.headers)).toBe("federated-access-token");
     expect(JSON.parse(iamRequest?.body ?? "{}")).toMatchObject({
       scope: ["https://www.googleapis.com/auth/cloudkms"],
     });
-    expect(kmsRequest?.headers.get("authorization")).toBe("Bearer kms-service-account-token");
+    expect(readBearerToken(kmsRequest?.headers)).toBe("kms-service-account-token");
   });
 });
 
@@ -251,4 +251,12 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
     status: init?.status ?? 200,
     statusText: init?.statusText,
   });
+}
+
+function readBearerToken(headers: Headers | undefined): string | null {
+  const authorization = headers?.get("authorization");
+  if (!authorization?.startsWith("Bearer ")) {
+    return null;
+  }
+  return authorization.slice("Bearer ".length);
 }
