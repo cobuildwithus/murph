@@ -152,13 +152,11 @@ function normalizeRequestedMetrics(
   metricPoints: readonly MetricPoint[],
 ): BrowserVaultRequestedMetric[] {
   const byKey = new Map<string, BrowserVaultRequestedMetric>();
-  const inputs: readonly BrowserVaultRequestedMetric[] = [
-    ...metricPoints.map((point) => ({
+  const inputs: readonly BrowserVaultRequestedMetric[] = requestedMetrics
+    ?? metricPoints.map((point) => ({
       biomarkerKey: point.biomarkerKey,
       metricKey: point.metricKey,
-    })),
-    ...(requestedMetrics ?? []),
-  ];
+    }));
 
   for (const input of inputs) {
     const metricKey = resolveMetricKey(input.metricKey);

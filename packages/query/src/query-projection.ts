@@ -263,7 +263,7 @@ export async function searchVaultRuntime(
 export interface QueryMetricPointFilters {
   biomarkerKey?: string;
   from?: string;
-  limit?: number;
+  limit?: number | null;
   metricKey?: string;
   to?: string;
 }
@@ -318,10 +318,10 @@ export async function selectMetricGoalProgressRuntime(input: {
     return null;
   }
 
-  const points = await listMetricPointsRuntime(input.vaultRoot, {
-    limit: 10_000,
-    metricKey: target.target.metricKey,
-  });
+  const points = await listMetricPointsRuntime(
+    input.vaultRoot,
+    metricPointFiltersForGoalTarget(target.target, input.now),
+  );
   return selectMetricGoalProgress({ goalId: target.goalId, now: input.now, points, target: target.target });
 }
 
@@ -785,15 +785,18 @@ function listStoredMetricPoints(
       parameters.push(filters.to);
     }
 
-    const limit = normalizeMetricPointLimit(filters.limit ?? 1_000);
-    parameters.push(limit);
+    const limit = filters.limit === null ? null : normalizeMetricPointLimit(filters.limit ?? 1_000);
+    const limitSql = limit === null ? "" : "LIMIT ?";
+    if (limit !== null) {
+      parameters.push(limit);
+    }
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
     const rows = database.prepare(`
       SELECT metric_point_json
       FROM query_metric_points
       ${whereSql}
       ORDER BY effective_date DESC, observed_at DESC, id ASC
-      LIMIT ?
+      ${limitSql}
     `).all(...parameters) as Array<{ metric_point_json: string }>;
 
     return rows
@@ -823,6 +826,69 @@ function normalizeMetricPointFilters(filters: QueryMetricPointFilters): QueryMet
       metricKey: definition?.key ?? (filters.metricKey ? normalizeMetricKey(filters.metricKey) : undefined),
     } : {}),
   };
+}
+
+function metricPointFiltersForGoalTarget(target: GoalMetricTarget, now: string | undefined): QueryMetricPointFilters {
+  const filters: QueryMetricPointFilters = {
+    limit: 10_000,
+    metricKey: target.metricKey,
+  };
+  const range = metricTargetDateRange(target, now);
+  if (range.from) filters.from = range.from;
+  if (range.to) filters.to = range.to;
+  if (filters.from || filters.to) filters.limit = null;
+  return normalizeMetricPointFilters(filters);
+}
+
+function metricTargetDateRange(
+  target: GoalMetricTarget,
+  now: string | undefined,
+): { from?: string; to?: string } {
+  if (target.evaluation.kind !== "rolling-window") {
+    return dateRange(target.startAt, target.targetAt);
+  }
+
+  const anchorDate = rollingWindowQueryAnchorDate(target, now);
+  if (!anchorDate) {
+    return dateRange(target.startAt, target.targetAt);
+  }
+
+  return dateRange(
+    maxIsoDate(target.startAt, subtractIsoDays(anchorDate, target.evaluation.windowDays - 1)),
+    minIsoDate(target.targetAt, anchorDate) ?? anchorDate,
+  );
+}
+
+function dateRange(from: string | undefined, to: string | undefined): { from?: string; to?: string } {
+  const range: { from?: string; to?: string } = {};
+  if (from) range.from = from;
+  if (to) range.to = to;
+  return range;
+}
+
+function rollingWindowQueryAnchorDate(target: GoalMetricTarget, now: string | undefined): string | null {
+  const nowDate = now?.slice(0, 10) ?? null;
+  if (nowDate && target.targetAt) return minIsoDate(nowDate, target.targetAt) ?? nowDate;
+  return nowDate ?? target.targetAt ?? null;
+}
+
+function maxIsoDate(left: string | undefined, right: string | undefined): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return left > right ? left : right;
+}
+
+function minIsoDate(left: string | undefined, right: string | undefined): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return left < right ? left : right;
+}
+
+function subtractIsoDays(value: string, days: number): string {
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.valueOf())) return value.slice(0, 10);
+  parsed.setUTCDate(parsed.getUTCDate() - days);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function listStoredMetricTargets(location: QueryProjectionLocation): QueryMetricTargetRow[] {

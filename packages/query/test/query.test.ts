@@ -3446,6 +3446,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
       kind: "latest-lab",
       preferCollectedAt: true,
     },
+    targetAt: "2026-04-29",
     targetId: "apob-under-85",
     unit: "mg/dL",
     value: 85,
@@ -3492,11 +3493,11 @@ test("query projection runtime goal progress resolves stored metric targets and 
     comparator: null,
     confidence: "high",
     context: {},
-    effectiveDate: "2026-04-30",
+    effectiveDate: "2026-04-28",
     grain: "day",
-    id: "metric-point:apob:2026-04-30:wearable-summary:0",
+    id: "metric-point:apob:2026-04-28:wearable-summary:0",
     metricKey: "apob",
-    observedAt: "2026-04-30T08:00:00.000Z",
+    observedAt: "2026-04-28T08:00:00.000Z",
     provenance: {
       dataOrigin: null,
       externalRef: null,
@@ -3609,22 +3610,19 @@ test("query projection runtime goal progress resolves stored metric targets and 
         JSON.stringify(wearablePoint.context),
         JSON.stringify(wearablePoint),
       );
-      for (let index = 0; index < 1_005; index += 1) {
+      for (let index = 0; index < 10_005; index += 1) {
         const noisePoint = {
           ...wearablePoint,
-          biomarkerKey: null,
-          canonicalUnit: "count",
+          canonicalUnit: "mg/dL",
           canonicalValue: index,
           effectiveDate: "2026-05-01",
-          id: `metric-point:steps:noise:${index}`,
-          metricKey: "steps",
+          id: `metric-point:apob:noise:${index}`,
           observedAt: `2026-05-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
           source: {
             ...wearablePoint.source,
-            kind: "activity-summary",
-            recordId: `noise_steps_${index}`,
+            recordId: `noise_apob_${index}`,
           },
-          unit: "count",
+          unit: "mg/dL",
           value: index,
         } as const;
         insertMetricPoint.run(
