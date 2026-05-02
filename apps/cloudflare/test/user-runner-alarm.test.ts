@@ -23,10 +23,7 @@ import {
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
-import {
-  createTestHostedRuntimeCryptoContext,
-  getTestHostedRuntimeRootKey,
-} from "./hosted-runtime-crypto-fixtures.ts";
+import { createTestHostedRuntimeCryptoContext } from "./hosted-runtime-crypto-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
@@ -337,18 +334,15 @@ describe("HostedUserRunner alarm routing", () => {
 
   it("deletes user-scoped R2 prefixes and runner secrets when cleanup is fully supported", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
-    const rootKey = getTestHostedRuntimeRootKey("runtime");
-    const ingressRootKey = getTestHostedRuntimeRootKey("ingress");
     const bundlePrefix = await hostedBundleUserPrefix({ userId: "member_123" });
     const artifactPrefix = await hostedArtifactUserPrefix({ userId: "member_123" });
     const browserVaultPrefix = await hostedBrowserVaultReplicaUserPrefix({
       userId: "member_123",
     });
-    const emailRawPrefix = await hostedEmailRawMessageUserPrefix(ingressRootKey, "member_123");
-    const unrelatedEmailRawPrefix = await hostedEmailRawMessageUserPrefix(
-      ingressRootKey,
-      "other_member",
-    );
+    const emailRawPrefix = await hostedEmailRawMessageUserPrefix({ userId: "member_123" });
+    const unrelatedEmailRawPrefix = await hostedEmailRawMessageUserPrefix({
+      userId: "other_member",
+    });
     const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: "member_123" });
     await bucket.put(`${bundlePrefix}bundle.bundle.json`, "bundle");
     await bucket.put(`${artifactPrefix}artifact.artifact.bin`, "artifact");

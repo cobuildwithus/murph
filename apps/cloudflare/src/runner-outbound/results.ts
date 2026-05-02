@@ -80,6 +80,7 @@ async function handleRunnerEmailMessageReadRequest(input: {
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
     rawMessageKey: input.rawMessageKey,
+    resolveKeyById: crypto.resolveKeyById,
     userId: input.userId,
   });
 
