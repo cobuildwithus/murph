@@ -1,6 +1,6 @@
 # Inbox Model Route Hard Cut
 
-Status: focused_verified_no_commit
+Status: completed
 Owner: Codex
 Started: 2026-04-28
 
@@ -75,3 +75,5 @@ Out of scope:
   `COMMAND_NOT_FOUND`; `--llms` advertises `inbox model bundle` and not
   `inbox model route`; bundle schema keeps `sensitive` and omits `baseUrl`,
   `apiKey`, and `headersJson`.
+Updated: 2026-05-02
+Completed: 2026-05-02

@@ -45,3 +45,6 @@ Success criteria:
 - `packages/assistant-engine/src/assistant/active-turn-input-controller.ts`
 - `packages/assistant-engine/test/assistant-codex-runtime.test.ts`
 - `packages/assistant-engine/test/assistant-local-service-runtime.test.ts`
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02

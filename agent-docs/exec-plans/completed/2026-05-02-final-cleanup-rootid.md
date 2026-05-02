@@ -1,6 +1,6 @@
 # Land final cleanup and root-id crypto patch
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -10,6 +10,9 @@ Updated: 2026-05-02
 - Ensure mailbox encryption/decryption and hosted runtime object decrypts resolve
   the exact crypto root by envelope `rootKeyId` instead of relying on current-root
   assumptions.
+- Close the remaining raw-email rotation hole by making raw email R2 paths
+  independent of ingress root material and decrypting stored envelopes by
+  envelope root id.
 
 ## Success criteria
 
@@ -19,8 +22,12 @@ Updated: 2026-05-02
 - Web exposes the signed internal root lookup route and Cloudflare uses it for
   root-id-specific decrypts.
 - Runtime bundle/artifact/runner-secret decrypt paths accept root key resolvers.
+- Raw hosted email messages live under `hosted-email/messages/{namespace}/...`
+  without root-derived path segments, and raw-email reads can resolve historical
+  ingress roots by envelope key id.
 - Device-sync local secret codec import uses the canonical package subpath and
   the old hard-cut guard exception is removed.
+- The dead hosted-web configuration error wrapper is removed.
 - Focused tests, typecheck, required completion audits, and diff checks pass or
   any unrelated blockers are documented precisely.
 
@@ -33,6 +40,10 @@ Updated: 2026-05-02
     and focused mailbox tests.
   - `apps/cloudflare` mailbox decrypt, runtime crypto context, R2 decrypt helper
     wiring, runner artifact/secret reads, and focused tests.
+  - `apps/cloudflare` hosted raw-email path derivation, deletion prefix cleanup,
+    and raw-email read resolver wiring.
+  - `apps/web` hosted-web encryption/onboarding HTTP cleanup for the dead
+    configuration error wrapper.
   - `packages/assistant-runtime` runtime user crypto resolver threading.
   - `packages/device-syncd` local secret codec export path and hard-cut guard.
   - The stale mailbox migration plan artifact called out by the supplied patch.
@@ -68,14 +79,20 @@ Updated: 2026-05-02
    path.
    Mitigation: Run focused mailbox/Cloudflare/runtime tests plus typecheck and
    the required coverage review.
+4. Risk: Raw-email object keys or raw message ids leak user ids, message ids, or
+   plaintext hashes.
+   Mitigation: Reuse the hosted storage namespace helper and opaque path-id
+   helper, and keep focused object-key assertions on the raw-email path.
 
 ## Tasks
 
 1. Register the task and inspect patch conflicts.
 2. Apply clean hunks and reconcile drifted Cloudflare hunks manually.
-3. Run focused tests and typecheck/diff checks.
-4. Run required security/privacy, coverage-write, and task-finish reviews.
-5. Address findings, rerun affected checks, and create a scoped commit.
+3. Decouple raw-email storage paths from ingress roots and remove the dead
+   hosted-web configuration wrapper.
+4. Run focused tests and typecheck/diff checks.
+5. Run required security/privacy, coverage-write, and task-finish reviews.
+6. Address findings, rerun affected checks, and close the plan.
 
 ## Decisions
 
@@ -86,13 +103,22 @@ Updated: 2026-05-02
 
 ## Verification
 
-- Commands to run:
-- `pnpm typecheck`
-- Focused mailbox/runtime/Cloudflare tests selected after inspecting touched
-  files.
-- `bash scripts/workspace-verify.sh test:diff <touched paths>` if the lane is
-  tractable in the dirty checkout.
-- `git diff --check`
-- Expected outcomes:
-- Required checks pass, or unrelated pre-existing blockers are documented with
-  exact command and target.
+- `pnpm typecheck` passed.
+- `pnpm --dir packages/hosted-execution typecheck` passed.
+- `pnpm --dir packages/device-syncd typecheck` passed.
+- `pnpm --dir packages/assistant-runtime typecheck` passed.
+- `pnpm --dir apps/cloudflare typecheck` passed.
+- `pnpm --dir apps/web typecheck` passed after fixing the stale mailbox payload
+  fixture.
+- Focused mailbox/runtime/device-sync/web tests passed.
+- Focused Cloudflare hosted email, storage rotation, mailbox encryption, and
+  runtime root lookup tests passed.
+- `node scripts/check-hosted-crypto-hardcut.mjs` passed.
+- `git diff --check` passed.
+- Required coverage-write, security/privacy, and task-finish reviews completed.
+- `pnpm --dir apps/web verify` remains blocked in the shared dirty checkout by
+  an unrelated active hosted-onboarding crypto import/export mismatch.
+- `bash scripts/workspace-verify.sh test:diff ...` was not green end-to-end in
+  the shared dirty checkout; direct affected checks above passed, and the
+  remaining failures were unrelated active-lane issues.
+Completed: 2026-05-02

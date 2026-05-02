@@ -66,3 +66,6 @@ Known external blockers:
 - Root `pnpm typecheck` is blocked by unrelated active checkout drift in
   `packages/assistant-runtime`: one workspace-boundary import guard finding and
   one hosted-share type error.
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02
