@@ -14,6 +14,7 @@ import {
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser";
 import {
+  getHostedBrowserVaultReplicaStorageKeyId,
   parseHostedBrowserVaultReplicaRef,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/browser-vault";
@@ -112,7 +113,7 @@ export async function loadBrowserVaultReplica({
       userId: session.replicaAad.userId,
     }),
     envelope: session.encryptedReplica,
-    expectedKeyId: getBrowserVaultReplicaStorageKeyId(session.replicaRef),
+    expectedKeyId: getHostedBrowserVaultReplicaStorageKeyId(session.replicaRef),
     key: replicaKey,
     scope: "browser-vault-replica",
   });
@@ -333,12 +334,6 @@ function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaul
     sourceBundleHash: requireNonEmptyString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireNonEmptyString(record.userId, `${label}.userId`),
   };
-}
-
-function getBrowserVaultReplicaStorageKeyId(
-  ref: HostedBrowserVaultReplicaRef,
-): string {
-  return ref.dataKeyEnvelope?.dataKeyId ?? ref.keyId;
 }
 
 function parseRequiredReplicaRef(value: unknown, label: string): HostedBrowserVaultReplicaRef {

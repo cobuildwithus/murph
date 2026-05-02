@@ -330,6 +330,12 @@ export interface HostedBrowserVaultReplicaRef {
 
 export type HostedBrowserVaultReplicaCursorRef = HostedBrowserVaultReplicaRef | null;
 
+export function getHostedBrowserVaultReplicaStorageKeyId(
+  ref: HostedBrowserVaultReplicaRef,
+): string {
+  return ref.dataKeyEnvelope?.dataKeyId ?? ref.keyId;
+}
+
 export const HOSTED_RUNTIME_TIMER_TRIGGER_KINDS = [
   "external_ingress",
   "runtime_timer",
