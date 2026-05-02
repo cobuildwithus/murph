@@ -145,6 +145,190 @@ describe("hosted crypto GCP Workload Identity Federation", () => {
     });
     expect(readBearerToken(kmsRequest?.headers)).toBe("kms-service-account-token");
   });
+
+  it("redacts raw Google provider messages from token exchange failures", async () => {
+    const fetchMock: typeof fetch = async (input) => {
+      const url = String(input);
+
+      if (url === "https://sts.googleapis.com/v1/token") {
+        return jsonResponse({
+          access_token: "federated-access-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        });
+      }
+
+      if (url.includes(":generateAccessToken")) {
+        return jsonResponse({
+          error: {
+            code: 403,
+            message:
+              "Request had insufficient authentication scopes for service-account@example.test at projects/example-project.",
+            status: "PERMISSION_DENIED",
+          },
+        }, { status: 403 });
+      }
+
+      return jsonResponse({ error: { status: "NOT_FOUND" } }, { status: 404 });
+    };
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ENV: "production",
+      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
+      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
+      NODE_ENV: "test",
+    });
+
+    let thrown: unknown;
+    try {
+      await client.encrypt({
+        additionalAuthenticatedData: "domain=control",
+        keyName: LOCAL_KMS_KEY_NAME,
+        plaintext: new Uint8Array([1, 2, 3]),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "GOOGLE_CLOUD_API_ERROR",
+      googleCloudOperation: "iamcredentials/generateAccessToken",
+      googleCloudReason: "PERMISSION_DENIED",
+      message: "Google Cloud iamcredentials/generateAccessToken failed (403): PERMISSION_DENIED",
+      status: 403,
+    });
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown instanceof Error ? thrown.message : "").not.toMatch(
+      /service-account@example\.test|example-project|insufficient authentication scopes/u,
+    );
+  });
+
+  it("uses stable operation labels for KMS failures instead of resource names", async () => {
+    const fetchMock: typeof fetch = async (input) => {
+      const url = String(input);
+
+      if (url === "https://sts.googleapis.com/v1/token") {
+        return jsonResponse({
+          access_token: "federated-access-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        });
+      }
+
+      if (url.includes(":generateAccessToken")) {
+        return jsonResponse({
+          accessToken: "kms-service-account-token",
+          expireTime: "2099-01-01T00:00:00Z",
+        });
+      }
+
+      if (url.includes(":encrypt")) {
+        return jsonResponse({
+          error: {
+            code: 403,
+            message: `KMS denied ${LOCAL_KMS_KEY_NAME}`,
+            status: "projects/example-project/keyRings/hosted",
+          },
+        }, { status: 403, statusText: `Forbidden ${LOCAL_KMS_KEY_NAME}` });
+      }
+
+      return jsonResponse({ error: { status: "NOT_FOUND" } }, { status: 404 });
+    };
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ENV: "production",
+      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
+      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
+      NODE_ENV: "test",
+    });
+
+    let thrown: unknown;
+    try {
+      await client.encrypt({
+        additionalAuthenticatedData: "domain=control",
+        keyName: LOCAL_KMS_KEY_NAME,
+        plaintext: new Uint8Array([1, 2, 3]),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "GOOGLE_CLOUD_API_ERROR",
+      googleCloudOperation: "cloudkms/encrypt",
+      googleCloudReason: "google_error_403",
+      message: "Google Cloud cloudkms/encrypt failed (403): google_error_403",
+      status: 403,
+    });
+    expect(JSON.stringify(thrown)).not.toMatch(/projects\/|keyRings|hosted-web-wrap/u);
+  });
+
+  it("keeps non-JSON Google error bodies out of KMS failure messages", async () => {
+    const fetchMock: typeof fetch = async (input) => {
+      const url = String(input);
+
+      if (url === "https://sts.googleapis.com/v1/token") {
+        return jsonResponse({
+          access_token: "federated-access-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        });
+      }
+
+      if (url.includes(":generateAccessToken")) {
+        return jsonResponse({
+          accessToken: "kms-service-account-token",
+          expireTime: "2099-01-01T00:00:00Z",
+        });
+      }
+
+      if (url.includes(":encrypt")) {
+        return new Response(`KMS denied ${LOCAL_KMS_KEY_NAME}`, {
+          headers: { "Content-Type": "text/plain" },
+          status: 403,
+          statusText: `Forbidden ${LOCAL_KMS_KEY_NAME}`,
+        });
+      }
+
+      return jsonResponse({ error: { status: "NOT_FOUND" } }, { status: 404 });
+    };
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ENV: "production",
+      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
+      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
+      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
+      NODE_ENV: "test",
+    });
+
+    let thrown: unknown;
+    try {
+      await client.encrypt({
+        additionalAuthenticatedData: "domain=control",
+        keyName: LOCAL_KMS_KEY_NAME,
+        plaintext: new Uint8Array([1, 2, 3]),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "GOOGLE_CLOUD_API_ERROR",
+      googleCloudOperation: "cloudkms/encrypt",
+      googleCloudReason: "http_403",
+      message: "Google Cloud cloudkms/encrypt failed (403): http_403",
+      status: 403,
+    });
+    expect(JSON.stringify(thrown)).not.toMatch(/projects\/|keyRings|hosted-web-wrap|KMS denied/u);
+  });
 });
 
 describe("hosted crypto local KMS", () => {

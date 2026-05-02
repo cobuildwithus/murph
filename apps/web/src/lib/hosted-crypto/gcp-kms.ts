@@ -11,6 +11,24 @@ const LOCAL_KMS_IV_BYTES = 12;
 const LOCAL_KMS_KEY_BYTES = 32;
 const DEFAULT_STS_TOKEN_URI = "https://sts.googleapis.com/v1/token";
 const DEFAULT_IAM_CREDENTIALS_API_ROOT = "https://iamcredentials.googleapis.com/v1";
+const GOOGLE_RPC_STATUS_REASONS = new Set([
+  "ABORTED",
+  "ALREADY_EXISTS",
+  "CANCELLED",
+  "DATA_LOSS",
+  "DEADLINE_EXCEEDED",
+  "FAILED_PRECONDITION",
+  "INTERNAL",
+  "INVALID_ARGUMENT",
+  "NOT_FOUND",
+  "OUT_OF_RANGE",
+  "PERMISSION_DENIED",
+  "RESOURCE_EXHAUSTED",
+  "UNAUTHENTICATED",
+  "UNAVAILABLE",
+  "UNIMPLEMENTED",
+  "UNKNOWN",
+]);
 
 export interface HostedGcpKmsClient {
   asymmetricSign(input: GcpKmsAsymmetricSignInput): Promise<{
@@ -70,6 +88,29 @@ interface StsTokenExchangeResponse {
 interface IamGenerateAccessTokenResponse {
   accessToken?: string;
   expireTime?: string;
+}
+
+interface GoogleCloudErrorBody {
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+  } | string;
+}
+
+class GoogleCloudApiError extends Error {
+  readonly code = "GOOGLE_CLOUD_API_ERROR";
+  readonly googleCloudOperation: string;
+  readonly googleCloudReason: string;
+  readonly status: number;
+
+  constructor(input: { operation: string; reason: string; status: number }) {
+    super(`Google Cloud ${input.operation} failed (${input.status}): ${input.reason}`);
+    this.name = "GoogleCloudApiError";
+    this.googleCloudOperation = input.operation;
+    this.googleCloudReason = input.reason;
+    this.status = input.status;
+  }
 }
 
 export function createHostedGcpKmsClientFromEnv(
@@ -221,13 +262,14 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
   }
 
   async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
-    const response = await this.call<GcpEncryptResponse>(
-      `${requireKmsResourceName(input.keyName, "GCP KMS Encrypt keyName")}:encrypt`,
-      {
+    const response = await this.call<GcpEncryptResponse>({
+      body: {
         additionalAuthenticatedData: encodeBase64(utf8(input.additionalAuthenticatedData)),
         plaintext: encodeBase64(input.plaintext),
       },
-    );
+      operation: "cloudkms/encrypt",
+      resource: `${requireKmsResourceName(input.keyName, "GCP KMS Encrypt keyName")}:encrypt`,
+    });
     return {
       ciphertext: requireNonEmptyString(response.ciphertext, "GCP KMS Encrypt ciphertext"),
       keyName: requireNonEmptyString(response.name ?? input.keyName, "GCP KMS Encrypt name"),
@@ -235,13 +277,14 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
   }
 
   async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
-    const response = await this.call<GcpDecryptResponse>(
-      `${requireKmsResourceName(input.keyName, "GCP KMS Decrypt keyName")}:decrypt`,
-      {
+    const response = await this.call<GcpDecryptResponse>({
+      body: {
         additionalAuthenticatedData: encodeBase64(utf8(input.additionalAuthenticatedData)),
         ciphertext: requireNonEmptyString(input.ciphertext, "GCP KMS Decrypt ciphertext"),
       },
-    );
+      operation: "cloudkms/decrypt",
+      resource: `${requireKmsResourceName(input.keyName, "GCP KMS Decrypt keyName")}:decrypt`,
+    });
     return {
       plaintext: decodeBase64(
         requireNonEmptyString(response.plaintext, "GCP KMS Decrypt plaintext"),
@@ -253,12 +296,16 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
     input: GcpKmsAsymmetricSignInput,
   ): Promise<{ keyVersionName: string; signature: string }> {
     const digest = await sha256(input.message);
-    const response = await this.call<GcpAsymmetricSignResponse>(
-      `${requireKmsResourceName(input.keyVersionName, "GCP KMS Sign keyVersionName")}:asymmetricSign`,
-      {
+    const response = await this.call<GcpAsymmetricSignResponse>({
+      body: {
         digest: { sha256: encodeBase64(digest) },
       },
-    );
+      operation: "cloudkms/asymmetricSign",
+      resource: `${requireKmsResourceName(
+        input.keyVersionName,
+        "GCP KMS Sign keyVersionName",
+      )}:asymmetricSign`,
+    });
     return {
       keyVersionName: requireNonEmptyString(
         response.name ?? input.keyVersionName,
@@ -268,17 +315,21 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
     };
   }
 
-  private async call<TResponse>(resource: string, body: Record<string, unknown>): Promise<TResponse> {
+  private async call<TResponse>(input: {
+    body: Record<string, unknown>;
+    operation: string;
+    resource: string;
+  }): Promise<TResponse> {
     const token = await this.accessTokenProvider.getAccessToken();
-    const response = await fetch(`${this.apiRoot}/${resource}`, {
-      body: JSON.stringify(body),
+    const response = await fetch(`${this.apiRoot}/${input.resource}`, {
+      body: JSON.stringify(input.body),
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       method: "POST",
     });
-    return parseGoogleJsonResponse<TResponse>(response, resource);
+    return parseGoogleJsonResponse<TResponse>(response, input.operation);
   }
 }
 
@@ -512,18 +563,46 @@ async function parseGoogleJsonResponse<TResponse>(
   label: string,
 ): Promise<TResponse> {
   const text = await response.text();
-  const parsed = text.length > 0 ? JSON.parse(text) : {};
+  let parsed: unknown = {};
+  if (text.length > 0) {
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      if (!response.ok) {
+        throw new GoogleCloudApiError({
+          operation: label,
+          reason: `http_${response.status}`,
+          status: response.status,
+        });
+      }
+      throw error;
+    }
+  }
   if (!response.ok) {
-    const error = parsed as { error?: { message?: string } | string };
-    const message =
-      typeof error.error === "object" && typeof error.error.message === "string"
-        ? error.error.message
-        : typeof error.error === "string"
-          ? error.error
-          : response.statusText;
-    throw new Error(`Google Cloud ${label} failed (${response.status}): ${message}`);
+    throw new GoogleCloudApiError({
+      operation: label,
+      reason: getGoogleCloudErrorReason(parsed, response),
+      status: response.status,
+    });
   }
   return parsed as TResponse;
+}
+
+function getGoogleCloudErrorReason(parsed: unknown, response: Response): string {
+  const error = (parsed as GoogleCloudErrorBody).error;
+
+  if (error && typeof error === "object") {
+    const status = typeof error.status === "string" ? error.status.trim().toUpperCase() : null;
+    if (status && GOOGLE_RPC_STATUS_REASONS.has(status)) {
+      return status;
+    }
+
+    if (typeof error.code === "number" && Number.isFinite(error.code)) {
+      return `google_error_${error.code}`;
+    }
+  }
+
+  return `http_${response.status}`;
 }
 
 async function sha256(value: Uint8Array): Promise<Uint8Array> {
