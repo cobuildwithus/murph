@@ -133,11 +133,14 @@ export function HostedLegalConsentCard({
           });
         }
       }
+      if (onAccepted) {
+        await onAccepted(latestStatus);
+        return;
+      }
       setStatus(latestStatus);
       setLegalAccepted(false);
       setHealthDataAccepted(false);
       setFeatureAccepted(false);
-      await onAccepted?.(latestStatus);
     } catch (error) {
       setErrorMessage(readConsentErrorMessage(error, "Could not record Murph legal consent right now."));
     } finally {

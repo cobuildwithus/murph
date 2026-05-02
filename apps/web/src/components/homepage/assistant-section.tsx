@@ -25,7 +25,7 @@ const MESSAGES = [
 
 export function AssistantSection() {
   return (
-    <section className="bg-[#2a2520] px-4 py-16 sm:px-10 lg:px-16 lg:py-24">
+    <section className="bg-[#2a2520] px-5 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
         <div className="grid gap-12 lg:grid-cols-[1fr_340px] lg:items-center lg:gap-16">
           <div>

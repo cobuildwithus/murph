@@ -490,6 +490,7 @@ const turnDelayMs = 25;
 let threadCounter = 0;
 let turnCounter = 0;
 let activeTurn = null;
+const threadAssistantHistory = new Map();
 
 function writeRpc(payload) {
   process.stdout.write(JSON.stringify(payload) + "\\n");
@@ -510,6 +511,39 @@ function readTextInput(params) {
   return input
     .flatMap((item) => item && item.type === "text" && typeof item.text === "string" ? [item.text] : [])
     .join("\\n\\n");
+}
+
+function readThreadAssistantHistory(threadId) {
+  const history = threadAssistantHistory.get(threadId);
+  return Array.isArray(history) ? history : [];
+}
+
+function appendThreadAssistantMessage(threadId, text) {
+  if (!threadId || typeof text !== "string" || !text.trim()) {
+    return;
+  }
+
+  threadAssistantHistory.set(
+    threadId,
+    readThreadAssistantHistory(threadId).concat([text.trim()]).slice(-8),
+  );
+}
+
+function buildThreadHistoryPrompt(threadId) {
+  const history = readThreadAssistantHistory(threadId);
+  if (history.length === 0) {
+    return "";
+  }
+
+  return "Conversation so far:\\n"
+    + history.map((text) => "Assistant:\\n" + text).join("\\n\\n");
+}
+
+function buildTurnPrompt(turn) {
+  return [
+    buildThreadHistoryPrompt(turn.threadId),
+    turn.prompts.filter(Boolean).join("\\n\\n"),
+  ].filter(Boolean).join("\\n\\n");
 }
 
 function extractResponseText(payload) {
@@ -553,8 +587,9 @@ async function completeTurn(turn) {
   turn.completed = true;
 
   try {
-    const prompt = turn.prompts.filter(Boolean).join("\\n\\n");
+    const prompt = buildTurnPrompt(turn);
     const text = await fetchAssistantResponse(prompt);
+    appendThreadAssistantMessage(turn.threadId, text);
     writeRpc({
       type: "item.completed",
       item: {
