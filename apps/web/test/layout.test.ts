@@ -101,7 +101,7 @@ test("RootLayout provides default title, description, and preview image metadata
   assert.equal(metadata.title, "Murph — Discover what actually makes you healthier");
   assert.equal(
     metadata.description,
-    "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
+    "Your personal health assistant. Sync your signals, pick a protocol, see what actually makes you healthier.",
   );
   assert.deepEqual(metadata.openGraph?.images, [
     {

@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:ada-standards-2026-glycemic-goals
 slug: sources/blood-glucose/ada-standards-2026-glycemic-goals
-title: "6. Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026"
+title: "Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026"
 summary: "ADA Standards chapter for individualized glycemic goals, CGM metrics, and hypoglycemia levels."
 status: draft
 quality: usable
@@ -22,11 +22,11 @@ relations:
     target: biomarker:blood-glucose
 source:
   kind: guideline
-  title: "6. Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026"
+  title: "Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026"
   authors: "American Diabetes Association Professional Practice Committee"
   year: 2026
   journal: "Diabetes Care"
-  citation: "American Diabetes Association Professional Practice Committee. 6. Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026. Diabetes Care. 2026;49(Supplement 1). doi:10.2337/dc26-S006"
+  citation: "American Diabetes Association Professional Practice Committee. Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026. Diabetes Care. 2026;49(Supplement 1). doi:10.2337/dc26-S006"
   pmid: "41358894"
   doi: "10.2337/dc26-S006"
   url: https://diabetesjournals.org/care/article/49/Supplement_1/S111/163928/6-Glycemic-Goals-and-Hypoglycemia-Standards-of

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { Badge } from "@/src/components/ui/badge";
 import { Collapsible, CollapsibleContent } from "@/src/components/ui/collapsible";
 import { cn } from "@/src/lib/utils";
 import type { Study } from "@/src/types/experiments";
@@ -62,25 +63,22 @@ export function StudyCard({
   const rowContent = (
     <div className="flex gap-4 px-6 py-5">
       <div className="flex w-[112px] shrink-0 flex-col items-start gap-1.5">
-        <div
-          className="rounded-md border border-border/70 bg-background px-2.5 py-1"
+        {participantLabel ? (
+          <Badge variant="secondary" className="font-mono text-[10px] text-primary">
+            {participantLabel}
+          </Badge>
+        ) : null}
+        <Badge
+          variant="outline"
+          className="font-mono text-[10px] text-muted-foreground"
           title={designLabel ? `${typeLabel}: ${designLabel}` : typeLabel}
         >
-          <span className="font-mono text-[10px]/3.5 text-muted-foreground">
-            {typeLabel}
-          </span>
-        </div>
-        {participantLabel ? (
-          <div className="rounded-md bg-primary/8 px-2.5 py-1.5">
-            <span className="font-mono text-xs/4 font-medium text-primary">
-              {participantLabel}
-            </span>
-          </div>
-        ) : null}
+          {typeLabel}
+        </Badge>
         {includedStudiesLabel ? (
-          <span className="rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]/3 text-muted-foreground/75">
+          <Badge variant="outline" className="font-mono text-[9px] text-muted-foreground/75">
             {includedStudiesLabel}
-          </span>
+          </Badge>
         ) : null}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -89,9 +87,9 @@ export function StudyCard({
             {title}
           </span>
           {yearLabel ? (
-            <span className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
+            <Badge variant="outline" className="shrink-0 font-mono text-[10px] text-muted-foreground">
               {yearLabel}
-            </span>
+            </Badge>
           ) : null}
         </div>
         {(authors || journal) ? (
@@ -124,9 +122,9 @@ export function StudyCard({
         ) : null}
         {(resultLabel || scopeLabel || stanceLabel) ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {resultLabel ? <StudyPill>{resultLabel}</StudyPill> : null}
-            {scopeLabel ? <StudyPill>{scopeLabel}</StudyPill> : null}
-            {stanceLabel ? <StudyPill>{stanceLabel}</StudyPill> : null}
+            {resultLabel ? <Badge variant="outline" className="text-[10px] text-muted-foreground">{resultLabel}</Badge> : null}
+            {scopeLabel ? <Badge variant="outline" className="text-[10px] text-muted-foreground">{scopeLabel}</Badge> : null}
+            {stanceLabel ? <Badge variant="outline" className="text-[10px] text-muted-foreground">{stanceLabel}</Badge> : null}
           </div>
         ) : null}
         {url ? (
@@ -139,7 +137,7 @@ export function StudyCard({
             rel="noreferrer"
             target="_blank"
           >
-            Open source ↗
+            Source ↗
           </a>
         ) : null}
       </div>
@@ -192,14 +190,6 @@ export function StudyCard({
         ) : null}
       </div>
     </Collapsible>
-  );
-}
-
-function StudyPill({ children }: { children: string }) {
-  return (
-    <span className="rounded-full border border-border/70 bg-background/35 px-2 py-0.5 text-[10px]/3.5 text-muted-foreground">
-      {children}
-    </span>
   );
 }
 

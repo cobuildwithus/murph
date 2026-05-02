@@ -64,6 +64,7 @@ import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
   HostedBrowserVaultReplicaOwnershipError,
+  HostedBrowserVaultReplicaRootKeyUnavailableError,
 } from "./browser-vault-store.ts";
 import {
   HostedUserRunner,
@@ -587,13 +588,16 @@ async function handleBrowserVaultSessionRoute(
   const replicaStore = createHostedBrowserVaultReplicaStore({
     bucket: context.env.BUNDLES,
     rootKey: crypto.rootKey,
+    rootKeyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+    resolveRootKeyById: crypto.resolveKeyById,
     userId,
   });
   let replicaEnvelope;
   try {
     replicaEnvelope = await replicaStore.readBrowserVaultReplicaEnvelope(body.replicaRef);
   } catch (error) {
-    if (error instanceof HostedBrowserVaultReplicaOwnershipError) {
+    if (error instanceof HostedBrowserVaultReplicaOwnershipError || error instanceof HostedBrowserVaultReplicaRootKeyUnavailableError) {
       replicaEnvelope = null;
     } else {
       throw error;
@@ -607,7 +611,19 @@ async function handleBrowserVaultSessionRoute(
     }, 404);
   }
 
-  const replicaKey = await replicaStore.deriveBrowserVaultReplicaKey(body.replicaRef);
+  let replicaKey;
+  try {
+    replicaKey = await replicaStore.deriveBrowserVaultReplicaKey(body.replicaRef);
+  } catch (error) {
+    if (error instanceof HostedBrowserVaultReplicaRootKeyUnavailableError) {
+      return json({
+        code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+        error: "Browser vault replica was not found.",
+      }, 404);
+    }
+
+    throw error;
+  }
   const replicaKeyEnvelope = await wrapHostedBrowserSessionKey({
     keyBytes: replicaKey,
     keyId: body.replicaRef.keyId,

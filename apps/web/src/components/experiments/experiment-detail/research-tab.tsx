@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 
 import type {
   ExperimentResearchGroup,
@@ -6,7 +7,6 @@ import type {
   Study,
 } from "@/src/types/experiments";
 import { StudyCard } from "./study-card";
-import { splitBulletLead } from "./format";
 
 export interface ResearchTabExperiment {
   id: string;
@@ -56,8 +56,8 @@ export function ResearchTab({ experiment }: ResearchTabProps) {
               key={stat.label}
               className={
                 isHero
-                  ? "order-first flex flex-col items-center gap-1.5 rounded-xl border border-primary/25 bg-primary/5 p-5 xl:col-span-2"
-                  : "flex flex-col items-center gap-1 rounded-xl border border-secondary/25 bg-card/90 p-4"
+                  ? "order-first flex flex-col items-center justify-center gap-1.5 rounded-xl border border-primary/25 bg-primary/5 p-5 xl:col-span-2"
+                  : "flex flex-col items-center justify-center gap-1 rounded-xl border border-secondary/25 bg-card/90 p-4"
               }
             >
               <span
@@ -86,7 +86,7 @@ export function ResearchTab({ experiment }: ResearchTabProps) {
           <summary className="cursor-pointer list-none font-mono text-[10px]/3 uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
             <span className="inline-flex items-center gap-1.5">
               How we count
-              <span aria-hidden="true" className="transition-transform group-open:rotate-180">˅</span>
+              <ChevronDown aria-hidden="true" className="inline size-3 transition-transform group-open:rotate-180" strokeWidth={1.75} />
             </span>
           </summary>
           <p className="mt-2 max-w-3xl text-xs/5 text-muted-foreground/70">
@@ -135,35 +135,25 @@ export function ResearchTab({ experiment }: ResearchTabProps) {
 }
 
 function ReadingResultsNotes({ items }: { items: ReadonlyArray<string> }) {
+  const colsClass =
+    items.length % 3 === 0 || items.length === 3
+      ? "md:grid-cols-3"
+      : "md:grid-cols-2";
   return (
     <section className="flex flex-col gap-5 rounded-xl border border-secondary/25 bg-card/90 p-7">
       <SectionLabel>Read results carefully</SectionLabel>
       <ul
         role="list"
-        className="grid gap-x-10 gap-y-6 md:grid-cols-3 md:divide-x md:divide-border/60"
+        className={`grid gap-x-10 gap-y-6 ${colsClass}`}
       >
-        {items.map((item) => {
-          const { lead, rest } = splitBulletLead(item);
-          return (
-            <li
-              key={item}
-              className="flex flex-col gap-1.5 text-[14px]/6 text-foreground text-pretty md:px-6 md:first:pl-0 md:last:pr-0"
-            >
-              {lead ? (
-                <>
-                  <strong className="font-semibold text-foreground">
-                    {lead}
-                  </strong>
-                  {rest ? (
-                    <span className="text-muted-foreground">{rest}</span>
-                  ) : null}
-                </>
-              ) : (
-                <span>{item}</span>
-              )}
-            </li>
-          );
-        })}
+        {items.map((item) => (
+          <li
+            key={item}
+            className="text-[14px]/6 text-muted-foreground text-pretty"
+          >
+            {item}
+          </li>
+        ))}
       </ul>
     </section>
   );
@@ -258,9 +248,9 @@ function ResearchGroupCard({
             </span>
             <span
               aria-hidden="true"
-              className="rounded-full border border-border/70 bg-background/35 px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground transition-transform group-open:rotate-180"
+              className="flex size-6 items-center justify-center rounded-full border border-border/70 bg-background/35 text-muted-foreground transition-transform group-open:rotate-180"
             >
-              ˅
+              <ChevronDown className="size-3.5" strokeWidth={1.75} />
             </span>
           </div>
         </div>

@@ -479,6 +479,7 @@ function createReplicaRef() {
     keyId: "browser-vault-replica:d",
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica.v1" as const,
+    runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
     sourceBundleHash: "a".repeat(64),
   };
@@ -489,6 +490,7 @@ function createReplicaAad() {
     dataVersion: "d".repeat(64),
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     purpose: "browser-vault-replica" as const,
+    runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.browser-vault-replica.v1" as const,
     sourceBundleHash: "a".repeat(64),
     userId: "member_123",

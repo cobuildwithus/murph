@@ -103,6 +103,21 @@ describe("hosted onboarding Stripe workflows", () => {
     })).rejects.toBeInstanceOf(FatalError);
   });
 
+  it("marks poisoned Stripe receipts fatal inside Workflow", async () => {
+    mocks.processRecordedHostedStripeWebhookEvent.mockRejectedValue(
+      hostedOnboardingError({
+        code: "STRIPE_WEBHOOK_RECONCILE_POISONED",
+        httpStatus: 500,
+        message: "Stripe webhook receipt is poisoned.",
+        retryable: false,
+      }),
+    );
+
+    await expect(processHostedStripeWebhookEventStep({
+      eventId: "evt_poisoned",
+    })).rejects.toBeInstanceOf(FatalError);
+  });
+
   it("marks retryable reconciliation failures retryable inside Workflow", async () => {
     mocks.processRecordedHostedStripeWebhookEvent.mockRejectedValue(
       hostedOnboardingError({
@@ -127,5 +142,14 @@ describe("hosted onboarding Stripe workflows", () => {
     await expect(processHostedStripeWebhookEventStep({
       eventId: "evt_123",
     })).rejects.toBeInstanceOf(RetryableError);
+  });
+
+  it("keeps the durable Stripe reconciliation retry window long enough for DB backoff and nudge outages", () => {
+    expect(
+      Object.getOwnPropertyDescriptor(
+        processHostedStripeWebhookEventStep,
+        "maxRetries",
+      )?.value,
+    ).toBe(120);
   });
 });

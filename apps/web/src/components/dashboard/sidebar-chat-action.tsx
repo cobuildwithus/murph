@@ -10,6 +10,7 @@ import {
   SIDEBAR_NAV_ICON_CLASS,
   SIDEBAR_NAV_ITEM_CLASS,
 } from "./sidebar-nav-classes";
+import { SidebarChatWithMurphAuthGate } from "./sidebar-chat-auth-gate";
 
 export function SidebarChatWithMurphFallback() {
   return (
@@ -31,7 +32,7 @@ export async function SidebarChatWithMurphAction() {
   const option = await resolveHostedMurphContactOption();
 
   if (!option) {
-    return <SidebarChatWithMurphFallback />;
+    return <SidebarChatWithMurphAuthGate />;
   }
 
   const opensInNewTab = option.target === "_blank";

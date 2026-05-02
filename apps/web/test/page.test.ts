@@ -177,7 +177,7 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
 
   expect(metadata.title).toBe("Murph — Discover what actually makes you healthier");
   expect(metadata.description).toBe(
-    "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
+    "Your personal health assistant. Sync your signals, pick a protocol, see what actually makes you healthier.",
   );
   expect(metadata.alternates?.canonical).toBe("/");
   expect(metadata.openGraph?.images).toEqual([

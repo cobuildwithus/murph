@@ -28,7 +28,7 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
           </h1>
 
           <p className="mt-6 max-w-[420px] text-base leading-[1.75] text-pretty text-white/75">
-            Murph is your personal health assistant. Connect your data. Run an
+            Murph is your personal health assistant. Sync your signals. Run an
             experiment. See what actually makes you healthier.
           </p>
 

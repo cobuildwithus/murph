@@ -20,7 +20,7 @@ import { StickyNav } from "./sticky-nav";
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Murph — Discover what actually makes you healthier",
   description:
-    "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
+    "Your personal health assistant. Sync your signals, pick a protocol, see what actually makes you healthier.",
   alternates: {
     canonical: "/",
   },

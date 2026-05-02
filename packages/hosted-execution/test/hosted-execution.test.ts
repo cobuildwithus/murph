@@ -47,6 +47,7 @@ describe("hosted execution coverage gaps", () => {
       keyId: "browser-vault-replica:key",
       objectKey: "users/browser-vault-replicas/user/replica.json",
       replicaSchema: "murph.browser-vault-replica.v1",
+      runtimeRootKeyId: "udrk:runtime:test-root",
       schema: "murph.hosted-browser-vault-replica-ref.v1",
       sourceBundleHash: "sha256:source",
     };

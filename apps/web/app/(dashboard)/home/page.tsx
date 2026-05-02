@@ -21,7 +21,7 @@ export default function HomePage() {
       <PageHeader
         eyebrow="Live Well"
         title="Welcome to Murph"
-        description="Connect your data, pick an experiment, and see what actually makes you healthier."
+        description="Sync your signals, pick an experiment, and see what actually makes you healthier."
       />
 
       <OnboardingSteps

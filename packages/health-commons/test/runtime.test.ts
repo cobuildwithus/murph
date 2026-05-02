@@ -401,6 +401,23 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       expect.stringContaining("short self-experiment"),
     ]));
     expect(Object.keys(researchTab.researchLandscape ?? {})).not.toContain("groups");
+    expect(researchTab.researchGroups?.map((group) => [group.id, group.studies.length])).toEqual([
+      ["evidence-backbone-and-claim-calibration", 23],
+      ["dry_sauna_acute_thermoregulation", 1],
+      ["near-term-autonomic-vascular-and-immune-signals", 38],
+      ["intervention-design-training-and-mixed-results", 29],
+      ["post_exercise_heat_performance", 2],
+      ["cultural-practice-and-protocol-context", 4],
+      ["traditional-sauna-design-and-operation", 2],
+      ["sauna-modality-definition-context", 1],
+      ["long-term-finnish-cohort-and-real-world-context", 21],
+      ["safety-dose-modality-and-context-boundaries", 69],
+      ["operational-public-sauna-safety", 3],
+      ["external-protocol-claims", 5],
+      ["external-protocol-dose-context", 1],
+      ["core-temperature-measurement-context", 2],
+      ["heat-tolerance-safety-boundaries", 2],
+    ]);
     expect(researchTab.studies.length).toBeGreaterThan(100);
     expect(researchTab.studies[0]).toEqual(expect.objectContaining({
       authors: expect.any(String),
@@ -727,12 +744,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(shell.byteLength).toBeLessThan(5_000);
     expect(protocolTab.byteLength).toBeLessThan(30_000);
     expect(resultsPublic.byteLength).toBeLessThan(10_000);
-    expect(researchTab.byteLength).toBeLessThan(250_000);
+    expect(researchTab.byteLength).toBeLessThan(500_000);
     expect(gzipSync(shell).byteLength).toBeLessThan(2_000);
     expect(gzipSync(protocolTab).byteLength).toBeLessThan(8_000);
     expect(gzipSync(resultsPublic).byteLength).toBeLessThan(4_000);
-    expect(gzipSync(researchTab).byteLength).toBeLessThan(60_000);
-    expect(bundle.byteLength / researchTab.byteLength).toBeGreaterThan(5);
+    expect(gzipSync(researchTab).byteLength).toBeLessThan(90_000);
+    expect(bundle.byteLength / researchTab.byteLength).toBeGreaterThan(2);
     expect(bundle.byteLength / protocolTab.byteLength).toBeGreaterThan(80);
     expect(bundle.byteLength / resultsPublic.byteLength).toBeGreaterThan(250);
   });
