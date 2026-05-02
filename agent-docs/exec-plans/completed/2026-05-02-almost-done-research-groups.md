@@ -22,3 +22,6 @@ Make the nearly complete Health Commons research tabs render grouped research se
 
 - Each assigned route should expose non-empty `researchGroups` in generated research JSON.
 - Health Commons generation/checks should pass, or unrelated blockers should be recorded.
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02
