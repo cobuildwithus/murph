@@ -44,10 +44,10 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
+    "@murphai/health-metrics": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.3.6",
-    "@murphai/health-metrics": "workspace:*"
+    "zod": "^4.3.6"
   },
   "engines": {
     "node": ">=24.14.1"

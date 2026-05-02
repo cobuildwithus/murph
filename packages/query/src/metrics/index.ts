@@ -96,6 +96,7 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
     confidence: row.confidence,
     context: {},
     effectiveDate: row.date.slice(0, 10),
+    grain: "day",
     metricKey: definition.key,
     observedAt,
     provenance: {
@@ -266,6 +267,7 @@ function scalarMetricPoint(input: {
     confidence: input.confidence,
     context: compactContext(input.context),
     effectiveDate,
+    grain: "event",
     metricKey: definition.key,
     observedAt,
     provenance: {

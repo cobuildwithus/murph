@@ -22,14 +22,14 @@ import type { CanonicalEntity } from "../canonical-entities.ts";
 export const BROWSER_VAULT_METRIC_POINT_SCHEMA = "murph.browser-vault.metric-point" as const;
 export const BROWSER_VAULT_METRIC_SELECTION_SCHEMA = "murph.browser-vault.metric-selection" as const;
 
-type MetricPointInput =
-  | readonly BrowserVaultMetricRow[]
-  | {
-      readonly generatedAt?: string;
-      readonly lookbackDays?: number;
-      readonly metricRows: readonly BrowserVaultMetricRow[];
-      readonly vault?: { readonly entities: readonly CanonicalEntity[] };
-    };
+interface MetricPointObjectInput {
+  readonly generatedAt?: string;
+  readonly lookbackDays?: number;
+  readonly metricRows: readonly BrowserVaultMetricRow[];
+  readonly vault?: { readonly entities: readonly CanonicalEntity[] };
+}
+
+type MetricPointInput = readonly BrowserVaultMetricRow[] | MetricPointObjectInput;
 
 type MetricSelectionPointInput = MetricPoint | BrowserVaultMetricPoint;
 
@@ -47,16 +47,15 @@ export function resolveBrowserVaultMetricPointBiomarkerKey(metricKey: string): s
 }
 
 export function createBrowserVaultMetricPointRecords(input: MetricPointInput): MetricPoint[] {
-  const metricRows = Array.isArray(input) ? input : input.metricRows;
-  const vault = Array.isArray(input) ? undefined : input.vault;
-  const metricPoints = extractMetricPoints({ metricRows, vault });
+  if (!isMetricPointObjectInput(input)) {
+    return extractMetricPoints({ metricRows: input });
+  }
 
-  return Array.isArray(input)
-    ? metricPoints
-    : filterMetricPointsByLookback(metricPoints, {
-        generatedAt: input.generatedAt ?? null,
-        lookbackDays: input.lookbackDays ?? null,
-      });
+  const metricPoints = extractMetricPoints({ metricRows: input.metricRows, vault: input.vault });
+  return filterMetricPointsByLookback(metricPoints, {
+    generatedAt: input.generatedAt ?? null,
+    lookbackDays: input.lookbackDays ?? null,
+  });
 }
 
 export function createBrowserVaultMetricPoints(input: MetricPointInput): BrowserVaultMetricPoint[] {
@@ -145,12 +144,12 @@ function toBrowserVaultMetricPoint(point: MetricPoint): BrowserVaultMetricPoint[
     metricKey: point.metricKey,
     observedAt: point.observedAt,
     pointSchema: BROWSER_VAULT_METRIC_POINT_SCHEMA,
-    provenance: point.provenance,
+    provenance: { ...point.provenance },
     recordedAt: point.recordedAt,
     recordIds: [point.source.recordId],
     reportedAt: point.reportedAt,
     schemaVersion: point.schemaVersion,
-    source: point.source,
+    source: { ...point.source },
     sourceFamily: point.source.family,
     sourceKind: point.source.kind,
     sourceLabel: point.provenance.sourceLabel,
@@ -215,6 +214,10 @@ function isMetricPointRecord(point: MetricSelectionPointInput): point is MetricP
     && point.source !== null
     && typeof point.provenance === "object"
     && point.provenance !== null;
+}
+
+function isMetricPointObjectInput(input: MetricPointInput): input is MetricPointObjectInput {
+  return "metricRows" in input;
 }
 
 function readBrowserMetricPointSource(point: BrowserVaultMetricPoint): MetricPointSource {

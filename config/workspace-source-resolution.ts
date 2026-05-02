@@ -11,6 +11,7 @@ export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/package.json",
   "@murphai/contracts": "../../packages/contracts/src/index.ts",
   "@murphai/health-commons": "../../packages/health-commons/src/index.ts",
+  "@murphai/health-metrics": "../../packages/health-metrics/src/index.ts",
   "@murphai/gateway-core": "../../packages/gateway-core/src/index.ts",
   "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
   "@murphai/messaging-ingress": "../../packages/messaging-ingress/package.json",
