@@ -619,12 +619,10 @@ describe("buildHostedLocalDevOverrides", () => {
     expect(overrides.HOSTED_EXECUTION_DISPATCH_URL).toBe("http://127.0.0.1:8787");
   });
 
-  it("can use a public tunnel origin for hosted onboarding links while keeping worker web base local", () => {
-    const overrides = buildHostedLocalDevOverrides(localConfig, {}, {
-      hostedOnboardingPublicBaseUrl: "https://tunnel.example.test",
-    });
+  it("keeps hosted onboarding links on the local web origin", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {});
 
-    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("https://tunnel.example.test");
+    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS).toBe("http://localhost:3000");
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
   });

@@ -180,7 +180,7 @@ function restingHeartRateRows(rows: readonly (readonly [string, number])[]): Bro
     observedAt: `${date}T00:00:00.000Z`,
     pointIds: [`metric-point:resting-heart-rate:${date}`],
     recordIds: [],
-    rowSchema: "murph.browser-vault.metric-row",
+    rowSchema: "murph.browser-vault.metric-row.v1",
     sourceFamily: "derived",
     sourceKind: "wearable-summary",
     sourceLabel: "Wearable summary",

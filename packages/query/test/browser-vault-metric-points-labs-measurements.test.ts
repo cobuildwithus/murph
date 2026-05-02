@@ -130,12 +130,13 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.equal(apob.unit, "mg/dL");
   assert.equal(apob.sourceLabel, "Function Health");
   assert.equal(apob.recordIds[0], "evt_blood_panel");
-  assert.deepEqual(
-    client.metrics
-      .series({ metricKey: "apob" })
-      .map((point) => ({ unit: point.unit, value: point.value })),
-    [{ unit: "mg/dL", value: 87 }],
-  );
+  const apobSeries = client.metrics.series({ metricKey: "apob" });
+  assert.deepEqual(apobSeries.map((point) => ({ unit: point.unit, value: point.value })), [
+    { unit: "mg/dL", value: 87 },
+    { unit: "mg/dL", value: 87 },
+  ]);
+  assert.equal(new Set(apobSeries.flatMap((point) => point.pointIds)).size, 2);
+  assert.equal(apobSeries.every((point) => /^metric-point:[0-9a-f]{16}$/u.test(point.pointIds[0] ?? "")), true);
 
   const glucose = client.metricSelections.getByBiomarker("biomarker:blood-glucose");
   assert.ok(glucose);
@@ -156,11 +157,90 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.ok(crp);
   assert.equal(crp.valueLabel, "<0.3");
   assert.equal(crp.unit, "mg/L");
-  assert.equal(client.metricSelections.get("unreviewed-private-panel-note"), null);
-  assert.deepEqual(client.metrics.series({ metricKey: "unreviewed-private-panel-note" }), []);
+  const customPanelMetric = client.metricSelections.get("unreviewed-private-panel-note");
+  assert.ok(customPanelMetric);
+  assert.equal(customPanelMetric.value, 5);
+  assert.equal(customPanelMetric.unit, "score");
+  assert.deepEqual(
+    client.metrics.series({ metricKey: "unreviewed-private-panel-note" }).map((point) => point.value),
+    [5],
+  );
 
   assert.equal(client.metrics.series({ metricKey: "body-weight" }).length, 2);
   assert.equal(client.metrics.latest({ metricKey: "apob" })?.sourceKind, "test-result");
+});
+
+test("browser-vault metric goal targets honor startAt when selecting rolling-window progress", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEvent("evt_rhr_pre_start", "measurement", {
+          occurredAt: "2026-04-23T07:00:00.000Z",
+          title: "Pre-start resting heart rate",
+          attributes: {
+            measurements: [
+              { metric: "restingHeartRate", value: 30, unit: "bpm" },
+            ],
+            source: "manual",
+          },
+        }),
+        ...Array.from({ length: 6 }, (_, index) => createEvent(`evt_rhr_${index + 1}`, "measurement", {
+          occurredAt: `2026-04-${String(24 + index).padStart(2, "0")}T07:00:00.000Z`,
+          title: `Rolling heart rate ${index + 1}`,
+          attributes: {
+            measurements: [
+              { metric: "restingHeartRate", value: 50, unit: "bpm" },
+            ],
+            source: "manual",
+          },
+        })),
+        {
+          attributes: {},
+          body: null,
+          date: "2026-04-20",
+          entityId: "goal_rhr",
+          experimentSlug: null,
+          family: "goal",
+          frontmatter: {
+            status: "active",
+            metricTargets: [{
+              comparator: "<",
+              evaluation: { kind: "rolling-window", statistic: "mean", windowDays: 7 },
+              kind: "metric",
+              metricKey: "resting-heart-rate",
+              startAt: "2026-04-24",
+              targetAt: "2026-04-30",
+              targetId: "rhr-under-49",
+              unit: "bpm",
+              value: 49,
+            }],
+          },
+          kind: "goal",
+          links: [],
+          lookupIds: ["goal_rhr"],
+          occurredAt: "2026-04-20T00:00:00.000Z",
+          path: "history/goals/goal_rhr.md",
+          primaryLookupId: "goal_rhr",
+          recordClass: "bank",
+          relatedIds: [],
+          status: "active",
+          stream: null,
+          tags: [],
+          title: "Resting heart rate goal",
+        } satisfies CanonicalEntity,
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const progress = replica.metricGoalProgressRows.find((row) => row.goalId === "goal_rhr");
+  assert.ok(progress);
+  assert.equal(progress.status, "behind");
+  assert.equal(progress.currentValue, 50);
+  assert.equal(progress.selectedPointIds.length, 6);
 });
 
 test("browser-vault metric points keep observation inputs while selecting the higher-priority stale reading", async () => {
@@ -225,7 +305,7 @@ test("browser-vault metric points keep observation inputs while selecting the hi
   assert.equal(bodyWeight.warnings.some((warning) => warning.code === "MIXED_SOURCES"), true);
 });
 
-test("query projection rebuild stores event-backed metric points in the projection table", async () => {
+test("query projection rebuild stores shared event and wearable metric points in the projection table", async () => {
   const vaultRoot = await createMetricPointProjectionVault();
 
   try {
@@ -261,7 +341,7 @@ test("query projection rebuild stores event-backed metric points in the projecti
         value: number;
       }>;
 
-      assert.deepEqual(rows.map((row) => row.metricKey), ["apob", "body-weight"]);
+      assert.deepEqual(rows.map((row) => row.metricKey), ["apob", "body-weight", "steps"]);
       assert.equal(rows.find((row) => row.metricKey === "body-weight")?.unit, "kg");
       assert.equal(rows.find((row) => row.metricKey === "body-weight")?.value, 81.6466);
       assert.equal(
@@ -273,6 +353,11 @@ test("query projection rebuild stores event-backed metric points in the projecti
       assert.deepEqual(
         [rows.find((row) => row.metricKey === "apob")?.sourceRecordId],
         ["evt_projection_test"],
+      );
+      assert.equal(rows.find((row) => row.metricKey === "steps")?.sourceKind, "activity-summary");
+      assert.deepEqual(
+        [rows.find((row) => row.metricKey === "steps")?.sourceRecordId],
+        ["activity-summary:steps:2026-05-01"],
       );
     } finally {
       database.close();
@@ -316,8 +401,10 @@ function createEvent(
 async function createMetricPointProjectionVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-metric-points-"));
   const eventsDir = path.join(vaultRoot, "ledger/events/2026");
+  const stepsDir = path.join(vaultRoot, "ledger/samples/steps/2026");
 
   await mkdir(eventsDir, { recursive: true });
+  await mkdir(stepsDir, { recursive: true });
   await writeFile(
     path.join(vaultRoot, "vault.json"),
     JSON.stringify(
@@ -367,6 +454,28 @@ async function createMetricPointProjectionVault(): Promise<string> {
             value: 87,
           },
         ],
+      }),
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(stepsDir, "2026-05.jsonl"),
+    [
+      JSON.stringify({
+        schemaVersion: "murph.sample.v1",
+        id: "smp_projection_steps",
+        stream: "steps",
+        recordedAt: "2026-05-01T21:00:00.000Z",
+        dayKey: "2026-05-01",
+        externalRef: {
+          resourceId: "steps-projection",
+          resourceType: "daily_summary",
+          system: "garmin",
+        },
+        source: "device",
+        quality: "summary",
+        value: 9234,
+        unit: "count",
       }),
       "",
     ].join("\n"),

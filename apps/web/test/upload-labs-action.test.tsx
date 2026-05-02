@@ -134,7 +134,7 @@ test("UploadLabsMurphContactAction opens assigned SMS with the lab-report messag
     markup,
     /data-slot="auth-button"[^>]*href="sms:\+15550100001\?body=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A"/,
   );
-  assert.match(markup, /aria-label="Share labs with Murph in Messages"/);
+  assert.match(markup, /aria-label="Sync labs with Murph in Messages"/);
   assert.doesNotMatch(markup, /\+14045550123/);
   assert.doesNotMatch(markup, /member@example\.test/);
   assert.deepEqual(mocks.readHostedMemberRoutingState.mock.calls[0]?.[0], {
@@ -219,7 +219,7 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
   );
   assert.match(
     markup,
-    /aria-label="Share labs with Murph in Telegram \(opens in a new tab\)"/,
+    /aria-label="Sync labs with Murph in Telegram \(opens in a new tab\)"/,
   );
   assert.doesNotMatch(markup, /href="mailto:murph@mail\.withmurph\.ai/);
   assert.doesNotMatch(markup, /tg_user_123/);
@@ -256,7 +256,7 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
   );
   assert.match(
     markup,
-    /aria-label="Share labs with Murph in Telegram \(opens in a new tab\)"/,
+    /aria-label="Sync labs with Murph in Telegram \(opens in a new tab\)"/,
   );
   assert.doesNotMatch(markup, /tg_user_123/);
   assert.doesNotMatch(markup, /member_handle/);

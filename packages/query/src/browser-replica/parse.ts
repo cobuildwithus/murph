@@ -94,8 +94,8 @@ function parseEntityLink(value: unknown, label: string): BrowserVaultEntityLink 
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
   const record = requireRecord(value, label);
   const rowSchema = requireString(record.rowSchema, `${label}.rowSchema`);
-  if (rowSchema !== "murph.browser-vault.metric-row") {
-    throw new TypeError(`${label}.rowSchema must be murph.browser-vault.metric-row.`);
+  if (rowSchema !== "murph.browser-vault.metric-row.v1") {
+    throw new TypeError(`${label}.rowSchema must be murph.browser-vault.metric-row.v1.`);
   }
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
@@ -122,8 +122,8 @@ function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
 function parseMetricSelectionRow(value: unknown, label: string): BrowserVaultMetricSelectionRow {
   const record = requireRecord(value, label);
   const selectionSchema = requireString(record.selectionSchema, `${label}.selectionSchema`);
-  if (selectionSchema !== "murph.browser-vault.metric-selection") {
-    throw new TypeError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.`);
+  if (selectionSchema !== "murph.browser-vault.metric-selection.v1") {
+    throw new TypeError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.v1.`);
   }
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
@@ -298,7 +298,7 @@ function requireMetricSelectionStatus(value: unknown, label: string) {
 }
 function requireMetricGoalStatus(value: unknown, label: string) {
   const text = requireString(value, label);
-  if (text === "behind" || text === "met" || text === "no_data" || text === "on_track" || text === "stale" || text === "unsupported") return text;
+  if (text === "behind" || text === "met" || text === "no_data" || text === "not_met" || text === "stale" || text === "unsupported") return text;
   throw new TypeError(`${label} must be a metric goal status.`);
 }
 function parseMetricSelectionWarning(value: unknown, label: string): BrowserVaultMetricSelectionRow["warnings"][number] {

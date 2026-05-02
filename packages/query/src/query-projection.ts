@@ -42,9 +42,9 @@ import {
   type MetricSelection,
 } from "@murphai/health-metrics";
 import {
-  extractMetricPointsFromCanonicalEntities,
-  extractMetricPointsFromSampleSummaries,
-} from "./metrics/index.ts";
+  buildMetricProjection,
+} from "./metrics/projection.ts";
+import { parseGoalMetricTargets } from "./metrics/index.ts";
 import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
@@ -337,11 +337,9 @@ async function rebuildQueryProjectionWithManifest(
     vaultRoot,
     entities: snapshot.entities,
   });
-  const dailySampleSummaries = summarizeDailySamples(snapshotReadModel);
-  const metricPoints = [
-    ...extractMetricPointsFromCanonicalEntities(snapshot.entities),
-    ...extractMetricPointsFromSampleSummaries(dailySampleSummaries),
-  ];
+  const metricProjection = buildMetricProjection(snapshotReadModel);
+  const dailySampleSummaries = metricProjection.dailySampleSummaries;
+  const metricPoints = metricProjection.metricPoints;
   const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
   const searchDocuments = [
     ...materializeSearchDocuments(projectedEntities),
@@ -847,64 +845,15 @@ function listStoredMetricTargets(location: QueryProjectionLocation): QueryMetric
 function extractMetricTargetsFromCanonicalEntities(entities: readonly CanonicalEntity[]): QueryMetricTargetRow[] {
   return entities
     .filter((entity) => entity.family === "goal")
-    .flatMap((entity) => {
-      const source = entity.frontmatter ?? entity.attributes;
-      const targets = Array.isArray(source.metricTargets) ? source.metricTargets : [];
-      return targets.flatMap((target, index) => parseMetricTarget(entity.entityId, target, index));
-    });
+    .flatMap((entity) =>
+      parseGoalMetricTargets(entity).map((target) => ({
+        goalId: entity.entityId,
+        id: `${entity.entityId}:${target.targetId}`,
+        target,
+      }))
+    );
 }
 
-function parseMetricTarget(goalId: string, value: unknown, index: number): QueryMetricTargetRow[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-  const record = value as Record<string, unknown>;
-  const metricKey = readString(record.metricKey);
-  const comparator = readMetricComparator(record.comparator);
-  const targetValue = readNumber(record.value);
-  const unit = readString(record.unit);
-  if (!metricKey || !comparator || targetValue === null || !unit) return [];
-  const targetId = readString(record.targetId) ?? `metric-target-${index + 1}`;
-  const target: GoalMetricTarget = {
-    biomarkerKey: readString(record.biomarkerKey) ?? undefined,
-    comparator,
-    evaluation: readMetricGoalEvaluation(record.evaluation),
-    highValue: readNumber(record.highValue) ?? undefined,
-    kind: "metric",
-    metricKey,
-    note: readString(record.note) ?? undefined,
-    targetAt: readString(record.targetAt) ?? undefined,
-    targetId,
-    unit,
-    value: targetValue,
-  };
-  return [{ goalId, id: `${goalId}:${targetId}`, target }];
-}
-
-function readMetricGoalEvaluation(value: unknown): GoalMetricTarget["evaluation"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "selected-value" };
-  const record = value as Record<string, unknown>;
-  const kind = readString(record.kind);
-  if (kind === "latest-lab") return { kind };
-  if (kind === "rolling-window") {
-    const statistic = readString(record.statistic);
-    const windowDays = readNumber(record.windowDays);
-    if ((statistic === "mean" || statistic === "median") && windowDays !== null) {
-      return { kind, statistic, windowDays };
-    }
-  }
-  return { kind: "selected-value" };
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function readNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function readMetricComparator(value: unknown): GoalMetricTarget["comparator"] | null {
-  return value === "<" || value === "<=" || value === ">" || value === ">=" || value === "between" ? value : null;
-}
 
 function searchQueryProjection(
   location: QueryProjectionLocation,

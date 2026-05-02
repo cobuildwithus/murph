@@ -1026,7 +1026,7 @@ function metricRow(input: {
     observedAt: `${input.date}T00:00:00.000Z`,
     pointIds: [`metric-point:${input.metricKey}:${input.date}`],
     recordIds: [],
-    rowSchema: "murph.browser-vault.metric-row",
+    rowSchema: "murph.browser-vault.metric-row.v1",
     sourceFamily: "derived",
     sourceKind: "wearable-summary",
     sourceLabel: "Wearable summary",

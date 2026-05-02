@@ -470,13 +470,8 @@ function normalizeHostedLocalBaseEnvironment(
 export function buildHostedLocalDevOverrides(
   config: HostedLocalDevConfig,
   cloudflareDevVars: Record<string, string>,
-  options: {
-    hostedOnboardingPublicBaseUrl?: string | null;
-  } = {},
 ): NodeJS.ProcessEnv {
   const webOrigin = `http://${config.webHost}:${config.webPort}`;
-  const hostedOnboardingPublicBaseUrl =
-    normalizeOptionalString(options.hostedOnboardingPublicBaseUrl) ?? webOrigin;
   const workerBaseUrl =
     `${config.workerProtocol}://${resolveLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
   const callbackPrivateJwkJson = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
@@ -508,7 +503,7 @@ export function buildHostedLocalDevOverrides(
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
     HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS: webOrigin,
-    HOSTED_ONBOARDING_PUBLIC_BASE_URL: hostedOnboardingPublicBaseUrl,
+    HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_ENV"),

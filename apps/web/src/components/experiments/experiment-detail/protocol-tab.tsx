@@ -340,11 +340,8 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
     (fact) => normalizeFactLabel(fact.label) === "frequency",
   );
   const sessionsPerWeek = frequencyFact
-    ? Math.max(
-        1,
-        Math.min(7, Number.parseInt(frequencyFact.value.match(/\d+/)?.[0] ?? "3", 10)),
-      )
-    : 3;
+    ? parseSessionsPerWeek(frequencyFact.value)
+    : 7;
   const scheduleEntries = interventionFact?.detail
     ? parseSessionCounts(interventionFact.detail)
     : [];
@@ -823,6 +820,14 @@ function ProtocolPhaseTimeline({
       </dl>
     </div>
   );
+}
+
+function parseSessionsPerWeek(frequencyValue: string): number {
+  const raw = Number.parseInt(frequencyValue.match(/\d+/)?.[0] ?? "7", 10);
+  if (/per day/i.test(frequencyValue)) {
+    return 7;
+  }
+  return Math.max(1, Math.min(7, raw));
 }
 
 function parseSessionCounts(detail: string): Array<{ label: string; value: string }> {

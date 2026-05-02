@@ -1,6 +1,8 @@
 import {
   resolveMetricDefinitionForBiomarker,
+  selectMetricTrend,
   type MetricConfidence,
+  type MetricTrend,
 } from "@murphai/health-metrics";
 import type {
   BrowserVaultMetricRow,
@@ -83,16 +85,7 @@ export interface BrowserVaultBiomarkerSeriesPoint {
   value: number;
 }
 
-export interface BrowserVaultBiomarkerTrend {
-  aggregation: BrowserVaultBiomarkerTrendDefaults["aggregation"];
-  baselineValue: number;
-  comparisonWindowDays: number;
-  currentValue: number;
-  delta: number;
-  direction: "down" | "flat" | "up";
-  label: string;
-  latestWindowDays: number;
-}
+export type BrowserVaultBiomarkerTrend = MetricTrend;
 
 export interface BrowserVaultBiomarkerPanelSource {
   displayName: string;
@@ -164,46 +157,20 @@ function buildMetricPanel(input: { metricKey: string; input: SelectBrowserVaultB
     latest: latest ? { confidence: latest.confidence, date: latest.date, sourceLabel: latest.sourceLabel ?? latest.sourceKind ?? "metric", unit: latest.unit, value: latest.value } : null,
     sampleCount: rows.length,
     series: rows.map((row) => ({ confidence: row.confidence, date: row.date, unit: row.unit, value: row.value })),
-    trend: buildTrend(rows, input.input.trendDefaults, input.input.unit, input.input.valuePrecision),
+    trend: selectMetricTrend({
+      metricKey: input.metricKey,
+      points: rows,
+      policy: input.input.trendDefaults,
+      unit: input.input.unit,
+      valuePrecision: input.input.valuePrecision,
+    }),
     unit,
     valuePrecision: input.input.valuePrecision,
   };
 }
 
-function buildTrend(rows: readonly BrowserVaultMetricRowWithValue[], trendDefaults: BrowserVaultBiomarkerTrendDefaults, unit: string, valuePrecision: number): BrowserVaultBiomarkerTrend | null {
-  const latest = rows.at(-1);
-  if (!latest) return null;
-  const currentStart = subtractIsoDays(latest.date, trendDefaults.latestWindowDays - 1);
-  const baselineStart = subtractIsoDays(currentStart, trendDefaults.comparisonWindowDays);
-  const currentRows = rows.filter((row) => row.date >= currentStart && row.date <= latest.date);
-  const baselineRows = rows.filter((row) => row.date >= baselineStart && row.date < currentStart);
-  if (currentRows.length === 0 || baselineRows.length < trendDefaults.minimumPoints) return null;
-  const currentValue = aggregateMetricRows(currentRows, trendDefaults.aggregation);
-  const baselineValue = aggregateMetricRows(baselineRows, trendDefaults.aggregation);
-  const delta = currentValue - baselineValue;
-  const directionDelta = isPercentageUnit(unit) ? delta : roundMetricValue(delta, valuePrecision);
-  const flatThreshold = nearFlatThresholdForUnit(unit);
-  return {
-    aggregation: trendDefaults.aggregation,
-    baselineValue,
-    comparisonWindowDays: trendDefaults.comparisonWindowDays,
-    currentValue,
-    delta,
-    direction: Math.abs(directionDelta) <= flatThreshold + 1e-9 ? "flat" : directionDelta < 0 ? "down" : "up",
-    label: `${trendDefaults.latestWindowDays}-day ${trendDefaults.aggregation} vs prior ${trendDefaults.comparisonWindowDays} days`,
-    latestWindowDays: trendDefaults.latestWindowDays,
-  };
-}
-
 type BrowserVaultMetricRowWithValue = BrowserVaultMetricRow & { value: number };
 function hasNumericMetricValue(row: BrowserVaultMetricRow): row is BrowserVaultMetricRowWithValue { return typeof row.value === "number" && Number.isFinite(row.value) }
-function aggregateMetricRows(rows: readonly BrowserVaultMetricRowWithValue[], aggregation: BrowserVaultBiomarkerTrendDefaults["aggregation"]): number {
-  const values = rows.map((row) => row.value);
-  if (aggregation === "mean") return values.reduce((sum, value) => sum + value, 0) / values.length;
-  const sorted = values.slice().sort((left, right) => left - right);
-  const midpoint = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? ((sorted[midpoint - 1] ?? 0) + (sorted[midpoint] ?? 0)) / 2 : sorted[midpoint] ?? 0;
-}
 function buildWarnings(input: { primary: BrowserVaultBiomarkerMetricPanel; trendDefaults: BrowserVaultBiomarkerTrendDefaults }): BrowserVaultBiomarkerPanelWarning[] {
   const warnings: BrowserVaultBiomarkerPanelWarning[] = [];
   if (input.primary.sampleCount > 0 && input.primary.sampleCount < input.trendDefaults.minimumPoints) warnings.push({ code: "LOW_SAMPLE_COUNT", message: `Only ${input.primary.sampleCount} private value${input.primary.sampleCount === 1 ? "" : "s"} found.` });
@@ -216,17 +183,6 @@ function isPrimarySeriesStale(input: { now: string; primary: BrowserVaultBiomark
 function emptyStateForStatus(_status: BrowserVaultBiomarkerPanelStatus): BrowserVaultBiomarkerPanelEmptyState {
   return { body: "Connect a health device or import labs to see your personal trend here. Your data stays private.", title: "Biomarker unavailable" };
 }
-function roundMetricValue(value: number, precision: number): number { return Number(value.toFixed(precision)) }
-function nearFlatThresholdForUnit(unit: string): number {
-  const normalized = unit.trim().toLowerCase();
-  if (normalized === "bpm") return 0.5;
-  if (normalized === "ml/kg/min") return 0.1;
-  if (isPercentageUnit(unit)) return 0.5;
-  if (normalized === "minutes") return 1;
-  return 0.01;
-}
-function isPercentageUnit(unit: string): boolean { const normalized = unit.trim().toLowerCase(); return normalized === "%" || normalized === "percent" || normalized.includes("percentage") }
-function subtractIsoDays(date: string, days: number): string { const parsed = new Date(`${date}T00:00:00.000Z`); parsed.setUTCDate(parsed.getUTCDate() - days); return parsed.toISOString().slice(0, 10) }
 function isOlderThanDays(dateOrDateTime: string, nowDateTime: string, days: number): boolean {
   const observed = new Date(dateOrDateTime.includes("T") ? dateOrDateTime : `${dateOrDateTime}T00:00:00.000Z`);
   const now = new Date(nowDateTime.includes("T") ? nowDateTime : `${nowDateTime}T00:00:00.000Z`);

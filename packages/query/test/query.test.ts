@@ -3472,7 +3472,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
     },
     recordedAt: null,
     reportedAt: null,
-    schemaVersion: "murph.metric-point",
+    schemaVersion: "murph.metric-point.v1",
     source: {
       family: "event",
       kind: "test-result",
@@ -3507,7 +3507,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
     },
     recordedAt: null,
     reportedAt: null,
-    schemaVersion: "murph.metric-point",
+    schemaVersion: "murph.metric-point.v1",
     source: {
       family: "derived",
       kind: "wearable-summary",

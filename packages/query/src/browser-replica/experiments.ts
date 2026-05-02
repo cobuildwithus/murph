@@ -12,6 +12,8 @@ import {
 import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  selectMetricWindowComparison,
+  type MetricWindowSummary,
 } from "../metrics/index.ts";
 import type {
   BrowserVaultEntity,
@@ -554,35 +556,27 @@ function buildBiomarkerResult(
     });
   }
 
-  const points = collectMetricPoints(client, sourceMetric, metricWindow);
-  const baselinePoints = points.filter((point) => point.phase === "baseline");
-  const interventionPoints = points.filter((point) => point.phase === "intervention");
-  const unit = firstString([
-    ...interventionPoints.map((point) => point.unit),
-    ...baselinePoints.map((point) => point.unit),
-  ]);
-  const baseline = summarizeMetricWindow(
-    metricWindow.windows.baselineStart,
-    metricWindow.windows.baselineEnd,
-    metricWindow.baselineDates.length,
-    baselinePoints,
-    unit,
-  );
-  const intervention = summarizeMetricWindow(
-    metricWindow.windows.interventionStart,
-    minIsoDate(metricWindow.windows.interventionEnd, context.asOfDate),
-    metricWindow.interventionDates.length,
-    interventionPoints,
-    unit,
-  );
-  const deltaAbs =
-    baseline.mean !== null && intervention.mean !== null
-      ? round(intervention.mean - baseline.mean)
-      : null;
-  const deltaPct =
-    baseline.mean !== null && intervention.mean !== null && baseline.mean !== 0
-      ? round(((intervention.mean - baseline.mean) / Math.abs(baseline.mean)) * 100)
-      : null;
+  const metricRows = collectMetricRows(client, sourceMetric, metricWindow);
+  const points = metricRowsToExperimentPoints(metricRows, sourceMetric, metricWindow);
+  const comparison = selectMetricWindowComparison({
+    baselineWindow: {
+      end: metricWindow.windows.baselineEnd,
+      start: metricWindow.windows.baselineStart,
+      totalDays: metricWindow.baselineDates.length,
+    },
+    comparisonWindow: {
+      end: minIsoDate(metricWindow.windows.interventionEnd, context.asOfDate),
+      start: metricWindow.windows.interventionStart,
+      totalDays: metricWindow.interventionDates.length,
+    },
+    metricKey: sourceMetric.metricKey,
+    points: metricRows,
+    statistic: "mean",
+  });
+  const baseline = experimentWindowSummaryFromMetricWindow(comparison.baseline);
+  const intervention = experimentWindowSummaryFromMetricWindow(comparison.comparison);
+  const deltaAbs = comparison.delta !== null ? round(comparison.delta) : null;
+  const deltaPct = comparison.deltaPercent !== null ? round(comparison.deltaPercent) : null;
   const windowUnavailable =
     metricWindow.baselineDates.length === 0 && metricWindow.interventionDates.length === 0;
   const status = resolveBiomarkerStatus({
@@ -590,6 +584,7 @@ function buildBiomarkerResult(
     sourceMetric,
     windowUnavailable,
   });
+  const unit = comparison.unit;
   const statusReason = buildBiomarkerStatusReason(status, label);
 
   if (status === "no_data") {
@@ -628,34 +623,65 @@ function buildBiomarkerResult(
   };
 }
 
-function collectMetricPoints(
+type BrowserVaultMetricRowWithValue = BrowserVaultMetricRow & { value: number };
+
+function collectMetricRows(
   client: BrowserVaultQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
   metricWindow: MetricWindowContext,
-): BrowserVaultExperimentMetricPoint[] {
-  const byDate = new Map<string, BrowserVaultExperimentMetricPoint>();
-
-  for (const row of client.replica.metricRows) {
-    if (row.metricKey !== sourceMetric.metricKey) {
-      continue;
-    }
-
+): BrowserVaultMetricRowWithValue[] {
+  const byDate = new Map<string, BrowserVaultMetricRowWithValue>();
+  for (const row of client.metrics.series({ metricKey: sourceMetric.metricKey })) {
     const phase = resolveMetricPointPhase(row.date, metricWindow);
-    if (!phase || typeof row.value !== "number" || !Number.isFinite(row.value)) {
-      continue;
+    if (phase && hasNumericMetricValue(row)) {
+      byDate.set(row.date, row);
     }
+  }
+  return [...byDate.values()].sort(compareMetricRowsAsc);
+}
 
-    byDate.set(row.date, {
+function metricRowsToExperimentPoints(
+  rows: readonly BrowserVaultMetricRowWithValue[],
+  sourceMetric: BrowserVaultExperimentMetricSource,
+  metricWindow: MetricWindowContext,
+): BrowserVaultExperimentMetricPoint[] {
+  return rows.flatMap((row) => {
+    const phase = resolveMetricPointPhase(row.date, metricWindow);
+    return phase ? [{
       confidence: row.confidence,
       date: row.date,
-      metricKey: row.metricKey,
+      metricKey: sourceMetric.metricKey,
       phase,
       unit: row.unit,
       value: row.value,
-    });
-  }
+    }] : [];
+  });
+}
 
-  return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+function hasNumericMetricValue(row: BrowserVaultMetricRow): row is BrowserVaultMetricRowWithValue {
+  return typeof row.value === "number" && Number.isFinite(row.value);
+}
+
+function compareMetricRowsAsc(
+  left: BrowserVaultMetricRow,
+  right: BrowserVaultMetricRow,
+): number {
+  if (left.date !== right.date) return left.date.localeCompare(right.date);
+  if (left.observedAt !== right.observedAt) return left.observedAt.localeCompare(right.observedAt);
+  return left.id.localeCompare(right.id);
+}
+
+function experimentWindowSummaryFromMetricWindow(
+  summary: MetricWindowSummary,
+): BrowserVaultExperimentMetricWindowSummary {
+  return {
+    daysWithData: summary.daysWithData,
+    end: summary.end,
+    mean: summary.value,
+    start: summary.start,
+    totalDays: summary.totalDays,
+    unit: summary.unit,
+  };
 }
 
 function resolveMetricPointPhase(
@@ -706,18 +732,16 @@ function emptyBiomarkerResult(input: {
   statusReason: string;
   window: MetricWindowContext;
 }): BrowserVaultExperimentBiomarkerResult {
-  const baseline = summarizeMetricWindow(
+  const baseline = emptyMetricWindowSummary(
     input.window.windows.baselineStart,
     input.window.windows.baselineEnd,
     input.window.baselineDates.length,
-    [],
     null,
   );
-  const intervention = summarizeMetricWindow(
+  const intervention = emptyMetricWindowSummary(
     input.window.windows.interventionStart,
     input.window.windows.interventionEnd,
     input.window.interventionDates.length,
-    [],
     null,
   );
 
@@ -736,6 +760,22 @@ function emptyBiomarkerResult(input: {
     status: input.status,
     statusReason: input.statusReason,
     unit: null,
+  };
+}
+
+function emptyMetricWindowSummary(
+  start: string | null,
+  end: string | null,
+  totalDays: number,
+  unit: string | null,
+): BrowserVaultExperimentMetricWindowSummary {
+  return {
+    daysWithData: 0,
+    end,
+    mean: null,
+    start,
+    totalDays,
+    unit,
   };
 }
 
@@ -1120,23 +1160,6 @@ function buildBiomarkerStatusReason(
   }
 }
 
-function summarizeMetricWindow(
-  start: string | null,
-  end: string | null,
-  totalDays: number,
-  points: readonly BrowserVaultExperimentMetricPoint[],
-  unit: string | null,
-): BrowserVaultExperimentMetricWindowSummary {
-  return {
-    daysWithData: points.length,
-    end,
-    mean: mean(points.map((point) => point.value)),
-    start,
-    totalDays,
-    unit,
-  };
-}
-
 function classifyMetricCompleteness(
   baselineDays: number,
   interventionDays: number,
@@ -1424,10 +1447,6 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
   return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
 }
 
-function firstString(values: readonly (string | null)[]): string | null {
-  return values.find((value): value is string => typeof value === "string" && value.length > 0) ?? null;
-}
-
 function dateRange(start: string | null, end: string | null): string[] {
   if (!start || !end || start > end) {
     return [];
@@ -1531,14 +1550,6 @@ function extractDate(value: string | null): string | null {
 
 function compareStringsDesc(left: string | null, right: string | null): number {
   return (right ?? "").localeCompare(left ?? "");
-}
-
-function mean(values: readonly number[]): number | null {
-  if (values.length === 0) {
-    return null;
-  }
-
-  return round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
 function round(value: number): number {

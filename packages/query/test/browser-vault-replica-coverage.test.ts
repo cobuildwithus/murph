@@ -73,7 +73,7 @@ function createReplicaFixture(): BrowserVaultReplica {
       metricRow("steps", "2026-04-20", 920, "steps"),
       metricRow("sleep-score", "2026-04-20", 91, "score"),
     ],
-    metricSelectionRows: [{ biomarkerKey: null, confidence: "high", effectiveDate: "2026-04-20", id: "metric-selection:steps", metricKey: "steps", observedAt: "2026-04-20T00:00:00.000Z", pointIds: ["p_steps"], recordIds: ["r_steps"], selectedMetricRowId: "metric-row:p_steps", selectionSchema: "murph.browser-vault.metric-selection", sourceLabel: "Wearable summary", status: "ready", unit: "steps", value: 920, valueLabel: "920", warnings: [] }],
+    metricSelectionRows: [{ biomarkerKey: null, confidence: "high", effectiveDate: "2026-04-20", id: "metric-selection:steps", metricKey: "steps", observedAt: "2026-04-20T00:00:00.000Z", pointIds: ["p_steps"], recordIds: ["r_steps"], selectedMetricRowId: "metric-row:p_steps", selectionSchema: "murph.browser-vault.metric-selection.v1", sourceLabel: "Wearable summary", status: "ready", unit: "steps", value: 920, valueLabel: "920", warnings: [] }],
     policy: { bodyPreviewChars: 280, excludedFamilies: [], id: BROWSER_VAULT_REPLICA_POLICY_ID, includedFamilies: [], metricLookbackDays: 365 },
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: [{ date: "2026-04-20", entityId: "exp_browser", family: "experiment", id: "exp_browser", kind: "experiment_entry", occurredAt: "2026-04-20T08:00:00.000Z", tags: ["focus"], text: "steady", title: "Steady experiment" }],
@@ -85,7 +85,7 @@ function createReplicaFixture(): BrowserVaultReplica {
 }
 
 function metricRow(metricKey: string, date: string, value: number, unit: string) {
-  return { biomarkerKey: null, confidence: "high" as const, context: {}, date, grain: "day" as const, id: `metric-row:${metricKey}:${date}`, metricKey, observedAt: `${date}T00:00:00.000Z`, pointIds: [`p_${metricKey}_${date}`], recordIds: [`r_${metricKey}_${date}`], rowSchema: "murph.browser-vault.metric-row" as const, sourceFamily: "derived", sourceKind: "wearable-summary", sourceLabel: "Wearable summary", statistic: "value" as const, unit, value, valueLabel: String(value) };
+  return { biomarkerKey: null, confidence: "high" as const, context: {}, date, grain: "day" as const, id: `metric-row:${metricKey}:${date}`, metricKey, observedAt: `${date}T00:00:00.000Z`, pointIds: [`p_${metricKey}_${date}`], recordIds: [`r_${metricKey}_${date}`], rowSchema: "murph.browser-vault.metric-row.v1" as const, sourceFamily: "derived", sourceKind: "wearable-summary", sourceLabel: "Wearable summary", statistic: "value" as const, unit, value, valueLabel: String(value) };
 }
 
 function createCanonicalEntity(family: CanonicalEntity["family"], entityId: string, overrides: Partial<CanonicalEntity> = {}): CanonicalEntity {

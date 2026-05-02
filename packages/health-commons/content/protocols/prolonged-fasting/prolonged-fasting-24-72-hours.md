@@ -55,6 +55,8 @@ media:
 protocol:
   doseSignature: One continuous 24–72 h hydrated water-only fast by default · zero-calorie variants require explicit exposure logging and separate interpretation · exact duration selected before start · planned refeed · safety screen required
   target: one hydrated water-only fast lasting 24, 36, 48, 60, or 72 hours; any zero-calorie beverage or electrolyte variant must be logged and interpreted separately from water-only evidence
+  frequency:
+    sessionsPerWeek: 1
   durationMinutes:
     min: 1440
     max: 4320
