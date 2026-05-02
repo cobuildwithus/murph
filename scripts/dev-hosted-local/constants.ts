@@ -30,6 +30,10 @@ export const DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG = path.join(
   ".tmp",
   "cloudflared-linq-webhook.yml",
 );
+export const DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE = path.join(
+  ".tmp",
+  "linq-webhook-registration.json",
+);
 export const DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME = "dev";
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync";
 // Local Cloudflare startup can include a full runner bundle build and cold container prep.

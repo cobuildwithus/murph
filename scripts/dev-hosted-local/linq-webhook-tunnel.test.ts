@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -113,6 +116,17 @@ describe("normalizeLinqWebhookPublicUrl", () => {
       normalizeLinqWebhookPublicUrl("http://tunnel.example.test")
     ).toThrow("must use HTTPS");
   });
+
+  it("rejects query and hash values before appending the webhook path", async () => {
+    const { normalizeLinqWebhookPublicUrl } = await import("./linq-webhook-tunnel.ts");
+
+    expect(() =>
+      normalizeLinqWebhookPublicUrl("https://tunnel.example.test?debug=1")
+    ).toThrow("must not include query or hash");
+    expect(() =>
+      normalizeLinqWebhookPublicUrl("https://tunnel.example.test/#fragment")
+    ).toThrow("must not include query or hash");
+  });
 });
 
 describe("parseCloudflaredTunnelHostname", () => {
@@ -125,6 +139,38 @@ describe("parseCloudflaredTunnelHostname", () => {
       "  - hostname: \"tunnel.example.test\"",
       "    service: http://localhost:3000",
     ].join("\n"))).toBe("tunnel.example.test");
+  });
+
+  it("selects the hostname whose ingress service routes to hosted web", async () => {
+    const { parseCloudflaredTunnelHostname } = await import("./linq-webhook-tunnel.ts");
+
+    expect(parseCloudflaredTunnelHostname([
+      "ingress:",
+      "  - hostname: other.example.test",
+      "    service: http://localhost:9999",
+      "  - hostname: tunnel.example.test",
+      "    service: http://127.0.0.1:3000",
+      "  - service: http_status:404",
+    ].join("\n"), "cloudflared.yml", {
+      webHost: "localhost",
+      webPort: 3000,
+    })).toBe("tunnel.example.test");
+  });
+
+  it("fails when no hostname rule routes to hosted web", async () => {
+    const { parseCloudflaredTunnelHostname } = await import("./linq-webhook-tunnel.ts");
+
+    expect(() =>
+      parseCloudflaredTunnelHostname([
+        "ingress:",
+        "  - hostname: tunnel.example.test",
+        "    service: http://localhost:9999",
+        "  - service: http_status:404",
+      ].join("\n"), "cloudflared.yml", {
+        webHost: "localhost",
+        webPort: 3000,
+      })
+    ).toThrow("must include an ingress hostname whose service routes to local hosted web port 3000");
   });
 
   it("fails closed when the cloudflared config has no hostname", async () => {
@@ -235,25 +281,83 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
         tunnelName: "dev",
       },
+      registrationCachePath: null,
       stderrTarget,
     });
 
-    expect(createLinqWebhookSubscription).toHaveBeenCalledWith(
-      {
-        phoneNumbers: ["+15550000001"],
-        subscribedEvents: ["message.received"],
-        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
-      },
-      {
-        env: expect.objectContaining({
-          LINQ_API_TOKEN: "linq-token",
-          LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
-        }),
-      },
-    );
+    const call = createLinqWebhookSubscription.mock.calls[0];
+    expect(call).toBeDefined();
+    if (!call) {
+      throw new Error("Expected Linq webhook subscription call.");
+    }
+    expect(call[0]).toEqual({
+      phoneNumbers: ["+15550000001"],
+      subscribedEvents: ["message.received"],
+      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+    });
+    expect(call[1].env).toEqual({
+      LINQ_API_TOKEN: "linq-token",
+    });
     expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
       "Registered local webhook target https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
     ));
+  });
+
+  it("uses the local registration cache to avoid duplicate create calls", async () => {
+    const { registerHostedLocalLinqWebhookSubscription } = await import(
+      "./linq-webhook-tunnel.ts"
+    );
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
+    const registrationCachePath = path.join(tempDir, "cache.json");
+    const setup = {
+      phoneNumbers: ["+15550000001"],
+      publicBaseUrl: "https://tunnel.example.test",
+      shouldRegister: true,
+      shouldStartTunnel: true,
+      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+      tunnelName: "dev",
+    };
+
+    try {
+      await registerHostedLocalLinqWebhookSubscription({
+        env: {
+          LINQ_API_BASE_URL: "https://linq.example.test/api/partner/v3",
+          LINQ_API_TOKEN: "linq-token",
+          LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+          PRIVY_APP_SECRET: "unrelated-secret",
+        },
+        registrationCachePath,
+        setup,
+      });
+      await registerHostedLocalLinqWebhookSubscription({
+        env: {
+          LINQ_API_BASE_URL: "https://linq.example.test/api/partner/v3",
+          LINQ_API_TOKEN: "linq-token",
+          LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+          PRIVY_APP_SECRET: "unrelated-secret",
+        },
+        registrationCachePath,
+        setup,
+      });
+
+      expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
+      const call = createLinqWebhookSubscription.mock.calls[0];
+      expect(call).toBeDefined();
+      if (!call) {
+        throw new Error("Expected Linq webhook subscription call.");
+      }
+      expect(call[1].env).toEqual({
+        LINQ_API_BASE_URL: "https://linq.example.test/api/partner/v3",
+        LINQ_API_TOKEN: "linq-token",
+      });
+      const cacheText = await readFile(registrationCachePath, "utf8");
+      expect(cacheText).not.toContain("linq-webhook-secret");
+      expect(cacheText).not.toContain("+15550000001");
+      expect(cacheText).not.toContain("unrelated-secret");
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
   });
 
   it("fails if Linq returns a different signing secret", async () => {
@@ -285,6 +389,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         tunnelConfigPath: null,
         tunnelName: null,
       },
+      registrationCachePath: null,
     })).rejects.toThrow("does not match local LINQ_WEBHOOK_SECRET");
   });
 });

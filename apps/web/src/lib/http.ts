@@ -67,6 +67,7 @@ interface JsonErrorResponseOptions {
   internalMessage: string;
   logMessage: string;
   logDetails?: JsonErrorLogDetailProvider;
+  routeContext?: JsonRouteLogContext | null;
   sanitizeLogString?: JsonLogStringSanitizer;
   warnLogDetails?: JsonErrorLogDetailProvider;
   matchers?: JsonErrorMatcher[];
@@ -88,6 +89,10 @@ export interface JsonRouteHelpers {
   withJsonError<TArgs extends unknown[]>(
     handler: (...args: TArgs) => Promise<Response>,
   ): (...args: TArgs) => Promise<Response>;
+}
+
+interface JsonRouteLogContext {
+  requestMethod?: string;
 }
 
 export class InvalidRouteParamEncodingError extends TypeError {
@@ -285,17 +290,24 @@ export function createJsonErrorResponse(
 export function createJsonRouteHelpers(
   options: JsonRouteHelpersOptions,
 ): JsonRouteHelpers {
-  const jsonError = (error: unknown, headers?: HeadersInit): NextResponse =>
+  const jsonErrorWithContext = (
+    error: unknown,
+    headers?: HeadersInit,
+    routeContext?: JsonRouteLogContext | null,
+  ): NextResponse =>
     createJsonErrorResponse(error, {
       defaultHeaders: options.defaultHeaders,
       headers,
       internalMessage: options.internalMessage,
       logMessage: options.logMessage,
       logDetails: options.logDetails,
+      routeContext,
       sanitizeLogString: options.sanitizeLogString,
       warnLogDetails: options.warnLogDetails,
       matchers: options.matchers,
     });
+  const jsonError = (error: unknown, headers?: HeadersInit): NextResponse =>
+    jsonErrorWithContext(error, headers);
 
   const jsonOk = (payload: unknown, status = 200, headers?: HeadersInit): NextResponse =>
     NextResponse.json(payload, {
@@ -309,7 +321,13 @@ export function createJsonRouteHelpers(
     withJsonError<TArgs extends unknown[]>(
       handler: (...args: TArgs) => Promise<Response>,
     ): (...args: TArgs) => Promise<Response> {
-      return withJsonErrorHandling(handler, (error) => jsonError(error));
+      return async (...args) => {
+        try {
+          return await handler(...args);
+        } catch (error) {
+          return jsonErrorWithContext(error, undefined, describeJsonRouteLogContext(args));
+        }
+      };
     },
   };
 }
@@ -390,17 +408,17 @@ function logMappedJsonError(
   mapping: JsonErrorMapping,
   options: JsonErrorResponseOptions,
 ): void {
-  if (!mapping.log) {
+  if (mapping.log === null) {
     return;
   }
 
-  logJsonError(mapping.log.level ?? inferJsonErrorLogLevel(mapping.status), error, options, {
+  logJsonError(mapping.log?.level ?? inferJsonErrorLogLevel(mapping.status), error, options, {
     errorResponseCode: mapping.error.code,
     ...(mapping.error.retryable === undefined
       ? {}
       : { errorResponseRetryable: mapping.error.retryable }),
     errorResponseStatus: mapping.status,
-    ...(mapping.log.details ?? {}),
+    ...(mapping.log?.details ?? {}),
   });
 }
 
@@ -422,10 +440,23 @@ function logJsonError(
   log(options.logMessage, {
     errorType: describeLoggedErrorType(error),
     internalMessage: options.internalMessage,
+    ...(options.routeContext ?? {}),
     ...(defaultDetails ?? {}),
     ...customDetails,
     ...extraDetails,
   });
+}
+
+function describeJsonRouteLogContext(args: readonly unknown[]): JsonRouteLogContext | null {
+  const request = args.find((arg): arg is Request => arg instanceof Request);
+
+  if (!request) {
+    return null;
+  }
+
+  return {
+    requestMethod: request.method,
+  };
 }
 
 function describeLoggedErrorType(error: unknown): string {

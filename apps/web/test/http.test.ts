@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/server", () => {
   class MockNextResponse extends Response {
@@ -27,6 +27,10 @@ describe("json route helper factory", () => {
     httpModule = await import("../src/lib/http");
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("merges default headers into jsonOk responses", async () => {
     const helpers = httpModule.createJsonRouteHelpers({
       defaultHeaders: {
@@ -49,6 +53,7 @@ describe("json route helper factory", () => {
   });
 
   it("uses domain matchers and default headers for jsonError responses", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
       defaultHeaders: {
         "Cache-Control": "no-store",
@@ -79,9 +84,16 @@ describe("json route helper factory", () => {
         message: "Known failure.",
       },
     });
+    expect(warnSpy).toHaveBeenCalledWith("route failed", {
+      errorResponseCode: "KNOWN",
+      errorResponseStatus: 409,
+      errorType: "string",
+      internalMessage: "route failed unexpectedly",
+    });
   });
 
   it("reuses the same domain mapping when wrapping handlers", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
       internalMessage: "route failed unexpectedly",
       logMessage: "route failed",
@@ -111,6 +123,81 @@ describe("json route helper factory", () => {
         message: "Known failure.",
       },
     });
+    expect(warnSpy).toHaveBeenCalledWith("route failed", {
+      errorMessage: "known",
+      errorResponseCode: "KNOWN",
+      errorResponseStatus: 422,
+      errorType: "Error",
+      internalMessage: "route failed unexpectedly",
+    });
+  });
+
+  it("logs wrapped route context for mapped failures without logging bodies or headers", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      matchers: [
+        (error) => error === "known"
+          ? {
+              error: {
+                code: "KNOWN",
+                message: "Known failure.",
+              },
+              status: 400,
+            }
+          : null,
+      ],
+    });
+    const handler = helpers.withJsonError(async () => {
+      return Promise.reject("known");
+    });
+
+    const response = await handler(new Request("https://join.example.test/api/demo", {
+      body: JSON.stringify({
+        token: "secret-value",
+      }),
+      headers: {
+        authorization: "Bearer secret-value",
+      },
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(warnSpy).toHaveBeenCalledWith("route failed", {
+      errorResponseCode: "KNOWN",
+      errorResponseStatus: 400,
+      errorType: "string",
+      internalMessage: "route failed unexpectedly",
+      requestMethod: "POST",
+    });
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("secret-value");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("/api/demo");
+  });
+
+  it("can suppress logs for explicitly quiet mapped errors", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      matchers: [
+        (error) => error === "quiet"
+          ? {
+              error: {
+                code: "QUIET",
+                message: "Quiet failure.",
+              },
+              log: null,
+              status: 404,
+            }
+          : null,
+      ],
+    });
+
+    const response = helpers.jsonError("quiet");
+
+    expect(response.status).toBe(404);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("can opt matched domain errors into safe classified logs", async () => {

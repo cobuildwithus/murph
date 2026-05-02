@@ -30,7 +30,8 @@ override any value explicitly.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.
 - `e2e:stub`: deterministic hosted-local E2E defaults. It disables the local
   Codex bridge, skips Stripe listener startup, skips Vercel env pull, and forces
-  assistant-provider stub mode.
+  assistant-provider stub mode. It also disables live Linq webhook tunnel
+  registration unless a caller explicitly opts back in.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
 
 ## State files

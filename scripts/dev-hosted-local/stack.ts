@@ -469,7 +469,7 @@ export async function startHostedLocalDevStack(input: {
         "tunnel",
         "--no-autoupdate",
         "--config",
-        requireLinqWebhookTunnelConfigPath(linqWebhookSetup),
+        resolveRepoRelativeChildArg(requireLinqWebhookTunnelConfigPath(linqWebhookSetup)),
         "run",
         requireLinqWebhookTunnelName(linqWebhookSetup),
       ], buildCloudflaredProcessEnv(initialProcessEnv), {
@@ -822,6 +822,15 @@ function buildCloudflaredProcessEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEn
     }
   }
   return env;
+}
+
+function resolveRepoRelativeChildArg(filePath: string): string {
+  const relative = path.relative(repoRoot, filePath);
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+    return relative.replaceAll(path.sep, "/");
+  }
+
+  return filePath;
 }
 
 function buildHostedLocalCodexBridgeWorkerEnv(input: {

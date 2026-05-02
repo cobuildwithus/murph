@@ -114,6 +114,8 @@ function expectVitestSpawnCall(): void {
   expect(options?.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
   expect(options?.env.MURPH_HOSTED_LOCAL_RUN_ID).toEqual(expect.any(String));
   expect(options?.env.MURPH_HOSTED_LOCAL_STATE_PATH).toEqual(expect.any(String));
+  expect(options?.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL).toBe("0");
+  expect(options?.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBe("1");
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_BUNDLE).toBe("1");
   expect(options?.stdio).toBe("inherit");
 }
