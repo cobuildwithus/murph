@@ -39,5 +39,5 @@ test("BiomarkersLayout renders biomarker pages inside the shared dashboard shell
   assert.match(markup, /data-biomarker-page="true"/);
   assert.match(markup, /data-slot="sidebar-wrapper"/);
   assert.match(markup, /data-slot="sidebar-inset"/);
-  assert.match(markup, /<main class="flex-1 px-6 py-8 md:px-14 md:py-10">/);
+  assert.match(markup, /<main class="flex-1 px-4 py-8 md:px-14 md:py-10">/);
 });
