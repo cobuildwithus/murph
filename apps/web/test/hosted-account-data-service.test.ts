@@ -36,6 +36,7 @@ type HostedAccountDataPrismaForTest = Parameters<typeof buildHostedDataExport>[0
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
+  "prisma.hosted_web_session",
   "prisma.hosted_member_identity",
   "prisma.hosted_member_routing",
   "prisma.hosted_member_email_authorization",
@@ -251,6 +252,7 @@ describe("buildHostedDataExport", () => {
       },
       counts: {
         "prisma.hosted_mailbox_payload": 1,
+        "prisma.hosted_web_session": 1,
         "prisma.hosted_user_crypto_audit": 1,
         "prisma.hosted_user_crypto_envelope": 1,
       },
@@ -462,7 +464,7 @@ describe("buildHostedDataExport", () => {
 });
 
 describe("deleteHostedAccountData", () => {
-  it("runs Cloudflare cleanup before deleting Prisma rows that cascade crypto roots", async () => {
+  it("runs Cloudflare cleanup after deleting Prisma rows", async () => {
     const order: string[] = [];
     serviceMocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
       order.push("cloudflare");
@@ -478,7 +480,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["cloudflare", "prisma"]);
+    expect(order).toEqual(["prisma", "cloudflare"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
       context: "settings.account-data.delete",
@@ -486,7 +488,7 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("keeps Cloudflare cleanup before Prisma even when the later transaction fails", async () => {
+  it("skips Cloudflare cleanup when the Prisma transaction fails", async () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => {
         throw new Error("transaction failed");
@@ -499,10 +501,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).rejects.toThrow("transaction failed");
 
-    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
-      context: "settings.account-data.delete",
-      userId: "member_123",
-    });
+    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
   });
 
   it("does not report provider-config device connections as provider-revoked without OAuth tokens", async () => {
@@ -1081,6 +1080,7 @@ async function createHostedAccountDataExportPrisma(input: {
         updatedAt: new Date("2026-04-27T00:12:00.000Z"),
       }),
     },
+    hostedWebSession: { count },
     hostedMemberBillingRef: { count },
     hostedMemberEmailAuthorization: { count },
     hostedMemberIdentity: { count },

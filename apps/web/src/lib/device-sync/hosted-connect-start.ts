@@ -3,9 +3,9 @@ import "server-only";
 import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
+import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import { readOptionalJsonObject } from "../hosted-onboarding/http";
-import { requireActivePrivyMemberAuth } from "../hosted-onboarding/request-auth";
 import {
   assertHostedConsentScopeGranted,
   assertHostedLaunchRequiredConsentGranted,
@@ -25,7 +25,7 @@ export async function startHostedDeviceSyncConnection(input: {
 }): Promise<HostedDeviceSyncConnectResponse> {
   assertHostedOnboardingMutationOrigin(input.request);
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuth(input.request, prisma);
+  const auth = await requireActiveHostedAppSessionFromRequest(input.request);
   await assertHostedLaunchRequiredConsentGranted({
     memberId: auth.member.id,
     prisma,

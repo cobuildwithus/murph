@@ -49,6 +49,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member row after child stores are explicitly deleted; Prisma cascade remains a safety net.",
   },
   {
+    slug: "prisma.hosted_web_session",
+    label: "Hosted web app sessions",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes active and revoked hashed app-session tokens. Export reports counts only and omits token hashes.",
+  },
+  {
     slug: "prisma.hosted_member_identity",
     label: "Privy identity and encrypted contact hints",
     deletion: "live-delete",
@@ -116,7 +123,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted crypto domain root envelopes",
     deletion: "live-delete",
     export: "metadata-and-counts",
-    note: "Deletes signed per-user domain root envelopes after Cloudflare has used them for best-effort R2 cleanup. Export reports counts only and omits signed envelope JSON.",
+    note: "Deletes signed per-user domain root envelopes. Export reports counts only and omits signed envelope JSON.",
   },
   {
     slug: "prisma.hosted_user_crypto_audit",
@@ -1140,10 +1147,6 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     request: input.request,
   });
-  const cloudflare = await deleteHostedRunnerUserDataBestEffort({
-    context: "settings.account-data.delete",
-    userId: input.memberId,
-  });
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     return deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
@@ -1151,6 +1154,10 @@ export async function deleteHostedAccountData(input: {
       prisma: tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const cloudflare = await deleteHostedRunnerUserDataBestEffort({
+    context: "settings.account-data.delete",
+    userId: input.memberId,
+  });
 
   return {
     cloudflare,
@@ -1170,6 +1177,7 @@ async function countHostedAccountData(input: {
   const memberId = input.memberId;
   const [
     hostedMember,
+    hostedWebSession,
     hostedMemberIdentity,
     hostedMemberRouting,
     hostedMemberBillingRef,
@@ -1195,6 +1203,7 @@ async function countHostedAccountData(input: {
     hostedWebInternalRequestNonce,
   ] = await Promise.all([
     input.prisma.hostedMember.count({ where: { id: memberId } }),
+    input.prisma.hostedWebSession.count({ where: { memberId } }),
     input.prisma.hostedMemberIdentity.count({ where: { memberId } }),
     input.prisma.hostedMemberRouting.count({ where: { memberId } }),
     input.prisma.hostedMemberBillingRef.count({ where: { memberId } }),
@@ -1236,6 +1245,7 @@ async function countHostedAccountData(input: {
     "prisma.hosted_mailbox_lane_counter": hostedMailboxLaneCounter,
     "prisma.hosted_mailbox_payload": hostedMailboxPayload,
     "prisma.hosted_member": hostedMember,
+    "prisma.hosted_web_session": hostedWebSession,
     "prisma.hosted_member_billing_ref": hostedMemberBillingRef,
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
@@ -1274,6 +1284,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId } }));
 
   const webhookTraceWhere = buildDeviceWebhookTraceWhere(input.connectionIdentities);

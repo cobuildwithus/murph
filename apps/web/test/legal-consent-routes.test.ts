@@ -21,8 +21,8 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireHostedAppSessionFromRequest: mocks.requirePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -98,10 +98,7 @@ describe("legal consent routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(
-      expect.any(Request),
-      mocks.prismaClient,
-    );
+    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,

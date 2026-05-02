@@ -5,12 +5,16 @@ import {
   SidebarMenuItem,
 } from "@/src/components/ui/sidebar";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { cn } from "@/src/lib/utils";
 import {
   SIDEBAR_NAV_ICON_CLASS,
   SIDEBAR_NAV_ITEM_CLASS,
 } from "./sidebar-nav-classes";
-import { SidebarChatWithMurphAuthGate } from "./sidebar-chat-auth-gate";
+import {
+  SidebarChatWithMurphAuthGate,
+  SidebarChatWithMurphSettingsGate,
+} from "./sidebar-chat-auth-gate";
 
 export function SidebarChatWithMurphFallback() {
   return (
@@ -32,7 +36,10 @@ export async function SidebarChatWithMurphAction() {
   const option = await resolveHostedMurphContactOption();
 
   if (!option) {
-    return <SidebarChatWithMurphAuthGate />;
+    const auth = await getHostedPageAuthSnapshot();
+    return auth.authenticated
+      ? <SidebarChatWithMurphSettingsGate />
+      : <SidebarChatWithMurphAuthGate />;
   }
 
   const opensInNewTab = option.target === "_blank";

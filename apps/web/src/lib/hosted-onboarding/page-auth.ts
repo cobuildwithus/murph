@@ -4,8 +4,6 @@ import { cache } from "react";
 
 import { getHostedAppSession, type HostedAppSession } from "./app-session";
 import { type HostedMemberCoreState } from "./hosted-member-store";
-import { type PrivyLinkedAccountLike } from "./privy-shared";
-import { type HostedMemberPrivyIdentityLookup } from "./member-identity-service";
 import {
   anonymousHostedSidebarAuthSnapshot,
   type HostedSidebarAuthSnapshot,
@@ -14,8 +12,6 @@ import {
 export interface HostedPageAuthSnapshot {
   authenticated: boolean;
   authenticatedMember: HostedMemberCoreState | null;
-  linkedAccounts: PrivyLinkedAccountLike[];
-  memberLookup: HostedMemberPrivyIdentityLookup | null;
   session: HostedAppSession | null;
 }
 
@@ -23,8 +19,6 @@ function buildAnonymousHostedPageAuthSnapshot(): HostedPageAuthSnapshot {
   return {
     authenticated: false,
     authenticatedMember: null,
-    linkedAccounts: [],
-    memberLookup: null,
     session: null,
   };
 }
@@ -39,8 +33,6 @@ const resolveHostedPageAuthSnapshot = cache(async (): Promise<HostedPageAuthSnap
   return {
     authenticated: true,
     authenticatedMember: session.member,
-    linkedAccounts: [],
-    memberLookup: null,
     session,
   };
 });

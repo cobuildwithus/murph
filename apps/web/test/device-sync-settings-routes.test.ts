@@ -29,8 +29,8 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest: mocks.requireActivePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -224,7 +224,7 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request), mocks.prismaClient);
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,

@@ -12,6 +12,7 @@ import {
   type ReactElement,
 } from "react";
 
+import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Button } from "@/src/components/ui/button";
@@ -238,10 +239,7 @@ function AccountMenu({
     setSignOutPending(true);
 
     try {
-      await requestHostedOnboardingJson({
-        method: "POST",
-        url: "/api/hosted-onboarding/session/logout",
-      });
+      await logoutHostedAppSession();
       router.refresh();
     } finally {
       setSignOutPending(false);

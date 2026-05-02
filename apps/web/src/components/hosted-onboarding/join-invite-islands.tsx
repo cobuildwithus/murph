@@ -25,6 +25,7 @@ import { cn } from "@/src/lib/utils";
 import { HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 import { requestHostedBillingCheckout } from "./client-api";
+import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
@@ -143,7 +144,8 @@ export function JoinInvitePhoneVerificationIsland({
       inviteCode={inviteCode}
       phoneAuthTarget={resolvedPhoneAuthTarget}
       phoneHint={resolvedPhoneHint}
-      onSignOut={() => {
+      onSignOut={async () => {
+        await logoutHostedAppSession();
         router.refresh();
       }}
       onCompleted={() => {
@@ -162,7 +164,7 @@ export function JoinInviteSignOutButtonIsland() {
     setSignOutPending(true);
 
     try {
-      await logout();
+      await logoutHostedAppSession({ logoutPrivy: logout });
       router.refresh();
     } finally {
       setSignOutPending(false);

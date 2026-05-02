@@ -63,3 +63,20 @@ export function SidebarChatWithMurphAuthGate() {
     </SidebarMenuItem>
   );
 }
+
+export function SidebarChatWithMurphSettingsGate() {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        size="lg"
+        className={SIDEBAR_NAV_ITEM_CLASS}
+        render={
+          <a href="/settings" aria-label="Link a contact method to chat with Murph">
+            <MessageCircle className={SIDEBAR_NAV_ICON_CLASS} />
+            Chat with Murph
+          </a>
+        }
+      />
+    </SidebarMenuItem>
+  );
+}

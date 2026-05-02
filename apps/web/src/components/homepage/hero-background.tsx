@@ -24,8 +24,9 @@ export function HeroBackground() {
         muted
         loop
         playsInline
+        preload="auto"
         onCanPlay={() => setVideoReady(true)}
-        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 sm:[object-position:center] ${
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 sm:[object-position:center] ${
           videoReady ? "opacity-100" : "opacity-0"
         }`}
         style={{ objectPosition: "80% center" }}

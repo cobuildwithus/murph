@@ -24,8 +24,6 @@ describe("hosted page auth", () => {
     await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
       authenticated: false,
       authenticatedMember: null,
-      linkedAccounts: [],
-      memberLookup: null,
       session: null,
     });
   });
@@ -44,8 +42,6 @@ describe("hosted page auth", () => {
     await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
       authenticated: true,
       authenticatedMember: member,
-      linkedAccounts: [],
-      memberLookup: null,
       session,
     });
   });

@@ -23,8 +23,8 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
     mocks.readHostedExecutionControlClientIfConfigured,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest: mocks.requireActivePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -83,10 +83,7 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(
-      expect.any(Request),
-      mocks.prismaClient,
-    );
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
