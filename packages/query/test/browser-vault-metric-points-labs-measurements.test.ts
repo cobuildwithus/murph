@@ -115,7 +115,7 @@ test("browser-vault metric points project manual measurements and blood-test res
   const bodyWeight = client.metricSelections.get("body-weight");
   assert.ok(bodyWeight);
   assert.equal(bodyWeight.unit, "kg");
-  assert.equal(Number(bodyWeight.value.toFixed(1)), 81.6);
+  assert.equal(Number((bodyWeight.value ?? NaN).toFixed(1)), 81.6);
   assert.equal(bodyWeight.sourceLabel, "Manual");
   assert.equal(bodyWeight.recordIds[0], "evt_measurement");
 
@@ -147,8 +147,9 @@ test("browser-vault metric points project manual measurements and blood-test res
     client.metrics
       .series({ metricKey: "glucose" })
       .map((point) => point.value)
+      .filter((value): value is number => typeof value === "number")
       .sort((left, right) => left - right),
-    [82, 88],
+    [82, 88, 99.1001],
   );
 
   const crp = client.metricSelections.get("hs-crp");
@@ -215,9 +216,9 @@ test("browser-vault metric points keep observation inputs while selecting the hi
   assert.ok(bodyWeight);
   assert.equal(bodyWeight.status, "stale");
   assert.equal(bodyWeight.unit, "kg");
-  assert.equal(Number(bodyWeight.value.toFixed(1)), 81.6);
+  assert.equal(Number((bodyWeight.value ?? NaN).toFixed(1)), 81.6);
   assert.equal(
-    bodyWeightPoints.find((point) => point.id === bodyWeight.pointIds[0])?.sourceKind,
+    bodyWeightPoints.find((point) => point.pointIds.includes(bodyWeight.pointIds[0] ?? ""))?.sourceKind,
     "measurement",
   );
   assert.equal(bodyWeight.warnings.some((warning) => warning.code === "SOURCE_STALE"), true);

@@ -89,6 +89,7 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
     confidence: row.confidence,
     context: {},
     effectiveDate: row.date.slice(0, 10),
+    grain: "day",
     metricKey: definition.key,
     observedAt,
     provenance: {
@@ -121,8 +122,12 @@ function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[]
   }
 
   switch (entity.kind) {
+    case "body_measurement":
+      return measurementMetricPoints(entity, "compat-body-measurement");
     case "measurement":
-      return measurementMetricPoints(entity);
+      return measurementMetricPoints(entity, "measurement");
+    case "observation":
+      return observationMetricPoints(entity);
     case "test":
       return testResultMetricPoints(entity);
     default:
@@ -130,10 +135,10 @@ function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[]
   }
 }
 
-function measurementMetricPoints(entity: CanonicalEntity): MetricPoint[] {
+function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {
   return readArray(entity.attributes.measurements).flatMap((entry, index) => {
     const record = readRecord(entry);
-    const metric = readString(record?.metric);
+    const metric = readString(record?.metric) ?? readString(record?.type);
     const value = readNumber(record?.value);
     const unit = readString(record?.unit);
     if (!metric || value === null) return [];
@@ -144,11 +149,29 @@ function measurementMetricPoints(entity: CanonicalEntity): MetricPoint[] {
       entity,
       index,
       metric,
-      sourceKind: "measurement",
+      sourceKind,
       unit,
       value,
     })];
   });
+}
+
+function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
+  const metric = readString(entity.attributes.metric);
+  const value = readNumber(entity.attributes.value);
+  const unit = readString(entity.attributes.unit);
+  if (!metric || value === null) return [];
+
+  return [scalarMetricPoint({
+    confidence: eventConfidence(entity),
+    context: { qualifiers: readQualifiers(entity.attributes.qualifiers) },
+    entity,
+    index: 0,
+    metric,
+    sourceKind: "compat-observation",
+    unit,
+    value,
+  })];
 }
 
 function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
@@ -217,6 +240,7 @@ function scalarMetricPoint(input: {
     confidence: input.confidence,
     context: compactContext(input.context),
     effectiveDate,
+    grain: "event",
     metricKey: definition.key,
     observedAt,
     provenance: {
@@ -261,9 +285,21 @@ function createMetricPoint(input: Omit<MetricPoint, "id" | "schemaVersion">): Me
 function dedupeMetricPoints(points: readonly MetricPoint[]): MetricPoint[] {
   const byId = new Map<string, MetricPoint>();
   for (const point of points) {
-    byId.set(point.id, point);
+    byId.set(metricPointDedupeKey(point), point);
   }
   return [...byId.values()];
+}
+
+function metricPointDedupeKey(point: MetricPoint): string {
+  return [
+    point.metricKey,
+    point.effectiveDate,
+    point.source.recordId,
+    point.source.kind,
+    point.comparator ?? "",
+    point.canonicalUnit ?? point.unit ?? "",
+    point.canonicalValue ?? point.value ?? point.textValue ?? "",
+  ].join("\u001f");
 }
 
 function compareMetricPointDesc(left: MetricPoint, right: MetricPoint): number {

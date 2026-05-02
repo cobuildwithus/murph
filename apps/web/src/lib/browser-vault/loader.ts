@@ -245,7 +245,7 @@ export interface BrowserVaultReplicaAad {
   objectKey: string;
   purpose: "browser-vault-replica";
   runtimeRootKeyId: string;
-  schema: "murph.browser-vault-replica.v1";
+  schema: "murph.browser-vault-replica";
   sourceBundleHash: string;
   userId: string;
 }
@@ -310,8 +310,8 @@ function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaul
   if (purpose !== "browser-vault-replica") {
     throw new TypeError(`${label}.purpose must be browser-vault-replica.`);
   }
-  if (schema !== "murph.browser-vault-replica.v1") {
-    throw new TypeError(`${label}.schema must be murph.browser-vault-replica.v1.`);
+  if (schema !== "murph.browser-vault-replica") {
+    throw new TypeError(`${label}.schema must be murph.browser-vault-replica.`);
   }
 
   return {

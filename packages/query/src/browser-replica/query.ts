@@ -50,16 +50,16 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
     },
     metrics: {
       latest(filters = {}) {
-        return frozenReplica.metricRows.find((row) => metricRowMatchesFilters(row, filters)) ?? null;
+        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters))).at(-1) ?? null;
       },
       list(filters = {}) {
-        return frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters));
+        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters)));
       },
       series(filters = {}) {
-        return frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters)).slice().reverse();
+        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters)));
       },
       seriesMany(filters) {
-        return filters.map((filter) => frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filter)).slice().reverse());
+        return filters.map((filter) => sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filter))));
       },
     },
     metricSelections: {
@@ -117,6 +117,14 @@ function matchesMetricSelectionFilters(row: BrowserVaultMetricSelectionRow, filt
   if (filters.metricKey && row.metricKey !== filters.metricKey) return false;
   if (filters.biomarkerKey && row.biomarkerKey !== filters.biomarkerKey) return false;
   return true;
+}
+
+function sortMetricRowsAsc(rows: readonly BrowserVaultMetricRow[]): BrowserVaultMetricRow[] {
+  return rows.slice().sort((left, right) => {
+    if (left.date !== right.date) return left.date.localeCompare(right.date);
+    if (left.observedAt !== right.observedAt) return left.observedAt.localeCompare(right.observedAt);
+    return left.id.localeCompare(right.id);
+  });
 }
 
 function matchesMetricGoalFilters(

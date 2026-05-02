@@ -511,7 +511,7 @@ export function normalizeMetricValue(input: {
     case "triglycerides":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 88.57, definition.displayName);
     case "apob":
-      return normalizeExactUnit(input.value, unit, "mg/dL", definition.displayName);
+      return normalizeApoB(input.value, unit);
     case "hs-crp":
       return normalizeExactUnit(input.value, unit, "mg/L", definition.displayName);
     case "ferritin":
@@ -830,6 +830,14 @@ function normalizeMassConcentration(
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, canonicalUnit)] };
 }
 
+function normalizeApoB(value: number, unit: string | null): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "mg/dL")) return { canonicalUnit: "mg/dL", canonicalValue: value, unit: unit ?? "mg/dL", warnings: [] };
+  if (unit === "g/L") {
+    return { canonicalUnit: "mg/dL", canonicalValue: Number((value * 100).toFixed(4)), unit, warnings: [] };
+  }
+  return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("ApoB", unit, "mg/dL")] };
+}
+
 function normalizeExactUnit(value: number, unit: string | null, canonicalUnit: string, label: string): MetricValueNormalization {
   if (!unit || unitsEquivalent(unit, canonicalUnit)) return { canonicalUnit, canonicalValue: value, unit: unit ?? canonicalUnit, warnings: [] };
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, canonicalUnit)] };
@@ -845,6 +853,8 @@ function normalizeUnit(value: string | null): string | null {
     case "percentage": return "percent";
     case "mg_dl":
     case "mg/dl": return "mg/dL";
+    case "g_l":
+    case "g/l": return "g/L";
     case "mg_l":
     case "mg/l": return "mg/L";
     case "ng_ml":

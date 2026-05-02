@@ -56,8 +56,8 @@ export function parseHostedBrowserVaultReplicaRef(
   if (schema !== HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA) {
     throw new TypeError(`${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA}.`);
   }
-  if (replicaSchema !== "murph.browser-vault-replica.v1") {
-    throw new TypeError(`${label}.replicaSchema must be murph.browser-vault-replica.v1.`);
+  if (replicaSchema !== "murph.browser-vault-replica") {
+    throw new TypeError(`${label}.replicaSchema must be murph.browser-vault-replica.`);
   }
   const dataKeyEnvelope = record.dataKeyEnvelope === undefined
     ? undefined

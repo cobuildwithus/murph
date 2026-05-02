@@ -17,7 +17,7 @@ import {
   hostedBrowserVaultReplicaUserPrefix,
 } from "./storage-paths.js";
 
-const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica.v1";
+const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica";
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
 

@@ -1605,7 +1605,7 @@ async function createMissingBrowserVaultReplicaRefForTest(
       dataVersion,
       userId,
     }),
-    replicaSchema: "murph.browser-vault-replica.v1",
+    replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: crypto.rootKeyId,
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash: "a".repeat(64),
