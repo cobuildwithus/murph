@@ -3406,7 +3406,7 @@ test("rebuildQueryProjection materializes the shared query projection and status
 
     assert.equal(rebuilt.exists, true);
     assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
-    assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
+    assert.equal(rebuilt.schemaVersion, "murph.query-projection");
     assert.equal(rebuilt.entityCount, vault.entities.filter((entity) => entity.family !== "sample").length);
     assert.equal(
       rebuilt.searchDocumentCount,
@@ -3563,8 +3563,8 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
     const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
 
     try {
-      assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(rebuilt.schemaVersion, "murph.query-projection");
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -3607,8 +3607,8 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
     });
 
     try {
-      assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(rebuilt.schemaVersion, "murph.query-projection");
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
       const queryMetaTable = reopened
         .prepare(`
           SELECT name
@@ -3671,7 +3671,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
       const staleLookupTable = reopened
         .prepare(`
           SELECT name
@@ -3685,7 +3685,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     }
 
     const statusAfter = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(statusAfter.schemaVersion, "murph.query-projection.v2");
+    assert.equal(statusAfter.schemaVersion, "murph.query-projection");
     assert.equal(statusAfter.fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

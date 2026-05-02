@@ -16,7 +16,7 @@ Key decisions:
 - Use current checkout only; no separate worktree.
 
 State:
-- Active.
+- Verifying hosted Linq/mailbox robustness follow-up.
 
 Done:
 - Read required routing, verification, security, reliability, and testing docs.
@@ -30,17 +30,25 @@ Done:
 - `pnpm --dir apps/web typecheck` passed after the focused route test addition.
 - `pnpm --dir apps/web lint` passed with one unrelated warning in `apps/web/src/components/experiments/experiment-detail/protocol-tab.tsx`.
 - Scoped `bash scripts/workspace-verify.sh test:diff ...` reached `apps/web verify`; lint and `next build` passed, but app-wide Vitest remains red on unrelated UI expectation drift in `hosted-legal-consent-card.test.ts` and `page.test.ts`.
+- Ported the supplied hosted Linq mailbox robustness patch onto current `main` after `git apply` hit a corrupt hunk and adjacent drift.
+- Active-member Linq conversation wakes now compact oversized/too-many parts instead of rejecting, measure the full mailbox envelope against the inline target, omit signed attachment URLs from canonical mailbox payloads, and keep attachment descriptors when possible.
+- Hosted mailbox inline payload storage now targets 128 KiB so normal conversation wakes avoid sidecar fetches.
+- Generic hosted mailbox import retryable blockers now remain pending, schedule a fast mailbox retry wake, and propagate that wake through checkpoint/runtime invocation results instead of aging into retry-exhausted quarantine.
+- Assistant prompt construction now adds staged-input context when inbox/parser projection is pending or failed and no attachment enrichment is available.
+- Focused Linq/mailbox store, assistant-runtime mailbox import/entrypoint, and assistant-engine prompt-builder tests passed.
 
 Now:
-- Wait for final completion audit refresh and handle findings.
+- Run typecheck, diff checks, and completion review on the current follow-up diff.
 
 Next:
-- Commit the scoped Linq follow-up if the final audit is clean.
+- Commit the scoped hosted Linq/mailbox docs and polish follow-up if verification is clean.
 
 Open questions (UNCONFIRMED if needed):
 - Full durable pending-handoff reconciler remains a follow-up hardening step, not part of this patch.
 
 Working set (files/ids/commands):
+- `agent-docs/references/hosted-runtime-protocol.md`
+- `ARCHITECTURE.md`
 - `apps/web/src/lib/hosted-onboarding/webhook-service-wake.ts`
 - `apps/web/src/lib/hosted-onboarding/webhook-service.ts`
 - `apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts`

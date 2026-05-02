@@ -1,10 +1,12 @@
 import {
-  buildMetricSeries,
+  METRIC_POINT_SCHEMA_VERSION,
   extractMetricPoints,
   formatMetricDisplayValue,
   resolveBrowserMetricBinding,
   resolveMetricDefinition,
   selectMetricValue,
+  type MetricPointSource,
+  type MetricSourceFamily,
   type MetricPoint,
   type MetricSelection,
 } from "../metrics/index.ts";
@@ -23,9 +25,15 @@ export const BROWSER_VAULT_METRIC_SELECTION_SCHEMA = "murph.browser-vault.metric
 type MetricPointInput =
   | readonly BrowserVaultMetricRow[]
   | {
+      readonly generatedAt?: string;
+      readonly lookbackDays?: number;
       readonly metricRows: readonly BrowserVaultMetricRow[];
       readonly vault?: { readonly entities: readonly CanonicalEntity[] };
     };
+
+type MetricSelectionPointInput = MetricPoint | BrowserVaultMetricPoint;
+
+const ISO_DAY_MS = 24 * 60 * 60 * 1000;
 
 export function resolveBrowserVaultMetricKey(input: {
   domain: BrowserVaultMetricDomain | string;
@@ -41,7 +49,14 @@ export function resolveBrowserVaultMetricPointBiomarkerKey(metricKey: string): s
 export function createBrowserVaultMetricPointRecords(input: MetricPointInput): MetricPoint[] {
   const metricRows = Array.isArray(input) ? input : input.metricRows;
   const vault = Array.isArray(input) ? undefined : input.vault;
-  return extractMetricPoints({ metricRows, vault });
+  const metricPoints = extractMetricPoints({ metricRows, vault });
+
+  return Array.isArray(input)
+    ? metricPoints
+    : filterMetricPointsByLookback(metricPoints, {
+        generatedAt: input.generatedAt ?? null,
+        lookbackDays: input.lookbackDays ?? null,
+      });
 }
 
 export function createBrowserVaultMetricPoints(input: MetricPointInput): BrowserVaultMetricPoint[] {
@@ -50,14 +65,18 @@ export function createBrowserVaultMetricPoints(input: MetricPointInput): Browser
 
 export function createBrowserVaultMetricSelectionRows(input: {
   generatedAt: string;
-  metricPoints: readonly MetricPoint[];
+  metricPoints: readonly MetricSelectionPointInput[];
 }): BrowserVaultMetricSelectionRow[] {
-  const metricKeys = [...new Set(input.metricPoints.map((point) => point.metricKey))].sort();
+  const metricPoints = input.metricPoints.flatMap((point) => {
+    const normalized = toMetricPointRecord(point);
+    return normalized ? [normalized] : [];
+  });
+  const metricKeys = [...new Set(metricPoints.map((point) => point.metricKey))].sort();
   return metricKeys.flatMap((metricKey) => {
     const selection = selectMetricValue({
       metricKey,
       now: input.generatedAt,
-      points: input.metricPoints,
+      points: metricPoints,
     });
     return selection.point ? [toBrowserVaultMetricSelectionRow(selection)] : [];
   });
@@ -142,6 +161,97 @@ function toBrowserVaultMetricPoint(point: MetricPoint): BrowserVaultMetricPoint[
     value,
     valueLabel: formatMetricDisplayValue(point, definition),
   }];
+}
+
+function toMetricPointRecord(point: MetricSelectionPointInput): MetricPoint | null {
+  if (isMetricPointRecord(point)) {
+    return point;
+  }
+
+  const value = typeof point.value === "number" && Number.isFinite(point.value)
+    ? point.value
+    : null;
+  if (value === null) {
+    return null;
+  }
+
+  const source = readBrowserMetricPointSource(point);
+  const provenance = {
+    dataOrigin: null,
+    externalRef: null,
+    labName: null,
+    provider: null,
+    rawRefs: [],
+    sourceLabel: point.sourceLabel,
+  };
+
+  return {
+    biomarkerKey: point.biomarkerKey,
+    canonicalUnit: point.canonicalUnit ?? null,
+    canonicalValue: point.canonicalValue ?? null,
+    comparator: point.comparator ?? null,
+    confidence: point.confidence,
+    context: {},
+    effectiveDate: point.effectiveDate ?? point.date,
+    grain: point.grain,
+    id: point.id,
+    metricKey: point.metricKey,
+    observedAt: point.observedAt,
+    provenance,
+    recordedAt: point.recordedAt ?? null,
+    reportedAt: point.reportedAt ?? null,
+    schemaVersion: METRIC_POINT_SCHEMA_VERSION,
+    source,
+    statistic: point.statistic,
+    textValue: point.textValue ?? null,
+    unit: point.unit,
+    value,
+  };
+}
+
+function isMetricPointRecord(point: MetricSelectionPointInput): point is MetricPoint {
+  return point.schemaVersion === METRIC_POINT_SCHEMA_VERSION
+    && typeof point.source === "object"
+    && point.source !== null
+    && typeof point.provenance === "object"
+    && point.provenance !== null;
+}
+
+function readBrowserMetricPointSource(point: BrowserVaultMetricPoint): MetricPointSource {
+  return {
+    family: readMetricSourceFamily(point.sourceFamily),
+    kind: point.sourceKind ?? "wearable-summary",
+    path: "",
+    recordId: point.recordIds[0] ?? point.sourceMetricRowId,
+    resultIndex: null,
+  };
+}
+
+function readMetricSourceFamily(value: string | null): MetricSourceFamily {
+  return value === "event" || value === "sample" || value === "derived" ? value : "derived";
+}
+
+function filterMetricPointsByLookback(
+  points: readonly MetricPoint[],
+  input: {
+    generatedAt: string | null;
+    lookbackDays: number | null;
+  },
+): MetricPoint[] {
+  if (!input.generatedAt || typeof input.lookbackDays !== "number") {
+    return points.slice();
+  }
+
+  return points.filter((point) =>
+    !isOlderThanDays(point.observedAt, input.generatedAt ?? "", input.lookbackDays ?? 0)
+  );
+}
+
+function isOlderThanDays(dateOrDateTime: string, nowDateTime: string, days: number): boolean {
+  const observed = new Date(dateOrDateTime.includes("T") ? dateOrDateTime : `${dateOrDateTime}T00:00:00.000Z`);
+  const now = new Date(nowDateTime.includes("T") ? nowDateTime : `${nowDateTime}T00:00:00.000Z`);
+  if (!Number.isFinite(observed.getTime()) || !Number.isFinite(now.getTime())) return false;
+  return now.getTime() - observed.getTime() > days * ISO_DAY_MS;
 }
 
 function toBrowserVaultMetricSelectionRow(selection: MetricSelection): BrowserVaultMetricSelectionRow {

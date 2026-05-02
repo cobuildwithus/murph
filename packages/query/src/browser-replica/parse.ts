@@ -151,8 +151,8 @@ function parseMetricPoint(value: unknown, label: string): BrowserVaultMetricPoin
   const record = requireRecord(value, label);
   const pointSchema = requireString(record.pointSchema, `${label}.pointSchema`);
 
-  if (pointSchema !== "murph.browser-vault.metric-point.v1") {
-    throw new TypeError(`${label}.pointSchema must be murph.browser-vault.metric-point.v1.`);
+  if (pointSchema !== "murph.browser-vault.metric-point") {
+    throw new TypeError(`${label}.pointSchema must be murph.browser-vault.metric-point.`);
   }
 
   return {
@@ -181,8 +181,8 @@ function parseMetricSelectionRow(value: unknown, label: string): BrowserVaultMet
   const selectionSchema = requireString(record.selectionSchema, `${label}.selectionSchema`);
   const status = requireString(record.status, `${label}.status`);
 
-  if (selectionSchema !== "murph.browser-vault.metric-selection.v1") {
-    throw new TypeError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.v1.`);
+  if (selectionSchema !== "murph.browser-vault.metric-selection") {
+    throw new TypeError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.`);
   }
   if (status !== "ready" && status !== "stale") {
     throw new TypeError(`${label}.status must be ready or stale.`);
