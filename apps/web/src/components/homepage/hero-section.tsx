@@ -11,7 +11,7 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
         preload
         fill
         sizes="100vw"
-        src="/hero.jpg"
+        src="/hero-optimized.jpg"
         alt=""
         style={{ objectFit: "cover", objectPosition: "80% center" }}
         className="sm:[object-position:center]"

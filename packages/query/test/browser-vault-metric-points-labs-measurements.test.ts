@@ -231,6 +231,101 @@ test("browser-vault metric goal targets honor startAt when selecting rolling-win
   assert.equal(progress.selectedPointIds.length, 6);
 });
 
+test("browser-vault metric goal targets honor selectionPolicyOverride from goal frontmatter", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEvent("evt_apob_non_fasting", "test", {
+          occurredAt: "2026-04-29T09:30:00.000Z",
+          title: "Non-fasting apob result",
+          attributes: {
+            collectedAt: "2026-04-29T09:30:00.000Z",
+            fastingStatus: "non_fasting",
+            labName: "Function Health",
+            results: [{
+              analyte: "Apolipoprotein B",
+              biomarkerSlug: "apob",
+              unit: "mg/dL",
+              value: 87,
+            }],
+            source: "manual",
+          },
+        }),
+        createEvent("evt_apob_fasting", "test", {
+          occurredAt: "2026-04-29T07:30:00.000Z",
+          title: "Fasting apob result",
+          attributes: {
+            collectedAt: "2026-04-29T07:30:00.000Z",
+            fastingStatus: "fasting",
+            labName: "Function Health",
+            results: [{
+              analyte: "Apolipoprotein B",
+              biomarkerSlug: "apob",
+              unit: "mg/dL",
+              value: 82,
+            }],
+            source: "manual",
+          },
+        }),
+        {
+          attributes: {},
+          body: null,
+          date: "2026-04-20",
+          entityId: "goal_apob",
+          experimentSlug: null,
+          family: "goal",
+          frontmatter: {
+            status: "active",
+            metricTargets: [{
+              biomarkerKey: "biomarker:apob",
+              comparator: "<",
+              evaluation: { kind: "selected-value" },
+              kind: "metric",
+              metricKey: "apob",
+              selectionPolicyOverride: {
+                kind: "latest-lab",
+                preferCollectedAt: true,
+                preferFasting: true,
+              },
+              targetId: "apob-under-85",
+              unit: "mg/dL",
+              value: 85,
+            }],
+          },
+          kind: "goal",
+          links: [],
+          lookupIds: ["goal_apob"],
+          occurredAt: "2026-04-20T00:00:00.000Z",
+          path: "history/goals/goal_apob.md",
+          primaryLookupId: "goal_apob",
+          recordClass: "bank",
+          relatedIds: [],
+          status: "active",
+          stream: null,
+          tags: [],
+          title: "Apolipoprotein B goal",
+        } satisfies CanonicalEntity,
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const metricSelection = client.metricSelections.get("apob");
+  const progress = client.metricGoals.progress({ goalId: "goal_apob" })[0];
+
+  assert.ok(metricSelection);
+  assert.equal(metricSelection.value, 87);
+  assert.deepEqual(metricSelection.recordIds, ["evt_apob_non_fasting"]);
+  assert.ok(progress);
+  assert.equal(progress.currentValue, 82);
+  assert.equal(progress.selectedPointIds.length, 1);
+  assert.notEqual(progress.selectedPointIds[0], metricSelection.pointIds[0]);
+});
+
 test("browser-vault metric selections can use old points while metric rows stay lookback bounded", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-05-02T12:00:00.000Z",

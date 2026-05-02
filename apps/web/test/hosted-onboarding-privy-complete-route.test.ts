@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   getHostedInviteStatus: vi.fn(),
+  issueHostedAppSession: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
 }));
 
@@ -22,6 +23,10 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requirePrivyCompletionSession:
     mocks.requirePrivyCompletionSession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  issueHostedAppSession: mocks.issueHostedAppSession,
 }));
 
 type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
@@ -46,6 +51,10 @@ describe("hosted onboarding Privy completion route", () => {
       stage: "checkout",
     });
     mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("checkout"));
+    mocks.issueHostedAppSession.mockResolvedValue({
+      cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+      sessionId: "hws_123",
+    });
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
@@ -75,6 +84,9 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Set-Cookie")).toBe(
+      "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+    );
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
@@ -96,6 +108,10 @@ describe("hosted onboarding Privy completion route", () => {
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
+    });
+    expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
+      memberId: "member_123",
+      privyUserId: "did:privy:user_123",
     });
   });
 
