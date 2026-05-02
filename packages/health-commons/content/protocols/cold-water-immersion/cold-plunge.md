@@ -732,137 +732,222 @@ claims:
   caveats:
   - A positive or uncertain screen is not a diagnosis; it means Murph should not start an unsupervised cold-water experiment without clinician guidance or a safer alternative.
 researchLandscape:
-  bottomLine: Cold Plunge has a plausible acute mood/safety-monitoring use case, but the evidence base is early, mixed, and safety-boundary heavy. Treat this as a conservative personal experiment, not a broad health, immune, sleep, or performance prescription.
+  bottomLine: "Cold Plunge has a plausible acute mood and tolerance use case, but the evidence base is early, mixed, and safety-boundary heavy. Treat this as a conservative personal experiment, not a broad health, immune, sleep, or performance prescription."
   confidenceLabel: mixed
-  primaryClaim: A short, controlled, head-out cold-water immersion block may be worth testing for acute subjective mood and tolerance in screened adults, while monitoring safety, burden, and recovery context.
-  mainCaveat: The strongest practical guidance comes from small acute studies, habituation/mechanistic studies, safety guidance, adjacent sports-recovery evidence, and external protocol claims; durable health outcomes are not established.
+  primaryClaim: "A short, controlled, head-out cold-water immersion block may be worth testing for acute subjective mood and tolerance in screened adults, while monitoring safety, burden, and recovery context."
+  mainCaveat: "The strongest practical guidance comes from small acute studies, habituation and mechanistic studies, safety guidance, adjacent sports-recovery evidence, and public protocol context; durable health outcomes are not established."
   groups:
   - id: acute-mood
-    label: Acute mood signal
+    label: "Acute mood signal"
     stance: supports
-    summary: A controlled single-session immersion record reported immediate mood-score improvement in young, healthy participants; use as a short-term subjective-mood signal, not a treatment claim.
+    summary: "A controlled single-session immersion record reported immediate mood-score improvement in young, healthy participants; use this as a short-term subjective-mood signal, not a treatment claim."
     sourceKeys:
     - source_artifact:doi-10.1002-lim2.53
     defaultOpen: true
   - id: environment-mood
-    label: Sea versus laboratory acute mood signal
+    label: "Sea versus laboratory mood signal"
     stance: supports
-    summary: A small crossover study reported mood improvement after both sea and laboratory cold-water immersion, while suggesting the immersion environment may modify the psychological response.
+    summary: "A small crossover study reported mood improvement after both sea and laboratory immersion, while suggesting the setting can modify the psychological response."
     sourceKeys:
     - source_artifact:doi-10.1002-lim2.70044
     defaultOpen: false
   - id: dose-mood
-    label: Duration-dose mood signal
+    label: "Duration-dose mood signal"
     stance: supports
-    summary: A duration-comparison trial reported acute mood improvement after 5–20 minutes of 13.6 °C immersion, while also showing autonomic/safety-relevant shifts in a small subgroup.
+    summary: "A duration-comparison trial reported acute mood improvement after 5-20 minutes of cool immersion, while also showing autonomic and safety-relevant shifts in a small subgroup."
     sourceKeys:
     - source_artifact:doi-10.1002-lim2.70048
     defaultOpen: true
   - id: acute-mood-stress
-    label: Acute mixed mood and stress markers
+    label: "Acute mixed mood and stress markers"
     stance: mixed
-    summary: A direct 10 °C immersion study supports a cautious acute negative-mood/cortisol signal but also reports mixed mood and vascular-shear interpretation.
+    summary: "A direct 10 C immersion study supports cautious acute stress and mood tracking, but its timing, cortisol, mood, and vascular signals were mixed."
     sourceKeys:
     - source_artifact:pmid-37866096
     defaultOpen: true
   - id: brain-mood-context
-    label: Brain and affect measurement context
+    label: "Brain and affect measurement context"
     stance: context_only
-    summary: A warmer head-out immersion study reported increased positive affect and brain-network interaction, but the exposure temperature and acute pre-post neuroimaging design make it measurement/mechanistic context rather than standalone cold-plunge benefit evidence.
+    summary: "Brain-connectivity and affect-measurement records can help choose endpoints, but the acute pre-post designs do not prove a durable cold-plunge benefit."
     sourceKeys:
     - source_artifact:pmid-36829490
+    - source_artifact:pmid-37719079
+    defaultOpen: false
+  - id: mental-health-and-open-water-context
+    label: "Mental-health and open-water context"
+    stance: mixed
+    summary: "Clinical, supervised, open-water, and bundled mental-health records can inform endpoints and screening, but they do not show that a short controlled plunge treats mood disorders."
+    sourceKeys:
+    - source_artifact:pmid-40530059
+    - source_artifact:pmid-39606690
+    - source_artifact:pmid-40560861
+    - source_artifact:pmid-37443045
+    - source_artifact:doi-10.1123-tsp.2024-0086
+    - source_artifact:doi-10.1192-bja.2023.60
+    - source_artifact:pmid-37381680
+    - source_artifact:doi-10.3389-fpubh.2025.1693026
+    - source_artifact:doi-10.1016-j.jenvp.2023.102073
+    - source_artifact:doi-10.1002-lim2.12
+    - source_artifact:doi-10.1016-j.mhpa.2022.100472
+    - source_artifact:pmid-30131418
+    - source_artifact:doi-10.1016-j.mhpa.2025.100723
     defaultOpen: false
   - id: health-wellbeing-review
-    label: Health and wellbeing review boundary
+    label: "Health and wellbeing review boundary"
     stance: mixed
-    summary: The 2025 review/meta-analysis is useful landscape evidence, but it mixes modalities, small samples, timepoints, and outcomes, so it should constrain rather than expand protocol claims.
+    summary: "Broad reviews and mechanistic hypotheses are useful landscape evidence, but they mix modalities, small samples, timepoints, and outcomes; use them to constrain rather than expand protocol claims."
     sourceKeys:
     - source_artifact:pmid-39879231
+    - source_artifact:pmid-41160573
+    - source_artifact:doi-10.5502-ijw.v15i1.3981
     defaultOpen: true
+  - id: observational-and-winter-swimming-context
+    label: "Observational and winter-swimming context"
+    stance: context_only
+    summary: "Habitual-use, winter-swimming, seasonal, and cross-sectional records are useful for hypotheses and confounders, not causal proof for a controlled cold-plunge block."
+    sourceKeys:
+    - source_artifact:pmid-37530998
+    - source_artifact:pmid-41127868
+    - source_artifact:pmid-12078959
+    - source_artifact:pmid-15253480
+    - source_artifact:pmid-38509857
+    - source_artifact:pmid-12546194
+    defaultOpen: false
   - id: cold-shock-safety
-    label: Cold shock and acute stress load
+    label: "Cold shock and breathing safety"
     stance: safety_boundary
-    summary: A direct cold-shock physiology source supports first-exposure breathing cautions and immediate exit if ventilation is not quickly controlled.
+    summary: "Cold-shock and respiratory physiology sources support first-exposure breathing cautions, no forcing, and immediate exit if ventilation is not quickly controlled."
     sourceKeys:
     - source_artifact:pmid-2010387
+    - source_artifact:pmid-16714416
+    - source_artifact:pmid-41602813
     defaultOpen: true
   - id: safety-cold-shock-hypothermia
-    label: Cold-shock and hypothermia physiology
+    label: "Cold-shock, hypothermia, and extreme-cold boundary"
     stance: safety_boundary
-    summary: Foundational CWI physiology anchors cold-shock and hypothermia risk as safety context, not benefit evidence.
+    summary: "Cold-shock, hypothermia, sudden-death, and extreme-cold records anchor the main safety boundary; they are not benefit evidence."
     sourceKeys:
+    - source_artifact:pmid-25275647
     - source_artifact:pmid-2691172
+    - source_artifact:pmid-40408371
+    - source_artifact:pmid-38609397
+    - source_artifact:pmid-14698111
+    - source_artifact:pmid-26592137
+    - source_artifact:doi-10.3389-fphys.2025.1679550
+    - source_artifact:pmid-28833689
     defaultOpen: false
   - id: temperature-dose-physiology
-    label: Longer colder immersion dose physiology
+    label: "Temperature and tissue-dose physiology"
     stance: context_only
-    summary: One-hour cold-water immersion physiology shows catecholamine and temperature-load context; it is dose/safety context, not a Murph starting-dose benefit claim.
+    summary: "Temperature, duration, and tissue-cooling studies help define dose measurement and thermal load, but cooling depth is not itself a wellness endpoint."
     sourceKeys:
+    - source_artifact:pmid-31203599
     - source_artifact:pmid-10751106
     defaultOpen: false
   - id: sympathetic-cardiovascular
-    label: Sympathetic and cardiovascular physiology
-    stance: context_only
-    summary: Acute sympathetic and cardiovascular shifts are mechanistic safety context, and repeated-exposure results do not establish broad benefit.
+    label: "Autonomic and cardiovascular physiology"
+    stance: safety_boundary
+    summary: "Autonomic, endocrine, vascular, medication, and cardiovascular studies explain the acute load of cold exposure; use them for monitoring and caution, not benefit claims."
     sourceKeys:
+    - source_artifact:pmid-38663342
     - source_artifact:pmid-8891513
+    - source_artifact:pmid-32082177
+    - source_artifact:pmid-36101432
+    - source_artifact:pmid-37079282
+    - source_artifact:pmid-36792625
+    - source_artifact:pmid-37840386
+    - source_artifact:pmid-38478550
+    - source_artifact:pmid-1517364
+    - source_artifact:pmid-6129886
+    - source_artifact:pmid-2789570
     defaultOpen: false
   - id: catecholamine-dose-context
-    label: Catecholamine and lipidome dose context
+    label: "Catecholamine, lipid, and biomarker context"
     stance: context_only
-    summary: A direct ice-bath physiology study reported noradrenaline/lipidome responses, which should be treated as mechanistic dose context rather than clinical benefit evidence.
+    summary: "Noradrenaline, lipid, and related biomarker responses are mechanistic dose context, not evidence that the protocol improves clinical outcomes."
     sourceKeys:
     - source_artifact:pmid-39779795
+    - source_artifact:pmid-36150503
     defaultOpen: false
   - id: cold-shock-habituation-safety
-    label: Habituation and anxiety boundary
+    label: "Habituation and cold-shock adaptation"
     stance: safety_boundary
-    summary: Habituation can reduce some cold-shock responses, but anxiety, context, and repeated-exposure design matter; it should not be converted into a blanket safety or efficacy claim.
+    summary: "Repeated exposure can reduce some cold-shock, ventilatory, anxiety, or perception responses, but habituation should not be converted into broad safety or efficacy claims."
     sourceKeys:
+    - source_artifact:pmid-9721005
+    - source_artifact:pmid-24229801
+    - source_artifact:pmid-24722189
     - source_artifact:pmid-38211547
     - source_artifact:pmid-22918558
     - source_artifact:pmid-24597161
     - source_artifact:pmid-28242468
     - source_artifact:pmid-29695988
+    - source_artifact:doi-10.3390-app15137107
     - source_artifact:pmid-9763650
+    - source_artifact:pmid-36106151
+    - source_artifact:pmid-11072768
     defaultOpen: false
   - id: habituation-brief-immersions
-    label: Brief repeated immersion habituation
+    label: "Brief repeated immersion habituation"
     stance: mixed
-    summary: Repeated brief 12 °C head-out immersions habituated ventilation and perception but did not show cardiovascular, metabolic, core, or skin-temperature habituation.
+    summary: "Repeated brief 12 C head-out immersions habituated ventilation and perception but did not show broad cardiovascular, metabolic, core, or skin-temperature adaptation."
     sourceKeys:
     - source_artifact:pmid-40815943
     defaultOpen: false
-  - id: cold-plunge-safety-guideline
-    label: Safety screening and implementation guidance
-    stance: safety_boundary
-    summary: Guideline and position-statement sources support screening, temperature awareness, supervision, acclimatization, exit planning, and emergency planning before cold-water immersion therapy.
+  - id: measurement-cognition-and-balance-context
+    label: "Measurement, cognition, and balance context"
+    stance: context_only
+    summary: "Cold-stress, hand-test, balance, cognition, and measurement-method papers help choose logs and stop rules, but they are not direct outcome evidence."
     sourceKeys:
+    - source_artifact:pmid-40012949
+    - source_artifact:pmid-39479308
+    - source_artifact:pmid-41185024
+    - source_artifact:pmid-21432119
+    defaultOpen: false
+  - id: cold-plunge-safety-guideline
+    label: "Safety screening and implementation guidance"
+    stance: safety_boundary
+    summary: "Guideline, position-statement, and clinical explainer sources support screening, measured temperature, supervision, acclimatization, exit planning, and emergency planning."
+    sourceKeys:
+    - source_artifact:clevelandclinic-cold-plunge-benefits-risks-2024-12-24
+    - source_artifact:utahhealth-cold-plunging-health-2023-03-24
     - source_artifact:pmid-26617380
     - source_artifact:pmid-36396152
     - source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26
     defaultOpen: true
   - id: cold-water-safety-boundary
-    label: Public cold-water safety boundary
+    label: "Cold-water and contrast safety boundary"
     stance: safety_boundary
-    summary: Public cold-water safety guidance supports treating cold shock, cold incapacitation, hypothermia, and rescue planning as safety boundaries.
+    summary: "Public cold-water, cardiopulmonary, and hot-cold contrast sources keep cold shock, incapacitation, respiratory risk, hypothermia, and rescue planning visible."
     sourceKeys:
+    - source_artifact:heart-org-cold-water-plunge-risks-2022-12-09
     - source_artifact:weather-gov-cold-water-safety-2026-04-27
+    - source_artifact:lungorg-sauna-cold-plunges-health-impacts-2025-05-29
     defaultOpen: true
   - id: cardiac-risk-clinical-boundary
-    label: Cardiac-risk clinical boundary
+    label: "Cardiac-risk clinical boundary"
     stance: safety_boundary
-    summary: Cardiac-disease, long-QT/channelopathy, and supervised cardiac-immersion sources support clinician guidance before any unsupervised cold-water exposure in cardiovascular-risk populations.
+    summary: "Heart-disease, blood-pressure, long-QT, channelopathy, and supervised cardiac-immersion sources support clinician guidance before unsupervised cold-water exposure."
     sourceKeys:
+    - source_artifact:harvardhealth-cold-plunges-heart-2025-06-01
     - source_artifact:pmid-39461093
     - source_artifact:pmid-26152773
     - source_artifact:pmid-38060596
     - source_artifact:pmid-19696059
     defaultOpen: false
-  - id: cold-urticaria-anaphylaxis-screening
-    label: Cold urticaria and allergic-reaction screening
+  - id: autonomic-conflict-arrhythmia-risk
+    label: "Autonomic conflict and arrhythmia risk"
     stance: safety_boundary
-    summary: Cold-triggered urticaria/anaphylaxis sources support explicit screening because complete cold-water immersion can be a systemic-reaction trigger in susceptible people.
+    summary: "Cold-water, diving, face-immersion, and long-QT sources show how competing autonomic reflexes can raise arrhythmia risk, especially with submersion or susceptible users."
+    sourceKeys:
+    - source_artifact:pmid-22547634
+    - source_artifact:pmid-29408217
+    - source_artifact:pmid-40624837
+    defaultOpen: false
+  - id: cold-urticaria-anaphylaxis-screening
+    label: "Cold urticaria and allergic-reaction screening"
+    stance: safety_boundary
+    summary: "Cold-triggered urticaria and anaphylaxis sources support explicit screening because complete cold-water immersion can trigger systemic reactions in susceptible people."
     sourceKeys:
     - source_artifact:pmid-37873787
     - source_artifact:pmid-41044831
@@ -871,118 +956,237 @@ researchLandscape:
     - source_artifact:pmid-34862605
     defaultOpen: false
   - id: pregnancy-safety-boundary
-    label: Pregnancy and postpartum boundary
+    label: "Pregnancy and postpartum boundary"
     stance: safety_boundary
-    summary: Pregnancy-specific cold-water evidence is sparse and not a clearance basis for this ordinary unsupervised wellness protocol.
+    summary: "Pregnancy and cold-stress sources are safety boundaries, not clearance for this ordinary unsupervised wellness protocol."
     sourceKeys:
+    - source_artifact:pmid-10223611
     - source_artifact:doi-10.1002-lim2.70009
     defaultOpen: false
   - id: alcohol-cold-water-safety-boundary
-    label: Alcohol and cold-water safety boundary
+    label: "Alcohol and cold-water safety boundary"
     stance: safety_boundary
-    summary: Alcohol changes thermal balance and early cold-water responses, supporting an alcohol/sedative exclusion for sessions.
+    summary: "Alcohol changes thermal balance and early cold-water responses, supporting an alcohol and sedative exclusion for sessions."
     sourceKeys:
     - source_artifact:pmid-497899
     - source_artifact:pmid-9088850
     defaultOpen: false
   - id: drowning-rescue-boundary
-    label: Drowning and rescue-planning boundary
+    label: "Drowning and rescue-planning boundary"
     stance: safety_boundary
-    summary: Drowning and submersion rescue sources support adult-nearby first-session supervision, rescue planning, and emergency escalation after any suspected submersion or aspiration.
+    summary: "Drowning, open-water, and submersion sources support first-session supervision, rescue planning, and urgent escalation after suspected submersion or aspiration."
     sourceKeys:
+    - source_artifact:pmid-31178366
     - source_artifact:pmid-26889019
+    - source_artifact:pmid-17622298
     - source_artifact:pmid-21458133
+    - source_artifact:pmid-33276648
+    - source_artifact:pmid-26941276
     - source_artifact:pmid-39530204
     - source_artifact:pmid-38379489
     defaultOpen: false
   - id: hypothermia-emergency-escalation
-    label: Hypothermia and emergency escalation
+    label: "Hypothermia recognition and rewarming"
     stance: safety_boundary
-    summary: Hypothermia, rescue, and afterdrop guidance support gentle rewarming, post-exit observation, and urgent escalation for persistent cold stress, confusion, inability to rewarm, or deterioration.
+    summary: "Hypothermia, rescue, afterdrop, and rewarming guidance support post-exit observation and urgent escalation for confusion, non-responsiveness, inability to rewarm, or deterioration."
     sourceKeys:
+    - source_artifact:pmid-23150960
+    - source_artifact:pmid-29162267
+    - source_artifact:pmid-34383570
+    - source_artifact:pmid-35010760
     - source_artifact:pmid-16538942
     - source_artifact:uscg-cold-water-survival-guide-2012-11-30
     - source_artifact:pmid-33675869
     - source_artifact:pmid-31740369
     defaultOpen: false
   - id: immune-inflammation-illness-context
-    label: Immune, inflammation, and illness boundary
+    label: "Immune, inflammation, and illness boundary"
     stance: mixed
-    summary: Adjacent illness and cold-shower evidence does not support a cold-plunge immune-protection promise.
+    summary: "Immune, inflammation, illness, cold-shower, clinical, and WHM-adjacent records are mixed or indirect and do not support an immune-protection promise for Cold Plunge."
     sourceKeys:
+    - source_artifact:pmid-33820701
     - source_artifact:pmid-27631616
+    - source_artifact:pmid-34428265
+    - source_artifact:pmid-39299098
+    - source_artifact:pmid-38478473
+    - source_artifact:pmid-24799686
+    - source_artifact:pmid-36137565
+    - source_artifact:pmid-18382932
+    - source_artifact:pmid-36348102
+    - source_artifact:pmid-39078461
+    - source_artifact:pmid-35021915
+    - source_artifact:pmid-12471310
+    - source_artifact:pmid-10066131
     defaultOpen: false
   - id: immune-stress-acute
-    label: Acute immune and stress biomarkers
+    label: "Acute immune and stress biomarkers"
     stance: mixed
-    summary: Short whole-body CWI triggered stress hormones and mixed cytokine/WBC changes; use as biomarker context, not immune benefit proof.
+    summary: "Short whole-body CWI triggered stress hormones and mixed cytokine or white-blood-cell changes; use this as biomarker context, not immune benefit proof."
     sourceKeys:
     - source_artifact:pmid-33910456
     defaultOpen: false
   - id: repeated-cwi-leukocytes
-    label: Repeated CWI leukocyte findings
+    label: "Repeated CWI leukocyte findings"
     stance: mixed
-    summary: Repeated 7 °C CWI had no clear relevant leukocyte effect and uncertain practical significance.
+    summary: "Repeated 7 C CWI had no clear relevant leukocyte effect and uncertain practical significance."
     sourceKeys:
     - source_artifact:pmid-37711459
     defaultOpen: false
   - id: immune-adaptation
-    label: Immune adaptation context
+    label: "Immune adaptation context"
     stance: mixed
-    summary: Repeated cold exposure shifted some immune markers, but the clinical meaning and direct cold-plunge benefit relevance are limited.
+    summary: "Repeated cold exposure shifted some immune markers, but clinical meaning and direct cold-plunge benefit relevance are limited."
     sourceKeys:
     - source_artifact:pmid-8925815
     defaultOpen: false
   - id: sleep-cognition
-    label: Direct sleep and cognition signal
+    label: "Direct sleep and cognition signal"
     stance: mixed
-    summary: A small repeated therapeutic cooling/CWI study reported sleep/cognition signals but neutral well-being findings; use as preliminary context only.
+    summary: "A small repeated therapeutic cooling or CWI study reported sleep and cognition signals but neutral wellbeing findings; use it as preliminary context only."
     sourceKeys:
     - source_artifact:pmid-39515683
     defaultOpen: false
-  - id: cold-exposure-sleep-adjacent-variants
-    label: Adjacent cold-exposure sleep context
-    stance: context_only
-    summary: Cold-shower and cold-air cryotherapy sleep records are adjacent modality evidence; they can inform what to monitor, but should not be treated as direct Cold Plunge sleep-benefit proof.
+  - id: sleep-hrv-recovery-context
+    label: "Sleep, HRV, and recovery context"
+    stance: mixed
+    summary: "Athlete and recovery studies make sleep, HRV, soreness, inflammation, and fatigue worth monitoring, but the evidence is adjacent and mixed rather than a direct wellness benefit."
     sourceKeys:
-    - source_artifact:pmid-33766020
+    - source_artifact:pmid-39959124
+    - source_artifact:pmid-37462808
+    - source_artifact:pmid-33870188
+    - source_artifact:pmid-23377833
+    - source_artifact:pmid-29801652
+    - source_artifact:pmid-21941017
+    - source_artifact:doi-10.1007-s11332-018-0522-6
+    - source_artifact:doi-10.1002-lim2.70029
+    - source_artifact:doi-10.1186-2046-7648-4-s1-a150
+    - source_artifact:pmid-23799825
+    - source_artifact:pmid-30026562
+    - source_artifact:pmid-33507839
+    - source_artifact:pmid-26275673
+    - source_artifact:pmid-33144349
+    defaultOpen: false
+  - id: cold-exposure-sleep-adjacent-variants
+    label: "Adjacent cold-exposure sleep context"
+    stance: context_only
+    summary: "Cold-shower, cold-air, cryotherapy, thermal sleep, and circadian records can inform what to monitor, but they are not direct Cold Plunge sleep-benefit proof."
+    sourceKeys:
+    - source_artifact:pmid-37782163
     - source_artifact:pmid-30551730
     - source_artifact:pmid-30876470
     - source_artifact:pmid-32472928
+    - source_artifact:pmid-33766020
     defaultOpen: false
   - id: sports-recovery-training-adaptation-boundary
-    label: Post-exercise recovery and training-adaptation boundary
+    label: "Post-exercise recovery and training-adaptation boundary"
     stance: mixed
-    summary: Athlete/post-exercise CWI can be useful for soreness or selected recovery contexts, includes null recovery trials, and can conflict with some training-adaptation goals; it is a separate timing variant.
+    summary: "Athlete and post-exercise CWI can help some soreness or selected recovery endpoints, includes null trials, and can conflict with strength or hypertrophy goals; it is a separate timing variant."
     sourceKeys:
     - source_artifact:pmid-22336838
-    - source_artifact:doi-10.1186-s12891-024-07315-2
-    - source_artifact:doi-10.1002-ejsc.12074
-    - source_artifact:pmid-24674975
-    - source_artifact:pmid-25760154
-    - source_artifact:pmid-25437181
-    - source_artifact:pmid-39918163
     - source_artifact:pmid-38301228
+    - source_artifact:doi-10.1002-ejsc.12074
+    - source_artifact:doi-10.1186-s12891-024-07315-2
     - source_artifact:doi-10.1371-journal.pone.0322416
+    - source_artifact:doi-10.3389-fspor.2021.714148
+    - source_artifact:pmid-24674975
+    - source_artifact:pmid-16372177
+    - source_artifact:pmid-25760154
+    - source_artifact:pmid-26062633
+    - source_artifact:pmid-23743793
+    - source_artifact:pmid-25074283
+    - source_artifact:pmid-25121612
+    - source_artifact:pmid-25437181
+    - source_artifact:pmid-19308790
+    - source_artifact:pmid-19074671
+    - source_artifact:pmid-20403733
+    - source_artifact:pmid-26174323
+    - source_artifact:pmid-26413718
+    - source_artifact:pmid-26581833
+    - source_artifact:pmid-27704555
+    - source_artifact:pmid-29627884
+    - source_artifact:pmid-29755363
+    - source_artifact:pmid-31513450
+    - source_artifact:pmid-31788800
+    - source_artifact:pmid-33146851
+    - source_artifact:pmid-33217726
+    - source_artifact:pmid-33898988
+    - source_artifact:pmid-35068365
+    - source_artifact:pmid-35157264
+    - source_artifact:pmid-36399666
+    - source_artifact:pmid-21947816
+    - source_artifact:pmid-23434565
+    - source_artifact:pmid-24768476
+    - source_artifact:doi-10.1016-j.jtherbio.2004.08.069
+    - source_artifact:mayoclinichealthsystem-cold-plunge-after-workouts-2024-01-30
+    - source_artifact:pmcid-PMC3766664
+    - source_artifact:pmid-25573221
+    - source_artifact:pmid-21077001
+    - source_artifact:pmid-21716151
+    - source_artifact:pmid-16937951
+    - source_artifact:pmcid-PMC3499890
+    - source_artifact:pmid-10735978
+    - source_artifact:pmid-10444630
+    - source_artifact:pmid-26614422
+    - source_artifact:pmid-27398915
+    - source_artifact:pmid-27430594
+    - source_artifact:pmid-27557407
+    - source_artifact:pmid-28116880
+    - source_artifact:pmid-29685828
+    - source_artifact:pmid-29952675
+    - source_artifact:pmid-30443221
+    - source_artifact:pmid-31222379
+    - source_artifact:pmid-32695024
+    - source_artifact:pmid-32880050
+    - source_artifact:pmid-33345125
+    - source_artifact:pmid-34575347
+    - source_artifact:ito-water-immersion-mucosal-immune-defense-2019-01-01
+    - source_artifact:pmid-36527593
+    - source_artifact:pmid-36744038
+    - source_artifact:pmid-36862831
+    - source_artifact:pmid-38491303
+    - source_artifact:pmid-38548939
+    - source_artifact:pmid-38613679
+    - source_artifact:pmid-39376896
+    - source_artifact:pmid-39918163
+    - source_artifact:pmid-40078372
+    - source_artifact:pmid-41716304
+    - source_artifact:pmid-41845491
+    - source_artifact:pmid-33877402
+    - source_artifact:pmid-35629351
+    - source_artifact:pmid-36308505
     defaultOpen: false
   - id: external-protocol-dose-claims
-    label: External/public protocol dose claims
+    label: "Public protocols and explainer claims"
     stance: context_only
-    summary: Huberman-style deliberate-cold dose language is useful for attribution and public expectation management, but it is not direct proof for this Murph protocol and bundles multiple cold modalities.
+    summary: "Huberman, Mayo, Wim Hof, cold-shower, and other public protocol or explainer sources are useful for expectations and attribution, but they are not direct proof for this Murph protocol."
     sourceKeys:
     - source_artifact:hubermanlab-cold-exposure-protocol-2026-04-27
     - source_artifact:hubermanlab-deliberate-cold-exposure-podcast-2022-04-04
+    - source_artifact:mayoclinicpress-ice-baths-recovery-2024-04-15
+    - source_artifact:wimhofmethod-cold-showers-2026-04-27
+    - source_artifact:wimhofmethod-regular-ice-baths-2026-04-27
+    defaultOpen: false
+  - id: breathwork-cold-bundle-boundary
+    label: "Breathwork and bundled cold-exposure boundary"
+    stance: mixed
+    summary: "Wim Hof-style and mindfulness-plus-cold studies bundle breathing, meditation, showers, swimming, coaching, or commitment with cold exposure, so they should not be cited as isolated cold-plunge proof."
+    sourceKeys:
+    - source_artifact:wimhofmethod-faq-safety-2026-04-27
+    - source_artifact:pmid-41309213
+    - source_artifact:pmid-36248220
+    - source_artifact:pmid-41388053
+    - source_artifact:doi-10.1038-s41598-023-44902-0
     defaultOpen: false
   - id: breath-hold-submersion-arrhythmia
-    label: Breath-hold, face-submersion, and underwater boundary
+    label: "Breath-hold, face-submersion, and underwater boundary"
     stance: safety_boundary
-    summary: Breath-hold, face-submersion, diving, and underwater-training sources support keeping the default Cold Plunge protocol head-out, with no deliberate hyperventilation, breath-holding, underwater challenge, or face-submersion escalation.
+    summary: "Breath-hold, face-submersion, diving, and underwater-training sources support keeping the default Cold Plunge protocol head-out, with no hyperventilation, breath-holding, or underwater escalation."
     sourceKeys:
-    - source_artifact:pmid-17086766
-    - source_artifact:pmid-7950804
+    - source_artifact:pmid-7337825
     - source_artifact:pmid-20377144
     - source_artifact:pmid-26754186
-    - source_artifact:pmid-7337825
+    - source_artifact:pmid-17086766
+    - source_artifact:pmid-7950804
     defaultOpen: true
 safety:
   cautionLevel: high

@@ -87,7 +87,7 @@ export async function createHostedDataKeyEnvelopeWithDomainRoot(input: {
     lane,
     resource,
     rootKeyId,
-    schema: HOSTED_DATA_KEY_ENVELOPE_SCHEMA,
+    schema: HOSTED_DATA_KEY_ENVELOPE_SCHEMA as typeof HOSTED_DATA_KEY_ENVELOPE_SCHEMA,
   };
   const wrapKey = await deriveHostedDataKeyRootWrapKey({
     ...envelopeBase,
