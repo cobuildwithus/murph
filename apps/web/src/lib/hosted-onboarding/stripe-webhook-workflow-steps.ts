@@ -22,32 +22,34 @@ import { withHostedWorkflowStepMaxRetries } from "./workflow-step-options";
 
 type HostedStripeWorkflowRetryAfter = NonNullable<RetryableErrorOptions["retryAfter"]>;
 
-export const processHostedStripeWebhookEventStep = withHostedWorkflowStepMaxRetries(
-  async function processHostedStripeWebhookEventStep(
-    input: HostedStripeWebhookReconciliationWorkflowInput,
-  ): Promise<void> {
-    "use step";
+export async function processHostedStripeWebhookEventStep(
+  input: HostedStripeWebhookReconciliationWorkflowInput,
+): Promise<void> {
+  "use step";
 
-    let result;
+  let result;
 
-    try {
-      result = await processRecordedHostedStripeWebhookEvent({
-        eventId: input.eventId,
-        timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-      });
-    } catch (error) {
-      throw mapHostedStripeWorkflowStepError(error);
-    }
+  try {
+    result = await processRecordedHostedStripeWebhookEvent({
+      eventId: input.eventId,
+      timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+    });
+  } catch (error) {
+    throw mapHostedStripeWorkflowStepError(error);
+  }
 
-    if (!result.accepted) {
-      throw new RetryableError(
-        "Hosted Stripe webhook runner nudge is temporarily unavailable.",
-        {
-          retryAfter: HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_RETRY_AFTER,
-        },
-      );
-    }
-  },
+  if (!result.accepted) {
+    throw new RetryableError(
+      "Hosted Stripe webhook runner nudge is temporarily unavailable.",
+      {
+        retryAfter: HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_RETRY_AFTER,
+      },
+    );
+  }
+}
+
+withHostedWorkflowStepMaxRetries(
+  processHostedStripeWebhookEventStep,
   HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_STEP_MAX_RETRIES,
 );
 

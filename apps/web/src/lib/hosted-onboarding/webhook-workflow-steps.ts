@@ -15,35 +15,37 @@ import {
 } from "./webhook-nudge-policy";
 import { withHostedWorkflowStepMaxRetries } from "./workflow-step-options";
 
-export const nudgeHostedWebhookMailboxItemStep = withHostedWorkflowStepMaxRetries(
-  async function nudgeHostedWebhookMailboxItemStep(
-    input: HostedWebhookNudgeWorkflowInput,
-  ): Promise<void> {
-    "use step";
+export async function nudgeHostedWebhookMailboxItemStep(
+  input: HostedWebhookNudgeWorkflowInput,
+): Promise<void> {
+  "use step";
 
-    const mailboxItemOwner = await readHostedMailboxItemOwnerById({
-      mailboxItemId: input.mailboxItemId,
-    });
+  const mailboxItemOwner = await readHostedMailboxItemOwnerById({
+    mailboxItemId: input.mailboxItemId,
+  });
 
-    if (!mailboxItemOwner) {
-      throw new FatalError("Hosted webhook mailbox item is missing.");
-    }
+  if (!mailboxItemOwner) {
+    throw new FatalError("Hosted webhook mailbox item is missing.");
+  }
 
-    const result = await nudgeHostedRunnerUserBestEffortResult({
-      context: resolveHostedNudgeWorkflowContext(input.source),
-      timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-      userId: mailboxItemOwner.userId,
-    });
+  const result = await nudgeHostedRunnerUserBestEffortResult({
+    context: resolveHostedNudgeWorkflowContext(input.source),
+    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+    userId: mailboxItemOwner.userId,
+  });
 
-    if (!result.accepted) {
-      throw new RetryableError(
-        "Hosted webhook runner nudge is temporarily unavailable.",
-        {
-          retryAfter: HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER,
-        },
-      );
-    }
-  },
+  if (!result.accepted) {
+    throw new RetryableError(
+      "Hosted webhook runner nudge is temporarily unavailable.",
+      {
+        retryAfter: HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER,
+      },
+    );
+  }
+}
+
+withHostedWorkflowStepMaxRetries(
+  nudgeHostedWebhookMailboxItemStep,
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_STEP_MAX_RETRIES,
 );
 
