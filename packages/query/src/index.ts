@@ -131,15 +131,28 @@ export {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
+  selectMetricTrend,
   selectMetricValue,
+  selectMetricWindowComparison,
   type GoalMetricTarget,
   type MetricDefinition,
   type MetricGoalProgress,
+  type MetricGoalProgressStatus,
   type MetricPoint,
   type MetricSelection,
   type MetricSelectionPolicy,
+  type MetricTrend,
+  type MetricWindowComparison,
+  type MetricWindowSummary,
   type MetricSelectionWarning,
 } from "@murphai/health-metrics";
+export {
+  buildMetricProjection,
+  buildWearableMetricEvidence,
+} from "./metrics/projection.ts";
+export type {
+  MetricProjection,
+} from "./metrics/projection.ts";
 export {
   extractMetricPoints,
   extractMetricPointsFromCanonicalEntities,

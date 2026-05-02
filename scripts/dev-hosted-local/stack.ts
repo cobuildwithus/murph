@@ -271,9 +271,7 @@ export async function startHostedLocalDevStack(input: {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: localInternalProxyBaseUrl,
       },
     });
-    const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
-      hostedOnboardingPublicBaseUrl: linqWebhookSetup?.publicBaseUrl,
-    });
+    const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
       ...localOverrides,

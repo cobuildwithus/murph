@@ -15,7 +15,7 @@ function JoinInviteSidebar() {
         />
         <Link href="/" aria-label="Murph home" className="relative inline-flex items-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-dark.svg" alt="Murph" className="h-6" />
+          <img src="/logo-dark.svg" alt="Murph" width={107} height={24} className="h-6" />
         </Link>
 
         <div className="relative mt-auto flex flex-col gap-3">
@@ -41,7 +41,7 @@ function JoinInviteSidebar() {
       <header className="flex items-center bg-gradient-to-br from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-6 py-5 md:hidden">
         <Link href="/" aria-label="Murph home" className="inline-flex items-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-dark.svg" alt="Murph" className="h-6" />
+          <img src="/logo-dark.svg" alt="Murph" width={107} height={24} className="h-6" />
         </Link>
       </header>
     </>

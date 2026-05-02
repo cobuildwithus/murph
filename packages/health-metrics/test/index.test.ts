@@ -12,8 +12,13 @@ import {
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  selectMetricGoalProgress,
+  selectMetricTrend,
   selectMetricValue,
+  selectMetricWindowComparison,
+  type GoalMetricTarget,
   type MetricPoint,
+  type MetricSeriesPoint,
 } from "../src/index.ts";
 
 test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {
@@ -370,6 +375,116 @@ test("builds chronological metric series and formats display values", () => {
   assert.equal(formatMetricDisplayValue(newer), "81.6");
 });
 
+test("selects metric window comparisons and trends through shared selectors", () => {
+  const rows = [
+    seriesPoint("2026-04-01", 60),
+    seriesPoint("2026-04-02", 62),
+    seriesPoint("2026-04-03", 58),
+    seriesPoint("2026-04-04", 56),
+  ];
+  const comparison = selectMetricWindowComparison({
+    baselineWindow: { end: "2026-04-02", start: "2026-04-01", totalDays: 2 },
+    comparisonWindow: { end: "2026-04-04", start: "2026-04-03", totalDays: 2 },
+    metricKey: "resting-heart-rate",
+    minimumPoints: 2,
+    points: rows,
+    statistic: "mean",
+  });
+
+  assert.equal(comparison.status, "ready");
+  assert.equal(comparison.baseline.daysWithData, 2);
+  assert.equal(comparison.baseline.value, 61);
+  assert.equal(comparison.comparison.value, 57);
+  assert.equal(comparison.delta, -4);
+  assert.equal(comparison.deltaPercent, -6.557377049180328);
+  assert.deepEqual(comparison.baseline.pointIds, ["point:2026-04-01", "point:2026-04-02"]);
+
+  const trend = selectMetricTrend({
+    metricKey: "resting-heart-rate",
+    points: rows,
+    policy: {
+      aggregation: "median",
+      comparisonWindowDays: 2,
+      latestWindowDays: 2,
+      minimumPoints: 2,
+    },
+    unit: "bpm",
+    valuePrecision: 0,
+  });
+
+  assert.equal(trend?.baselineValue, 61);
+  assert.equal(trend?.currentValue, 57);
+  assert.equal(trend?.delta, -4);
+  assert.equal(trend?.direction, "down");
+  assert.equal(trend?.label, "2-day median vs prior 2 days");
+});
+
+test("goal progress reports neutral not_met for unscheduled selected-value targets", () => {
+  const target: GoalMetricTarget = {
+    comparator: "<",
+    evaluation: { kind: "selected-value" },
+    kind: "metric",
+    metricKey: "resting-heart-rate",
+    targetId: "rhr-under-40",
+    unit: "bpm",
+    value: 40,
+  };
+
+  const progress = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    now: "2026-04-30T00:00:00.000Z",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:resting-heart-rate:2026-04-29:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "wearable_rhr",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 45,
+      }),
+    ],
+    target,
+  });
+
+  assert.equal(progress.status, "not_met");
+  assert.equal(progress.currentValue, 45);
+});
+
+test("goal progress keeps behind for scheduled rolling-window targets that miss target", () => {
+  const target: GoalMetricTarget = {
+    comparator: "<",
+    evaluation: { kind: "rolling-window", statistic: "median", windowDays: 7 },
+    kind: "metric",
+    metricKey: "resting-heart-rate",
+    startAt: "2026-04-01",
+    targetAt: "2026-05-01",
+    targetId: "rhr-under-40",
+    unit: "bpm",
+    value: 40,
+  };
+
+  const progress = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    now: "2026-04-30T00:00:00.000Z",
+    points: Array.from({ length: 7 }, (_, index) => metricPoint({
+      effectiveDate: `2026-04-${String(23 + index).padStart(2, "0")}`,
+      id: `metric-point:resting-heart-rate:2026-04-${String(23 + index).padStart(2, "0")}:wearable:0`,
+      metricKey: "resting-heart-rate",
+      observedAt: `2026-04-${String(23 + index).padStart(2, "0")}T07:00:00.000Z`,
+      recordId: `wearable_rhr_${index}`,
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 45,
+    })),
+    target,
+  });
+
+  assert.equal(progress.status, "behind");
+  assert.equal(progress.currentValue, 45);
+});
+
 function metricPoint(input: {
   biomarkerKey?: string | null;
   comparator?: MetricPoint["comparator"];
@@ -424,5 +539,28 @@ function metricPoint(input: {
     textValue: null,
     unit: input.unit ?? "mg/dL",
     value: input.value,
+  };
+}
+
+function seriesPoint(date: string, value: number): MetricSeriesPoint {
+  return {
+    biomarkerKey: "biomarker:resting-heart-rate",
+    confidence: "high",
+    context: {},
+    date,
+    grain: "day",
+    id: `row:${date}`,
+    metricKey: "resting-heart-rate",
+    observedAt: `${date}T08:00:00.000Z`,
+    pointIds: [`point:${date}`],
+    recordIds: [`record:${date}`],
+    sourceFamily: "derived",
+    sourceKind: "wearable-summary",
+    sourceKinds: ["wearable-summary"],
+    sourceLabel: "Fixture",
+    statistic: "mean",
+    unit: "bpm",
+    value,
+    valueLabel: String(value),
   };
 }

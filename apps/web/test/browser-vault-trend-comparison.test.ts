@@ -132,7 +132,7 @@ function buildDailyRows(
       observedAt: `${date.toISOString().slice(0, 10)}T00:00:00.000Z`,
       pointIds: [`point-${index}`],
       recordIds: [`record-${index}`],
-      rowSchema: "murph.browser-vault.metric-row",
+      rowSchema: "murph.browser-vault.metric-row.v1",
       sourceFamily: "derived",
       sourceKind: "wearable-summary",
       sourceLabel: "Wearable summary",

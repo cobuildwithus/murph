@@ -86,7 +86,7 @@ it("wires browser-vault metric selections into biomarker browse cards", async ()
             pointIds: ["metric-point:resting-heart-rate:2026-04-29"],
             recordIds: ["record:resting-heart-rate:2026-04-29"],
             selectedMetricRowId: "metric-row:resting-heart-rate:2026-04-29",
-            selectionSchema: "murph.browser-vault.metric-selection",
+            selectionSchema: "murph.browser-vault.metric-selection.v1",
             sourceLabel: "Wearable summary",
             status: "ready",
             unit: "bpm",

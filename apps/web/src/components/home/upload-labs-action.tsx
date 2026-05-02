@@ -18,7 +18,7 @@ export function UploadLabsActionFallback() {
       disabled
       aria-busy="true"
     >
-      Share labs
+      Sync labs
       <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" />
     </button>
   );
@@ -34,11 +34,11 @@ export async function UploadLabsMurphContactAction() {
 
   return (
     <MurphContactAuthButton
-      actionLabel="Share labs with Murph"
+      actionLabel="Sync labs with Murph"
       className={getOnboardingStepActionClass(false)}
       option={option}
     >
-      Share labs
+      Sync labs
       <ArrowRight
         data-icon="inline-end"
         className="transition-transform duration-200 group-hover:translate-x-0.5"

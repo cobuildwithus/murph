@@ -25,6 +25,13 @@ test("browser-vault exposes metric-key rows and selections without legacy domain
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt: "2026-04-30T12:00:00.000Z",
     metricPoints: points,
+    requestedMetrics: [
+      { metricKey: "resting-heart-rate", biomarkerKey: "biomarker:resting-heart-rate" },
+      { metricKey: "hrv-rmssd", biomarkerKey: "biomarker:hrv-rmssd" },
+      { metricKey: "deep-sleep-minutes", biomarkerKey: "biomarker:deep-sleep-minutes" },
+      { metricKey: "rem-sleep-minutes", biomarkerKey: "biomarker:rem-sleep-minutes" },
+      { metricKey: "apob", biomarkerKey: "biomarker:apob" },
+    ],
   });
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica({ metricRows, metricSelectionRows })));
 
@@ -37,6 +44,8 @@ test("browser-vault exposes metric-key rows and selections without legacy domain
   ]);
 
   assert.equal(client.metricSelections.getByBiomarker("biomarker:resting-heart-rate")?.value, 57);
+  assert.equal(client.metricSelections.getByBiomarker("biomarker:apob")?.status, "no_data");
+  assert.equal(client.metricSelections.getByBiomarker("biomarker:apob")?.selectedMetricRowId, null);
   assert.equal(client.metricSelections.get("resting-heart-rate")?.id, "metric-selection:resting-heart-rate");
   assert.equal(client.metrics.series({ metricKey: "resting-heart-rate" }).at(-1)?.value, 57);
   assert.deepEqual(client.metrics.seriesMany([{ metricKey: "hrv-rmssd" }, { metricKey: "deep-sleep-minutes" }]).map((series) => series.at(-1)?.value), [72, 81]);
@@ -58,7 +67,7 @@ function point(date: string, metricKey: string, biomarkerKey: string | null, val
     provenance: { dataOrigin: null, externalRef: null, labName: null, provider: null, rawRefs: [], sourceLabel: "Wearable summary" },
     recordedAt: null,
     reportedAt: null,
-    schemaVersion: "murph.metric-point",
+    schemaVersion: "murph.metric-point.v1",
     source: { family: "derived", kind: "wearable-summary", path: "", recordId: `record:${metricKey}:${date}`, resultIndex: null },
     statistic: "value",
     textValue: null,

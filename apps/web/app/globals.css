@@ -59,6 +59,24 @@
   animation: marquee 30s linear infinite;
 }
 
+@keyframes dot-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(var(--dot-scale, 1.1));
+  }
+}
+
+.brand-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.group\/brand:hover .brand-dot {
+  animation: dot-pulse 1s ease-out var(--dot-delay, 0s) infinite;
+}
+
 @theme inline {
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);

@@ -8,10 +8,13 @@ import {
   type MetricConfidence,
   type MetricPoint,
   type MetricPointContext,
+  type MetricSourceFamily,
   type MetricSourceKind,
 } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
+
+export { parseGoalMetricTargets } from "./goals.ts";
 
 export type {
   GoalMetricTarget,
@@ -19,6 +22,7 @@ export type {
   MetricConfidence,
   MetricDefinition,
   MetricGoalProgress,
+  MetricGoalProgressStatus,
   MetricPoint,
   MetricPointContext,
   MetricPointProvenance,
@@ -27,6 +31,13 @@ export type {
   MetricSelectionStatus,
   MetricSelectionWarning,
   MetricSelectionWarningCode,
+  MetricSeries,
+  MetricSeriesAggregation,
+  MetricSeriesDuplicatePolicy,
+  MetricSeriesPoint,
+  MetricTrend,
+  MetricWindowComparison,
+  MetricWindowSummary,
 } from "@murphai/health-metrics";
 
 export {
@@ -35,20 +46,30 @@ export {
   buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
+  listMetricPoints,
   listMetricDefinitions,
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
+  selectMetricSeries,
+  selectMetricTrend,
+  selectMetricWindowComparison,
   selectMetricValue,
 } from "@murphai/health-metrics";
 
 export interface MetricRowEvidence {
   confidence: MetricConfidence;
+  context?: MetricPointContext;
+  dataOrigin?: unknown | null;
   date: string;
+  externalRef?: unknown | null;
   metricKey: string;
+  provider?: string | null;
+  rawRefs?: readonly string[];
   recordIds: readonly string[];
+  sourceFamily?: MetricSourceFamily;
   sourceKind: MetricSourceKind;
   sourceLabel: string | null;
   unit: string | null;
@@ -165,23 +186,23 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
     canonicalValue: normalized.canonicalValue,
     comparator: null,
     confidence: row.confidence,
-    context: {},
+    context: compactContext(row.context ?? {}),
     effectiveDate: row.date.slice(0, 10),
     grain: "day",
     metricKey: definition.key,
     observedAt,
     provenance: {
-      dataOrigin: null,
-      externalRef: null,
+      dataOrigin: readJson(row.dataOrigin),
+      externalRef: readJson(row.externalRef),
       labName: null,
-      provider: null,
-      rawRefs: [],
+      provider: row.provider ?? null,
+      rawRefs: readStringArray(row.rawRefs),
       sourceLabel: row.sourceLabel,
     },
     recordedAt: null,
     reportedAt: null,
     source: {
-      family: "derived",
+      family: row.sourceFamily ?? "derived",
       kind: row.sourceKind,
       path: "",
       recordId: row.recordIds[0] ?? `derived:${definition.key}:${row.date}`,
@@ -265,8 +286,7 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     const value = readNumber(record?.value);
     const textValue = readString(record?.textValue);
     const unit = readString(record?.unit);
-    const definition = metric ? resolveMetricDefinition(metric) : null;
-    if (!metric || !definition || (value === null && !textValue)) return [];
+    if (!metric || (value === null && !textValue)) return [];
 
     return [scalarMetricPoint({
       comparator: readComparator(record?.comparator),
@@ -348,14 +368,7 @@ function scalarMetricPoint(input: {
 function createMetricPoint(input: Omit<MetricPoint, "id" | "schemaVersion">): MetricPoint {
   return {
     ...input,
-    id: [
-      "metric-point",
-      input.metricKey,
-      input.effectiveDate,
-      input.source.recordId,
-      input.source.kind,
-      input.source.resultIndex ?? 0,
-    ].join(":"),
+    id: `metric-point:${hashMetricPointIdentity(input)}`,
     schemaVersion: METRIC_POINT_SCHEMA_VERSION,
   };
 }
@@ -369,15 +382,48 @@ function dedupeMetricPoints(points: readonly MetricPoint[]): MetricPoint[] {
 }
 
 function metricPointDedupeKey(point: MetricPoint): string {
+  return metricPointIdentityJson(point);
+}
+
+function hashMetricPointIdentity(point: Omit<MetricPoint, "id" | "schemaVersion">): string {
+  return fnv1a64Hex(metricPointIdentityJson(point));
+}
+
+function metricPointIdentityJson(point: Omit<MetricPoint, "id" | "schemaVersion"> | MetricPoint): string {
+  return JSON.stringify(metricPointIdentityTuple(point));
+}
+
+function metricPointIdentityTuple(point: Omit<MetricPoint, "id" | "schemaVersion"> | MetricPoint): readonly unknown[] {
   return [
     point.metricKey,
+    point.observedAt,
     point.effectiveDate,
-    point.source.recordId,
+    point.grain,
+    point.statistic,
+    point.source.family,
     point.source.kind,
+    point.source.recordId,
+    point.source.resultIndex,
+    point.source.path,
     point.comparator ?? "",
-    point.canonicalUnit ?? point.unit ?? "",
-    point.canonicalValue ?? point.value ?? point.textValue ?? "",
-  ].join("\u001f");
+    point.canonicalValue ?? point.value ?? point.textValue ?? null,
+    point.canonicalUnit ?? point.unit ?? null,
+  ];
+}
+
+const FNV_64_OFFSET_BASIS = 0xcbf29ce484222325n;
+const FNV_64_PRIME = 0x100000001b3n;
+const FNV_64_MASK = 0xffffffffffffffffn;
+
+function fnv1a64Hex(value: string): string {
+  let hash = FNV_64_OFFSET_BASIS;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index));
+    hash = (hash * FNV_64_PRIME) & FNV_64_MASK;
+  }
+
+  return hash.toString(16).padStart(16, "0");
 }
 
 function compareMetricPointDesc(left: MetricPoint, right: MetricPoint): number {

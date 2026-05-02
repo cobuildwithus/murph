@@ -156,10 +156,14 @@ export function HostedLegalConsentCard({
         role="status"
         className={joinClassNames(cardClassName(mode), className)}
       >
-        <div className="flex items-center gap-3 text-sm text-muted-foreground">
-          <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />
-          <span>Checking Murph legal consent...</span>
-        </div>
+        {mode === "compact" ? (
+          <ConsentSkeleton />
+        ) : (
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />
+            <span>Loading...</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -319,7 +323,7 @@ function LaunchConsentCheckboxes({
               >
                 Consumer Health Data Notice
               </a>
-              , which explains what health data Murph collects
+              , which explains what health data Murph collects and why
             </>
           }
         />
@@ -405,4 +409,28 @@ function cardClassName(mode: HostedLegalConsentCardMode): string {
 
 function joinClassNames(...values: Array<string | null | undefined>): string {
   return values.filter(Boolean).join(" ");
+}
+
+function ConsentSkeleton() {
+  return (
+    <div className="w-full animate-pulse space-y-8">
+      <div className="space-y-6">
+        <div className="flex items-start gap-4">
+          <div className="size-7 shrink-0 rounded-lg bg-muted" />
+          <div className="flex-1 space-y-2 pt-1">
+            <div className="h-3.5 w-full rounded-full bg-muted" />
+            <div className="h-3.5 w-3/4 rounded-full bg-muted" />
+          </div>
+        </div>
+        <div className="flex items-start gap-4">
+          <div className="size-7 shrink-0 rounded-lg bg-muted" />
+          <div className="flex-1 space-y-2 pt-1">
+            <div className="h-3.5 w-full rounded-full bg-muted" />
+            <div className="h-3.5 w-4/5 rounded-full bg-muted" />
+          </div>
+        </div>
+      </div>
+      <div className="h-14 w-full rounded-2xl bg-muted" />
+    </div>
+  );
 }

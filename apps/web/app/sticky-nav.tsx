@@ -49,6 +49,8 @@ export function StickyNav({
         <img
           src="/logo-dark.svg"
           alt="Murph"
+          width={107}
+          height={24}
           className="h-6"
         />
       </Link>

@@ -32,10 +32,10 @@ const steps: {
   {
     id: "labs",
     step: 2,
-    title: "Share labs",
+    title: "Sync labs",
     description:
       "Share blood work or lab results to track biomarkers over time.",
-    cta: "Share labs",
+    cta: "Sync labs",
     href: "/settings",
     icon: LabReportIcon,
   },

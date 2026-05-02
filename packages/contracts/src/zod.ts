@@ -576,6 +576,28 @@ const goalMetricTargetEvaluationSchema = z.union([
   }).strict(),
 ]);
 
+const goalMetricSelectionPolicySchema = z.union([
+  z.object({
+    kind: z.literal("latest-valid"),
+    staleAfterDays: integerSchema(1, 3650).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("latest-lab"),
+    preferCollectedAt: z.literal(true).default(true),
+    preferFasting: z.boolean().optional(),
+    staleAfterDays: integerSchema(1, 3650).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("latest-device-estimate"),
+    staleAfterDays: integerSchema(1, 3650).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("qualified-latest"),
+    requiredQualifiers: measurementQualifiersSchema,
+    staleAfterDays: integerSchema(1, 3650).optional(),
+  }).strict(),
+]);
+
 export const goalMetricTargetSchema = z
   .object({
     targetId: patternedString(SLUG_PATTERN),
@@ -587,6 +609,7 @@ export const goalMetricTargetSchema = z
     unit: patternedString(UNIT_PATTERN),
     highValue: numberSchema().optional(),
     evaluation: goalMetricTargetEvaluationSchema.default({ kind: "selected-value" }),
+    selectionPolicyOverride: goalMetricSelectionPolicySchema.optional(),
     startAt: isoDateString().optional(),
     targetAt: isoDateString().optional(),
     note: boundedString(1, 4000).optional(),
@@ -1706,6 +1729,7 @@ export const goalFrontmatterSchema = withContractMetadata(
       relatedExperimentIds: uniqueArray(idSchema(ID_PREFIXES.experiment), { uniqueItems: true }).optional(),
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+      metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
     })
     .strict(),
   "@murphai/contracts/frontmatter-goal.schema.json",

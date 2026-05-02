@@ -7,7 +7,13 @@ import type {
 } from "../overview.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
-import type { MetricConfidence, MetricGrain, MetricSelectionStatus, MetricStatistic } from "@murphai/health-metrics";
+import type {
+  MetricConfidence,
+  MetricGoalProgressStatus,
+  MetricGrain,
+  MetricSelectionStatus,
+  MetricStatistic,
+} from "@murphai/health-metrics";
 
 export const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica";
 export const BROWSER_VAULT_REPLICA_POLICY_ID = "health-vault-browser";
@@ -107,7 +113,7 @@ export interface BrowserVaultMetricRow {
   observedAt: string;
   pointIds: string[];
   recordIds: string[];
-  rowSchema: "murph.browser-vault.metric-row";
+  rowSchema: "murph.browser-vault.metric-row.v1";
   sourceFamily: string | null;
   sourceKind: string | null;
   sourceLabel: string | null;
@@ -132,7 +138,7 @@ export interface BrowserVaultMetricSelectionRow {
   pointIds: string[];
   recordIds: string[];
   selectedMetricRowId: string | null;
-  selectionSchema: "murph.browser-vault.metric-selection";
+  selectionSchema: "murph.browser-vault.metric-selection.v1";
   sourceLabel: string | null;
   status: MetricSelectionStatus;
   unit: string | null;
@@ -193,7 +199,7 @@ export interface BrowserVaultMetricGoalProgressRow {
   goalId: string;
   metricKey: string;
   selectedPointIds: string[];
-  status: "behind" | "met" | "no_data" | "on_track" | "stale" | "unsupported";
+  status: MetricGoalProgressStatus;
   targetId: string;
   targetValueLabel: string;
   unit: string;

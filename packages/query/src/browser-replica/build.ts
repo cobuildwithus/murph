@@ -5,26 +5,18 @@ import { buildTimeline, type TimelineEntry } from "../timeline.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import {
   buildWearableAssistantSummary,
-  summarizeWearableActivity,
-  summarizeWearableBodyState,
-  summarizeWearableRecovery,
-  summarizeWearableSleep,
   summarizeWearableSourceHealth,
-  type WearableActivitySummary,
   type WearableAssistantSummary,
-  type WearableBodyStateSummary,
-  type WearableConfidenceLevel,
-  type WearableRecoverySummary,
-  type WearableSleepSummary,
   type WearableSourceHealthSummary,
 } from "../wearables.ts";
 import {
-  extractMetricPoints,
+  listMetricDefinitions,
+  parseGoalMetricTargets,
   selectMetricGoalProgress,
   type GoalMetricTarget,
   type MetricPoint,
-  type MetricRowEvidence,
 } from "../metrics/index.ts";
+import { buildMetricProjection } from "../metrics/projection.ts";
 import {
   BODY_PREVIEW_CHARS,
   BROWSER_VAULT_REPLICA_POLICY_ID,
@@ -32,7 +24,6 @@ import {
   EXCLUDED_FAMILIES,
   INCLUDED_FAMILIES,
   METRIC_LOOKBACK_DAYS,
-  SIGNAL_LIMIT,
   SOURCE_HEALTH_LIMIT,
   TIMELINE_LIMIT,
   WEEKLY_SAMPLE_LOOKBACK_DAYS,
@@ -50,6 +41,7 @@ import {
 import {
   createBrowserVaultMetricSelectionRows,
   toBrowserVaultMetricRows,
+  type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
 
 export async function createBrowserVaultReplica(
@@ -65,16 +57,13 @@ export async function createBrowserVaultReplica(
   const timelineRows = buildTimeline(input.vault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(input.vault, generatedAt);
-  const wearableMetricRows = buildWearableMetricEvidence(input.vault);
-  const allMetricPoints = extractMetricPoints({
-    metricRows: wearableMetricRows,
-    sampleSummaries: summarizeDailySamples(input.vault),
-    vault: input.vault,
-  });
+  const allMetricPoints = buildMetricProjection(input.vault).metricPoints;
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) => point.effectiveDate >= cutoff);
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
-  const metricSelectionRows = createBrowserVaultMetricSelectionRows({ generatedAt, metricPoints });
+  const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
+  const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
+  const metricSelectionRows = createBrowserVaultMetricSelectionRows({ generatedAt, metricPoints, metricRowPointIds, requestedMetrics });
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const replicaWithoutVersion: BrowserVaultReplica = {
@@ -139,77 +128,14 @@ function isBrowserVaultIncludedFamily(family: string): boolean {
   return (INCLUDED_FAMILIES as readonly string[]).includes(family);
 }
 
-function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
-  return [
-    ...summarizeWearableSleep(vault, { limit: SIGNAL_LIMIT }).flatMap(sleepMetricEvidence),
-    ...summarizeWearableRecovery(vault, { limit: SIGNAL_LIMIT }).flatMap(recoveryMetricEvidence),
-    ...summarizeWearableActivity(vault, { limit: SIGNAL_LIMIT }).flatMap(activityMetricEvidence),
-    ...summarizeWearableBodyState(vault, { limit: SIGNAL_LIMIT }).flatMap(bodyStateMetricEvidence),
-  ];
-}
-
-function sleepMetricEvidence(summary: WearableSleepSummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "total-sleep-minutes", summary.totalSleepMinutes.selection.value, summary.totalSleepMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "sleep-score", summary.sleepScore.selection.value, summary.sleepScore.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "deep-sleep-minutes", summary.deepMinutes.selection.value, summary.deepMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "rem-sleep-minutes", summary.remMinutes.selection.value, summary.remMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "hrv-rmssd", summary.hrv.selection.value, summary.hrv.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
-    metricEvidence(summary.date, "spo2", summary.spo2.selection.value, summary.spo2.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
-  ];
-}
-
-function recoveryMetricEvidence(summary: WearableRecoverySummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "readiness-score", summary.readinessScore.selection.value, summary.readinessScore.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
-    metricEvidence(summary.date, "resting-heart-rate", summary.restingHeartRate.selection.value, summary.restingHeartRate.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
-    metricEvidence(summary.date, "hrv-rmssd", summary.hrv.selection.value, summary.hrv.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
-  ];
-}
-
-function activityMetricEvidence(summary: WearableActivitySummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "steps", summary.steps.selection.value, summary.steps.selection.unit, summary.summaryConfidence.level, "activity-summary"),
-    metricEvidence(summary.date, "activity-minutes", summary.sessionMinutes.selection.value, summary.sessionMinutes.selection.unit, summary.summaryConfidence.level, "activity-summary"),
-    metricEvidence(summary.date, "estimated-vo2-max", summary.estimatedVo2Max.selection.value, summary.estimatedVo2Max.selection.unit, summary.summaryConfidence.level, "activity-summary"),
-  ];
-}
-
-function bodyStateMetricEvidence(summary: WearableBodyStateSummary): MetricRowEvidence[] {
-  return [
-    metricEvidence(summary.date, "body-weight", summary.weightKg.selection.value, summary.weightKg.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
-    metricEvidence(summary.date, "body-fat-percentage", summary.bodyFatPercentage.selection.value, summary.bodyFatPercentage.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
-  ];
-}
-
-function metricEvidence(
-  date: string,
-  metricKey: string,
-  value: number | null,
-  unit: string | null,
-  confidence: WearableConfidenceLevel,
-  sourceKind: MetricRowEvidence["sourceKind"],
-): MetricRowEvidence {
-  return {
-    confidence,
-    date,
-    metricKey,
-    recordIds: [`${sourceKind}:${metricKey}:${date}`],
-    sourceKind,
-    sourceLabel: "Wearable summary",
-    unit,
-    value,
-  };
-}
-
 function buildMetricGoalProgressRows(
   entities: readonly CanonicalEntity[],
   points: readonly MetricPoint[],
   now: string,
 ): BrowserVaultMetricGoalProgressRow[] {
   return entities
-    .filter((entity) => entity.family === "goal")
-    .flatMap((entity) => readGoalMetricTargets(entity).map((target) =>
+    .filter(isActiveGoalEntity)
+    .flatMap((entity) => parseGoalMetricTargets(entity).map((target) =>
       selectMetricGoalProgress({
         goalId: entity.entityId,
         now,
@@ -219,60 +145,64 @@ function buildMetricGoalProgressRows(
     ));
 }
 
-function readGoalMetricTargets(entity: CanonicalEntity): GoalMetricTarget[] {
+function collectRequestedBrowserVaultMetrics(entities: readonly CanonicalEntity[]): BrowserVaultRequestedMetric[] {
+  return dedupeRequestedMetrics([
+    ...listMetricDefinitions().flatMap((definition) => definition.biomarkerKey
+      ? [{ metricKey: definition.key, biomarkerKey: definition.biomarkerKey }]
+      : []),
+    ...entities.flatMap(privateMetricBindingRequests),
+    ...entities.filter(isActiveGoalEntity).flatMap((entity) =>
+      parseGoalMetricTargets(entity).map((target) => ({
+        metricKey: target.metricKey,
+        biomarkerKey: target.biomarkerKey ?? null,
+      }))
+    ),
+  ]);
+}
+
+function privateMetricBindingRequests(entity: CanonicalEntity): BrowserVaultRequestedMetric[] {
   const source = entity.frontmatter ?? entity.attributes;
-  const rawTargets = Array.isArray(source.metricTargets) ? source.metricTargets : [];
-  return rawTargets.flatMap((target, index) => {
-    if (!target || typeof target !== "object" || Array.isArray(target)) return [];
-    const record = target as Record<string, unknown>;
-    const metricKey = readString(record.metricKey);
-    const comparator = readComparator(record.comparator);
-    const value = readNumber(record.value);
-    const unit = readString(record.unit);
-    if (!metricKey || !comparator || value === null || !unit) return [];
-    const targetId = readString(record.targetId) ?? `${entity.entityId}:metric-target:${index + 1}`;
+  const rawBindings = Array.isArray(source.privateMetricBindings) ? source.privateMetricBindings : [];
+  const entityKey = readOptionalString(source.key);
+  const entityBiomarkerKey = entityKey?.startsWith("biomarker:") ? entityKey : null;
+  return rawBindings.flatMap((binding) => {
+    if (!binding || typeof binding !== "object" || Array.isArray(binding)) return [];
+    const record = binding as Record<string, unknown>;
+    if (readOptionalString(record.source) !== "metric") return [];
+    const metricKey = readOptionalString(record.metricKey);
+    if (!metricKey) return [];
     return [{
-      biomarkerKey: readString(record.biomarkerKey) ?? undefined,
-      comparator,
-      evaluation: readGoalTargetEvaluation(record.evaluation),
-      highValue: readNumber(record.highValue) ?? undefined,
-      kind: "metric",
       metricKey,
-      note: readString(record.note) ?? undefined,
-      targetAt: readString(record.targetAt) ?? undefined,
-      targetId,
-      unit,
-      value,
-    } satisfies GoalMetricTarget];
+      biomarkerKey: readOptionalString(record.biomarkerKey) ?? entityBiomarkerKey,
+    }];
   });
 }
 
-function readGoalTargetEvaluation(value: unknown): GoalMetricTarget["evaluation"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "selected-value" };
-  const record = value as Record<string, unknown>;
-  const kind = readString(record.kind);
-  if (kind === "latest-lab") return { kind };
-  if (kind === "rolling-window") {
-    const statistic = readString(record.statistic);
-    const windowDays = readNumber(record.windowDays);
-    if ((statistic === "mean" || statistic === "median") && windowDays !== null) {
-      return { kind, statistic, windowDays };
-    }
+function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[]): BrowserVaultRequestedMetric[] {
+  const byKey = new Map<string, BrowserVaultRequestedMetric>();
+  for (const metric of metrics) {
+    if (!metric.metricKey) continue;
+    byKey.set(`${metric.metricKey}\u001f${metric.biomarkerKey ?? ""}`, {
+      metricKey: metric.metricKey,
+      biomarkerKey: metric.biomarkerKey ?? null,
+    });
   }
-  return { kind: "selected-value" };
+  return [...byKey.values()].sort((left, right) =>
+    left.metricKey.localeCompare(right.metricKey) || (left.biomarkerKey ?? "").localeCompare(right.biomarkerKey ?? "")
+  );
 }
 
-function readString(value: unknown): string | null {
+function isActiveGoalEntity(entity: CanonicalEntity): boolean {
+  if (entity.family !== "goal") return false;
+  const source = entity.frontmatter ?? entity.attributes;
+  const status = readOptionalString(source.status) ?? entity.status;
+  return status === "active";
+}
+
+function readOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function readNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function readComparator(value: unknown): GoalMetricTarget["comparator"] | null {
-  return value === "<" || value === "<=" || value === ">" || value === ">=" || value === "between" ? value : null;
-}
 
 function projectEntity(entity: CanonicalEntity): BrowserVaultEntity {
   return {

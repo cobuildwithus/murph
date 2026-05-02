@@ -161,6 +161,7 @@
       "uniqueItems": true
     },
     "metricTargets": {
+      "maxItems": 20,
       "type": "array",
       "items": {
         "type": "object",
@@ -202,6 +203,9 @@
             "type": "number"
           },
           "evaluation": {
+            "default": {
+              "kind": "selected-value"
+            },
             "anyOf": [
               {
                 "type": "object",
@@ -258,6 +262,118 @@
               }
             ]
           },
+          "selectionPolicyOverride": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "latest-valid"
+                  },
+                  "staleAfterDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "latest-lab"
+                  },
+                  "preferCollectedAt": {
+                    "default": true,
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "preferFasting": {
+                    "type": "boolean"
+                  },
+                  "staleAfterDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
+                  }
+                },
+                "required": [
+                  "kind",
+                  "preferCollectedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "latest-device-estimate"
+                  },
+                  "staleAfterDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "qualified-latest"
+                  },
+                  "requiredQualifiers": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                    },
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    }
+                  },
+                  "staleAfterDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
+                  }
+                },
+                "required": [
+                  "kind",
+                  "requiredQualifiers"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
           "startAt": {
             "type": "string",
             "format": "date"
@@ -278,11 +394,11 @@
           "metricKey",
           "comparator",
           "value",
-          "unit"
+          "unit",
+          "evaluation"
         ],
         "additionalProperties": false
       },
-      "maxItems": 20,
       "uniqueItems": true
     }
   },
