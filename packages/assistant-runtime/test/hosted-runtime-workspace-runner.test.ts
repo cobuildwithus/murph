@@ -935,7 +935,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(logRequests[0]?.entries[0]?.redactedJson, {
         blockCodes: ["lane.gap"],
         blockedCount: 1,
-        checkpointed: false,
+        checkpointed: true,
         conversationSeqEnd: "0",
         conversationSeqStart: "0",
         fetchedCount: 1,
