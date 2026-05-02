@@ -132,7 +132,7 @@ test("SidebarChatWithMurphAction prefers the member assigned Murph text number",
   });
 });
 
-test("SidebarChatWithMurphAction stays disabled when no connected chat channel exists", async () => {
+test("SidebarChatWithMurphAction renders no direct contact route when no connected chat channel exists", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -158,8 +158,8 @@ test("SidebarChatWithMurphAction stays disabled when no connected chat channel e
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /disabled=""/);
   assert.match(markup, /data-slot="sidebar-menu-button"/);
+  assert.doesNotMatch(markup, /disabled=""/);
   assert.doesNotMatch(markup, /href=/);
 });
 
