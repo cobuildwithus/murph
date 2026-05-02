@@ -530,7 +530,7 @@ export async function fetchHostedMailboxPayload(input: {
       ? null
       : {
         code: payloadResult.unavailableCode,
-        retryable: false,
+        retryable: payloadResult.retryable,
       },
   };
 }
@@ -555,6 +555,7 @@ async function readHostedMailboxPayloadAvailability(input: {
   userId: string;
 }): Promise<{
   payload: HostedMailboxPayloadRecord | null;
+  retryable: boolean;
   unavailableCode: "expired" | "not_found";
 }> {
   const prisma = input.prisma ?? getPrisma();
@@ -576,6 +577,7 @@ async function readHostedMailboxPayloadAvailability(input: {
   if (payloadRef && resolveHostedMailboxPayloadRef(payloadRef) !== mailboxItemId) {
     return {
       payload: null,
+      retryable: false,
       unavailableCode: "not_found",
     };
   }
@@ -592,6 +594,7 @@ async function readHostedMailboxPayloadAvailability(input: {
   if (!item) {
     return {
       payload: null,
+      retryable: false,
       unavailableCode: "not_found",
     };
   }
@@ -599,6 +602,7 @@ async function readHostedMailboxPayloadAvailability(input: {
   if (isHostedMailboxItemExpired(item, fetchedAt)) {
     return {
       payload: null,
+      retryable: false,
       unavailableCode: "expired",
     };
   }
@@ -624,6 +628,7 @@ async function readHostedMailboxPayloadAvailability(input: {
 
   return {
     payload: row ? projectHostedMailboxPayload(row) : null,
+    retryable: row === null,
     unavailableCode: "not_found",
   };
 }

@@ -68,6 +68,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare. | `packages/assistant-runtime/**` | Medium | 2026-04-30 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |
 | `packages/gateway-local/README.md` | Local gateway runtime and projection-store ownership boundary. | `packages/gateway-local/**` | Medium | 2026-04-06 |
+| `packages/health-metrics/README.md` | Neutral MetricPoint contracts, health metric definitions, unit normalization, display formatting, and selection policy. | `packages/health-metrics/**` | Medium | 2026-05-02 |
 | `packages/hosted-execution/README.md` | Shared hosted execution contracts, auth, env, and client seam. | `packages/hosted-execution/**` | Medium | 2026-03-28 |
 | `packages/messaging-ingress/README.md` | Shared stateless messaging ingress boundary. | `packages/messaging-ingress/**` | Medium | 2026-04-02 |
 | `packages/runtime-state/README.md` | `.runtime` taxonomy, portability, and local/hosted state rules. | `packages/runtime-state/**` | Medium | 2026-04-01 |

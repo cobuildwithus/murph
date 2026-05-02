@@ -93,6 +93,7 @@ const baseSmokeImportPaths = [
   "packages/importers/dist/core-port.js",
   "packages/device-syncd/dist/index.js",
   "packages/device-syncd/dist/client.js",
+  "packages/health-metrics/dist/index.js",
   "packages/query/dist/index.js",
   "packages/inboxd/dist/index.js",
   "packages/parsers/dist/index.js",

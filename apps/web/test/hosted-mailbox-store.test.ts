@@ -844,6 +844,40 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(JSON.stringify(result)).not.toContain("cipher_ref_1");
     expect(hostedMailboxPayload.findFirst).not.toHaveBeenCalled();
   });
+
+  it("reports missing sidecar payload rows as retryable", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        id: "mailbox_ref_1",
+        payloadInlineCiphertext: null,
+        payloadRef: MAILBOX_REF_1_PAYLOAD_REF,
+      })),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate({
+      findFirst: vi.fn<HostedMailboxPayloadFindFirst>(async () => null),
+    });
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    const result = await fetchHostedMailboxPayload({
+      dedupeKey: "dedupe_1",
+      mailboxItemId: "mailbox_ref_1",
+      payloadRef: MAILBOX_REF_1_PAYLOAD_REF,
+      prisma,
+      requestId: "request_payload_missing_1",
+      userId: "member_mailbox_1",
+    });
+
+    expect(result).toMatchObject({
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: true,
+      },
+    });
+  });
 });
 
 interface HostedMailboxCreateArgs {

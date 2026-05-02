@@ -160,6 +160,12 @@
       "@murphai/importers/*": [
         "packages/importers/src/*"
       ],
+      "@murphai/health-metrics": [
+        "packages/health-metrics/src/index.ts"
+      ],
+      "@murphai/health-metrics/*": [
+        "packages/health-metrics/src/*"
+      ],
       "@murphai/query": [
         "packages/query/src/index.ts"
       ],

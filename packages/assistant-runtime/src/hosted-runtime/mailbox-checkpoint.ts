@@ -116,8 +116,9 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     previousState,
     importResult.state,
   );
+  const shouldCheckpoint = stateChanged || Boolean(importResult.nextRetryAt);
 
-  if (!stateChanged) {
+  if (!shouldCheckpoint) {
     return {
       afterCheckpointEffects: [],
       checkpoint: null,
@@ -128,10 +129,12 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     };
   }
 
-  await writeHostedMailboxImportState({
-    state: importResult.state,
-    vaultRoot: input.vaultRoot,
-  });
+  if (stateChanged) {
+    await writeHostedMailboxImportState({
+      state: importResult.state,
+      vaultRoot: input.vaultRoot,
+    });
+  }
 
   let checkpoint: HostedWorkspaceCheckpointResponse;
   try {
@@ -159,14 +162,16 @@ export async function importHostedMailboxPrefixAndCheckpoint(
       throw new HostedMailboxImportCheckpointConflictError(checkpoint);
     }
   } catch (error) {
-    await writeHostedMailboxImportState({
-      state: previousState,
-      vaultRoot: input.vaultRoot,
-    });
-    await restoreHostedSystemMailboxCheckpointRollbackState({
-      state: previousSystemMailboxState,
-      vaultRoot: input.vaultRoot,
-    });
+    if (stateChanged) {
+      await writeHostedMailboxImportState({
+        state: previousState,
+        vaultRoot: input.vaultRoot,
+      });
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        state: previousSystemMailboxState,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     throw error;
   }
 
@@ -176,7 +181,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     importResult,
     previousState,
     state: importResult.state,
-    stateChanged: true,
+    stateChanged,
   };
 }
 

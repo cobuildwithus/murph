@@ -35,6 +35,7 @@ repo/
     inboxd/
     inbox-services/
     parsers/
+    health-metrics/
     query/
     vault-usecases/
     health-commons/
@@ -76,7 +77,8 @@ repo/
 - `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
 - `packages/inbox-services` owns lower-level inbox runtime, read, and promotion service composition used by CLI/assistant flows without becoming the canonical inbox-capture owner.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
-- `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection under `.runtime/projections/query.sqlite` that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, and exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`.
+- `packages/health-metrics` owns neutral MetricPoint contracts, health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports.
+- `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection under `.runtime/projections/query.sqlite` that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`, and adapts canonical/wearable evidence through `@murphai/health-metrics` MetricPoints.
 - `packages/vault-usecases` owns CLI/headless vault usecase orchestration over core, importers, and query. It exposes the neutral service surface, lazy runtime loaders, command-shaped input normalization, and assistant-safe vault path helpers used by CLI and headless runtimes. It is not a canonical write owner, query-model owner, inbox/device runtime owner, assistant/session owner, or broad re-export layer.
 - `packages/health-commons` owns the public Health Commons for protocol, biomarker, source, and source-person pages, plus the generated catalogs and aggregate outcome summaries consumed by local and hosted surfaces.
 - `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, assistant-specific vault/inbox/knowledge tools, and the local gateway adapter used by daemon and hosted runtimes.

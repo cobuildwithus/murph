@@ -38,6 +38,9 @@
       "path": "./packages/device-syncd"
     },
     {
+      "path": "./packages/health-metrics"
+    },
+    {
       "path": "./packages/query"
     },
     {

@@ -8,7 +8,9 @@
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
   "include": [
-    "src/**/*.ts"
+    "*.ts",
+    "src/**/*.ts",
+    "test/**/*.ts"
   ],
   "exclude": [
     "dist"
