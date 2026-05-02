@@ -489,6 +489,7 @@ function parseMetricSelectionWarning(
 
   if (
     code !== "LOW_SAMPLE_COUNT" &&
+    code !== "COMPARATOR_VALUE" &&
     code !== "MIXED_SOURCES" &&
     code !== "SOURCE_STALE" &&
     code !== "UNIT_NOT_NORMALIZED" &&
