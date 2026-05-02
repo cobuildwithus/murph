@@ -6,11 +6,14 @@ import {
   serializeHostedSecureBoxEnvelope,
 } from "@murphai/runtime-state";
 import {
+  buildHostedMailboxPayloadScope,
+  buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  createHostedMailboxEncryptionEnvironmentFromIngressRootResolver,
   createHostedMailboxEncryptionEnvironmentFromIngressRoot,
   decryptHostedMailboxPayloadCiphertext,
 } from "../src/hosted-mailbox-encryption.ts";
@@ -42,24 +45,14 @@ describe("hosted mailbox secure-box encryption", () => {
         payloadStorage,
         userId: "member_mailbox_1",
       };
+      const scope = buildHostedMailboxPayloadScope(metadata.payloadStorage);
+      const secureBoxAad = buildHostedMailboxPayloadSecureBoxAad(metadata);
       const ciphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
         aad: buildHostedSecureBoxAad({
           domain: "ingress",
-          field,
+          ...secureBoxAad,
           lane: "mailbox-payload",
-          objectKey: JSON.stringify({
-            dedupeKey: metadata.dedupeKey,
-            kind: metadata.kind,
-            lane: metadata.lane,
-            occurredAt: metadata.occurredAt,
-            payloadSchema: metadata.payloadSchema,
-            payloadStorage,
-          }),
-          purpose: "hosted-mailbox-payload",
-          rowId: metadata.itemId,
-          scope: `hosted-mailbox-payload:${field}`,
-          sequence: metadata.laneSeq,
-          table: "hosted_mailbox_item",
+          scope,
           userId: metadata.userId,
         }),
         domain: "ingress",
@@ -70,7 +63,7 @@ describe("hosted mailbox secure-box encryption", () => {
         })),
         rootKey,
         rootKeyId,
-        scope: `hosted-mailbox-payload:${field}`,
+        scope,
       }));
 
       await expect(decryptHostedMailboxPayloadCiphertext({
@@ -82,5 +75,64 @@ describe("hosted mailbox secure-box encryption", () => {
         kind: "member.channels.updated",
       });
     }
+  });
+
+  it("requests the exact envelope root key id when decrypting mailbox payloads", async () => {
+    const envelopeRootKey = Uint8Array.from({ length: 32 }, (_, index) => 33 + index);
+    const envelopeRootKeyId = "udrk:ingress:exact-envelope-root";
+    const resolvedRootKeyIds: string[] = [];
+    const environment = createHostedMailboxEncryptionEnvironmentFromIngressRootResolver({
+      async readIngressRoot(rootKeyId) {
+        resolvedRootKeyIds.push(rootKeyId);
+        if (rootKeyId !== envelopeRootKeyId) {
+          throw new Error(`Unexpected hosted mailbox ingress root ${rootKeyId}.`);
+        }
+        return {
+          rootKey: envelopeRootKey,
+          rootKeyId: envelopeRootKeyId,
+        };
+      },
+    });
+    const metadata = {
+      dedupeKey: "event:hosted-mailbox-exact-envelope-root",
+      itemId: "item:hosted-mailbox-exact-envelope-root",
+      kind: "member.channels.updated",
+      lane: "system",
+      laneSeq: "3",
+      occurredAt: "2026-05-01T00:00:00.000Z",
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      payloadStorage: "inline" as const,
+      userId: "member_mailbox_1",
+    };
+    const scope = buildHostedMailboxPayloadScope(metadata.payloadStorage);
+    const secureBoxAad = buildHostedMailboxPayloadSecureBoxAad(metadata);
+    const ciphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
+      aad: buildHostedSecureBoxAad({
+        domain: "ingress",
+        ...secureBoxAad,
+        lane: "mailbox-payload",
+        scope,
+        userId: metadata.userId,
+      }),
+      domain: "ingress",
+      lane: "mailbox-payload",
+      plaintext: new TextEncoder().encode(JSON.stringify({
+        field: "hosted-mailbox-inline-payload",
+        kind: "member.channels.updated",
+      })),
+      rootKey: envelopeRootKey,
+      rootKeyId: envelopeRootKeyId,
+      scope,
+    }));
+
+    await expect(decryptHostedMailboxPayloadCiphertext({
+      ciphertext,
+      environment,
+      metadata,
+    })).resolves.toEqual({
+      field: "hosted-mailbox-inline-payload",
+      kind: "member.channels.updated",
+    });
+    expect(resolvedRootKeyIds).toEqual([envelopeRootKeyId]);
   });
 });

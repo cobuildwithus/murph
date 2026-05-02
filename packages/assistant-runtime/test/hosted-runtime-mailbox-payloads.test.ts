@@ -83,7 +83,7 @@ test("fetches sidecar mailbox ciphertext with a generated request id and item id
   );
   assert.deepEqual(result, {
     payloadCiphertext: "ciphertext_sidecar_synthetic",
-    payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
     requestId: payloadFetchRequests[0]?.requestId,
     source: "sidecar",
     status: "resolved",

@@ -11,6 +11,7 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
@@ -1238,7 +1239,7 @@ function createMailboxPort(input: {
           createdAt: TEST_NOW,
           mailboxItemId: request.mailboxItemId,
           payloadCiphertext: "ciphertext_synthetic_sidecar",
-          payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+          payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
           userId: TEST_USER_ID,
         },
       };

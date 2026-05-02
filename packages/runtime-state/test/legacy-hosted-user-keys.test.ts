@@ -16,7 +16,7 @@ import {
   unwrapHostedUserRootKeyForKind,
   unwrapHostedUserRootKeyRecipient,
   wrapHostedUserRootKeyRecipient,
-} from "../src/hosted-user-keys.ts";
+} from "../src/legacy-hosted-user-keys.ts";
 
 describe("parseHostedUserRootKeyEnvelope", () => {
   it("rejects duplicate recipient kinds", async () => {
