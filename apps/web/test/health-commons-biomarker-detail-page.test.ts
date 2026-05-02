@@ -168,6 +168,24 @@ describe("BiomarkerPage", () => {
     }));
   });
 
+  it("redirects the short RHR overview route to the canonical biomarker page", async () => {
+    const { default: BiomarkerOverviewPage } = await import(
+      "../app/biomarkers/[biomarkerId]/page"
+    );
+
+    await expect(BiomarkerOverviewPage({
+      params: Promise.resolve({
+        biomarkerId: "rhr",
+      }),
+    })).rejects.toThrow("NEXT_REDIRECT:/biomarkers/resting-heart-rate");
+
+    expect(mocks.redirect).toHaveBeenCalledWith("/biomarkers/resting-heart-rate");
+    expect(resolveHealthCommonsBiomarkerDetail("rhr")).toEqual(expect.objectContaining({
+      key: "biomarker:resting-heart-rate",
+      routeId: "resting-heart-rate",
+    }));
+  });
+
   it("redirects the short SpO₂ research route to the canonical research subpath, preserving the tab", async () => {
     const { default: BiomarkerResearchPage } = await import(
       "../app/biomarkers/[biomarkerId]/research/page"

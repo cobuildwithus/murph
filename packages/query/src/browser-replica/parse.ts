@@ -10,7 +10,11 @@ import {
   type BrowserVaultEntityLink,
   type BrowserVaultMetricDayRow,
   type BrowserVaultMetricDomain,
+  type BrowserVaultMetricPoint,
+  type BrowserVaultMetricPointGrain,
+  type BrowserVaultMetricPointStatistic,
   type BrowserVaultMetricRow,
+  type BrowserVaultMetricSelectionRow,
   type BrowserVaultReplica,
   type BrowserVaultReplicaPolicy,
   type BrowserVaultReplicaSource,
@@ -42,6 +46,12 @@ export function parseBrowserVaultReplica(
     ),
     metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) =>
       parseMetricRow(entry, `${label}.metricRows[${index}]`)
+    ),
+    metricPoints: readOptionalArray(record.metricPoints, `${label}.metricPoints`).map((entry, index) =>
+      parseMetricPoint(entry, `${label}.metricPoints[${index}]`)
+    ),
+    metricSelectionRows: readOptionalArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) =>
+      parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)
     ),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
@@ -134,6 +144,68 @@ function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
     sourceKind: readNullableString(record.sourceKind),
     unit: readNullableString(record.unit),
     value: readNullableFiniteNumber(record.value),
+  };
+}
+
+function parseMetricPoint(value: unknown, label: string): BrowserVaultMetricPoint {
+  const record = requireRecord(value, label);
+  const pointSchema = requireString(record.pointSchema, `${label}.pointSchema`);
+
+  if (pointSchema !== "murph.browser-vault.metric-point.v1") {
+    throw new TypeError(`${label}.pointSchema must be murph.browser-vault.metric-point.v1.`);
+  }
+
+  return {
+    biomarkerKey: readNullableString(record.biomarkerKey),
+    confidence: requireConfidenceLevel(record.confidence, `${label}.confidence`),
+    date: requireString(record.date, `${label}.date`),
+    grain: requireMetricPointGrain(record.grain, `${label}.grain`),
+    id: requireString(record.id, `${label}.id`),
+    metricKey: requireString(record.metricKey, `${label}.metricKey`),
+    observedAt: requireString(record.observedAt, `${label}.observedAt`),
+    pointSchema,
+    recordIds: requireStringArray(record.recordIds, `${label}.recordIds`),
+    sourceFamily: readNullableString(record.sourceFamily),
+    sourceKind: readNullableString(record.sourceKind),
+    sourceLabel: readNullableString(record.sourceLabel),
+    sourceMetricRowId: requireString(record.sourceMetricRowId, `${label}.sourceMetricRowId`),
+    statistic: requireMetricPointStatistic(record.statistic, `${label}.statistic`),
+    unit: readNullableString(record.unit),
+    value: requireFiniteNumber(record.value, `${label}.value`),
+    valueLabel: requireString(record.valueLabel, `${label}.valueLabel`),
+  };
+}
+
+function parseMetricSelectionRow(value: unknown, label: string): BrowserVaultMetricSelectionRow {
+  const record = requireRecord(value, label);
+  const selectionSchema = requireString(record.selectionSchema, `${label}.selectionSchema`);
+  const status = requireString(record.status, `${label}.status`);
+
+  if (selectionSchema !== "murph.browser-vault.metric-selection.v1") {
+    throw new TypeError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.v1.`);
+  }
+  if (status !== "ready" && status !== "stale") {
+    throw new TypeError(`${label}.status must be ready or stale.`);
+  }
+
+  return {
+    biomarkerKey: readNullableString(record.biomarkerKey),
+    confidence: requireConfidenceLevel(record.confidence, `${label}.confidence`),
+    date: requireString(record.date, `${label}.date`),
+    id: requireString(record.id, `${label}.id`),
+    metricKey: requireString(record.metricKey, `${label}.metricKey`),
+    observedAt: requireString(record.observedAt, `${label}.observedAt`),
+    pointIds: requireStringArray(record.pointIds, `${label}.pointIds`),
+    recordIds: requireStringArray(record.recordIds, `${label}.recordIds`),
+    selectionSchema,
+    sourceLabel: readNullableString(record.sourceLabel),
+    status,
+    unit: readNullableString(record.unit),
+    value: requireFiniteNumber(record.value, `${label}.value`),
+    valueLabel: requireString(record.valueLabel, `${label}.valueLabel`),
+    warnings: requireArray(record.warnings, `${label}.warnings`).map((entry, index) =>
+      parseMetricSelectionWarning(entry, `${label}.warnings[${index}]`)
+    ),
   };
 }
 
@@ -265,6 +337,14 @@ function requireArray(value: unknown, label: string): unknown[] {
   return value.slice();
 }
 
+function readOptionalArray(value: unknown, label: string): unknown[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  return requireArray(value, label);
+}
+
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
@@ -362,6 +442,62 @@ function requireConfidenceLevel(value: unknown, label: string): WearableConfiden
   }
 
   throw new TypeError(`${label} must be a wearable confidence level.`);
+}
+
+function requireMetricPointGrain(value: unknown, label: string): BrowserVaultMetricPointGrain {
+  const text = requireString(value, label);
+
+  if (
+    text === "instant" ||
+    text === "event" ||
+    text === "day" ||
+    text === "week" ||
+    text === "month" ||
+    text === "window"
+  ) {
+    return text;
+  }
+
+  throw new TypeError(`${label} must be a metric point grain.`);
+}
+
+function requireMetricPointStatistic(value: unknown, label: string): BrowserVaultMetricPointStatistic {
+  const text = requireString(value, label);
+
+  if (
+    text === "value" ||
+    text === "latest" ||
+    text === "mean" ||
+    text === "median" ||
+    text === "min" ||
+    text === "max" ||
+    text === "sum" ||
+    text === "count"
+  ) {
+    return text;
+  }
+
+  throw new TypeError(`${label} must be a metric point statistic.`);
+}
+
+function parseMetricSelectionWarning(
+  value: unknown,
+  label: string,
+): BrowserVaultMetricSelectionRow["warnings"][number] {
+  const record = requireRecord(value, label);
+  const code = requireString(record.code, `${label}.code`);
+
+  if (
+    code !== "LOW_SAMPLE_COUNT" &&
+    code !== "MIXED_SOURCES" &&
+    code !== "SOURCE_STALE" &&
+    code !== "UNIT_NOT_NORMALIZED" &&
+    code !== "METHOD_CHANGED"
+  ) {
+    throw new TypeError(`${label}.code is not a supported metric selection warning code.`);
+  }
+
+  return { code, message: requireString(record.message, `${label}.message`) };
 }
 
 function requireTimelineEntryType(value: unknown, label: string): TimelineEntry["entryType"] {

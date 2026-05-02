@@ -91,5 +91,21 @@ describe("hosted email ingress contract", () => {
         sizeBytes: 321,
       })),
     })).toThrow(/attachmentSummaries must include at most 12 items/u);
+    expect(() => parseHostedEmailIngressWakeAppendRequest({
+      ...base,
+      messageId: "x".repeat(513),
+    })).toThrow(/messageId must be at most 512 characters/u);
+    expect(() => parseHostedEmailIngressWakeAppendRequest({
+      ...base,
+      selfAddress: "x".repeat(161),
+    })).toThrow(/selfAddress must be at most 160 characters/u);
+    expect(() => parseHostedEmailIngressWakeAppendRequest({
+      ...base,
+      threadKey: "x".repeat(513),
+    })).toThrow(/threadKey must be at most 512 characters/u);
+    expect(() => parseHostedEmailIngressWakeAppendRequest({
+      ...base,
+      threadTarget: "x".repeat(2_049),
+    })).toThrow(/threadTarget must be at most 2048 characters/u);
   });
 });

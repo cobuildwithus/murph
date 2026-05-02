@@ -122,25 +122,28 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await maybeSendHostedLinqIngressReadReceipt({
-      plan,
-      signal: input.signal,
-    });
-
     responseReason = plan.response.reason ?? null;
-    await maybeHandoffHostedExecutionWebhookWake({
+    const wakeHandoff = await maybeHandoffHostedExecutionWebhookWake({
       eventId: event.event_id,
       mailboxItemId: plan.wakeMailboxItemId,
       response: plan.response,
       source: "linq",
       userId: plan.wakeUserId,
     });
+
+    await maybeSendHostedLinqIngressReadReceipt({
+      plan,
+      signal: input.signal,
+    });
+
     finishHostedOnboardingTiming(timing, "completed", {
       duplicate: Boolean(plan.response.duplicate),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+      wakeHandoffReason: wakeHandoff?.reason ?? null,
+      wakeHandoffStarted: wakeHandoff?.started ?? false,
     });
     return plan.response;
   } catch (error) {

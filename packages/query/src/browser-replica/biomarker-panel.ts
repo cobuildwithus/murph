@@ -4,6 +4,10 @@ import type {
   BrowserVaultQueryClient,
   BrowserVaultSourceHealthRow,
 } from "./shared.ts";
+import {
+  browserVaultMetricPointToMetricRow,
+  resolveBrowserVaultMetricKey,
+} from "./metric-points.ts";
 
 export const BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA = "murph.browser-vault-biomarker-panel.v1";
 
@@ -255,8 +259,18 @@ function buildMetricPanel(input: {
   binding: BrowserVaultBiomarkerMetricBinding;
   input: SelectBrowserVaultBiomarkerPanelInput;
 }): BrowserVaultBiomarkerMetricPanel {
-  const rows = input.input.client?.metrics
-    .series({ domain: input.binding.domain, metric: input.binding.metric })
+  const metricKey = resolveBrowserVaultMetricKey(input.binding);
+  const metricPointRows = metricKey
+    ? input.input.client?.metricPoints
+      .series({ metricKey })
+      .map((point) => browserVaultMetricPointToMetricRow({
+        binding: input.binding,
+        point,
+      })) ?? []
+    : [];
+  const rows = (metricPointRows.length > 0
+    ? metricPointRows
+    : input.input.client?.metrics.series({ domain: input.binding.domain, metric: input.binding.metric }) ?? [])
     .filter(hasNumericMetricValue)
     .sort((left, right) => left.date.localeCompare(right.date)) ?? [];
   const latest = rows.at(-1) ?? null;

@@ -661,7 +661,42 @@ describe("hosted email worker ingress", () => {
     );
   });
 
-  it("fails email ingress when the durable workflow handoff fails", async () => {
+  it("uses the Worker execution context for post-append email workflow handoff", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const waitUntil = vi.fn();
+
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const env = createWorkerEnv(bucket);
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      to: "assistant@mail.example.test",
+    }, env, { waitUntil });
+
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mailboxItemId: "mailbox_item_123",
+      }),
+    );
+  });
+
+  it("keeps email ingress committed when the durable workflow handoff fails", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
 
     mocks.startHostedEmailIngressNudgeWorkflowInWeb.mockRejectedValueOnce(
@@ -688,7 +723,7 @@ describe("hosted email worker ingress", () => {
         to: "assistant@mail.example.test",
       }),
       to: "assistant@mail.example.test",
-    }, env)).rejects.toThrow("workflow unavailable");
+    }, env)).resolves.toBeUndefined();
 
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
@@ -700,9 +735,10 @@ describe("hosted email worker ingress", () => {
           reason: "runner-nudge-workflow-start-failed",
         }),
         level: "warn",
-        message: "Hosted email runner nudge workflow failed to start after appending the canonical ingress event.",
+        message: "Hosted email runner nudge workflow failed to start after appending the canonical ingress event; ingress append remains committed.",
       }),
     );
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
   it("deletes newly written raw email blobs when the canonical append fails with a permanent client HTTP response", async () => {

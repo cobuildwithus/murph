@@ -1,4 +1,3 @@
-import { hostedOnboardingError } from "./errors";
 import {
   startHostedWebhookNudgeWorkflow,
 } from "./webhook-workflow-start";
@@ -10,15 +9,27 @@ import {
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 
+export type HostedWebhookWakeHandoffResult =
+  | {
+      reason: "workflow-started";
+      runId: string;
+      started: true;
+    }
+  | {
+      errorName?: string | null;
+      reason: "missing-mailbox-item" | "workflow-start-failed";
+      started: false;
+    };
+
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   eventId: string;
   mailboxItemId?: string;
   response: HostedWebhookServiceResponse;
   source: "linq" | "telegram";
   userId?: string;
-}): Promise<void> {
+}): Promise<HostedWebhookWakeHandoffResult | null> {
   if (input.response.reason !== "wake-appended-active-member") {
-    return;
+    return null;
   }
 
   const handoffTiming = startHostedOnboardingTiming(
@@ -33,7 +44,13 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
   try {
     if (!input.mailboxItemId) {
-      throw buildHostedRunnerNudgeRetryError();
+      finishHostedOnboardingTiming(handoffTiming, "missing-mailbox-item", {
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      });
+      return {
+        reason: "missing-mailbox-item",
+        started: false,
+      };
     }
 
     const workflow = await startHostedWebhookNudgeWorkflow({
@@ -43,19 +60,20 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
       workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
     });
+    return {
+      reason: "workflow-started",
+      runId: workflow.runId,
+      started: true,
+    };
   } catch (error) {
+    const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
+      errorName,
     });
-    throw error;
+    return {
+      errorName,
+      reason: "workflow-start-failed",
+      started: false,
+    };
   }
-}
-
-function buildHostedRunnerNudgeRetryError() {
-  return hostedOnboardingError({
-    code: "HOSTED_RUNNER_NUDGE_RETRY_REQUIRED",
-    httpStatus: 503,
-    message: "Webhook processing is temporarily unavailable.",
-    retryable: true,
-  });
 }

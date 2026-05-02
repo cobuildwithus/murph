@@ -161,6 +161,97 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "0");
   });
 
+  test("quarantines stale retryable blockers and advances the lane", async () => {
+    const staleCreatedAt = "2026-04-25T23:29:59.000Z";
+    const missingSidecar = createMailboxItem({
+      createdAt: staleCreatedAt,
+      id: "mailbox_item_conversation_stale_sidecar",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_conversation_stale_sidecar",
+    });
+    const deferredItem = createMailboxItem({
+      createdAt: staleCreatedAt,
+      id: "mailbox_item_conversation_stale_deferred",
+      laneSeq: "2",
+    });
+    const blockedItem = createMailboxItem({
+      createdAt: staleCreatedAt,
+      id: "mailbox_item_conversation_stale_blocked",
+      laneSeq: "3",
+    });
+    const validItem = createMailboxItem({
+      id: "mailbox_item_conversation_after_stale_blockers",
+      laneSeq: "4",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [missingSidecar, deferredItem, blockedItem, validItem],
+      payloadResponse: {
+        fetchedAt: TEST_NOW,
+        payload: null,
+      },
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        if (input.item.id === "mailbox_item_conversation_stale_deferred") {
+          return {
+            reasonCode: "import.deferred",
+            status: "deferred",
+          };
+        }
+        if (input.item.id === "mailbox_item_conversation_stale_blocked") {
+          return {
+            reasonCode: "temporary.retryable_block",
+            retryable: true,
+            status: "blocked",
+          };
+        }
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_stale_retryable",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(result.blocked, [
+      {
+        itemId: "mailbox_item_conversation_stale_sidecar",
+        lane: "conversation",
+        reasonCode: "payload.sidecar_missing.retry_exhausted",
+        retryable: false,
+        seq: "1",
+      },
+      {
+        itemId: "mailbox_item_conversation_stale_deferred",
+        lane: "conversation",
+        reasonCode: "import.deferred.retry_exhausted",
+        retryable: false,
+        seq: "2",
+      },
+      {
+        itemId: "mailbox_item_conversation_stale_blocked",
+        lane: "conversation",
+        reasonCode: "temporary.retryable_block.retry_exhausted",
+        retryable: false,
+        seq: "3",
+      },
+    ]);
+    assert.deepEqual(imported, ["mailbox_item_conversation_after_stale_blockers"]);
+    assert.equal(result.state.watermarks.conversation, "4");
+    assert.deepEqual(result.state.recentStatuses.map((status) => status.status), [
+      "quarantined",
+      "quarantined",
+      "quarantined",
+      "imported",
+    ]);
+  });
+
   test("quarantines malformed route metadata without exposing payload details", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_system_bad_lane",

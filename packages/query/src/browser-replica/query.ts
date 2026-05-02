@@ -3,7 +3,11 @@ import {
   type BrowserVaultEntityFilters,
   type BrowserVaultMetricDayRow,
   type BrowserVaultMetricFilters,
+  type BrowserVaultMetricPoint,
+  type BrowserVaultMetricPointFilters,
   type BrowserVaultMetricRow,
+  type BrowserVaultMetricSelectionFilters,
+  type BrowserVaultMetricSelectionRow,
   type BrowserVaultQueryClient,
   type BrowserVaultReplica,
   type BrowserVaultSearchFilters,
@@ -14,11 +18,23 @@ import {
 export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): BrowserVaultQueryClient {
   const frozenReplica = deepFreezeBrowserVaultValue(replica);
   const byLookupId = new Map<string, BrowserVaultEntity>();
+  const metricSelectionById = new Map<string, BrowserVaultMetricSelectionRow>();
 
   for (const entity of frozenReplica.entities) {
     byLookupId.set(entity.id, entity);
     for (const lookupId of entity.lookupIds) {
       byLookupId.set(lookupId, entity);
+    }
+  }
+
+  const metricPoints = frozenReplica.metricPoints ?? [];
+  const metricSelectionRows = frozenReplica.metricSelectionRows ?? [];
+
+  for (const selection of metricSelectionRows) {
+    metricSelectionById.set(selection.id, selection);
+    metricSelectionById.set(selection.metricKey, selection);
+    if (selection.biomarkerKey) {
+      metricSelectionById.set(selection.biomarkerKey, selection);
     }
   }
 
@@ -45,6 +61,31 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
       },
       series(filters = {}) {
         return frozenReplica.metricRows.filter((row) => matchesMetricFilters(row, filters)).slice().reverse();
+      },
+    },
+    metricPoints: {
+      latest(filters = {}) {
+        return metricPoints.find((point) => matchesMetricPointFilters(point, filters)) ?? null;
+      },
+      list(filters = {}) {
+        return metricPoints.filter((point) => matchesMetricPointFilters(point, filters));
+      },
+      series(filters = {}) {
+        return metricPoints
+          .filter((point) => matchesMetricPointFilters(point, filters))
+          .slice()
+          .reverse();
+      },
+    },
+    metricSelections: {
+      get(idOrMetricKey) {
+        return metricSelectionById.get(idOrMetricKey) ?? null;
+      },
+      getByBiomarker(biomarkerKey) {
+        return metricSelectionById.get(biomarkerKey) ?? null;
+      },
+      list(filters = {}) {
+        return metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, filters));
       },
     },
     replica: frozenReplica,
@@ -133,6 +174,36 @@ function matchesMetricDayFilters(row: BrowserVaultMetricDayRow, filters: Browser
     return false;
   }
 
+  return true;
+}
+
+function matchesMetricPointFilters(row: BrowserVaultMetricPoint, filters: BrowserVaultMetricPointFilters): boolean {
+  if (filters.metricKey && row.metricKey !== filters.metricKey) {
+    return false;
+  }
+  if (filters.biomarkerKey && row.biomarkerKey !== filters.biomarkerKey) {
+    return false;
+  }
+  if (filters.from && row.date < filters.from) {
+    return false;
+  }
+  if (filters.to && row.date > filters.to) {
+    return false;
+  }
+
+  return true;
+}
+
+function matchesMetricSelectionFilters(
+  row: BrowserVaultMetricSelectionRow,
+  filters: BrowserVaultMetricSelectionFilters,
+): boolean {
+  if (filters.metricKey && row.metricKey !== filters.metricKey) {
+    return false;
+  }
+  if (filters.biomarkerKey && row.biomarkerKey !== filters.biomarkerKey) {
+    return false;
+  }
   return true;
 }
 

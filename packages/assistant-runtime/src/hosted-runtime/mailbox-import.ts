@@ -25,6 +25,8 @@ import type {
   HostedRuntimeMailboxPort,
 } from "./platform.ts";
 
+const HOSTED_MAILBOX_RETRYABLE_BLOCK_MAX_AGE_MS = 30 * 60 * 1000;
+
 export type HostedMailboxItemImportOutcome =
   | {
       status: "blocked";
@@ -161,21 +163,28 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       });
       if (payload.status === "blocked") {
         const reasonCode = `payload.${payload.code}`;
+        const retryExpired = payload.retryable && isHostedMailboxRetryableBlockExpired({
+          item,
+          nowIso: now(),
+        });
+        const blockedReasonCode = retryExpired
+          ? normalizeRetryExhaustedReasonCode(reasonCode)
+          : reasonCode;
         blocked.push({
           itemId: item.id,
           lane,
-          reasonCode,
-          retryable: payload.retryable,
+          reasonCode: blockedReasonCode,
+          retryable: payload.retryable && !retryExpired,
           seq: item.laneSeq,
         });
-        if (payload.retryable) {
+        if (payload.retryable && !retryExpired) {
           break;
         }
         nextState = recordHostedMailboxImportQuarantine(nextState, {
           itemKind: item.kind,
           lane,
           occurredAt: now(),
-          reasonCode,
+          reasonCode: blockedReasonCode,
           seq: item.laneSeq,
         });
         nextState = advanceHostedMailboxLaneWatermark(nextState, {
@@ -192,33 +201,63 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         route,
       });
       if (outcome.status === "deferred") {
+        const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
+        const retryExpired = isHostedMailboxRetryableBlockExpired({
+          item,
+          nowIso: now(),
+        });
+        const blockedReasonCode = retryExpired
+          ? normalizeRetryExhaustedReasonCode(reasonCode)
+          : reasonCode;
         blocked.push({
           itemId: item.id,
           lane,
-          reasonCode: normalizeReasonCode(outcome.reasonCode, "import.deferred"),
-          retryable: true,
+          reasonCode: blockedReasonCode,
+          retryable: !retryExpired,
           seq: item.laneSeq,
         });
-        break;
-      }
-
-      if (outcome.status === "blocked") {
-        const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
-        blocked.push({
-          itemId: item.id,
-          lane,
-          reasonCode,
-          retryable: outcome.retryable,
-          seq: item.laneSeq,
-        });
-        if (outcome.retryable) {
+        if (!retryExpired) {
           break;
         }
         nextState = recordHostedMailboxImportQuarantine(nextState, {
           itemKind: item.kind,
           lane,
           occurredAt: now(),
-          reasonCode,
+          reasonCode: blockedReasonCode,
+          seq: item.laneSeq,
+        });
+        nextState = advanceHostedMailboxLaneWatermark(nextState, {
+          lane,
+          seq: item.laneSeq,
+        }).state;
+        expectedSeq += 1n;
+        continue;
+      }
+
+      if (outcome.status === "blocked") {
+        const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
+        const retryExpired = outcome.retryable && isHostedMailboxRetryableBlockExpired({
+          item,
+          nowIso: now(),
+        });
+        const blockedReasonCode = retryExpired
+          ? normalizeRetryExhaustedReasonCode(reasonCode)
+          : reasonCode;
+        blocked.push({
+          itemId: item.id,
+          lane,
+          reasonCode: blockedReasonCode,
+          retryable: outcome.retryable && !retryExpired,
+          seq: item.laneSeq,
+        });
+        if (outcome.retryable && !retryExpired) {
+          break;
+        }
+        nextState = recordHostedMailboxImportQuarantine(nextState, {
+          itemKind: item.kind,
+          lane,
+          occurredAt: now(),
+          reasonCode: blockedReasonCode,
           seq: item.laneSeq,
         });
         nextState = advanceHostedMailboxLaneWatermark(nextState, {
@@ -316,4 +355,24 @@ function normalizeReasonCode(value: string, fallback: string | null): string | n
   }
 
   return fallback;
+}
+
+function isHostedMailboxRetryableBlockExpired(input: {
+  item: HostedMailboxItem;
+  nowIso: string;
+}): boolean {
+  const itemCreatedAtMs = Date.parse(input.item.createdAt);
+  const nowMs = Date.parse(input.nowIso);
+  if (!Number.isFinite(itemCreatedAtMs) || !Number.isFinite(nowMs)) {
+    return false;
+  }
+
+  return nowMs - itemCreatedAtMs >= HOSTED_MAILBOX_RETRYABLE_BLOCK_MAX_AGE_MS;
+}
+
+function normalizeRetryExhaustedReasonCode(reasonCode: string): string {
+  return normalizeReasonCode(
+    `${reasonCode}.retry_exhausted`,
+    "retry_exhausted",
+  );
 }

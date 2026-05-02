@@ -1,10 +1,14 @@
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { readRawBodyBuffer } from "@/src/lib/http";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
+
+const HOSTED_LINQ_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
 export async function GET() {
   return jsonOk({
@@ -29,7 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
         signalAbortedAtStart: request.signal.aborted,
       },
     );
-    const rawBody = await request.text();
+    const rawBody = await readHostedLinqWebhookRawBody(request);
     const rawBodyBytes = new TextEncoder().encode(rawBody).byteLength;
     finishHostedOnboardingTiming(bodyTiming, "completed", {
       rawBodyBytes,
@@ -59,3 +63,21 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 });
+
+async function readHostedLinqWebhookRawBody(request: Request): Promise<string> {
+  try {
+    return (await readRawBodyBuffer(request, {
+      limitBytes: HOSTED_LINQ_WEBHOOK_MAX_BODY_BYTES,
+    })).toString("utf8");
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw hostedOnboardingError({
+        code: "LINQ_WEBHOOK_BODY_TOO_LARGE",
+        httpStatus: 413,
+        message: "Linq webhook body is too large.",
+      });
+    }
+
+    throw error;
+  }
+}
