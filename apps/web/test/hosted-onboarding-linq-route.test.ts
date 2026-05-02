@@ -167,4 +167,23 @@ describe("hosted onboarding Linq webhook route", () => {
       },
     });
   });
+
+  it("rejects streamed oversized webhook bodies without a declared content length", async () => {
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        body: "x".repeat((256 * 1024) + 1),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(mocks.handleHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "LINQ_WEBHOOK_BODY_TOO_LARGE",
+        message: "Linq webhook body is too large.",
+        retryable: false,
+      },
+    });
+  });
 });

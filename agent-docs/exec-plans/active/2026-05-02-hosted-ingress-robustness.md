@@ -22,12 +22,20 @@ Done:
 - Read required routing, verification, security, reliability, and testing docs.
 - Confirmed supplied patch is corrupt for `git apply`.
 - Added bounded Linq webhook raw-body read scaffolding; current follow-up adjusts the cap to 256 KiB and adds Linq message-parts payload bounds.
+- Moved Linq message part-count/serialized-size validation to the shared `message.received` entry point so first-contact and redirect paths fail before side effects.
+- Added focused coverage for oversized first-contact iMessage and non-home-line redirect payloads rejecting before signup, routing, quota, reply, read receipt, or mailbox side effects.
+- Added focused route coverage for oversized bodies without declared `content-length` so the streaming accumulator cap is exercised.
+- Focused Linq route/dispatch tests passed after adding body/parts limit coverage (36 tests).
+- Root `pnpm typecheck` passed before unrelated tunnel-dev changes appeared; rerun is currently blocked by unrelated dirty `scripts/dev-hosted-local/*` type errors.
+- `pnpm --dir apps/web typecheck` passed after the focused route test addition.
+- `pnpm --dir apps/web lint` passed with one unrelated warning in `apps/web/src/components/experiments/experiment-detail/protocol-tab.tsx`.
+- Scoped `bash scripts/workspace-verify.sh test:diff ...` reached `apps/web verify`; lint and `next build` passed, but app-wide Vitest remains red on unrelated UI expectation drift in `hosted-legal-consent-card.test.ts` and `page.test.ts`.
 
 Now:
-- Add focused Linq request-body and pre-mailbox message-parts limits on top of current files.
+- Wait for final completion audit refresh and handle findings.
 
 Next:
-- Run focused verification, required audits, typecheck/tests as feasible, then commit via repo helper.
+- Commit the scoped Linq follow-up if the final audit is clean.
 
 Open questions (UNCONFIRMED if needed):
 - Full durable pending-handoff reconciler remains a follow-up hardening step, not part of this patch.

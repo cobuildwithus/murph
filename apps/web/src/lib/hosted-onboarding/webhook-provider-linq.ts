@@ -68,6 +68,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
     recipientPhoneNumber,
     summary,
   } = context;
+  const linqMessageParts = buildBoundedHostedLinqMailboxParts(
+    messageEvent.data.message.parts,
+  );
 
   if (!participantPhoneNumber) {
     return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-phone");
@@ -131,8 +134,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     if (routeDecision.kind === "ignore_unknown_home") {
       return buildIgnoredLinqWebhookPlan("unknown-home-line");
     }
-
-    const linqMessageParts = buildBoundedHostedLinqMailboxParts(messageEvent.data.message.parts);
 
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
       chatId: summary.chatId,
