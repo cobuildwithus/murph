@@ -39,4 +39,13 @@ Primary files:
 ## State
 
 - Registered plan before content edits.
-- Next: baseline missing grouped coverage and delegate disjoint protocol slices to subagents.
+- Delegated the five protocol slices to disjoint subagents and integrated the returned grouped research/appraisal content.
+- Cleaned stale skin/photoaging and red-light-glasses appraisal rows that pointed at obsolete group ids.
+- Added the remaining pneumatic multi-group appraisal links so every listed group/source pair has a matching appraisal.
+- Final generated coverage check: all five protocols have zero missing group links, zero stale appraisals, and zero duplicate source/group appraisal rows.
+- Verification passed: Health Commons typecheck, Vitest, generate:check, grouped-coverage check, diff check, and privacy sentinel scan.
+- Completion audits passed. Final review found one low copy issue in the walking appraisal prose; fixed and re-ran the verification set.
+- Next: archive this plan and create a scoped commit.
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02
