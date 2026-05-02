@@ -157,23 +157,33 @@ function selectDailyAggregatePoint(
   const candidates = points.filter((point) => point.effectiveDate >= windowStart && point.effectiveDate <= anchorDate);
   const minimumPoints = policy.minimumPoints ?? 0;
 
-  if (minimumPoints > 0 && candidates.length < minimumPoints) {
+  const useCanonicalValues = policy.statistic !== "count" && definition.canonicalUnit !== null;
+  const values = candidates
+    .map((point) => useCanonicalValues ? point.canonicalValue : pointNumericValue(point))
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const warnings: MetricSelectionWarning[] = [];
+
+  if (useCanonicalValues && candidates.some((point) => point.value !== null && point.canonicalValue === null)) {
+    warnings.push({
+      code: "UNIT_NOT_NORMALIZED",
+      message: `${definition.displayName} daily aggregate excluded values that could not be normalized to ${definition.canonicalUnit}.`,
+    });
+  }
+
+  const availablePointCount = policy.statistic === "count" ? candidates.length : values.length;
+  if (minimumPoints > 0 && availablePointCount < minimumPoints) {
     return {
       point: null,
       status: "insufficient_data",
       warnings: [{
         code: "LOW_SAMPLE_COUNT",
-        message: `Only ${candidates.length} point${candidates.length === 1 ? "" : "s"} were available for ${definition.displayName}; ${minimumPoints} required.`,
-      }],
+        message: `Only ${availablePointCount} point${availablePointCount === 1 ? "" : "s"} were available for ${definition.displayName}; ${minimumPoints} required.`,
+      }, ...warnings],
     };
   }
 
-  const values = candidates
-    .map(pointNumericValue)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-
   if (values.length === 0 && policy.statistic !== "count") {
-    return { point: null };
+    return { point: null, warnings };
   }
 
   const value = policy.statistic === "count"
@@ -183,8 +193,10 @@ function selectDailyAggregatePoint(
   const recordIds = uniqueStrings(candidates.flatMap(metricPointRecordIds));
   const unit = policy.statistic === "count"
     ? "count"
-    : latest.canonicalUnit ?? latest.unit ?? definition.displayUnit;
-  const aggregateIsCanonical = policy.statistic === "count" || latest.canonicalUnit !== null || !definition.canonicalUnit;
+    : useCanonicalValues
+      ? definition.canonicalUnit
+      : latest.canonicalUnit ?? latest.unit ?? definition.displayUnit;
+  const aggregateIsCanonical = policy.statistic === "count" || useCanonicalValues || latest.canonicalUnit !== null || !definition.canonicalUnit;
 
   return {
     point: {
@@ -231,6 +243,7 @@ function selectDailyAggregatePoint(
     },
     provenancePointIds: uniqueStrings(candidates.map((point) => point.id)),
     provenanceRecordIds: recordIds,
+    warnings,
   };
 }
 
