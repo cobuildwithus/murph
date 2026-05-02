@@ -1,5 +1,7 @@
-Status: CLOSED / superseded. Retained only as historical migration context; do
-not use this plan as current hosted-mailbox or hosted-crypto guidance.
+Status: completed
+
+Retained only as historical migration context; do not use this plan as current
+hosted-mailbox or hosted-crypto guidance.
 
 Goal (incl. success criteria):
 - Migrate one coherent hosted web producer slice from hosted ingress/run events to encrypted HostedMailboxItem append for the greenfield hosted runtime cut.
@@ -60,3 +62,5 @@ Working set (files/ids/commands):
 - `pnpm exec vitest run apps/web/test/hosted-mailbox-store.test.ts apps/web/test/hosted-onboarding-member-channel-sync.test.ts apps/web/test/hosted-mailbox-schema.test.ts apps/web/test/hosted-runtime-internal-routes.test.ts --config apps/web/vitest.workspace.ts --no-coverage`
 - `pnpm --dir apps/web typecheck`
 - `git diff --check -- <touched paths>`
+Updated: 2026-05-02
+Completed: 2026-05-02
