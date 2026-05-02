@@ -88,37 +88,37 @@ const sidebarThemeStyle = {
 } as CSSProperties;
 
 function BrandMark() {
-  const r0 = { "--dot-delay": "0s", "--dot-scale": "1.2" } as CSSProperties;
-  const r1 = { "--dot-delay": "0.08s", "--dot-scale": "1.15" } as CSSProperties;
-  const r2 = { "--dot-delay": "0.16s", "--dot-scale": "1.12" } as CSSProperties;
-  const r3 = { "--dot-delay": "0.24s", "--dot-scale": "1.08" } as CSSProperties;
+  const r0 = { "--dot-delay": "0s", "--dot-scale": "1.12" } as CSSProperties;
+  const r1 = { "--dot-delay": "0.08s", "--dot-scale": "1.08" } as CSSProperties;
+  const r2 = { "--dot-delay": "0.16s", "--dot-scale": "1.12", "--dot-opacity": "0.4", "--dot-opacity-peak": "0.7" } as CSSProperties;
+  const r3 = { "--dot-delay": "0.24s", "--dot-scale": "1.08", "--dot-opacity": "0.2", "--dot-opacity-peak": "0.55" } as CSSProperties;
 
   return (
     <Link href="/home" aria-label="Murph" className="group/brand flex items-center px-2 py-1">
       <svg fill="none" viewBox="0 0 197 44" xmlns="http://www.w3.org/2000/svg" className="h-6 w-auto">
         <g>
           {/* Ring 3 — outer */}
-          <circle className="brand-dot" style={r3} cx="6.5" cy="5.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="16.5" cy="5.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="48.5" cy="5.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="58.5" cy="5.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="4.5" cy="15.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="14.5" cy="15.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="50.5" cy="15.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="60.5" cy="15.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="2" cy="27.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="63" cy="27.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="6.5" cy="38.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="16.5" cy="38.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="48.5" cy="38.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
-          <circle className="brand-dot" style={r3} cx="58.5" cy="38.5" fill="#5c6b4f" fillOpacity=".35" r="2"/>
+          <circle className="brand-dot" style={r3} cx="6.5" cy="5.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="16.5" cy="5.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="48.5" cy="5.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="58.5" cy="5.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="4.5" cy="15.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="14.5" cy="15.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="50.5" cy="15.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="60.5" cy="15.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="2" cy="27.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="63" cy="27.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="6.5" cy="38.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="16.5" cy="38.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="48.5" cy="38.5" fill="#5c6b4f" r="2"/>
+          <circle className="brand-dot" style={r3} cx="58.5" cy="38.5" fill="#5c6b4f" r="2"/>
           {/* Ring 2 — mid */}
-          <circle className="brand-dot" style={r2} cx="27" cy="5.5" fill="#c4956a" fillOpacity=".55" r="2.5"/>
-          <circle className="brand-dot" style={r2} cx="38" cy="5.5" fill="#c4956a" fillOpacity=".55" r="2.5"/>
-          <circle className="brand-dot" style={r2} cx="12.5" cy="27.5" fill="#c4956a" fillOpacity=".55" r="2.5"/>
-          <circle className="brand-dot" style={r2} cx="52.5" cy="27.5" fill="#c4956a" fillOpacity=".55" r="2.5"/>
-          <circle className="brand-dot" style={r2} cx="27" cy="38.5" fill="#c4956a" fillOpacity=".55" r="2.5"/>
-          <circle className="brand-dot" style={r2} cx="38" cy="38.5" fill="#c4956a" fillOpacity=".55" r="2.5"/>
+          <circle className="brand-dot" style={r2} cx="27" cy="5.5" fill="#c4956a" r="2.5"/>
+          <circle className="brand-dot" style={r2} cx="38" cy="5.5" fill="#c4956a" r="2.5"/>
+          <circle className="brand-dot" style={r2} cx="12.5" cy="27.5" fill="#c4956a" r="2.5"/>
+          <circle className="brand-dot" style={r2} cx="52.5" cy="27.5" fill="#c4956a" r="2.5"/>
+          <circle className="brand-dot" style={r2} cx="27" cy="38.5" fill="#c4956a" r="2.5"/>
+          <circle className="brand-dot" style={r2} cx="38" cy="38.5" fill="#c4956a" r="2.5"/>
           {/* Ring 1 — inner */}
           <circle className="brand-dot" style={r1} cx="26" cy="15.5" fill="#a07a4e" r="3.5"/>
           <circle className="brand-dot" style={r1} cx="39" cy="15.5" fill="#a07a4e" r="3.5"/>

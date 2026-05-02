@@ -62,19 +62,22 @@
 @keyframes dot-pulse {
   0%, 100% {
     transform: scale(1);
+    opacity: var(--dot-opacity, 1);
   }
   35% {
     transform: scale(var(--dot-scale, 1.1));
+    opacity: var(--dot-opacity-peak, 1);
   }
 }
 
 .brand-dot {
   transform-box: fill-box;
   transform-origin: center;
+  opacity: var(--dot-opacity, 1);
 }
 
 .group\/brand:hover .brand-dot {
-  animation: dot-pulse 1s ease-out var(--dot-delay, 0s) infinite;
+  animation: dot-pulse 1.4s ease-out var(--dot-delay, 0s) infinite;
 }
 
 @theme inline {
