@@ -246,7 +246,7 @@ test("returns empty and stale selections without losing metric identity", () => 
 
   const stale = selectMetricValue({
     metricKey: "body-weight",
-    now: "2026-05-10T00:00:00.000Z",
+    now: "2026-04-30T00:00:00.000Z",
     points: [
       metricPoint({
         effectiveDate: "2026-01-01",
@@ -432,7 +432,7 @@ test("goal progress reports neutral not_met for unscheduled selected-value targe
 
   const progress = selectMetricGoalProgress({
     goalId: "goal_rhr",
-    now: "2026-04-30T00:00:00.000Z",
+    now: "2026-05-10T00:00:00.000Z",
     points: [
       metricPoint({
         effectiveDate: "2026-04-29",
