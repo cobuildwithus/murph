@@ -1,8 +1,43 @@
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { BiomarkerBrowseCard } from "../src/components/biomarkers/biomarker-browse-card";
+import { renderClientComponent } from "./render-client-component";
+
+const browserVaultMock = vi.hoisted(() => ({
+  value: {
+    client: null as unknown,
+    status: "empty",
+  },
+}));
+
+vi.mock("../src/lib/browser-vault/context", () => ({
+  BrowserVaultProvider({ children }: { children: unknown }) {
+    return children;
+  },
+  useBrowserVault() {
+    return browserVaultMock.value;
+  },
+}));
+
+vi.mock("next/link", () => ({
+  default({
+    children,
+    href,
+  }: {
+    children: ReactNode;
+    href: string;
+  }) {
+    return createElement("a", { href }, children);
+  },
+}));
+
+vi.mock("../src/components/experiments/category-filter", () => ({
+  CategoryFilter() {
+    return createElement("div", { "data-testid": "category-filter" });
+  },
+}));
 
 it("renders a compact latest private value when available", () => {
   const markup = renderToStaticMarkup(
@@ -26,4 +61,63 @@ it("renders a compact latest private value when available", () => {
   expect(markup).toContain("57 bpm");
   expect(markup).toContain("Wearable summary - 29 Apr");
   expect(markup).not.toContain("stale");
+});
+
+it("wires browser-vault metric selections into biomarker browse cards", async () => {
+  const { BiomarkersPageClient } = await import("../app/biomarkers/biomarkers-page-client");
+
+  browserVaultMock.value = {
+    client: {
+      metricSelections: {
+        getByBiomarker(biomarkerKey: string) {
+          if (biomarkerKey !== "biomarker:resting-heart-rate") {
+            return null;
+          }
+
+          return {
+            biomarkerKey,
+            confidence: "high",
+            date: "2026-04-29",
+            id: "metric-selection:resting-heart-rate",
+            metricKey: "resting-heart-rate",
+            observedAt: "2026-04-29T00:00:00.000Z",
+            pointIds: ["metric-point:resting-heart-rate:2026-04-29"],
+            recordIds: ["record:resting-heart-rate:2026-04-29"],
+            selectionSchema: "murph.browser-vault.metric-selection.v1",
+            sourceLabel: "Wearable summary",
+            status: "ready",
+            unit: "bpm",
+            value: 57,
+            valueLabel: "57",
+            warnings: [],
+          };
+        },
+      },
+    },
+    status: "ready",
+  };
+
+  const rendered = await renderClientComponent(
+    createElement(BiomarkersPageClient, {
+      biomarkers: [{
+        aliases: [],
+        categories: ["heart-health"],
+        key: "biomarker:resting-heart-rate",
+        routeId: "resting-heart-rate",
+        shortName: "RHR",
+        summary: "Resting heart rate reflects recovery load.",
+        title: "Resting Heart Rate",
+        unit: "bpm",
+      }],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).toContain("Your latest");
+    expect(rendered.container.textContent).toContain("57 bpm");
+    expect(rendered.container.textContent).toContain("Wearable summary - Apr 29");
+  } finally {
+    await rendered.cleanup();
+  }
 });
