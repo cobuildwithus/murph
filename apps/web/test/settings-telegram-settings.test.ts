@@ -281,3 +281,119 @@ describe("ConnectTelegram", () => {
     expect(container.textContent).not.toContain("@murph_user");
   });
 });
+
+describe("HostedTelegramCardSettings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.linkTelegram.mockResolvedValue(undefined);
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [
+        {
+          id: 67890,
+          type: "telegram",
+          username: "new_user",
+        },
+      ],
+    });
+    mocks.requestHostedOnboardingJson.mockResolvedValue({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "67890",
+      telegramUsername: "new_user",
+    });
+    mocks.usePrivy.mockReturnValue({
+      linkTelegram: mocks.linkTelegram,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [],
+      },
+    });
+  });
+
+  afterEach(async () => {
+    if (cleanupRender) {
+      await cleanupRender();
+      cleanupRender = null;
+    }
+  });
+
+  it("notifies its parent after a manual Telegram link sync succeeds", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    const onSynced = vi.fn();
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [],
+        onSynced,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link Telegram"),
+    );
+    expect(linkButton).toBeTruthy();
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        payload: {
+          expectedTelegramUserId: "67890",
+        },
+        url: "/api/settings/telegram/sync",
+      });
+    });
+    expect(onSynced).toHaveBeenCalledWith({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "67890",
+      telegramUsername: "new_user",
+    });
+  });
+
+  it("does not notify its parent for quiet background Telegram resync", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    const onSynced = vi.fn();
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            id: 67890,
+            type: "telegram",
+            username: "new_user",
+          },
+        ],
+      },
+    });
+
+    const { cleanup } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [],
+        onSynced,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        payload: {
+          expectedTelegramUserId: "67890",
+        },
+        url: "/api/settings/telegram/sync",
+      });
+    });
+    expect(onSynced).not.toHaveBeenCalled();
+  });
+});

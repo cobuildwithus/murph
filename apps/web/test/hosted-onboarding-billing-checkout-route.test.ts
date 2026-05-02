@@ -5,11 +5,10 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  completeHostedPrivyVerification: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   getPrisma: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
-  requirePrivyMemberAuth: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
@@ -24,16 +23,12 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
-  completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
@@ -59,41 +54,14 @@ describe("hosted onboarding billing checkout route", () => {
       url: "https://stripe.example.test/checkout",
     });
     mocks.getPrisma.mockReturnValue({ prisma: true });
-    mocks.completeHostedPrivyVerification.mockResolvedValue({
-      inviteCode: "invite_123",
-      joinUrl: "https://join.example.test/join/invite_123",
-      memberId: "member_123",
-      messagingSetupRequired: false,
-      stage: "checkout",
-    });
     mocks.requireHostedInviteCodeFromRequest.mockResolvedValue({
       body: {},
       inviteCode: "invite_123",
     });
-    mocks.requirePrivyMemberAuth.mockResolvedValue({
-      linkedAccounts: [
-        {
-          address: "member@example.test",
-          type: "email",
-          verified_at: 1_710_000_000,
-        },
-      ],
-      identity: {
-        email: {
-          address: "member@example.test",
-          verifiedAt: 1_710_000_000,
-        },
-        phone: null,
-        telegram: null,
-        userId: "did:privy:member_123",
-        wallet: null,
-      },
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
         suspendedAt: null,
-      },
-      verifiedPrivyUser: {
-        id: "did:privy:member_123",
       },
     });
   });
@@ -116,31 +84,9 @@ describe("hosted onboarding billing checkout route", () => {
       alreadyActive: false,
       url: "https://stripe.example.test/checkout",
     });
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      identity: {
-        email: {
-          address: "member@example.test",
-          verifiedAt: 1_710_000_000,
-        },
-        phone: null,
-        telegram: null,
-        userId: "did:privy:member_123",
-        wallet: null,
-      },
-      inviteCode: "invite_123",
-      verifiedPrivyUser: {
-        id: "did:privy:member_123",
-      },
-    });
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite_123",
-      linkedAccounts: [
-        {
-          address: "member@example.test",
-          type: "email",
-          verified_at: 1_710_000_000,
-        },
-      ],
       member: {
         id: "member_123",
         suspendedAt: null,
@@ -150,7 +96,7 @@ describe("hosted onboarding billing checkout route", () => {
       memberId: "member_123",
       prisma: { prisma: true },
     });
-    expect(mocks.completeHostedPrivyVerification.mock.invocationCallOrder[0])
+    expect(mocks.requireHostedAppSessionFromRequest.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.assertHostedLaunchRequiredConsentGranted.mock.invocationCallOrder[0] ?? 0);
     expect(mocks.assertHostedLaunchRequiredConsentGranted.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.createHostedBillingCheckout.mock.invocationCallOrder[0] ?? 0);

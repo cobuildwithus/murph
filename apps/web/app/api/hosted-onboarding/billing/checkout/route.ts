@@ -7,9 +7,8 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
-import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
-import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import { requireHostedInviteCodeFromRequest } from "@/src/lib/hosted-onboarding/route-helpers";
+import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -18,7 +17,8 @@ export const POST = withJsonError(async (request: Request) => {
 
   try {
     assertHostedOnboardingMutationOrigin(request);
-    const auth = await requirePrivyMemberAuth(request);
+    const prisma = getPrisma();
+    const auth = await requireHostedAppSessionFromRequest(request);
     const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);
     const billingPlanCode = parseHostedBillingPlanCode(body.billingPlanCode);
 
@@ -26,20 +26,14 @@ export const POST = withJsonError(async (request: Request) => {
       throw new TypeError("billingPlanCode must be one of the configured Murph billing plans.");
     }
 
-    await completeHostedPrivyVerification({
-      identity: auth.identity,
-      inviteCode,
-      verifiedPrivyUser: auth.verifiedPrivyUser,
-    });
     await assertHostedLaunchRequiredConsentGranted({
       memberId: auth.member.id,
-      prisma: getPrisma(),
+      prisma,
     });
 
     const checkout = await createHostedBillingCheckout({
       ...(billingPlanCode ? { billingPlanCode } : {}),
       inviteCode,
-      linkedAccounts: auth.linkedAccounts,
       member: {
         id: auth.member.id,
         suspendedAt: auth.member.suspendedAt,

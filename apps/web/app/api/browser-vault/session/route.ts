@@ -4,6 +4,7 @@ import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
@@ -11,6 +12,7 @@ import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consen
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
+  assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
   const auth = await requireActiveHostedAppSessionFromRequest(request);
   await assertHostedLaunchRequiredConsentGranted({

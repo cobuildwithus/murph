@@ -171,6 +171,7 @@ describe("HostedEmailSettings", () => {
 
   it("syncs the verified email returned by Privy's link flow", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const onSynced = vi.fn();
     const linkedUser = {
       linkedAccounts: [
         {
@@ -198,6 +199,7 @@ describe("HostedEmailSettings", () => {
       createElement(HostedEmailSettings, {
         authenticated: true,
         initialLinkedAccounts: [],
+        onSynced,
       }),
     );
     cleanupRender = cleanup;
@@ -223,6 +225,11 @@ describe("HostedEmailSettings", () => {
       );
     });
     expect(container.textContent).toContain("Email verified");
+    expect(onSynced).toHaveBeenCalledWith({
+      emailAddress: "linked@example.com",
+      runTriggered: true,
+      verifiedAt: "2026-04-25T00:00:00.000Z",
+    });
   });
 
   it("sends and verifies update-email codes from the live settings inputs", async () => {

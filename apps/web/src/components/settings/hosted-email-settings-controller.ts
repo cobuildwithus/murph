@@ -15,12 +15,14 @@ import {
   normalizeEmailAddress,
   resolveHostedEmailSettingsDisplayState,
   syncHostedVerifiedEmailAddress,
+  type HostedEmailSyncResult,
 } from "./hosted-email-settings-helpers";
 import { toErrorMessage } from "./hosted-settings-utils";
 
 export function useHostedEmailSettingsController(input: {
   authenticated: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
   const { refreshUser, user } = useUser();
   const linkedAccounts = readPrivyLinkedAccounts(user) ?? input.initialLinkedAccounts;
@@ -268,6 +270,14 @@ export function useHostedEmailSettingsController(input: {
       });
       setSuccessMessage(syncPresentation.successMessage);
       setErrorMessage(syncPresentation.errorMessage);
+
+      if (syncPresentation.syncResult) {
+        try {
+          await input.onSynced?.(syncPresentation.syncResult);
+        } catch (error) {
+          setErrorMessage(toErrorMessage(error, "Email was synced, but we could not refresh the page state yet."));
+        }
+      }
     } finally {
       setIsSyncingEmailRoute(false);
     }

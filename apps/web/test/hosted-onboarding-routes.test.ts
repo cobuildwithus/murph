@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getHostedInviteStatus: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedAppSession: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   issueHostedAppSession: mocks.issueHostedAppSession,
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
@@ -151,6 +153,12 @@ describe("hosted onboarding routes", () => {
     mocks.issueHostedAppSession.mockResolvedValue({
       cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
       sessionId: "hws_123",
+    });
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.createHostedBillingCheckout.mockResolvedValue({
@@ -813,31 +821,11 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(request);
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      identity: {
-        email: {
-          address: "user@example.com",
-          verifiedAt: 1_710_000_000,
-        },
-        phone: null,
-        telegram: null,
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
-      inviteCode: "invite-code",
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
-    });
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.requirePrivyMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "user@example.com",
-          type: "email",
-        },
-      ],
       member: {
         id: "member_123",
         suspendedAt: null,
@@ -867,15 +855,10 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.requirePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "user@example.com",
-          type: "email",
-        },
-      ],
       member: {
         id: "member_123",
         suspendedAt: null,
