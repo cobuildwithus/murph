@@ -12,8 +12,8 @@ import { LandingAuthActions } from "@/app/auth-controls";
 
 import { renderClientComponent } from "./render-client-component";
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
-  HostedAuthPanel(props: {
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => ({
+  HostedAuthPanelIsland(props: {
     authMode?: "login" | "signup";
     requireLaunchConsentOnCompletion?: boolean;
     showPassiveLegalNotice?: boolean;
@@ -31,6 +31,13 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
     );
   },
 }));
+
+async function flushHostedAuthPanelIsland() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
 
 const DialogOpenContext = createContext(false);
 
@@ -81,6 +88,7 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   await act(async () => {
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });
+  await flushHostedAuthPanelIsland();
 
   const authPanel = window.document.querySelector(
     '[data-hosted-auth-launch-consent="required"]',
@@ -150,6 +158,7 @@ test("LandingAuthActions splits the lower homepage CTA into login and signup act
   await act(async () => {
     buttons[0]?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+  await flushHostedAuthPanelIsland();
 
   expect(container.textContent).toContain("Log in to Murph");
   expect(
@@ -164,6 +173,7 @@ test("LandingAuthActions splits the lower homepage CTA into login and signup act
   await act(async () => {
     buttons[1]?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+  await flushHostedAuthPanelIsland();
 
   expect(container.textContent).toContain("Create your Murph account");
   expect(

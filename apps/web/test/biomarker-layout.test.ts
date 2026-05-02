@@ -13,6 +13,18 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   }),
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-privy-boundary", () => ({
+  HostedPrivyBoundary(input: { children: React.ReactNode }) {
+    return createElement(
+      "div",
+      {
+        "data-hosted-privy-boundary": "true",
+      },
+      input.children,
+    );
+  },
+}));
+
 vi.mock("@/src/components/dashboard/sidebar", () => ({
   Sidebar() {
     return createElement("div", {
@@ -35,6 +47,7 @@ test("BiomarkersLayout renders biomarker pages inside the shared dashboard shell
   );
 
   assert.match(markup, /#site-footer \{ display: none; \}/);
+  assert.match(markup, /data-hosted-privy-boundary="true"/);
   assert.match(markup, /data-dashboard-sidebar="true"/);
   assert.match(markup, /data-biomarker-page="true"/);
   assert.match(markup, /data-slot="sidebar-wrapper"/);
