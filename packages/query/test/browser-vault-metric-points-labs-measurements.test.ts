@@ -145,10 +145,7 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.ok(crp);
   assert.equal(crp.valueLabel, "<0.3");
   assert.equal(crp.unit, "mg/L");
-  const customPanelMetric = client.metricSelections.get("unreviewed-private-panel-note");
-  assert.ok(customPanelMetric);
-  assert.equal(customPanelMetric.value, 5);
-  assert.equal(customPanelMetric.unit, "score");
+  assert.equal(client.metricSelections.get("unreviewed-private-panel-note"), null);
   assert.deepEqual(
     client.metrics.series({ metricKey: "unreviewed-private-panel-note" }).map((point) => point.value),
     [5],
@@ -339,6 +336,16 @@ test("browser-vault metric selections can use old requested points while metric 
             measurements: [
               { metric: "body_weight", value: 180, unit: "lb" },
               { metric: "private_reaction_score", value: 5, unit: "score" },
+            ],
+            source: "manual",
+          },
+        }),
+        createEvent("evt_recent_private_reaction", "measurement", {
+          occurredAt: "2026-04-30T07:30:00.000Z",
+          title: "Recent private reaction score",
+          attributes: {
+            measurements: [
+              { metric: "private_reaction_score", value: 9, unit: "score" },
             ],
             source: "manual",
           },

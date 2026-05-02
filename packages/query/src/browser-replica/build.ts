@@ -11,6 +11,7 @@ import {
 } from "../wearables.ts";
 import {
   listMetricDefinitions,
+  normalizeMetricKey,
   parseGoalMetricTargets,
   selectMetricGoalProgress,
   type GoalMetricTarget,
@@ -59,8 +60,13 @@ export async function createBrowserVaultReplica(
   const weeklySampleSummaries = projectWeeklySampleSummaries(input.vault, generatedAt);
   const allMetricPoints = buildMetricProjection(input.vault).metricPoints;
   const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
+  const selectionMetricPoints = allMetricPoints.filter((point) =>
+    isBrowserVaultRequestedMetricPoint(point, requestedMetrics)
+  );
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
-  const metricPoints = allMetricPoints.filter((point) => point.effectiveDate >= cutoff);
+  const metricPoints = allMetricPoints.filter((point) =>
+    isBrowserVaultMetricRowPoint(point, requestedMetrics) && point.effectiveDate >= cutoff
+  );
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
@@ -68,7 +74,7 @@ export async function createBrowserVaultReplica(
     metricPoints,
     metricRowPointIds,
     requestedMetrics,
-    selectionPoints: allMetricPoints,
+    selectionPoints: selectionMetricPoints,
   });
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
@@ -189,14 +195,29 @@ function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[])
   const byKey = new Map<string, BrowserVaultRequestedMetric>();
   for (const metric of metrics) {
     if (!metric.metricKey) continue;
-    byKey.set(`${metric.metricKey}\u001f${metric.biomarkerKey ?? ""}`, {
-      metricKey: metric.metricKey,
+    const metricKey = normalizeMetricKey(metric.metricKey);
+    byKey.set(`${metricKey}\u001f${metric.biomarkerKey ?? ""}`, {
+      metricKey,
       biomarkerKey: metric.biomarkerKey ?? null,
     });
   }
   return [...byKey.values()].sort((left, right) =>
     left.metricKey.localeCompare(right.metricKey) || (left.biomarkerKey ?? "").localeCompare(right.biomarkerKey ?? "")
   );
+}
+
+function isBrowserVaultMetricRowPoint(
+  point: MetricPoint,
+  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+): boolean {
+  return isBrowserVaultRequestedMetricPoint(point, requestedMetrics) || point.source.kind === "test-result";
+}
+
+function isBrowserVaultRequestedMetricPoint(
+  point: MetricPoint,
+  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+): boolean {
+  return requestedMetrics.some((metric) => metric.metricKey === point.metricKey);
 }
 
 function isActiveGoalEntity(entity: CanonicalEntity): boolean {
