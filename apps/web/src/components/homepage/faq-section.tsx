@@ -51,7 +51,7 @@ const FAQ_ITEMS = [
 
 export function FaqSection() {
   return (
-    <section id="faq" className="px-6 py-16 sm:px-10 lg:px-16 lg:py-24">
+    <section id="faq" className="px-4 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
         <div className="grid gap-10 lg:grid-cols-[280px_1fr] lg:gap-20">
           <div>

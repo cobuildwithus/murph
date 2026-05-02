@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/src/components/ui/select";
+import { ResponsiveSelect } from "@/src/components/ui/responsive-select";
 
 const DEFAULT_CATEGORIES = [
   "All",
@@ -28,24 +22,17 @@ export function CategoryFilter({ value, onChange, categories }: CategoryFilterPr
   const categoryOptions = categories && categories.length > 0
     ? ["All", ...categories.filter((category) => category !== "All")]
     : DEFAULT_CATEGORIES;
-  const handleValueChange = (nextValue: string | null) => {
-    if (nextValue) {
-      onChange(nextValue);
-    }
-  };
 
   return (
-    <Select value={value} onValueChange={handleValueChange}>
-      <SelectTrigger size="sm" className="w-full sm:w-52">
-        <SelectValue placeholder="All categories" />
-      </SelectTrigger>
-      <SelectContent>
-        {categoryOptions.map((category) => (
-          <SelectItem key={category} value={category}>
-            {category}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <ResponsiveSelect
+      value={value}
+      onValueChange={onChange}
+      placeholder="All categories"
+      options={categoryOptions.map((category) => ({
+        label: category,
+        value: category,
+      }))}
+      className="w-full sm:w-52"
+    />
   );
 }

@@ -10,7 +10,7 @@ export function SignupCtaSection({
   signupCta: HomepageSignupCta;
 }) {
   return (
-    <section id="pricing" className="relative overflow-hidden bg-[#2a2520] px-6 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28">
+    <section id="pricing" className="relative overflow-hidden bg-[#2a2520] px-4 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"

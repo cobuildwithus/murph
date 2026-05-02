@@ -13,6 +13,7 @@ import {
 import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import { SectionLabel } from "@/src/components/ui/section-label";
+import { cn } from "@/src/lib/utils";
 import type {
   Expert,
   ExperimentMechanismChainStep,
@@ -907,11 +908,14 @@ function ProtocolShapeRail({
           );
         })}
       </div>
-      <div className="relative h-3 font-mono text-[9px]/3 tabular-nums text-muted-foreground">
-        {positionedTicks.map((tick, i) => (
+      <div className="relative h-6 font-mono text-[9px]/3 tabular-nums text-muted-foreground sm:h-3">
+        {positionedTicks.map((tick, i, arr) => (
           <span
             key={`${tick.label}-${i}`}
-            className="absolute top-0 -translate-x-1/2 whitespace-nowrap first:translate-x-0 last:-translate-x-full"
+            className={cn(
+              "absolute -translate-x-1/2 whitespace-nowrap first:translate-x-0 last:-translate-x-full",
+              i % 2 === 1 ? "top-3 sm:top-0" : "top-0",
+            )}
             style={{ left: `${tick.positionPercent}%` }}
           >
             {tick.label}

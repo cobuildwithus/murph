@@ -9,7 +9,7 @@ const PROMISES = [
 
 export function SecurityTeaserSection() {
   return (
-    <section className="bg-[#ebdfc6] px-6 py-20 sm:px-10 lg:px-16 lg:py-28">
+    <section className="bg-[#ebdfc6] px-4 py-20 sm:px-10 lg:px-16 lg:py-28">
       <div className="mx-auto grid max-w-[1120px] items-center gap-x-16 gap-y-14 lg:grid-cols-[1.15fr_0.85fr]">
         <div>
           <div className="flex items-center gap-4">

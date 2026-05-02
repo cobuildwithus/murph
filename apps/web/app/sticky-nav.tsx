@@ -28,7 +28,7 @@ export function StickyNav({
 
   return (
     <nav
-      className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 transition-all duration-300 sm:px-10 lg:px-16 ${
+      className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-4 transition-all duration-300 sm:px-10 lg:px-16 ${
         scrolled
           ? "bg-[#1A1F16]/90 backdrop-blur-xl"
           : ""

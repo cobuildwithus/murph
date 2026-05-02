@@ -37,7 +37,6 @@ test("removes the unwanted Bryan Johnson description qualifier from the rendered
       category: "Recovery",
       durationDays: 21,
       evidenceLevel: 3,
-      evidenceLabel: "Field testing · Usable",
       status: "upcoming",
       baselineDays: 7,
       description:
@@ -59,7 +58,6 @@ test("shows protocol days at the top level without counting baseline days", () =
       category: "Recovery",
       durationDays: 21,
       evidenceLevel: 3,
-      evidenceLabel: "Field testing · Usable",
       status: "upcoming",
       baselineDays: 7,
       description: "Daily sauna protocol with a baseline period.",
@@ -81,7 +79,6 @@ test("shows active protocol progress without counting baseline days", () => {
       category: "Recovery",
       durationDays: 21,
       evidenceLevel: 3,
-      evidenceLabel: "Field testing · Usable",
       status: "active",
       day: 8,
       baselineDays: 7,
