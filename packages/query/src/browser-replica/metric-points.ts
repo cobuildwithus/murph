@@ -330,6 +330,10 @@ function createMetricPointsFromRows(
       unit: row.unit ?? definition.unit,
       value: row.value,
     });
+    if (!normalized) {
+      return [];
+    }
+
     const observedAt = metricRowObservedAt(row);
     const sourceLabel = metricPointSourceLabel(row);
 
@@ -510,11 +514,11 @@ function buildMetricPointFromScalar(input: {
     return null;
   }
 
-  const normalized = normalizeMetricValue({
-    definition,
-    unit: input.unit ?? definition.unit,
-    value: input.value,
-  });
+  const normalized = normalizeMetricValue({ definition, unit: input.unit, value: input.value });
+  if (!normalized) {
+    return null;
+  }
+
   const observedAt = input.observedAt ?? entityObservedAt(input.entity);
   const date = observedAt.slice(0, 10);
 
@@ -705,7 +709,7 @@ function normalizeMetricValue(input: {
   definition: MetricDefinition;
   unit: string | null;
   value: number;
-}): { unit: string | null; value: number } {
+}): { unit: string | null; value: number } | null {
   const normalizedUnit = normalizeUnit(input.unit);
 
   switch (input.definition.metricKey) {
@@ -713,29 +717,28 @@ function normalizeMetricValue(input: {
       return normalizeWeightKilograms(input.value, normalizedUnit);
     case "body-fat-percentage":
     case "hba1c":
-      return { unit: "percent", value: input.value };
+      return normalizedUnit === "percent" ? { unit: "percent", value: input.value } : null;
     case "glucose":
     case "apob":
     case "ldl-c":
     case "hdl-c":
     case "triglycerides":
-      return { unit: "mg/dL", value: input.value };
+      return normalizedUnit === "mg/dL" ? { unit: "mg/dL", value: input.value } : null;
     case "hs-crp":
-      return { unit: "mg/L", value: input.value };
+      return normalizedUnit === "mg/L" ? { unit: "mg/L", value: input.value } : null;
     case "ferritin":
-      return { unit: "ng/mL", value: input.value };
+      return normalizedUnit === "ng/mL" ? { unit: "ng/mL", value: input.value } : null;
     case "alt":
     case "ast":
     case "ggt":
-      return { unit: "U/L", value: input.value };
+      return normalizedUnit === "U/L" ? { unit: "U/L", value: input.value } : null;
     default:
       return { unit: input.unit ?? input.definition.unit, value: input.value };
   }
 }
 
-function normalizeWeightKilograms(value: number, unit: string | null): { unit: string; value: number } {
+function normalizeWeightKilograms(value: number, unit: string | null): { unit: string; value: number } | null {
   switch (unit) {
-    case null:
     case "kg":
     case "kilogram":
     case "kilograms":
@@ -746,7 +749,7 @@ function normalizeWeightKilograms(value: number, unit: string | null): { unit: s
     case "pounds":
       return { unit: "kg", value: Number((value * 0.45359237).toFixed(4)) };
     default:
-      return { unit: "kg", value };
+      return null;
   }
 }
 
