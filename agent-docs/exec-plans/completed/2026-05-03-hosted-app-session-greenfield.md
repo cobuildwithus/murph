@@ -28,3 +28,15 @@ Land the supplied greenfield hosted app-session patch so Murph dashboard/setting
 - Start with patch application and static inspection.
 - Run focused hosted-web checks, then the repo-required verification lane unless blocked by unrelated failures.
 - Run required security/privacy, frontend, coverage, and final review audits for this high-risk hosted-web change.
+
+## Outcome
+
+- Applied supplied final app-session hardening patch.
+- Moved hosted billing checkout/success routes onto hosted app-session auth while leaving Privy as fresh proof for login/linking.
+- Added hosted mutation origin guard to the browser-vault session route before session/workspace reads.
+- Added the optional settings identity-link polish so email and Telegram close the dialog and refresh after hosted sync success, matching phone.
+- Fixed frontend-review finding so Telegram parent callbacks only fire for manual link sync, not quiet background resync.
+- Focused Vitest and diff checks passed; `pnpm test:diff` remains blocked by unrelated hosted-web landing-page expectation drift and an unrelated `HeartbeatButton` design-page prop mismatch.
+Status: completed
+Updated: 2026-05-03
+Completed: 2026-05-03
