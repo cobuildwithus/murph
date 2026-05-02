@@ -1,6 +1,6 @@
 # Wire hosted-local Linq webhook through Cloudflare tunnel
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -45,6 +45,10 @@ Updated: 2026-05-02
    Mitigation: skip when no explicit tunnel URL/config is provided; fail only when the operator explicitly requests Linq tunnel setup.
 3. Risk: logs or state could leak tokens, phone numbers, or local machine paths.
    Mitigation: report only counts/target URLs, rely on existing state redaction, and avoid writing secrets to docs/tests.
+4. Risk: repeated dev starts could duplicate provider webhook subscriptions.
+   Mitigation: cache successful local registration fingerprints under ignored `.tmp/` state.
+5. Risk: a shared cloudflared config could register the wrong public hostname.
+   Mitigation: require the selected ingress hostname to route to the configured local hosted-web port.
 
 ## Tasks
 
@@ -64,11 +68,16 @@ Updated: 2026-05-02
 - Passed:
   - `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/dev-hosted-local/config.test.ts scripts/hosted-local.test.ts scripts/dev-hosted-local/linq-webhook-tunnel.test.ts scripts/dev-hosted-local/environment.test.ts scripts/dev-hosted-local/stack.test.ts`
   - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/helpers/hosted-local-dev-harness.test.ts`
+  - `pnpm exec vitest run --config apps/cloudflare/vitest.e2e.config.ts --no-coverage apps/cloudflare/test/run-hosted-local-e2e.test.ts`
   - `pnpm hosted-local --help`
   - `pnpm exec tsc -p tsconfig.tools.json --pretty false`
   - `git diff --check`
+- Audits:
+  - Security/privacy review found no hard-coded tunnel hostnames or raw secrets; medium findings were fixed by narrowing Linq registration env, validating cloudflared ingress service, and passing repo-relative config paths to `cloudflared`.
+  - Finish review findings were fixed by disabling Linq tunnel registration in E2E defaults, caching successful local registrations, and rejecting query/hash values before URL normalization mutates the target.
 - Blocked/unrelated:
   - `pnpm typecheck` gets through the repo tools typecheck for this change, then fails in dirty `packages/query` browser-replica metric point work outside this plan.
   - `pnpm test:repo-tools` now fails only in `scripts/research-init.test.ts` on a missing Health Commons protocol zip-entry expectation outside this plan.
 - Not run:
   - Live Linq registration against the current tunnel, to avoid mutating the Linq webhook subscription outside a user-triggered `pnpm dev` session.
+Completed: 2026-05-02
