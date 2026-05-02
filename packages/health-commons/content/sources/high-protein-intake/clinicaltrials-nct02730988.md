@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Effect of High Protein Weight Loss for Seniors"
+  authors: Wake Forest University
+  journal: ClinicalTrials.gov
   url: https://clinicaltrials.gov/study/NCT02730988/
 researchEvidence:
   designKind: randomized_controlled_trial

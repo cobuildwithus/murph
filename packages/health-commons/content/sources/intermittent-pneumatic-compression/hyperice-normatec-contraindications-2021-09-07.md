@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Are there any contraindications for the Normatec?"
+  authors: Hyperice
+  journal: Hyperice Support
   url: "https://hyperice.zendesk.com/hc/en-us/articles/360046872273-Are-there-any-contraindications-for-the-Normatec"
 researchEvidence:
   designKind: other

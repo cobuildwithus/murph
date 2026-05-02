@@ -20,6 +20,8 @@ relations:
 source:
   kind: "guideline"
   title: "Generalised anxiety disorder and panic disorder in adults: management"
+  authors: "National Institute for Health and Care Excellence"
+  journal: "NICE Clinical Guideline CG113"
   url: "https://www.nice.org.uk/guidance/cg113"
 researchEvidence:
   designKind: "guideline"

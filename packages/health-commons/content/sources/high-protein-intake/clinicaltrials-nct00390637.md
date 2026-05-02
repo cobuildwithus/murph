@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "DiOGenes: Diet, Obesity and Genes Study"
+  authors: University of Copenhagen
+  journal: ClinicalTrials.gov
   url: https://clinicaltrials.gov/study/NCT00390637/
 researchEvidence:
   designKind: other

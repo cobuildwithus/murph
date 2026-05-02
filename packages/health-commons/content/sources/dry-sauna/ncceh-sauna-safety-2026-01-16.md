@@ -21,6 +21,8 @@ relations:
 source:
   kind: "guideline"
   title: "Rapid review: Environmental health risks and safety considerations in saunas"
+  authors: Chen T
+  journal: National Collaborating Centre for Environmental Health
   url: "https://ncceh.ca/resources/evidence-briefs/rapid-review-environmental-health-risks-and-safety-considerations-saunas"
   citation: "Rapid review: Environmental health risks and safety considerations in saunas. https://ncceh.ca/resources/evidence-briefs/rapid-review-environmental-health-risks-and-safety-considerations-saunas"
 sourceIdentity:

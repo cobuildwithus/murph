@@ -21,6 +21,8 @@ relations:
 source:
   kind: "guideline"
   title: "Clinical Overview of Heat and Pregnancy"
+  authors: "Centers for Disease Control and Prevention"
+  journal: "CDC Heat Health"
   url: "https://cdc.gov/heat-health/hcp/clinical-overview/heat-and-pregnant-women.html"
   citation: "Clinical Overview of Heat and Pregnancy. https://cdc.gov/heat-health/hcp/clinical-overview/heat-and-pregnant-women.html"
 sourceIdentity:

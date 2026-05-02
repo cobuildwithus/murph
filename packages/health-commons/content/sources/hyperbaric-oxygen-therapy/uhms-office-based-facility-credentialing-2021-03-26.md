@@ -23,6 +23,8 @@ relations:
 source:
   kind: "guideline"
   title: "Office-based Hyperbaric Oxygen Facility Credentialing Guidelines"
+  authors: Kelly M, Gelly H, Shapshak D
+  journal: Undersea & Hyperbaric Medical Society
   url: "https://www.uhms.org/images/Position-Statements/27._c._UHMS-PS-Office-based-HBOT_ver3-26-21_1.pdf"
 researchEvidence:
   designKind: "guideline"

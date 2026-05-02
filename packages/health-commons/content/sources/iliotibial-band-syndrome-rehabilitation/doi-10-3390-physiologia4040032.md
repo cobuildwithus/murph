@@ -20,6 +20,8 @@ relations:
 source:
   kind: review
   title: 'Effects of Saddle Position on Cycling: An Umbrella Review'
+  authors: Pedro Castro Vigário, Ricardo Maia Ferreira, António Rodrigues Sampaio, Pedro Nunes Martins
+  journal: Physiologia
   citation: 'Effects of Saddle Position on Cycling: An Umbrella Review. doi:10.3390/physiologia4040032'
   doi: 10.3390/physiologia4040032
   url: https://www.mdpi.com/2673-9488/4/4/32

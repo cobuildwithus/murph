@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Evaluation of Treatment Factors in the Management of Chronic Iliotibial Band Syndrome in Female Runners
+  authors: University of British Columbia
+  journal: ClinicalTrials.gov
   citation: Evaluation of Treatment Factors in the Management of Chronic Iliotibial Band Syndrome in Female Runners
   url: https://clinicaltrials.gov/study/NCT02296151
 researchEvidence:

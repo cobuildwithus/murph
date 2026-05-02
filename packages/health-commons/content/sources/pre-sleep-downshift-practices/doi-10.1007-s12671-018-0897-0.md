@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "The Safety of Mindfulness-Based Interventions: a Systematic Review of Randomized Controlled Trials"
+  authors: Samuel Y. S. Wong, Joyce Y. C. Chan, Daisy D. Zhang, et al.
+  journal: Mindfulness
   doi: "10.1007/s12671-018-0897-0"
   url: "https://link.springer.com/article/10.1007/s12671-018-0897-0"
 researchEvidence:

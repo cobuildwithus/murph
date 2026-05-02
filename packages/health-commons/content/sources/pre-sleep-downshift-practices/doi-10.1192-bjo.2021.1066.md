@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Prevalence, predictors and types of unpleasant and adverse effects of meditation in regular meditators: international cross-sectional study"
+  authors: Luca Pauly, Niklas Bergmann, Inge Hahne, Sarah Pux, et al.
+  journal: BJPsych Open
   doi: "10.1192/bjo.2021.1066"
   url: "https://www.cambridge.org/core/journals/bjpsych-open/article/prevalence-predictors-and-types-of-unpleasant-and-adverse-effects-of-meditation-in-regular-meditators-international-crosssectional-study/81E6E9CF2FEE32BC8E97AE9853FD13BC"
 researchEvidence:

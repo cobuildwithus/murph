@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Incidence and Predictors of Meditation-Related Unusual Experiences and Adverse Effects in a Representative Sample of Meditators in the United States"
+  authors: Nicholas T. Van Dam, Jessica Targett, Jonathan N. Davies, et al.
+  journal: Clinical Psychological Science
   doi: "10.1177/21677026241298269"
   url: "https://journals.sagepub.com/doi/10.1177/21677026241298269"
 researchEvidence:

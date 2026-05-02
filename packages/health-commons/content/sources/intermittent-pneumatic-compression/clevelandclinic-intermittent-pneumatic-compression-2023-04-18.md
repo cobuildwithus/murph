@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Intermittent Pneumatic Compression Devices"
+  authors: Aetna
+  journal: Aetna Clinical Policy Bulletin
   url: "https://my.clevelandclinic.org/health/treatments/14791-intermittent-pneumatic-compression-ipc-device"
 researchEvidence:
   designKind: other

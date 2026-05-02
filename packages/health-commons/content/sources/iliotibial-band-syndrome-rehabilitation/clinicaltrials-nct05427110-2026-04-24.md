@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Shearwave Elastography in Evaluation of Iliotibial Band Syndrome
+  authors: "Nathaly Gaudreault, Université de Sherbrooke"
+  journal: "ClinicalTrials.gov"
   citation: Shearwave Elastography in Evaluation of Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT05427110
 researchEvidence:

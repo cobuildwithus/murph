@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Effectiveness of Deep Breathing and Body Scan Meditation Combined with Music to Improve Sleep Quality and Quality of Life in Older Adults"
+  authors: "Nitayapa Nanthakwang, Penprapa Siviroj, Anuchart Matanasarawoot, Ratana Sapbamrer, et al."
+  journal: "The Open Public Health Journal"
   doi: "10.2174/1874944502013010232"
   url: "https://openpublichealthjournal.com/VOLUME/13/PAGE/232/FULLTEXT/"
 researchEvidence:

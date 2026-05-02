@@ -21,6 +21,8 @@ relations:
 source:
   kind: "external_protocol"
   title: "My #1 Longevity Protocol of 2025"
+  authors: Bryan Johnson
+  journal: Blueprint
   url: "https://blueprint.bryanjohnson.com/blogs/news/sauna-protocol"
   citation: "My #1 Longevity Protocol of 2025. https://blueprint.bryanjohnson.com/blogs/news/sauna-protocol"
 sourceIdentity:

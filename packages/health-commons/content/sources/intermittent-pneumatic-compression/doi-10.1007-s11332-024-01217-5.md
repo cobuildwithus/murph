@@ -29,6 +29,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "Intermittent sequential pneumatic compression reduces post-exercise hemodilution and enhances perceptual recovery without improving subsequent cycling performance"
+  authors: Pau Ferrer-Ramos, Arnau Artés, Casimiro Javierre, Ginés Viscor et al.
+  journal: Sport Sciences for Health
   doi: "10.1007/s11332-024-01217-5"
   url: "https://link.springer.com/article/10.1007/s11332-024-01217-5"
 researchEvidence:

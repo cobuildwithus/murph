@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "Adverse Meditation Experiences: Navigating Buddhist and Secular Frameworks for Addressing Them"
+  authors: Jane Compson
+  journal: Mindfulness
   doi: "10.1007/s12671-017-0878-8"
   url: "https://link.springer.com/article/10.1007/s12671-017-0878-8"
 researchEvidence:

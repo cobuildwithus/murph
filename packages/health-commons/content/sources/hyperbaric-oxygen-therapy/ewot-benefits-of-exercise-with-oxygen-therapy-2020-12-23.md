@@ -23,6 +23,8 @@ relations:
 source:
   kind: "web_page"
   title: "What Are the Benefits of Exercise With Oxygen Therapy?"
+  authors: EWOT Team Member
+  journal: EWOT Blog
   url: "https://ewot.com/blogs/blog/what-are-the-benefits-of-exercise-with-oxygen-therapy"
 researchEvidence:
   designKind: "other"

@@ -20,6 +20,8 @@ relations:
 source:
   kind: "web_page"
   title: "Wim Hof Method FAQ: breathing exercise safety around water"
+  authors: "Wim Hof Method"
+  journal: "Wim Hof Method FAQ"
   url: "https://www.wimhofmethod.com/faq"
 researchEvidence:
   designKind: "other"

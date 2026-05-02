@@ -21,6 +21,8 @@ relations:
 source:
   kind: "guideline"
   title: "Heat and Medications – Guidance for Clinicians"
+  authors: "Centers for Disease Control and Prevention"
+  journal: "CDC Heat Health"
   url: "https://cdc.gov/heat-health/hcp/clinical-guidance/heat-and-medications-guidance-for-clinicians.html"
   citation: "Heat and Medications – Guidance for Clinicians. https://cdc.gov/heat-health/hcp/clinical-guidance/heat-and-medications-guidance-for-clinicians.html"
 sourceIdentity:

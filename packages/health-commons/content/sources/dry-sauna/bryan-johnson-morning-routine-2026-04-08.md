@@ -21,6 +21,8 @@ relations:
 source:
   kind: "external_protocol"
   title: "My Morning Routine (2026)"
+  authors: Bryan Johnson
+  journal: Blueprint
   url: "https://blueprint.bryanjohnson.com/blogs/news/morning-routine"
   citation: "My Morning Routine (2026). https://blueprint.bryanjohnson.com/blogs/news/morning-routine"
 sourceIdentity:

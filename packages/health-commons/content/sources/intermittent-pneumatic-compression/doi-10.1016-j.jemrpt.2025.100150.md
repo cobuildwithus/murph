@@ -29,6 +29,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "Compressive neuropathy following intermittent pneumatic compression device: A case report"
+  authors: "Tyler D'Ovidio, Abhishek Mogili, Simeret Genet, Charles R. Litchfield, et al."
+  journal: "JEM Reports"
   doi: "10.1016/j.jemrpt.2025.100150"
   url: "https://www.sciencedirect.com/science/article/pii/S2773232025000148"
 researchEvidence:

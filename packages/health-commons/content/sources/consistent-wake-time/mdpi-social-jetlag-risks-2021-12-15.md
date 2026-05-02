@@ -21,6 +21,8 @@ relations:
 source:
   kind: "review"
   title: "Social Jetlag and Related Risks for Human Health"
+  authors: Rocco Caliandro; Astrid A. Streng; Linda W. M. van Kerkhof; Gijsbertus T. J. van der Horst; et al.
+  journal: Nutrients
   url: "https://www.mdpi.com/2072-6643/13/12/4543"
 researchEvidence:
   designKind: "narrative_review"

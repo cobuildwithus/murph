@@ -23,6 +23,8 @@ relations:
 source:
   kind: "guideline"
   title: "UHMS Guidelines for Credentialing, Privileging and Supervision of Hyperbaric Oxygen Therapy in the U.S.A."
+  authors: UHMS Credentialing Committee
+  journal: Undersea & Hyperbaric Medicine
   url: "https://www.uhms.org/images/Position-Statements/UHMS_Cred_and_Priv_Guide_2022_final_Jul_2023_V4.pdf"
 researchEvidence:
   designKind: "guideline"

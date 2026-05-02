@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Knee pain - assessment
+  authors: "National Institute for Health and Care Excellence"
+  journal: "NICE Clinical Knowledge Summaries"
   citation: Knee pain - assessment
   url: https://cks.nice.org.uk/topics/knee-pain-assessment/
 researchEvidence:

@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Slow Breathing Improves Arterial Baroreflex Sensitivity and Decreases Blood Pressure in Essential Hypertension"
+  authors: Chacko N. Joseph, Cesare Porta, Gaia Casucci, Nadia Casiraghi, et al.
+  journal: Hypertension
   doi: "10.1161/01.hyp.0000179581.68566.7d"
   url: "https://doi.org/10.1161/01.HYP.0000179581.68566.7d"
 researchEvidence:

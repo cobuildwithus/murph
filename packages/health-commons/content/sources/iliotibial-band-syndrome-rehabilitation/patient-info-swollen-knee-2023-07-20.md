@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: 'Swollen Knee: Causes, Treatment, and When to See a Doctor'
+  authors: "Dr Colin Tidy; Dr Doug McKechnie"
+  journal: "Patient.info"
   citation: 'Swollen Knee: Causes, Treatment, and When to See a Doctor'
   url: https://patient.info/doctor/swollen-knee
 researchEvidence:

@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "A qualitative analysis of experiential challenges associated with meditation practice"
+  authors: Tim Lomas, Tina Cartwright, Trudi Edginton, Damien Ridge
+  journal: Mindfulness
   doi: "10.1007/s12671-014-0329-8"
   url: "https://link.springer.com/article/10.1007/s12671-014-0329-8"
 researchEvidence:

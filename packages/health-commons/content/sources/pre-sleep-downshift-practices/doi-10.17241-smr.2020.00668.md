@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "The Effect of Deep Breathing Cycles with Various Ratios on Heart Rate Variability and the Sleep Quality of Healthy Young Adults"
+  authors: Jirawat Wattanapanyawech, Premtip Thaveeratitham
+  journal: Sleep Medicine Research
   doi: "10.17241/smr.2020.00668"
   url: "https://www.sleepmedres.org/journal/view.php?number=148"
 researchEvidence:

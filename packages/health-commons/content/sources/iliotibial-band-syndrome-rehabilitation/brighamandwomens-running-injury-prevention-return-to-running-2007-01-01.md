@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Running Injury Prevention Tips & Return to Running Program
+  authors: "Brigham and Women's Hospital Department of Rehabilitation Services"
+  journal: "Brigham and Women's Hospital"
   citation: Running Injury Prevention Tips & Return to Running Program
   url: https://www.brighamandwomens.org/assets/bwh/patients-and-families/rehabilitation-services/pdfs/le-running-injury-prevention-tips-and-return-to-running-program-bwh.pdf
 researchEvidence:

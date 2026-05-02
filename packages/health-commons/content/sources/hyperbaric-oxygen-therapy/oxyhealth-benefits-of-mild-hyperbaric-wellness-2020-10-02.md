@@ -23,6 +23,8 @@ relations:
 source:
   kind: "web_page"
   title: "Just A Few Of The Amazing Benefits Of Mild Hyperbaric Wellness"
+  authors: Mullis J
+  journal: Longevity Box
   url: "https://www.oxyhealth.eu/en/benefits-of-mild-hyperbaric-wellness"
 researchEvidence:
   designKind: "other"

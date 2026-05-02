@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effect of Neuromuscular Inhibition Technique on Iliotibial Band Friction Syndrome
+  authors: "Cairo University"
+  journal: "ClinicalTrials.gov"
   citation: Effect of Neuromuscular Inhibition Technique on Iliotibial Band Friction Syndrome
   url: https://clinicaltrials.gov/study/NCT06980324
 researchEvidence:

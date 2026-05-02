@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "High Protein Intake and Intense Exercise During Weight Loss"
+  authors: McMaster University
+  journal: ClinicalTrials.gov
   url: https://clinicaltrials.gov/study/NCT01776359/
 researchEvidence:
   designKind: other

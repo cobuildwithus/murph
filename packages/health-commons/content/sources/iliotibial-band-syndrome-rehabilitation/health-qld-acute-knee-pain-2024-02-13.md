@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Knee pain (acute)
+  authors: "NSW Health"
+  journal: "NSW Health Outpatient Referrals"
   citation: Knee pain (acute)
   url: https://www.health.qld.gov.au/cpc/orthopaedics/acute-knee-pain
 researchEvidence:

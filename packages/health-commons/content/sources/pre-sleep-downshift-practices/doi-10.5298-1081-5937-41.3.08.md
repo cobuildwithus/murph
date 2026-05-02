@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Protocol for Heart Rate Variability Biofeedback Training"
+  authors: Paul Lehrer, Bronya Vaschillo, Terri Zucker, Jessica Graves, et al.
+  journal: Biofeedback
   doi: "10.5298/1081-5937-41.3.08"
   url: "https://doi.org/10.5298/1081-5937-41.3.08"
 researchEvidence:

@@ -34,6 +34,8 @@ sourceIdentity:
 source:
   kind: review
   title: "Dietary protein and energy balance in relation to obesity and co-morbidities"
+  authors: Mathijs Drummen; Lea Tischmann; Blandine Gatta-Cherifi; Tanja Adam et al.
+  journal: Frontiers in Endocrinology
   doi: 10.3389/fendo.2018.00443
   url: https://pmc.ncbi.nlm.nih.gov/articles/PMC6087750/
 researchEvidence:

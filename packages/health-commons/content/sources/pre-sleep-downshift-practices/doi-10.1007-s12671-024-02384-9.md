@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Development and Validation of the Inventory of Meditation Experiences (IME)"
+  authors: "Nicholas T. Van Dam, Jessica Targett, Alex Burger, Jonathan N. Davies et al."
+  journal: "Mindfulness"
   doi: "10.1007/s12671-024-02384-9"
   url: "https://link.springer.com/article/10.1007/s12671-024-02384-9"
 researchEvidence:

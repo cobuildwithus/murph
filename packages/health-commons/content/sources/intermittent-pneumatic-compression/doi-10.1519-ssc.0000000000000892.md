@@ -29,6 +29,8 @@ sourceIdentity:
 source:
   kind: review
   title: "From Fads to Facts: A Systematic Review and Meta-Analysis of Intermittent Pneumatic Compression Therapy for Muscle Recovery"
+  authors: Laura Albillos-Almaraz, Iván Cavero-Redondo, Miguel Ángel Rodríguez, Rony Fares et al.
+  journal: Strength & Conditioning Journal
   doi: "10.1519/ssc.0000000000000892"
   url: "https://journals.lww.com/nsca-scj/abstract/2025/08000/from_fads_to_facts__a_systematic_review_and.11.aspx"
 researchEvidence:

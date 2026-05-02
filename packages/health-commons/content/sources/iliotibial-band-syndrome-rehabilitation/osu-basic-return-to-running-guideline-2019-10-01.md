@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Basic Return to Running Guideline
+  authors: Melissa Gallatin, Megan Graver
+  journal: The Ohio State University Wexner Medical Center
   citation: Basic Return to Running Guideline
   url: https://wexnermedical.osu.edu/-/media/files/wexnermedical/patient-care/healthcare-services/sports-medicine/education/medical-professionals/other/basic-return-to-running-guideline.pdf?hash=BA8D440B70C5063C529CCEE2EB13C4EF8D7B20CD&la=en
 researchEvidence:

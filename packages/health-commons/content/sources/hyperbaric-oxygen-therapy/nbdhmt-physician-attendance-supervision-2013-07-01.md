@@ -23,6 +23,8 @@ relations:
 source:
   kind: "guideline"
   title: "Physician Attendance and Supervision of Hyperbaric Oxygen Therapy"
+  authors: National Board of Diving and Hyperbaric Medical Technology
+  journal: National Board of Diving and Hyperbaric Medical Technology
   url: "https://nbdhmt.org/"
 researchEvidence:
   designKind: "guideline"

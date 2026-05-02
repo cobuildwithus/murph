@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "Examining heterogeneity in elderly consumers’ acceptance of carriers for protein-enriched food: A segmentation study"
+  authors: Lotte D. T. van der Zanden; Ellen van Kleef; René A. de Wijk; Hans C. M. van Trijp
+  journal: Food Quality and Preference
   doi: 10.1016/j.foodqual.2015.01.016
   url: https://doi.org/10.1016/j.foodqual.2015.01.016/
 researchEvidence:

@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: guideline
   title: "Venous thromboembolism in over 16s: reducing the risk of hospital-acquired deep vein thrombosis or pulmonary embolism"
+  authors: National Guideline Centre (UK); National Institute for Health and Care Excellence
+  journal: NICE Guideline NG89
   url: "https://www.nice.org.uk/guidance/ng89"
 researchEvidence:
   designKind: guideline

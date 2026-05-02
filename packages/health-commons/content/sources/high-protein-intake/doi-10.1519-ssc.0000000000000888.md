@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: review
   title: "Effect of Dietary Protein on Fat-Free Mass in Energy Restricted, Resistance-Trained Individuals: An Updated Systematic Review With Meta-Regression"
+  authors: "Refalo MC, Trexler ET, Helms ER"
+  journal: "Strength and Conditioning Journal"
   doi: 10.1519/ssc.0000000000000888
   url: https://journals.lww.com/nsca-scj/fulltext/9900/effect_of_dietary_protein_on_fat_free_mass_in.179.aspx/
 researchEvidence:

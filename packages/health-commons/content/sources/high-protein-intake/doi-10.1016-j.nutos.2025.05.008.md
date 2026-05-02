@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "The role of protein intake distribution across meals in maintenance of physical performance and muscle strength in older adults: An exploratory study based on secondary data analysis of the PRevention Of Malnutrition In Senior Subjects in the EU (PROMISS) trial"
+  authors: "Wijnhoven HAH; Niskanen RT; Reinders I; Suominen MH et al."
+  journal: "Clinical Nutrition Open Science"
   doi: 10.1016/j.nutos.2025.05.008
   url: https://doi.org/10.1016/j.nutos.2025.05.008/
 researchEvidence:

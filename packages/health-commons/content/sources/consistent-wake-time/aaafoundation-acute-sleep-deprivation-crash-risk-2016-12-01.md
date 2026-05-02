@@ -21,6 +21,8 @@ relations:
 source:
   kind: "web_page"
   title: "Acute Sleep Deprivation and Risk of Motor Vehicle Crash Involvement"
+  authors: Brian C. Tefft
+  journal: AAA Foundation for Traffic Safety
   url: "https://aaafoundation.org/research/acute-sleep-deprivation-risk-motor-vehicle-crash-involvement/"
 researchEvidence:
   designKind: "other"

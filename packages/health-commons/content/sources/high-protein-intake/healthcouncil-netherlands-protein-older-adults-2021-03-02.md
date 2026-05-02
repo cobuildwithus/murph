@@ -30,6 +30,8 @@ sourceIdentity:
 source:
   kind: guideline
   title: "Systematic review of health effects of dietary protein in older adults"
+  authors: "Health Council of the Netherlands"
+  journal: "Health Council of the Netherlands"
   url: https://www.gezondheidsraad.nl/site/binaries/site-content/collections/documents/2021/03/02/voedingsnormen-voor-eiwitten/backgrounddocument-Systematic-review-of-health-effects-of-dietary-protein-in-older-adults.pdf/
 researchEvidence:
   designKind: systematic_review

@@ -31,6 +31,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "Disrupting prolonged sitting reduces IL-8 and lower leg swell in active young adults"
+  authors: Shilpa Dogra, Mitchell C. Wolf, Michael P. Jeffrey, Ryan C.A. Foley et al.
+  journal: BMC Sports Science, Medicine and Rehabilitation
   doi: "10.1186/s13102-019-0138-4"
   url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC6798359/"
 researchEvidence:

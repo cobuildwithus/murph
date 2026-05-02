@@ -21,6 +21,8 @@ relations:
 source:
   kind: "external_protocol"
   title: "Sauna Experience"
+  authors: "North American Sauna Society"
+  journal: "North American Sauna Society"
   url: "https://saunasociety.org/sauna-experience"
   citation: "Sauna Experience. https://saunasociety.org/sauna-experience"
 sourceIdentity:

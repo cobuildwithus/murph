@@ -21,6 +21,8 @@ relations:
 source:
   kind: "web_page"
   title: "Fimea issues a warning: Wearing an opioid patch in the sauna may cause life-threatening poisoning"
+  authors: "Finnish Medicines Agency Fimea"
+  journal: "Fimea"
   url: "https://fimea.fi/en/-/fimea-issues-a-warning-wearing-an-opioid-patch-in-the-sauna-may-cause-life-threatening-poisoning"
   citation: "Fimea issues a warning: Wearing an opioid patch in the sauna may cause life-threatening poisoning. https://fimea.fi/en/-/fimea-issues-a-warning-wearing-an-opioid-patch-in-the-sauna-may-cause-life-threatening-poisoning"
 sourceIdentity:

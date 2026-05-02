@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Mindfulness Meditation Adherence in a College Sample: Comparison of a 10-Min Versus 20-Min 2-Week Daily Practice"
+  authors: Christopher R. Berghoff, Linnie E. Wheeless, Timothy R. Ritzert, Cody M. Wooley, et al.
+  journal: Mindfulness
   doi: "10.1007/s12671-017-0717-y"
   url: "https://link.springer.com/article/10.1007/s12671-017-0717-y"
 researchEvidence:

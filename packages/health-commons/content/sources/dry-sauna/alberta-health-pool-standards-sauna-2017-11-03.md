@@ -21,6 +21,8 @@ relations:
 source:
   kind: "guideline"
   title: "Pool Standards, July 2014 (Amended 2017)"
+  authors: Alberta Health
+  journal: Government of Alberta
   url: "https://open.alberta.ca/publications/9781460135990"
   citation: "Pool Standards, July 2014 (Amended 2017). https://open.alberta.ca/publications/9781460135990"
 sourceIdentity:

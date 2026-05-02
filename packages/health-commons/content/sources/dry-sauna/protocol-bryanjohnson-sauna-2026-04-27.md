@@ -21,6 +21,8 @@ relations:
 source:
   kind: "external_protocol"
   title: "DON'T DIE Protocol: Sauna"
+  authors: Bryan Johnson
+  journal: DON’T DIE Protocol
   url: "https://protocol.bryanjohnson.com/"
   citation: "DON'T DIE Protocol: Sauna. https://protocol.bryanjohnson.com/"
 sourceIdentity:

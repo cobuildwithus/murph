@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Distribution of Nutrient Derived Amino Acids"
+  authors: "Bispebjerg Hospital"
+  journal: "ClinicalTrials.gov"
   url: https://clinicaltrials.gov/study/NCT03870425/
 researchEvidence:
   designKind: other

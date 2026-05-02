@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Safety Instructions (NormaTec Elite)"
+  authors: Hyperice
+  journal: Hyperice Support
   url: "https://hyperice.zendesk.com/hc/en-us/articles/26261642595355-Safety-Instructions-NormaTec-Elite"
 researchEvidence:
   designKind: other

@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effect of Clamshell Versus Frog Pump Exercises for IT Band Pain Relief in Sales Workers
+  authors: "University of Lahore"
+  journal: "ClinicalTrials.gov"
   citation: Effect of Clamshell Versus Frog Pump Exercises for IT Band Pain Relief in Sales Workers
   url: https://clinicaltrials.gov/study/NCT07118371
 researchEvidence:

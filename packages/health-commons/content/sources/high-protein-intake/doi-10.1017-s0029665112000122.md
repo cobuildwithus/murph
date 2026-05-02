@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: review
   title: "Safety and efficacy of high-protein diets for weight loss"
+  authors: Alexandra M. Johnstone
+  journal: Proceedings of the Nutrition Society
   doi: 10.1017/s0029665112000122
   url: https://doi.org/10.1017/S0029665112000122/
 researchEvidence:

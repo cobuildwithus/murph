@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "High-Protein Total Diet Replacement and Energy Metabolism in Women"
+  authors: University of Alberta
+  journal: ClinicalTrials.gov
   url: https://clinicaltrials.gov/study/NCT03565510/
 researchEvidence:
   designKind: other

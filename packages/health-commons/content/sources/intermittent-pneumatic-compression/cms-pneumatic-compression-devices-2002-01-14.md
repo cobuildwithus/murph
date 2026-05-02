@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "National Coverage Determination (NCD) for Pneumatic Compression Devices (280.6)"
+  authors: Centers for Medicare & Medicaid Services
+  journal: CMS National Coverage Determination Manual
   url: "https://www.cms.gov/medicare-coverage-database/view/ncd.aspx?ncdid=225"
 researchEvidence:
   designKind: other

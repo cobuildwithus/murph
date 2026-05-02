@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effect of Radial Extracorporeal Shockwave Therapy on Ultrasonography Changes in Patients With Iliotibial Band Syndrome
+  authors: "Cairo University"
+  journal: "ClinicalTrials.gov"
   citation: Effect of Radial Extracorporeal Shockwave Therapy on Ultrasonography Changes in Patients With Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT06410781
 researchEvidence:

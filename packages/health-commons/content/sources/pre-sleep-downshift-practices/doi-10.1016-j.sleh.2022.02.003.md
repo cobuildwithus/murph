@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Dissociable changes in sleep architecture with mindfulness and sleep hygiene intervention in older adults: secondary and exploratory analysis of polysomnography data from the Mindfulness Sleep Therapy (MIST) trial"
+  authors: Kian F. Wong; Francesca Perini; Jia Lin; Michael R. Goldstein; et al.
+  journal: Sleep Health
   doi: "10.1016/j.sleh.2022.02.003"
   url: "https://www.sciencedirect.com/science/article/abs/pii/S235272182200030X"
 researchEvidence:

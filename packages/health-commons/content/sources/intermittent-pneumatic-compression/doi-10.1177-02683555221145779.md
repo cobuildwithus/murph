@@ -29,6 +29,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "Effect of pneumatic compression device and stocking use on symptoms and quality of life in women with lipedema: A proof-in-principle randomized trial"
+  authors: "Thomas Wright, Crystal D. Scarfino, Ellen M. O'Malley"
+  journal: "Phlebology"
   doi: "10.1177/02683555221145779"
   url: "https://doi.org/10.1177/02683555221145779"
 researchEvidence:

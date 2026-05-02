@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Examining the Dose-Response Effects of Mindfulness Meditation Interventions on Well-Being: Protocol for a Randomized Controlled Trial"
+  authors: "Nicholas Bowles, Alexander Burger, Jonathan N. Davies, Julie A. Simpson, et al."
+  journal: "JMIR Research Protocols"
   doi: "10.2196/72786"
   url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC12344385/"
 researchEvidence:

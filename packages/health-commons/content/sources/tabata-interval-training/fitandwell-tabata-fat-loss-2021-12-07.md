@@ -23,6 +23,8 @@ relations:
 source:
   kind: web_page
   title: Get fit quick with this Tabata HIIT workout that blasts fat
+  authors: "James Frew"
+  journal: "Fit&Well"
   url: https://www.fitandwell.com/news/get-fit-quick-with-this-tabata-hiit-workout-that-blasts-fat
 researchEvidence:
   designKind: other

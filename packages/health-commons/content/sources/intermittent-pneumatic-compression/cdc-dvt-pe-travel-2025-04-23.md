@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Deep Vein Thrombosis and Pulmonary Embolism"
+  authors: "Nimia L. Reyes, Karon Abe"
+  journal: "CDC Yellow Book: Health Information for International Travel"
   url: "https://www.cdc.gov/yellow-book/hcp/travel-air-sea/deep-vein-thrombosis-and-pulmonary-embolism.html"
 researchEvidence:
   designKind: guideline

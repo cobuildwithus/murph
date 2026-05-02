@@ -20,6 +20,8 @@ relations:
 source:
   kind: "guideline"
   title: "VA/DoD Clinical Practice Guideline for the Management of Chronic Insomnia Disorder and Obstructive Sleep Apnea"
+  authors: "VA/DoD Clinical Practice Guideline Work Group"
+  journal: "U.S. Department of Veterans Affairs and U.S. Department of Defense"
   url: "https://www.healthquality.va.gov/guidelines/CD/insomnia/"
 researchEvidence:
   designKind: "guideline"

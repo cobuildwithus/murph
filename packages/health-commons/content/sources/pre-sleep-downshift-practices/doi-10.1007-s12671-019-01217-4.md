@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Pre-sleep Cognitive Arousal Decreases Following a 4-Week Introductory Mindfulness Course"
+  authors: Zuriel Hassirim; Eric C. J. Lim; June C. Lo; Julian Lim
+  journal: Mindfulness
   doi: "10.1007/s12671-019-01217-4"
   url: "https://doi.org/10.1007/s12671-019-01217-4"
 researchEvidence:

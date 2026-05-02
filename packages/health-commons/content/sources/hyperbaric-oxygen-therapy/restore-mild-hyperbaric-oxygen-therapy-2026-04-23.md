@@ -23,6 +23,8 @@ relations:
 source:
   kind: "web_page"
   title: "Mild Hyperbaric Oxygen Therapy | Benefits and What to Expect"
+  authors: Restore Hyper Wellness
+  journal: Restore Hyper Wellness
   url: "https://www.restore.com/services/mild-hyperbaric-oxygen-therapy"
 researchEvidence:
   designKind: "other"

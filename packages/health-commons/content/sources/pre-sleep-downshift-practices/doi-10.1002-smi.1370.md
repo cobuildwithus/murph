@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "The effects of a mindfulness-based stress reduction programme on pre-sleep cognitive arousal and insomnia symptoms: a pilot study"
+  authors: Andrea L. Cincotta, Philip Gehrman, Nalaka S. Gooneratne, Michael J. Baime
+  journal: Stress and Health
   doi: "10.1002/smi.1370"
   url: "https://onlinelibrary.wiley.com/doi/10.1002/smi.1370"
 researchEvidence:

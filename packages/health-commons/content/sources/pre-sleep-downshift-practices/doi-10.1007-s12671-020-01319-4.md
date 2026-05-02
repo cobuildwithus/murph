@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "The Relationship Between Doses of Mindfulness-Based Programs and Depression, Anxiety, Stress, and Mindfulness: a Dose-Response Meta-Regression of Randomized Controlled Trials"
+  authors: "Sarah Strohmaier"
+  journal: "Mindfulness"
   doi: "10.1007/s12671-020-01319-4"
   url: "https://link.springer.com/article/10.1007/s12671-020-01319-4"
 researchEvidence:

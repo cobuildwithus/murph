@@ -24,6 +24,8 @@ relations:
 source:
   kind: "review"
   title: "Negative Impacts of Shiftwork and Long Work Hours"
+  authors: Claire C. Caruso
+  journal: Rehabilitation Nursing
   url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC4629843/"
 researchEvidence:
   designKind: "narrative_review"

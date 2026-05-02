@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "The Effect of Slow-Paced Breathing on Cardiovascular and Emotion Functions: A Meta-Analysis and Systematic Review"
+  authors: Robin Shao; Idy S. C. Man; Tatia M. C. Lee
+  journal: Mindfulness
   doi: "10.1007/s12671-023-02294-2"
   url: "https://link.springer.com/article/10.1007/s12671-023-02294-2"
 researchEvidence:

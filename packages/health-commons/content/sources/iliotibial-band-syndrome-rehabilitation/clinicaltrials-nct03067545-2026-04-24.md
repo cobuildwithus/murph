@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Do Simple Running Technique Changes Reduce Pain and Change Injury Causing Mechanics
+  authors: "University of Salford"
+  journal: "ClinicalTrials.gov"
   citation: Do Simple Running Technique Changes Reduce Pain and Change Injury Causing Mechanics
   url: https://clinicaltrials.gov/study/NCT03067545
 researchEvidence:

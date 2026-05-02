@@ -20,6 +20,8 @@ relations:
 source:
   kind: "web_page"
   title: "Hyperventilation Syndrome"
+  authors: "Rebecca Dezube"
+  journal: "MSD Manual Professional Edition"
   url: "https://www.msdmanuals.com/professional/pulmonary-disorders/symptoms-of-pulmonary-disorders/hyperventilation-syndrome"
 researchEvidence:
   designKind: "guideline"

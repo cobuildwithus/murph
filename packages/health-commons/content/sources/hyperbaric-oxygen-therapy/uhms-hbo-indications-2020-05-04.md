@@ -23,6 +23,8 @@ relations:
 source:
   kind: "guideline"
   title: "Hyperbaric Oxygen Therapy Indications"
+  authors: Moon RE
+  journal: Undersea & Hyperbaric Medical Society
   url: "https://www.uhms.org/images/UHMS-Reference-Material.pdf"
 researchEvidence:
   designKind: "guideline"

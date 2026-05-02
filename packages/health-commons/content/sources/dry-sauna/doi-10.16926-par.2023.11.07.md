@@ -23,6 +23,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Effect of repeated alternative thermal stress on the physiological and body composition characteristics of young women sporadically using sauna"
+  authors: Podstawski R, Borysławski K, Hinca B, et al.
+  journal: Physical Activity Review
   doi: "10.16926/par.2023.11.07"
   url: "https://doi.org/10.16926/par.2023.11.07"
   citation: "Effect of repeated alternative thermal stress on the physiological and body composition characteristics of young women sporadically using sauna. https://doi.org/10.16926/par.2023.11.07"

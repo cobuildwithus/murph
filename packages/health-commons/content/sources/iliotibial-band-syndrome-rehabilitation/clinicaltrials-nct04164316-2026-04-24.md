@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: The Effects of Kinesio Taping on Biomechanical and Clinical Outcomes in Runners With Iliotibial Band Friction Syndrome
+  authors: "University of Central Lancashire"
+  journal: "ClinicalTrials.gov"
   citation: The Effects of Kinesio Taping on Biomechanical and Clinical Outcomes in Runners With Iliotibial Band Friction Syndrome
   url: https://clinicaltrials.gov/study/NCT04164316
 researchEvidence:

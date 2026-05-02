@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "The Adverse Effects of Meditation-Interventions and Mind–Body Practices: a Systematic Review"
+  authors: Greenberry B. Taylor, Taylor S. Vasquez, Amanda Kastrinos, Carla L. Fisher, et al.
+  journal: Mindfulness
   doi: "10.1007/s12671-022-01915-6"
   url: "https://link.springer.com/article/10.1007/s12671-022-01915-6"
 researchEvidence:

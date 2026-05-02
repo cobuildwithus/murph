@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Effects of Length of Mindfulness Practice on Mindfulness, Depression, Anxiety, and Stress: a Randomized Controlled Experiment"
+  authors: "Strohmaier S, Jones FW, Cane JE"
+  journal: "Mindfulness"
   doi: "10.1007/s12671-020-01512-5"
   url: "https://link.springer.com/article/10.1007/s12671-020-01512-5"
 researchEvidence:

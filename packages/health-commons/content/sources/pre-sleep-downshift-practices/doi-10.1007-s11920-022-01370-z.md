@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "Mindfulness-Based Strategies for Improving Sleep in People with Psychiatric Disorders"
+  authors: Allie L. Peters, William J. Saunders, Melinda L. Jackson
+  journal: Current Psychiatry Reports
   doi: "10.1007/s11920-022-01370-z"
   url: "https://link.springer.com/article/10.1007/s11920-022-01370-z"
 researchEvidence:

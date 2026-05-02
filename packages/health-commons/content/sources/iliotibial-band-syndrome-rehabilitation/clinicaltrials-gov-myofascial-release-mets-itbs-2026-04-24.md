@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effects of Myofascial Release of IT Band With or Without Muscle Energy Technique of Gluteus Maximus and Tensor Fascia Lata With Iliotibial Band Syndrome
+  authors: "Riphah International University"
+  journal: "ClinicalTrials.gov"
   citation: Effects of Myofascial Release of IT Band With or Without Muscle Energy Technique of Gluteus Maximus and Tensor Fascia Lata With Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT04954703
 researchEvidence:

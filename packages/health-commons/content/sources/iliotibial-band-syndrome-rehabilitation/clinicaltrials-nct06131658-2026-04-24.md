@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effects of Functional Motor Control on Pain, Flexibility, Lower Extremity Function With Iliotibial Band Syndrome
+  authors: Riphah International University
+  journal: ClinicalTrials.gov
   citation: Effects of Functional Motor Control on Pain, Flexibility, Lower Extremity Function With Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT06131658
 researchEvidence:

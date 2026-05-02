@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Mass General Return to Running Program
+  authors: "Massachusetts General Hospital Sports Medicine"
+  journal: "Mass General Sports Medicine"
   citation: Mass General Return to Running Program
   url: https://www.massgeneral.org/assets/mgh/pdf/orthopaedics/sports-medicine/physical-therapy/mass-general-return-to-running-program.pdf
 researchEvidence:

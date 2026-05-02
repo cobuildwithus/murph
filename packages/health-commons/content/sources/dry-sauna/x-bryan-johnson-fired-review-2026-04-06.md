@@ -21,6 +21,8 @@ relations:
 source:
   kind: "external_protocol"
   title: "I think I need to be fired. I've done 232 dry sauna sessions"
+  authors: Bryan Johnson
+  journal: X (Twitter)
   url: "https://x.com/bryan_johnson/status/2041202370672288028"
   citation: "I think I need to be fired. I've done 232 dry sauna sessions. https://x.com/bryan_johnson/status/2041202370672288028"
 sourceIdentity:

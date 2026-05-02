@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Rehabilitation Protocol for Iliotibial Band Syndrome
+  authors: "Massachusetts General Brigham Sports Medicine"
+  journal: "Mass General Brigham Sports Medicine"
   citation: Rehabilitation Protocol for Iliotibial Band Syndrome
   url: https://www.massgeneral.org/assets/mgh/pdf/orthopaedics/sports-medicine/physical-therapy/rehabilitation-protocol-for-iliotibial-band-syndrome.pdf
 researchEvidence:

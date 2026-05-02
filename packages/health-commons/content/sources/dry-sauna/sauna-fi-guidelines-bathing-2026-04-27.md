@@ -21,6 +21,8 @@ relations:
 source:
   kind: "guideline"
   title: "Guidelines for bathing in the sauna"
+  authors: "Finnish Sauna Society"
+  journal: "Finnish Sauna Society"
   url: "https://sauna.fi/en/sauna-knowledge/guidelines-for-bathing-in-the-sauna"
   citation: "Guidelines for bathing in the sauna. https://sauna.fi/en/sauna-knowledge/guidelines-for-bathing-in-the-sauna"
 sourceIdentity:

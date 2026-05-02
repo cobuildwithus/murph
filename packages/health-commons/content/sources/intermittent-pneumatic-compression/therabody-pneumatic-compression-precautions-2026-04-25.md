@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Product Safety & Precautions: Pneumatic Compression Devices"
+  authors: Therabody
+  journal: Therabody Product Safety & Precautions
   url: "https://www.therabody.com/pages/precautions"
 researchEvidence:
   designKind: other

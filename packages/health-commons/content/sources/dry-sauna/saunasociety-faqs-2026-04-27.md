@@ -21,6 +21,8 @@ relations:
 source:
   kind: "web_page"
   title: "FAQs"
+  authors: "North American Sauna Society"
+  journal: "North American Sauna Society"
   url: "https://saunasociety.org/faqs"
   citation: "FAQs. https://saunasociety.org/faqs"
 sourceIdentity:

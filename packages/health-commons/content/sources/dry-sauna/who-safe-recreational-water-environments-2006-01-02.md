@@ -21,6 +21,8 @@ relations:
 source:
   kind: "guideline"
   title: "Guidelines for safe recreational water environments. Volume 2: Swimming pools and similar environments"
+  authors: World Health Organization
+  journal: World Health Organization
   url: "https://who.int/publications/i/item/9241546808"
   citation: "Guidelines for safe recreational water environments. Volume 2: Swimming pools and similar environments. https://who.int/publications/i/item/9241546808"
 sourceIdentity:
