@@ -1,4 +1,5 @@
 import {
+  normalizeMetricKey,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricTrend,
@@ -7,6 +8,7 @@ import {
 } from "@murphai/health-metrics";
 import type {
   BrowserVaultMetricRow,
+  BrowserVaultMetricSelectionRow,
   BrowserVaultQueryClient,
 } from "./shared.ts";
 import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
@@ -33,6 +35,7 @@ export type BrowserVaultBiomarkerPanelWarningCode =
 export interface BrowserVaultBiomarkerMetricBinding {
   metricKey: string;
   label?: string | null;
+  biomarkerKey?: string | null;
   role?: "context" | "primary" | "secondary" | null;
   source?: string | null;
   unit?: string | null;
@@ -77,6 +80,7 @@ export interface BrowserVaultBiomarkerMetricPanel {
   label: string;
   latest: { confidence: MetricConfidence; date: string; sourceLabel: string; unit: string | null; value: number } | null;
   sampleCount: number;
+  selection: BrowserVaultMetricSelectionRow | null;
   series: BrowserVaultBiomarkerSeriesPoint[];
   trend: BrowserVaultBiomarkerTrend | null;
   unit: string;
@@ -102,7 +106,6 @@ export interface BrowserVaultBiomarkerPanelWarning { code: BrowserVaultBiomarker
 export interface BrowserVaultBiomarkerPanelEmptyState { body: string; title: string }
 
 const DEFAULT_STALE_AFTER_DAYS = 7;
-const ISO_DAY_MS = 24 * 60 * 60 * 1000;
 
 export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomarkerPanelInput): BrowserVaultBiomarkerPanel {
   const generatedAt = input.generatedAt ?? input.client?.replica.generatedAt ?? input.now ?? new Date().toISOString();
@@ -118,20 +121,38 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
   const primary = buildMetricPanel({ binding: primaryBinding ?? { metricKey, role: "primary" }, input, metricKey });
   const context = resolveContextMetricBindings(input, metricKey).map((binding) => buildMetricPanel({ binding, input, metricKey: binding.metricKey }));
   const warnings = buildWarnings({ primary, trendDefaults: input.trendDefaults });
-  if (primary.sampleCount === 0) {
-    return { ...base, emptyState: { body: `No ${input.label} values were found in the current browser-vault snapshot.`, title: "No private values yet" }, status: "no_data", warnings };
-  }
-  if (primary.sampleCount < input.trendDefaults.minimumPoints) {
-    return { ...base, emptyState: { body: `Found ${primary.sampleCount} point${primary.sampleCount === 1 ? "" : "s"}. Murph waits for at least ${input.trendDefaults.minimumPoints} before summarizing a trend.`, title: "Not enough private data yet" }, primary, status: "insufficient_data", warnings };
+  const selectionStatus = primary.selection?.status ?? (primary.latest ? "ready" : "no_data");
+
+  if (selectionStatus === "unsupported") {
+    return {
+      ...base,
+      emptyState: { body: "Private tracking for this biomarker is not available yet.", title: "Biomarker unavailable" },
+      primary,
+      status: "unsupported",
+      warnings,
+    };
   }
 
-  const stale = isPrimarySeriesStale({ now: input.now ?? generatedAt, primary, staleAfterDays: input.staleAfterDays ?? DEFAULT_STALE_AFTER_DAYS });
+  if (selectionStatus === "no_data" || !primary.latest) {
+    return { ...base, emptyState: { body: `No ${input.label} values were found in the current browser-vault snapshot.`, title: "No private values yet" }, status: "no_data", warnings };
+  }
+
+  if (selectionStatus === "insufficient_data") {
+    return {
+      ...base,
+      emptyState: { body: `Found ${primary.sampleCount} point${primary.sampleCount === 1 ? "" : "s"}. Murph waits for enough data before selecting a current value.`, title: "Not enough private data yet" },
+      primary,
+      status: "insufficient_data",
+      warnings,
+    };
+  }
+
   return {
     ...base,
     context,
     primary,
-    status: stale ? "stale" : "ready",
-    warnings: stale ? [...warnings, { code: "SOURCE_STALE", message: `Latest ${input.label} value is older than ${input.staleAfterDays ?? DEFAULT_STALE_AFTER_DAYS} days.` }] : warnings,
+    status: selectionStatus === "stale" ? "stale" : "ready",
+    warnings,
   };
 }
 
@@ -178,14 +199,16 @@ function buildMetricPanel(input: {
     .filter(hasNumericMetricValue)
     .sort((left, right) => left.date.localeCompare(right.date));
   const latest = rows.at(-1) ?? null;
+  const selection = selectMetricSelectionForPanel(input);
   const definition = resolveMetricDefinition(input.metricKey);
-  const unit = latest?.unit ?? input.binding.unit ?? input.input.unit;
+  const unit = selection?.unit ?? latest?.unit ?? input.binding.unit ?? input.input.unit;
   const trendPoints = rows.map(browserMetricRowToSeriesPoint);
   return {
     binding: { metricKey: input.metricKey },
     label: input.binding.label ?? definition?.displayName ?? input.input.label,
-    latest: latest ? { confidence: latest.confidence, date: latest.date, sourceLabel: latest.sourceLabel ?? latest.sourceKind ?? "metric", unit: latest.unit, value: latest.value } : null,
+    latest: metricSelectionToLatest(selection) ?? (latest ? { confidence: latest.confidence, date: latest.date, sourceLabel: latest.sourceLabel ?? latest.sourceKind ?? "metric", unit: latest.unit, value: latest.value } : null),
     sampleCount: rows.length,
+    selection,
     series: rows.map((row) => ({ confidence: row.confidence, date: row.date, unit: row.unit, value: row.value })),
     trend: selectMetricTrend({
       metricKey: input.metricKey,
@@ -199,23 +222,52 @@ function buildMetricPanel(input: {
   };
 }
 
+function selectMetricSelectionForPanel(input: {
+  binding: BrowserVaultBiomarkerMetricBinding;
+  metricKey: string;
+  input: SelectBrowserVaultBiomarkerPanelInput;
+}): BrowserVaultMetricSelectionRow | null {
+  const client = input.input.client;
+  if (!client) return null;
+
+  const normalizedMetricKey = resolveMetricDefinition(input.metricKey)?.key ?? normalizeMetricKey(input.metricKey);
+  const biomarkerKey = input.binding.biomarkerKey
+    ?? (input.binding.role === "primary" || input.binding.role === undefined || input.binding.role === null ? input.input.biomarkerKey : null);
+
+  if (biomarkerKey) {
+    const byBiomarker = client.metricSelections.getByBiomarker(biomarkerKey);
+    if (byBiomarker && byBiomarker.metricKey === normalizedMetricKey) return byBiomarker;
+
+    const scoped = client.metricSelections.list({ metricKey: normalizedMetricKey, biomarkerKey }).at(0) ?? null;
+    if (scoped) return scoped;
+  }
+
+  return client.metricSelections.get(normalizedMetricKey);
+}
+
+function metricSelectionToLatest(
+  selection: BrowserVaultMetricSelectionRow | null,
+): BrowserVaultBiomarkerMetricPanel["latest"] {
+  if (!selection || (selection.status !== "ready" && selection.status !== "stale")) return null;
+  if (typeof selection.value !== "number" || !Number.isFinite(selection.value)) return null;
+  const date = selection.effectiveDate ?? selection.observedAt?.slice(0, 10) ?? null;
+  if (!date) return null;
+  return {
+    confidence: selection.confidence,
+    date,
+    sourceLabel: selection.sourceLabel ?? "metric",
+    unit: selection.unit,
+    value: selection.value,
+  };
+}
+
 type BrowserVaultMetricRowWithValue = BrowserVaultMetricRow & { value: number };
 function hasNumericMetricValue(row: BrowserVaultMetricRow): row is BrowserVaultMetricRowWithValue { return typeof row.value === "number" && Number.isFinite(row.value) }
 function buildWarnings(input: { primary: BrowserVaultBiomarkerMetricPanel; trendDefaults: BrowserVaultBiomarkerTrendDefaults }): BrowserVaultBiomarkerPanelWarning[] {
-  const warnings: BrowserVaultBiomarkerPanelWarning[] = [];
+  const warnings: BrowserVaultBiomarkerPanelWarning[] = input.primary.selection?.warnings.map((warning) => ({ code: warning.code, message: warning.message })) ?? [];
   if (input.primary.sampleCount > 0 && input.primary.sampleCount < input.trendDefaults.minimumPoints) warnings.push({ code: "LOW_SAMPLE_COUNT", message: `Only ${input.primary.sampleCount} private value${input.primary.sampleCount === 1 ? "" : "s"} found.` });
   return warnings;
 }
-function isPrimarySeriesStale(input: { now: string; primary: BrowserVaultBiomarkerMetricPanel; staleAfterDays: number }): boolean {
-  const latestDate = input.primary.latest?.date;
-  return latestDate ? isOlderThanDays(latestDate, input.now, input.staleAfterDays) : false;
-}
 function emptyStateForStatus(_status: BrowserVaultBiomarkerPanelStatus): BrowserVaultBiomarkerPanelEmptyState {
   return { body: "Connect a health device or import labs to see your personal trend here. Your data stays private.", title: "Biomarker unavailable" };
-}
-function isOlderThanDays(dateOrDateTime: string, nowDateTime: string, days: number): boolean {
-  const observed = new Date(dateOrDateTime.includes("T") ? dateOrDateTime : `${dateOrDateTime}T00:00:00.000Z`);
-  const now = new Date(nowDateTime.includes("T") ? nowDateTime : `${nowDateTime}T00:00:00.000Z`);
-  if (!Number.isFinite(observed.getTime()) || !Number.isFinite(now.getTime())) return false;
-  return now.getTime() - observed.getTime() > days * ISO_DAY_MS;
 }

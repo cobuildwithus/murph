@@ -31,6 +31,7 @@ import {
   experimentFrontmatterSchema,
   inboxCaptureRecordSchema,
   journalDayFrontmatterSchema,
+  metricSampleRecordSchema,
   protocolFrontmatterSchema,
   sampleRecordSchema,
   vaultMetadataSchema,
@@ -52,6 +53,7 @@ export const HEALTH_LIBRARY_DIRECTORY = "bank/library" as const;
 export const JOURNAL_DIRECTORY = "journal" as const;
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments" as const;
 export const EVENT_LEDGER_DIRECTORY = "ledger/events" as const;
+export const METRIC_SAMPLE_LEDGER_DIRECTORY = "ledger/metric-samples" as const;
 export const SAMPLE_LEDGER_DIRECTORY = "ledger/samples" as const;
 export const AUDIT_DIRECTORY = "audit" as const;
 export const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures" as const;
@@ -93,6 +95,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   healthLibrary: "healthLibrary",
   assessments: "assessments",
   events: "events",
+  metricSamples: "metricSamples",
   samples: "samples",
   audits: "audits",
   inboxCaptures: "inboxCaptures",
@@ -521,6 +524,21 @@ const vaultFamilyDescriptors = [
     },
   },
   {
+    id: VAULT_FAMILY_IDS.metricSamples,
+    description: "Open scalar metric-sample ledger shards.",
+    owner: "core",
+    storageKind: "jsonl-directory",
+    directory: METRIC_SAMPLE_LEDGER_DIRECTORY,
+    fileExtension: ".jsonl",
+    shardPattern: "ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl",
+    querySource: "jsonl-root",
+    validation: {
+      kind: "jsonl",
+      issueCode: "SAMPLE_INVALID",
+      schema: metricSampleRecordSchema,
+    },
+  },
+  {
     id: VAULT_FAMILY_IDS.samples,
     description: "Sample ledger shards.",
     owner: "core",
@@ -896,6 +914,7 @@ export const VAULT_LAYOUT = Object.freeze({
   ledgerDirectory: LEDGER_DIRECTORY,
   assessmentLedgerDirectory: ASSESSMENT_LEDGER_DIRECTORY,
   eventLedgerDirectory: EVENT_LEDGER_DIRECTORY,
+  metricSampleLedgerDirectory: METRIC_SAMPLE_LEDGER_DIRECTORY,
   sampleLedgerDirectory: SAMPLE_LEDGER_DIRECTORY,
   inboxCaptureLedgerDirectory: INBOX_CAPTURE_LEDGER_DIRECTORY,
   rawDirectory: RAW_DIRECTORY,
@@ -920,6 +939,7 @@ export const VAULT_LAYOUT = Object.freeze({
 export const VAULT_SHARDS = Object.freeze({
   assessments: getVaultShardPattern(VAULT_FAMILY_IDS.assessments),
   events: getVaultShardPattern(VAULT_FAMILY_IDS.events),
+  metricSamples: getVaultShardPattern(VAULT_FAMILY_IDS.metricSamples),
   samples: getVaultShardPattern(VAULT_FAMILY_IDS.samples),
   audit: getVaultShardPattern(VAULT_FAMILY_IDS.audits),
   inboxCaptures: getVaultShardPattern(VAULT_FAMILY_IDS.inboxCaptures),

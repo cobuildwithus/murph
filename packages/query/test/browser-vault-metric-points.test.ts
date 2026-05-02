@@ -46,7 +46,7 @@ test("browser-vault exposes metric-key rows and selections without legacy domain
   assert.equal(client.metricSelections.getByBiomarker("biomarker:resting-heart-rate")?.value, 57);
   assert.equal(client.metricSelections.getByBiomarker("biomarker:apob")?.status, "no_data");
   assert.equal(client.metricSelections.getByBiomarker("biomarker:apob")?.selectedMetricRowId, null);
-  assert.equal(client.metricSelections.get("resting-heart-rate")?.id, "metric-selection:resting-heart-rate");
+  assert.equal(client.metricSelections.get("resting-heart-rate")?.id, "metric-selection:resting-heart-rate:biomarker:resting-heart-rate");
   assert.equal(client.metrics.series({ metricKey: "resting-heart-rate" }).at(-1)?.value, 57);
   assert.deepEqual(client.metrics.seriesMany([{ metricKey: "hrv-rmssd" }, { metricKey: "deep-sleep-minutes" }]).map((series) => series.at(-1)?.value), [72, 81]);
 });

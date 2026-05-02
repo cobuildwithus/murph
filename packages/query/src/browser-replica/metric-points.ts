@@ -124,14 +124,15 @@ function toBrowserVaultMetricSelectionRow(
   metricRowPointIds: ReadonlySet<string> | undefined,
 ): BrowserVaultMetricSelectionRow {
   const point = selection.point;
+  const biomarkerKey = selection.biomarkerKey ?? requestedMetric.biomarkerKey ?? null;
   const selectedMetricRowId = point && (!metricRowPointIds || metricRowPointIds.has(point.id))
     ? `metric-row:metric-series:${point.id}`
     : null;
   return {
-    biomarkerKey: selection.biomarkerKey ?? requestedMetric.biomarkerKey ?? null,
+    biomarkerKey,
     confidence: selection.confidence,
     effectiveDate: selection.effectiveDate ?? point?.effectiveDate ?? null,
-    id: `metric-selection:${selection.metricKey}`,
+    id: browserVaultMetricSelectionId(selection.metricKey, biomarkerKey),
     metricKey: selection.metricKey,
     observedAt: selection.observedAt ?? point?.observedAt ?? null,
     pointIds: selection.provenance.pointIds,
@@ -145,6 +146,10 @@ function toBrowserVaultMetricSelectionRow(
     valueLabel: selection.valueLabel,
     warnings: selection.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
   };
+}
+
+function browserVaultMetricSelectionId(metricKey: string, biomarkerKey: string | null): string {
+  return `metric-selection:${metricKey}:${biomarkerKey ?? "none"}`;
 }
 
 function normalizeRequestedMetrics(

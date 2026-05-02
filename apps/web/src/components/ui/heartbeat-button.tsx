@@ -113,7 +113,7 @@ function HeartbeatTrace() {
   ].join(" ");
 
   return (
-    <div className="absolute inset-0 animate-[hb-clip_2s_linear_infinite]">
+    <div className="absolute inset-0 animate-[hb-clip_4s_linear_infinite]">
       <svg
         viewBox="0 0 100 24"
         preserveAspectRatio="none"

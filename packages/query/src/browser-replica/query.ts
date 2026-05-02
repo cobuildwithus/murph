@@ -19,6 +19,8 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
   const frozenReplica = deepFreezeBrowserVaultValue(replica);
   const byLookupId = new Map<string, BrowserVaultEntity>();
   const metricSelectionById = new Map<string, BrowserVaultMetricSelectionRow>();
+  const metricSelectionsByMetricKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
+  const metricSelectionByBiomarkerKey = new Map<string, BrowserVaultMetricSelectionRow>();
 
   for (const entity of frozenReplica.entities) {
     byLookupId.set(entity.id, entity);
@@ -29,11 +31,12 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
 
   for (const selection of frozenReplica.metricSelectionRows) {
     metricSelectionById.set(selection.id, selection);
-    metricSelectionById.set(selection.metricKey, selection);
+    appendMetricSelection(metricSelectionsByMetricKey, selection.metricKey, selection);
     if (selection.biomarkerKey) {
-      metricSelectionById.set(selection.biomarkerKey, selection);
+      metricSelectionByBiomarkerKey.set(selection.biomarkerKey, selection);
     }
   }
+
 
   return {
     entities: {
@@ -71,12 +74,16 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
     },
     metricSelections: {
       get(idOrMetricKey) {
-        return metricSelectionById.get(idOrMetricKey)
-          ?? metricSelectionById.get(normalizeMetricFilterKey(idOrMetricKey) ?? idOrMetricKey)
-          ?? null;
+        const direct = metricSelectionById.get(idOrMetricKey);
+        if (direct) return direct;
+        const normalizedMetricKey = normalizeMetricFilterKey(idOrMetricKey);
+        if (normalizedMetricKey) {
+          return chooseDefaultMetricSelection(metricSelectionsByMetricKey.get(normalizedMetricKey) ?? [], normalizedMetricKey);
+        }
+        return metricSelectionByBiomarkerKey.get(idOrMetricKey) ?? null;
       },
       getByBiomarker(biomarkerKey) {
-        return metricSelectionById.get(biomarkerKey) ?? null;
+        return metricSelectionByBiomarkerKey.get(biomarkerKey) ?? null;
       },
       list(filters = {}) {
         return frozenReplica.metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, normalizeMetricSelectionFilters(filters)));
@@ -196,4 +203,23 @@ function deepFreezeBrowserVaultValue<T>(value: T, seen = new WeakSet<object>()):
     deepFreezeBrowserVaultValue(nestedValue, seen);
   }
   return Object.freeze(objectValue) as T;
+}
+
+function appendMetricSelection(
+  map: Map<string, BrowserVaultMetricSelectionRow[]>,
+  metricKey: string,
+  selection: BrowserVaultMetricSelectionRow,
+): void {
+  const existing = map.get(metricKey) ?? [];
+  existing.push(selection);
+  map.set(metricKey, existing);
+}
+
+function chooseDefaultMetricSelection(rows: readonly BrowserVaultMetricSelectionRow[], metricKey: string): BrowserVaultMetricSelectionRow | null {
+  if (rows.length === 0) return null;
+  const definition = resolveMetricDefinition(metricKey);
+  return rows.find((row) => row.biomarkerKey === definition?.biomarkerKey)
+    ?? rows.find((row) => row.biomarkerKey === null)
+    ?? rows[0]
+    ?? null;
 }

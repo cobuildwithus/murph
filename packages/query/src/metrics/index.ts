@@ -218,6 +218,10 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
 }
 
 function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[] {
+  if (entity.family === "sample" && entity.kind === "metric_sample") {
+    return metricSampleMetricPoints(entity);
+  }
+
   if (entity.family !== "event") {
     return [];
   }
@@ -230,6 +234,66 @@ function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[]
     default:
       return [];
   }
+}
+
+function metricSampleMetricPoints(entity: CanonicalEntity): MetricPoint[] {
+  const metric = readString(entity.attributes.metric) ?? entity.stream;
+  const value = readNumber(entity.attributes.value);
+  const unit = readString(entity.attributes.unit);
+  const observedAt = readString(entity.attributes.recordedAt) ?? entity.occurredAt;
+  if (!metric || value === null || !observedAt) return [];
+
+  const metricKey = normalizeMetricKey(metric);
+  const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, unit);
+  const normalized = normalizeMetricValue({ metricKey: definition.key, unit: unit ?? definition.displayUnit, value });
+  const quality = readString(entity.attributes.quality) ?? entity.status ?? null;
+  const source = readString(entity.attributes.source);
+  const provider = providerForMetricSample(entity);
+
+  return [createMetricPoint({
+    biomarkerKey: definition.biomarkerKey,
+    canonicalUnit: normalized.canonicalUnit,
+    canonicalValue: normalized.canonicalValue,
+    comparator: null,
+    confidence: metricSampleConfidence(quality),
+    context: compactContext({
+      qualifiers: readQualifiers(entity.attributes.qualifiers),
+      quality: quality ?? undefined,
+      source: source ?? undefined,
+      timeZone: readString(entity.attributes.timeZone) ?? undefined,
+    }),
+    effectiveDate: readString(entity.attributes.dayKey) ?? observedAt.slice(0, 10),
+    grain: "instant",
+    metricKey: definition.key,
+    observedAt,
+    provenance: {
+      dataOrigin: readJson(entity.attributes.dataOrigin),
+      externalRef: readJson(entity.attributes.externalRef),
+      labName: null,
+      provider,
+      rawRefs: [],
+      sourceLabel: provider ? humanize(provider) : source ? humanize(source) : "Metric sample",
+    },
+    recordedAt: observedAt,
+    reportedAt: null,
+    source: {
+      family: "sample",
+      kind: "metric-sample",
+      path: entity.path,
+      recordId: entity.entityId,
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit,
+    value,
+  })];
+}
+
+function metricSampleConfidence(quality: string | null): MetricConfidence {
+  if (quality === "raw") return "medium";
+  if (quality === "normalized" || quality === "derived") return "high";
+  return "medium";
 }
 
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {
@@ -427,6 +491,15 @@ function sourceLabelForEntity(entity: CanonicalEntity): string | null {
 function providerForEntity(entity: CanonicalEntity): string | null {
   const externalRef = readRecord(entity.attributes.externalRef);
   return readString(externalRef?.system);
+}
+
+function providerForMetricSample(entity: CanonicalEntity): string | null {
+  const dataOrigin = readRecord(entity.attributes.dataOrigin);
+  const externalRef = readRecord(entity.attributes.externalRef);
+  return readString(dataOrigin?.sourceProviderSlug)
+    ?? readString(dataOrigin?.aggregatorProvider)
+    ?? readString(externalRef?.system)
+    ?? readString(entity.attributes.source);
 }
 
 function eventConfidence(entity: CanonicalEntity): MetricConfidence {

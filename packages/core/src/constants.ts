@@ -37,6 +37,7 @@ export const FRONTMATTER_SCHEMA_VERSIONS = Object.freeze({
 
 export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.assessmentResponse;
 export const EVENT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.event;
+export const METRIC_SAMPLE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.metricSample;
 export const SAMPLE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.sample;
 export const AUDIT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.audit;
 
@@ -54,6 +55,7 @@ export const VAULT_PATHS = Object.freeze({
   conditionsRoot: VAULT_LAYOUT.conditionsDirectory,
   coreDocument: VAULT_LAYOUT.coreDocument,
   eventsRoot: VAULT_LAYOUT.eventLedgerDirectory,
+  metricSamplesRoot: VAULT_LAYOUT.metricSampleLedgerDirectory,
   experimentsRoot: VAULT_LAYOUT.experimentsDirectory,
   exportsRoot: VAULT_LAYOUT.exportsDirectory,
   familyRoot: VAULT_LAYOUT.familyDirectory,
