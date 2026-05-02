@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:ada-standards-2026-diagnosis
 slug: sources/blood-glucose/ada-standards-2026-diagnosis
-title: "2. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026"
+title: "Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026"
 summary: "ADA Standards chapter for diabetes classification and diagnostic criteria; used as the current clinical reference boundary for Murph glucose pages."
 status: draft
 quality: usable
@@ -22,11 +22,11 @@ relations:
     target: biomarker:blood-glucose
 source:
   kind: guideline
-  title: "2. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026"
+  title: "Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026"
   authors: "American Diabetes Association Professional Practice Committee"
   year: 2026
   journal: "Diabetes Care"
-  citation: "American Diabetes Association Professional Practice Committee. 2. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026. Diabetes Care. 2026;49(Supplement 1):S27-S49. doi:10.2337/dc26-S002"
+  citation: "American Diabetes Association Professional Practice Committee. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026. Diabetes Care. 2026;49(Supplement 1):S27-S49. doi:10.2337/dc26-S002"
   pmid: "41358893"
   doi: "10.2337/dc26-S002"
   url: https://diabetesjournals.org/care/article/49/Supplement_1/S27/163926/2-Diagnosis-and-Classification-of-Diabetes

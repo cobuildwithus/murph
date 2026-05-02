@@ -18,6 +18,7 @@ interface BiomarkerBodySection {
 
 const DUPLICATIVE_RESEARCH_NOTE_HEADINGS = new Set([
   "how murph should interpret your trend",
+  "how murph should display it",
   "protocol interpretation",
   "protocol ranking logic",
 ]);

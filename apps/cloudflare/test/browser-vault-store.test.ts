@@ -19,9 +19,11 @@ describe("hosted browser vault replica store", () => {
   it("round-trips browser vault replicas through the browser-vault-replica scope", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(29);
+    const rootKeyId = "runtime-root-current";
     const store = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId,
       userId: "user_123",
     });
     type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
@@ -86,6 +88,7 @@ describe("hosted browser vault replica store", () => {
       generatedAt: replica.generatedAt,
       objectKey: storedKey,
       replicaSchema: replica.schema,
+      runtimeRootKeyId: rootKeyId,
       schema: "murph.hosted-browser-vault-replica-ref.v1",
       sourceBundleHash: replica.source.sourceBundleHash,
     });
@@ -106,6 +109,7 @@ describe("hosted browser vault replica store", () => {
         dataVersion: aadFields.dataVersion,
         objectKey: aadFields.objectKey,
         purpose: aadFields.purpose,
+        runtimeRootKeyId: aadFields.runtimeRootKeyId,
         schema: aadFields.schema,
         sourceBundleHash: aadFields.sourceBundleHash,
         userId: aadFields.userId,
@@ -133,12 +137,60 @@ describe("hosted browser vault replica store", () => {
     ).toThrow("Browser vault replica.schema must be murph.browser-vault-replica.v1.");
   });
 
+  it("derives browser-vault replica keys from the ref runtime root id across rotation", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const oldRootKey = createTestRootKey(30);
+    const nextRootKey = createTestRootKey(31);
+    const oldRootKeyId = "runtime-root-old";
+    const nextRootKeyId = "runtime-root-next";
+    const userId = "user_123";
+    const oldStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey: oldRootKey,
+      rootKeyId: oldRootKeyId,
+      userId,
+    });
+    const replica = await createBrowserVaultReplica({
+      generatedAt: "2026-04-17T00:00:00.000Z",
+      sourceBundleHash: "a".repeat(64),
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+    const replicaRef = await oldStore.writeBrowserVaultReplica({ replica, userId });
+    const rotatedStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey: nextRootKey,
+      rootKeyId: nextRootKeyId,
+      resolveRootKeyById: async (rootKeyId) => rootKeyId === oldRootKeyId ? oldRootKey : null,
+      userId,
+    });
+
+    await expect(rotatedStore.readBrowserVaultReplicaEnvelope(replicaRef)).resolves.toMatchObject({
+      keyId: replicaRef.keyId,
+      scope: "browser-vault-replica",
+    });
+    await expect(rotatedStore.deriveBrowserVaultReplicaKey(replicaRef))
+      .resolves.toEqual(await oldStore.deriveBrowserVaultReplicaKey(replicaRef));
+    await expect(createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey: nextRootKey,
+      rootKeyId: nextRootKeyId,
+      userId,
+    }).deriveBrowserVaultReplicaKey(replicaRef)).rejects.toThrow(
+      "Hosted browser vault replica runtime root key is unavailable.",
+    );
+  });
+
   it("keeps prior replica objects until explicitly deleted", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(31);
     const store = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId: "runtime-root-current",
       userId: "user_123",
     });
 
@@ -196,6 +248,7 @@ describe("hosted browser vault replica store", () => {
     const firstRef = await createHostedBrowserVaultReplicaStore({
       bucket: new MemoryEncryptedR2Bucket(),
       rootKey: createTestRootKey(45),
+      rootKeyId: "runtime-root-first",
       userId: "user_123",
     }).writeBrowserVaultReplica({
       replica,
@@ -204,6 +257,7 @@ describe("hosted browser vault replica store", () => {
     const secondRef = await createHostedBrowserVaultReplicaStore({
       bucket: new MemoryEncryptedR2Bucket(),
       rootKey: createTestRootKey(46),
+      rootKeyId: "runtime-root-second",
       userId: "user_123",
     }).writeBrowserVaultReplica({
       replica,
@@ -211,6 +265,8 @@ describe("hosted browser vault replica store", () => {
     });
 
     expect(firstRef.objectKey).toBe(secondRef.objectKey);
+    expect(firstRef.runtimeRootKeyId).toBe("runtime-root-first");
+    expect(secondRef.runtimeRootKeyId).toBe("runtime-root-second");
     expectOpaqueStrings([firstRef.objectKey], ["user_123"]);
   });
 
@@ -220,10 +276,12 @@ describe("hosted browser vault replica store", () => {
     const store = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId: "runtime-root-current",
     });
     const foreignDeleteStore = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId: "runtime-root-current",
       userId: "user_456",
     });
 
@@ -263,11 +321,13 @@ describe("hosted browser vault replica store", () => {
     const ownerStore = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId: "runtime-root-current",
       userId: "user_123",
     });
     const foreignReadStore = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId: "runtime-root-current",
       userId: "user_456",
     });
 
@@ -305,11 +365,13 @@ describe("hosted browser vault replica store", () => {
     const ownerStore = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId: "runtime-root-current",
       userId: "user_123",
     });
     const unboundReadStore = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      rootKeyId: "runtime-root-current",
     });
     const ref = await ownerStore.writeBrowserVaultReplica({
       replica: await createBrowserVaultReplica({

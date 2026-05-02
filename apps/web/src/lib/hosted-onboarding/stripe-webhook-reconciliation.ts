@@ -18,6 +18,12 @@ import {
   requireHostedStripeApi,
 } from "./runtime";
 
+export const HOSTED_STRIPE_WEBHOOK_WORKFLOW_RETRY_AFTER_DETAIL_KEY = "workflowRetryAfter";
+
+const HOSTED_STRIPE_WEBHOOK_WORKFLOW_DEFAULT_RETRY_AFTER = "1m";
+const HOSTED_STRIPE_WEBHOOK_WORKFLOW_MIN_RETRY_AFTER_SECONDS = 5;
+const HOSTED_STRIPE_WEBHOOK_WORKFLOW_MAX_RETRY_AFTER_SECONDS = 60 * 60;
+
 export type HostedStripeWebhookReconciliationResult = {
   activatedMemberId: string | null;
   eventId: string;
@@ -45,7 +51,7 @@ export async function prepareDuplicateHostedStripeWebhookEventForWorkflowRetry(
     return true;
   }
 
-  if (!requiresHostedStripeWebhookInlineRetryReset(storedEvent, now)) {
+  if (!requiresHostedStripeWebhookInlineRetryReset(storedEvent)) {
     return false;
   }
 
@@ -106,11 +112,25 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
       });
     }
 
-    throw buildHostedStripeWebhookReconcileError(input.eventId);
+    throw buildHostedStripeWebhookReconcileDeferredError({
+      eventId: input.eventId,
+      now: new Date(),
+      storedEvent: refreshedEvent,
+    });
   }
 
   if (reconciled.status !== "completed") {
-    throw buildHostedStripeWebhookReconcileError(input.eventId);
+    const refreshedEvent = await readHostedStripeWebhookEventReceipt(input.eventId, prisma);
+
+    if (!refreshedEvent) {
+      throw buildHostedStripeWebhookReceiptMissingError(input.eventId);
+    }
+
+    throw buildHostedStripeWebhookReconcileDeferredError({
+      eventId: input.eventId,
+      now: new Date(),
+      storedEvent: refreshedEvent,
+    });
   }
 
   return {
@@ -210,8 +230,7 @@ function shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(
   >,
   now: Date,
 ): boolean {
-  return storedEvent.status === HostedStripeEventStatus.completed
-    || isHostedStripeWebhookReceiptFreshlyProcessing(storedEvent, now);
+  return isHostedStripeWebhookReceiptFreshlyProcessing(storedEvent, now);
 }
 
 function isHostedStripeWebhookReceiptFreshlyProcessing(
@@ -229,16 +248,10 @@ function requiresHostedStripeWebhookInlineRetryReset(
   storedEvent: NonNullable<
     Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
   >,
-  now: Date,
 ): boolean {
   switch (storedEvent.status) {
-    case HostedStripeEventStatus.pending:
-    case HostedStripeEventStatus.failed:
-      return storedEvent.nextAttemptAt.getTime() > now.getTime();
     case HostedStripeEventStatus.processing:
       return storedEvent.claimExpiresAt === null;
-    case HostedStripeEventStatus.poisoned:
-      return true;
     default:
       return false;
   }
@@ -251,8 +264,7 @@ function buildHostedStripeWebhookInlineRetryReset(
   return {
     claimExpiresAt: null,
     nextAttemptAt: now,
-    ...(status === HostedStripeEventStatus.poisoned
-      || status === HostedStripeEventStatus.processing
+    ...(status === HostedStripeEventStatus.processing
       ? { status: HostedStripeEventStatus.failed }
       : {}),
   };
@@ -353,14 +365,36 @@ function buildHostedStripeWebhookReceiptMissingError(eventId: string) {
   });
 }
 
+type HostedStripeWebhookEventReceipt = NonNullable<
+  Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
+>;
+
+function buildHostedStripeWebhookReconcileDeferredError(input: {
+  eventId: string;
+  now: Date;
+  storedEvent: HostedStripeWebhookEventReceipt;
+}) {
+  if (input.storedEvent.status === HostedStripeEventStatus.poisoned) {
+    return buildHostedStripeWebhookReconcilePoisonedError(input.eventId);
+  }
+
+  return buildHostedStripeWebhookReconcileError(input.eventId, undefined, {
+    [HOSTED_STRIPE_WEBHOOK_WORKFLOW_RETRY_AFTER_DETAIL_KEY]:
+      resolveHostedStripeWebhookWorkflowRetryAfter(input.storedEvent, input.now),
+    stripeEventStatus: input.storedEvent.status,
+  });
+}
+
 function buildHostedStripeWebhookReconcileError(
   eventId: string,
   cause?: unknown,
+  details: Record<string, unknown> = {},
 ) {
   const error = hostedOnboardingError({
     code: "STRIPE_WEBHOOK_RECONCILE_FAILED",
     details: {
       eventId,
+      ...details,
     },
     httpStatus: 500,
     message: "Stripe webhook reconciliation did not complete. Retry later.",
@@ -372,4 +406,60 @@ function buildHostedStripeWebhookReconcileError(
   }
 
   return error;
+}
+
+function buildHostedStripeWebhookReconcilePoisonedError(eventId: string) {
+  return hostedOnboardingError({
+    code: "STRIPE_WEBHOOK_RECONCILE_POISONED",
+    details: {
+      eventId,
+    },
+    httpStatus: 500,
+    message: "Stripe webhook reconciliation is poisoned and cannot be retried automatically.",
+    retryable: false,
+  });
+}
+
+function resolveHostedStripeWebhookWorkflowRetryAfter(
+  storedEvent: HostedStripeWebhookEventReceipt,
+  now: Date,
+): string {
+  const nextAttemptAt = resolveHostedStripeWebhookNextWorkflowAttemptAt(storedEvent);
+
+  if (!nextAttemptAt) {
+    return HOSTED_STRIPE_WEBHOOK_WORKFLOW_DEFAULT_RETRY_AFTER;
+  }
+
+  const delayMs = nextAttemptAt.getTime() - now.getTime();
+
+  if (!Number.isFinite(delayMs)) {
+    return HOSTED_STRIPE_WEBHOOK_WORKFLOW_DEFAULT_RETRY_AFTER;
+  }
+
+  const retryAfterSeconds = Math.min(
+    HOSTED_STRIPE_WEBHOOK_WORKFLOW_MAX_RETRY_AFTER_SECONDS,
+    Math.max(
+      HOSTED_STRIPE_WEBHOOK_WORKFLOW_MIN_RETRY_AFTER_SECONDS,
+      Math.ceil(delayMs / 1000),
+    ),
+  );
+
+  return `${retryAfterSeconds}s`;
+}
+
+function resolveHostedStripeWebhookNextWorkflowAttemptAt(
+  storedEvent: HostedStripeWebhookEventReceipt,
+): Date | null {
+  switch (storedEvent.status) {
+    case HostedStripeEventStatus.pending:
+    case HostedStripeEventStatus.failed:
+      return storedEvent.nextAttemptAt;
+    case HostedStripeEventStatus.processing:
+      return storedEvent.claimExpiresAt ?? storedEvent.nextAttemptAt;
+    case HostedStripeEventStatus.completed:
+    case HostedStripeEventStatus.poisoned:
+      return null;
+    default:
+      return null;
+  }
 }

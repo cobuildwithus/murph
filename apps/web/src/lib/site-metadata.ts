@@ -6,7 +6,7 @@ type TwitterMetadata = NonNullable<Metadata["twitter"]>;
 export const MURPH_DEFAULT_METADATA_TITLE =
   "Murph — Discover what actually makes you healthier";
 export const MURPH_DEFAULT_METADATA_DESCRIPTION =
-  "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.";
+  "Your personal health assistant. Sync your signals, pick a protocol, see what actually makes you healthier.";
 
 export const MURPH_DEFAULT_OPEN_GRAPH_IMAGE = {
   alt: "Murph — Wearable data, made useful.",

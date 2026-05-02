@@ -104,6 +104,7 @@ export async function loadBrowserVaultReplica({
       dataVersion: session.replicaAad.dataVersion,
       objectKey: session.replicaAad.objectKey,
       purpose: session.replicaAad.purpose,
+      runtimeRootKeyId: session.replicaAad.runtimeRootKeyId,
       schema: session.replicaAad.schema,
       sourceBundleHash: session.replicaAad.sourceBundleHash,
       userId: session.replicaAad.userId,
@@ -238,6 +239,7 @@ export interface BrowserVaultReplicaAad {
   dataVersion: string;
   objectKey: string;
   purpose: "browser-vault-replica";
+  runtimeRootKeyId: string;
   schema: "murph.browser-vault-replica.v1";
   sourceBundleHash: string;
   userId: string;
@@ -257,6 +259,14 @@ function assertBrowserVaultReplicaAadMatchesRef(input: {
 
   if (input.aad.sourceBundleHash !== input.ref.sourceBundleHash) {
     throw new Error("Browser vault replica AAD sourceBundleHash did not match its session ref.");
+  }
+
+  if (!input.ref.runtimeRootKeyId) {
+    throw new Error("Browser vault replica ref is missing runtimeRootKeyId.");
+  }
+
+  if (input.aad.runtimeRootKeyId !== input.ref.runtimeRootKeyId) {
+    throw new Error("Browser vault replica AAD runtimeRootKeyId did not match its session ref.");
   }
 }
 
@@ -290,6 +300,7 @@ function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaul
     dataVersion: requireNonEmptyString(record.dataVersion, `${label}.dataVersion`),
     objectKey: requireNonEmptyString(record.objectKey, `${label}.objectKey`),
     purpose,
+    runtimeRootKeyId: requireNonEmptyString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`),
     schema,
     sourceBundleHash: requireNonEmptyString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireNonEmptyString(record.userId, `${label}.userId`),

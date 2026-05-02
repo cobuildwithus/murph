@@ -59,7 +59,7 @@ biomarker:
 
     -
       title: What it is
-      body: Blood glucose is the amount of glucose in blood at a moment in time. Murph treats imported glucose values as a private trend signal, not as a diagnostic label.
+      body: Blood glucose is the amount of glucose in blood at a moment in time. Imported glucose values serve as a trend signal, not a diagnostic label.
     -
       title: Why people care
       body: "Shows fasting control, post-meal spikes, overnight stability, hypoglycemia risk, and how lifestyle, illness, or medications affect metabolism."
@@ -73,7 +73,7 @@ biomarker:
       title: Safety first
       body: Hypoglycemia is an immediate safety issue. If readings are unexpectedly low, symptoms do not match the device, or insulin or sulfonylurea dosing is involved, follow the clinical plan and confirm with an approved meter or clinician-guided workflow.
   measurement:
-    bestContext: "Use explicit context labels: fasting lab FPG, waking home meter, pre-meal, one-to-two-hour post-meal, overnight CGM, exercise window, sick day, or medication window. Murph should compare like-context windows rather than mixing every glucose number into one generic average."
+    bestContext: "Best read with explicit context: fasting lab FPG, waking home meter, pre-meal, one-to-two-hour post-meal, overnight CGM, exercise window, sick day, or medication window. Like-context comparisons are more useful than mixing every glucose number into one generic average."
     howToMeasure:
       - For diagnosis, use clinician-ordered laboratory tests such as fasting plasma glucose, A1C, oral glucose tolerance testing, or random plasma glucose in the appropriate clinical context.
       - For home finger-stick checks, use an FDA-cleared meter and strips, wash and dry hands, use unexpired strips stored as directed, and record the timing relative to meals, activity, symptoms, and medications.
@@ -145,7 +145,7 @@ claims:
   -
     claimId: blood-glucose-diagnostic-lab-thresholds
     type: evidence_scope
-    text: Fasting plasma glucose and oral glucose tolerance thresholds are diagnostic anchors only when measured in the right clinical context, usually with confirmation; Murph should surface them as reference context, not diagnose users.
+    text: Fasting plasma glucose and oral glucose tolerance thresholds are diagnostic anchors only when measured in the right clinical context, usually with confirmation. They provide reference context, not a diagnosis.
     strength: high
     sourceKeys:
       - source_artifact:ada-standards-2026-diagnosis
@@ -176,7 +176,7 @@ claims:
   -
     claimId: blood-glucose-device-method-caveat
     type: design_guardrail
-    text: Home meters, CGMs, and unauthorized noninvasive wearables should not be treated as interchangeable. Murph should label method, device, and confidence and should not promote smartwatch or ring-only glucose claims.
+    text: Home meters, CGMs, and unauthorized noninvasive wearables are not interchangeable. Method, device, and confidence all matter; smartwatch or ring-only glucose claims remain unproven.
     strength: high
     sourceKeys:
       - source_artifact:ada-blood-glucose-meters
@@ -210,24 +210,24 @@ communityOutcomeSummary:
   placeholder: Early Murph glucose outcome summaries will appear once enough opted-in experiment runs include glucose samples with timing context.
 ---
 
-Blood glucose is one of the most useful and most easily misread biomarkers in a personal health vault. It is useful because it changes quickly enough to reveal meal, activity, sleep, stress, alcohol, illness, and medication effects. It is easily misread because the same number can mean different things depending on whether it came from a fasting laboratory draw, a waking finger-stick, a post-meal check, a CGM trace, an exercise window, or an illness day.
+Blood glucose is one of the most useful and most easily misread biomarkers. It changes quickly enough to reveal meal, activity, sleep, stress, alcohol, illness, and medication effects. But the same number can mean different things depending on whether it came from a fasting laboratory draw, a waking finger-stick, a post-meal check, a CGM trace, an exercise window, or an illness day.
 
 ## Diagnosis and self-tracking are different jobs
 
-Murph should keep a strict boundary between clinical diagnosis and personal trend interpretation. Fasting plasma glucose, A1C, oral glucose tolerance testing, and random plasma glucose are clinical tests with specific diagnostic rules. A home glucose meter or CGM trace can be useful for day-to-day management and experiments, but it is not a diagnosis engine.
+Clinical diagnosis and personal trend tracking answer different questions. Fasting plasma glucose, A1C, oral glucose tolerance testing, and random plasma glucose are clinical tests with specific diagnostic rules. A home glucose meter or CGM trace can be useful for day-to-day management and experiments, but it is not a diagnosis tool.
 
-Useful reference anchors:
+Reference anchors:
 
 - **Fasting plasma glucose:** under 100 mg/dL is commonly described as normal, 100 to 125 mg/dL as impaired fasting glucose or prediabetes range, and 126 mg/dL or higher as a diabetes-range result when confirmed in the right clinical context.
 - **Oral glucose tolerance testing:** two-hour values below 140 mg/dL are commonly described as normal, 140 to 199 mg/dL as prediabetes range, and 200 mg/dL or higher as diabetes range when interpreted clinically.
 - **Diabetes-management targets:** many diabetes education materials use 80 to 130 mg/dL before meals and less than 180 mg/dL two hours after a meal as typical targets, but those targets are individualized.
 - **Low glucose:** below 70 mg/dL is a common action threshold in diabetes education and is a safety issue, not a score to optimize downward.
 
-Those anchors should be visible as context, but Murph should not label a person as normal, prediabetic, diabetic, controlled, or uncontrolled from a private trend card.
+These anchors provide context, not a diagnosis. A trend card does not tell you whether you are normal, prediabetic, or diabetic.
 
-## Context buckets Murph should avoid mixing
+## Context matters more than any single number
 
-The safest product behavior is to segment glucose into explicit buckets before summarizing it:
+Glucose readings are most useful when compared within the same context:
 
 - **Fasting laboratory plasma glucose** for clinical reference.
 - **Waking home meter glucose** for a consistent self-tracking window.
@@ -237,32 +237,14 @@ The safest product behavior is to segment glucose into explicit buckets before s
 - **Exercise-window readings** for activity response and hypoglycemia risk.
 - **Sick-day readings** for illness, ketone, and clinician-plan context.
 
-A single combined glucose average is often less informative than a small number of labeled, same-context trend lines.
+A single combined glucose average is often less informative than same-context trend lines compared over time.
 
 ## What can move blood glucose
 
 Food and activity are only the obvious movers. Glucose can also move with sleep restriction, circadian disruption, late meals, acute stress, infection, injury, dehydration, alcohol, menstrual cycle phase, pregnancy, insulin or sulfonylurea dosing, steroid medication, sensor lag, compression lows, strip storage, device changes, and whether the user washed their hands before a finger-stick.
 
-That is why the page treats glucose as **mixed_or_contextual** rather than simply “lower is better.” Lower post-meal spikes may be a reasonable experiment goal for many users, but hypoglycemia is dangerous and should never be rewarded.
-
-## How Murph should display it
-
-For the first Murph implementation, imported `glucose` samples are projected into the private browser vault as a daily `body_state:glucose` metric. The biomarker card can show a private trend when enough values exist, but product copy should still remind users that:
-
-- the trend is private,
-- the trend is not diagnostic,
-- the unit and method matter,
-- same-context comparisons are preferable,
-- symptoms and clinical plans override app interpretation.
-
-Future versions should add richer glucose-specific summaries: fasting median, post-meal peak or area-under-curve, time above range, time below range, overnight lows, coefficient of variation, and method labels for CGM versus finger-stick versus lab.
-
-## Protocol interpretation
-
-The strongest protocol relationship in the current Commons set is regular physical activity, represented here by Norwegian 4x4 as a secondary glucose candidate rather than as a glucose-first protocol. Post-meal walking evidence is particularly useful for designing future meal-timed micro-experiments, but that protocol is not yet a first-class Murph variant in this snapshot.
-
-Red-light glasses before bed remain a low-confidence indirect candidate because circadian and sleep context matter for glucose, not because the glasses themselves have been proven as a glucose treatment. Sauna is listed as a cautious manual candidate only because heat exposure can change recovery and hydration context; it should not be presented as a glucose-lowering protocol from this evidence set.
+That is why glucose is **mixed_or_contextual** rather than simply “lower is better.” Lower post-meal spikes may be a reasonable experiment goal, but hypoglycemia is dangerous and should never be treated as a good result.
 
 ## Safety boundary
 
-People using insulin, sulfonylureas, or other glucose-lowering medications need to follow their clinician's instructions for glucose monitoring, hypoglycemia treatment, sick-day rules, exercise, and dose changes. Murph should never suggest medication changes, insulin dosing, or ignoring unexpected lows or symptoms.
+People using insulin, sulfonylureas, or other glucose-lowering medications should follow their clinician's instructions for glucose monitoring, hypoglycemia treatment, sick-day rules, exercise, and dose changes. Nothing on this page replaces that guidance.

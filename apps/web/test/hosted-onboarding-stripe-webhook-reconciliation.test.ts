@@ -112,6 +112,47 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     });
   });
 
+  it("uses the stored retry timestamp when the workflow finds a not-yet-due receipt", async () => {
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+
+    await expect(reconcileRecordedHostedStripeWebhookEvent({
+      eventId: "evt_123",
+      prisma: createPrisma({
+        claimExpiresAt: null,
+        nextAttemptAt: new Date(Date.now() + 15 * 60_000),
+        status: HostedStripeEventStatus.failed,
+        type: "invoice.paid",
+        updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+      }) as never,
+    })).rejects.toMatchObject({
+      code: "STRIPE_WEBHOOK_RECONCILE_FAILED",
+      details: {
+        eventId: "evt_123",
+        stripeEventStatus: HostedStripeEventStatus.failed,
+        workflowRetryAfter: expect.stringMatching(/^\d+s$/u),
+      },
+      retryable: true,
+    });
+  });
+
+  it("marks poisoned receipts fatal for Workflow retries", async () => {
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+
+    await expect(reconcileRecordedHostedStripeWebhookEvent({
+      eventId: "evt_123",
+      prisma: createPrisma({
+        claimExpiresAt: null,
+        nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+        status: HostedStripeEventStatus.poisoned,
+        type: "invoice.paid",
+        updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+      }) as never,
+    })).rejects.toMatchObject({
+      code: "STRIPE_WEBHOOK_RECONCILE_POISONED",
+      retryable: false,
+    });
+  });
+
   it("rederives completed activation pointers from the mailbox for nudge retries", async () => {
     const prisma = createPrisma({
       hostedMailboxItem: {

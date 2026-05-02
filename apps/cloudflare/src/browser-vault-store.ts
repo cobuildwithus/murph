@@ -27,6 +27,7 @@ export interface BrowserVaultReplicaAadFields {
   dataVersion: string;
   objectKey: string;
   purpose: "browser-vault-replica";
+  runtimeRootKeyId: string;
   schema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   sourceBundleHash: string;
   userId: string;
@@ -46,6 +47,16 @@ export class HostedBrowserVaultReplicaOwnershipError extends Error {
   }
 }
 
+export class HostedBrowserVaultReplicaRootKeyUnavailableError extends Error {
+  readonly runtimeRootKeyId: string | null;
+
+  constructor(runtimeRootKeyId: string | null = null) {
+    super("Hosted browser vault replica runtime root key is unavailable.");
+    this.name = "HostedBrowserVaultReplicaRootKeyUnavailableError";
+    this.runtimeRootKeyId = runtimeRootKeyId;
+  }
+}
+
 export function createBrowserVaultReplicaAadFields(input: {
   ref: HostedBrowserVaultReplicaRef;
   userId: string;
@@ -54,6 +65,7 @@ export function createBrowserVaultReplicaAadFields(input: {
     dataVersion: input.ref.dataVersion,
     objectKey: input.ref.objectKey,
     purpose: "browser-vault-replica",
+    runtimeRootKeyId: requireBrowserVaultReplicaRuntimeRootKeyId(input.ref),
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     sourceBundleHash: input.ref.sourceBundleHash,
     userId: input.userId,
@@ -63,6 +75,9 @@ export function createBrowserVaultReplicaAadFields(input: {
 export function createHostedBrowserVaultReplicaStore(input: {
   bucket: HostedBrowserVaultReplicaBucketLike;
   rootKey: Uint8Array;
+  rootKeyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+  resolveRootKeyById?: (rootKeyId: string) => Promise<Uint8Array | null>;
   userId?: string | null;
 }): HostedBrowserVaultReplicaStore {
   return {
@@ -77,7 +92,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
     },
 
     async deriveBrowserVaultReplicaKey(ref) {
-      return deriveBrowserVaultReplicaKey(input.rootKey, ref);
+      return deriveBrowserVaultReplicaKey(await resolveBrowserVaultReplicaRootKey(input, ref), ref);
     },
 
     async readBrowserVaultReplicaEnvelope(ref) {
@@ -109,6 +124,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
         keyId: createBrowserVaultReplicaKeyId(parsed.source.dataVersion),
         objectKey,
         replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
+        runtimeRootKeyId: requireBrowserVaultReplicaRootKeyId(input.rootKeyId),
         schema: HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
         sourceBundleHash: parsed.source.sourceBundleHash,
       };
@@ -121,6 +137,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
           dataVersion: aadFields.dataVersion,
           objectKey: aadFields.objectKey,
           purpose: aadFields.purpose,
+          runtimeRootKeyId: aadFields.runtimeRootKeyId,
           schema: aadFields.schema,
           sourceBundleHash: aadFields.sourceBundleHash,
           userId: aadFields.userId,
@@ -158,14 +175,58 @@ async function assertHostedBrowserVaultReplicaOwnedByUser(
   }
 }
 
+async function resolveBrowserVaultReplicaRootKey(
+  input: {
+    rootKey: Uint8Array;
+    rootKeyId: string;
+    keysById?: Readonly<Record<string, Uint8Array>>;
+    resolveRootKeyById?: (rootKeyId: string) => Promise<Uint8Array | null>;
+  },
+  ref: HostedBrowserVaultReplicaRef,
+): Promise<Uint8Array> {
+  const runtimeRootKeyId = requireBrowserVaultReplicaRuntimeRootKeyId(ref);
+  if (runtimeRootKeyId === requireBrowserVaultReplicaRootKeyId(input.rootKeyId)) {
+    return input.rootKey;
+  }
+
+  const keyFromKeyring = input.keysById?.[runtimeRootKeyId];
+  if (keyFromKeyring) {
+    return keyFromKeyring;
+  }
+
+  const resolvedKey = await input.resolveRootKeyById?.(runtimeRootKeyId) ?? null;
+  if (resolvedKey) {
+    return resolvedKey;
+  }
+
+  throw new HostedBrowserVaultReplicaRootKeyUnavailableError(runtimeRootKeyId);
+}
+
 async function deriveBrowserVaultReplicaKey(
   rootKey: Uint8Array,
   ref: HostedBrowserVaultReplicaRef,
 ): Promise<Uint8Array> {
+  const runtimeRootKeyId = requireBrowserVaultReplicaRuntimeRootKeyId(ref);
   return deriveHostedStorageKey(
     rootKey,
-    `id:browser-vault-replica:${ref.sourceBundleHash}:${ref.dataVersion}`,
+    `id:browser-vault-replica:${runtimeRootKeyId}:${ref.sourceBundleHash}:${ref.dataVersion}`,
   );
+}
+
+function requireBrowserVaultReplicaRootKeyId(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new TypeError("Hosted browser vault replica rootKeyId must be a non-empty string.");
+  }
+  return normalized;
+}
+
+function requireBrowserVaultReplicaRuntimeRootKeyId(ref: HostedBrowserVaultReplicaRef): string {
+  const runtimeRootKeyId = ref.runtimeRootKeyId?.trim() ?? "";
+  if (!runtimeRootKeyId) {
+    throw new HostedBrowserVaultReplicaRootKeyUnavailableError(null);
+  }
+  return runtimeRootKeyId;
 }
 
 function createBrowserVaultReplicaKeyId(dataVersion: string): string {

@@ -14,6 +14,7 @@ export function browserVaultReplicaRefsMatch(
     && left.keyId === right.keyId
     && left.objectKey === right.objectKey
     && left.replicaSchema === right.replicaSchema
+    && (left.runtimeRootKeyId ?? null) === (right.runtimeRootKeyId ?? null)
     && left.schema === right.schema
     && left.sourceBundleHash === right.sourceBundleHash;
 }

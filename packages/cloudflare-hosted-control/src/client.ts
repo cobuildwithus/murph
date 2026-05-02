@@ -42,6 +42,7 @@ export interface CloudflareHostedControlBrowserVaultReplicaAad {
   dataVersion: string;
   objectKey: string;
   purpose: "browser-vault-replica";
+  runtimeRootKeyId: string;
   schema: "murph.browser-vault-replica.v1";
   sourceBundleHash: string;
   userId: string;
@@ -312,6 +313,12 @@ function parseCloudflareHostedControlBrowserVaultSession(
     "the requested replicaRef.sourceBundleHash",
   );
   assertMatchingString(
+    replicaAad.runtimeRootKeyId,
+    requireHostedBrowserVaultReplicaRuntimeRootKeyId(expected.replicaRef),
+    "Cloudflare browser vault session replicaAad.runtimeRootKeyId",
+    "the requested replicaRef.runtimeRootKeyId",
+  );
+  assertMatchingString(
     replicaKeyEnvelope.userId,
     expected.userId,
     "Cloudflare browser vault session replicaKeyEnvelope.userId",
@@ -365,6 +372,7 @@ function parseCloudflareHostedControlBrowserVaultReplicaAad(
     dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
     purpose,
+    runtimeRootKeyId: requireString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`),
     schema,
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireString(record.userId, `${label}.userId`),
@@ -493,6 +501,12 @@ function assertHostedBrowserVaultReplicaRefMatches(
     `${label}.sourceBundleHash`,
     "the requested replicaRef.sourceBundleHash",
   );
+  assertMatchingOptionalString(
+    actual.runtimeRootKeyId,
+    expected.runtimeRootKeyId,
+    `${label}.runtimeRootKeyId`,
+    "the requested replicaRef.runtimeRootKeyId",
+  );
 }
 
 function assertMatchingNumber(
@@ -515,6 +529,26 @@ function assertMatchingString(
   if (actual !== expected) {
     throw new TypeError(`${label} must match ${expectedLabel}.`);
   }
+}
+
+function assertMatchingOptionalString(
+  actual: string | null | undefined,
+  expected: string | null | undefined,
+  label: string,
+  expectedLabel: string,
+): void {
+  if ((actual ?? null) !== (expected ?? null)) {
+    throw new TypeError(`${label} must match ${expectedLabel}.`);
+  }
+}
+
+function requireHostedBrowserVaultReplicaRuntimeRootKeyId(
+  replicaRef: HostedBrowserVaultReplicaRef,
+): string {
+  if (!replicaRef.runtimeRootKeyId) {
+    throw new TypeError("Cloudflare browser vault session requested replicaRef.runtimeRootKeyId is required.");
+  }
+  return replicaRef.runtimeRootKeyId;
 }
 
 function requireHostedExecutionBaseUrl(

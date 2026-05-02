@@ -289,6 +289,21 @@ describe("createCloudflareHostedControlClient", () => {
     {
       buildResponse: () =>
         createBrowserVaultSession({
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: {
+            ...createReplicaAad(),
+            runtimeRootKeyId: "udrk:runtime:other-root",
+          },
+          replicaKeyEnvelope: createReplicaKeyEnvelope(),
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        }),
+      message: "Cloudflare browser vault session replicaAad.runtimeRootKeyId must match the requested replicaRef.runtimeRootKeyId.",
+      name: "replica AAD runtime root differs from the request",
+    },
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
           encryptedReplica: {
             ...createReplicaEnvelope(),
             keyId: "browser-vault-replica:other",
@@ -614,6 +629,7 @@ function createReplicaRef() {
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica.v1" as const,
     schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
+    runtimeRootKeyId: "udrk:runtime:test-root",
     sourceBundleHash: "a".repeat(64),
   };
 }
@@ -623,6 +639,7 @@ function createReplicaAad() {
     dataVersion: "d".repeat(64),
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     purpose: "browser-vault-replica" as const,
+    runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.browser-vault-replica.v1" as const,
     sourceBundleHash: "a".repeat(64),
     userId: "user_123",
