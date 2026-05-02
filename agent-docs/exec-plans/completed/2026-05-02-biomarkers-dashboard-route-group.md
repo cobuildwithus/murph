@@ -27,5 +27,11 @@ Created 2026-05-02. Route family moved under `app/(dashboard)/biomarkers`; focus
 
 Verification so far:
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/biomarker-layout.test.ts apps/web/test/biomarker-browse-card.test.ts apps/web/test/health-commons-biomarker-detail-page.test.ts apps/web/test/health-commons-route-bundle-boundary.test.ts` passed: 4 files, 26 tests.
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/biomarker-private-trend-card.test.ts` passed: 1 file, 8 tests.
 - `pnpm --dir apps/web typecheck` passed.
+- `git diff --check` on the scoped route/test/plan files passed.
 - `pnpm test:diff ...` reached `apps/web verify` and failed on unrelated current app issues: hosted legal consent card expectation, root page hero typography expectation, and dirty `apps/web/src/lib/health-commons/biomarker-bindings.ts` build typing.
+- Required audit passes completed with no findings: security/privacy review, frontend review, coverage-write, and task-finish review.
+Status: completed
+Updated: 2026-05-03
+Completed: 2026-05-03
