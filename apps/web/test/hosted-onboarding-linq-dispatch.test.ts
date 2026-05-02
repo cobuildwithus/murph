@@ -662,6 +662,82 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
   });
 
+  it("preserves active-member Linq link content when truncation is required", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "link",
+              value: "https://example.test/linked-context",
+            },
+            {
+              type: "text",
+              value: "x".repeat((128 * 1024) + 1),
+            },
+            {
+              attachment_id: "att_link_compaction",
+              filename: "proof.jpg",
+              mime_type: "image/jpeg",
+              size: 1234,
+              type: "media",
+              url: "https://cdn.example.test/proof.jpg",
+            },
+          ],
+        },
+        eventId: "evt_link_compaction",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    const serializedEnvelope = JSON.stringify(envelope);
+    expect(envelope).toEqual(expect.objectContaining({
+      message: expect.objectContaining({
+        linqMessage: expect.objectContaining({
+          parts: expect.arrayContaining([
+            expect.objectContaining({
+              type: "text",
+              value: expect.stringContaining("https://example.test/linked-context"),
+            }),
+          ]),
+        }),
+      }),
+    }));
+    expect(serializedEnvelope).toContain("some content truncated");
+    expect(serializedEnvelope).not.toContain("cdn.example.test");
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+  });
+
   it("omits signed Linq attachment URLs from active-member mailbox wakes", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
