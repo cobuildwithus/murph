@@ -1,6 +1,6 @@
 # Land greenfield MetricPoint architecture hard cut
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -68,3 +68,4 @@ Updated: 2026-05-02
   - `git diff --check`
 - Expected outcomes:
   - Required checks pass, or unrelated pre-existing failures are named with evidence.
+Completed: 2026-05-02
