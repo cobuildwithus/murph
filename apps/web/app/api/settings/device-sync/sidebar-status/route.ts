@@ -5,10 +5,10 @@ import {
   summarizeSidebarDeviceSyncStatus,
   type SidebarDeviceSyncStatusResponse,
 } from "@/src/lib/device-sync/sidebar-status";
-import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 
 export const GET = withJsonError(async (request: Request) => {
-  const auth = await requireActivePrivyMemberAuth(request);
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const { connections, providers } = await controlPlane.listConnections(auth.member.id);
   const sources = buildHostedDeviceSyncSettingsSources({

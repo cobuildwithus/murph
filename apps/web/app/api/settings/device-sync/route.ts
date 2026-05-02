@@ -4,10 +4,10 @@ import {
   type HostedDeviceSyncSettingsResponse,
 } from "@/src/lib/device-sync/settings-surface";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
-import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 
 export const GET = withJsonError(async (request: Request) => {
-  const auth = await requireActivePrivyMemberAuth(request);
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const { connectionSources, connections, providers } = await controlPlane.listConnections(auth.member.id);
 

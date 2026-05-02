@@ -82,7 +82,7 @@ function PhoneSettingsCard({
           </Button>
         }
       />
-      {murphPhoneNumber ? (
+      {phoneNumber && murphPhoneNumber ? (
         <a className="text-sm font-medium text-primary hover:underline" href={`sms:${murphPhoneNumber}`}>
           Message Murph
         </a>

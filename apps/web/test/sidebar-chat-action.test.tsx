@@ -149,7 +149,7 @@ test("SidebarChatWithMurphAction prefers the member assigned Murph text number",
   });
 });
 
-test("SidebarChatWithMurphAction renders no direct contact route when no connected chat channel exists", async () => {
+test("SidebarChatWithMurphAction routes signed-in members without a chat channel to settings", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -182,7 +182,8 @@ test("SidebarChatWithMurphAction renders no direct contact route when no connect
 
   assert.match(markup, /data-slot="sidebar-menu-button"/);
   assert.doesNotMatch(markup, /disabled=""/);
-  assert.doesNotMatch(markup, /href=/);
+  assert.match(markup, /href="\/settings"/);
+  assert.match(markup, /aria-label="Link a contact method to chat with Murph"/);
 });
 
 test("SidebarChatWithMurphAction does not use assigned SMS without a connected phone channel", async () => {
