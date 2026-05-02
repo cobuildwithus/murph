@@ -12,11 +12,11 @@ The live ownership split is:
 - `apps/web` owns hosted product/control-plane facts, encrypted mailbox rows,
   latest workspace checkpoint metadata, redacted runtime status, and bounded
   redacted runtime logs. For Linq and Telegram conversation webhooks, it verifies
-  and appends in web-owned code, then starts a Vercel Workflow run that durably
-  retries runner nudge by opaque mailbox item pointer only. Cloudflare Email
-  ingress appends the same canonical mailbox item through a signed web callback
-  and uses a signed pointer-only web callback to start that same durable nudge
-  workflow.
+  and appends in web-owned code, then attempts to start a Vercel Workflow run
+  that durably retries runner nudge by opaque mailbox item pointer only.
+  Cloudflare Email ingress appends the same canonical mailbox item through a
+  signed web callback and uses a signed pointer-only web callback to start that
+  same durable nudge workflow.
   Stripe webhook ingress verifies the raw Stripe request locally, records only
   minimal receipt state in Postgres, and may start a separate Vercel Workflow
   with only the Stripe event id to retry reconciliation plus any activation
@@ -75,16 +75,20 @@ product/control-plane mutation that made work necessary. Large payloads use
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
-drains any receipt-local side effects, and starts a Vercel Workflow with only
-`{ mailboxItemId, source }` to nudge the per-user Cloudflare runner. Cloudflare
-Email ingress verifies the authorized email route and sender, stores the
-encrypted raw message, appends the canonical encrypted mailbox item through web,
-and starts the same pointer-only nudge workflow through a signed web callback.
+drains any receipt-local side effects, and attempts to start a Vercel Workflow
+with only `{ mailboxItemId, source }` to nudge the per-user Cloudflare runner.
+Cloudflare Email ingress verifies the authorized email route and sender, stores
+the encrypted raw message, appends the canonical encrypted mailbox item through
+web, and attempts to start the same pointer-only nudge workflow through a signed
+web callback.
 Raw provider bodies, raw email messages, message content, verification headers,
 provider secrets, and decrypted mailbox payloads must not be Vercel Workflow
 inputs or outputs. If the pointer workflow cannot be accepted after the mailbox
-row exists, the webhook returns a retryable provider response or the email
-handler fails the ingress attempt after the mailbox append.
+row exists, the failure is logged as a post-commit best-effort handoff failure
+and does not make provider ingress fail. This avoids duplicate provider retries
+after the durable append, but guaranteed recovery from workflow-start
+unavailability still requires a future pending-handoff reconciler or mailbox-lag
+sweeper.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and runner
 nudges only coalesce pending work.
@@ -205,10 +209,10 @@ assistant channel enablement state, outbox truth, or durable queue history.
 
 ### Vercel Workflow Owns
 
-- pointer-only nudge workflow run state for Linq, Telegram, device-sync, and Cloudflare Email ingress handoff
+- accepted pointer-only nudge workflow run state for Linq, Telegram, device-sync, and Cloudflare Email ingress handoff
 - Stripe event-id reconciliation workflow run state after local Stripe signature verification and receipt recording
 - workflow event logs for opaque mailbox item ids, Stripe event ids, channel/source labels, retry status, and step errors
-- runner nudge handoff and retry state after web-owned verification and mailbox append have committed
+- runner nudge handoff and retry state after web-owned verification and mailbox append have committed and the workflow start is accepted
 
 Vercel Workflow does not own raw webhook payloads, provider verification
 headers, Stripe request bodies, provider secrets, canonical product facts,

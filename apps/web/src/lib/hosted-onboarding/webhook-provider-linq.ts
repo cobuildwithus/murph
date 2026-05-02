@@ -1,5 +1,10 @@
 import type { Prisma } from "@prisma/client";
+import {
+  type HostedExecutionLinqConversationMessagePart,
+  buildHostedExecutionLinqConversationMessageWake,
+} from "@murphai/hosted-execution";
 
+import { hostedOnboardingError } from "./errors";
 import { issueHostedInviteTx } from "./invite-service";
 import {
   hasHostedMemberActiveAccess,
@@ -14,6 +19,7 @@ import {
   incrementHostedLinqOutboundDailyState,
 } from "./linq-daily-state";
 import {
+  type HostedLinqMessageReceivedEvent,
   type HostedLinqWebhookEvent,
 } from "./linq";
 import {
@@ -24,7 +30,6 @@ import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
-import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
@@ -43,6 +48,9 @@ export type {
 import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
+
+const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
+const HOSTED_LINQ_MESSAGE_MAX_SERIALIZED_PARTS_BYTES = 128 * 1024;
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
@@ -124,6 +132,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return buildIgnoredLinqWebhookPlan("unknown-home-line");
     }
 
+    const linqMessageParts = buildBoundedHostedLinqMailboxParts(messageEvent.data.message.parts);
+
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
       chatId: summary.chatId,
       memberId: existingMember.id,
@@ -167,22 +177,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           from: participantPhoneNumber,
           isFromMe: summary.isFromMe,
           messageId: summary.messageId,
-          parts: messageEvent.data.message.parts.map((part) =>
-            part.type === "text" || part.type === "link"
-              ? {
-                  type: part.type,
-                  value: part.value,
-                }
-              : {
-                  ...(part.attachment_id === undefined
-                    ? {}
-                    : { attachmentId: part.attachment_id }),
-                  ...(part.filename === undefined ? {} : { fileName: part.filename }),
-                  ...(part.mime_type === undefined ? {} : { mimeType: part.mime_type }),
-                  ...(part.size === undefined ? {} : { size: part.size }),
-                  type: part.type,
-                  ...(part.url === undefined ? {} : { url: part.url }),
-                }),
+          parts: linqMessageParts,
           ...(messageEvent.data.message.reply_to?.message_id === undefined
             ? {}
             : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -256,4 +251,48 @@ export async function planHostedOnboardingLinqWebhook(input: {
     messageId: summary.messageId,
     sourceEventId: input.event.event_id,
   });
+}
+
+function buildBoundedHostedLinqMailboxParts(
+  parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
+): HostedExecutionLinqConversationMessagePart[] {
+  if (parts.length > HOSTED_LINQ_MESSAGE_MAX_PARTS) {
+    throw hostedOnboardingError({
+      code: "LINQ_MESSAGE_PARTS_TOO_MANY",
+      httpStatus: 413,
+      message: "Linq webhook message contains too many parts.",
+      retryable: false,
+    });
+  }
+
+  const mailboxParts = parts.map((part): HostedExecutionLinqConversationMessagePart =>
+    part.type === "text" || part.type === "link"
+      ? {
+          type: part.type,
+          value: part.value,
+        }
+      : {
+          ...(part.attachment_id === undefined
+            ? {}
+            : { attachmentId: part.attachment_id }),
+          ...(part.filename === undefined ? {} : { fileName: part.filename }),
+          ...(part.mime_type === undefined ? {} : { mimeType: part.mime_type }),
+          ...(part.size === undefined ? {} : { size: part.size }),
+          type: part.type,
+          ...(part.url === undefined ? {} : { url: part.url }),
+        }
+  );
+  const serializedParts = JSON.stringify(mailboxParts);
+  const serializedPartsBytes = new TextEncoder().encode(serializedParts).byteLength;
+
+  if (serializedPartsBytes > HOSTED_LINQ_MESSAGE_MAX_SERIALIZED_PARTS_BYTES) {
+    throw hostedOnboardingError({
+      code: "LINQ_MESSAGE_PARTS_TOO_LARGE",
+      httpStatus: 413,
+      message: "Linq webhook message parts are too large.",
+      retryable: false,
+    });
+  }
+
+  return mailboxParts;
 }
