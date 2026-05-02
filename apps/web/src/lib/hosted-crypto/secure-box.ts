@@ -20,12 +20,14 @@ const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
 
 type HostedSecureBoxStringTestCodec = {
   decrypt(input: {
+    aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
     lane: HostedCryptoLane;
     scope: string;
     userId: string;
     value: string;
   }): string;
   encrypt(input: {
+    aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
     lane: HostedCryptoLane;
     scope: string;
     userId: string;
@@ -70,6 +72,7 @@ export async function sealHostedUserSecureBoxString(input: {
   const testCodec = getHostedSecureBoxStringTestCodecForTests();
   if (testCodec) {
     return testCodec.encrypt({
+      aad: input.aad,
       lane: input.lane,
       scope: input.scope,
       userId: input.userId,
@@ -125,6 +128,7 @@ export async function openHostedUserSecureBoxString(input: {
   const testCodec = getHostedSecureBoxStringTestCodecForTests();
   if (testCodec) {
     return testCodec.decrypt({
+      aad: input.aad,
       lane: input.lane,
       scope: input.scope,
       userId: input.userId,

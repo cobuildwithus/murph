@@ -957,11 +957,22 @@ experimentOnboarding:
     missedLogFollowupCopy: You missed an EPA/DHA log. Did you take the planned serving, skip it, or change the dose/product?
     confirmationPrompt: I can set this up as a 14-day baseline plus 12-week oral EPA/DHA run, with safety boundaries and exact EPA/DHA logging. Please confirm the product and measurement plan before I create the experiment.
 whyItWorks:
-- 'Preformed EPA and DHA can raise blood EPA/DHA status when intake exceeds baseline diet and the product is taken consistently; response depends on baseline status, dose, duration, formulation, meal context, and adherence.'
-- 'RBC EPA+DHA/omega-3 index is a slower exposure marker than acute plasma fatty acids, so before/after testing should use a consistent sample matrix after a sufficiently long intervention window.'
-- 'Triglycerides are the most consistent lipid signal for oral EPA/DHA-style interventions, but LDL-C and other lipid markers can move differently by dose, baseline phenotype, and EPA/DHA mix.'
-- 'Mechanistic or biomarker movement does not prove cardiovascular-event, mood, cognition, dry-eye, recovery, or inflammation benefit in a self-experiment.'
-- 'Prescription labels and safety references are safety-boundary sources, not proof that high-dose or prescription-style omega-3 use belongs in an ordinary wellness self-experiment.'
+  - "## EPA and DHA replace other fatty acids in cell membranes\n\nPreformed EPA and DHA enter red-blood-cell membranes over weeks of consistent intake, raising omega-3 index proportionally to dose, duration, and baseline status. A 12-week window with same-matrix retesting separates real tissue change from acute plasma noise."
+  - "## Triglycerides fall when liver export slows\n\nEPA and DHA reduce hepatic VLDL assembly and triglyceride secretion. Fasting triglycerides are the most consistent lipid signal, especially from an elevated baseline. LDL-C and non-HDL-C move in different directions depending on dose, EPA/DHA ratio, and starting phenotype."
+  - "## Biomarker movement is not disease prevention\n\nRising omega-3 index and falling triglycerides confirm exposure and metabolic shift. They do not establish cardiovascular-event reduction, mood improvement, dry-eye relief, or inflammation control in a self-experiment."
+mechanismChain:
+  -
+    label: "Dose"
+    content: "Fixed daily EPA + DHA from 1 product · logged mg · taken with food"
+  -
+    label: "Acute effect"
+    content: "EPA and DHA enter plasma; liver VLDL assembly slows"
+  -
+    label: "Repeated signal"
+    content: "Daily fatty-acid surplus shifts RBC membrane composition over weeks"
+  -
+    label: "Adaptation"
+    content: "Omega-3 index rises; fasting triglycerides fall; LDL-C remodels by dose and EPA/DHA ratio"
 claims:
 -
   claimId: oral-epa-dha-raises-blood-status

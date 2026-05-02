@@ -80,8 +80,8 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewP
 
 function SubHeading({ children }: { children: string }) {
   return (
-    <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+    <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
       {children}
-    </span>
+    </h3>
   );
 }

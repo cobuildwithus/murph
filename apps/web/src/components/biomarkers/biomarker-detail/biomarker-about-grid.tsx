@@ -42,7 +42,7 @@ function AboutColumn({
   body: string;
 }) {
   return (
-    <div className="flex justify-center">
+    <div className="flex md:justify-center">
       <div className="flex max-w-md gap-4">
         <span
           aria-hidden="true"

@@ -5,7 +5,7 @@ import { test, vi } from "vitest";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
-import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/crypto.ts";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { disconnectDeviceSyncAccount, queueDeviceSyncManualReconcile } from "../src/service-controls.ts";
 import { getDeviceSyncServiceTestingHooks } from "../src/service-testing.ts";

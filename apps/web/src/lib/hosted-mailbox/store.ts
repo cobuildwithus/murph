@@ -95,8 +95,6 @@ interface AppendHostedMailboxItemBaseInput {
   kind: HostedMailboxKind | string;
   lane: HostedMailboxLane | string;
   occurredAt: Date | string;
-  payloadBytes: number;
-  payloadHash?: string | null;
   payloadSchema?: string | null;
   payloadSerializedJson: string;
   userId: string;
@@ -123,15 +121,21 @@ export async function appendHostedMailboxItem(
       });
 
       if (existing) {
+        const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
+          payloadSerializedJson: input.payloadSerializedJson,
+          userId: input.userId,
+        });
+
         return {
           duplicate: true,
           dedupeConflict: hasHostedMailboxDedupeConflict({
             existing,
             kind: input.kind,
             lane: input.lane,
-            payloadBytes: input.payloadBytes,
-            payloadHash: input.payloadHash,
-            payloadSchema: input.payloadSchema ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+            payloadBytes: payloadMetadata.payloadBytes,
+            payloadHash: payloadMetadata.payloadHash,
+            payloadSchema: normalizeNullableString(input.payloadSchema)
+              ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
           }),
           inserted: false,
           item: await hydrateHostedMailboxItemTx({
@@ -160,8 +164,11 @@ export async function appendHostedMailboxItemTx(
     : requireDate(input.expiresAt, "Hosted mailbox expiresAt");
   const payloadSchema = normalizeNullableString(input.payloadSchema)
     ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
-  const payloadBytes = requirePositivePayloadBytes(input.payloadBytes);
-  const payloadHash = normalizeNullableString(input.payloadHash);
+  const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
+    payloadSerializedJson: input.payloadSerializedJson,
+    userId,
+  });
+  const { payloadBytes, payloadHash, serialized } = payloadMetadata;
   await acquireHostedMailboxDedupeAppendLockTx({
     dedupeKey,
     tx: input.tx,
@@ -227,7 +234,7 @@ export async function appendHostedMailboxItemTx(
     payloadBytes,
     payloadSchema,
     prisma: input.tx,
-    serialized: requireHostedMailboxSerializedPayload(input.payloadSerializedJson),
+    serialized,
     userId,
   });
   const inserted = await input.tx.$queryRaw<HostedMailboxItemRow[]>`
@@ -374,18 +381,13 @@ export async function appendHostedMailboxEnvelopeTx(input: {
       userId: envelope.userId,
     },
   });
-  const encodedPayload = serializeHostedMailboxPayload({
-    userId: envelope.userId,
-    value: envelope,
-  });
+  const encodedPayload = serializeHostedMailboxPayload(envelope);
 
   return appendHostedMailboxItemTx({
     dedupeKey: envelope.eventId,
     kind: envelope.kind,
     lane: resolveHostedMailboxLaneForKind(envelope.kind),
     occurredAt: envelope.occurredAt,
-    payloadBytes: encodedPayload.payloadBytes,
-    payloadHash: encodedPayload.payloadHash,
     payloadSerializedJson: encodedPayload.serialized,
     tx: input.tx,
     userId: envelope.userId,
@@ -845,7 +847,7 @@ export function resolveHostedMailboxLaneForKind(kind: string): HostedMailboxLane
   return kind === "conversation.message" ? "conversation" : "system";
 }
 
-interface EncodedHostedMailboxStoredPayload {
+interface HostedMailboxStoredPayloadMetadata {
   payloadBytes: number;
   payloadHash: string;
   serialized: string;
@@ -868,16 +870,23 @@ type HostedMailboxEncryptedPayloadStorage =
 const HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES = 16 * 1024;
 const HOSTED_MAILBOX_PAYLOAD_REF_PREFIX = "hosted-mailbox-payload:";
 
-function serializeHostedMailboxPayload(input: {
-  userId: string;
-  value: unknown;
-}): EncodedHostedMailboxStoredPayload {
-  const serialized = JSON.stringify(input.value);
+function serializeHostedMailboxPayload(value: unknown): Pick<HostedMailboxStoredPayloadMetadata, "serialized"> {
+  const serialized = JSON.stringify(value);
 
   if (typeof serialized !== "string" || serialized.length === 0) {
     throw new TypeError("Hosted mailbox payload must serialize to a non-empty JSON string.");
   }
 
+  return {
+    serialized,
+  };
+}
+
+function deriveHostedMailboxStoredPayloadMetadata(input: {
+  payloadSerializedJson: string;
+  userId: string;
+}): HostedMailboxStoredPayloadMetadata {
+  const serialized = requireHostedMailboxSerializedPayload(input.payloadSerializedJson);
   const payloadBytes = Buffer.byteLength(serialized, "utf8");
   const payloadHash = hashHostedMailboxStoredPayload({
     serialized,
@@ -987,14 +996,6 @@ function isHostedMailboxItemExpired(
   at: Date,
 ): boolean {
   return item.expiresAt !== null && item.expiresAt.getTime() <= at.getTime();
-}
-
-function requirePositivePayloadBytes(value: number): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError("Hosted mailbox payloadBytes must be a positive integer.");
-  }
-
-  return value;
 }
 
 function normalizeHostedMailboxSeq(

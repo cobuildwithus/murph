@@ -1294,10 +1294,23 @@ experimentOnboarding:
     missedLogFollowupCopy: Want to fill in yesterday's creatine dose, symptoms, and training context?
     confirmationPrompt: Create a creatine monohydrate experiment with the selected dose path, safety boundaries, and logging fields?
 whyItWorks:
-  - 'Creatine supplementation can raise muscle creatine availability; loading raises stores faster, while lower daily dosing can build stores more gradually, and maintenance dosing helps keep stores elevated.'
-  - 'The most plausible user-visible effects are selected strength, repeated high-intensity, and training-volume outcomes, especially in resistance-training contexts; not every strength, power, endurance, or sport endpoint improves.'
-  - 'Taking creatine with carbohydrate or protein/carbohydrate can improve retention or uptake in acute physiology studies, but extracted outcome evidence does not make high-sugar co-ingestion a protocol requirement.'
-  - 'Plain monohydrate remains the best-supported protocol boundary; alternative forms and blends should be treated as adjacent variants because superiority over monohydrate is not consistently shown.'
+  - "## Daily creatine raises muscle phosphocreatine stores\n\n3–5 g/day creatine monohydrate saturates the creatine transporter over weeks, raising intramuscular phosphocreatine. Loading at 20 g/day split into 4 servings reaches saturation faster — roughly 5–7 days versus several weeks — but both paths converge on the same elevated store."
+  - "## More phosphocreatine fuels harder repeated efforts\n\nPhosphocreatine donates its phosphate group to regenerate ATP during short, intense contractions. Higher stores let each set, sprint, or rep start with a fuller energy buffer. The effect is strongest in repeated high-intensity work: more reps at a given load, faster recovery between sets, and greater total training volume per session."
+  - "## Greater training volume drives strength and lean-mass gains\n\nThe performance boost is not decorative. More mechanical work per session — heavier sets, extra reps, shorter rest — is the primary driver of strength and lean-mass adaptation over weeks of resistance training. Body weight typically rises 1–2 kg early, mostly from intracellular water retention, before lean tissue accrues."
+  - "## Plain monohydrate is the reference form\n\nNo alternative creatine form consistently outperforms monohydrate in head-to-head trials. Blends, buffered forms, and novel salts introduce variables without proven superiority, so the protocol boundary stays at plain creatine monohydrate."
+mechanismChain:
+  -
+    label: "Dose"
+    content: "3–5 g/day creatine monohydrate · daily oral dose"
+  -
+    label: "Uptake"
+    content: "Creatine transporter loads muscle cells; intramuscular phosphocreatine rises over days to weeks"
+  -
+    label: "Acute performance"
+    content: "More ATP regenerated per set · more reps at load · faster inter-set recovery"
+  -
+    label: "Adaptation"
+    content: "Greater total training volume drives larger strength gains and lean-mass accrual"
 claims:
 
   -

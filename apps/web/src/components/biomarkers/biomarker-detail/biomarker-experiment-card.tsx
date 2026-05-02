@@ -26,7 +26,7 @@ export function BiomarkerExperimentCard({
   return (
     <Link
       href={protocol.href}
-      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border"
+      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/60 bg-card/90 transition-colors hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
     >
       <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden">
         {imageSrc ? (
@@ -51,14 +51,14 @@ export function BiomarkerExperimentCard({
             <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
               {protocol.category}
             </span>
-            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-balance">
+            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-pretty">
               {protocol.title}
             </h3>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <span
               className={cn(
-                "font-serif text-xl/6 font-semibold",
+                "font-serif text-base/5 font-semibold sm:text-xl/6",
                 biomarkerFitToneClassName(protocol.fitLabel),
               )}
             >
@@ -76,17 +76,17 @@ export function BiomarkerExperimentCard({
         <StatCell
           label="Exp. change"
           value={expectedHighlight}
-          valueClassName="font-serif text-sm/5 font-semibold text-primary"
+          valueClassName="font-serif text-xs/4 font-semibold text-primary sm:text-sm/5"
         />
         <StatCell
           label="Duration"
           value={durationHighlight}
-          valueClassName="font-serif text-sm/5 font-semibold text-foreground"
+          valueClassName="font-serif text-xs/4 font-semibold text-foreground sm:text-sm/5"
         />
         <StatCell
           label="Burden"
           value={formatChipLabel(protocol.burdenLabel)}
-          valueClassName="text-sm/5 font-medium text-foreground"
+          valueClassName="text-xs/4 font-medium text-foreground sm:text-sm/5"
         />
       </div>
 
@@ -108,8 +108,8 @@ function StatCell({
   valueClassName: string;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 px-4 py-4 min-w-0">
-      <span className="font-mono text-[10px]/3 uppercase tracking-[0.14em] text-muted-foreground">
+    <div className="flex flex-col gap-1.5 px-3 py-3 min-w-0 sm:px-4 sm:py-4">
+      <span className="font-mono text-[9px]/3 uppercase tracking-[0.12em] text-muted-foreground sm:text-[10px]/3 sm:tracking-[0.14em]">
         {label}
       </span>
       <span className={cn("text-pretty", valueClassName)}>{value}</span>

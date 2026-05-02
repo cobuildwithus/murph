@@ -328,9 +328,22 @@ experimentOnboarding:
     missedLogFollowupCopy: Log missed D3 doses as context; do not double up just because a log was missed.
     confirmationPrompt: Confirm the daily dose, safety screen, supplement stack, and lab-feedback plan before creating the experiment.
 whyItWorks:
-  - Cholecalciferol supplementation supplies vitamin D3 that can raise circulating 25(OH)D over weeks; this is the direct biomarker effect tested by the protocol.
-  - Baseline status, body size, sun exposure, diet, season, and population context modify response, so Murph treats the protocol as a logged N-of-1 lab-feedback experiment rather than a fixed-dose guarantee.
-  - Safety is calcium-centered: adult upper-intake guidance is a ceiling, and higher daily doses or special medical contexts require caution rather than casual escalation.
+  - "## Daily D3 feeds the liver conversion that raises 25(OH)D\n\nOral cholecalciferol enters circulation and the liver hydroxylates it into 25-hydroxyvitamin D — the form measured by a standard vitamin D lab. Consistent daily dosing at 800–1000 IU raises serum 25(OH)D by roughly 8–14 ng/mL over 8–12 weeks in trials of healthy adults."
+  - "## Response depends on where you start and how you live\n\nBaseline 25(OH)D, body size, season, latitude, sun exposure, skin pigmentation, diet, and adherence all shift the dose-response curve. A person starting low in winter gains more per IU than someone replete in summer. Murph treats this as a logged N-of-1 lab-feedback experiment, not a fixed-dose guarantee."
+  - "## Safety boundaries outweigh dose chasing\n\n4000 IU/day is an adult upper-intake ceiling, not a target. Meta-analyses find increased hypercalcemia risk at 3200–4000 IU/day, and higher daily doses lower volumetric BMD in trial evidence. Kidney disease, stones, high calcium, supplement stacking, and active vitamin D analogues shift the safety posture further."
+mechanismChain:
+  -
+    label: "Dose"
+    content: "Daily oral cholecalciferol · 800–1000 IU typical start"
+  -
+    label: "Hepatic conversion"
+    content: "Liver hydroxylates D3 into 25(OH)D; circulating level rises over weeks"
+  -
+    label: "Steady state"
+    content: "8–12 weeks of consistent intake · serum 25(OH)D stabilizes at new level"
+  -
+    label: "Adaptation"
+    content: "Vitamin D status shifts measurably; downstream calcium and bone metabolism gain substrate"
 claims:
 
   -

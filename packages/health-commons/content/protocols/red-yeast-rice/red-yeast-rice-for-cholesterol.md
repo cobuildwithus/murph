@@ -490,9 +490,22 @@ experimentOnboarding:
     missedLogFollowupCopy: "A missed RYR log matters for dose attribution. Please mark taken, missed, or stopped."
     confirmationPrompt: "Before creating this RYR experiment, confirm: baseline lipid panel is planned or complete, product identity and product-quality/local-law checks are documented, safety screen is negative or clinician guidance is in place, and you understand this is not a replacement for prescribed lipid care or cardiovascular-risk management."
 whyItWorks:
-  - "RYR can deliver monacolin K, which is chemically lovastatin-like and can reduce cholesterol synthesis through a statin-like mechanism; this is why the protocol treats RYR as a high-caution active pharmacologic exposure rather than a generic food supplement."
-  - "The evidence signal is product-specific: direct RYR trials and syntheses show LDL-C and total-cholesterol lowering for some preparations over short windows, while commercial products can differ in monacolin content and contaminants."
-  - "A lipid-panel test is necessary because the expected signal is a lab biomarker change, not a same-day symptom change; LDL-C, non-HDL-C, total cholesterol, HDL-C, triglycerides, and optional ApoB should be interpreted with fasting status, lab method, adherence, and confounders visible."
+  - "## Monacolin K blocks liver cholesterol synthesis\n\nMonacolin K is chemically identical to lovastatin and inhibits HMG-CoA reductase, the rate-limiting enzyme in cholesterol production. The liver compensates by upregulating LDL receptors, pulling LDL particles out of the bloodstream. This statin-like pharmacology is why the protocol requires high-caution screening rather than treating RYR as a generic food supplement."
+  - "## Product identity determines whether the mechanism fires\n\nCommercial RYR products vary widely in monacolin content, contaminant profile, and active-dose documentation. Direct trials show LDL-C and total-cholesterol lowering for documented preparations, but a specific commercial supplement arm in SPORT showed no significant LDL-C change over 28 days. The signal is product-specific, not category-wide."
+  - "## LDL-C is a lab endpoint, not a felt symptom\n\nThe expected signal is a lipid-panel biomarker shift, not a same-day experience change. A baseline and 8-12 week follow-up lipid panel with fasting status, lab method, adherence, product identity, and confounder logs visible is the only way to interpret whether this product moved cholesterol handling."
+mechanismChain:
+  -
+    label: "Dose"
+    content: "1 documented RYR product · monacolin K or total monacolins logged · daily for 8-12 weeks"
+  -
+    label: "Acute effect"
+    content: "Monacolin K inhibits HMG-CoA reductase; liver cholesterol synthesis drops"
+  -
+    label: "Repeated signal"
+    content: "Sustained synthesis block forces liver to upregulate LDL-receptor expression"
+  -
+    label: "Adaptation"
+    content: "LDL-C and total cholesterol fall; magnitude depends on product potency, dose, and baseline level"
 claims:
 
   -

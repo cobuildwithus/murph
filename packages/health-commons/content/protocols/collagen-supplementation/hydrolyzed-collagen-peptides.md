@@ -985,10 +985,23 @@ experimentOnboarding:
     missedLogFollowupCopy: Want to mark whether you took collagen yesterday and note any symptoms or confounders?
     confirmationPrompt: Before creating the private run, confirm the exact product, source species/category, planned labeled daily grams, full ingredient/allergen/lot details, primary target, baseline plan, hard-stop safety screen, biotin/lab context, and confounders. Do not create the run until the user explicitly confirms.
 whyItWorks:
-- 'Collagen-derived peptides can appear in circulation after oral collagen or gelatin hydrolysate intake, which makes oral HCP biologically plausible, but absorption evidence does not by itself prove that a user-facing endpoint will improve.'
-- 'Skin endpoints have the clearest direct HCP cluster, with hydration, elasticity, wrinkle, and appearance outcomes reported across trials and reviews; Murph still treats these as endpoint- and product-specific rather than universal.'
-- 'Joint, tendon, and recovery outcomes are more context-sensitive. Tendon and ligament hypotheses depend especially on loading or rehab exposure, while recovery/performance interpretations require repeatable stressors and training context.'
-- 'A good Murph run is therefore not “collagen works” versus “collagen does not work.” It is a bounded test of one target, one product, one dose, and one measurement plan, with safety and confounders visible.'
+- “## Collagen peptides survive digestion and reach target tissues\n\nHydrolysis breaks collagen into low-molecular-weight peptides (Pro-Hyp, Hyp-Gly, and others) that survive gastric acid and appear in blood within hours. These peptide fragments accumulate in skin, cartilage, and connective tissue, where they act as both building blocks and signaling molecules for local matrix turnover.”
+- “## Skin outcomes have the strongest direct signal\n\nAcross RCTs and meta-analyses, daily HCP intake improves dermal hydration, elasticity, and wrinkle depth over 6–12 weeks. The peptides stimulate fibroblast collagen synthesis and glycosaminoglycan production in the dermis. Results remain product-, dose-, and population-specific rather than universal.”
+- “## Joint, tendon, and recovery signals depend on loading context\n\nConnective-tissue remodeling around joints and tendons requires mechanical stimulus alongside the peptide signal. Activity-related joint-pain improvements appear over 12–24 weeks in loaded populations, while tendon and recovery effects are mixed and inseparable from the training program. A useful run isolates one target, one stressor, and one measurement plan.”
+- “## One target, one product, one test\n\nCollagen evidence is endpoint-specific. Mixing skin, joint, tendon, bone, and recovery claims into a single run produces uninterpretable noise. A good Murph experiment locks the product, dose, source species, primary metric, and confounders before the baseline week.”
+mechanismChain:
+-
+  label: “Dose”
+  content: “Daily oral HCP · user-selected grams/day · consistent product and source”
+-
+  label: “Absorption”
+  content: “Gastric and brush-border enzymes release Pro-Hyp, Hyp-Gly, and other bioactive peptide fragments into circulation”
+-
+  label: “Tissue accumulation”
+  content: “Peptides concentrate in skin, cartilage, and connective tissue; signal fibroblasts and chondrocytes to increase matrix turnover”
+-
+  label: “Adaptation”
+  content: “Dermal collagen density and hydration rise; loaded connective tissue remodels around the repeated mechanical stimulus”
 claims:
 -
   claimId: starter-variant-is-oral-hcp
