@@ -63,8 +63,8 @@ biomarker:
       title: "What it is"
       body: "A manual check after each prescribed HBOT session for ear/sinus pressure symptoms, vision change, anxiety or claustrophobia, glucose/BP issues if relevant, and any staff intervention or stopped session."
     -
-      title: "Why Murph tracks it"
-      body: "The runnable HBOT protocol is safety-first. Tolerability and adverse-event logging are more appropriate for Murph than promising disease-specific efficacy from wearable proxies."
+      title: "Why it is tracked"
+      body: "The runnable HBOT protocol is safety-first. Tolerability and adverse-event logging are more appropriate than promising disease-specific efficacy from wearable proxies."
   measurement:
     bestContext: "Complete immediately after each supervised HBOT session, with a follow-up note later the same day if symptoms persist."
     howToMeasure:
@@ -94,4 +94,4 @@ claims:
       - "source_artifact:pmid-26152103"
 ---
 
-Use this manual signal as the primary Murph outcome when tracking clinician-prescribed HBOT. It is not a disease outcome. It records whether the prescribed exposure was tolerated and whether any safety concern needs clinician or facility follow-up.
+Use this manual signal as the primary outcome when tracking clinician-prescribed HBOT. It is not a disease outcome. It records whether the prescribed exposure was tolerated and whether any safety concern needs clinician or facility follow-up.

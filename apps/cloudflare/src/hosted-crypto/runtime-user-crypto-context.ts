@@ -11,6 +11,7 @@ import type { HostedExecutionEnvironment } from "../env.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import {
   fetchHostedWorkerRuntimeRootByRootKeyId,
+  HostedRuntimeCryptoRootUnavailableError,
   unwrapHostedWorkerRuntimeRoot,
   type HostedRuntimeCryptoContextResponse,
   type HostedWorkerCryptoEnv,
@@ -19,8 +20,11 @@ import {
 type HostedWorkerRuntimeDomain = Extract<HostedCryptoDomain, "ingress" | "runtime">;
 
 export interface HostedUserCryptoContext {
+  cacheMaxAgeMs: number;
+  cryptoContextVersion: string | null;
   domain: HostedWorkerRuntimeDomain;
   envelope: HostedDomainRootKeyEnvelopeV1;
+  fetchedAtMs: number;
   keysById: Readonly<Record<string, Uint8Array>>;
   resolveKeyById(rootKeyId: string): Promise<Uint8Array | null>;
   rootKey: Uint8Array;
@@ -44,6 +48,17 @@ export class HostedUserCryptoRepairNeededError extends Error {
     this.status = input.status ?? null;
     this.userId = input.userId;
   }
+}
+
+export function isHostedUserCryptoContextExpired(
+  context: Pick<HostedUserCryptoContext, "cacheMaxAgeMs" | "fetchedAtMs">,
+  nowMs = Date.now(),
+): boolean {
+  if (!Number.isFinite(context.fetchedAtMs) || context.cacheMaxAgeMs <= 0) {
+    return true;
+  }
+
+  return nowMs - context.fetchedAtMs >= context.cacheMaxAgeMs;
 }
 
 export async function requireHostedUserCryptoContextFromEnvironment(input: {
@@ -106,10 +121,24 @@ async function fetchAndUnwrapRuntimeCryptoContext(input: {
     env: hostedCryptoEnv,
   });
   const keysById = new Map<string, Uint8Array>([[root.envelope.rootKeyId, root.rootKey]]);
+  const parsedFetchedAtMs =
+    typeof context.fetchedAt === "string" ? Date.parse(context.fetchedAt) : Date.now();
+  const fetchedAtMs = Number.isFinite(parsedFetchedAtMs)
+    ? parsedFetchedAtMs
+    : Date.now();
+  const cacheMaxAgeMs =
+    typeof context.cacheMaxAgeMs === "number" && Number.isFinite(context.cacheMaxAgeMs)
+      ? context.cacheMaxAgeMs
+      : 5 * 60 * 1000;
 
   return {
+    cacheMaxAgeMs,
+    cryptoContextVersion: typeof context.cryptoContextVersion === "string"
+      ? context.cryptoContextVersion
+      : null,
     domain,
     envelope: root.envelope,
+    fetchedAtMs,
     get keysById() {
       return Object.fromEntries(keysById.entries());
     },
@@ -118,16 +147,24 @@ async function fetchAndUnwrapRuntimeCryptoContext(input: {
       if (existing) {
         return existing;
       }
-      const resolved = await fetchHostedWorkerRuntimeRootByRootKeyId({
-        baseUrl: input.environment.hostedWebBaseUrl,
-        callbackSigning: input.environment.webCallbackSigning,
-        cryptoEnv: hostedCryptoEnv,
-        domain,
-        fetchImpl: input.fetchImpl,
-        rootKeyId,
-        timeoutMs: input.environment.webControlTimeoutMs,
-        userId: input.userId,
-      });
+      let resolved;
+      try {
+        resolved = await fetchHostedWorkerRuntimeRootByRootKeyId({
+          baseUrl: input.environment.hostedWebBaseUrl,
+          callbackSigning: input.environment.webCallbackSigning,
+          cryptoEnv: hostedCryptoEnv,
+          domain,
+          fetchImpl: input.fetchImpl,
+          rootKeyId,
+          timeoutMs: input.environment.webControlTimeoutMs,
+          userId: input.userId,
+        });
+      } catch (error) {
+        if (error instanceof HostedRuntimeCryptoRootUnavailableError) {
+          return null;
+        }
+        throw error;
+      }
       keysById.set(resolved.envelope.rootKeyId, resolved.rootKey);
       return resolved.rootKey;
     },

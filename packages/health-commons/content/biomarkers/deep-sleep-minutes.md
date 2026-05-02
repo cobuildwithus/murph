@@ -137,7 +137,7 @@ claims:
   -
     claimId: wearable-stage-noise
     type: design_guardrail
-    text: Consumer wearables often detect sleep versus wake better than they classify specific stages, so Murph should treat deep sleep minutes as trend context rather than a clinical endpoint.
+    text: Consumer wearables often detect sleep versus wake better than they classify specific stages, so deep sleep minutes are best treated as trend context rather than a clinical endpoint.
     strength: high
     sourceKeys:
       - source_artifact:pmid-37917155-deep-sleep
@@ -180,18 +180,18 @@ claims:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 30
-  placeholder: Early Murph outcome summaries for deep sleep will appear once enough opted-in runs have same-device sleep-stage data and privacy thresholds are met.
+  placeholder: Early outcome summaries for deep sleep will appear once enough opted-in runs have same-device sleep-stage data and privacy thresholds are met.
 ---
 
-Deep sleep minutes are useful only when Murph keeps the measurement boundary clear: this page is about a **consumer-wearable estimate** of N3 / slow-wave sleep duration, not a direct laboratory measurement of slow-wave activity or glymphatic clearance.
+Deep sleep minutes are useful when the measurement boundary is clear: this page is about a **consumer-wearable estimate** of N3 / slow-wave sleep duration, not a direct laboratory measurement of slow-wave activity or glymphatic clearance.
 
 ## Bottom line
 
 Use deep sleep minutes as a **secondary sleep architecture signal**. It can make a self-experiment more interesting when the trend repeats across many nights, but it should not override the broader sleep story. A strong read needs agreement across total sleep time, sleep efficiency, wake-after-sleep-onset, bedtime regularity, subjective restoration, and relevant confounder notes.
 
-## Why Murph includes it
+## Why it matters
 
-People ask about deep sleep because it feels intuitive: the number appears on many devices, and the underlying N3 / slow-wave literature is tied to sleep depth, memory and learning biology, blood-pressure associations, and brain-restoration hypotheses. Murph can support that curiosity while preventing overclaiming.
+People ask about deep sleep because it feels intuitive: the number appears on many devices, and the underlying N3 / slow-wave literature is tied to sleep depth, memory and learning biology, blood-pressure associations, and brain-restoration hypotheses. This page supports that curiosity while preventing overclaiming.
 
 ## Measurement hierarchy
 

@@ -66,7 +66,7 @@ biomarker:
       - "alcohol change"
 communityOutcomeSummary:
   state: "coming_soon"
-  placeholder: "Community outcome summaries will require enough completed Murph experiments using the same lab context."
+  placeholder: "Community outcome summaries will require enough completed experiments using the same lab context."
 claims:
 
   -

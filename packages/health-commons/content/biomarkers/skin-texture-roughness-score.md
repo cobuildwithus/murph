@@ -38,7 +38,7 @@ measurementContexts:
 unit: "0-10 score"
 interpretationFrame:
   principle: "Compare repeated baseline and intervention windows using the same camera, lighting, region, expression, and scoring rule."
-  caveat: "This is a practical Murph self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
+  caveat: "This is a practical self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
 biomarker:
   shortName: "Skin Texture / Roughness Score"
   displayName: "Skin Texture / Roughness Score"
@@ -59,10 +59,10 @@ biomarker:
       title: "What it is"
       body: "A practical score for perceived facial roughness, smoothness, or texture uniformity using a fixed rubric and standardized photos."
     -
-      title: "How Murph uses it"
+      title: "How to use it"
       body: "Use it as a before-and-after region score across a predefined baseline and intervention window, then review adherence and confounders before interpreting any change."
   measurement:
-    bestContext: "Instrumented profilometry or validated imaging is strongest; Murph uses fixed photos and a repeated self-rating as a pragmatic proxy."
+    bestContext: "Instrumented profilometry or validated imaging is strongest; fixed photos and a repeated self-rating serve as a pragmatic proxy."
     howToMeasure:
       - "Define the treated facial regions and a 0-10 texture rubric before starting."
       - "Rate texture at baseline and scheduled checkpoints, not after every session."

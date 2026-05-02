@@ -60,7 +60,7 @@ claims:
   -
     claimId: cold-plunge-perceived-stress-is-best-fit-primary-endpoint
     type: design_guardrail
-    text: Perceived stress is the best-fit primary biomarker for Murph’s first cold-plunge protocol because the clearest direct review-level signal is delayed stress improvement rather than a reliable immediate calming effect or a broad physiological marker shift.
+    text: Perceived stress is the best-fit primary biomarker for a first cold-plunge protocol because the clearest direct review-level signal is delayed stress improvement rather than a reliable immediate calming effect or a broad physiological marker shift.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-39879231
@@ -74,4 +74,4 @@ Perceived stress is the most practical primary endpoint for a first-pass cold-pl
 
 The main reason is timing: the strongest direct synthesis signal is not “instant calm on exit,” but a later reduction in perceived stress or negative affect after some exposures. That makes a simple later-same-day check-in more informative than trying to read the first cold minute as a benefit signal.
 
-For Murph, this biomarker is intentionally simple. A repeatable 1-to-5 or 0-to-10 rating done with the same wording and the same timing window is more useful than a complicated stress questionnaire that the user will not sustain.
+This biomarker is intentionally simple. A repeatable 1-to-5 or 0-to-10 rating done with the same wording and the same timing window is more useful than a complicated stress questionnaire that the user will not sustain.

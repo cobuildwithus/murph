@@ -92,4 +92,4 @@ communityOutcomeSummary:
 ---
 Postprandial glucose excursion is the primary outcome candidate for Walking After Every Meal.
 
-For Murph experiments, treat this as a **meal-window** biomarker. The most useful comparisons pair meal timing, meal content, walking start delay, walking duration, and glucose data. Do not interpret a single spike, a single low, or a commercial CGM score as proof that the protocol worked.
+For self-experiments, treat this as a **meal-window** biomarker. The most useful comparisons pair meal timing, meal content, walking start delay, walking duration, and glucose data. Do not interpret a single spike, a single low, or a commercial CGM score as proof that the protocol worked.

@@ -114,7 +114,7 @@ biomarker:
       title: What moves it
       body: "Intervals, endurance training, detraining, illness, heat, altitude, sensors, GPS, body weight, heart-rate medications, and test protocol."
   measurement:
-    bestContext: Lab CPET with respiratory gas analysis is best when a precise clinical or performance value matters. For Murph experiments, same-device wearable cardio-fitness estimates are acceptable as a private trend signal when interpreted cautiously.
+    bestContext: Lab CPET with respiratory gas analysis is best when a precise clinical or performance value matters. For self-experiments, same-device wearable cardio-fitness estimates are acceptable as a private trend signal when interpreted cautiously.
     howToMeasure:
       - Prefer a lab cardiopulmonary exercise test when you need a true VO₂ max value, clinical-grade interpretation, or age/sex reference-standard comparison.
       - For wearable estimates, keep the same device, app, and measurement mode across baseline and intervention windows.
@@ -167,7 +167,7 @@ claims:
   -
     claimId: wearable_vo2max_proxy
     type: evidence_scope
-    text: Consumer wearables can estimate VO₂ max, and exercise-based algorithms tend to perform better than resting-only estimates, but individual-level error remains large enough that Murph should treat wearable VO₂ max as a trend proxy.
+    text: Consumer wearables can estimate VO₂ max, and exercise-based algorithms tend to perform better than resting-only estimates, but individual-level error remains large enough that wearable VO₂ max is best treated as a trend proxy.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-35072942
@@ -177,7 +177,7 @@ claims:
   -
     claimId: norwegian_4x4_primary_outcome
     type: intervention_result
-    text: Norwegian 4x4-style aerobic interval training is one of the clearest Murph protocol candidates for improving VO₂ max because direct interval-training trials and later syntheses commonly use VO₂ max or cardiorespiratory fitness as a primary endpoint.
+    text: Norwegian 4x4-style aerobic interval training is one of the clearest protocol candidates for improving VO₂ max because direct interval-training trials and later syntheses commonly use VO₂ max or cardiorespiratory fitness as a primary endpoint.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-17414804
@@ -188,14 +188,14 @@ claims:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 30
-  placeholder: VO₂ max outcome summaries will appear once enough opted-in Murph runs have same-device baseline and intervention windows with visible training adherence and confounder notes.
+  placeholder: VO₂ max outcome summaries will appear once enough opted-in runs have same-device baseline and intervention windows with visible training adherence and confounder notes.
 ---
 
 VO₂ max is the highest rate at which the body can use oxygen during intense, sustained, large-muscle exercise. It is one of the clearest single markers of cardiorespiratory fitness, but the measurement context matters a lot.
 
-## Bottom line for Murph
+## Bottom line
 
-Use VO₂ max as a **fitness trend marker**, not a body-ranking score. The most useful Murph question is not “is my number good enough?” It is: “did this specific protocol, run with enough fidelity and recovery, move my own cardiorespiratory-fitness signal in a plausible direction?”
+Use VO₂ max as a **fitness trend marker**, not a body-ranking score. The most useful question is not “is my number good enough?” It is: “did this specific protocol, run with enough fidelity and recovery, move my own cardiorespiratory-fitness signal in a plausible direction?”
 
 For a Norwegian 4x4 experiment, VO₂ max belongs near the top of the outcome stack because the protocol is explicitly designed to stress aerobic capacity. For a sauna or recovery protocol, VO₂ max is a secondary or contextual signal; it may be interesting, but it is not the main reason to run the experiment.
 
@@ -203,7 +203,7 @@ For a Norwegian 4x4 experiment, VO₂ max belongs near the top of the outcome st
 
 1. **Lab CPET with gas exchange** is the reference context when a precise value matters. It directly measures oxygen uptake during a graded exercise test and can be interpreted against reference standards.
 2. **Structured field tests** can be useful when lab testing is unavailable, but they estimate fitness from performance and assumptions.
-3. **Wearable cardio-fitness estimates** are the most scalable Murph signal. They are convenient and private, but they are algorithmic estimates and should be read as repeated trends.
+3. **Wearable cardio-fitness estimates** are the most scalable self-tracking signal. They are convenient and private, but they are algorithmic estimates and should be read as repeated trends.
 
 ## What counts as a useful self-experiment signal
 
@@ -221,4 +221,4 @@ For wearable estimates, a small shift can be noise. A more trustworthy pattern i
 
 Do not compare a watch estimate to a lab result as though they are interchangeable. Do not compare two devices unless you are explicitly studying device disagreement. Do not treat a sudden device-side jump as biological proof if firmware, GPS, sensor fit, route, or training mode changed.
 
-VO₂ max is also not a complete health story. It can improve while sleep, joint pain, mood, or life-fit gets worse. Murph should keep the protocol bounded, keep safety visible, and interpret the number as one clue among several.
+VO₂ max is also not a complete health story. It can improve while sleep, joint pain, mood, or life-fit gets worse. Keep the protocol bounded, keep safety visible, and interpret the number as one clue among several.

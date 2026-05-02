@@ -67,7 +67,7 @@ biomarker:
       title: What it is
       body: Subjective sleep quality is a quick rating of how well you slept or how restored you felt. It is not the same as a sleep-stage estimate.
     -
-      title: Why Murph uses it
+      title: Why it matters
       body: Morning-light evidence often uses sleep-quality or sleep-problem questionnaires, so a consistent daily rating is closer to the source outcomes than consumer sleep-stage metrics.
     -
       title: How to read it
@@ -94,11 +94,11 @@ biomarker:
 communityOutcomeSummary:
   state: insufficient_data
   minimumCohortSize: 30
-  placeholder: No Murph community outcome is available yet for Morning Outdoor Light Exposure and subjective sleep quality.
+  placeholder: No community outcome is available yet for Morning Outdoor Light Exposure and subjective sleep quality.
 ---
 
 Subjective sleep quality is a practical primary outcome for morning-light experiments because it is low-burden and close to the outcomes used in the closest outdoor/natural-light sources.
 
-Use it as a **same-person trend**, not a diagnosis. A useful Murph log can be as simple as: “How was your sleep quality last night?” on a stable 1-5 or 1-10 scale, plus bedtime, final wake time, morning alertness, and a short confounder note.
+Use it as a **same-person trend**, not a diagnosis. A useful log can be as simple as: “How was your sleep quality last night?” on a stable 1-5 or 1-10 scale, plus bedtime, final wake time, morning alertness, and a short confounder note.
 
 For Morning Outdoor Light Exposure, subjective sleep quality should be interpreted alongside exposure adherence, sleep timing, evening-light changes, symptoms, UV/heat constraints, and whether the exposure was truly outdoors rather than through a window.

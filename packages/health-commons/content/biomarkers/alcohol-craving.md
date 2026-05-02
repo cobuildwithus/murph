@@ -112,11 +112,11 @@ claims:
   - source_artifact:pmid-29668736
   - source_artifact:pmid-30016350
   caveats:
-  - Moderate-heavy consumer studies are adjacent context; they are not direct efficacy tests of the Murph challenge.
+  - Moderate-heavy consumer studies are adjacent context; they are not direct efficacy tests of the challenge.
 ---
 
 
-## How Murph uses this
+## How to use this
 
 Craving helps explain adherence, lapses, and the off-ramp plan. It is most useful when logged with the trigger, setting, replacement behavior, and whether the urge passed.
 

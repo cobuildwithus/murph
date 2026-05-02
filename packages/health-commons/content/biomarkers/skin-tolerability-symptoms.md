@@ -41,7 +41,7 @@ measurementContexts:
 unit: "symptom log"
 interpretationFrame:
   principle: "Compare repeated baseline and intervention windows using the same camera, lighting, region, expression, and scoring rule."
-  caveat: "This is a practical Murph self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
+  caveat: "This is a practical self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
 biomarker:
   shortName: "Skin and Eye Tolerability Symptoms"
   displayName: "Skin and Eye Tolerability Symptoms"
@@ -62,10 +62,10 @@ biomarker:
       title: "What it is"
       body: "A safety log for heat, pain, irritation, prolonged redness, blistering, pigment change, headache, eye discomfort, afterimages, blurry vision, flashes, or spots."
     -
-      title: "How Murph uses it"
+      title: "How to use it"
       body: "Use it as a before-and-after region score across a predefined baseline and intervention window, then review adherence and confounders before interpreting any change."
   measurement:
-    bestContext: "Clinical adverse-event reporting is strongest; Murph uses session-by-session symptom logging to support conservative stop rules."
+    bestContext: "Clinical adverse-event reporting is strongest; session-by-session symptom logging supports conservative stop rules."
     howToMeasure:
       - "Log heat, pain, redness, irritation, pigment change, headache, and ocular symptoms every session."
       - "Stop the session immediately for eye discomfort, afterimages, blurry vision, flashes, spots, burning, blistering, or painful irritation."

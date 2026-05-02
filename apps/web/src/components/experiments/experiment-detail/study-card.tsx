@@ -62,7 +62,7 @@ export function StudyCard({
 
   const rowContent = (
     <div className="flex gap-4 px-6 py-5">
-      <div className="flex w-[112px] shrink-0 flex-col items-start gap-1.5">
+      <div className="hidden w-[112px] shrink-0 flex-col items-start gap-1.5 md:flex">
         {participantLabel ? (
           <Badge variant="secondary" className="font-mono text-[10px] text-primary">
             {participantLabel}
@@ -82,12 +82,36 @@ export function StudyCard({
         ) : null}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex flex-wrap items-center gap-1.5 md:hidden">
+          <Badge
+            variant="outline"
+            className="font-mono text-[10px] text-muted-foreground"
+            title={designLabel ? `${typeLabel}: ${designLabel}` : typeLabel}
+          >
+            {typeLabel}
+          </Badge>
+          {participantLabel ? (
+            <Badge variant="secondary" className="font-mono text-[10px] text-primary">
+              {participantLabel}
+            </Badge>
+          ) : null}
+          {includedStudiesLabel ? (
+            <Badge variant="outline" className="font-mono text-[9px] text-muted-foreground/75">
+              {includedStudiesLabel}
+            </Badge>
+          ) : null}
+          {yearLabel ? (
+            <Badge variant="outline" className="font-mono text-[10px] text-muted-foreground">
+              {yearLabel}
+            </Badge>
+          ) : null}
+        </div>
         <div className="flex items-start justify-between gap-4">
           <span className="min-w-0 text-sm/5 font-semibold text-foreground">
             {title}
           </span>
           {yearLabel ? (
-            <Badge variant="outline" className="shrink-0 font-mono text-[10px] text-muted-foreground">
+            <Badge variant="outline" className="hidden shrink-0 font-mono text-[10px] text-muted-foreground md:inline-flex">
               {yearLabel}
             </Badge>
           ) : null}

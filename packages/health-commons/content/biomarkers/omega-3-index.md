@@ -72,13 +72,13 @@ biomarker:
       - "alcohol change"
 communityOutcomeSummary:
   state: "coming_soon"
-  placeholder: "Community outcome summaries will require enough completed Murph experiments using the same lab context."
+  placeholder: "Community outcome summaries will require enough completed experiments using the same lab context."
 claims:
 
   -
     claimId: "omega3-index-exposure-endpoint"
     type: "intervention_result"
-    text: "Omega-3 index/RBC EPA+DHA is the preferred lab-enabled exposure/status endpoint for the Murph oral EPA/DHA protocol."
+    text: "Omega-3 index/RBC EPA+DHA is the preferred lab-enabled exposure/status endpoint for the oral EPA/DHA protocol."
     strength: "high"
     sourceKeys:
       - "source_artifact:pmid-31396625"

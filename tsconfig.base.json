@@ -43,6 +43,39 @@
       "@murphai/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
+      "@murphai/hosted-execution/auth": [
+        "packages/hosted-execution/src/auth.ts"
+      ],
+      "@murphai/hosted-execution/assistant-identifiers": [
+        "packages/hosted-execution/src/assistant-identifiers.ts"
+      ],
+      "@murphai/hosted-execution/bundles": [
+        "packages/hosted-execution/src/bundles.ts"
+      ],
+      "@murphai/hosted-execution/browser-vault": [
+        "packages/hosted-execution/src/browser-vault.ts"
+      ],
+      "@murphai/hosted-execution/contracts": [
+        "packages/hosted-execution/src/contracts.ts"
+      ],
+      "@murphai/hosted-execution/env": [
+        "packages/hosted-execution/src/env.ts"
+      ],
+      "@murphai/hosted-execution/hosted-email": [
+        "packages/hosted-execution/src/hosted-email.ts"
+      ],
+      "@murphai/hosted-execution/parsers": [
+        "packages/hosted-execution/src/parsers.ts"
+      ],
+      "@murphai/hosted-execution/routes": [
+        "packages/hosted-execution/src/routes.ts"
+      ],
+      "@murphai/hosted-execution/runtime-control": [
+        "packages/hosted-execution/src/runtime-control.ts"
+      ],
+      "@murphai/hosted-execution/side-effects": [
+        "packages/hosted-execution/src/side-effects.ts"
+      ],
       "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],

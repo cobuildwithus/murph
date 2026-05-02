@@ -34,6 +34,7 @@ import { hostedEmailRawMessageUserPrefix } from "./hosted-email.ts";
 import { toStringEnvSource } from "./string-env.js";
 import {
   HostedUserCryptoRepairNeededError,
+  isHostedUserCryptoContextExpired,
   requireHostedUserCryptoContextFromEnvironment,
   type HostedUserCryptoContext,
 } from "./hosted-crypto/runtime-user-crypto-context.ts";
@@ -128,12 +129,19 @@ export class HostedUserRunner {
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
     const resolvedUserId = userId ?? await this.requireBoundUserId();
 
-    if (this.runnerStores?.userId === resolvedUserId && !this.runtimeCryptoContextLock) {
+    if (
+      this.runnerStores?.userId === resolvedUserId
+      && !this.runtimeCryptoContextLock
+      && !isHostedUserCryptoContextExpired(this.runnerStores.crypto)
+    ) {
       return this.runnerStores;
     }
 
     return this.withRuntimeCryptoContextLock(async () => {
-      if (this.runnerStores?.userId === resolvedUserId) {
+      if (
+        this.runnerStores?.userId === resolvedUserId
+        && !isHostedUserCryptoContextExpired(this.runnerStores.crypto)
+      ) {
         return this.runnerStores;
       }
 

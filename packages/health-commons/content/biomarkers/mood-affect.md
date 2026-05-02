@@ -83,4 +83,4 @@ Mood is worth logging for cold plunge because several direct studies do suggest 
 
 But the pattern is not consistent enough to promise “instant mood boost” as the default story. A mild 20 °C 5-minute immersion and an outdoor immersion study both support near-term affect improvement, while a colder 10 °C lab immersion pointed more toward delayed reduction in negative affect and cortisol.
 
-That is why Murph treats mood as a useful secondary biomarker: track it, but interpret it with timing, temperature, and context in mind.
+That is why mood is best treated as a useful secondary biomarker: track it, but interpret it with timing, temperature, and context in mind.

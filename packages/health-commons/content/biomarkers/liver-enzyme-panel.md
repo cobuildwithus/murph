@@ -64,7 +64,7 @@ biomarker:
     - Use the liver-enzyme panel only as an optional secondary signal, mainly for the 30-day challenge.
     - Record date, fasting status if relevant, lab reference range, recent illness, intense exercise, medications, supplements, and weight change.
     - 'Compare like with like: the same analyte, lab, units, and similar timing relative to the challenge.'
-    - Treat abnormal results, known liver disease, jaundice, right-upper-quadrant pain, or other concerning symptoms as clinical issues rather than Murph experiment outcomes.
+    - Treat abnormal results, known liver disease, jaundice, right-upper-quadrant pain, or other concerning symptoms as clinical issues rather than experiment outcomes.
     - Do not use normal-range changes to claim treatment, diagnosis, or organ repair.
     confounders:
     - baseline liver disease
@@ -101,7 +101,7 @@ claims:
 -
   claimId: one-month-liver-marker-context
   type: evidence_scope
-  text: Direct one-month abstinence sources support liver-enzyme panels as optional context for longer challenges, but Murph should not use them to claim liver-disease treatment or broad organ repair.
+  text: Direct one-month abstinence sources support liver-enzyme panels as optional context for longer challenges, but they should not be used to claim liver-disease treatment or broad organ repair.
   strength: moderate
   sourceKeys:
   - source_artifact:pmid-29726886
@@ -117,11 +117,11 @@ claims:
   - source_artifact:pmid-41399621
   - source_artifact:pmid-41899181
   caveats:
-  - These sources are adjacent liver context, not direct Murph 7-, 14-, or 30-day wellness challenge evidence for treating disease.
+  - These sources are adjacent liver context, not direct 7-, 14-, or 30-day wellness challenge evidence for treating disease.
 ---
 
 
-## How Murph uses this
+## How to use this
 
 The liver enzyme panel is optional. It is most defensible for the 30-day version when a user already has access to comparable labs or is measuring for another appropriate reason.
 

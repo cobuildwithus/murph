@@ -8,8 +8,10 @@ export interface HostedExecutionWorkerEnvironment {
   allowedRunnerSecretKeys: string | null;
   hostedCryptoAuthoritySignKeyVersion: string;
   hostedCryptoAuthoritySignPublicKeyPem: string;
+  hostedCryptoAuthorityVerifyKeyringJson: string | null;
   hostedCryptoCloudflareAutomationKeyId: string;
   hostedCryptoCloudflareAutomationPrivateJwk: string;
+  hostedCryptoCloudflareAutomationPrivateKeyringJson: string | null;
   hostedCryptoEnv: string;
   hostedWebBaseUrl: string;
   maxEventAttempts: number;
@@ -55,6 +57,9 @@ export function readHostedExecutionWorkerEnvironment(
       source.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
       "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
     ),
+    hostedCryptoAuthorityVerifyKeyringJson: normalizeHostedExecutionString(
+      source.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
+    ),
     hostedCryptoCloudflareAutomationKeyId: requireHostedExecutionString(
       source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
@@ -62,6 +67,9 @@ export function readHostedExecutionWorkerEnvironment(
     hostedCryptoCloudflareAutomationPrivateJwk: requireHostedExecutionString(
       source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
+    ),
+    hostedCryptoCloudflareAutomationPrivateKeyringJson: normalizeHostedExecutionString(
+      source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
     ),
     hostedCryptoEnv,
     hostedWebBaseUrl: requireHostedExecutionBaseUrl(

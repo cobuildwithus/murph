@@ -18,25 +18,27 @@ export function BiomarkerEvidenceRow({
   if (!evidence) return null;
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-        <Stat value={String(evidence.studies)} label="studies" />
-        <Sep />
-        <Stat value={evidence.participants.toLocaleString()} label="participants" />
-        <Sep />
-        <span className="text-foreground">{STUDY_TYPE_LABELS[evidence.studyType]}</span>
-        <Sep />
-        <Rating value={evidence.rating} max={5} />
-      </div>
+    <section className="rounded-xl border border-secondary/25 bg-card/90 p-7">
+      <div className="flex flex-col gap-5">
+        <blockquote className="max-w-3xl">
+          <p className="font-serif text-[19px]/8 italic text-foreground text-pretty">
+            {"“"}{evidence.quote}{"”"}
+          </p>
+          <footer className="mt-2.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            — {evidence.attribution}
+          </footer>
+        </blockquote>
 
-      <blockquote className="max-w-3xl">
-        <p className="font-serif text-[19px]/8 italic text-foreground text-pretty">
-          “{evidence.quote}”
-        </p>
-        <footer className="mt-2.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          — {evidence.attribution}
-        </footer>
-      </blockquote>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+          <Stat value={String(evidence.studies)} label="studies" />
+          <Sep />
+          <Stat value={evidence.participants.toLocaleString()} label="participants" />
+          <Sep />
+          <Stat value={STUDY_TYPE_LABELS[evidence.studyType]} label="design" />
+          <Sep />
+          <Rating value={evidence.rating} max={5} />
+        </div>
+      </div>
     </section>
   );
 }

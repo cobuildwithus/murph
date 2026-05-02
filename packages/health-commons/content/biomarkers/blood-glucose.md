@@ -32,7 +32,7 @@ measurementContexts:
 unit: mg/dL
 interpretationFrame:
   principle: Segment by context before interpreting. Fasting lab values, waking finger-stick checks, pre-meal values, post-meal values, overnight CGM summaries, exercise windows, illness windows, and medication windows answer different questions.
-  caveat: Blood/finger-stick, laboratory plasma, and CGM interstitial sensor glucose are related but not interchangeable. Diagnosis and medication decisions require clinician-guided lab testing or approved diabetes-monitoring workflows, not Murph trend cards.
+  caveat: Blood/finger-stick, laboratory plasma, and CGM interstitial sensor glucose are related but not interchangeable. Diagnosis and medication decisions require clinician-guided lab testing or approved diabetes-monitoring workflows, not trend cards.
 biomarker:
   shortName: Glucose
   displayName: Blood Glucose
@@ -207,7 +207,7 @@ claims:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 30
-  placeholder: Early Murph glucose outcome summaries will appear once enough opted-in experiment runs include glucose samples with timing context.
+  placeholder: Early glucose outcome summaries will appear once enough opted-in experiment runs include glucose samples with timing context.
 ---
 
 Blood glucose is one of the most useful and most easily misread biomarkers. It changes quickly enough to reveal meal, activity, sleep, stress, alcohol, illness, and medication effects. But the same number can mean different things depending on whether it came from a fasting laboratory draw, a waking finger-stick, a post-meal check, a CGM trace, an exercise window, or an illness day.

@@ -6,10 +6,10 @@ import type {
   BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-projections";
 import { cn } from "@/src/lib/utils";
-import { biomarkerFitToneClassName } from "./biomarker-fit-tone";
+import { biomarkerFitDisplayLabel, biomarkerFitToneClassName } from "./biomarker-fit-tone";
 
 const ROW_GRID =
-  "grid-cols-[40px_minmax(0,1fr)_max-content] md:grid-cols-[40px_minmax(0,1fr)_120px_88px_88px_96px_64px_20px]";
+  "grid-cols-[40px_minmax(0,1fr)_max-content] md:grid-cols-[40px_minmax(0,1fr)_140px_140px_88px_96px_96px_20px]";
 
 export function BiomarkerExperimentRowHeader() {
   return (
@@ -90,7 +90,7 @@ export function BiomarkerExperimentRow({
           biomarkerFitToneClassName(protocol.fitLabel),
         )}
       >
-        {protocol.fitLabel}
+        {biomarkerFitDisplayLabel(protocol.fitLabel)}
       </span>
       <ChevronRight
         aria-hidden="true"

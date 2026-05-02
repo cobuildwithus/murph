@@ -167,7 +167,7 @@ claims:
   -
     claimId: hrv_definition_and_metric_scope
     type: evidence_scope
-    text: "HRV is a family of beat-to-beat variability measures; this Murph page scopes the consumer biomarker to RMSSD-style millisecond values rather than frequency-domain ratios or proprietary recovery scores."
+    text: "HRV is a family of beat-to-beat variability measures; this page scopes the consumer biomarker to RMSSD-style millisecond values rather than frequency-domain ratios or proprietary recovery scores."
     strength: high
     sourceKeys:
       - source_artifact:pmid-8598068
@@ -177,7 +177,7 @@ claims:
   -
     claimId: hrv_measurement_standardization
     type: design_guardrail
-    text: "HRV interpretation depends strongly on measurement context, so Murph should prefer same-device, same-window, repeated measurements and keep posture, breathing, timing, signal quality, and artifacts visible."
+    text: "HRV interpretation depends strongly on measurement context, so same-device, same-window, repeated measurements are preferred, with posture, breathing, timing, signal quality, and artifacts kept visible."
     strength: high
     sourceKeys:
       - source_artifact:pmid-39351472
@@ -202,7 +202,7 @@ claims:
   -
     claimId: hrv_stress_sleep_alcohol_context
     type: association_not_causation
-    text: "Stress, alcohol intake, and sleep timing or quality can shift HRV enough to confound short self-experiments, so Murph should not attribute an HRV change to a protocol until these context variables are checked."
+    text: "Stress, alcohol intake, and sleep timing or quality can shift HRV enough to confound short self-experiments, so an HRV change should not be attributed to a protocol until these context variables are checked."
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-29486547
@@ -211,12 +211,12 @@ claims:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
-  placeholder: Early Murph HRV outcome summaries will appear here once enough opted-in experiment runs are available with stable same-device baseline and intervention windows.
+  placeholder: Early HRV outcome summaries will appear here once enough opted-in experiment runs are available with stable same-device baseline and intervention windows.
 ---
 
 ## Bottom line
 
-HRV is a useful **recovery-context biomarker** when it is read as a personal trend. It is much weaker when it is treated as a universal score, a diagnosis, or a one-morning verdict. Murph should use HRV to ask, "Is this protocol adding strain, improving my recovery baseline, or being confounded by sleep, alcohol, illness, stress, or measurement changes?"
+HRV is a useful **recovery-context biomarker** when it is read as a personal trend. It is much weaker when it is treated as a universal score, a diagnosis, or a one-morning verdict. The right question is: "Is this protocol adding strain, improving my recovery baseline, or being confounded by sleep, alcohol, illness, stress, or measurement changes?"
 
 For this page, HRV means **RMSSD-style heart rate variability in milliseconds**. RMSSD emphasizes short-term beat-to-beat variation and is the consumer-wearable HRV metric most likely to appear in recovery dashboards. It should not be merged with SDNN, LF/HF, proprietary readiness scores, or app-specific normalized HRV values.
 
@@ -224,13 +224,13 @@ For this page, HRV means **RMSSD-style heart rate variability in milliseconds**.
 
 A steady pulse does not mean every heartbeat arrives on an identical schedule. HRV describes variation in the time between normal beats. RMSSD is calculated from successive beat-to-beat differences, so it is especially sensitive to short-term parasympathetic or vagal modulation.
 
-For Murph, the practical interpretation is narrower than the physiology. HRV can be a window into autonomic state, but the product experience should avoid pretending that a wearable HRV value cleanly separates "healthy" from "unhealthy." A useful HRV read asks whether the user's own baseline is stable, rising, or falling under comparable conditions.
+The practical interpretation is narrower than the physiology. HRV can be a window into autonomic state, but a wearable HRV value does not cleanly separate "healthy" from "unhealthy." A useful HRV read asks whether your own baseline is stable, rising, or falling under comparable conditions.
 
 ## Best measurement approach
 
 The cleanest consumer workflow is **same device, same context, repeated windows**. Overnight HRV can be convenient because it is passive and frequent. Morning resting HRV can be cleaner if the user takes it consistently before caffeine, exercise, screens, and stressful tasks. Either can work; mixing them breaks interpretability.
 
-Murph should prefer the 7-day median against the prior 30-day baseline. Daily values are still shown privately, but the interpretation should wait for repeated points. HRV is noisy enough that one low morning after alcohol, poor sleep, a late workout, travel, or a stressful day should be treated as a context flag, not a protocol conclusion.
+Prefer the 7-day median against the prior 30-day baseline. Daily values are still shown privately, but the interpretation should wait for repeated points. HRV is noisy enough that one low morning after alcohol, poor sleep, a late workout, travel, or a stressful day should be treated as a context flag, not a protocol conclusion.
 
 ## What can move HRV
 
@@ -238,19 +238,11 @@ Patterns that can plausibly raise a personal HRV baseline include improved aerob
 
 Some protocols create both effects. A hard interval protocol may improve autonomic fitness over weeks but suppress HRV the day after a difficult workout. A sauna protocol may create acute heat strain, then a rebound or adaptation signal, but direct multi-week HRV improvement should remain a cautious claim. A sleep-light protocol may only move HRV if it actually improves sleep timing, sleep continuity, or bedtime arousal.
 
-## Protocol ranking logic
-
-Norwegian 4x4 ranks first because structured exercise has the strongest general evidence path for improving HRV-related autonomic markers, and HRV is easy to measure during a 6-week training block. The caution is recovery: if the workload is too aggressive, HRV may fall even while the protocol is physiologically plausible.
-
-Finnish dry sauna ranks next because heat exposure is autonomically active and existing Health Commons sauna sources already connect it to recovery markers. The HRV claim stays contextual because direct intervention evidence is mixed and a modern trial did not clearly confirm HRV improvement from regular post-exercise sauna bathing.
-
-Red-light glasses before bed are indirect. They may help HRV only through better sleep timing, less bedtime arousal, or improved sleep continuity. The external Bryan Johnson sauna routine is also contextual: it is a higher-burden heat protocol, so HRV is most useful as a safety and recovery-tolerance signal.
-
-## How Murph should interpret your trend
+## How to interpret your trend
 
 A stronger positive HRV pattern is a stable or rising 7-day median, similar or lower resting heart rate, no obvious illness or alcohol confounder, adequate sleep, and no major device or timing change. A weaker pattern is a single-day spike, a change after switching devices, or a rise paired with poor sleep and a large resting-heart-rate increase.
 
-A concerning or cautionary pattern is a repeated HRV drop below baseline paired with higher resting heart rate, poor sleep, unusual fatigue, illness symptoms, palpitations, dizziness, or a protocol that recently became more intense. Murph should respond by surfacing context, not by diagnosing disease.
+A concerning or cautionary pattern is a repeated HRV drop below baseline paired with higher resting heart rate, poor sleep, unusual fatigue, illness symptoms, palpitations, dizziness, or a protocol that recently became more intense. Treat this as context for further investigation, not a diagnosis.
 
 ## What not to claim
 

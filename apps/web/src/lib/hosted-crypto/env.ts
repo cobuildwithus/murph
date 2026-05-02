@@ -1,8 +1,18 @@
+import {
+  createHostedAuthorityVerifyKeyring,
+  createHostedRecipientPublicKeyring,
+  selectActiveHostedRecipientPublicKey,
+  type HostedAuthorityVerifyKeyring,
+  type HostedRecipientPublicKeyring,
+} from "@murphai/runtime-state";
+
 import { createHostedGcpKmsClientFromEnv, type HostedGcpKmsClient } from "./gcp-kms";
 
 export interface HostedWebCryptoConfig {
   authoritySignKeyVersionName: string;
   authoritySignPublicKeyPem: string;
+  authorityVerifyKeyring: HostedAuthorityVerifyKeyring;
+  cloudflareAutomationPublicKeyring: HostedRecipientPublicKeyring;
   cloudflareAutomationPublicJwk: JsonWebKey;
   cloudflareAutomationRecipientKeyId: string;
   env: string;
@@ -28,23 +38,47 @@ export function getHostedWebCryptoConfig(
     publicJwkEnv: "HOSTED_CRYPTO_RECOVERY_PUBLIC_JWK",
   });
   const teeRuntimeRecipient = readOptionalTeeRuntimeRecipient(source);
-  const config: HostedWebCryptoConfig = {
-    authoritySignKeyVersionName: readRequiredEnv(
-      source,
-      "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
-    ),
-    authoritySignPublicKeyPem: readRequiredEnv(
-      source,
-      "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
-    ).replace(/\\n/g, "\n"),
-    cloudflareAutomationPublicJwk: readRequiredJsonWebKey(
+  const authoritySignKeyVersionName = readRequiredEnv(
+    source,
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+  );
+  const authoritySignPublicKeyPem = readRequiredEnv(
+    source,
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  ).replace(/\\n/g, "\n");
+  const cloudflareAutomationPublicKeyring = createHostedRecipientPublicKeyring({
+    activePublicJwk: readRequiredJsonWebKey(
       source,
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
     ),
-    cloudflareAutomationRecipientKeyId: readRequiredEnv(
+    activeRecipient: "cloudflare-automation-secret",
+    activeRecipientKeyId: readRequiredEnv(
       source,
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
     ),
+    keyringJson: readOptionalEnv(
+      source,
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON",
+    ),
+  });
+  const cloudflareAutomation = selectActiveHostedRecipientPublicKey({
+    keyring: cloudflareAutomationPublicKeyring,
+    recipient: "cloudflare-automation-secret",
+  });
+  const config: HostedWebCryptoConfig = {
+    authoritySignKeyVersionName,
+    authoritySignPublicKeyPem,
+    authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({
+      activeKeyVersionName: authoritySignKeyVersionName,
+      activePublicKeyPem: authoritySignPublicKeyPem,
+      keyringJson: readOptionalEnv(
+        source,
+        "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON",
+      ),
+    }),
+    cloudflareAutomationPublicKeyring,
+    cloudflareAutomationPublicJwk: cloudflareAutomation.publicJwk,
+    cloudflareAutomationRecipientKeyId: cloudflareAutomation.recipientKeyId,
     env: readHostedCryptoEnv(source),
     gcpKms: createHostedGcpKmsClientFromEnv(source),
     recoveryPublicJwk: recoveryRecipient.publicJwk,

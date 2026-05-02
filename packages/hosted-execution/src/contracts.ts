@@ -1,4 +1,5 @@
 import type {
+  HostedDataKeyEnvelopeV1,
   HostedExecutionBundleKind as RuntimeHostedExecutionBundleKind,
   HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
@@ -316,6 +317,7 @@ export const HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA = "murph.hosted-browser-vau
 
 export interface HostedBrowserVaultReplicaRef {
   byteLength: number;
+  dataKeyEnvelope?: HostedDataKeyEnvelopeV1;
   dataVersion: string;
   generatedAt: string;
   keyId: string;

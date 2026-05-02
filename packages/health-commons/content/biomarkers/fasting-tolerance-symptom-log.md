@@ -67,4 +67,4 @@ biomarker:
       - high stress
 ---
 
-This is the default primary Murph endpoint for a community 24–72 hour fasting experiment because safety and tolerability are more decision-relevant than a single acute biomarker change.
+This is the default primary endpoint for a community 24–72 hour fasting experiment because safety and tolerability are more decision-relevant than a single acute biomarker change.

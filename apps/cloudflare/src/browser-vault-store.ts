@@ -1,7 +1,9 @@
 import {
   buildHostedStorageAad as buildRuntimeHostedStorageAad,
+  createHostedDataKeyEnvelopeWithDomainRoot,
   deriveHostedStorageKey,
   parseHostedCipherEnvelope,
+  unwrapHostedDataKeyWithDomainRoot,
   type HostedCipherEnvelope,
 } from "@murphai/runtime-state";
 import {
@@ -24,6 +26,8 @@ type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike & {
 };
 
 export interface BrowserVaultReplicaAadFields {
+  dataKeyId?: string;
+  dataKeyRootKeyId?: string;
   dataVersion: string;
   objectKey: string;
   purpose: "browser-vault-replica";
@@ -61,7 +65,17 @@ export function createBrowserVaultReplicaAadFields(input: {
   ref: HostedBrowserVaultReplicaRef;
   userId: string;
 }): BrowserVaultReplicaAadFields {
+  assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef({
+    ref: input.ref,
+    userId: input.userId,
+  });
   return {
+    ...(input.ref.dataKeyEnvelope
+      ? {
+          dataKeyId: input.ref.dataKeyEnvelope.dataKeyId,
+          dataKeyRootKeyId: input.ref.dataKeyEnvelope.rootKeyId,
+        }
+      : {}),
     dataVersion: input.ref.dataVersion,
     objectKey: input.ref.objectKey,
     purpose: "browser-vault-replica",
@@ -92,7 +106,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
     },
 
     async deriveBrowserVaultReplicaKey(ref) {
-      return deriveBrowserVaultReplicaKey(await resolveBrowserVaultReplicaRootKey(input, ref), ref);
+      return deriveBrowserVaultReplicaKey(input, ref);
     },
 
     async readBrowserVaultReplicaEnvelope(ref) {
@@ -128,12 +142,29 @@ export function createHostedBrowserVaultReplicaStore(input: {
         schema: HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
         sourceBundleHash: parsed.source.sourceBundleHash,
       };
-      const replicaKey = await deriveBrowserVaultReplicaKey(input.rootKey, ref);
+      const { dataKey, envelope: dataKeyEnvelope } =
+        await createHostedDataKeyEnvelopeWithDomainRoot({
+          domain: "runtime",
+          lane: "browser-vault-replica",
+          resource: {
+            objectKey,
+            purpose: "browser-vault-replica",
+            userId,
+          },
+          rootKey: input.rootKey,
+          rootKeyId: ref.runtimeRootKeyId,
+        });
+      const persistedRef: HostedBrowserVaultReplicaRef = {
+        ...ref,
+        dataKeyEnvelope,
+      };
 
-      const aadFields = createBrowserVaultReplicaAadFields({ ref, userId });
+      const aadFields = createBrowserVaultReplicaAadFields({ ref: persistedRef, userId });
 
       await writeEncryptedR2Payload({
         aad: buildRuntimeHostedStorageAad({
+          dataKeyId: aadFields.dataKeyId,
+          dataKeyRootKeyId: aadFields.dataKeyRootKeyId,
           dataVersion: aadFields.dataVersion,
           objectKey: aadFields.objectKey,
           purpose: aadFields.purpose,
@@ -143,14 +174,14 @@ export function createHostedBrowserVaultReplicaStore(input: {
           userId: aadFields.userId,
         }),
         bucket: input.bucket,
-        cryptoKey: replicaKey,
+        cryptoKey: dataKey,
         key: objectKey,
-        keyId: ref.keyId,
+        keyId: dataKeyEnvelope.dataKeyId,
         plaintext: utf8Encoder.encode(JSON.stringify(replica)),
         scope: "browser-vault-replica",
       });
 
-      return ref;
+      return persistedRef;
     },
   };
 }
@@ -184,33 +215,100 @@ async function resolveBrowserVaultReplicaRootKey(
   },
   ref: HostedBrowserVaultReplicaRef,
 ): Promise<Uint8Array> {
-  const runtimeRootKeyId = requireBrowserVaultReplicaRuntimeRootKeyId(ref);
-  if (runtimeRootKeyId === requireBrowserVaultReplicaRootKeyId(input.rootKeyId)) {
+  return resolveBrowserVaultReplicaRootKeyById(
+    input,
+    requireBrowserVaultReplicaRuntimeRootKeyId(ref),
+  );
+}
+
+async function resolveBrowserVaultReplicaRootKeyById(
+  input: {
+    rootKey: Uint8Array;
+    rootKeyId: string;
+    keysById?: Readonly<Record<string, Uint8Array>>;
+    resolveRootKeyById?: (rootKeyId: string) => Promise<Uint8Array | null>;
+  },
+  rootKeyId: string,
+): Promise<Uint8Array> {
+  const normalizedRootKeyId = requireBrowserVaultReplicaRootKeyId(rootKeyId);
+  if (normalizedRootKeyId === requireBrowserVaultReplicaRootKeyId(input.rootKeyId)) {
     return input.rootKey;
   }
 
-  const keyFromKeyring = input.keysById?.[runtimeRootKeyId];
+  const keyFromKeyring = input.keysById?.[normalizedRootKeyId];
   if (keyFromKeyring) {
     return keyFromKeyring;
   }
 
-  const resolvedKey = await input.resolveRootKeyById?.(runtimeRootKeyId) ?? null;
+  const resolvedKey = await input.resolveRootKeyById?.(normalizedRootKeyId) ?? null;
   if (resolvedKey) {
     return resolvedKey;
   }
 
-  throw new HostedBrowserVaultReplicaRootKeyUnavailableError(runtimeRootKeyId);
+  throw new HostedBrowserVaultReplicaRootKeyUnavailableError(normalizedRootKeyId);
 }
 
 async function deriveBrowserVaultReplicaKey(
-  rootKey: Uint8Array,
+  input: {
+    rootKey: Uint8Array;
+    rootKeyId: string;
+    keysById?: Readonly<Record<string, Uint8Array>>;
+    resolveRootKeyById?: (rootKeyId: string) => Promise<Uint8Array | null>;
+    userId?: string | null;
+  },
   ref: HostedBrowserVaultReplicaRef,
 ): Promise<Uint8Array> {
+  if (ref.dataKeyEnvelope) {
+    assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef({
+      ref,
+      userId: input.userId ?? undefined,
+    });
+    const rootKey = await resolveBrowserVaultReplicaRootKeyById(
+      input,
+      ref.dataKeyEnvelope.rootKeyId,
+    );
+    return unwrapHostedDataKeyWithDomainRoot({
+      envelope: ref.dataKeyEnvelope,
+      rootKey,
+      rootKeyId: ref.dataKeyEnvelope.rootKeyId,
+    });
+  }
+
   const runtimeRootKeyId = requireBrowserVaultReplicaRuntimeRootKeyId(ref);
+  const rootKey = await resolveBrowserVaultReplicaRootKey(input, ref);
   return deriveHostedStorageKey(
     rootKey,
     `id:browser-vault-replica:${runtimeRootKeyId}:${ref.sourceBundleHash}:${ref.dataVersion}`,
   );
+}
+
+function assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef(input: {
+  ref: HostedBrowserVaultReplicaRef;
+  userId?: string;
+}): void {
+  const envelope = input.ref.dataKeyEnvelope;
+  if (!envelope) {
+    return;
+  }
+
+  if (envelope.domain !== "runtime") {
+    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.domain must be runtime.");
+  }
+  if (envelope.lane !== "browser-vault-replica") {
+    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.lane must be browser-vault-replica.");
+  }
+  if (envelope.rootKeyId !== requireBrowserVaultReplicaRuntimeRootKeyId(input.ref)) {
+    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.rootKeyId must match runtimeRootKeyId.");
+  }
+  if (envelope.resource.objectKey !== input.ref.objectKey) {
+    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.resource.objectKey must match objectKey.");
+  }
+  if (envelope.resource.purpose !== "browser-vault-replica") {
+    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.resource.purpose must be browser-vault-replica.");
+  }
+  if (input.userId && envelope.resource.userId !== input.userId) {
+    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.resource.userId must match userId.");
+  }
 }
 
 function requireBrowserVaultReplicaRootKeyId(value: string): string {

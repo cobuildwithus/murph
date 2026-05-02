@@ -41,10 +41,22 @@ export function readHostedExecutionEnvironment(
         : {}),
       HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
         workerEnvironment.hostedCryptoAuthoritySignPublicKeyPem,
+      ...(workerEnvironment.hostedCryptoAuthorityVerifyKeyringJson
+        ? {
+            HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON:
+              workerEnvironment.hostedCryptoAuthorityVerifyKeyringJson,
+          }
+        : {}),
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
         workerEnvironment.hostedCryptoCloudflareAutomationKeyId,
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
         workerEnvironment.hostedCryptoCloudflareAutomationPrivateJwk,
+      ...(workerEnvironment.hostedCryptoCloudflareAutomationPrivateKeyringJson
+        ? {
+            HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+              workerEnvironment.hostedCryptoCloudflareAutomationPrivateKeyringJson,
+          }
+        : {}),
       HOSTED_CRYPTO_ENV: workerEnvironment.hostedCryptoEnv,
       ...(source.NODE_ENV ? { NODE_ENV: source.NODE_ENV } : {}),
       ...(source.VERCEL_ENV ? { VERCEL_ENV: source.VERCEL_ENV } : {}),
