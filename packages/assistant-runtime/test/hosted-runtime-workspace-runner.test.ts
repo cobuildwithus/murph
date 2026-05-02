@@ -88,7 +88,7 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
   generatedAt: "2026-04-26T00:00:00.000Z",
   keyId: "key_synthetic_runner",
   objectKey: "browser-vault/member-synthetic/replica.json",
-  replicaSchema: "murph.browser-vault-replica.v1",
+  replicaSchema: "murph.browser-vault-replica",
   runtimeRootKeyId: "udrk:runtime:synthetic-runner",
   schema: "murph.hosted-browser-vault-replica-ref.v1",
   sourceBundleHash: "bundle_hash_synthetic_runner",

@@ -24,11 +24,6 @@ vi.mock("next/font/google", () => ({
   },
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
-  requireHostedPrivyClientAppId: () => "cm_app_123",
-  resolveHostedPrivyClientId: () => "client_123",
-}));
-
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
   HostedPhoneCountryCodeProvider(input: {
     children: React.ReactNode;
@@ -38,20 +33,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider",
       "div",
       {
         "data-phone-country-code": input.countryCode ?? "",
-      },
-      input.children,
-    );
-  },
-}));
-
-vi.mock("../app/providers", () => ({
-  Providers(input: { children: React.ReactNode; privyAppId: string; privyClientId?: string | null }) {
-    return createElement(
-      "div",
-      {
-        "data-providers": "true",
-        "data-privy-app-id": input.privyAppId,
-        "data-privy-client-id": input.privyClientId ?? "",
       },
       input.children,
     );
@@ -69,9 +50,9 @@ test("RootLayout renders the site footer with legal and social links", () => {
 
   assert.match(markup, /hosted-shell/);
   assert.match(markup, /data-phone-country-code=""/);
-  assert.match(markup, /data-providers="true"/);
-  assert.match(markup, /data-privy-app-id="cm_app_123"/);
-  assert.match(markup, /data-privy-client-id="client_123"/);
+  assert.doesNotMatch(markup, /data-providers="true"/);
+  assert.doesNotMatch(markup, /data-privy-app-id=/);
+  assert.doesNotMatch(markup, /data-privy-client-id=/);
   assert.match(markup, /<html lang="en" class="[^"]*--font-serif[^"]*"/u);
   assert.match(markup, /<html lang="en" class="[^"]*--font-sans[^"]*"/u);
   assert.match(markup, /<html lang="en" class="[^"]*--font-mono[^"]*"/u);

@@ -13,8 +13,10 @@ import type { HostedLocalDevConfig } from "./types.ts";
 export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
   "/api/hosted-onboarding/linq/webhook";
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENT = "message.received";
+const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
   "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
+const LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS = 10_000;
 const LINQ_WEBHOOK_TARGET_READY_TIMEOUT_MS = 30_000;
 const LINQ_WEBHOOK_TARGET_READY_INTERVAL_MS = 1_000;
 const LINQ_WEBHOOK_TARGET_READY_REQUEST_TIMEOUT_MS = 5_000;
@@ -34,6 +36,14 @@ interface LinqWebhookRegistrationCache {
   subscriptionId: string | null;
   targetUrl: string;
   updatedAt: string;
+}
+
+interface LinqWebhookSubscriptionSummary {
+  id: string | null;
+  isActive: boolean;
+  phoneNumbers: readonly string[] | null;
+  subscribedEvents: readonly string[];
+  targetUrl: string | null;
 }
 
 export interface HostedLocalLinqWebhookSetup {
@@ -129,6 +139,7 @@ export async function resolveHostedLocalLinqWebhookSetup(input: {
 
 export async function registerHostedLocalLinqWebhookSubscription(input: {
   env: NodeJS.ProcessEnv;
+  fetchImplementation?: typeof fetch;
   setup: HostedLocalLinqWebhookSetup;
   stderrTarget?: NodeJS.WritableStream;
   registrationCachePath?: string | null;
@@ -141,6 +152,7 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   if (!linqApiToken) {
     throw new Error("LINQ_API_TOKEN must be set before registering the Linq webhook.");
   }
+  const registrationEnv = buildLinqWebhookRegistrationEnv(input.env, linqApiToken);
 
   const registrationFingerprint = createLinqWebhookRegistrationFingerprint({
     phoneNumbers: input.setup.phoneNumbers,
@@ -166,6 +178,28 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
     return;
   }
 
+  const existingRegistration = await findExistingLinqWebhookSubscription({
+    env: registrationEnv,
+    fetchImplementation: input.fetchImplementation ?? fetch,
+    phoneNumbers: input.setup.phoneNumbers,
+    subscribedEvents: [HOSTED_LOCAL_LINQ_WEBHOOK_EVENT],
+    targetUrl: input.setup.targetUrl,
+  });
+  if (existingRegistration !== null) {
+    if (cachePath) {
+      await writeLinqWebhookRegistrationCache(cachePath, {
+        fingerprint: registrationFingerprint,
+        subscriptionId: existingRegistration.id,
+        targetUrl: input.setup.targetUrl,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    (input.stderrTarget ?? process.stderr).write(
+      `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel}.\n`,
+    );
+    return;
+  }
+
   const result = await createLinqWebhookSubscription(
     {
       phoneNumbers: input.setup.phoneNumbers,
@@ -173,7 +207,7 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
       targetUrl: input.setup.targetUrl,
     },
     {
-      env: buildLinqWebhookRegistrationEnv(input.env, linqApiToken),
+      env: registrationEnv,
     },
   );
   const returnedSecret = normalizeOptionalString(result.signingSecret);
@@ -318,6 +352,161 @@ function buildLinqWebhookRegistrationEnv(
   };
 }
 
+async function findExistingLinqWebhookSubscription(input: {
+  env: NodeJS.ProcessEnv;
+  fetchImplementation: typeof fetch;
+  phoneNumbers: readonly string[] | null;
+  subscribedEvents: readonly string[];
+  targetUrl: string;
+}): Promise<LinqWebhookSubscriptionSummary | null> {
+  const token = normalizeOptionalString(input.env.LINQ_API_TOKEN);
+  if (!token) {
+    throw new Error("LINQ_API_TOKEN must be set before listing Linq webhooks.");
+  }
+
+  const response = await fetchLinqWebhookSubscriptions({
+    env: input.env,
+    fetchImplementation: input.fetchImplementation,
+    token,
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Linq request GET /webhook-subscriptions failed with HTTP ${response.status}.`,
+    );
+  }
+
+  const payload: unknown = await response.json();
+  const subscriptions = parseLinqWebhookSubscriptionList(payload);
+  return subscriptions.find((subscription) =>
+    subscription.isActive
+    && subscription.targetUrl === input.targetUrl
+    && eventSetsEqual(subscription.subscribedEvents, input.subscribedEvents)
+    && phoneNumberSetsEqual(subscription.phoneNumbers, input.phoneNumbers)
+  ) ?? null;
+}
+
+async function fetchLinqWebhookSubscriptions(input: {
+  env: NodeJS.ProcessEnv;
+  fetchImplementation: typeof fetch;
+  token: string;
+}): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS);
+
+  try {
+    return await input.fetchImplementation(
+      new URL("webhook-subscriptions", resolveLinqWebhookRegistrationBaseUrl(input.env)),
+      {
+        headers: {
+          authorization: `Bearer ${input.token}`,
+        },
+        method: "GET",
+        signal: controller.signal,
+      },
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        `Linq request GET /webhook-subscriptions timed out after ${LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS}ms.`,
+      );
+    }
+    throw new Error("Linq request GET /webhook-subscriptions failed before a response was returned.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function resolveLinqWebhookRegistrationBaseUrl(env: NodeJS.ProcessEnv): URL {
+  const configured = normalizeOptionalString(env.LINQ_API_BASE_URL);
+  let parsed: URL;
+  try {
+    parsed = new URL(configured ?? DEFAULT_LINQ_API_BASE_URL);
+  } catch {
+    throw new Error("LINQ_API_BASE_URL must be a valid URL.");
+  }
+  if (!parsed.pathname.endsWith("/")) {
+    parsed.pathname = `${parsed.pathname}/`;
+  }
+  return parsed;
+}
+
+function parseLinqWebhookSubscriptionList(
+  value: unknown,
+): readonly LinqWebhookSubscriptionSummary[] {
+  if (!isPlainRecord(value)) {
+    return [];
+  }
+  const subscriptions = value.subscriptions;
+  if (!Array.isArray(subscriptions)) {
+    return [];
+  }
+
+  return subscriptions
+    .map(parseLinqWebhookSubscriptionSummary)
+    .filter((subscription): subscription is LinqWebhookSubscriptionSummary =>
+      subscription !== null
+    );
+}
+
+function parseLinqWebhookSubscriptionSummary(
+  value: unknown,
+): LinqWebhookSubscriptionSummary | null {
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+
+  return {
+    id: normalizeOptionalString(value.id),
+    isActive: value.is_active === true,
+    phoneNumbers: normalizeLinqOptionalStringList(value.phone_numbers),
+    subscribedEvents: normalizeLinqOptionalStringList(value.subscribed_events) ?? [],
+    targetUrl: normalizeOptionalString(value.target_url),
+  };
+}
+
+function normalizeLinqOptionalStringList(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const normalized = value
+    .map((item) => normalizeOptionalString(item))
+    .filter((item): item is string => item !== null);
+  return normalized.length > 0 ? normalized : [];
+}
+
+function eventSetsEqual(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  const actualNormalized = normalizeStringSet(actual);
+  const expectedNormalized = normalizeStringSet(expected);
+  if (actualNormalized.length !== expectedNormalized.length) {
+    return false;
+  }
+  return actualNormalized.every((value, index) => value === expectedNormalized[index]);
+}
+
+function phoneNumberSetsEqual(
+  actual: readonly string[] | null,
+  expected: readonly string[] | null,
+): boolean {
+  const actualNormalized = normalizeStringSet(actual ?? []);
+  const expectedNormalized = normalizeStringSet(expected ?? []);
+  if (actualNormalized.length !== expectedNormalized.length) {
+    return false;
+  }
+  return actualNormalized.every((value, index) => value === expectedNormalized[index]);
+}
+
+function normalizeStringSet(value: readonly string[]): readonly string[] {
+  return [...value]
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .sort();
+}
+
 async function fetchLinqWebhookTargetReadiness(input: {
   fetchImplementation: typeof fetch;
   targetUrl: string;
@@ -378,7 +567,7 @@ async function readLinqWebhookRegistrationCache(
   }
 
   try {
-    const parsed = JSON.parse(text) as unknown;
+    const parsed: unknown = JSON.parse(text);
     return parseLinqWebhookRegistrationCache(parsed);
   } catch {
     return null;
@@ -388,26 +577,25 @@ async function readLinqWebhookRegistrationCache(
 function parseLinqWebhookRegistrationCache(
   value: unknown,
 ): LinqWebhookRegistrationCache | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isPlainRecord(value)) {
     return null;
   }
-  const record = value as Record<string, unknown>;
   if (
-    typeof record.fingerprint !== "string"
-    || typeof record.targetUrl !== "string"
-    || typeof record.updatedAt !== "string"
+    typeof value.fingerprint !== "string"
+    || typeof value.targetUrl !== "string"
+    || typeof value.updatedAt !== "string"
   ) {
     return null;
   }
-  if (record.subscriptionId !== null && typeof record.subscriptionId !== "string") {
+  if (value.subscriptionId !== null && typeof value.subscriptionId !== "string") {
     return null;
   }
 
   return {
-    fingerprint: record.fingerprint,
-    subscriptionId: record.subscriptionId,
-    targetUrl: record.targetUrl,
-    updatedAt: record.updatedAt,
+    fingerprint: value.fingerprint,
+    subscriptionId: value.subscriptionId,
+    targetUrl: value.targetUrl,
+    updatedAt: value.updatedAt,
   };
 }
 
@@ -636,9 +824,16 @@ function isValidTunnelHostname(value: string): boolean {
   }
 }
 
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
   return normalized && normalized.length > 0 ? normalized : null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function pathExistsDefault(filePath: string): Promise<boolean> {

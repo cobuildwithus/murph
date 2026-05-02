@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +13,16 @@ import { cn } from "@/src/lib/utils";
 
 type LandingAuthContext = "nav" | "hero" | "footer";
 type LandingAuthMode = "login" | "signup";
+type HostedAuthPanelIslandComponent = typeof import(
+  "@/src/components/hosted-onboarding/hosted-auth-panel-island"
+)["HostedAuthPanelIsland"];
+
+async function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
+  const mod = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-panel-island"
+  );
+  return mod.HostedAuthPanelIsland;
+}
 
 function getLandingAuthDialogCopy(mode: LandingAuthMode) {
   if (mode === "login") {
@@ -51,14 +60,35 @@ function LandingAuthDialogButton({
   title?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [AuthPanelIsland, setAuthPanelIsland] =
+    useState<HostedAuthPanelIslandComponent | null>(null);
+  const [authPanelLoadError, setAuthPanelLoadError] = useState<string | null>(null);
   const defaultCopy = getLandingAuthDialogCopy(authMode);
+
+  async function loadAuthPanelIsland() {
+    if (AuthPanelIsland) {
+      return;
+    }
+
+    setAuthPanelLoadError(null);
+
+    try {
+      const Component = await loadHostedAuthPanelIsland();
+      setAuthPanelIsland(() => Component);
+    } catch {
+      setAuthPanelLoadError("Sign in did not load. Try again.");
+    }
+  }
 
   return (
     <>
       <button
         type="button"
         className={buttonClassName}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpen(true);
+          void loadAuthPanelIsland();
+        }}
       >
         <span>{buttonLabel}</span>
         {showArrow ? (
@@ -81,13 +111,23 @@ function LandingAuthDialogButton({
             </DialogDescription>
           </DialogHeader>
           {open ? (
-            <HostedAuthPanel
-              authMode={authMode}
-              methods={["phone", "telegram", "email"]}
-              requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
-              showPassiveLegalNotice={showPassiveLegalNotice}
-              size="compact"
-            />
+            AuthPanelIsland ? (
+              <AuthPanelIsland
+                authMode={authMode}
+                methods={["phone", "telegram", "email"]}
+                requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
+                showPassiveLegalNotice={showPassiveLegalNotice}
+                size="compact"
+              />
+            ) : authPanelLoadError ? (
+              <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+                {authPanelLoadError}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border bg-card/60 p-4 text-sm text-muted-foreground">
+                Loading sign in...
+              </div>
+            )
           ) : null}
         </DialogContent>
       </Dialog>

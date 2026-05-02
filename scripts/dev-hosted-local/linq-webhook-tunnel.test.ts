@@ -266,12 +266,16 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       "./linq-webhook-tunnel.ts"
     );
     const stderrTarget = new CapturingWritable();
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json({ subscriptions: [] })
+    );
 
     await registerHostedLocalLinqWebhookSubscription({
       env: {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
+      fetchImplementation,
       setup: {
         phoneNumbers: ["+15550000001"],
         publicBaseUrl: "https://tunnel.example.test",
@@ -310,6 +314,9 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
     const registrationCachePath = path.join(tempDir, "cache.json");
     const stderrTarget = new CapturingWritable();
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json({ subscriptions: [] })
+    );
     const setup = {
       phoneNumbers: ["+15550000001"],
       publicBaseUrl: "https://tunnel.example.test",
@@ -328,6 +335,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
           LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
           PRIVY_APP_SECRET: "unrelated-secret",
         },
+        fetchImplementation,
         registrationCachePath,
         setup,
         stderrTarget,
@@ -339,12 +347,14 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
           LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
           PRIVY_APP_SECRET: "unrelated-secret",
         },
+        fetchImplementation,
         registrationCachePath,
         setup,
         stderrTarget,
       });
 
       expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
+      expect(fetchImplementation).toHaveBeenCalledTimes(1);
       const call = createLinqWebhookSubscription.mock.calls[0];
       expect(call).toBeDefined();
       if (!call) {
@@ -361,6 +371,109 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
+  });
+
+  it("uses the remote Linq subscription list to avoid duplicate create calls", async () => {
+    const { registerHostedLocalLinqWebhookSubscription } = await import(
+      "./linq-webhook-tunnel.ts"
+    );
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
+    const registrationCachePath = path.join(tempDir, "cache.json");
+    const stderrTarget = new CapturingWritable();
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        subscriptions: [
+          {
+            id: "subscription-existing",
+            is_active: true,
+            phone_numbers: ["+15550000001"],
+            subscribed_events: ["message.received"],
+            target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+          },
+        ],
+      })
+    );
+
+    try {
+      await registerHostedLocalLinqWebhookSubscription({
+        env: {
+          LINQ_API_BASE_URL: "https://linq.example.test/api/partner/v3",
+          LINQ_API_TOKEN: "linq-token",
+          LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+        },
+        fetchImplementation,
+        registrationCachePath,
+        setup: {
+          phoneNumbers: ["+15550000001"],
+          publicBaseUrl: "https://tunnel.example.test",
+          shouldRegister: true,
+          shouldStartTunnel: true,
+          targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+          tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+          tunnelName: "dev",
+        },
+        stderrTarget,
+      });
+
+      expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
+      expect(fetchImplementation).toHaveBeenCalledWith(
+        new URL("webhook-subscriptions", "https://linq.example.test/api/partner/v3/"),
+        expect.objectContaining({
+          headers: {
+            authorization: "Bearer linq-token",
+          },
+          method: "GET",
+        }),
+      );
+      const cacheText = await readFile(registrationCachePath, "utf8");
+      expect(cacheText).toContain("subscription-existing");
+      expect(cacheText).not.toContain("linq-webhook-secret");
+      expect(cacheText).not.toContain("+15550000001");
+      expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
+        "is already registered for 1 configured phone number(s)",
+      ));
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("creates a new Linq webhook subscription when the remote target has extra events", async () => {
+    const { registerHostedLocalLinqWebhookSubscription } = await import(
+      "./linq-webhook-tunnel.ts"
+    );
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        subscriptions: [
+          {
+            id: "subscription-broader",
+            is_active: true,
+            phone_numbers: null,
+            subscribed_events: ["message.received", "message.sent"],
+            target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+          },
+        ],
+      })
+    );
+
+    await registerHostedLocalLinqWebhookSubscription({
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      },
+      fetchImplementation,
+      registrationCachePath: null,
+      setup: {
+        phoneNumbers: null,
+        publicBaseUrl: "https://tunnel.example.test",
+        shouldRegister: true,
+        shouldStartTunnel: true,
+        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+        tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+        tunnelName: "dev",
+      },
+    });
+
+    expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
   });
 
   it("waits for the public webhook target before Linq registration", async () => {
@@ -434,12 +547,16 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
       updatedAt: null,
     });
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json({ subscriptions: [] })
+    );
 
     await expect(registerHostedLocalLinqWebhookSubscription({
       env: {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
+      fetchImplementation,
       setup: {
         phoneNumbers: null,
         publicBaseUrl: "https://tunnel.example.test",

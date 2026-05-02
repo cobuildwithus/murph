@@ -60,6 +60,18 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary",
   },
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-privy-boundary", () => ({
+  HostedPrivyBoundary(input: { children: React.ReactNode }) {
+    return createElement(
+      "div",
+      {
+        "data-hosted-privy-boundary": "true",
+      },
+      input.children,
+    );
+  },
+}));
+
 vi.mock("@/src/lib/legal/consent", () => ({
   readHostedConsentStatus: mocks.readHostedConsentStatus,
 }));
@@ -150,6 +162,7 @@ test("JoinInvitePage builds a server model with the verified session identity", 
     },
   });
   assert.match(markup, /data-phone-country-code="GB"/);
+  assert.match(markup, /data-hosted-privy-boundary="true"/);
   assert.match(markup, /data-invite-code="invite code"/);
   assert.doesNotMatch(markup, /data-share-code/);
 });
