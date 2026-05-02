@@ -658,6 +658,43 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
+  it("keeps platform private JWKs out of runtime child, forwarded, and user env", () => {
+    const configSource = {
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+        '{"kty":"EC","d":"automation"}',
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
+        '{"kty":"EC","d":"callback"}',
+    };
+    const runtime = buildHostedRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv: buildHostedRunnerContainerEnv(configSource),
+      runnerSecrets: {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+          "user-automation-private-jwk",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
+          "user-callback-private-jwk",
+      },
+    });
+    const childEnv = buildHostedRunnerChildRuntimeEnv({
+      forwardedEnv: runtime.forwardedEnv ?? {},
+    });
+
+    expect(runtime.platformEnv).toEqual({
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+        '{"kty":"EC","d":"automation"}',
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
+        '{"kty":"EC","d":"callback"}',
+    });
+    expect(childEnv.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
+    expect(childEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
+    expect(runtime.forwardedEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
+    expect(runtime.forwardedEnv?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
+    expect(runtime.userEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
+    expect(runtime.userEnv?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
+  });
+
   it("keeps loopback runner callback urls intact when the runtime envelope already has forwarded env", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
