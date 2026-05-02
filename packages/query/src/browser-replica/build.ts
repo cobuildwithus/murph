@@ -76,7 +76,10 @@ export async function createBrowserVaultReplica(
     ...glucoseSampleMetricDayRows,
   ]);
   const metricRows = metricDayRows.flatMap((day) => dayToMetricRows(day));
-  const metricPoints = createBrowserVaultMetricPoints(metricRows);
+  const metricPoints = createBrowserVaultMetricPoints({
+    metricRows,
+    vault: input.vault,
+  });
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt,
     metricPoints,

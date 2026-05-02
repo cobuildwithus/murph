@@ -12,11 +12,15 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const hostedWebAppDir = path.join(repoRoot, "apps", "web");
+const workspaceRuntimeEntries = {
+  ...resolveHostedWebWorkspaceSourceEntries(hostedWebAppDir),
+  "@murphai/operator-config": path.join(repoRoot, "packages", "operator-config", "package.json"),
+};
 
 export default defineConfig({
   resolve: {
     alias: createVitestWorkspaceRuntimeAliases(
-      resolveHostedWebWorkspaceSourceEntries(hostedWebAppDir),
+      workspaceRuntimeEntries,
     ),
   },
   test: {

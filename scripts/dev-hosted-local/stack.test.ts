@@ -11,6 +11,16 @@ import type {
 } from "./types.ts";
 import type { HostedLocalWorkerPortMode } from "./runtime.ts";
 
+type HostedLocalLinqWebhookSetup = {
+  phoneNumbers: readonly string[] | null;
+  publicBaseUrl: string;
+  shouldRegister: boolean;
+  shouldStartTunnel: boolean;
+  targetUrl: string;
+  tunnelConfigPath: string | null;
+  tunnelName: string | null;
+};
+
 class CapturingWritable extends Writable {
   readonly chunks: string[] = [];
 
@@ -31,11 +41,16 @@ class CapturingWritable extends Writable {
 const defaultConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  linqWebhookPublicUrl: null,
+  linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+  linqWebhookTunnelMode: "disabled",
+  linqWebhookTunnelName: "dev",
   localCodexBridge: true,
   localCodexBridgeHost: "127.0.0.1",
   localCodexBridgePort: 0,
   localCodexCommand: "codex",
   skipHealthCommonsWatch: true,
+  skipLinqWebhookRegister: false,
   skipRunnerSmoke: false,
   skipPrismaMigrate: false,
   skipStripeListen: true,
@@ -140,11 +155,24 @@ const startHostedLocalCodexBridge = vi.fn<
   proxyUrl: "tcp://127.0.0.1:41234",
   stop: stopHostedLocalCodexBridge,
 }));
+const resolveHostedLocalLinqWebhookSetup = vi.fn<
+  (input: {
+    config: HostedLocalDevConfig;
+    env: NodeJS.ProcessEnv;
+  }) => Promise<HostedLocalLinqWebhookSetup | null>
+>(async () => null);
+const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
 
 vi.mock("node:fs/promises", () => ({
+  access: vi.fn(async () => {
+    const error = new Error("not found") as NodeJS.ErrnoException;
+    error.code = "ENOENT";
+    throw error;
+  }),
   chmod: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
+  readFile: vi.fn(async () => ""),
   rename: vi.fn(async () => {}),
   rm: vi.fn(async () => {}),
   symlink: vi.fn(async () => {}),
@@ -235,6 +263,11 @@ vi.mock("./environment.ts", () => ({
     NODE_ENV: input.overrides?.NODE_ENV,
   })),
   warnForMissingEnv: vi.fn(),
+}));
+
+vi.mock("./linq-webhook-tunnel.ts", () => ({
+  registerHostedLocalLinqWebhookSubscription,
+  resolveHostedLocalLinqWebhookSetup,
 }));
 
 vi.mock("./runtime.ts", () => ({
@@ -557,6 +590,72 @@ describe("hosted local dev stack", () => {
       ["--dir", "apps/cloudflare", "deploy:smoke"],
       expect.any(Object),
     );
+  });
+
+  it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {
+    resolveHostedLocalLinqWebhookSetup.mockResolvedValueOnce({
+      phoneNumbers: ["+15550000001"],
+      publicBaseUrl: "https://tunnel.example.test",
+      shouldRegister: true,
+      shouldStartTunnel: true,
+      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      tunnelConfigPath: "/tmp/murph-dev-env-test/cloudflared-linq-webhook.yml",
+      tunnelName: "dev",
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 141 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "linq-tunnel", pid: 142 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 143 }));
+
+    const environmentModule = await import("./environment.ts");
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(environmentModule.buildHostedLocalDevOverrides).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      {
+        hostedOnboardingPublicBaseUrl: "https://tunnel.example.test",
+      },
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "linq-tunnel",
+      "cloudflared",
+      [
+        "tunnel",
+        "--no-autoupdate",
+        "--config",
+        "/tmp/murph-dev-env-test/cloudflared-linq-webhook.yml",
+        "run",
+        "dev",
+      ],
+      expect.not.objectContaining({
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      }),
+      expect.any(Object),
+    );
+    expect(registerHostedLocalLinqWebhookSubscription).toHaveBeenCalledWith({
+      env: expect.objectContaining({
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      }),
+      setup: expect.objectContaining({
+        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      }),
+      stderrTarget: undefined,
+    });
+    expect(stack.processes.linqTunnel?.name).toBe("linq-tunnel");
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });
 
   it("uses prisma migrate deploy for non-local databases instead of forcing db push", async () => {
