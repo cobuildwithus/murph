@@ -451,7 +451,7 @@ https://join.example.test/join/code_first_text`);
     },
   );
 
-  it("rejects active-member Linq messages with too many parts before mailbox append", async () => {
+  it("compacts active-member Linq messages with too many parts and still appends a wake", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -487,18 +487,32 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "LINQ_MESSAGE_PARTS_TOO_MANY",
-      httpStatus: 413,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
     });
 
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(envelope).toEqual(expect.objectContaining({
+      message: expect.objectContaining({
+        linqMessage: expect.objectContaining({
+          parts: expect.arrayContaining([
+            expect.objectContaining({
+              type: "text",
+              value: expect.stringContaining("part(s) omitted"),
+            }),
+          ]),
+        }),
+      }),
+    }));
+    expect(JSON.stringify(envelope)).not.toContain("LINQ_MESSAGE_PARTS_TOO_MANY");
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
   });
 
-  it("rejects active-member Linq messages with oversized serialized parts before mailbox append", async () => {
+  it("compacts active-member Linq messages with oversized content and still appends a wake", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -537,15 +551,100 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "LINQ_MESSAGE_PARTS_TOO_LARGE",
-      httpStatus: 413,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
     });
 
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(JSON.stringify(envelope).length).toBeLessThan(128 * 1024);
+    expect(envelope).toEqual(expect.objectContaining({
+      message: expect.objectContaining({
+        linqMessage: expect.objectContaining({
+          parts: expect.arrayContaining([
+            expect.objectContaining({
+              type: "text",
+              value: expect.stringContaining("[truncated]"),
+            }),
+            expect.objectContaining({
+              type: "text",
+              value: expect.stringContaining("some content truncated"),
+            }),
+          ]),
+        }),
+      }),
+    }));
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+  });
+
+  it("omits signed Linq attachment URLs from active-member mailbox wakes", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              attachment_id: "att_voice_123",
+              filename: "voice-note.m4a",
+              mime_type: "audio/mp4",
+              size: 12345,
+              type: "voice_memo",
+              url: "https://cdn.linqapp.com/files/signed-voice-url.m4a",
+            },
+          ],
+        },
+        eventId: "evt_attachment_url_omitted",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(envelope).toEqual(expect.objectContaining({
+      message: expect.objectContaining({
+        linqMessage: expect.objectContaining({
+          parts: [
+            expect.objectContaining({
+              attachmentId: "att_voice_123",
+              fileName: "voice-note.m4a",
+              mimeType: "audio/mp4",
+              size: 12345,
+              type: "voice_memo",
+            }),
+          ],
+        }),
+      }),
+    }));
+    expect(JSON.stringify(envelope)).not.toContain("signed-voice-url");
   });
 
   it("starts a pointer workflow for active-member Linq messages", async () => {
@@ -1181,7 +1280,7 @@ https://join.example.test/join/code_first_text`);
       httpStatus: 413,
     });
 
-    expect(prismaMocks.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();

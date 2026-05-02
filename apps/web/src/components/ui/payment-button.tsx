@@ -1,20 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { Button, buttonVariants } from "@/src/components/ui/button";
+import { AuthButton, type AuthButtonProps } from "@/src/components/ui/auth-button";
+import { buttonVariants } from "@/src/components/ui/button";
 import { cn } from "@/src/lib/utils";
 import type { VariantProps } from "class-variance-authority";
 
 type PaymentButtonStatus = "idle" | "pending" | "success";
 
 interface PaymentButtonProps
-  extends Omit<ComponentProps<typeof Button>, "onClick" | "children">,
+  extends Omit<AuthButtonProps, "onClick" | "render" | "children">,
     Pick<VariantProps<typeof buttonVariants>, "size" | "variant"> {
   onClick: () => Promise<void> | void;
   idleLabel: ReactNode;
+  connectLabel?: ReactNode;
   idleAdornment?: ReactNode;
-  pendingLabel?: ReactNode;
   successHoldMs?: number;
   onSuccess?: () => void;
   onError?: (error: unknown) => void;
@@ -24,8 +25,8 @@ interface PaymentButtonProps
 function PaymentButton({
   onClick,
   idleLabel,
+  connectLabel,
   idleAdornment,
-  pendingLabel,
   successHoldMs = 650,
   onSuccess,
   onError,
@@ -34,6 +35,7 @@ function PaymentButton({
   className,
   size = "lg",
   variant = "default",
+  onConnect,
   ...rest
 }: PaymentButtonProps) {
   const [internalStatus, setInternalStatus] = useState<PaymentButtonStatus>("idle");
@@ -71,39 +73,51 @@ function PaymentButton({
   const isBusy = isPending || isSuccess;
 
   return (
-    <Button
+    <AuthButton
       type="button"
       disabled={disabled || isBusy}
       onClick={handleClick}
+      onConnect={onConnect}
       size={size}
       variant={variant}
       data-status={status}
       aria-live="polite"
-      className={cn(className)}
+      className={cn("relative overflow-hidden", className)}
+      connectLabel={
+        <>
+          <span className="flex-1 text-center">{connectLabel ?? idleLabel}</span>
+          {idleAdornment ? (
+            <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
+              {idleAdornment}
+            </span>
+          ) : null}
+        </>
+      }
       {...rest}
     >
-      <span className="flex-1 text-center">
-        {isPending && pendingLabel ? pendingLabel : idleLabel}
+      <span
+        className={cn(
+          "flex flex-1 items-center justify-center gap-2 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          isBusy && "translate-y-3 opacity-0",
+        )}
+      >
+        <span>{idleLabel}</span>
+        {idleAdornment ? (
+          <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
+            {idleAdornment}
+          </span>
+        ) : null}
       </span>
-      <span className="relative flex size-6 shrink-0 items-center justify-center" aria-hidden>
-        <span
-          className={cn(
-            "absolute inset-0 flex items-center justify-center transition-opacity duration-150",
-            isBusy ? "opacity-0" : "opacity-100",
-          )}
-        >
-          {idleAdornment}
-        </span>
-        <span
-          className={cn(
-            "absolute inset-0 flex items-center justify-center transition-opacity duration-150",
-            isBusy ? "opacity-100" : "opacity-0",
-          )}
-        >
-          <PaymentProgressMark status={status} />
-        </span>
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-0 flex items-center justify-center transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          isBusy ? "translate-y-0 opacity-100" : "-translate-y-3 opacity-0",
+        )}
+      >
+        <PaymentProgressMark status={status} />
       </span>
-    </Button>
+    </AuthButton>
   );
 }
 

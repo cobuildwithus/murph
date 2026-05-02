@@ -46,6 +46,7 @@ import {
   type CreateBrowserVaultReplicaInput,
 } from "./shared.ts";
 import {
+  createBrowserVaultMetricPointRecords,
   createBrowserVaultMetricPoints,
   createBrowserVaultMetricSelectionRows,
 } from "./metric-points.ts";

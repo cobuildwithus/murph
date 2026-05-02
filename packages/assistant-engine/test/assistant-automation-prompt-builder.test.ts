@@ -233,6 +233,31 @@ describe('buildAssistantAutoReplyPrompt', () => {
     })
   })
 
+  it('renders projection failure context when inbox enrichment is unavailable', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: {
+          attachments: [],
+          text: 'Please look at the voice memo when it is available.',
+        },
+        projectionReasonCode: 'conversation-import.projection-failed',
+        projectionStatus: 'failed',
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Message enrichment:')
+    expect(result.prompt).toContain(
+      'inbox/parser enrichment failed (conversation-import.projection-failed); use the staged message text and available metadata only.',
+    )
+    expect(result.prompt).toContain(
+      'Message text:\nPlease look at the voice memo when it is available.',
+    )
+  })
+
   it('renders minimized assistant-input attachment descriptors without inbox projection', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
@@ -496,6 +521,31 @@ describe('prepareAssistantAutoReplyInput', () => {
         attachments: [],
       }),
     )
+  })
+
+  it('prepares staged text with projection pending context when no attachment bundle is available', async () => {
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          captureOverrides: {
+            attachments: [],
+            text: 'Audio note incoming.',
+          },
+          projectionStatus: 'pending',
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('Message enrichment:')
+    expect(result.prompt).toContain(
+      'inbox/parser enrichment is pending; use the staged message text and available metadata only.',
+    )
+    expect(result.prompt).toContain('Message text:\nAudio note incoming.')
   })
 
   it('prepares metadata/status input when parser work is still pending', async () => {

@@ -12,7 +12,7 @@ import {
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
-import { CheckoutButton } from "@/src/components/ui/checkout-button";
+import { PaymentButton } from "@/src/components/ui/payment-button";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
@@ -338,8 +338,8 @@ export function JoinInviteCheckoutPlanButtonIsland({
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
-      <CheckoutButton
-        onCheckout={startCheckout}
+      <PaymentButton
+        onClick={startCheckout}
         onSuccess={handleCheckoutSuccess}
         onError={handleCheckoutError}
         disabled={!billingReady || !planCode}

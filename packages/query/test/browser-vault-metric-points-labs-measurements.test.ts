@@ -214,7 +214,7 @@ test("query projection rebuild stores event-backed metric points in the projecti
 
   try {
     const rebuilt = await rebuildQueryProjection(vaultRoot);
-    assert.equal(rebuilt.schemaVersion, "murph.query-projection.v2");
+    assert.equal(rebuilt.schemaVersion, "murph.query-projection");
 
     const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
       create: false,
@@ -228,31 +228,33 @@ test("query projection rebuild stores event-backed metric points in the projecti
           biomarker_key AS biomarkerKey,
           unit,
           value,
-          value_label AS valueLabel,
+          canonical_value AS canonicalValue,
           source_kind AS sourceKind,
-          record_ids_json AS recordIdsJson
+          source_record_id AS sourceRecordId,
+          metric_point_json AS metricPointJson
         FROM query_metric_points
         ORDER BY metric_key ASC
       `).all() as Array<{
         biomarkerKey: string | null;
+        canonicalValue: number | null;
         metricKey: string;
-        recordIdsJson: string;
+        metricPointJson: string;
         sourceKind: string;
+        sourceRecordId: string;
         unit: string;
         value: number;
-        valueLabel: string;
       }>;
 
       assert.deepEqual(rows.map((row) => row.metricKey), ["apob", "body-weight"]);
       assert.equal(rows.find((row) => row.metricKey === "body-weight")?.unit, "kg");
       assert.equal(
-        Number(rows.find((row) => row.metricKey === "body-weight")?.value.toFixed(1)),
+        Number(rows.find((row) => row.metricKey === "body-weight")?.canonicalValue?.toFixed(1)),
         81.6,
       );
       assert.equal(rows.find((row) => row.metricKey === "apob")?.biomarkerKey, "biomarker:apob");
       assert.equal(rows.find((row) => row.metricKey === "apob")?.sourceKind, "test-result");
       assert.deepEqual(
-        JSON.parse(rows.find((row) => row.metricKey === "apob")?.recordIdsJson ?? "[]"),
+        [rows.find((row) => row.metricKey === "apob")?.sourceRecordId],
         ["evt_projection_test"],
       );
     } finally {

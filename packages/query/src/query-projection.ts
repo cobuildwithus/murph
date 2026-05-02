@@ -30,8 +30,8 @@ import {
   type SearchResult,
 } from "./search-shared.ts";
 import { summarizeDailySamples } from "./summaries.ts";
-import { createBrowserVaultMetricPoints } from "./browser-replica/metric-points.ts";
-import type { BrowserVaultMetricPoint } from "./browser-replica/shared.ts";
+import { selectMetricValue, type MetricPoint, type MetricSelection } from "@murphai/health-metrics";
+import { extractMetricPointsFromCanonicalEntities } from "./metrics/index.ts";
 import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
@@ -52,8 +52,8 @@ export type {
   RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
 
-const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v2";
-const QUERY_PROJECTION_SQLITE_VERSION = 2;
+const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
+const QUERY_PROJECTION_SQLITE_VERSION = 1;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -247,6 +247,41 @@ export async function searchVaultRuntime(
   return searchQueryProjection(location, query, filters);
 }
 
+export interface QueryMetricPointFilters {
+  biomarkerKey?: string;
+  from?: string;
+  limit?: number;
+  metricKey?: string;
+  to?: string;
+}
+
+export async function listMetricPointsRuntime(
+  vaultRoot: string,
+  filters: QueryMetricPointFilters = {},
+): Promise<MetricPoint[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  return listStoredMetricPoints(location, filters);
+}
+
+export async function selectMetricRuntime(input: {
+  biomarkerKey?: string;
+  metricKey?: string;
+  now?: string;
+  vaultRoot: string;
+}): Promise<MetricSelection> {
+  const points = await listMetricPointsRuntime(input.vaultRoot, {
+    biomarkerKey: input.biomarkerKey,
+    metricKey: input.metricKey,
+  });
+  return selectMetricValue({
+    biomarkerKey: input.biomarkerKey,
+    metricKey: input.metricKey,
+    now: input.now,
+    points,
+  });
+}
+
+
 async function rebuildQueryProjectionWithManifest(
   vaultRoot: string,
   currentManifest: readonly QuerySourceManifestEntry[],
@@ -256,10 +291,7 @@ async function rebuildQueryProjectionWithManifest(
   const snapshot = await readVaultSourceStrict(vaultRoot);
   const projectedEntities = snapshot.entities.filter((entity) => entity.family !== "sample");
   const sampleEntities = snapshot.entities.filter((entity) => entity.family === "sample");
-  const metricPoints = createBrowserVaultMetricPoints({
-    metricRows: [],
-    vault: { entities: snapshot.entities },
-  });
+  const metricPoints = extractMetricPointsFromCanonicalEntities(snapshot.entities);
   const searchDocuments = [
     ...materializeSearchDocuments(projectedEntities),
     ...materializeSampleSummarySearchDocuments(snapshot),
@@ -320,25 +352,32 @@ async function rebuildQueryProjectionWithManifest(
       `);
       const insertMetricPoint = database.prepare(`
         INSERT INTO query_metric_points (
-          metric_point_id,
+          id,
           sort_rank,
           metric_key,
           biomarker_key,
+          value,
+          text_value,
+          comparator,
+          unit,
+          canonical_value,
+          canonical_unit,
           observed_at,
-          date,
+          effective_date,
+          recorded_at,
+          reported_at,
           grain,
           statistic,
-          unit,
-          value,
-          value_label,
-          confidence,
           source_family,
           source_kind,
-          source_label,
-          source_id,
-          record_ids_json,
+          source_record_id,
+          source_result_index,
+          source_path,
+          confidence,
+          provenance_json,
+          context_json,
           metric_point_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertSearchDocument = database.prepare(`
         INSERT INTO query_search_document (
@@ -404,25 +443,32 @@ async function rebuildQueryProjectionWithManifest(
         );
       });
 
-      metricPoints.forEach((point: BrowserVaultMetricPoint, index: number) => {
+      metricPoints.forEach((point: MetricPoint, index: number) => {
         insertMetricPoint.run(
           point.id,
           index,
           point.metricKey,
           point.biomarkerKey,
+          point.value,
+          point.textValue,
+          point.comparator,
+          point.unit,
+          point.canonicalValue,
+          point.canonicalUnit,
           point.observedAt,
-          point.date,
+          point.effectiveDate,
+          point.recordedAt,
+          point.reportedAt,
           point.grain,
           point.statistic,
-          point.unit,
-          point.value,
-          point.valueLabel,
+          point.source.family,
+          point.source.kind,
+          point.source.recordId,
+          point.source.resultIndex,
+          point.source.path,
           point.confidence,
-          point.sourceFamily,
-          point.sourceKind,
-          point.sourceLabel,
-          point.sourceMetricRowId,
-          JSON.stringify(point.recordIds),
+          JSON.stringify(point.provenance),
+          JSON.stringify(point.context),
           JSON.stringify(point),
         );
       });
@@ -623,6 +669,68 @@ function readStoredVaultSource(
   } finally {
     database.close();
   }
+}
+
+function listStoredMetricPoints(
+  location: QueryProjectionLocation,
+  filters: QueryMetricPointFilters,
+): MetricPoint[] {
+  const database = openQueryProjectionDatabase(location, {
+    create: false,
+    readOnly: true,
+  });
+
+  try {
+    if (!hasQueryProjectionTables(database)) {
+      throw new Error(
+        `Query projection at ${location.dbPath} is missing required tables. Rebuild the projection and try again.`,
+      );
+    }
+
+    const whereClauses: string[] = [];
+    const parameters: Array<string | number> = [];
+
+    if (filters.metricKey) {
+      whereClauses.push("metric_key = ?");
+      parameters.push(filters.metricKey);
+    }
+    if (filters.biomarkerKey) {
+      whereClauses.push("biomarker_key = ?");
+      parameters.push(filters.biomarkerKey);
+    }
+    if (filters.from) {
+      whereClauses.push("effective_date >= ?");
+      parameters.push(filters.from);
+    }
+    if (filters.to) {
+      whereClauses.push("effective_date <= ?");
+      parameters.push(filters.to);
+    }
+
+    const limit = normalizeMetricPointLimit(filters.limit ?? 1_000);
+    parameters.push(limit);
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const rows = database.prepare(`
+      SELECT metric_point_json
+      FROM query_metric_points
+      ${whereSql}
+      ORDER BY effective_date DESC, observed_at DESC, id ASC
+      LIMIT ?
+    `).all(...parameters) as Array<{ metric_point_json: string }>;
+
+    return rows
+      .map((row) => parseJsonValue<MetricPoint | null>(row.metric_point_json, null))
+      .filter((point): point is MetricPoint => point !== null);
+  } finally {
+    database.close();
+  }
+}
+
+function normalizeMetricPointLimit(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    return 1_000;
+  }
+  return Math.min(value, 10_000);
 }
 
 function searchQueryProjection(
@@ -852,29 +960,36 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_sample_points_experiment_idx ON query_sample_points(experiment_slug);
 
     CREATE TABLE IF NOT EXISTS query_metric_points (
-      metric_point_id TEXT PRIMARY KEY,
+      id TEXT PRIMARY KEY,
       sort_rank INTEGER NOT NULL,
       metric_key TEXT NOT NULL,
       biomarker_key TEXT,
+      value REAL,
+      text_value TEXT,
+      comparator TEXT,
+      unit TEXT,
+      canonical_value REAL,
+      canonical_unit TEXT,
       observed_at TEXT NOT NULL,
-      date TEXT NOT NULL,
+      effective_date TEXT NOT NULL,
+      recorded_at TEXT,
+      reported_at TEXT,
       grain TEXT NOT NULL,
       statistic TEXT NOT NULL,
-      unit TEXT,
-      value REAL NOT NULL,
-      value_label TEXT NOT NULL,
+      source_family TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_record_id TEXT NOT NULL,
+      source_result_index INTEGER,
+      source_path TEXT NOT NULL,
       confidence TEXT NOT NULL,
-      source_family TEXT,
-      source_kind TEXT,
-      source_label TEXT,
-      source_id TEXT NOT NULL,
-      record_ids_json TEXT NOT NULL,
+      provenance_json TEXT NOT NULL,
+      context_json TEXT NOT NULL,
       metric_point_json TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS query_metric_points_metric_latest_idx ON query_metric_points(metric_key, date DESC, observed_at DESC);
-    CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx ON query_metric_points(biomarker_key, date DESC, observed_at DESC);
-    CREATE INDEX IF NOT EXISTS query_metric_points_source_idx ON query_metric_points(source_id);
+    CREATE INDEX IF NOT EXISTS query_metric_points_metric_latest_idx ON query_metric_points(metric_key, effective_date DESC, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS query_metric_points_source_idx ON query_metric_points(source_record_id);
 
     CREATE TABLE IF NOT EXISTS query_source_manifest (
       relative_path TEXT PRIMARY KEY,

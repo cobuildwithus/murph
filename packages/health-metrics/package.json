@@ -1,0 +1,28 @@
+{
+  "name": "@murphai/health-metrics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json --force --pretty false",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm typecheck"
+  },
+  "engines": {
+    "node": ">=24.14.1"
+  }
+}
