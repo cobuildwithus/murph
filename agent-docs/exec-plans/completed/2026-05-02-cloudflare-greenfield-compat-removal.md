@@ -25,7 +25,7 @@ Success criteria:
 
 ## State
 
-implemented_pending_verification
+completed
 
 ## Done
 
@@ -34,14 +34,26 @@ implemented_pending_verification
 - Removed the deploy workflow fallback to legacy hosted execution automation recipient names.
 - Deleted the legacy runner wake Queue module, Worker handler export, Queue contract types, and Queue tests.
 - Added focused guard coverage for canonical deploy env names and absence of Worker Queue handler/contracts.
+- Passed `pnpm --dir apps/cloudflare typecheck`.
+- Passed full `apps/cloudflare` Node Vitest workspace through `pnpm --dir apps/cloudflare test:node -- apps/cloudflare/test/index.test.ts apps/cloudflare/test/deploy-automation.test.ts`.
+- Passed `pnpm --dir apps/cloudflare verify`.
+- Passed targeted `bash scripts/workspace-verify.sh test:diff ...` for this working set; the command printed a transient unrelated `output-packages/research/tmp-*` scan race but exited successfully.
+- Passed root `pnpm typecheck`.
+- Required security/privacy review found no findings.
+- Required coverage-write pass made no changes and found proof sufficient.
+- `pnpm verify:acceptance` failed before coverage on pre-existing doc-gardening issues.
+- Root `pnpm test` failed in unrelated CLI test buckets with subprocess timeouts and missing built CLI artifact symptoms.
+- The scoped Cloudflare hard-cut was committed at `e2cc939ad` before plan archival.
+- Required final completion review found no findings.
+- Archived the active plan and removed the matching ledger row.
 
 ## Now
 
-- Run focused Cloudflare tests and required completion reviews.
+- Completed.
 
 ## Next
 
-- Run focused Cloudflare verification, required audit passes, repo verification, then finish with a scoped commit if not blocked by unrelated dirty work.
+- None.
 
 ## Open Questions
 
@@ -56,3 +68,6 @@ implemented_pending_verification
 - `apps/cloudflare/test/index.test.ts`
 - `apps/cloudflare/test/deploy-automation.test.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02
