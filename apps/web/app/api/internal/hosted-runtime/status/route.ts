@@ -1,13 +1,14 @@
 import {
-  type HostedMailboxLane,
-} from "@murphai/hosted-execution/runtime-control";
-import {
   parseHostedRuntimeWebStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import {
+  computeHostedMailboxLaneLag,
+  readHostedMailboxRedactedStatusRecord,
+} from "@/src/lib/hosted-mailbox/lag";
 import { readHostedMailboxMaxSeqByLane } from "@/src/lib/hosted-mailbox/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -23,20 +24,13 @@ export const GET = withJsonError(async (request: Request) => {
     readHostedMailboxMaxSeqByLane({ userId }),
     listHostedRuntimeLogs({ limit: logLimit, userId }),
   ]);
-  const redactedStatus = readRecord(workspace?.redactedStatusJson);
+  const redactedStatus = readHostedMailboxRedactedStatusRecord(workspace?.redactedStatusJson);
 
   return jsonOk(parseHostedRuntimeWebStatusResponse({
-    mailboxLag: maxSeqByLane.map((highWater) => {
-      const importedSeq = readImportedSeqForLane(redactedStatus, highWater.lane);
-      const maxSeq = BigInt(highWater.maxSeq);
-
-      return {
-        importedSeq: importedSeq.toString(),
-        lag: (maxSeq > importedSeq ? maxSeq - importedSeq : 0n).toString(),
-        lane: highWater.lane,
-        maxSeq: highWater.maxSeq,
-      };
-    }),
+    mailboxLag: maxSeqByLane.map((highWater) => computeHostedMailboxLaneLag({
+      highWater,
+      redactedStatusJson: redactedStatus,
+    })),
     recentLogs: recentLogs.map((entry) => ({
       at: entry.at,
       attemptId: entry.attemptId,
@@ -51,7 +45,7 @@ export const GET = withJsonError(async (request: Request) => {
       mailboxSeqStart: entry.mailboxSeqStart,
       outboxIntentRef: entry.outboxIntentRef,
       phase: entry.phase,
-      redactedJson: readRecord(entry.redactedJson),
+      redactedJson: readHostedMailboxRedactedStatusRecord(entry.redactedJson),
       workspaceVersion: entry.workspaceVersion,
     })),
     userId,
@@ -82,55 +76,4 @@ function readStatusLogLimit(request: Request): number {
   const parsed = Number.parseInt(rawLimit, 10);
 
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 20;
-}
-
-function readImportedSeqForLane(
-  redactedStatus: Record<string, unknown> | null,
-  lane: HostedMailboxLane,
-): bigint {
-  if (!redactedStatus) {
-    return 0n;
-  }
-
-  const capitalizedLane = `${lane.slice(0, 1).toUpperCase()}${lane.slice(1)}`;
-  const candidates = [
-    `hostedMailbox${capitalizedLane}ImportedSeq`,
-    `${lane}ImportedSeq`,
-    `imported${capitalizedLane}Seq`,
-    `mailbox${capitalizedLane}ImportedSeq`,
-  ];
-
-  for (const key of candidates) {
-    const parsed = readNonNegativeBigInt(redactedStatus[key]);
-
-    if (parsed !== null) {
-      return parsed;
-    }
-  }
-
-  return 0n;
-}
-
-function readNonNegativeBigInt(value: unknown): bigint | null {
-  if (typeof value === "bigint" && value >= 0n) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
-    return BigInt(value);
-  }
-
-  if (typeof value === "string" && /^[0-9]+$/u.test(value)) {
-    return BigInt(value);
-  }
-
-  return null;
-}
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  return Object.fromEntries(Object.entries(value));
 }
