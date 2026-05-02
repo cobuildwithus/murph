@@ -479,6 +479,7 @@ describe("hosted onboarding routes", () => {
         "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading <redacted-path> and notifying <redacted-email> with Bearer <redacted-secret>",
       errorType: "TypeError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
+      requestMethod: "POST",
     });
   });
 
@@ -676,6 +677,7 @@ describe("hosted onboarding routes", () => {
         column: "signup_phone_code_send_attempt_id",
         modelName: "HostedMemberIdentity",
       },
+      requestMethod: "POST",
     });
   });
 
@@ -718,6 +720,7 @@ describe("hosted onboarding routes", () => {
       prismaCode: "P1001",
       prismaMessage:
         "connect failed for <redacted-url> from <redacted-path> while notifying <redacted-email> at <redacted-phone>",
+      requestMethod: "POST",
     });
   });
 
@@ -975,6 +978,7 @@ describe("hosted onboarding routes", () => {
         "Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
       errorType: "Error",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
+      requestMethod: "POST",
     });
     const loggedPayload = errorSpy.mock.calls[0]?.[1];
     expect(loggedPayload).not.toHaveProperty("errorDetails");

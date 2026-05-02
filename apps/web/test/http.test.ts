@@ -88,6 +88,7 @@ describe("json route helper factory", () => {
       errorResponseCode: "KNOWN",
       errorResponseStatus: 409,
       errorType: "string",
+      errorValue: "known",
       internalMessage: "route failed unexpectedly",
     });
   });
@@ -149,7 +150,7 @@ describe("json route helper factory", () => {
           : null,
       ],
     });
-    const handler = helpers.withJsonError(async () => {
+    const handler = helpers.withJsonError(async (_request: Request) => {
       return Promise.reject("known");
     });
 
@@ -168,6 +169,7 @@ describe("json route helper factory", () => {
       errorResponseCode: "KNOWN",
       errorResponseStatus: 400,
       errorType: "string",
+      errorValue: "known",
       internalMessage: "route failed unexpectedly",
       requestMethod: "POST",
     });
