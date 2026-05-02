@@ -851,59 +851,88 @@ researchLandscape:
     - source_artifact:pmid-32716115
     defaultOpen: true
   - id: clinic-and-methods-context
-    label: Clinic-supervised and methods context
+    label: Clinic, device, dose, and methods context
     stance: context_only
-    summary: Older clinic-supervised 633/830 nm studies and radiometry/methods papers support plausibility and implementation discipline, but they are not exact home-mask dose templates; mixed red-only clinical evidence is handled in the mixed/null group.
+    summary: Clinic-supervised early LED studies, mechanism and dose-response reviews, home-device reviews, registry or protocol records, radiometry papers, and reporting-quality sources support plausibility and implementation discipline. They help set device, dose, endpoint, and measurement boundaries but are not exact home-mask efficacy templates.
     sourceKeys:
+    - source_artifact:pmid-38309304
+    - source_artifact:pmid-24049929
+    - source_artifact:pmid-38674067
+    - source_artifact:pmid-38307144
     - source_artifact:pmid-16414908
     - source_artifact:pmid-17566756
     - source_artifact:pmid-16989189
     - source_artifact:pmid-17760698
     - source_artifact:pmid-41032498
     - source_artifact:pmid-26964800
+    - source_artifact:pmid-22461763
+    - source_artifact:pmid-20799848
     - source_artifact:pmid-30044464
+    - source_artifact:clinicaltrials-nct07054710-cosmetic-light-mask-2026-04-24
+    - source_artifact:clinicaltrials-nct04911140-led-mask-facial-rejuvenation-2021-06-02
+    - source_artifact:pmid-15624743
+    - source_artifact:pmid-15654716
+    - source_artifact:pmid-16176771
+    - source_artifact:pmid-16414904
+    - source_artifact:pmid-19150294
+    - source_artifact:pmid-19587693
+    - source_artifact:pmid-25705949
+    - source_artifact:pmid-26155326
+    - source_artifact:pmid-28741866
+    - source_artifact:pmid-31345324
+    - source_artifact:pmid-33471046
+    - source_artifact:pmid-33594706
+    - source_artifact:pmid-33938981
+    - source_artifact:pmid-36749255
+    - source_artifact:pmid-37252792
+    - source_artifact:pmid-38288650
+    - source_artifact:pmid-38476342
+    - source_artifact:pmid-40751922
   - id: mixed-and-adjacent-outcomes
     label: Mixed or adjacent variants
     stance: mixed
-    summary: Red-only, amber/yellow, periocular-only, under-eye, neck, large-area panel, handheld, multimodal, and red-only clinical studies can inform boundaries and outcome choice; several preserve null or mixed findings for blinded clinical scales, hydration/viscoelasticity, objective wrinkle scores, comparator superiority, or broadband red/NIR advantage.
+    summary: Red-only, amber/yellow, periocular-only, under-eye, neck, handheld, RF/multimodal, infrared, melasma/PIH, OLED, and registry-only adjacent records can inform boundaries and outcome choice. Several preserve null or mixed findings for blinded clinical scales, hydration or viscoelasticity, objective wrinkle scores, comparator superiority, or broadband red/NIR advantage.
     sourceKeys:
     - source_artifact:pmid-40167796
     - source_artifact:pmid-15909229
     - source_artifact:pmid-36780572
     - source_artifact:pmid-39133416
-    - source_artifact:pmid-39319750
-    - source_artifact:pmid-24286286
-    - source_artifact:pmid-41091280
     - source_artifact:pmid-28195844
+    - source_artifact:pmid-24286286
+    - source_artifact:pmid-39319750
+    - source_artifact:pmid-33921839
+    - source_artifact:pmid-37522497
+    - source_artifact:pmid-41091280
+    - source_artifact:pmid-29858421
+    - source_artifact:clinicaltrials-nct04525573-2026-04-24
+    - source_artifact:clinicaltrials-nct07025837-irestore-led-face-neck-chest-2024-09-06
+    - source_artifact:pmid-16941737
+    - source_artifact:pmid-17852628
+    - source_artifact:pmid-19146602
+    - source_artifact:pmid-19215260
+    - source_artifact:pmid-19839877
+    - source_artifact:pmid-27910259
+    - source_artifact:pmid-32949447
   - id: safety-boundaries
-    label: Eye, heat, pigment, medication, and procedure safety boundaries
+    label: Eye, device, pigment, medication, and procedure safety boundaries
     stance: safety_boundary
-    summary: Safety evidence and regulatory context support required eye protection, adult-only automated onboarding, pregnancy/lactation clinician review, nonthermal use, no blue/UV/acne/PDT/photosensitizer/photoconverter modes, conservative ocular, photosensitivity, pigment, lesion, medication, and procedure screening, and stop rules for ocular symptoms, irritation, blistering, pigment change, device heat, or dose-escalation pressure.
+    summary: Safety evidence and regulatory context support required eye protection, adult-only onboarding, nonthermal use, no blue/UV/acne/PDT/photosensitizer/photoconverter modes, conservative ocular, pigment, lesion, medication, device-heat, recent-procedure, and skin-of-color screening, and stop rules for ocular symptoms, irritation, blistering, pigment change, device heat, or dose-escalation pressure.
     sourceKeys:
+    - source_artifact:fda-currentbody-series-2-k250966-2025-06-25
+    - source_artifact:fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20
+    - source_artifact:fda-k230124-led-facewear-mask-eye-protection-2023-02-09
+    - source_artifact:pmid-31483941
     - source_artifact:pmid-39122507
     - source_artifact:pmid-39335685
     - source_artifact:pmid-37533142
     - source_artifact:pmid-32541484
     - source_artifact:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17
-    - source_artifact:fda-currentbody-series-2-k250966-2025-06-25
-    - source_artifact:fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20
-    - source_artifact:fda-k230124-led-facewear-mask-eye-protection-2023-02-09
     - source_artifact:fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27
     - source_artifact:pmid-35606999
     - source_artifact:pmid-28891192
     - source_artifact:pmid-29552271
     - source_artifact:pmid-35333214
     - source_artifact:doi-10.5318-wjo.v4.i1.1
-    - source_artifact:pmid-33390779
-    - source_artifact:pmid-34863776
-    - source_artifact:pmid-37227712
-    - source_artifact:pmid-39672511
-    - source_artifact:ranzco-red-light-nir-pbm-eye-position-statement-2020-11-01
-    - source_artifact:pmid-31483941
-    - source_artifact:pmid-27484782
-    - source_artifact:pmid-30894210
-    - source_artifact:clinicaltrials-nct02630303-2026-04-24
-    - source_artifact:clinicaltrials-nct03433222-2026-04-24
     - source_artifact:pmid-20410914
     - source_artifact:pmid-24888214
     - source_artifact:pmid-26121474
@@ -931,31 +960,47 @@ researchLandscape:
     - source_artifact:pmid-23551853
     - source_artifact:pmid-30074109
     - source_artifact:pmid-25266806
-    - source_artifact:clinicaltrials-nct07054710-cosmetic-light-mask-2026-04-24
     - source_artifact:bmla-laser-ipl-treatment-guidelines-2019-05-01
+    - source_artifact:pmid-33390779
+    - source_artifact:pmid-34863776
+    - source_artifact:pmid-37227712
+    - source_artifact:pmid-39672511
+    - source_artifact:ranzco-red-light-nir-pbm-eye-position-statement-2020-11-01
+    - source_artifact:pmid-27484782
+    - source_artifact:pmid-30894210
+    - source_artifact:clinicaltrials-nct02630303-2026-04-24
+    - source_artifact:clinicaltrials-nct03433222-2026-04-24
+    - source_artifact:pmid-26745730
+    - source_artifact:pmid-29178437
+    - source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21
+    - source_artifact:aad-red-light-therapy-safety-2024-09-13
+    - source_artifact:govuk-laser-ipl-led-guidance-2015-09-01
+    - source_artifact:pmid-23111621
+    - source_artifact:pmid-25790150
+    - source_artifact:pmid-29657669
+    - source_artifact:pmid-31922171
+    - source_artifact:pmid-32118019
+    - source_artifact:pmid-33731574
+    - source_artifact:pmid-37858054
+    - source_artifact:pmid-38018017
+    - source_artifact:pmid-39211002
+    - source_artifact:pmid-39429338
+    - source_artifact:pmid-39547340
+    defaultOpen: true
+  - id: excluded-protocol-families
+    label: Excluded protocol families
+    stance: context_only
+    summary: PDT/photosensitizer, photoconverter gel, PRP-combination, broad dermatologic LED/PBM, laser/IPL, acne, ophthalmology/myopia PBM, transcranial/intranasal PBM, infrared sauna, and whole-body panel records should be re-homed or used only as boundary context, not as direct cosmetic red+NIR facial-mask efficacy evidence.
+    sourceKeys:
     - source_artifact:pmid-30506819
     - source_artifact:pmid-34575408
     - source_artifact:pmid-29552272
     - source_artifact:pmid-20456545
     - source_artifact:pmid-27257391
-    - source_artifact:pmid-26745730
-    - source_artifact:pmid-29178437
-    - source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21
-    - source_artifact:pmid-39439130
-    defaultOpen: true
-  - id: excluded-protocol-families
-    label: Excluded protocol families
-    stance: context_only
-    summary: PDT/photosensitizer, photoconverter, laser/IPL, post-procedure wound healing, acne, ophthalmology/myopia PBM, transcranial/intranasal PBM, infrared sauna, and whole-body panel records should be re-homed or used only as safety/context, not as direct cosmetic efficacy evidence.
-    sourceKeys:
-    - source_artifact:pmid-20456545
-    - source_artifact:pmid-27257391
     - source_artifact:clinicaltrials-nct04145999-photobiomodulation-prp-facial-rejuvenation-2019-10-31
-    - source_artifact:pmid-34575408
     - source_artifact:pmid-29356026
     - source_artifact:pmid-36310510
     - source_artifact:pmid-40253006
-    - source_artifact:pmid-29552272
 ---
 
 ## Question this experiment answers

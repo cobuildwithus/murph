@@ -1491,95 +1491,159 @@ researchLandscape:
     id: direct-glycemic-anchors
     label: Direct after-meal glycemic anchors
     stance: supports
-    summary: Direct or close after-main-meal studies support 10–15 minute post-meal walking as a meal-level glucose experiment, with strongest precision in adults with type 2 diabetes and small supervised or CGM studies.
+    summary: Direct after-meal walking studies provide the main meal-window glucose rationale, especially in adults with type 2 diabetes or impaired-glucose-tolerance risk; they do not prove broader metabolic or clinical outcomes.
     sourceKeys:
-    - source_artifact:pmid-27747394
-    - source_artifact:pmid-23761134
-    - source_artifact:pmid-28883892
-    - source_artifact:pmid-33088646
-    - source_artifact:pmid-32173259
     - source_artifact:pmid-19560716
+    - source_artifact:pmid-23761134
+    - source_artifact:pmid-27747394
+    - source_artifact:pmid-28883892
+    - source_artifact:pmid-32173259
+    - source_artifact:pmid-33088646
     defaultOpen: true
   -
     id: dose-timing-implementation
     label: Dose, timing, and implementation
     stance: mixed
-    summary: The default dose is meal-adjacent 10–15 minute walking, but the exact start minute, intensity, and dinner-only versus every-meal tradeoff remain endpoint- and context-dependent.
+    summary: Timing, bout length, intensity, dinner-only comparisons, pre/post-meal timing, and accumulated-bout reviews calibrate how to run the protocol without turning adjacent doses into stronger claims.
     sourceKeys:
-    - source_artifact:pmid-40594496
-    - source_artifact:pmid-35268055
-    - source_artifact:pmid-30603254
-    - source_artifact:pmid-33561220
-    - source_artifact:pmid-36715875
-    - source_artifact:pmid-30067587
-    - source_artifact:pmid-38548105
+    - source_artifact:pmid-19568199
     - source_artifact:pmid-20029518
     - source_artifact:pmid-22270150
+    - source_artifact:pmid-24508328
+    - source_artifact:pmid-29396781
+    - source_artifact:pmid-29421968
+    - source_artifact:pmid-30067587
+    - source_artifact:pmid-30295296
+    - source_artifact:pmid-30603254
+    - source_artifact:pmid-31093764
+    - source_artifact:pmid-31952250
+    - source_artifact:pmid-33561220
+    - source_artifact:pmid-35072806
+    - source_artifact:pmid-35268055
+    - source_artifact:pmid-36612575
+    - source_artifact:pmid-38548105
+    - source_artifact:pmid-36715875
+    - source_artifact:pmid-37892564
+    - source_artifact:pmid-40594496
   -
     id: secondary-metabolism-and-longer-outcomes
     label: Secondary metabolic and longer-run outcomes
     stance: mixed
-    summary: Fasting glucose, HbA1c, fructosamine, triglycerides, insulin, inflammatory markers, oxidative-stress markers, blood pressure, and other lab or clinic markers should be tracked only as secondary or safety/context outcomes because direct and adjacent findings are mixed or null.
+    summary: Lipids, insulin, fasting glucose, HbA1c, CGM variability, pregnancy-hyperglycemia signals, and other longer-run metabolic endpoints are mixed or adjacent and should stay secondary to meal-window glucose.
     sourceKeys:
+    - source_artifact:doi-10.3389-fendo.2025.1694758
+    - source_artifact:pmid-28857839
     - source_artifact:pmid-31318033
     - source_artifact:pmid-35985050
-    - source_artifact:pmid-30067587
-    - source_artifact:pmid-31952250
-    - source_artifact:pmid-32236116
-    - source_artifact:pmid-28883892
+    - source_artifact:pmid-41362785
   -
     id: measurement-readiness
     label: Experiment measurement readiness
     stance: context_only
-    summary: CGM plus meal and walking timestamps is the highest-readiness measurement path; fingerstick can be a fallback, while wearables are mainly adherence and exposure evidence.
+    summary: CGM, meal timestamps, walk timestamps, trial-protocol designs, and wearable activity records help make the self-experiment interpretable; they are not direct efficacy evidence by themselves.
     sourceKeys:
-    - source_artifact:pmid-23761134
-    - source_artifact:pmid-27747394
-    - source_artifact:pmid-33088646
-    - source_artifact:pmid-32173259
-    - source_artifact:pmid-24038928
     - source_artifact:clinicaltrials-nct07250698-2026-04-25
-    - source_artifact:clinicaltrials-nct06125704-2026-04-25
+    - source_artifact:doi-10.1186-s12966-024-01693-5
+    - source_artifact:pmid-24038928
+    - source_artifact:pmid-37356796
+    - source_artifact:pmid-40023292
+    - source_artifact:pmid-41607684
   -
     id: safety-population-boundaries
     label: Safety and population boundaries
     stance: safety_boundary
-    summary: Diabetes medication, type 1 diabetes, pregnancy/GDM, recurrent lows, frailty, falls, post-meal dizziness or suspected postprandial hypotension, neuropathy/foot risk, reflux/GI symptom contexts, limited direct adverse-event reporting, and unstable cardiopulmonary symptoms require stronger boundaries than the efficacy evidence alone suggests.
+    summary: Diabetes medications, type 1 diabetes, pregnancy/GDM, frailty, falls, post-meal hypotension, neuropathy/foot risk, reflux or GI symptom contexts, and cardiometabolic guidelines set boundaries before any benefit claim.
     sourceKeys:
-    - source_artifact:american-diabetes-association-standards-care-2026-2025-12-08
-    - source_artifact:diabetes.org-blood-glucose-exercise-2026-04-25
-    - source_artifact:diabetes-org-exercising-diabetes-complications-2026-04-25
-    - source_artifact:diabetes.org-exercise-type-1-2026-04-25
-    - source_artifact:pmid-27926890
-    - source_artifact:pmid-29650112
-    - source_artifact:pmid-35029593
-    - source_artifact:pmid-36477488
     - source_artifact:ada-standards-2026-glycemic-goals
-    - source_artifact:nice-ng3-diabetes-in-pregnancy-2015
-    - source_artifact:pmid-32217980
+    - source_artifact:american-diabetes-association-standards-care-2026-2025-12-08
+    - source_artifact:clinicaltrials-nct06157684-2026-04-25
+    - source_artifact:diabetes-org-exercising-diabetes-complications-2026-04-25
+    - source_artifact:diabetes.org-blood-glucose-exercise-2026-04-25
+    - source_artifact:diabetes.org-exercise-type-1-2026-04-25
     - source_artifact:doi-10.1093-ageing-afae022
-    - source_artifact:pmid-7825766
+    - source_artifact:nice-ng3-diabetes-in-pregnancy-2015
+    - source_artifact:pmid-10569685
+    - source_artifact:pmid-10685744
+    - source_artifact:pmid-11148431
+    - source_artifact:pmid-11171839
+    - source_artifact:pmid-11306744
+    - source_artifact:pmid-11315820
+    - source_artifact:pmid-12161052
+    - source_artifact:pmid-12792163
+    - source_artifact:pmid-15017652
+    - source_artifact:pmid-18392240
+    - source_artifact:pmid-19405255
+    - source_artifact:pmid-21152196
+    - source_artifact:pmid-22204202
+    - source_artifact:pmid-22875231
+    - source_artifact:pmid-24630686
+    - source_artifact:pmid-24676289
+    - source_artifact:pmid-25306290
+    - source_artifact:pmid-27068716
     - source_artifact:pmid-27089361
     - source_artifact:pmid-27445060
+    - source_artifact:pmid-27926890
+    - source_artifact:pmid-28126459
+    - source_artifact:pmid-28922065
+    - source_artifact:pmid-29272606
+    - source_artifact:pmid-29370047
+    - source_artifact:pmid-29650112
+    - source_artifact:pmid-30397494
+    - source_artifact:pmid-32105515
+    - source_artifact:pmid-32217980
+    - source_artifact:pmid-32236116
+    - source_artifact:pmid-32246999
+    - source_artifact:pmid-32982972
+    - source_artifact:pmid-33112052
+    - source_artifact:pmid-33868611
+    - source_artifact:pmid-34216833
+    - source_artifact:pmid-3425644
+    - source_artifact:pmid-34807007
+    - source_artifact:pmid-35029593
+    - source_artifact:pmid-35123084
+    - source_artifact:pmid-35226174
+    - source_artifact:pmid-36148880
+    - source_artifact:pmid-36477488
+    - source_artifact:pmid-36537529
+    - source_artifact:pmid-36929054
+    - source_artifact:pmid-37219354
+    - source_artifact:pmid-38233988
+    - source_artifact:pmid-38433709
+    - source_artifact:pmid-39389106
     - source_artifact:pmid-40242133
+    - source_artifact:pmid-40844856
     - source_artifact:pmid-41358888
-    - source_artifact:pmid-11306744
-    - source_artifact:pmid-19405255
-    - source_artifact:pmid-24676289
+    - source_artifact:pmid-41358898
+    - source_artifact:pmid-7825766
+    - source_artifact:pmid-8020641
   -
     id: adjacent-external-claims
-    label: Adjacent variants and external claims
+    label: Adjacent activity context and external claims
     stance: context_only
-    summary: Standing-only breaks, micro-walk sedentary-break protocols, consumer CGM pages, influencer-style glucose-spike claims, and trial registries map user expectations and boundaries but should not supply primary efficacy claims for the Murph protocol.
+    summary: Standing-only breaks, micro-walk sedentary-break protocols, accumulated activity, general physical-activity reviews, consumer CGM pages, and public glucose-spike claims help map expectations without becoming primary evidence for this protocol.
     sourceKeys:
+    - source_artifact:doi-10.1093-eurjpc-zwag079
+    - source_artifact:levels-walking-after-meal-2024-03-18
+    - source_artifact:nutrisense-get-blood-sugar-down-2022-09-12
     - source_artifact:pmid-22374636
     - source_artifact:pmid-23803893
+    - source_artifact:pmid-24637345
     - source_artifact:pmid-24704421
     - source_artifact:pmid-25731923
-    - source_artifact:levels-walking-after-meal-2024-03-18
+    - source_artifact:pmid-26509374
+    - source_artifact:pmid-26628415
+    - source_artifact:pmid-28422556
+    - source_artifact:pmid-30078066
+    - source_artifact:pmid-31552570
+    - source_artifact:pmid-32594985
+    - source_artifact:pmid-33359636
+    - source_artifact:pmid-35147898
+    - source_artifact:pmid-36728338
+    - source_artifact:pmid-36840389
+    - source_artifact:pmid-37887672
+    - source_artifact:pmid-39803911
     - source_artifact:signos-walking-after-meals-2025-09-11
     - source_artifact:zoe-blood-sugar-tips-jessie-inchauspe-2024-08-22
-    - source_artifact:clinicaltrials-nct04499287-2026-04-25
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
