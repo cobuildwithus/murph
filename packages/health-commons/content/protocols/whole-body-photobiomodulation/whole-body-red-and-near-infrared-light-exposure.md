@@ -836,6 +836,7 @@ researchLandscape:
         - "source_artifact:pmid-19602651"
         - "source_artifact:pmid-36927734"
         - "source_artifact:pmid-37002704"
+        - "source_artifact:pmid-37593770"
         - "source_artifact:pmid-40253006"
     -
       id: "direct-sleep-and-wellbeing-evidence"
