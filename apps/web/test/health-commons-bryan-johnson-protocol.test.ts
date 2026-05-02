@@ -425,8 +425,12 @@ describe("Health Commons experiment protocol metadata", () => {
       "walking-bout-minutes",
       "walking-cadence",
     ];
+    const publishedBiomarkerRouteIds = new Set(listHealthCommonsBiomarkerRoutes());
+    const expectedPublishedSignalRouteIds = expectedSignalRouteIds.map((routeId) =>
+      publishedBiomarkerRouteIds.has(routeId) ? routeId : undefined
+    );
     expect(fullProtocol.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
-      expectedSignalRouteIds,
+      expectedPublishedSignalRouteIds,
     );
     expect(protocolTab.expectedSignals.map((signal) => signal.biomarkerRouteId)).toEqual(
       expectedSignalRouteIds,
