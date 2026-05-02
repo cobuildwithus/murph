@@ -144,7 +144,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
       wakeHandoffReason: wakeHandoff?.reason ?? null,
+      wakeHandoffRunnerNudgeAccepted: wakeHandoff?.nudgeAccepted ?? false,
       wakeHandoffStarted: wakeHandoff?.started ?? false,
+      wakeHandoffWorkflowStarted: wakeHandoff?.workflowStarted ?? false,
     });
     return plan.response;
   } catch (error) {
@@ -174,6 +176,7 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   const timeoutMs = HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS;
   const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
   const wakeHandoffStarted = input.wakeHandoff?.started === true;
+  const runnerNudgeAccepted = input.wakeHandoff?.nudgeAccepted === true;
   const readReceiptTiming = startHostedOnboardingTiming(
     "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
@@ -181,16 +184,20 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       responseReason,
       timeoutMs,
       wakeHandoffReason,
+      runnerNudgeAccepted,
       wakeHandoffStarted,
+      wakeHandoffWorkflowStarted: input.wakeHandoff?.workflowStarted ?? false,
     },
   );
 
-  if (!wakeHandoffStarted) {
-    finishHostedOnboardingTiming(readReceiptTiming, "skipped-wake-handoff-not-started", {
+  if (!runnerNudgeAccepted) {
+    finishHostedOnboardingTiming(readReceiptTiming, "skipped-runner-nudge-not-accepted", {
+      runnerNudgeAccepted,
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
       wakeHandoffStarted,
+      wakeHandoffWorkflowStarted: input.wakeHandoff?.workflowStarted ?? false,
     });
     return;
   }
@@ -206,12 +213,14 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       httpStatus: result.status,
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+      runnerNudgeAccepted,
       wakeHandoffReason,
       wakeHandoffStarted,
     });
   } catch (error) {
     finishHostedOnboardingTiming(readReceiptTiming, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
+      runnerNudgeAccepted,
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
