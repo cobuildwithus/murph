@@ -1,11 +1,12 @@
 # Command Surface
 
-Status: frozen baseline plus health extension fence for `vault-cli`
+Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
 
 ## Namespace
 
-- The only public baseline namespace is `vault-cli`.
-- The installed `murph` binary is the product-facing single-active-vault wrapper over this raw surface: normal `murph` commands use the selected active vault, `murph onboard --vault <path>` creates/selects one during setup, and `murph use <path>` selects an existing vault for future `murph` commands.
+- `murph` is the product CLI. It uses the selected active vault for normal commands, `murph onboard --vault <path>` creates or selects one during setup, and `murph use <path>` selects an existing vault for future product commands.
+- `vault-cli` is the raw explicit-vault and operator surface. The command synopses below list that explicit-vault contract because every canonical vault command names its target with `--vault <path>`.
+- `murph` and `vault-cli` are two UX layers over the same command graph; product aliases such as `murph chat`, `murph run`, `murph status`, `murph doctor`, and `murph stop` must stay discovery-compatible with their explicit-vault equivalents.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
 - `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
@@ -247,7 +248,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `audit` exposes `show | list | tail`.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and the audit-only normalized model bundle helper.
 - `assistant` is a Codex App Server-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
-- `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert`, `update`, or `forget`. Canonical `memoryId` arguments use `mem_<ULID>` ids, while legacy hash-shaped ids remain readable for existing persisted memory comments.
+- `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids.
 - `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
 - Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
 - Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.

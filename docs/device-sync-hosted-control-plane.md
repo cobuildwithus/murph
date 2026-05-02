@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-04-19
+Last verified against repo layout: 2026-05-02
 
 ## Current split
 
@@ -55,7 +55,7 @@ It does not own canonical health-data import, token authority, or canonical host
 
 `apps/cloudflare` is responsible for:
 
-- hosted execution coordination and per-user run orchestration
+- hosted runner nudge handling, per-user Durable Object coordination, and bounded hosted workspace invocation drive
 - invoking signed internal `apps/web` callbacks when a hosted job needs current device-sync runtime authority
 - consuming current runtime snapshots during a hosted job and sending narrow runtime updates back to web
 
@@ -71,7 +71,7 @@ Local `device-syncd` remains responsible for:
 
 - local token cache and reconcile state
 - scheduled reconcile and backfill execution
-- direct WHOOP and Oura API fetches when the local data plane is active
+- direct provider API fetches for configured direct providers such as WHOOP, Oura, and Strava, plus Junction-backed targets such as Garmin when configured
 - normalization and import through `@murphai/importers`
 - all canonical vault writes for wearable data
 
@@ -150,12 +150,12 @@ This local runtime remains the only place that writes wearable facts into the va
 
 ### Hosted public routes
 
-- `GET /api/device-sync/oauth/:provider/start`
 - `GET /api/device-sync/oauth/:provider/callback`
-- `POST /api/device-sync/webhooks/whoop`
-- `POST /api/device-sync/webhooks/oura`
+- `GET /api/device-sync/connect/:provider/callback`
+- `GET /api/device-sync/webhooks/:provider`
+- `POST /api/device-sync/webhooks/:provider`
 
-These are internet-facing and provider-facing only.
+These are internet-facing and provider-facing only. `:provider` is resolved through the shared provider-manifest registry, not an app-local provider list. Current configured providers include `junction`, `oura`, `strava`, and `whoop`; Junction-backed source providers such as Garmin are selected by connect target/source-provider metadata rather than by adding a separate hosted provider route.
 
 ### Hosted settings-authenticated routes
 
@@ -164,7 +164,7 @@ These are internet-facing and provider-facing only.
 - `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-These are the browser-facing wearable-management routes. Ordinary reads should come from durable hosted metadata in Postgres. Live execution/runtime inspection belongs only on explicit operational routes.
+These are the browser-facing wearable-management routes. They resolve direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so the UI can expose direct WHOOP plus Junction-backed Garmin/Oura/Strava targets when those providers are configured. Ordinary reads should come from durable hosted metadata in Postgres. Live execution/runtime inspection belongs only on explicit operational routes.
 
 ### Hosted assertion-authenticated browser bridge routes
 
@@ -189,7 +189,7 @@ These are authenticated by local-agent credentials, not browser cookies.
 - `POST /api/internal/device-sync/runtime/apply` on `apps/web`
 - `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link` on `apps/web`
 
-These routes are authenticated by signed server-to-server traffic that never reaches the browser. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution.
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution.
 
 ## Runtime access strategy
 
@@ -203,9 +203,11 @@ The current hosted runtime strategy is:
 
 This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
 
-## Provider split
+## Provider and connect-target split
 
-### WHOOP
+Provider configuration is registry-owned by `@murphai/device-syncd/config`. Hosted routes resolve provider manifests for direct providers and resolve connect targets for user-facing source choices. This keeps direct WHOOP, direct Oura and Strava, and Junction-backed source providers such as Garmin/Oura/Strava on one control-plane shape instead of branching hosted persistence by provider.
+
+### WHOOP direct provider
 
 Hosted responsibilities:
 
@@ -220,19 +222,49 @@ Local responsibilities:
 - fetch WHOOP collections and resources directly
 - import delete and resource changes into the vault from hosted hints
 
-### Oura
+### Oura direct or Junction-backed target
 
 Hosted responsibilities:
 
 - OAuth callback
 - hosted web token refresh and agent export flows
 - webhook subscription management when Oura webhooks are enabled
+- Junction connect-target link generation when Oura is routed through Junction
 - execution-time runtime snapshot/apply access when a hosted job needs it
 
 Local responsibilities:
 
 - polling-first reconcile against recent windows
 - optional use of hosted webhook signals
+- local imports into the vault
+
+### Strava direct or Junction-backed target
+
+Hosted responsibilities:
+
+- OAuth callback
+- hosted web token refresh and agent export flows
+- app-global webhook preflight and dedupe when direct Strava webhooks are enabled
+- Junction connect-target link generation when Strava is routed through Junction
+- execution-time runtime snapshot/apply access when a hosted job needs it
+
+Local responsibilities:
+
+- polling-first reconcile against recent activity windows
+- optional use of hosted webhook signals
+- local imports into the vault
+
+### Garmin via Junction
+
+Hosted responsibilities:
+
+- Junction connect-target link generation with Garmin carried as the Junction source provider
+- hosted web token refresh and agent export flows through the Junction provider manifest
+- execution-time runtime snapshot/apply access when a hosted job needs it
+
+Local responsibilities:
+
+- Junction-backed reconcile of Garmin summaries, timeseries, sleep, activity, and other configured resources
 - local imports into the vault
 
 ## Local-only daemon contract

@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-04-30
+Last verified: 2026-05-02
 
 ## Purpose
 
@@ -20,19 +20,36 @@ repo/
       04-error-codes.md
       05-fixtures.md
 
+  apps/
+    web/
+    cloudflare/
+
   packages/
     contracts/
+    hosted-execution/
     runtime-state/
     core/
-    assistant-cli/
-    setup-cli/
-    cli/
     importers/
     device-syncd/
+    messaging-ingress/
     inboxd/
+    inbox-services/
     parsers/
     query/
+    vault-usecases/
     health-commons/
+    assistant-engine/
+    operator-config/
+    assistant-cli/
+    setup-cli/
+    assistantd/
+    assistant-runtime/
+    gateway-core/
+    gateway-local/
+    cloudflare-hosted-control/
+    hosted-local-harness/
+    cli/
+    openclaw-plugin/
   fixtures/
     minimal-vault/
     sample-imports/
@@ -48,18 +65,34 @@ repo/
 - Keep each package's `exports` map intentionally small and semantic. When a package starts wanting many file-shaped subpaths or compatibility wrappers, that is a signal to split ownership or add one clearer owner seam rather than turning `package.json` into a directory listing.
 - Re-export another package's surface only when this package is the real owner-level API. Otherwise callers should import from the true owner package directly.
 - Compatibility shims are temporary migration tools, not permanent architecture. Remove pass-through files and subpath aliases once callers have moved.
+- Only `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin` are published. Other `packages/*` entries are workspace-private owner packages that may be bundled into published tarballs when needed.
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, generated JSON Schema artifacts, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd.
+- `packages/hosted-execution` owns shared hosted runtime-control contracts, route builders, auth canonicalization helpers, redacted runtime-log/status codecs, and vendor-neutral hosted env names while deployed topology and auth adapters stay app-local.
 - `packages/runtime-state` defines canonical local-state taxonomy and paths (`.runtime/operations/**`, `.runtime/projections/**`, `.runtime/cache/**`, `.runtime/tmp/**`), aggregates subsystem-owned operational descriptor manifests for portability policy, and provides shared JSON/SQLite versioning helpers and migration defaults.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, canonical write rules, and current-format vault validation; canonical reads/writes fail closed on non-current `formatVersion` values.
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
 - `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials in durable local operational state under `.runtime/operations/device-sync/**` and outside the canonical vault.
+- `packages/messaging-ingress` owns stateless Telegram/Linq webhook parsing, verification, target grammar, summaries, and sparse minimization without taking on polling, hosted policy, or runtime persistence.
 - `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
+- `packages/inbox-services` owns lower-level inbox runtime, read, and promotion service composition used by CLI/assistant flows without becoming the canonical inbox-capture owner.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection under `.runtime/projections/query.sqlite` that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, and exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`.
+- `packages/vault-usecases` owns CLI/headless vault usecase orchestration over core, importers, and query. It exposes the neutral service surface, lazy runtime loaders, command-shaped input normalization, and assistant-safe vault path helpers used by CLI and headless runtimes. It is not a canonical write owner, query-model owner, inbox/device runtime owner, assistant/session owner, or broad re-export layer.
 - `packages/health-commons` owns the public Health Commons for protocol, biomarker, source, and source-person pages, plus the generated catalogs and aggregate outcome summaries consumed by local and hosted surfaces.
+- `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, assistant-specific vault/inbox/knowledge tools, and the local gateway adapter used by daemon and hosted runtimes.
+- `packages/operator-config` owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and shared CLI/setup contracts.
 - `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging, and the Ink chat UI.
 - `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
-- `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, and must not bypass core for canonical writes.
+- `packages/assistantd` owns the loopback-only local assistant daemon and authenticated control plane for steady-state assistant, automation, outbox, status, and local gateway operations bound to one vault.
+- `packages/assistant-runtime` owns the headless hosted runtime surface that runs bounded hosted inbox/bootstrap/assistant/outbox/device-sync workspace invocations behind an injected hosted platform context.
+- `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, projection/snapshot helpers, opaque ids, and event-log utilities.
+- `packages/gateway-local` owns the workspace-private local vault-backed gateway adapter and rebuildable `.runtime/projections/gateway.sqlite` store.
+- `packages/cloudflare-hosted-control` owns private Cloudflare runner nudge/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
+- `packages/hosted-local-harness` owns the local hosted-development and hosted E2E harness, including profile selection, redacted state files, runner-bundle prep, diagnostics, and cleanup.
+- `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
+- `packages/openclaw-plugin` exposes the published OpenClaw-compatible skill bundle that teaches OpenClaw to call the existing Murph CLI rather than running a second assistant runtime.
+- `apps/web` owns the hosted Next.js control plane, hosted Postgres product/control facts, encrypted mailbox rows, hosted workspace checkpoint metadata, usage ledger, onboarding, billing, consent, and device-sync authority.
+- `apps/cloudflare` owns the hosted execution plane: authenticated runner nudge/status/browser-vault requests, Durable Object coordination, encrypted runtime blobs, and the native runner-container path over `packages/assistant-runtime`.
 
 ## Storage Model
 
@@ -88,7 +121,7 @@ repo/
   - `derived/knowledge/log.md`
   - `derived/knowledge/pages/*.md`
 - Local runtime state:
-- canonical `vault.json` / markdown evolution stays in `packages/core`; non-current `formatVersion` values fail closed, `vault.json` stores only instance-owned facts plus `formatVersion`, layout and id/shard policy stay code-owned, and rebuildable `.runtime/projections/**` stores are repaired or rebuilt separately and never become canonical migration state
+  - canonical `vault.json` / markdown evolution stays in `packages/core`; non-current `formatVersion` values fail closed, `vault.json` stores only instance-owned facts plus `formatVersion`, layout and id/shard policy stay code-owned, and rebuildable `.runtime/projections/**` stores are repaired or rebuilt separately and never become canonical migration state
   - `.runtime/operations/inbox/*.json`
   - `.runtime/operations/parsers/toolchain.json`
   - `.runtime/operations/device-sync/state.sqlite`
