@@ -34,7 +34,7 @@ import type { QueryRecordData } from "./query-record-data.ts";
 export type { QueryRecordData } from "./query-record-data.ts";
 
 type FrontmatterRecordType = "core" | "experiment" | "journal" | "protocol";
-type JsonRecordType = "audit" | "event" | "sample";
+type JsonRecordType = "audit" | "event" | "metric_sample" | "sample";
 
 export interface VaultSourceSnapshot {
   metadata: QueryRecordData | null;
@@ -205,6 +205,7 @@ async function readBaseEntities(
   const protocols = await readProtocolEntities(vaultRoot);
   const journalEntries = await readJournalEntities(vaultRoot);
   const events = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, "event");
+  const metricSamples = await readMetricSampleEntities(vaultRoot);
   const samples = await readSampleEntities(vaultRoot);
   const audits = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.auditDirectory, "audit");
 
@@ -214,6 +215,7 @@ async function readBaseEntities(
     ...protocols,
     ...journalEntries,
     ...events,
+    ...metricSamples,
     ...samples,
     ...audits,
   ];
@@ -427,7 +429,7 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
 async function readJsonlRecordFamily(
   vaultRoot: string,
   relativeDir: string,
-  recordType: Exclude<JsonRecordType, "sample">,
+  recordType: Exclude<JsonRecordType, "metric_sample" | "sample">,
 ): Promise<CanonicalEntity[]> {
   const entities = await readSortedJsonlRecords(
     vaultRoot,
@@ -492,6 +494,54 @@ async function readJsonlRecordFamily(
   );
 
   return recordType === "event" ? collapseEventLedgerEntities(entities) : entities;
+}
+
+async function readMetricSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
+  return readSortedJsonlRecords(
+    vaultRoot,
+    VAULT_LAYOUT.metricSampleLedgerDirectory,
+    (sourcePath, lineNumber, rawPayload) => {
+      const payload = normalizeJsonRecordPayload("metric_sample", rawPayload);
+      const rawRecordId = requireCanonicalString(
+        payload,
+        "id",
+        `metric sample record at ${sourcePath}:${lineNumber}`,
+      );
+      const occurredAt = requireCanonicalString(
+        payload,
+        "recordedAt",
+        `metric sample record at ${sourcePath}:${lineNumber}`,
+      );
+      const metric = requireCanonicalString(
+        payload,
+        "metric",
+        `metric sample record at ${sourcePath}:${lineNumber}`,
+      );
+      const links: CanonicalEntity["links"] = [];
+
+      return {
+        entityId: rawRecordId,
+        primaryLookupId: rawRecordId,
+        lookupIds: uniqueStrings([rawRecordId]),
+        family: "sample",
+        recordClass: resolveCanonicalRecordClass("sample"),
+        kind: "metric_sample",
+        status: pickString(payload, ["quality"]),
+        occurredAt,
+        date: pickString(payload, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
+        path: sourcePath,
+        title: `${metric} metric sample`,
+        body: null,
+        attributes: payload,
+        frontmatter: null,
+        links,
+        relatedIds: linkTargetIds(links),
+        stream: metric,
+        experimentSlug: pickString(payload, ["experimentSlug"]),
+        tags: normalizeTags(payload.tags),
+      };
+    },
+  );
 }
 
 async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
