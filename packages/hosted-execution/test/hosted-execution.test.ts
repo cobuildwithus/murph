@@ -13,7 +13,9 @@ import {
   readHostedExecutionSignatureHeaders,
 } from "../src/auth.ts";
 import {
+  getHostedBrowserVaultReplicaStorageKeyId,
   parseHostedBrowserVaultReplicaRef,
+  type HostedBrowserVaultReplicaRef,
 } from "../src/browser-vault.ts";
 import {
   HOSTED_EXECUTION_EVENT_KINDS,
@@ -50,9 +52,10 @@ describe("hosted execution coverage gaps", () => {
       runtimeRootKeyId: "udrk:runtime:test-root",
       schema: "murph.hosted-browser-vault-replica-ref.v1",
       sourceBundleHash: "sha256:source",
-    };
+    } satisfies HostedBrowserVaultReplicaRef;
 
     expect(parseHostedBrowserVaultReplicaRef(ref)).toEqual(ref);
+    expect(getHostedBrowserVaultReplicaStorageKeyId(ref)).toBe(ref.keyId);
     const dataKeyRef = {
       ...ref,
       dataKeyEnvelope: {
@@ -74,8 +77,11 @@ describe("hosted execution coverage gaps", () => {
           rootKeyId: ref.runtimeRootKeyId,
         }],
       },
-    };
+    } satisfies HostedBrowserVaultReplicaRef;
     expect(parseHostedBrowserVaultReplicaRef(dataKeyRef)).toEqual(dataKeyRef);
+    expect(getHostedBrowserVaultReplicaStorageKeyId(dataKeyRef)).toBe(
+      dataKeyRef.dataKeyEnvelope.dataKeyId,
+    );
     expect(parseHostedBrowserVaultReplicaRef(null)).toBeNull();
     expect(parseHostedExecutionSnapshotRef(undefined)).toBeNull();
     expect(() => parseHostedBrowserVaultReplicaRef({
@@ -274,6 +280,7 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);
+    expect(typeof browserVaultModule.getHostedBrowserVaultReplicaStorageKeyId).toBe("function");
     expect(typeof browserVaultModule.parseHostedBrowserVaultReplicaRef).toBe("function");
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);

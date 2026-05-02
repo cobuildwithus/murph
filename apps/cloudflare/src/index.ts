@@ -15,6 +15,7 @@ import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  getHostedBrowserVaultReplicaStorageKeyId,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
@@ -610,7 +611,7 @@ async function handleBrowserVaultSessionRoute(
       error: "Browser vault replica was not found.",
     }, 404);
   }
-  const replicaStorageKeyId = getBrowserVaultReplicaStorageKeyId(body.replicaRef);
+  const replicaStorageKeyId = getHostedBrowserVaultReplicaStorageKeyId(body.replicaRef);
   if (replicaEnvelope.keyId !== replicaStorageKeyId) {
     return json({
       code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
@@ -649,12 +650,6 @@ async function handleBrowserVaultSessionRoute(
     replicaRef: body.replicaRef,
     state: "ready",
   });
-}
-
-function getBrowserVaultReplicaStorageKeyId(
-  ref: HostedBrowserVaultReplicaRef,
-): string {
-  return ref.dataKeyEnvelope?.dataKeyId ?? ref.keyId;
 }
 
 function parseJsonValue(value: string): unknown {
