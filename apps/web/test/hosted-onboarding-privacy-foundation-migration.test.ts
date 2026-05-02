@@ -81,6 +81,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
+  "HostedWebSession",
   "HostedMailboxItem",
   "HostedMailboxLaneCounter",
   "HostedMailboxPayload",
@@ -166,6 +167,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260501000001_hosted_user_crypto_envelope_hardening",
       "2026050100_device_connection_credentials_setup",
       "2026050101_device_connection_sources",
+      "20260502000000_hosted_web_session",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');

@@ -16,6 +16,7 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 const mocks = vi.hoisted(() => ({
   getHostedInviteStatus: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
   joinInvitePageViewProps: null as { model: JoinInvitePageModel } | null,
   readHostedConsentStatus: vi.fn(),
@@ -46,6 +47,10 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
+  getHostedPrivySession: mocks.getHostedPrivySession,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
@@ -108,6 +113,20 @@ beforeEach(() => {
       verifiedPrivyUser: {
         id: "test-privy-user",
       },
+    },
+  });
+  mocks.getHostedPrivySession.mockResolvedValue({
+    identity: {
+      phone: {
+        number: "+15550100271",
+        verifiedAt: 1741194420,
+      },
+      userId: "test-privy-user",
+      wallet: null,
+    },
+    linkedAccounts: [],
+    verifiedPrivyUser: {
+      id: "test-privy-user",
     },
   });
   mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
@@ -208,15 +227,8 @@ test("JoinInvitePage gates checkout on server-read launch consent", async () => 
 
 test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
-  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "active",
-      createdAt: new Date("2025-03-27T08:00:00.000Z"),
-      id: "member_123",
-      suspendedAt: null,
-      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
-    },
+  mocks.getHostedPrivySession.mockResolvedValueOnce({
+    identity: null,
     linkedAccounts: [
       {
         address: "hidden@example.test",
@@ -232,6 +244,20 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
         username: "murph_test",
       },
     ],
+    verifiedPrivyUser: {
+      id: "test-privy-user",
+    },
+  });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      createdAt: new Date("2025-03-27T08:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    },
+    linkedAccounts: [],
     memberLookup: null,
     session: {
       identity: null,

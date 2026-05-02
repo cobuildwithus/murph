@@ -66,7 +66,7 @@ export type {
 } from "./query-projection-types.ts";
 
 const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-const QUERY_PROJECTION_SQLITE_VERSION = 1;
+const QUERY_PROJECTION_SQLITE_VERSION = 2;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -312,14 +312,17 @@ export async function selectMetricGoalProgressRuntime(input: {
   targetId: string;
   vaultRoot: string;
 }): Promise<MetricGoalProgress | null> {
-  const [targets, points] = await Promise.all([
-    listMetricTargetsRuntime(input.vaultRoot),
-    listMetricPointsRuntime(input.vaultRoot),
-  ]);
+  const targets = await listMetricTargetsRuntime(input.vaultRoot);
   const target = targets.find((entry) => entry.goalId === input.goalId && entry.target.targetId === input.targetId);
-  return target
-    ? selectMetricGoalProgress({ goalId: target.goalId, now: input.now, points, target: target.target })
-    : null;
+  if (!target) {
+    return null;
+  }
+
+  const points = await listMetricPointsRuntime(input.vaultRoot, {
+    limit: 10_000,
+    metricKey: target.target.metricKey,
+  });
+  return selectMetricGoalProgress({ goalId: target.goalId, now: input.now, points, target: target.target });
 }
 
 

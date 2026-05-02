@@ -6,6 +6,7 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
+  formatTargetValue,
   listMetricPoints,
   listMetricDefinitions,
   normalizeMetricKey,
@@ -235,6 +236,99 @@ test("selects metric points by policy and exposes provenance warnings", () => {
   }).map((point) => point.id), ["metric-point:apob:2026-04-29:lab:0"]);
 });
 
+test("latest-lab policy does not silently fall back to non-lab event points", () => {
+  const manualMeasurement = metricPoint({
+    effectiveDate: "2026-04-30",
+    id: "metric-point:glucose:2026-04-30:measurement:0",
+    observedAt: "2026-04-30T07:00:00.000Z",
+    recordId: "manual_glucose",
+    sourceKind: "measurement",
+    value: 88,
+  });
+  const olderLab = metricPoint({
+    context: { fastingStatus: "fasting" },
+    effectiveDate: "2026-04-01",
+    id: "metric-point:glucose:2026-04-01:lab:0",
+    observedAt: "2026-04-01T07:00:00.000Z",
+    recordId: "lab_glucose",
+    sourceKind: "test-result",
+    value: 82,
+  });
+
+  const selected = selectMetricValue({
+    metricKey: "glucose",
+    points: [manualMeasurement, olderLab],
+  });
+
+  assert.equal(selected.status, "ready");
+  assert.equal(selected.point?.source.recordId, "lab_glucose");
+  assert.equal(selected.value, 82);
+
+  const noLab = selectMetricValue({
+    metricKey: "glucose",
+    points: [manualMeasurement],
+  });
+
+  assert.equal(noLab.status, "no_data");
+  assert.equal(noLab.point, null);
+});
+
+test("supports daily aggregate policy selections with contributing provenance", () => {
+  const points = [
+    metricPoint({
+      effectiveDate: "2026-04-27",
+      id: "metric-point:resting-heart-rate:2026-04-27:wearable:0",
+      metricKey: "resting-heart-rate",
+      observedAt: "2026-04-27T07:00:00.000Z",
+      recordId: "wearable_rhr_1",
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 52,
+    }),
+    metricPoint({
+      effectiveDate: "2026-04-28",
+      id: "metric-point:resting-heart-rate:2026-04-28:wearable:0",
+      metricKey: "resting-heart-rate",
+      observedAt: "2026-04-28T07:00:00.000Z",
+      recordId: "wearable_rhr_2",
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 50,
+    }),
+    metricPoint({
+      effectiveDate: "2026-04-29",
+      id: "metric-point:resting-heart-rate:2026-04-29:wearable:0",
+      metricKey: "resting-heart-rate",
+      observedAt: "2026-04-29T07:00:00.000Z",
+      recordId: "wearable_rhr_3",
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 51,
+    }),
+  ];
+  const selected = selectMetricValue({
+    metricKey: "resting-heart-rate",
+    now: "2026-04-30T00:00:00.000Z",
+    points,
+    policyOverride: { kind: "daily-aggregate", latestWindowDays: 3, minimumPoints: 3, staleAfterDays: 7, statistic: "median" },
+  });
+
+  assert.equal(selected.status, "ready");
+  assert.equal(selected.value, 51);
+  assert.equal(selected.point?.source.kind, "metric-selection-summary");
+  assert.deepEqual(selected.provenance.pointIds, points.map((point) => point.id));
+  assert.deepEqual(selected.provenance.recordIds, ["wearable_rhr_1", "wearable_rhr_2", "wearable_rhr_3"]);
+
+  const insufficient = selectMetricValue({
+    metricKey: "resting-heart-rate",
+    points,
+    policyOverride: { kind: "daily-aggregate", latestWindowDays: 3, minimumPoints: 4, statistic: "median" },
+  });
+
+  assert.equal(insufficient.status, "insufficient_data");
+  assert.equal(insufficient.warnings[0]?.code, "LOW_SAMPLE_COUNT");
+});
+
 test("returns empty and stale selections without losing metric identity", () => {
   const empty = selectMetricValue({
     biomarkerKey: "biomarker:blood-glucose",
@@ -265,12 +359,33 @@ test("returns empty and stale selections without losing metric identity", () => 
   assert.equal(stale.warnings[0]?.code, "SOURCE_STALE");
   assert.ok(stale.point);
 
+  const overrideFresh = selectMetricValue({
+    metricKey: "body-weight",
+    now: "2026-04-30T00:00:00.000Z",
+    points: [stale.point],
+    policyOverride: { kind: "latest-valid", staleAfterDays: 365 },
+  });
+  assert.equal(overrideFresh.status, "ready");
+  assert.equal(
+    overrideFresh.warnings.some((warning) => warning.code === "SOURCE_STALE"),
+    false,
+  );
+
   const invalidNow = selectMetricValue({
     metricKey: "body-weight",
     now: "not-a-date",
     points: [stale.point],
   });
   assert.equal(invalidNow.status, "ready");
+
+  const overrideStale = selectMetricValue({
+    metricKey: "body-weight",
+    now: "2026-01-10T00:00:00.000Z",
+    points: [stale.point],
+    policyOverride: { kind: "latest-valid", staleAfterDays: 5 },
+  });
+  assert.equal(overrideStale.status, "stale");
+  assert.equal(overrideStale.warnings[0]?.code, "SOURCE_STALE");
 });
 
 test("sorts source priorities and custom metrics through selection and series helpers", () => {
@@ -332,6 +447,66 @@ test("sorts source priorities and custom metrics through selection and series he
   assert.equal(series.status, "ready");
   assert.deepEqual(series.rows.map((point) => point.pointIds), [[latestMeasurement.id]]);
   assert.equal(series.warnings.some((warning) => warning.code === "MIXED_SOURCES"), true);
+
+  const latestObserved = selectMetricSeries({
+    duplicatePolicy: "latest-observed",
+    metricKey: "body-fat-percentage",
+    points: [sameDayDevice, latestMeasurement],
+  });
+  assert.deepEqual(latestObserved.rows.map((point) => point.pointIds), [[sameDayDevice.id]]);
+
+  const keepAll = selectMetricSeries({
+    duplicatePolicy: "keep-all",
+    grain: "day",
+    metricKey: "body-fat-percentage",
+    points: [sameDayDevice, latestMeasurement],
+    statistic: "value",
+  });
+  assert.deepEqual(keepAll.rows.map((point) => point.pointIds), [[latestMeasurement.id], [sameDayDevice.id]]);
+});
+
+test("reports empty, insufficient, and warning-rich semantic series states", () => {
+  const noData = selectMetricSeries({
+    metricKey: "glucose",
+    points: [],
+  });
+  assert.equal(noData.status, "no_data");
+  assert.deepEqual(noData.provenance.pointIds, []);
+
+  const bodyWeight = metricPoint({
+    comparator: ">",
+    context: { measurementMethodKey: "scale-a" },
+    effectiveDate: "2026-04-29",
+    id: "metric-point:body-weight:2026-04-29:measurement:0",
+    metricKey: "body-weight",
+    observedAt: "2026-04-29T08:00:00.000Z",
+    recordId: "weight_scale_a",
+    sourceKind: "measurement",
+    unit: "stone",
+    value: 12,
+  });
+  const bodyWeightOtherMethod = metricPoint({
+    context: { measurementMethodKey: "scale-b" },
+    effectiveDate: "2026-04-30",
+    id: "metric-point:body-weight:2026-04-30:measurement:0",
+    metricKey: "body-weight",
+    observedAt: "2026-04-30T08:00:00.000Z",
+    recordId: "weight_scale_b",
+    sourceKind: "wearable-summary",
+    unit: "kg",
+    value: 81,
+  });
+
+  const insufficient = selectMetricSeries({
+    metricKey: "body-weight",
+    minimumPoints: 3,
+    points: [bodyWeight, bodyWeightOtherMethod],
+  });
+  assert.equal(insufficient.status, "insufficient_data");
+  assert.deepEqual(
+    insufficient.warnings.map((warning) => warning.code).sort(),
+    ["COMPARATOR_VALUE", "LOW_SAMPLE_COUNT", "METHOD_CHANGED", "MIXED_SOURCES", "UNIT_NOT_NORMALIZED"],
+  );
 });
 
 test("formats text-only metric values and missing numeric values", () => {
@@ -409,6 +584,32 @@ test("builds chronological metric series and formats display values", () => {
     { date: "2026-04-20", value: 82.2 },
     { date: "2026-04-29", value: 81.9 },
   ]);
+  const aggregations: Array<"count" | "max" | "median" | "min" | "sum"> = ["min", "max", "sum", "median", "count"];
+  assert.deepEqual(aggregations.map((aggregation) =>
+    selectMetricSeries({
+      aggregation,
+      metricKey: "body-weight",
+      points: [newer, older],
+    }).rows.map((point) => point.value)
+  ), [
+    [82.2, 81.64],
+    [82.2, 81.64],
+    [82.2, 81.64],
+    [82.2, 81.64],
+    [1, 1],
+  ]);
+
+  const textOnlyCount = selectMetricSeries({
+    aggregation: "count",
+    metricKey: "body-weight",
+    points: [{
+      ...older,
+      canonicalValue: null,
+      textValue: "not measured",
+      value: null,
+    }],
+  });
+  assert.equal(textOnlyCount.rows[0]?.value, 0);
   assert.equal(formatMetricDisplayValue(newer), "81.6");
 });
 
@@ -454,6 +655,85 @@ test("selects metric window comparisons and trends through shared selectors", ()
   assert.equal(trend?.delta, -4);
   assert.equal(trend?.direction, "down");
   assert.equal(trend?.label, "2-day median vs prior 2 days");
+
+  assert.equal(selectMetricTrend({
+    metricKey: "resting-heart-rate",
+    points: [],
+    policy: {
+      aggregation: "mean",
+      comparisonWindowDays: 2,
+      latestWindowDays: 2,
+      minimumPoints: 2,
+    },
+  }), null);
+
+  assert.equal(selectMetricWindowComparison({
+    baselineWindow: { end: null, start: null },
+    comparisonWindow: { end: "2026-04-04", start: "2026-04-03", totalDays: 2 },
+    metricKey: "resting-heart-rate",
+    points: rows,
+  }).status, "unsupported");
+
+  assert.equal(selectMetricWindowComparison({
+    baselineWindow: { end: "2026-04-02", start: "2026-04-01", totalDays: 2 },
+    comparisonWindow: { end: "2026-04-04", start: "2026-04-03", totalDays: 2 },
+    metricKey: "resting-heart-rate",
+    minimumPoints: 3,
+    points: rows.slice(0, 3),
+  }).status, "insufficient_data");
+
+  const mixedUnits = selectMetricWindowComparison({
+    baselineWindow: { end: "2026-04-01", start: "2026-04-01", totalDays: 1 },
+    comparisonWindow: { end: "2026-04-02", start: "2026-04-02", totalDays: 1 },
+    metricKey: "resting-heart-rate",
+    points: [
+      seriesPoint("2026-04-01", 60),
+      { ...seriesPoint("2026-04-02", 62), unit: "beats-per-minute" },
+    ],
+  });
+  assert.equal(mixedUnits.warnings[0]?.code, "UNIT_NOT_NORMALIZED");
+
+  const flatTrend = selectMetricTrend({
+    metricKey: "resting-heart-rate",
+    points: [
+      seriesPoint("2026-04-01", 60),
+      seriesPoint("2026-04-02", 60),
+      seriesPoint("2026-04-03", 60.4),
+      seriesPoint("2026-04-04", 60.4),
+    ],
+    policy: {
+      aggregation: "mean",
+      comparisonWindowDays: 2,
+      latestWindowDays: 2,
+    },
+    unit: "bpm",
+    valuePrecision: 0,
+  });
+  assert.equal(flatTrend?.direction, "flat");
+
+  const upwardPercentTrend = selectMetricTrend({
+    metricKey: "body-fat-percentage",
+    points: [
+      { ...seriesPoint("2026-04-01", 20), metricKey: "body-fat-percentage", unit: "percent" },
+      { ...seriesPoint("2026-04-02", 20), metricKey: "body-fat-percentage", unit: "percent" },
+      { ...seriesPoint("2026-04-03", 21), metricKey: "body-fat-percentage", unit: "percent" },
+      { ...seriesPoint("2026-04-04", 21), metricKey: "body-fat-percentage", unit: "percent" },
+    ],
+    policy: {
+      aggregation: "mean",
+      comparisonWindowDays: 2,
+      latestWindowDays: 2,
+    },
+    unit: "%",
+  });
+  assert.equal(upwardPercentTrend?.direction, "up");
+
+  assert.equal(selectMetricWindowComparison({
+    baselineWindow: { end: "2026-04-02", start: "2026-04-01", totalDays: 2 },
+    comparisonWindow: { end: "2026-04-04", start: "2026-04-03", totalDays: 2 },
+    metricKey: "unknown-metric",
+    points: rows,
+  }).status, "no_data");
 });
 
 test("goal progress reports neutral not_met for unscheduled selected-value targets", () => {
@@ -489,6 +769,119 @@ test("goal progress reports neutral not_met for unscheduled selected-value targe
   assert.equal(progress.currentValue, 45);
 });
 
+test("goal progress covers latest-lab, policy overrides, open ranges, and no-data", () => {
+  const lab = metricPoint({
+    effectiveDate: "2026-04-29",
+    id: "metric-point:resting-heart-rate:2026-04-29:lab:0",
+    metricKey: "resting-heart-rate",
+    observedAt: "2026-04-29T07:00:00.000Z",
+    recordId: "lab_rhr",
+    sourceKind: "test-result",
+    unit: "bpm",
+    value: 55,
+  });
+  const device = metricPoint({
+    effectiveDate: "2026-04-30",
+    id: "metric-point:resting-heart-rate:2026-04-30:wearable:0",
+    metricKey: "resting-heart-rate",
+    observedAt: "2026-04-30T08:00:00.000Z",
+    recordId: "wearable_rhr",
+    sourceKind: "wearable-summary",
+    unit: "bpm",
+    value: 65,
+  });
+
+  const latestLab = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    points: [device, lab],
+    target: {
+      comparator: "<=",
+      evaluation: { kind: "latest-lab" },
+      kind: "metric",
+      metricKey: "resting-heart-rate",
+      targetId: "lab-rhr-under-55",
+      unit: "bpm",
+      value: 55,
+    },
+  });
+  assert.equal(latestLab.status, "met");
+  assert.deepEqual(latestLab.selectedPointIds, [lab.id]);
+  assert.equal(latestLab.deltaToTarget, 0);
+
+  const selectedDevice = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    points: [lab, device],
+    target: {
+      comparator: ">",
+      evaluation: { kind: "selected-value" },
+      kind: "metric",
+      metricKey: "resting-heart-rate",
+      selectionPolicyOverride: { kind: "latest-device-estimate" },
+      targetId: "device-rhr-over-60",
+      unit: "bpm",
+      value: 60,
+    },
+  });
+  assert.equal(selectedDevice.status, "met");
+  assert.deepEqual(selectedDevice.selectedPointIds, [device.id]);
+  assert.equal(selectedDevice.deltaToTarget, -5);
+
+  const noData = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    points: [],
+    target: {
+      comparator: ">=",
+      evaluation: { kind: "selected-value" },
+      kind: "metric",
+      metricKey: "resting-heart-rate",
+      targetId: "device-rhr-over-60",
+      unit: "bpm",
+      value: 60,
+    },
+  });
+  assert.equal(noData.status, "no_data");
+  assert.equal(noData.currentValue, null);
+
+  const inRange: GoalMetricTarget = {
+    comparator: "between",
+    evaluation: { kind: "selected-value" },
+    highValue: 70,
+    kind: "metric",
+    metricKey: "resting-heart-rate",
+    targetId: "rhr-range",
+    unit: "bpm",
+    value: 60,
+  };
+  assert.equal(formatTargetValue(inRange), "60-70 bpm");
+  assert.equal(selectMetricGoalProgress({ goalId: "goal_rhr", points: [device], target: inRange }).status, "met");
+
+  const belowRange = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    points: [{ ...device, canonicalValue: 55, value: 55 }],
+    target: inRange,
+  });
+  assert.equal(belowRange.status, "not_met");
+  assert.equal(belowRange.deltaToTarget, 5);
+
+  const aboveRange = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    points: [{ ...device, canonicalValue: 75, value: 75 }],
+    target: inRange,
+  });
+  assert.equal(aboveRange.status, "not_met");
+  assert.equal(aboveRange.deltaToTarget, 5);
+
+  const openRange: GoalMetricTarget = { ...inRange, highValue: undefined };
+  const openRangeProgress = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    points: [device],
+    target: openRange,
+  });
+  assert.equal(formatTargetValue(openRange), "60-? bpm");
+  assert.equal(openRangeProgress.status, "not_met");
+  assert.equal(openRangeProgress.deltaToTarget, null);
+});
+
 test("goal progress keeps behind for scheduled rolling-window targets that miss target", () => {
   const target: GoalMetricTarget = {
     comparator: "<",
@@ -520,6 +913,87 @@ test("goal progress keeps behind for scheduled rolling-window targets that miss 
 
   assert.equal(progress.status, "behind");
   assert.equal(progress.currentValue, 45);
+});
+
+test("goal progress surfaces rolling-window stale and low-sample warnings", () => {
+  const target: GoalMetricTarget = {
+    comparator: "<",
+    evaluation: { kind: "rolling-window", statistic: "mean", windowDays: 7 },
+    kind: "metric",
+    metricKey: "resting-heart-rate",
+    selectionPolicyOverride: { kind: "latest-valid", staleAfterDays: 3 },
+    targetAt: "2026-04-29",
+    targetId: "rhr-under-40",
+    unit: "bpm",
+    value: 40,
+  };
+
+  const progress = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    now: "2026-05-10T00:00:00.000Z",
+    points: Array.from({ length: 3 }, (_, index) => metricPoint({
+      effectiveDate: `2026-04-${String(27 + index).padStart(2, "0")}`,
+      id: `metric-point:resting-heart-rate:2026-04-${String(27 + index).padStart(2, "0")}:wearable:0`,
+      metricKey: "resting-heart-rate",
+      observedAt: `2026-04-${String(27 + index).padStart(2, "0")}T07:00:00.000Z`,
+      recordId: `wearable_rhr_sparse_${index}`,
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 45,
+    })),
+    target,
+  });
+
+  assert.equal(progress.status, "stale");
+  assert.deepEqual(
+    progress.warnings.map((warning) => warning.code).sort(),
+    ["LOW_SAMPLE_COUNT", "SOURCE_STALE"],
+  );
+});
+
+test("goal progress marks rolling windows stale from newest selected point rather than target anchor", () => {
+  const target: GoalMetricTarget = {
+    comparator: "<",
+    evaluation: { kind: "rolling-window", statistic: "mean", windowDays: 14 },
+    kind: "metric",
+    metricKey: "resting-heart-rate",
+    selectionPolicyOverride: { kind: "latest-valid", staleAfterDays: 3 },
+    targetAt: "2026-05-10",
+    targetId: "rhr-under-40",
+    unit: "bpm",
+    value: 40,
+  };
+
+  const progress = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    now: "2026-05-10T00:00:00.000Z",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:resting-heart-rate:2026-04-29:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "wearable_rhr_anchor_0",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 45,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-30",
+        id: "metric-point:resting-heart-rate:2026-04-30:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-04-30T07:00:00.000Z",
+        recordId: "wearable_rhr_anchor_1",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 45,
+      }),
+    ],
+    target,
+  });
+
+  assert.equal(progress.status, "stale");
+  assert.equal(progress.warnings.some((warning) => warning.code === "SOURCE_STALE"), true);
 });
 
 function metricPoint(input: {

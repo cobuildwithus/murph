@@ -529,7 +529,9 @@ Hosted onboarding surfaces:
 The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.
-- Privy remains the browser auth boundary for hosted onboarding.
+- Privy verifies login, linking, and security-sensitive identity operations;
+  successful hosted completion issues a first-party opaque app session stored as
+  a hashed `HostedWebSession`.
 - Stripe Checkout is subscription-only and `invoice.paid` remains the only
   positive entitlement source.
 - Hosted webhook receipts are retry journals for receipt-local side effects,

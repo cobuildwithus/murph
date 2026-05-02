@@ -70,7 +70,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(metadata.title, "Connect Devices — Murph");
-  assert.match(markup, /Connect your health/);
+  assert.match(markup, /Sync your biomarkers/);
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);

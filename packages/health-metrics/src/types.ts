@@ -29,6 +29,13 @@ export type MetricSelectionWarningCode =
 export type MetricSelectionPolicy =
   | { kind: "latest-valid"; staleAfterDays?: number }
   | { kind: "latest-lab"; preferCollectedAt: true; preferFasting?: boolean; staleAfterDays?: number }
+  | {
+      kind: "daily-aggregate";
+      latestWindowDays?: number;
+      minimumPoints?: number;
+      staleAfterDays?: number;
+      statistic: "mean" | "median" | "min" | "max" | "sum" | "count";
+    }
   | { kind: "latest-device-estimate"; staleAfterDays?: number }
   | {
       kind: "qualified-latest";

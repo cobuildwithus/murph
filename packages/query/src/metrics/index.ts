@@ -185,7 +185,10 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
     canonicalValue: normalized.canonicalValue,
     comparator: null,
     confidence: row.confidence,
-    context: compactContext(row.context ?? {}),
+    context: compactContext({
+      ...(row.context ?? {}),
+      contributingRecordIds: readStringArray(row.recordIds),
+    }),
     effectiveDate: row.date.slice(0, 10),
     grain: "day",
     metricKey: definition.key,

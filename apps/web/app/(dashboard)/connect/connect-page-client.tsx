@@ -13,8 +13,8 @@ import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-cons
 import {
   describeDeviceSyncCallbackError,
 } from "@/src/components/settings/hosted-device-sync-settings-utils";
-import { HostedSettingsSessionState } from "@/src/components/settings/hosted-settings-session-state";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/settings-surface";
@@ -132,13 +132,6 @@ export function ConnectSourcesGrid({
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
-      {!authenticated ? (
-        <HostedSettingsSessionState
-          authenticated={authenticated}
-          signedOutDescription="Sign in to connect your health data sources."
-        />
-      ) : null}
-
       {initialLoadError?.message ? (
         <Alert variant="destructive">
           <AlertTitle>Unable to load connected sources</AlertTitle>
@@ -210,6 +203,7 @@ export function ConnectSourcesGrid({
           ))}
         </div>
       )}
+
     </section>
   );
 }
@@ -273,18 +267,22 @@ function SourceCard({
         </div>
       ) : (
         <div className="mt-auto flex flex-col items-start gap-2">
-          <Button
-            type="button"
-            disabled={!canStart || pending}
-            aria-label={isAvailable
-              ? authenticated
+          {!authenticated ? (
+            <AuthButton aria-label={`Sign in to connect ${source.name}`}>
+              Sign in
+            </AuthButton>
+          ) : (
+            <Button
+              type="button"
+              disabled={!canStart || pending}
+              aria-label={isAvailable
                 ? `Connect ${source.name}`
-                : `Sign in to connect ${source.name}`
-              : `${source.name} connection is not available yet`}
-            onClick={() => void onStartConnection(source)}
-          >
-            {pending ? "Opening..." : isAvailable ? authenticated ? "Connect" : "Sign in first" : "Not available"}
-          </Button>
+                : `${source.name} connection is not available yet`}
+              onClick={() => void onStartConnection(source)}
+            >
+              {pending ? "Opening..." : isAvailable ? "Connect" : "Not available"}
+            </Button>
+          )}
           {errorMessage ? (
             <p role="alert" className="text-xs leading-snug text-destructive">
               {errorMessage}

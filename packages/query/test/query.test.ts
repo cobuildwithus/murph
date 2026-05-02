@@ -3434,7 +3434,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
   const target = {
-    biomarkerKey: "biomarker:apob",
+    biomarkerKey: "biomarker:apolipoprotein-b",
     comparator: "<",
     evaluation: {
       kind: "latest-lab",
@@ -3609,6 +3609,52 @@ test("query projection runtime goal progress resolves stored metric targets and 
         JSON.stringify(wearablePoint.context),
         JSON.stringify(wearablePoint),
       );
+      for (let index = 0; index < 1_005; index += 1) {
+        const noisePoint = {
+          ...wearablePoint,
+          biomarkerKey: null,
+          canonicalUnit: "count",
+          canonicalValue: index,
+          effectiveDate: "2026-05-01",
+          id: `metric-point:steps:noise:${index}`,
+          metricKey: "steps",
+          observedAt: `2026-05-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+          source: {
+            ...wearablePoint.source,
+            kind: "activity-summary",
+            recordId: `noise_steps_${index}`,
+          },
+          unit: "count",
+          value: index,
+        } as const;
+        insertMetricPoint.run(
+          noisePoint.id,
+          index + 2,
+          noisePoint.metricKey,
+          noisePoint.biomarkerKey,
+          noisePoint.value,
+          noisePoint.textValue,
+          noisePoint.comparator,
+          noisePoint.unit,
+          noisePoint.canonicalValue,
+          noisePoint.canonicalUnit,
+          noisePoint.observedAt,
+          noisePoint.effectiveDate,
+          noisePoint.recordedAt,
+          noisePoint.reportedAt,
+          noisePoint.grain,
+          noisePoint.statistic,
+          noisePoint.source.family,
+          noisePoint.source.kind,
+          noisePoint.source.recordId,
+          noisePoint.source.resultIndex,
+          noisePoint.source.path,
+          noisePoint.confidence,
+          JSON.stringify(noisePoint.provenance),
+          JSON.stringify(noisePoint.context),
+          JSON.stringify(noisePoint),
+        );
+      }
 
       database.prepare(`
         INSERT INTO query_metric_targets (
@@ -3799,7 +3845,7 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -3843,7 +3889,7 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
       const queryMetaTable = reopened
         .prepare(`
           SELECT name
@@ -3906,7 +3952,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
       const staleLookupTable = reopened
         .prepare(`
           SELECT name

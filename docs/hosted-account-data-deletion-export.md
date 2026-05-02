@@ -16,7 +16,7 @@ Murph hosted users need a real, backend-backed way to export account data and de
 
 The export and delete endpoints are intentionally stricter than normal settings reads.
 
-1. `POST /api/settings/data-export` and `POST /api/settings/privacy/delete` require an authenticated Privy-backed hosted member session via `requirePrivyMemberAuth`, including members who need privacy access after losing active billing state.
+1. `POST /api/settings/data-export` and `POST /api/settings/privacy/delete` require an authenticated Murph hosted app session via `requireHostedAppSessionFromRequest`, including members who need privacy access after losing active billing state.
 2. Both routes enforce browser mutation-origin protection with `assertHostedOnboardingMutationOrigin`, allowing only the canonical hosted origin or explicitly trusted mutation origins.
 3. Both routes parse JSON through the hosted onboarding JSON helper with a 4 KiB body limit instead of accepting form-encoded, ambiguous, or oversized bodies.
 4. `parseHostedDataExportRequest` requires the exact `EXPORT MY DATA` phrase plus sensitive-download acknowledgement. Lowercase, extra spaces, or omitted acknowledgement fail with structured 400 errors.
@@ -24,7 +24,8 @@ The export and delete endpoints are intentionally stricter than normal settings 
 6. The data export response is a JSON attachment with `private, no-store, no-cache` caching headers, same-origin resource policy, no referrer policy, and content-type sniffing disabled.
 7. Provider revocation runs before local database deletion while local token references are still readable.
 8. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
-9. Cloudflare runner/R2 cleanup runs only after the Prisma transaction commits, so a database failure does not leave a still-present account with already-destroyed runner state.
+9. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
+10. Cloudflare runner/R2 cleanup runs only after the Prisma transaction commits, so a database failure does not leave a still-present account with already-destroyed runner state.
 
 ## Export contract
 

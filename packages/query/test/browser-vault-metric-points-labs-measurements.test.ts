@@ -326,7 +326,7 @@ test("browser-vault metric goal targets honor selectionPolicyOverride from goal 
   assert.notEqual(progress.selectedPointIds[0], metricSelection.pointIds[0]);
 });
 
-test("browser-vault metric selections can use old points while metric rows stay lookback bounded", async () => {
+test("browser-vault metric selections can use old requested points while metric rows stay lookback bounded", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-05-02T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
@@ -338,10 +338,43 @@ test("browser-vault metric selections can use old points while metric rows stay 
           attributes: {
             measurements: [
               { metric: "body_weight", value: 180, unit: "lb" },
+              { metric: "private_reaction_score", value: 5, unit: "score" },
             ],
             source: "manual",
           },
         }),
+        {
+          attributes: {},
+          body: null,
+          date: "2024-01-01",
+          entityId: "goal_weight",
+          experimentSlug: null,
+          family: "goal",
+          frontmatter: {
+            metricTargets: [{
+              comparator: "<",
+              evaluation: { kind: "selected-value" },
+              kind: "metric",
+              metricKey: "body-weight",
+              targetId: "weight-under-82",
+              unit: "kg",
+              value: 82,
+            }],
+            status: "active",
+          },
+          kind: "goal",
+          links: [],
+          lookupIds: ["goal_weight"],
+          occurredAt: "2024-01-01T00:00:00.000Z",
+          path: "history/goals/goal_weight.md",
+          primaryLookupId: "goal_weight",
+          recordClass: "bank",
+          relatedIds: [],
+          status: "active",
+          stream: null,
+          tags: [],
+          title: "Body weight goal",
+        } satisfies CanonicalEntity,
       ],
       metadata: null,
       vaultRoot: "browser://vault",
@@ -352,6 +385,8 @@ test("browser-vault metric selections can use old points while metric rows stay 
 
   const bodyWeightPoints = client.metrics.series({ metricKey: "body-weight" });
   assert.deepEqual(bodyWeightPoints, []);
+  assert.deepEqual(client.metrics.series({ metricKey: "private-reaction-score" }), []);
+  assert.equal(client.metricSelections.get("private-reaction-score"), null);
 
   const bodyWeight = client.metricSelections.get("body-weight");
   assert.ok(bodyWeight);
@@ -361,6 +396,11 @@ test("browser-vault metric selections can use old points while metric rows stay 
   assert.equal(bodyWeight.selectedMetricRowId, null);
   assert.deepEqual(bodyWeight.recordIds, ["evt_weight_measurement"]);
   assert.equal(bodyWeight.warnings.some((warning) => warning.code === "SOURCE_STALE"), true);
+
+  const progress = client.metricGoals.progress({ goalId: "goal_weight" })[0];
+  assert.ok(progress);
+  assert.equal(progress.status, "stale");
+  assert.equal(Number((progress.currentValue ?? NaN).toFixed(1)), 81.6);
 });
 
 test("query projection rebuild stores shared event and wearable metric points in the projection table", async () => {
@@ -415,8 +455,14 @@ test("query projection rebuild stores shared event and wearable metric points in
       assert.equal(rows.find((row) => row.metricKey === "steps")?.sourceKind, "activity-summary");
       assert.deepEqual(
         [rows.find((row) => row.metricKey === "steps")?.sourceRecordId],
-        ["activity-summary:steps:2026-05-01"],
+        ["smp_projection_steps"],
       );
+      const stepsPoint = JSON.parse(
+        rows.find((row) => row.metricKey === "steps")?.metricPointJson ?? "null",
+      ) as { context?: { contributingRecordIds?: unknown }; source?: { recordId?: string } } | null;
+      assert.ok(stepsPoint);
+      assert.equal(stepsPoint.source?.recordId, "smp_projection_steps");
+      assert.deepEqual(stepsPoint.context?.contributingRecordIds, ["smp_projection_steps"]);
     } finally {
       database.close();
     }
