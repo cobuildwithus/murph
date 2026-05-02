@@ -7,7 +7,6 @@ import {
   readJsonObject,
   sanitizeJsonLogString,
 } from "../http";
-import { isHostedWebConfigurationError } from "../hosted-web/encryption";
 import { isHostedOnboardingError } from "./errors";
 
 const HOSTED_ONBOARDING_DEFAULT_HEADERS = {
@@ -36,10 +35,6 @@ export { readJsonObject, readOptionalJsonObject };
 
 function mapHostedOnboardingError(error: unknown) {
   return isHostedOnboardingError(error) ? mapDomainJsonError(error) : null;
-}
-
-function mapHostedWebConfigurationError(error: unknown) {
-  return isHostedWebConfigurationError(error) ? mapDomainJsonError(error) : null;
 }
 
 function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unknown> | null {
@@ -278,7 +273,7 @@ const hostedOnboardingJsonRouteHelpers = createJsonRouteHelpers({
   internalMessage: "Hosted onboarding route failed unexpectedly.",
   logMessage: "Hosted onboarding route failed.",
   logDetails: describeHostedOnboardingErrorForLog,
-  matchers: [mapHostedOnboardingError, mapHostedWebConfigurationError],
+  matchers: [mapHostedOnboardingError],
   sanitizeLogString: sanitizeHostedOnboardingLogString,
 });
 

@@ -7,14 +7,12 @@
 import type { HostedEmailAuthenticatedSenderVerdict } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.ts";
-import {
-  buildHostedStorageAad,
-  deriveHostedStorageOpaqueId,
-} from "./crypto-context.js";
+import { buildHostedStorageAad } from "./crypto-context.js";
 import {
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
 } from "./crypto.ts";
+import { hostedEmailRawMessageObjectKey } from "./storage-paths.ts";
 
 export type { HostedEmailConfig } from "./hosted-email/config.ts";
 export { readHostedEmailConfig } from "./hosted-email/config.ts";
@@ -29,7 +27,9 @@ export { shouldRejectHostedEmailIngressFailure } from "./hosted-email/ingress-po
 export { HostedEmailSendValidationError, sendHostedEmailMessage } from "./hosted-email/transport.ts";
 
 const HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024;
-const HOSTED_EMAIL_RAW_MESSAGE_OBJECT_PREFIX = "hosted-email/messages";
+const HOSTED_EMAIL_RAW_MESSAGE_KEY_SALT = "murph.hosted.email.raw-message-key.v1";
+
+export { hostedEmailRawMessageUserPrefix } from "./storage-paths.ts";
 
 export class HostedEmailRawMessageMissingError extends Error {
   readonly code = "email-raw-message-missing";
@@ -61,13 +61,15 @@ export async function readHostedEmailRawMessage(input: {
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
   rawMessageKey: string;
+  resolveKeyById?: (keyId: string) => Promise<Uint8Array | null>;
+  storageNamespaceId?: string | null;
   userId: string;
 }): Promise<Uint8Array | null> {
-  const objectKey = await hostedEmailRawMessageObjectKey(
-    input.key,
-    input.userId,
-    input.rawMessageKey,
-  );
+  const objectKey = await hostedEmailRawMessageObjectKey({
+    rawMessageKey: input.rawMessageKey,
+    storageNamespaceId: input.storageNamespaceId,
+    userId: input.userId,
+  });
 
   const rawMessage = await readEncryptedR2Payload({
     aad: buildHostedStorageAad({
@@ -81,6 +83,7 @@ export async function readHostedEmailRawMessage(input: {
     cryptoKeysById: input.keysById,
     expectedKeyId: input.keyId,
     key: objectKey,
+    resolveCryptoKeyById: input.resolveKeyById,
     scope: "email-raw",
   });
 
@@ -88,18 +91,21 @@ export async function readHostedEmailRawMessage(input: {
 }
 
 export async function resolveHostedEmailRawMessageStorageRef(input: {
-  key: Uint8Array;
   plaintext: Uint8Array;
+  storageNamespaceId?: string | null;
   userId: string;
 }): Promise<HostedEmailRawMessageStorageRef> {
   const rawMessageKey = await deriveHostedEmailRawMessageKey(
-    input.key,
     input.userId,
     input.plaintext,
   );
 
   return {
-    objectKey: await hostedEmailRawMessageObjectKey(input.key, input.userId, rawMessageKey),
+    objectKey: await hostedEmailRawMessageObjectKey({
+      rawMessageKey,
+      storageNamespaceId: input.storageNamespaceId,
+      userId: input.userId,
+    }),
     rawMessageKey,
   };
 }
@@ -110,11 +116,12 @@ export async function writeHostedEmailRawMessage(input: {
   keyId: string;
   plaintext: Uint8Array;
   storageRef?: HostedEmailRawMessageStorageRef;
+  storageNamespaceId?: string | null;
   userId: string;
 }): Promise<string> {
   const storageRef = input.storageRef ?? await resolveHostedEmailRawMessageStorageRef({
-    key: input.key,
     plaintext: input.plaintext,
+    storageNamespaceId: input.storageNamespaceId,
     userId: input.userId,
   });
   await writeEncryptedR2Payload({
@@ -136,9 +143,8 @@ export async function writeHostedEmailRawMessage(input: {
 
 export async function deleteHostedEmailRawMessage(input: {
   bucket: R2BucketLike;
-  key: Uint8Array;
-  keysById?: Readonly<Record<string, Uint8Array>>;
   rawMessageKey: string;
+  storageNamespaceId?: string | null;
   userId: string;
 }): Promise<void> {
   if (!input.bucket.delete) {
@@ -146,21 +152,12 @@ export async function deleteHostedEmailRawMessage(input: {
   }
 
   await input.bucket.delete(
-    await hostedEmailRawMessageObjectKey(input.key, input.userId, input.rawMessageKey),
+    await hostedEmailRawMessageObjectKey({
+      rawMessageKey: input.rawMessageKey,
+      storageNamespaceId: input.storageNamespaceId,
+      userId: input.userId,
+    }),
   );
-}
-
-export async function hostedEmailRawMessageUserPrefix(
-  rootKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "email-raw",
-    value: `user:${userId}`,
-  });
-  return `${HOSTED_EMAIL_RAW_MESSAGE_OBJECT_PREFIX}/${userSegment}/`;
 }
 
 export async function readHostedEmailMessageBytes(
@@ -251,34 +248,17 @@ function assertHostedEmailMessageSize(
 }
 
 async function deriveHostedEmailRawMessageKey(
-  rootKey: Uint8Array,
   userId: string,
   plaintext: Uint8Array,
 ): Promise<string> {
   const plaintextHash = await sha256Hex(plaintext);
+  const rawMessageKey = await sha256Hex(new TextEncoder().encode([
+    HOSTED_EMAIL_RAW_MESSAGE_KEY_SALT,
+    userId,
+    plaintextHash,
+  ].join("\0")));
 
-  return await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "email-raw-id",
-    value: `message:${userId}:${plaintextHash}`,
-  });
-}
-
-async function hostedEmailRawMessageObjectKey(
-  rootKey: Uint8Array,
-  userId: string,
-  rawMessageKey: string,
-): Promise<string> {
-  const userPrefix = await hostedEmailRawMessageUserPrefix(rootKey, userId);
-  const messageSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "email-raw",
-    value: `message:${userId}:${rawMessageKey}`,
-  });
-
-  return `${userPrefix}${messageSegment}.eml`;
+  return rawMessageKey.slice(0, 40);
 }
 
 async function sha256Hex(input: Uint8Array): Promise<string> {

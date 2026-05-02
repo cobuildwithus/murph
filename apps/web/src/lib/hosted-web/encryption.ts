@@ -6,30 +6,6 @@ import {
 
 export type HostedWebEncryptionPrismaClient = HostedSecureBoxPrismaClient;
 
-export class HostedWebConfigurationError extends Error {
-  readonly code: string;
-  readonly httpStatus: number;
-
-  constructor(input: { code: string; httpStatus: number; message: string }) {
-    super(input.message);
-    this.name = "HostedWebConfigurationError";
-    this.code = input.code;
-    this.httpStatus = input.httpStatus;
-  }
-}
-
-export function hostedWebConfigurationError(input: {
-  code: string;
-  httpStatus: number;
-  message: string;
-}): HostedWebConfigurationError {
-  return new HostedWebConfigurationError(input);
-}
-
-export function isHostedWebConfigurationError(error: unknown): error is HostedWebConfigurationError {
-  return error instanceof HostedWebConfigurationError;
-}
-
 export async function encryptHostedWebNullableString(input: {
   field: string;
   memberId: string;

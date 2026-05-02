@@ -205,6 +205,9 @@ describe("hosted storage object keys", () => {
     const storedEmailKey = findStoredObjectKey(bucket, (key) =>
       key.startsWith("hosted-email/messages/"),
     );
+    expect(storedEmailKey).toMatch(
+      /^hosted-email\/messages\/hsn_[0-9a-f]{24}\/[0-9a-f]{48}\.eml$/u,
+    );
     expectOpaqueStrings([storedEmailKey], ["user_email_123", rawMessageKey]);
   });
 });

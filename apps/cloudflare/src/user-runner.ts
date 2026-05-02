@@ -575,28 +575,12 @@ export class HostedUserRunner {
     const supportsObjectDeletion = Boolean(this.bucket.delete);
     const supportsPrefixDeletion = Boolean(this.bucket.delete && this.bucket.list);
     let userCrypto: HostedUserCryptoContext | null = null;
-    let ingressCrypto: HostedUserCryptoContext | null = null;
     const userScopedSkipReasons: string[] = [];
 
     try {
       userCrypto = await requireHostedUserCryptoContextFromEnvironment({
         bucket: this.bucket,
         domain: "runtime",
-        environment: this.env,
-        reason: "account-data-deletion",
-        userId,
-      });
-    } catch (error) {
-      if (!(error instanceof HostedUserCryptoRepairNeededError)) {
-        throw error;
-      }
-      userScopedSkipReasons.push(error instanceof Error && error.name ? error.name : "UnknownError");
-    }
-
-    try {
-      ingressCrypto = await requireHostedUserCryptoContextFromEnvironment({
-        bucket: this.bucket,
-        domain: "ingress",
         environment: this.env,
         reason: "account-data-deletion",
         userId,
@@ -631,20 +615,16 @@ export class HostedUserRunner {
         userScopedSkipReasons.push("RuntimeCryptoContextUnavailable");
       }
 
-      if (ingressCrypto) {
-        deletedObjectCount += (await deleteR2ObjectsWithPrefix(
-          this.bucket,
-          await hostedEmailRawMessageUserPrefix(ingressCrypto.rootKey, userId),
-        )).deletedCount;
-      } else {
-        userScopedSkipReasons.push("IngressCryptoContextUnavailable");
-      }
-    } else if (userCrypto || ingressCrypto) {
+      deletedObjectCount += (await deleteR2ObjectsWithPrefix(
+        this.bucket,
+        await hostedEmailRawMessageUserPrefix({ userId }),
+      )).deletedCount;
+    } else if (userCrypto) {
       userScopedSkipReasons.push("R2PrefixDeletionUnsupported");
     }
 
     const skippedUserScopedPrefixes =
-      !supportsPrefixDeletion || userCrypto === null || ingressCrypto === null;
+      !supportsPrefixDeletion || userCrypto === null;
     return {
       deletedObjectCount,
       skippedUserScopedPrefixes,

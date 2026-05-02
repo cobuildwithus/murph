@@ -81,6 +81,32 @@ export async function hostedRunnerSecretsObjectKey(input: {
   return `users/${userSegment}/runner-secrets.json`;
 }
 
+export async function hostedEmailRawMessageObjectKey(input: {
+  rawMessageKey: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const rawMessageKey = requireStoragePathString(
+    input.rawMessageKey,
+    "Hosted email raw message key",
+  );
+  const messageSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "email-raw-path",
+    value: `email-raw:${userSegment}:${rawMessageKey}`,
+  });
+
+  return `hosted-email/messages/${userSegment}/${messageSegment}.eml`;
+}
+
+export async function hostedEmailRawMessageUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-email/messages/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
 export async function hostedBrowserVaultReplicaObjectKey(input: {
   dataVersion: string;
   storageNamespaceId?: string | null;
