@@ -148,6 +148,7 @@ Provider-owned webhook-admin settings:
 Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
+- `HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS` for explicit trusted browser mutation origins. Leave empty in production unless a deliberate first-party frontend origin must mutate the same hosted state; do not include loopback origins in production.
 - `HOSTED_CONTACT_PRIVACY_KEYS`
 - `HOSTED_DEVICE_ROUTING_INDEX_KEY`
 - `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION`

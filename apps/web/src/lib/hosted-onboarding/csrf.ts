@@ -14,9 +14,8 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
 
   const environment = getHostedOnboardingEnvironment();
   const canonicalOrigin = normalizeOrigin(environment.publicBaseUrl);
-  const requestOrigin = normalizeOrigin(request.url);
 
-  if (!environment.isProduction && requestOrigin && requestOrigin === origin && isLoopbackOrigin(origin)) {
+  if (isAllowedConfiguredMutationOrigin(origin, environment.allowedMutationOrigins)) {
     return;
   }
 
@@ -36,8 +35,19 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
     code: "HOSTED_ONBOARDING_ORIGIN_NOT_CONFIGURED",
     httpStatus: 500,
     message:
-      "Hosted browser mutation routes require a canonical public origin configuration outside explicit localhost development.",
+      "Hosted browser mutation routes require a canonical public origin or explicit allowed mutation origin configuration.",
   });
+}
+
+function isAllowedConfiguredMutationOrigin(
+  origin: string,
+  configuredOrigins: readonly string[] | undefined,
+): boolean {
+  if (!configuredOrigins) {
+    return false;
+  }
+
+  return configuredOrigins.some((configuredOrigin) => normalizeOrigin(configuredOrigin) === origin);
 }
 
 function normalizeOrigin(value: string | null | undefined): string | null {
@@ -61,15 +71,22 @@ function normalizeOrigin(value: string | null | undefined): string | null {
 }
 
 function isLoopbackHost(hostname: string, protocol: string): boolean {
-  return protocol === "http:"
-    && (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]");
-}
-
-function isLoopbackOrigin(origin: string): boolean {
-  try {
-    const url = new URL(origin);
-    return isLoopbackHost(url.hostname.toLowerCase(), url.protocol.toLowerCase());
-  } catch {
+  if (protocol !== "http:") {
     return false;
   }
+
+  const normalizedHostname =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+
+  if (normalizedHostname === "localhost" || normalizedHostname === "::1") {
+    return true;
+  }
+
+  const ipv4Parts = normalizedHostname.split(".");
+  return ipv4Parts.length === 4
+    && ipv4Parts.every((part) => /^[0-9]+$/u.test(part))
+    && Number(ipv4Parts[0]) === 127
+    && ipv4Parts.every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
