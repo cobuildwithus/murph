@@ -626,7 +626,7 @@ async function handleBrowserVaultSessionRoute(
   }
   const replicaKeyEnvelope = await wrapHostedBrowserSessionKey({
     keyBytes: replicaKey,
-    keyId: body.replicaRef.keyId,
+    keyId: body.replicaRef.dataKeyEnvelope?.dataKeyId ?? body.replicaRef.keyId,
     publicKeyJwk: body.browserPublicKeyJwk,
     purpose: "browser-vault-replica",
     userId,
