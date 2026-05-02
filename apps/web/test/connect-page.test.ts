@@ -553,7 +553,7 @@ test("ConnectPage ignores stale Junction upstream sources when the parent connec
   assert.match(markup, /aria-label="Connect Oura"/u);
 });
 
-test("ConnectPage keeps configured sources visible but disables connect actions when signed out", async () => {
+test("ConnectPage keeps configured sources visible but renders sign-in actions when signed out", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
   vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -570,9 +570,9 @@ test("ConnectPage keeps configured sources visible but disables connect actions 
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.match(markup, /Sign in first/);
+  assert.match(markup, />Sign in<\/button>/);
   assert.match(markup, /Sign in to connect Garmin/);
-  assert.match(markup, /Sign in to connect your health data sources\./);
+  assert.doesNotMatch(markup, /aria-label="Connect Garmin"/u);
   expectSettingResponseNotLoaded();
 });
 
