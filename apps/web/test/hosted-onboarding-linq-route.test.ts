@@ -163,6 +163,7 @@ describe("hosted onboarding Linq webhook route", () => {
       error: {
         code: "LINQ_WEBHOOK_BODY_TOO_LARGE",
         message: "Linq webhook body is too large.",
+        retryable: false,
       },
     });
   });

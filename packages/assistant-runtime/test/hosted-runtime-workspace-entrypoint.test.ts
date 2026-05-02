@@ -917,6 +917,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 laneSeq: "1",
               }),
               createMailboxItem({
+                createdAt: "9999-01-01T00:00:00.000Z",
                 id: "mailbox_item_entrypoint_budget_002",
                 laneSeq: "2",
               }),
