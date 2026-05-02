@@ -129,9 +129,6 @@ export async function unwrapHostedDataKeyWithDomainRoot(input: {
     input.rootKeyId,
     "Hosted data-key unwrap rootKeyId",
   );
-  if (envelope.rootKeyId !== rootKeyId) {
-    throw new Error("Hosted data-key envelope rootKeyId mismatch.");
-  }
   const wrap = envelope.wraps.find(
     (entry) => entry.kind === "domain-root" && entry.rootKeyId === rootKeyId,
   );
@@ -141,20 +138,20 @@ export async function unwrapHostedDataKeyWithDomainRoot(input: {
     );
   }
 
-  const wrapKey = await deriveHostedDataKeyRootWrapKey({
+  const wrapContext = {
     alg: envelope.alg,
     dataKeyId: envelope.dataKeyId,
     domain: envelope.domain,
     lane: envelope.lane,
     resource: envelope.resource,
-    rootKey: input.rootKey,
     rootKeyId,
     schema: envelope.schema,
-  });
+  } as const;
+  const wrapKey = await deriveHostedDataKeyRootWrapKey({ ...wrapContext, rootKey: input.rootKey });
   const plaintext = new Uint8Array(
     await crypto.subtle.decrypt(
       {
-        additionalData: toArrayBuffer(buildHostedDataKeyRootWrapAad(envelope)),
+        additionalData: toArrayBuffer(buildHostedDataKeyRootWrapAad(wrapContext)),
         iv: toArrayBuffer(
           decodeFixedBase64(
             wrap.iv,

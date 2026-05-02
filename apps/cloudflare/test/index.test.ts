@@ -10,6 +10,9 @@ import {
   createVaultReadModel,
 } from "@murphai/query/browser";
 import {
+  parseHostedBrowserSessionKeyEnvelope,
+} from "@murphai/runtime-state";
+import {
   createHostedWebCallbackSignatureHeaders,
 } from "../src/web-callback-auth.ts";
 import {
@@ -673,7 +676,7 @@ describe("cloudflare worker routes", () => {
         "https://runner.example.test/internal/users/member_123/browser-vault/session",
         {
           body: JSON.stringify({
-            browserPublicKeyJwk: createBrowserSessionPublicKeyJwk(),
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
             replicaRef,
           }),
           headers: {
@@ -695,6 +698,43 @@ describe("cloudflare worker routes", () => {
     ]);
   });
 
+  it("returns browser-vault sessions keyed by the replica storage key id", async () => {
+    const env = createWorkerEnv();
+    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: runtimeRoot.rootKey,
+      rootKeyId: runtimeRoot.rootKeyId,
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+            replicaRef,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      replicaRef,
+      state: "ready",
+    });
+    const sessionKeyEnvelope = parseHostedBrowserSessionKeyEnvelope(
+      (body as { replicaKeyEnvelope?: unknown }).replicaKeyEnvelope,
+    );
+    expect(sessionKeyEnvelope.keyId).toBe(replicaRef.dataKeyEnvelope?.dataKeyId ?? replicaRef.keyId);
+  });
+
   it("returns the stable browser-vault missing-replica code when the replica runtime root is unavailable", async () => {
     const env = createWorkerEnv();
     const unavailableRootKeyId = "udrk:runtime:retired-root";
@@ -706,7 +746,7 @@ describe("cloudflare worker routes", () => {
       "https://runner.example.test/internal/users/member_123/browser-vault/session",
       {
         body: JSON.stringify({
-          browserPublicKeyJwk: createBrowserSessionPublicKeyJwk(),
+          browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
           replicaRef,
         }),
         headers: {
@@ -750,7 +790,7 @@ describe("cloudflare worker routes", () => {
         "https://runner.example.test/internal/users/member_123/browser-vault/session",
         {
           body: JSON.stringify({
-            browserPublicKeyJwk: createBrowserSessionPublicKeyJwk(),
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
             replicaRef: foreignReplicaRef,
           }),
           headers: {
@@ -1443,13 +1483,13 @@ function createWake(eventId: string): HostedExecutionWake {
   };
 }
 
-function createBrowserSessionPublicKeyJwk() {
-  return {
-    crv: "P-256",
-    kty: "EC",
-    x: "browser-session-x",
-    y: "browser-session-y",
-  };
+async function createBrowserSessionPublicKeyJwk(): Promise<JsonWebKey> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  );
+  return crypto.subtle.exportKey("jwk", keyPair.publicKey);
 }
 
 async function createMissingBrowserVaultReplicaRefForTest(

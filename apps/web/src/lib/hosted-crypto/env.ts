@@ -25,6 +25,11 @@ export interface HostedWebCryptoConfig {
   webWrapKmsKeyName: string;
 }
 
+export interface HostedCloudflareAutomationRecipient {
+  publicJwk: JsonWebKey;
+  recipientKeyId: string;
+}
+
 let cachedConfig: HostedWebCryptoConfig | null = null;
 
 export function getHostedWebCryptoConfig(
@@ -61,9 +66,8 @@ export function getHostedWebCryptoConfig(
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON",
     ),
   });
-  const cloudflareAutomation = selectActiveHostedRecipientPublicKey({
-    keyring: cloudflareAutomationPublicKeyring,
-    recipient: "cloudflare-automation-secret",
+  const cloudflareAutomation = selectActiveHostedCloudflareAutomationRecipient({
+    cloudflareAutomationPublicKeyring,
   });
   const config: HostedWebCryptoConfig = {
     authoritySignKeyVersionName,
@@ -92,6 +96,20 @@ export function getHostedWebCryptoConfig(
     cachedConfig = config;
   }
   return config;
+}
+
+export function selectActiveHostedCloudflareAutomationRecipient(
+  config: Pick<HostedWebCryptoConfig, "cloudflareAutomationPublicKeyring">,
+): HostedCloudflareAutomationRecipient {
+  const active = selectActiveHostedRecipientPublicKey({
+    keyring: config.cloudflareAutomationPublicKeyring,
+    recipient: "cloudflare-automation-secret",
+  });
+
+  return {
+    publicJwk: active.publicJwk,
+    recipientKeyId: active.recipientKeyId,
+  };
 }
 
 function readHostedCryptoEnv(source: NodeJS.ProcessEnv): string {
