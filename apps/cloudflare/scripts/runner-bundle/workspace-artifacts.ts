@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 
 import {
@@ -106,9 +107,12 @@ export async function packWorkspacePackageArtifacts(
   tarballsDir: string,
   input: {
     repoRoot: string;
+    skipPreflights?: boolean;
   },
 ): Promise<Map<string, string>> {
-  await runWorkspacePackagePackPreflights(packageNames, input);
+  if (!input.skipPreflights) {
+    await runWorkspacePackagePackPreflights(packageNames, input);
+  }
 
   const packedEntries = await mapWithConcurrency(
     packageNames,
@@ -135,10 +139,11 @@ export function buildHostedRunnerWorkspaceBuildArgs(
   packageNames: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
+  const defaultConcurrency = resolveDefaultHostedRunnerBuildConcurrency();
   return [
     `--workspace-concurrency=${resolvePositiveIntegerEnv(
       env.MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY,
-      "1",
+      defaultConcurrency,
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY",
     )}`,
     ...packageNames.flatMap((packageName) => ["--filter", packageName]),
@@ -374,6 +379,10 @@ function resolveHostedRunnerPackConcurrency(
     ),
     10,
   );
+}
+
+function resolveDefaultHostedRunnerBuildConcurrency(): string {
+  return String(Math.min(4, Math.max(1, availableParallelism())));
 }
 
 function resolvePositiveIntegerEnv(

@@ -41,6 +41,9 @@ const shouldSkipBuild = process.argv.includes("--skip-build");
 const shouldSkipBundleOnlyDependencies = process.argv.includes(
   "--skip-bundle-only-dependencies",
 );
+const shouldSkipPackPreflights =
+  process.argv.includes("--skip-pack-preflights") ||
+  process.env.MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS === "1";
 
 await assembleRunnerBundle();
 
@@ -77,7 +80,10 @@ async function assembleRunnerBundle(): Promise<void> {
     const tarballPaths = await packWorkspacePackageArtifacts(
       packedWorkspacePackageNames,
       tarballsDir,
-      { repoRoot },
+      {
+        repoRoot,
+        skipPreflights: shouldSkipPackPreflights,
+      },
     );
 
     await installPackedRunnerDependencies(

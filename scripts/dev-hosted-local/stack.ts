@@ -391,9 +391,13 @@ export async function startHostedLocalDevStack(input: {
 
     if (workerRuntimeEnv !== null) {
       if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
-        await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle"], {
+        const runnerBundleEnv: NodeJS.ProcessEnv = {
+          ...(workerProcessEnv ?? workerRuntimeEnv),
+          MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
+        };
+        await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
           cwd: repoRoot,
-          env: workerProcessEnv ?? workerRuntimeEnv,
+          env: runnerBundleEnv,
           name: "setup",
         });
         if (workerProcessEnv !== null) {

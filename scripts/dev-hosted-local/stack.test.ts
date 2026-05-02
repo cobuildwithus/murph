@@ -368,11 +368,12 @@ describe("hosted local dev stack", () => {
     );
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
-      ["--dir", "apps/cloudflare", "runner:bundle"],
+      ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"],
       expect.objectContaining({
         cwd: expect.stringContaining("murph"),
         env: expect.objectContaining({
           MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: expect.stringMatching(/^sha256-[a-f0-9]{24}$/u),
+          MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
         }),
         name: "setup",
       }),

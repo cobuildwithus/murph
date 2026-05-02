@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { availableParallelism, tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedRunnerWorkspaceArtifacts,
@@ -27,6 +27,7 @@ afterEach(async () => {
       rm(directory, { force: true, recursive: true }),
     ),
   );
+  vi.unstubAllEnvs();
 });
 
 describe("runner bundle runtime artifact staging", () => {
@@ -47,14 +48,14 @@ describe("runner bundle runtime artifact staging", () => {
     ]);
   });
 
-  it("defaults runner bundle workspace builds to serial package execution", () => {
+  it("defaults runner bundle workspace builds to bounded parallel package execution", () => {
     expect(
       buildHostedRunnerWorkspaceBuildArgs(
         ["@murphai/contracts", "@murphai/runtime-state"],
         {},
       ),
     ).toEqual([
-      "--workspace-concurrency=1",
+      `--workspace-concurrency=${String(Math.min(4, availableParallelism()))}`,
       "--filter",
       "@murphai/contracts",
       "--filter",
@@ -234,6 +235,84 @@ describe("runner bundle runtime artifact staging", () => {
     expect(stagedPackageJson.dependencies).toEqual({
       "@murphai/runtime-state": "workspace:*",
       jose: "^6.2.2",
+    });
+  });
+
+  it("skips pack preflights when explicitly requested", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-skip-"));
+    const appsDir = path.join(rootDir, "apps");
+    const binDir = path.join(rootDir, "bin");
+    const packageDir = path.join(rootDir, "packages", "contracts");
+    const tarballsDir = path.join(rootDir, "tarballs");
+    const pnpmLogPath = path.join(rootDir, "pnpm.log");
+
+    temporaryDirectories.push(rootDir);
+    await mkdir(appsDir, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await mkdir(path.join(packageDir, "dist"), { recursive: true });
+    await mkdir(tarballsDir, { recursive: true });
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "@murphai/contracts",
+          version: "1.2.3",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(path.join(packageDir, "dist", "index.js"), "export const ok = true;\n");
+    await writeFile(path.join(packageDir, "dist", "schemas.js"), "export const schemas = [];\n");
+    await writeFile(
+      path.join(binDir, "pnpm"),
+      [
+        "#!/usr/bin/env node",
+        "import { appendFileSync } from 'node:fs';",
+        "const logPath = process.env.MURPH_FAKE_PNPM_LOG;",
+        "if (!logPath) process.exit(2);",
+        "appendFileSync(logPath, `${process.argv.slice(2).join(' ')}\\n`, 'utf8');",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(binDir, "npm"),
+      [
+        "#!/usr/bin/env node",
+        "import { mkdirSync, writeFileSync } from 'node:fs';",
+        "import path from 'node:path';",
+        "const args = process.argv.slice(2);",
+        "const destinationIndex = args.indexOf('--pack-destination');",
+        "const destination = destinationIndex >= 0 ? args[destinationIndex + 1] : null;",
+        "if (!destination) process.exit(2);",
+        "mkdirSync(destination, { recursive: true });",
+        "writeFileSync(path.join(destination, 'fake-package.tgz'), '', 'utf8');",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(path.join(binDir, "pnpm"), 0o755);
+    await chmod(path.join(binDir, "npm"), 0o755);
+
+    vi.stubEnv("PATH", `${binDir}${path.delimiter}${process.env.PATH ?? ""}`);
+    vi.stubEnv("MURPH_FAKE_PNPM_LOG", pnpmLogPath);
+
+    const tarballs = await packWorkspacePackageArtifacts(
+      ["@murphai/contracts"],
+      tarballsDir,
+      {
+        repoRoot: rootDir,
+        skipPreflights: true,
+      },
+    );
+    const contractsTarball = tarballs.get("@murphai/contracts");
+
+    if (!contractsTarball) {
+      throw new Error("Contracts tarball was not packed.");
+    }
+
+    await expect(readFile(pnpmLogPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
     });
   });
 
