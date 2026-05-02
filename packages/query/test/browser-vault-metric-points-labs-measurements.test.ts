@@ -73,6 +73,12 @@ test("browser-vault metric points project manual measurements and blood-test res
                 value: 82,
               },
               {
+                analyte: "Glucose",
+                biomarkerSlug: "glucose",
+                unit: "mmol/L",
+                value: 5.5,
+              },
+              {
                 analyte: "hs-CRP",
                 comparator: "<",
                 slug: "hs-crp",
@@ -123,6 +129,13 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.equal(glucose.value, 82);
   assert.equal(glucose.sourceLabel, "Function Health");
   assert.equal(glucose.warnings.some((warning) => warning.code === "MIXED_SOURCES"), true);
+  assert.deepEqual(
+    client.metricPoints
+      .series({ metricKey: "glucose" })
+      .map((point) => point.value)
+      .sort((left, right) => left - right),
+    [82, 88],
+  );
 
   const crp = client.metricSelections.get("hs-crp");
   assert.ok(crp);

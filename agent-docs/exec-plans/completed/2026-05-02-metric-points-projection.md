@@ -1,6 +1,6 @@
 # Land MetricPoint labs and measurements projection patch
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -59,12 +59,24 @@ Updated: 2026-05-02
 ## Decisions
 
 - Classify `query_metric_points` as a rebuildable local projection under `.runtime/projections/query.sqlite`, not canonical product truth.
+- Browser-vault event-backed MetricPoints are bounded by `METRIC_LOOKBACK_DAYS`; the all-time query projection rebuild does not pass that browser payload filter.
+- Unknown/free-text metrics and unsupported units fail closed instead of becoming canonicalized MetricPoints.
 
 ## Verification
 
 - Commands to run:
   - `pnpm --filter @murphai/query test browser-vault-metric-points`
+  - `pnpm --filter @murphai/query typecheck`
+  - `pnpm --dir packages/query test:coverage`
   - `pnpm typecheck`
   - `pnpm test:smoke`
 - Expected outcomes:
   - All commands pass, or any unrelated pre-existing failure is identified precisely before handoff.
+- Outcomes:
+  - `pnpm --filter @murphai/query test browser-vault-metric-points`: passed.
+  - `pnpm --filter @murphai/query typecheck`: passed.
+  - `pnpm --dir packages/query test:coverage`: passed.
+  - `pnpm typecheck`: passed.
+  - `pnpm test:smoke`: passed.
+  - Required security/privacy, coverage-write, and final completion audits ran; findings were addressed.
+Completed: 2026-05-02
