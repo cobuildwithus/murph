@@ -970,6 +970,101 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("checkpoints mailbox retry wake for a pure retryable sidecar block", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    const sidecarItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_sidecar_retry",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_entrypoint_sidecar_retry",
+    });
+    const baseMailboxPort = createMailboxPort({
+      events,
+      items: [sidecarItem],
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot(snapshotInput) {
+          events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+          return {
+            snapshotRef: createBundleRef({
+              hash: "d".repeat(64),
+              key: "users/bundles/member-synthetic/workspace-sidecar-retry.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem(item) {
+          imported.push(item.item.id);
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: {
+            ...baseMailboxPort,
+            async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+              events.push("mailbox.fetchPayload");
+              return {
+                fetchedAt: TEST_NOW,
+                payload: null,
+                unavailable: {
+                  code: "not_found",
+                  retryable: true,
+                },
+              };
+            },
+          },
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        vaultRoot,
+      });
+
+      assert.deepEqual(imported, []);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "mailbox.fetchPayload",
+        "snapshot:0",
+        "workspace.checkpoint",
+      ]);
+      assert.equal(checkpointRequests.length, 1);
+      const mailboxRetryWakeAt = checkpointRequests[0]?.nextWakeAt;
+      assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedMailboxBlockedCount: 1,
+        hostedMailboxConversationImportedSeq: "0",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 0,
+        hostedMailboxNextRetryAtPresent: true,
+        hostedMailboxRetryableBlockedCount: 1,
+        hostedMailboxSystemImportedSeq: "0",
+      });
+      assert.deepEqual(result, {
+        nextWakeAt: mailboxRetryWakeAt,
+        redactedStatus: {
+          hostedMailboxBlockedCount: 1,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 1,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxNextRetryAtPresent: true,
+          hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        status: "scheduled",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("returns next wake from the checkpointed workspace after import commits", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const staleWakeAt = "2026-04-27T00:05:00.000Z";

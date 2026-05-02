@@ -16,7 +16,7 @@ Key decisions:
 - Use current checkout only; no separate worktree.
 
 State:
-- Verifying hosted Linq/mailbox robustness follow-up.
+- Ready to close after scoped final commit.
 
 Done:
 - Read required routing, verification, security, reliability, and testing docs.
@@ -36,12 +36,15 @@ Done:
 - Generic hosted mailbox import retryable blockers now remain pending, schedule a fast mailbox retry wake, and propagate that wake through checkpoint/runtime invocation results instead of aging into retry-exhausted quarantine.
 - Assistant prompt construction now adds staged-input context when inbox/parser projection is pending or failed and no attachment enrichment is available.
 - Focused Linq/mailbox store, assistant-runtime mailbox import/entrypoint, and assistant-engine prompt-builder tests passed.
+- Completion reviews ran. Coverage review requested no edits. Security/privacy and final reviews found missing durable retry wake persistence for no-state-change retryable blocks and non-retryable web missing-sidecar responses; both were fixed.
+- Added coverage for web missing sidecar payload rows returning retryable unavailable responses, mailbox-checkpoint retry wake checkpointing without watermark advance, and workspace-entrypoint pure retryable sidecar blocks checkpointing a mailbox retry wake.
+- Latest focused verification passed: web hosted-mailbox/Linq dispatch tests (47 tests), assistant-runtime mailbox import/checkpoint/workspace-entrypoint tests (38 tests), assistant-engine prompt-builder test (15 tests), scoped diff-check, focused lint, and scoped privacy/leakage diff scan.
 
 Now:
-- Run typecheck, diff checks, and completion review on the current follow-up diff.
+- Close the plan and commit only the remaining scoped hosted-runtime test diff plus plan archival.
 
 Next:
-- Commit the scoped hosted Linq/mailbox docs and polish follow-up if verification is clean.
+- Report the mixed-commit caveat and verification results.
 
 Open questions (UNCONFIRMED if needed):
 - Full durable pending-handoff reconciler remains a follow-up hardening step, not part of this patch.
@@ -58,3 +61,6 @@ Working set (files/ids/commands):
 - `packages/hosted-execution/src/email-ingress.ts`
 - `packages/assistant-runtime/src/hosted-runtime/mailbox-import.ts`
 - Focused tests under `apps/web/test`, `apps/cloudflare/test`, and package tests if already present.
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02
