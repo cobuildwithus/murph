@@ -309,6 +309,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     );
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
     const registrationCachePath = path.join(tempDir, "cache.json");
+    const stderrTarget = new CapturingWritable();
     const setup = {
       phoneNumbers: ["+15550000001"],
       publicBaseUrl: "https://tunnel.example.test",
@@ -329,6 +330,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         },
         registrationCachePath,
         setup,
+        stderrTarget,
       });
       await registerHostedLocalLinqWebhookSubscription({
         env: {
@@ -339,6 +341,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         },
         registrationCachePath,
         setup,
+        stderrTarget,
       });
 
       expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
