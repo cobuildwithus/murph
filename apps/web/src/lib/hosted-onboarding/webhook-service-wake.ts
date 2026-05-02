@@ -17,32 +17,22 @@ import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 
 export type HostedWebhookWakeHandoffResult =
   | {
-      directNudgeAttempted: true;
-      directNudgeErrorCode: string | null;
-      nudgeAccepted: true;
       reason: "runner-nudged";
+      runnerNudgeAccepted: true;
       started: true;
       workflowStarted: false;
     }
   | {
-      directNudgeAccepted: false;
-      directNudgeAttempted: boolean;
-      directNudgeConfigured: boolean | null;
-      directNudgeErrorCode: string | null;
-      nudgeAccepted: false;
       reason: "workflow-started";
       runId: string;
-      started: false;
+      runnerNudgeAccepted: false;
+      started: true;
       workflowStarted: true;
     }
   | {
-      directNudgeAccepted?: false;
-      directNudgeAttempted?: boolean;
-      directNudgeConfigured?: boolean | null;
-      directNudgeErrorCode?: string | null;
       errorName?: string | null;
       reason: "missing-mailbox-item" | "workflow-start-failed";
-      nudgeAccepted: false;
+      runnerNudgeAccepted: false;
       started: false;
       workflowStarted: false;
     };
@@ -82,7 +72,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       });
       return {
         reason: "missing-mailbox-item",
-        nudgeAccepted: false,
+        runnerNudgeAccepted: false,
         started: false,
         workflowStarted: false,
       };
@@ -96,10 +86,8 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         directNudgeErrorCode: directNudge.errorCode,
       });
       return {
-        directNudgeAttempted: true,
-        directNudgeErrorCode: directNudge.errorCode,
-        nudgeAccepted: true,
         reason: "runner-nudged",
+        runnerNudgeAccepted: true,
         started: true,
         workflowStarted: false,
       };
@@ -116,14 +104,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
     });
     return {
-      directNudgeAccepted: false,
-      directNudgeAttempted: directNudge.attempted,
-      directNudgeConfigured: directNudge.configured,
-      directNudgeErrorCode: directNudge.errorCode,
-      nudgeAccepted: false,
       reason: "workflow-started",
       runId: workflow.runId,
-      started: false,
+      runnerNudgeAccepted: false,
+      started: true,
       workflowStarted: true,
     };
   } catch (error) {
@@ -134,7 +118,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     return {
       errorName,
       reason: "workflow-start-failed",
-      nudgeAccepted: false,
+      runnerNudgeAccepted: false,
       started: false,
       workflowStarted: false,
     };
