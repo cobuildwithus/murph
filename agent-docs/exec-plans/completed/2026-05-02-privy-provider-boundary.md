@@ -20,3 +20,10 @@ Land the supplied hosted Privy provider-boundary patch so only routes that need 
 - Focused `apps/web` tests covering layout/auth boundary behavior
 - Hosted-web lint/typecheck or truthful app-level verification per repo policy
 - Privacy/security readback of the landed diff before commit
+
+## Outcome
+
+- Landed the supplied provider-boundary cut in the hosted web app.
+- Focused route/auth tests passed.
+- Standalone hosted-web typecheck passed.
+- Full diff-aware hosted-web verification reached build/lint but remains blocked by unrelated pre-existing app test failures outside the Privy boundary slice.
