@@ -10,13 +10,13 @@ import {
   listMetricDefinitions,
   normalizeMetricKey,
   normalizeMetricValue,
-  resolveBrowserMetricBinding,
   resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
   selectMetricValue,
   type MetricPoint,
 } from "../src/index.ts";
 
-test("resolves browser metric aliases and normalizes metric keys", () => {
+test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {
   assert.equal(normalizeMetricKey("restingHeartRate"), "resting-heart-rate");
   assert.equal(normalizeMetricKey(" Apo B / Latest "), "apo-b-latest");
   assert.equal(normalizeMetricKey("  hs_CRP / Latest! "), "hs-crp-latest");
@@ -24,14 +24,14 @@ test("resolves browser metric aliases and normalizes metric keys", () => {
   assert.equal(resolveMetricDefinition("LDL_C")?.key, "ldl-c");
   assert.equal(resolveMetricDefinition("unknown metric"), null);
   assert.equal(
-    resolveBrowserMetricBinding({ domain: "recovery", metric: "restingHeartRate" })?.key,
+    resolveMetricDefinitionForBiomarker("biomarker:resting-heart-rate")?.key,
     "resting-heart-rate",
   );
   assert.equal(
-    resolveBrowserMetricBinding({ domain: "sleep", metric: "deepMinutes" })?.biomarkerKey,
+    resolveMetricDefinitionForBiomarker("biomarker:deep-sleep-minutes")?.biomarkerKey,
     "biomarker:deep-sleep-minutes",
   );
-  assert.equal(resolveBrowserMetricBinding({ domain: "unknown", metric: "deepMinutes" }), null);
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],
     biomarkerKey: null,

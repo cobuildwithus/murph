@@ -30,7 +30,14 @@ import {
   type SearchResult,
 } from "./search-shared.ts";
 import { summarizeDailySamples } from "./summaries.ts";
-import { selectMetricValue, type MetricPoint, type MetricSelection } from "@murphai/health-metrics";
+import {
+  selectMetricGoalProgress,
+  selectMetricValue,
+  type GoalMetricTarget,
+  type MetricGoalProgress,
+  type MetricPoint,
+  type MetricSelection,
+} from "@murphai/health-metrics";
 import { extractMetricPointsFromCanonicalEntities } from "./metrics/index.ts";
 import {
   listCanonicalSourceManifest,
@@ -281,6 +288,33 @@ export async function selectMetricRuntime(input: {
   });
 }
 
+export interface QueryMetricTargetRow {
+  goalId: string;
+  id: string;
+  target: GoalMetricTarget;
+}
+
+export async function listMetricTargetsRuntime(vaultRoot: string): Promise<QueryMetricTargetRow[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  return listStoredMetricTargets(location);
+}
+
+export async function selectMetricGoalProgressRuntime(input: {
+  goalId: string;
+  now?: string;
+  targetId: string;
+  vaultRoot: string;
+}): Promise<MetricGoalProgress | null> {
+  const [targets, points] = await Promise.all([
+    listMetricTargetsRuntime(input.vaultRoot),
+    listMetricPointsRuntime(input.vaultRoot),
+  ]);
+  const target = targets.find((entry) => entry.goalId === input.goalId && entry.target.targetId === input.targetId);
+  return target
+    ? selectMetricGoalProgress({ goalId: target.goalId, now: input.now, points, target: target.target })
+    : null;
+}
+
 
 async function rebuildQueryProjectionWithManifest(
   vaultRoot: string,
@@ -292,6 +326,7 @@ async function rebuildQueryProjectionWithManifest(
   const projectedEntities = snapshot.entities.filter((entity) => entity.family !== "sample");
   const sampleEntities = snapshot.entities.filter((entity) => entity.family === "sample");
   const metricPoints = extractMetricPointsFromCanonicalEntities(snapshot.entities);
+  const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
   const searchDocuments = [
     ...materializeSearchDocuments(projectedEntities),
     ...materializeSampleSummarySearchDocuments(snapshot),
@@ -305,6 +340,7 @@ async function rebuildQueryProjectionWithManifest(
         DELETE FROM query_entities;
         DELETE FROM query_sample_points;
         DELETE FROM query_metric_points;
+        DELETE FROM query_metric_targets;
         DELETE FROM query_source_manifest;
         DELETE FROM query_search_document;
         DELETE FROM query_search_fts;
@@ -378,6 +414,18 @@ async function rebuildQueryProjectionWithManifest(
           context_json,
           metric_point_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertMetricTarget = database.prepare(`
+        INSERT INTO query_metric_targets (
+          id,
+          goal_id,
+          metric_key,
+          biomarker_key,
+          comparator,
+          target_value,
+          target_unit,
+          target_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertSearchDocument = database.prepare(`
         INSERT INTO query_search_document (
@@ -470,6 +518,19 @@ async function rebuildQueryProjectionWithManifest(
           JSON.stringify(point.provenance),
           JSON.stringify(point.context),
           JSON.stringify(point),
+        );
+      });
+
+      metricTargets.forEach((entry) => {
+        insertMetricTarget.run(
+          entry.id,
+          entry.goalId,
+          entry.target.metricKey,
+          entry.target.biomarkerKey ?? null,
+          entry.target.comparator,
+          entry.target.value,
+          entry.target.unit,
+          JSON.stringify(entry.target),
         );
       });
 
@@ -733,6 +794,88 @@ function normalizeMetricPointLimit(value: number): number {
   return Math.min(value, 10_000);
 }
 
+function listStoredMetricTargets(location: QueryProjectionLocation): QueryMetricTargetRow[] {
+  const database = openQueryProjectionDatabase(location, { create: false, readOnly: true });
+  try {
+    if (!hasQueryProjectionTables(database)) {
+      throw new Error(`Query projection at ${location.dbPath} is missing required tables. Rebuild the projection and try again.`);
+    }
+    const rows = database.prepare(`
+      SELECT id, goal_id AS goalId, target_json AS targetJson
+      FROM query_metric_targets
+      ORDER BY goal_id ASC, id ASC
+    `).all() as Array<{ goalId: string; id: string; targetJson: string }>;
+    return rows.flatMap((row) => {
+      const target = parseJsonValue<GoalMetricTarget | null>(row.targetJson, null);
+      return target ? [{ goalId: row.goalId, id: row.id, target }] : [];
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function extractMetricTargetsFromCanonicalEntities(entities: readonly CanonicalEntity[]): QueryMetricTargetRow[] {
+  return entities
+    .filter((entity) => entity.family === "goal")
+    .flatMap((entity) => {
+      const source = entity.frontmatter ?? entity.attributes;
+      const targets = Array.isArray(source.metricTargets) ? source.metricTargets : [];
+      return targets.flatMap((target, index) => parseMetricTarget(entity.entityId, target, index));
+    });
+}
+
+function parseMetricTarget(goalId: string, value: unknown, index: number): QueryMetricTargetRow[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  const metricKey = readString(record.metricKey);
+  const comparator = readMetricComparator(record.comparator);
+  const targetValue = readNumber(record.value);
+  const unit = readString(record.unit);
+  if (!metricKey || !comparator || targetValue === null || !unit) return [];
+  const targetId = readString(record.targetId) ?? `metric-target-${index + 1}`;
+  const target: GoalMetricTarget = {
+    biomarkerKey: readString(record.biomarkerKey) ?? undefined,
+    comparator,
+    evaluation: readMetricGoalEvaluation(record.evaluation),
+    highValue: readNumber(record.highValue) ?? undefined,
+    kind: "metric",
+    metricKey,
+    note: readString(record.note) ?? undefined,
+    targetAt: readString(record.targetAt) ?? undefined,
+    targetId,
+    unit,
+    value: targetValue,
+  };
+  return [{ goalId, id: `${goalId}:${targetId}`, target }];
+}
+
+function readMetricGoalEvaluation(value: unknown): GoalMetricTarget["evaluation"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "selected-value" };
+  const record = value as Record<string, unknown>;
+  const kind = readString(record.kind);
+  if (kind === "latest-lab") return { kind };
+  if (kind === "rolling-window") {
+    const statistic = readString(record.statistic);
+    const windowDays = readNumber(record.windowDays);
+    if ((statistic === "mean" || statistic === "median") && windowDays !== null) {
+      return { kind, statistic, windowDays };
+    }
+  }
+  return { kind: "selected-value" };
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readMetricComparator(value: unknown): GoalMetricTarget["comparator"] | null {
+  return value === "<" || value === "<=" || value === ">" || value === ">=" || value === "between" ? value : null;
+}
+
 function searchQueryProjection(
   location: QueryProjectionLocation,
   query: string,
@@ -874,6 +1017,7 @@ function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
     !tableExists(database, "query_entities") ||
     !tableExists(database, "query_sample_points") ||
     !tableExists(database, "query_metric_points") ||
+    !tableExists(database, "query_metric_targets") ||
     !tableExists(database, "query_source_manifest") ||
     !tableExists(database, "query_search_document") ||
     !tableExists(database, "query_search_fts")
@@ -991,6 +1135,21 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC);
     CREATE INDEX IF NOT EXISTS query_metric_points_source_idx ON query_metric_points(source_record_id);
 
+    CREATE TABLE IF NOT EXISTS query_metric_targets (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      metric_key TEXT NOT NULL,
+      biomarker_key TEXT,
+      comparator TEXT NOT NULL,
+      target_value REAL NOT NULL,
+      target_unit TEXT NOT NULL,
+      target_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS query_metric_targets_goal_idx ON query_metric_targets(goal_id);
+    CREATE INDEX IF NOT EXISTS query_metric_targets_metric_idx ON query_metric_targets(metric_key);
+    CREATE INDEX IF NOT EXISTS query_metric_targets_biomarker_idx ON query_metric_targets(biomarker_key);
+
     CREATE TABLE IF NOT EXISTS query_source_manifest (
       relative_path TEXT PRIMARY KEY,
       size_bytes INTEGER NOT NULL,
@@ -1038,6 +1197,7 @@ function hasQueryProjectionTables(database: DatabaseSync): boolean {
     tableExists(database, "query_entities") &&
     tableExists(database, "query_sample_points") &&
     tableExists(database, "query_metric_points") &&
+    tableExists(database, "query_metric_targets") &&
     tableExists(database, "query_source_manifest") &&
     tableExists(database, "query_search_document") &&
     tableExists(database, "query_search_fts")

@@ -363,6 +363,63 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     }
   });
 
+  it("waits for the public webhook target before Linq registration", async () => {
+    const { waitForHostedLocalLinqWebhookTarget } = await import(
+      "./linq-webhook-tunnel.ts"
+    );
+    const fetchImplementation = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("not ready", { status: 530 }))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    const sleep = vi.fn(async () => {});
+
+    await waitForHostedLocalLinqWebhookTarget({
+      fetchImplementation,
+      intervalMs: 1,
+      setup: {
+        phoneNumbers: null,
+        publicBaseUrl: "https://tunnel.example.test",
+        shouldRegister: true,
+        shouldStartTunnel: false,
+        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+        tunnelConfigPath: null,
+        tunnelName: null,
+      },
+      sleep,
+      timeoutMs: 30_000,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    expect(sleep).toHaveBeenCalledOnce();
+  });
+
+  it("fails before Linq registration when the public webhook target is unreachable", async () => {
+    const { waitForHostedLocalLinqWebhookTarget } = await import(
+      "./linq-webhook-tunnel.ts"
+    );
+    const fetchImplementation = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("not ready", { status: 530 }));
+
+    await expect(waitForHostedLocalLinqWebhookTarget({
+      fetchImplementation,
+      setup: {
+        phoneNumbers: null,
+        publicBaseUrl: "https://tunnel.example.test",
+        shouldRegister: true,
+        shouldStartTunnel: false,
+        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+        tunnelConfigPath: null,
+        tunnelName: null,
+      },
+      timeoutMs: 0,
+    })).rejects.toThrow("Last readiness check: HTTP 530");
+  });
+
   it("fails if Linq returns a different signing secret", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "./linq-webhook-tunnel.ts"

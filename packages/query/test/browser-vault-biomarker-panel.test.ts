@@ -14,7 +14,6 @@ import {
 test("returns no_private_vault when no browser-vault client is available", () => {
   const panel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: "biomarker:resting-heart-rate",
-    bindings: [restingHeartRateBinding()],
     client: null,
     generatedAt: "2026-04-30T12:00:00.000Z",
     label: "RHR",
@@ -52,7 +51,6 @@ test("builds a ready biomarker panel from browser-vault metric rows", () => {
 
   const panel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: "biomarker:resting-heart-rate",
-    bindings: [restingHeartRateBinding()],
     client,
     label: "RHR",
     now: "2026-04-30T12:00:00.000Z",
@@ -62,7 +60,7 @@ test("builds a ready biomarker panel from browser-vault metric rows", () => {
   });
 
   assert.equal(panel.status, "ready");
-  assert.equal(panel.schema, "murph.browser-vault-biomarker-panel.v1");
+  assert.equal(panel.schema, "murph.browser-vault-biomarker-panel");
   assert.equal(panel.primary?.latest?.value, 57);
   assert.equal(panel.primary?.sampleCount, 13);
   assert.equal(panel.primary?.trend?.direction, "down");
@@ -83,7 +81,6 @@ test("returns insufficient_data before the biomarker minimum point threshold", (
 
   const panel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: "biomarker:resting-heart-rate",
-    bindings: [restingHeartRateBinding()],
     client,
     label: "RHR",
     now: "2026-04-30T12:00:00.000Z",
@@ -102,7 +99,6 @@ test("returns no_data when the browser-vault replica has no rows for the bound m
 
   const panel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: "biomarker:resting-heart-rate",
-    bindings: [restingHeartRateBinding()],
     client,
     label: "RHR",
     now: "2026-04-30T12:00:00.000Z",
@@ -117,12 +113,11 @@ test("returns no_data when the browser-vault replica has no rows for the bound m
   assert.equal(panel.sources[0]?.displayName, "WHOOP");
 });
 
-test("returns unsupported for biomarker pages without browser-vault metric bindings", () => {
+test("returns unsupported for biomarker pages without a metric-catalog mapping", () => {
   const client = createBrowserVaultQueryClient(createReplica());
 
   const panel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: "biomarker:self-reported-mood",
-    bindings: [],
     client,
     label: "Mood",
     now: "2026-04-30T12:00:00.000Z",
@@ -150,7 +145,6 @@ test("marks old metric series as stale while keeping the selected value", () => 
 
   const panel = selectBrowserVaultBiomarkerPanel({
     biomarkerKey: "biomarker:resting-heart-rate",
-    bindings: [restingHeartRateBinding()],
     client,
     label: "RHR",
     now: "2026-04-30T12:00:00.000Z",
@@ -165,15 +159,6 @@ test("marks old metric series as stale while keeping the selected value", () => 
   assert.equal(panel.warnings.some((warning) => warning.code === "SOURCE_STALE"), true);
 });
 
-function restingHeartRateBinding() {
-  return {
-    domain: "recovery",
-    metric: "restingHeartRate",
-    preferred: true,
-    unit: "bpm",
-  } as const;
-}
-
 function trendDefaults() {
   return {
     aggregation: "median",
@@ -185,16 +170,24 @@ function trendDefaults() {
 
 function restingHeartRateRows(rows: readonly (readonly [string, number])[]): BrowserVaultMetricRow[] {
   return rows.map(([date, value]) => ({
+    biomarkerKey: "biomarker:resting-heart-rate",
     confidence: "high",
+    context: {},
     date,
-    domain: "recovery",
-    id: `recovery:${date}:restingHeartRate`,
-    metric: "restingHeartRate",
+    grain: "day",
+    id: `metric-row:resting-heart-rate:${date}`,
+    metricKey: "resting-heart-rate",
+    observedAt: `${date}T00:00:00.000Z`,
+    pointIds: [`metric-point:resting-heart-rate:${date}`],
     recordIds: [],
+    rowSchema: "murph.browser-vault.metric-row",
     sourceFamily: "derived",
-    sourceKind: "summary",
+    sourceKind: "wearable-summary",
+    sourceLabel: "Wearable summary",
+    statistic: "value",
     unit: "bpm",
     value,
+    valueLabel: String(value),
   }));
 }
 
@@ -206,8 +199,9 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     },
     entities: [],
     generatedAt: "2026-04-30T12:00:00.000Z",
-    metricDayRows: [],
+    metricGoalProgressRows: [],
     metricRows: [],
+    metricSelectionRows: [],
     policy: {
       bodyPreviewChars: 280,
       excludedFamilies: [],

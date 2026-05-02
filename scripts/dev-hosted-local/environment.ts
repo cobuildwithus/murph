@@ -185,6 +185,11 @@ export function mergeCloudflareLocalEnv(input: {
   const callbackSigningPublicJwkJson = JSON.stringify(
     toPublicEcP256Jwk(parsePrivateEcP256Jwk(callbackSigningPrivateJwkJson)),
   );
+  const callbackSigningPublicKeyringJson = buildCallbackSigningPublicKeyringJson({
+    currentKeyId: callbackSigningKeyId,
+    currentPublicJwkJson: callbackSigningPublicJwkJson,
+    existingKeyringJson: readHostedLocalKey("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON"),
+  });
   const hostedDeviceRoutingIndexKey =
     readHostedLocalKey("HOSTED_DEVICE_ROUTING_INDEX_KEY") ?? createEnvelopeKey();
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
@@ -252,9 +257,7 @@ export function mergeCloudflareLocalEnv(input: {
       ?? workerOrigin,
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackSigningKeyId,
-    HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON:
-      readHostedLocalKey("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON")
-      ?? buildJsonKeyringJson(callbackSigningKeyId, callbackSigningPublicJwkJson),
+    HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: callbackSigningPublicKeyringJson,
     HOSTED_WEB_BASE_URL: webOrigin,
   };
 
@@ -375,8 +378,29 @@ function isTruthy(value: string | undefined): boolean {
   return value === "1" || value?.toLowerCase() === "true";
 }
 
-function buildJsonKeyringJson(keyId: string, jsonValue: string): string {
-  return JSON.stringify({ [keyId]: JSON.parse(jsonValue) });
+function buildCallbackSigningPublicKeyringJson(input: {
+  currentKeyId: string;
+  currentPublicJwkJson: string;
+  existingKeyringJson: string | null;
+}): string {
+  const keyring = parseOptionalJsonObject(input.existingKeyringJson) ?? {};
+  keyring[input.currentKeyId] = JSON.parse(input.currentPublicJwkJson);
+  return JSON.stringify(keyring);
+}
+
+function parseOptionalJsonObject(value: string | null): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeOptionalEnvOverrides(
@@ -470,10 +494,15 @@ export function buildHostedLocalDevOverrides(
     ? JSON.stringify(toPublicEcP256Jwk(parsePrivateEcP256Jwk(callbackPrivateJwkJson)))
     : null;
   const callbackPublicKeyringJson =
-    cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON?.trim()
-    ?? (callbackPublicJwkJson && callbackKeyId
-      ? buildJsonKeyringJson(callbackKeyId, callbackPublicJwkJson)
-      : null);
+    callbackPublicJwkJson && callbackKeyId
+      ? buildCallbackSigningPublicKeyringJson({
+        currentKeyId: callbackKeyId,
+        currentPublicJwkJson: callbackPublicJwkJson,
+        existingKeyringJson:
+          cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON?.trim()
+          ?? null,
+      })
+      : null;
 
   return {
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,

@@ -297,6 +297,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       status: 204,
     });
+    mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
+      runId: "workflow-run-123",
+    });
   });
 
   it("builds the inactive signup invite with the concise Murph positioning line", () => {
@@ -451,7 +454,7 @@ https://join.example.test/join/code_first_text`);
     },
   );
 
-  it("compacts active-member Linq messages with too many parts and still appends a wake", async () => {
+  it("preserves all active-member Linq text parts when the inbound part count exceeds the old cap", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -493,21 +496,100 @@ https://join.example.test/join/code_first_text`);
     });
 
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    const serializedEnvelope = JSON.stringify(envelope);
     expect(envelope).toEqual(expect.objectContaining({
       message: expect.objectContaining({
         linqMessage: expect.objectContaining({
           parts: expect.arrayContaining([
             expect.objectContaining({
               type: "text",
-              value: expect.stringContaining("part(s) omitted"),
+              value: expect.stringContaining("part 32"),
             }),
           ]),
         }),
       }),
     }));
-    expect(JSON.stringify(envelope)).not.toContain("LINQ_MESSAGE_PARTS_TOO_MANY");
+    expect(serializedEnvelope).toContain("part 0");
+    expect(serializedEnvelope).not.toContain("LINQ_MESSAGE_PARTS_TOO_MANY");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+  });
+
+  it("prioritizes active-member Linq text when attachment descriptors arrive first", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            ...Array.from({ length: 33 }, (_, index) => ({
+              attachment_id: `att_${index}`,
+              filename: `file-${index}.jpg`,
+              mime_type: "image/jpeg",
+              size: 1234,
+              type: "media" as const,
+              url: `https://cdn.linq.example.test/file-${index}.jpg`,
+            })),
+            {
+              type: "text",
+              value: "late user question after attachments",
+            },
+          ],
+        },
+        eventId: "evt_attachments_before_text",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    const serializedEnvelope = JSON.stringify(envelope);
+    expect(envelope).toEqual(expect.objectContaining({
+      message: expect.objectContaining({
+        linqMessage: expect.objectContaining({
+          parts: expect.arrayContaining([
+            expect.objectContaining({
+              type: "text",
+              value: expect.stringContaining("late user question after attachments"),
+            }),
+            expect.objectContaining({
+              type: "text",
+              value: expect.stringContaining("1 attachment descriptor(s) omitted"),
+            }),
+          ]),
+        }),
+      }),
+    }));
+    expect(serializedEnvelope).not.toContain("file-32.jpg");
+    expect(serializedEnvelope).not.toContain("cdn.linq.example.test");
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
   });
@@ -759,6 +841,61 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         httpStatus: 204,
         responseReason: "wake-appended-active-member",
+      }),
+    );
+  });
+
+  it("skips the optional ingress Linq read receipt when workflow handoff does not start", async () => {
+    mocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(new Error("workflow unavailable"));
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_ingress_read_receipt_skipped",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
+      source: "linq",
+    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "skipped-wake-handoff-not-started",
+      expect.objectContaining({
+        responseReason: "wake-appended-active-member",
+        wakeHandoffReason: "workflow-start-failed",
+        wakeHandoffStarted: false,
       }),
     );
   });
@@ -1232,7 +1369,15 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("rejects first-contact iMessage payloads with too many parts before signup side effects", async () => {
+  it("sends first-contact signup links even when inbound Linq parts exceed mailbox limits", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_many_parts",
+      inviteCode: "code_many_parts",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -1247,15 +1392,22 @@ https://join.example.test/join/code_first_text`);
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn(),
-        findFirst: vi.fn(),
-        findUnique: vi.fn(),
-        update: vi.fn(),
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_many_parts",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
         updateMany: vi.fn(),
       },
       hostedMember: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
     };
@@ -1275,19 +1427,36 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "LINQ_MESSAGE_PARTS_TOO_MANY",
-      httpStatus: 413,
+    })).resolves.toMatchObject({
+      inviteCode: "code_many_parts",
+      joinUrl: "https://join.example.test/join/code_many_parts",
+      ok: true,
+      reason: "sent-signup-link",
     });
 
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalled();
-    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.update).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_many_parts",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          joinUrl: "https://join.example.test/join/code_many_parts",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
@@ -1735,7 +1904,7 @@ https://join.example.test/join/code_first_text`);
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
-  it("rejects oversized non-home-line payloads before redirect side effects", async () => {
+  it("sends non-home-line redirects even when inbound Linq parts exceed mailbox limits", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -1818,12 +1987,20 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "LINQ_MESSAGE_PARTS_TOO_MANY",
-      httpStatus: 413,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "redirected-to-home-line",
     });
 
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_other",
+        message: buildHostedLinqConversationHomeRedirectReply({
+          homeRecipientPhone: "+15550100001",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();

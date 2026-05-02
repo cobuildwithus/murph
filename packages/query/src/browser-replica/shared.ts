@@ -7,10 +7,10 @@ import type {
 } from "../overview.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
-import type { WearableConfidenceLevel } from "../wearables.ts";
+import type { MetricConfidence, MetricGrain, MetricSelectionStatus, MetricStatistic } from "@murphai/health-metrics";
 
-export const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica.v1";
-export const BROWSER_VAULT_REPLICA_POLICY_ID = "health-vault-browser-v1";
+export const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica";
+export const BROWSER_VAULT_REPLICA_POLICY_ID = "health-vault-browser";
 
 export const BODY_PREVIEW_CHARS = 280;
 export const METRIC_LOOKBACK_DAYS = 365;
@@ -20,8 +20,6 @@ export const TIMELINE_LIMIT = 240;
 export const SIGNAL_LIMIT = 30;
 export const SOURCE_HEALTH_LIMIT = 24;
 export const WEEKLY_SAMPLE_LOOKBACK_DAYS = 365;
-export const GLUCOSE_SAMPLE_STREAM = "glucose";
-export const GLUCOSE_SAMPLE_UNIT = "mg_dL";
 
 export const INCLUDED_FAMILIES = [
   "allergy",
@@ -48,7 +46,6 @@ export const EXCLUDED_FAMILIES = [
 ] as const;
 
 export type BrowserVaultEntityFamily = (typeof INCLUDED_FAMILIES)[number];
-export type BrowserVaultMetricDomain = "activity" | "body_state" | "recovery" | "sleep";
 
 export interface BrowserVaultReplicaPolicy {
   bodyPreviewChars: number;
@@ -96,55 +93,28 @@ export interface BrowserVaultResolvedMetric {
 }
 
 export interface BrowserVaultSummaryConfidence {
-  level: WearableConfidenceLevel;
+  level: MetricConfidence;
 }
 
 export interface BrowserVaultMetricRow {
-  confidence: WearableConfidenceLevel;
-  date: string;
-  domain: BrowserVaultMetricDomain;
-  id: string;
-  metric: string;
-  recordIds: string[];
-  sourceFamily: string | null;
-  sourceKind: string | null;
-  unit: string | null;
-  value: number | null;
-}
-
-export type BrowserVaultMetricPointStatus = "ready" | "stale";
-export type BrowserVaultMetricPointGrain = "instant" | "event" | "day" | "week" | "month" | "window";
-export type BrowserVaultMetricPointStatistic = "value" | "latest" | "mean" | "median" | "min" | "max" | "sum" | "count";
-
-export interface BrowserVaultMetricPoint {
   biomarkerKey: string | null;
-  canonicalUnit?: string | null;
-  canonicalValue?: number | null;
-  comparator?: "<" | "<=" | ">" | ">=" | null;
-  confidence: WearableConfidenceLevel;
-  context?: Record<string, unknown>;
+  confidence: MetricConfidence;
+  context: Record<string, unknown>;
   date: string;
-  effectiveDate?: string;
-  grain: BrowserVaultMetricPointGrain;
+  grain: MetricGrain;
   id: string;
   metricKey: string;
   observedAt: string;
-  pointSchema: "murph.browser-vault.metric-point";
-  provenance?: Record<string, unknown>;
-  recordedAt?: string | null;
+  pointIds: string[];
   recordIds: string[];
-  reportedAt?: string | null;
-  schemaVersion?: "murph.metric-point";
-  source?: Record<string, unknown>;
+  rowSchema: "murph.browser-vault.metric-row";
   sourceFamily: string | null;
   sourceKind: string | null;
   sourceLabel: string | null;
-  sourceMetricRowId: string;
-  statistic: BrowserVaultMetricPointStatistic;
-  textValue?: string | null;
+  statistic: MetricStatistic;
   unit: string | null;
-  value: number;
-  valueLabel: string;
+  value: number | null;
+  valueLabel: string | null;
 }
 
 export interface BrowserVaultMetricSelectionWarning {
@@ -154,32 +124,21 @@ export interface BrowserVaultMetricSelectionWarning {
 
 export interface BrowserVaultMetricSelectionRow {
   biomarkerKey: string | null;
-  confidence: WearableConfidenceLevel;
-  date: string;
-  effectiveDate?: string;
+  confidence: MetricConfidence;
+  effectiveDate: string | null;
   id: string;
   metricKey: string;
-  observedAt: string;
+  observedAt: string | null;
   pointIds: string[];
   recordIds: string[];
+  selectedMetricRowId: string | null;
   selectionSchema: "murph.browser-vault.metric-selection";
   sourceLabel: string | null;
-  status: BrowserVaultMetricPointStatus;
+  status: MetricSelectionStatus;
   unit: string | null;
-  value: number;
-  valueLabel: string;
+  value: number | null;
+  valueLabel: string | null;
   warnings: BrowserVaultMetricSelectionWarning[];
-}
-
-export interface BrowserVaultMetricDayRow {
-  attributes: Record<string, unknown>;
-  confidence: WearableConfidenceLevel;
-  date: string;
-  domain: BrowserVaultMetricDomain;
-  id: string;
-  metricIds: string[];
-  metrics: Record<string, BrowserVaultResolvedMetric>;
-  notes: string[];
 }
 
 export interface BrowserVaultTimelineRow {
@@ -227,14 +186,27 @@ export interface BrowserVaultAssistantSummary {
   latestDate: string | null;
 }
 
+export interface BrowserVaultMetricGoalProgressRow {
+  currentValue: number | null;
+  currentValueLabel: string | null;
+  deltaToTarget: number | null;
+  goalId: string;
+  metricKey: string;
+  selectedPointIds: string[];
+  status: "behind" | "met" | "no_data" | "on_track" | "stale" | "unsupported";
+  targetId: string;
+  targetValueLabel: string;
+  unit: string;
+  warnings: BrowserVaultMetricSelectionWarning[];
+}
+
 export interface BrowserVaultReplica {
   assistantSummary: BrowserVaultAssistantSummary;
   entities: BrowserVaultEntity[];
   generatedAt: string;
-  metricDayRows: BrowserVaultMetricDayRow[];
+  metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
-  metricPoints?: BrowserVaultMetricPoint[];
-  metricSelectionRows?: BrowserVaultMetricSelectionRow[];
+  metricSelectionRows: BrowserVaultMetricSelectionRow[];
   policy: BrowserVaultReplicaPolicy;
   schema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   searchRows: BrowserVaultSearchRow[];
@@ -262,20 +234,14 @@ export interface BrowserVaultEntityFilters {
 }
 
 export interface BrowserVaultMetricFilters {
-  domain?: BrowserVaultMetricDomain;
-  from?: string;
-  metric?: string;
-  to?: string;
-}
-
-export interface BrowserVaultMetricPointFilters {
   biomarkerKey?: string;
   from?: string;
+  grain?: MetricGrain;
   metricKey?: string;
   to?: string;
 }
 
-export type BrowserVaultMetricSelectionFilters = Pick<BrowserVaultMetricPointFilters, "biomarkerKey" | "metricKey">;
+export type BrowserVaultMetricSelectionFilters = Pick<BrowserVaultMetricFilters, "biomarkerKey" | "metricKey">;
 
 export interface BrowserVaultTimelineFilters {
   families?: readonly string[];
@@ -294,18 +260,14 @@ export interface BrowserVaultQueryClient {
     get(idOrLookupId: string): BrowserVaultEntity | null;
     list(filters?: BrowserVaultEntityFilters): BrowserVaultEntity[];
   };
-  metricDays: {
-    list(filters?: BrowserVaultMetricFilters): BrowserVaultMetricDayRow[];
+  metricGoals: {
+    progress(filters?: { goalId?: string; metricKey?: string }): BrowserVaultMetricGoalProgressRow[];
   };
   metrics: {
     latest(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow | null;
     list(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow[];
     series(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow[];
-  };
-  metricPoints: {
-    latest(filters?: BrowserVaultMetricPointFilters): BrowserVaultMetricPoint | null;
-    list(filters?: BrowserVaultMetricPointFilters): BrowserVaultMetricPoint[];
-    series(filters?: BrowserVaultMetricPointFilters): BrowserVaultMetricPoint[];
+    seriesMany(filters: readonly BrowserVaultMetricFilters[]): BrowserVaultMetricRow[][];
   };
   metricSelections: {
     get(idOrMetricKey: string): BrowserVaultMetricSelectionRow | null;
@@ -336,8 +298,8 @@ export interface BrowserVaultSignalsView {
 }
 
 export interface BrowserVaultActivitySummary {
-  activityScore: BrowserVaultResolvedMetric;
   activeCalories: BrowserVaultResolvedMetric;
+  activityScore: BrowserVaultResolvedMetric;
   activityTypes: string[];
   altitudeChangeMeters: BrowserVaultResolvedMetric;
   date: string;

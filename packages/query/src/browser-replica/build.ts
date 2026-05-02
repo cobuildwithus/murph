@@ -15,17 +15,21 @@ import {
   type WearableBodyStateSummary,
   type WearableConfidenceLevel,
   type WearableRecoverySummary,
-  type WearableResolvedMetric,
   type WearableSleepSummary,
   type WearableSourceHealthSummary,
 } from "../wearables.ts";
+import {
+  extractMetricPoints,
+  selectMetricGoalProgress,
+  type GoalMetricTarget,
+  type MetricPoint,
+  type MetricRowEvidence,
+} from "../metrics/index.ts";
 import {
   BODY_PREVIEW_CHARS,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   EXCLUDED_FAMILIES,
-  GLUCOSE_SAMPLE_STREAM,
-  GLUCOSE_SAMPLE_UNIT,
   INCLUDED_FAMILIES,
   METRIC_LOOKBACK_DAYS,
   SIGNAL_LIMIT,
@@ -34,21 +38,18 @@ import {
   WEEKLY_SAMPLE_LOOKBACK_DAYS,
   type BrowserVaultAssistantSummary,
   type BrowserVaultEntity,
-  type BrowserVaultMetricDayRow,
-  type BrowserVaultMetricDomain,
+  type BrowserVaultMetricGoalProgressRow,
   type BrowserVaultMetricRow,
   type BrowserVaultReplica,
   type BrowserVaultReplicaPolicy,
-  type BrowserVaultResolvedMetric,
   type BrowserVaultSearchRow,
   type BrowserVaultSourceHealthRow,
   type BrowserVaultTimelineRow,
   type CreateBrowserVaultReplicaInput,
 } from "./shared.ts";
 import {
-  createBrowserVaultMetricPointRecords,
-  createBrowserVaultMetricPoints,
   createBrowserVaultMetricSelectionRows,
+  toBrowserVaultMetricRows,
 } from "./metric-points.ts";
 
 export async function createBrowserVaultReplica(
@@ -64,44 +65,23 @@ export async function createBrowserVaultReplica(
   const timelineRows = buildTimeline(input.vault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(input.vault, generatedAt);
-  const activity = summarizeWearableActivity(input.vault, { limit: SIGNAL_LIMIT });
-  const sleep = summarizeWearableSleep(input.vault, { limit: SIGNAL_LIMIT });
-  const recovery = summarizeWearableRecovery(input.vault, { limit: SIGNAL_LIMIT });
-  const bodyState = summarizeWearableBodyState(input.vault, { limit: SIGNAL_LIMIT });
-  const glucoseSampleMetricDayRows = projectGlucoseSampleMetricDayRows(input.vault, generatedAt);
-  const metricDayRows = mergeMetricDayRows([
-    ...activity.map(projectActivityMetricDayRow),
-    ...sleep.map(projectSleepMetricDayRow),
-    ...recovery.map(projectRecoveryMetricDayRow),
-    ...bodyState.map(projectBodyStateMetricDayRow),
-    ...glucoseSampleMetricDayRows,
-  ]);
-  const metricRows = metricDayRows.flatMap((day) => dayToMetricRows(day));
-  const metricPointRecords = createBrowserVaultMetricPointRecords({
-    generatedAt,
-    lookbackDays: METRIC_LOOKBACK_DAYS,
-    metricRows,
+  const wearableMetricRows = buildWearableMetricEvidence(input.vault);
+  const allMetricPoints = extractMetricPoints({
+    metricRows: wearableMetricRows,
     vault: input.vault,
   });
-  const metricPoints = createBrowserVaultMetricPoints({
-    generatedAt,
-    lookbackDays: METRIC_LOOKBACK_DAYS,
-    metricRows,
-    vault: input.vault,
-  });
-  const metricSelectionRows = createBrowserVaultMetricSelectionRows({
-    generatedAt,
-    metricPoints: metricPointRecords,
-  });
+  const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
+  const metricPoints = allMetricPoints.filter((point) => point.effectiveDate >= cutoff);
+  const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
+  const metricSelectionRows = createBrowserVaultMetricSelectionRows({ generatedAt, metricPoints });
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(input.vault)),
     entities,
     generatedAt,
-    metricDayRows,
+    metricGoalProgressRows: buildMetricGoalProgressRows(input.vault.entities, metricPoints, generatedAt),
     metricRows,
-    metricPoints,
     metricSelectionRows,
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
@@ -156,6 +136,139 @@ function createBrowserVaultReplicaPolicy(): BrowserVaultReplicaPolicy {
 
 function isBrowserVaultIncludedFamily(family: string): boolean {
   return (INCLUDED_FAMILIES as readonly string[]).includes(family);
+}
+
+function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
+  return [
+    ...summarizeWearableSleep(vault, { limit: SIGNAL_LIMIT }).flatMap(sleepMetricEvidence),
+    ...summarizeWearableRecovery(vault, { limit: SIGNAL_LIMIT }).flatMap(recoveryMetricEvidence),
+    ...summarizeWearableActivity(vault, { limit: SIGNAL_LIMIT }).flatMap(activityMetricEvidence),
+    ...summarizeWearableBodyState(vault, { limit: SIGNAL_LIMIT }).flatMap(bodyStateMetricEvidence),
+  ];
+}
+
+function sleepMetricEvidence(summary: WearableSleepSummary): MetricRowEvidence[] {
+  return [
+    metricEvidence(summary.date, "total-sleep-minutes", summary.totalSleepMinutes.selection.value, summary.totalSleepMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
+    metricEvidence(summary.date, "sleep-score", summary.sleepScore.selection.value, summary.sleepScore.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
+    metricEvidence(summary.date, "deep-sleep-minutes", summary.deepMinutes.selection.value, summary.deepMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
+    metricEvidence(summary.date, "rem-sleep-minutes", summary.remMinutes.selection.value, summary.remMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
+    metricEvidence(summary.date, "hrv-rmssd", summary.hrv.selection.value, summary.hrv.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
+  ];
+}
+
+function recoveryMetricEvidence(summary: WearableRecoverySummary): MetricRowEvidence[] {
+  return [
+    metricEvidence(summary.date, "readiness-score", summary.readinessScore.selection.value, summary.readinessScore.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
+    metricEvidence(summary.date, "resting-heart-rate", summary.restingHeartRate.selection.value, summary.restingHeartRate.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
+    metricEvidence(summary.date, "hrv-rmssd", summary.hrv.selection.value, summary.hrv.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
+  ];
+}
+
+function activityMetricEvidence(summary: WearableActivitySummary): MetricRowEvidence[] {
+  return [
+    metricEvidence(summary.date, "steps", summary.steps.selection.value, summary.steps.selection.unit, summary.summaryConfidence.level, "activity-summary"),
+    metricEvidence(summary.date, "activity-minutes", summary.sessionMinutes.selection.value, summary.sessionMinutes.selection.unit, summary.summaryConfidence.level, "activity-summary"),
+  ];
+}
+
+function bodyStateMetricEvidence(summary: WearableBodyStateSummary): MetricRowEvidence[] {
+  return [
+    metricEvidence(summary.date, "body-weight", summary.weightKg.selection.value, summary.weightKg.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
+    metricEvidence(summary.date, "body-fat-percentage", summary.bodyFatPercentage.selection.value, summary.bodyFatPercentage.selection.unit, summary.summaryConfidence.level, "wearable-summary"),
+  ];
+}
+
+function metricEvidence(
+  date: string,
+  metricKey: string,
+  value: number | null,
+  unit: string | null,
+  confidence: WearableConfidenceLevel,
+  sourceKind: MetricRowEvidence["sourceKind"],
+): MetricRowEvidence {
+  return {
+    confidence,
+    date,
+    metricKey,
+    recordIds: [`${sourceKind}:${metricKey}:${date}`],
+    sourceKind,
+    sourceLabel: "Wearable summary",
+    unit,
+    value,
+  };
+}
+
+function buildMetricGoalProgressRows(
+  entities: readonly CanonicalEntity[],
+  points: readonly MetricPoint[],
+  now: string,
+): BrowserVaultMetricGoalProgressRow[] {
+  return entities
+    .filter((entity) => entity.family === "goal")
+    .flatMap((entity) => readGoalMetricTargets(entity).map((target) =>
+      selectMetricGoalProgress({
+        goalId: entity.entityId,
+        now,
+        points,
+        target,
+      }) satisfies BrowserVaultMetricGoalProgressRow
+    ));
+}
+
+function readGoalMetricTargets(entity: CanonicalEntity): GoalMetricTarget[] {
+  const source = entity.frontmatter ?? entity.attributes;
+  const rawTargets = Array.isArray(source.metricTargets) ? source.metricTargets : [];
+  return rawTargets.flatMap((target, index) => {
+    if (!target || typeof target !== "object" || Array.isArray(target)) return [];
+    const record = target as Record<string, unknown>;
+    const metricKey = readString(record.metricKey);
+    const comparator = readComparator(record.comparator);
+    const value = readNumber(record.value);
+    const unit = readString(record.unit);
+    if (!metricKey || !comparator || value === null || !unit) return [];
+    const targetId = readString(record.targetId) ?? `${entity.entityId}:metric-target:${index + 1}`;
+    return [{
+      biomarkerKey: readString(record.biomarkerKey) ?? undefined,
+      comparator,
+      evaluation: readGoalTargetEvaluation(record.evaluation),
+      highValue: readNumber(record.highValue) ?? undefined,
+      kind: "metric",
+      metricKey,
+      note: readString(record.note) ?? undefined,
+      targetAt: readString(record.targetAt) ?? undefined,
+      targetId,
+      unit,
+      value,
+    } satisfies GoalMetricTarget];
+  });
+}
+
+function readGoalTargetEvaluation(value: unknown): GoalMetricTarget["evaluation"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "selected-value" };
+  const record = value as Record<string, unknown>;
+  const kind = readString(record.kind);
+  if (kind === "latest-lab") return { kind };
+  if (kind === "rolling-window") {
+    const statistic = readString(record.statistic);
+    const windowDays = readNumber(record.windowDays);
+    if ((statistic === "mean" || statistic === "median") && windowDays !== null) {
+      return { kind, statistic, windowDays };
+    }
+  }
+  return { kind: "selected-value" };
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readComparator(value: unknown): GoalMetricTarget["comparator"] | null {
+  return value === "<" || value === "<=" || value === ">" || value === ">=" || value === "between" ? value : null;
 }
 
 function projectEntity(entity: CanonicalEntity): BrowserVaultEntity {
@@ -379,294 +492,10 @@ function projectWeeklySampleSummary(entry: DailySampleSummary): OverviewWeeklySa
   };
 }
 
-function projectGlucoseSampleMetricDayRows(
-  vault: VaultReadModel,
-  generatedAt: string,
-): BrowserVaultMetricDayRow[] {
-  const cutoffDate = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
-
-  return summarizeDailySamples(vault, {
-    from: cutoffDate,
-    streams: [GLUCOSE_SAMPLE_STREAM],
-  })
-    .filter((entry) => entry.unit === GLUCOSE_SAMPLE_UNIT && entry.averageValue !== null)
-    .map(projectGlucoseSampleMetricDayRow)
-    .sort(compareMetricDayRows);
-}
-
-function projectGlucoseSampleMetricDayRow(summary: DailySampleSummary): BrowserVaultMetricDayRow {
-  const confidence = inferSampleSummaryConfidence(summary);
-
-  return buildMetricDayRow({
-    attributes: {
-      firstSampleAt: summary.firstSampleAt,
-      glucoseConfidence: confidence,
-      lastSampleAt: summary.lastSampleAt,
-      sampleCount: summary.sampleCount,
-      sourceStream: summary.stream,
-    },
-    confidence,
-    date: summary.date,
-    domain: "body_state",
-    metrics: {
-      glucose: {
-        selection: {
-          unit: GLUCOSE_SAMPLE_UNIT,
-          value: summary.averageValue,
-        },
-      },
-    },
-    notes: buildGlucoseSampleNotes(summary),
-  });
-}
-
-function inferSampleSummaryConfidence(summary: DailySampleSummary): WearableConfidenceLevel {
-  if (summary.numericSampleCount >= 3) {
-    return "medium";
-  }
-
-  return "low";
-}
-
-function buildGlucoseSampleNotes(summary: DailySampleSummary): string[] {
-  const sampleLabel = summary.sampleCount === 1 ? "sample" : "samples";
-
-  return [
-    `Daily glucose summary from ${summary.sampleCount} imported ${sampleLabel}.`,
-    "Glucose context is not inferred; compare same-device and same-timing readings when possible.",
-  ];
-}
-
 function projectWearableAssistantSummary(summary: WearableAssistantSummary): BrowserVaultAssistantSummary {
   return {
     highlights: summary.highlights.slice(),
     latestDate: summary.latestDate,
-  };
-}
-
-function projectActivityMetricDayRow(summary: WearableActivitySummary): BrowserVaultMetricDayRow {
-  return buildMetricDayRow({
-    attributes: { activityTypes: summary.activityTypes.slice() },
-    confidence: summary.summaryConfidence.level,
-    date: summary.date,
-    domain: "activity",
-    metrics: {
-      activityScore: projectWearableResolvedMetric(summary.activityScore),
-      activeCalories: projectWearableResolvedMetric(summary.activeCalories),
-      altitudeChangeMeters: projectWearableResolvedMetric(summary.altitudeChangeMeters),
-      dayStrain: projectWearableResolvedMetric(summary.dayStrain),
-      distanceKm: projectWearableResolvedMetric(summary.distanceKm),
-      estimatedVo2Max: projectWearableResolvedMetric(summary.estimatedVo2Max),
-      maxHeartRate: projectWearableResolvedMetric(summary.maxHeartRate),
-      percentRecorded: projectWearableResolvedMetric(summary.percentRecorded),
-      sessionCount: projectWearableResolvedMetric(summary.sessionCount),
-      sessionMinutes: projectWearableResolvedMetric(summary.sessionMinutes),
-      steps: projectWearableResolvedMetric(summary.steps),
-      totalElevationGainMeters: projectWearableResolvedMetric(summary.totalElevationGainMeters),
-      workoutStrain: projectWearableResolvedMetric(summary.workoutStrain),
-    },
-    notes: summary.notes,
-  });
-}
-
-function projectSleepMetricDayRow(summary: WearableSleepSummary): BrowserVaultMetricDayRow {
-  return buildMetricDayRow({
-    attributes: {
-      sleepEndAt: summary.sleepEndAt,
-      sleepStartAt: summary.sleepStartAt,
-      sleepWindowProvider: summary.sleepWindowProvider,
-    },
-    confidence: summary.summaryConfidence.level,
-    date: summary.date,
-    domain: "sleep",
-    metrics: {
-      averageHeartRate: projectWearableResolvedMetric(summary.averageHeartRate),
-      awakeMinutes: projectWearableResolvedMetric(summary.awakeMinutes),
-      deepMinutes: projectWearableResolvedMetric(summary.deepMinutes),
-      hrv: projectWearableResolvedMetric(summary.hrv),
-      lightMinutes: projectWearableResolvedMetric(summary.lightMinutes),
-      lowestHeartRate: projectWearableResolvedMetric(summary.lowestHeartRate),
-      remMinutes: projectWearableResolvedMetric(summary.remMinutes),
-      respiratoryRate: projectWearableResolvedMetric(summary.respiratoryRate),
-      sessionMinutes: projectWearableResolvedMetric(summary.sessionMinutes),
-      sleepConsistency: projectWearableResolvedMetric(summary.sleepConsistency),
-      sleepEfficiency: projectWearableResolvedMetric(summary.sleepEfficiency),
-      sleepPerformance: projectWearableResolvedMetric(summary.sleepPerformance),
-      sleepScore: projectWearableResolvedMetric(summary.sleepScore),
-      spo2: projectWearableResolvedMetric(summary.spo2),
-      timeInBedMinutes: projectWearableResolvedMetric(summary.timeInBedMinutes),
-      totalSleepMinutes: projectWearableResolvedMetric(summary.totalSleepMinutes),
-    },
-    notes: summary.notes,
-  });
-}
-
-function projectRecoveryMetricDayRow(summary: WearableRecoverySummary): BrowserVaultMetricDayRow {
-  return buildMetricDayRow({
-    attributes: {},
-    confidence: summary.summaryConfidence.level,
-    date: summary.date,
-    domain: "recovery",
-    metrics: {
-      bodyBattery: projectWearableResolvedMetric(summary.bodyBattery),
-      hrv: projectWearableResolvedMetric(summary.hrv),
-      readinessScore: projectWearableResolvedMetric(summary.readinessScore),
-      recoveryScore: projectWearableResolvedMetric(summary.recoveryScore),
-      respiratoryRate: projectWearableResolvedMetric(summary.respiratoryRate),
-      restingHeartRate: projectWearableResolvedMetric(summary.restingHeartRate),
-      spo2: projectWearableResolvedMetric(summary.spo2),
-      stressLevel: projectWearableResolvedMetric(summary.stressLevel),
-      temperature: projectWearableResolvedMetric(summary.temperature),
-      temperatureDeviation: projectWearableResolvedMetric(summary.temperatureDeviation),
-    },
-    notes: summary.notes,
-  });
-}
-
-function projectBodyStateMetricDayRow(summary: WearableBodyStateSummary): BrowserVaultMetricDayRow {
-  return buildMetricDayRow({
-    attributes: {},
-    confidence: summary.summaryConfidence.level,
-    date: summary.date,
-    domain: "body_state",
-    metrics: {
-      bmi: projectWearableResolvedMetric(summary.bmi),
-      bodyFatPercentage: projectWearableResolvedMetric(summary.bodyFatPercentage),
-      temperature: projectWearableResolvedMetric(summary.temperature),
-      weightKg: projectWearableResolvedMetric(summary.weightKg),
-    },
-    notes: summary.notes,
-  });
-}
-
-function buildMetricDayRow(input: {
-  attributes: Record<string, unknown>;
-  confidence: WearableConfidenceLevel;
-  date: string;
-  domain: BrowserVaultMetricDomain;
-  metrics: Record<string, BrowserVaultResolvedMetric>;
-  notes: readonly string[];
-}): BrowserVaultMetricDayRow {
-  const metricIds = Object.keys(input.metrics).map((metric) => `${input.domain}:${input.date}:${metric}`);
-
-  return {
-    attributes: cloneRecord(input.attributes),
-    confidence: input.confidence,
-    date: input.date,
-    domain: input.domain,
-    id: `${input.domain}:${input.date}`,
-    metricIds,
-    metrics: cloneMetricMap(input.metrics),
-    notes: input.notes.slice(),
-  };
-}
-
-function mergeMetricDayRows(rows: readonly BrowserVaultMetricDayRow[]): BrowserVaultMetricDayRow[] {
-  const byId = new Map<string, BrowserVaultMetricDayRow>();
-
-  for (const row of rows) {
-    const existing = byId.get(row.id);
-    byId.set(row.id, existing ? mergeMetricDayRow(existing, row) : row);
-  }
-
-  return [...byId.values()].sort(compareMetricDayRows);
-}
-
-function mergeMetricDayRow(
-  left: BrowserVaultMetricDayRow,
-  right: BrowserVaultMetricDayRow,
-): BrowserVaultMetricDayRow {
-  return buildMetricDayRow({
-    attributes: {
-      ...left.attributes,
-      ...right.attributes,
-    },
-    confidence: mergedMetricDayConfidence(left, right),
-    date: left.date,
-    domain: left.domain,
-    metrics: {
-      ...left.metrics,
-      ...right.metrics,
-    },
-    notes: uniqueStrings([...left.notes, ...right.notes]),
-  });
-}
-
-function compareMetricDayRows(left: BrowserVaultMetricDayRow, right: BrowserVaultMetricDayRow): number {
-  const domainDelta = metricDomainSortIndex(left.domain) - metricDomainSortIndex(right.domain);
-
-  if (domainDelta !== 0) {
-    return domainDelta;
-  }
-
-  return right.date.localeCompare(left.date);
-}
-
-function metricDomainSortIndex(domain: BrowserVaultMetricDomain): number {
-  if (domain === "activity") {
-    return 0;
-  }
-  if (domain === "sleep") {
-    return 1;
-  }
-  if (domain === "recovery") {
-    return 2;
-  }
-
-  return 3;
-}
-
-function mergedMetricDayConfidence(
-  left: BrowserVaultMetricDayRow,
-  right: BrowserVaultMetricDayRow,
-): WearableConfidenceLevel {
-  if (hasOnlyGlucoseMetric(left) && !hasOnlyGlucoseMetric(right)) {
-    return right.confidence;
-  }
-  if (!hasOnlyGlucoseMetric(left) && hasOnlyGlucoseMetric(right)) {
-    return left.confidence;
-  }
-
-  return left.confidence;
-}
-
-function hasOnlyGlucoseMetric(row: BrowserVaultMetricDayRow): boolean {
-  return Object.keys(row.metrics).every((metricKey) => metricKey === "glucose");
-}
-
-function dayToMetricRows(day: BrowserVaultMetricDayRow): BrowserVaultMetricRow[] {
-  return Object.entries(day.metrics).map(([metric, resolved]) => ({
-    confidence: metricConfidence(day, metric),
-    date: day.date,
-    domain: day.domain,
-    id: `${day.id}:${metric}`,
-    metric,
-    recordIds: [],
-    sourceFamily: "derived",
-    sourceKind: "summary",
-    unit: resolved.selection.unit,
-    value: resolved.selection.value,
-  }));
-}
-
-function metricConfidence(day: BrowserVaultMetricDayRow, key: string): WearableConfidenceLevel {
-  if (key === "glucose") {
-    const glucoseConfidence = readNullableString(day.attributes.glucoseConfidence);
-
-    if (glucoseConfidence === "low" || glucoseConfidence === "medium" || glucoseConfidence === "high") {
-      return glucoseConfidence;
-    }
-  }
-
-  return day.confidence;
-}
-
-function projectWearableResolvedMetric(metric: WearableResolvedMetric): BrowserVaultResolvedMetric {
-  return {
-    selection: {
-      unit: metric.selection.unit,
-      value: metric.selection.value,
-    },
   };
 }
 
@@ -687,21 +516,6 @@ function projectSourceHealthRow(summary: WearableSourceHealthSummary): BrowserVa
   };
 }
 
-function cloneMetricMap(metrics: Record<string, BrowserVaultResolvedMetric>): Record<string, BrowserVaultResolvedMetric> {
-  const output: Record<string, BrowserVaultResolvedMetric> = {};
-
-  for (const [key, value] of Object.entries(metrics)) {
-    output[key] = {
-      selection: {
-        unit: value.selection.unit,
-        value: value.selection.value,
-      },
-    };
-  }
-
-  return output;
-}
-
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
@@ -719,18 +533,6 @@ function requireIsoDateTime(value: unknown, label: string): string {
   }
 
   return text;
-}
-
-function readNullableString(value: unknown): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError("Expected nullable string.");
-  }
-
-  return value;
 }
 
 function previewText(value: string | null, limit: number): string | null {

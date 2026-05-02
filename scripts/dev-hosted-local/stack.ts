@@ -41,6 +41,7 @@ import {
   registerHostedLocalLinqWebhookSubscription,
   resolveHostedLocalLinqWebhookSetup,
   type HostedLocalLinqWebhookSetup,
+  waitForHostedLocalLinqWebhookTarget,
 } from "./linq-webhook-tunnel.ts";
 import {
   assertHostedWebDevServerAvailable,
@@ -631,6 +632,9 @@ export async function startHostedLocalDevStack(input: {
           }),
         ]);
         if (linqWebhookSetup?.shouldRegister) {
+          await waitForHostedLocalLinqWebhookTarget({
+            setup: linqWebhookSetup,
+          });
           await registerHostedLocalLinqWebhookSubscription({
             env: runtimeEnv,
             setup: linqWebhookSetup,

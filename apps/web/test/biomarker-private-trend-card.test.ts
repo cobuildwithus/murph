@@ -69,7 +69,7 @@ test("the biomarker overview mounts the browser-vault private card", () => {
   assert.doesNotMatch(source, /BiomarkerTrendDetail/u);
 });
 
-test("the biomarker overview skips the private card for biomarkers without browser-vault metric bindings", () => {
+test("the biomarker overview lets the metric catalog decide private trend support", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
 
@@ -91,8 +91,8 @@ test("the biomarker overview skips the private card for biomarkers without brows
     createElement(BiomarkerOverview, { biomarker: unsupportedBiomarker }),
   );
 
-  assert.doesNotMatch(markup, /data-browser-vault-provider/u);
-  assert.doesNotMatch(markup, /Biomarker unavailable/u);
+  assert.match(markup, /data-browser-vault-provider/u);
+  assert.match(markup, /Biomarker unavailable/u);
   assert.doesNotMatch(markup, /Connect a health device/u);
 });
 
@@ -217,16 +217,24 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
 
 function restingHeartRateRows(rows: readonly (readonly [string, number])[]): BrowserVaultMetricRow[] {
   return rows.map(([date, value]) => ({
+    biomarkerKey: "biomarker:resting-heart-rate",
     confidence: "high",
+    context: {},
     date,
-    domain: "recovery",
-    id: `recovery:${date}:restingHeartRate`,
-    metric: "restingHeartRate",
+    grain: "day",
+    id: `metric-row:resting-heart-rate:${date}`,
+    metricKey: "resting-heart-rate",
+    observedAt: `${date}T00:00:00.000Z`,
+    pointIds: [`metric-point:resting-heart-rate:${date}`],
     recordIds: [],
+    rowSchema: "murph.browser-vault.metric-row",
     sourceFamily: "derived",
-    sourceKind: "summary",
+    sourceKind: "wearable-summary",
+    sourceLabel: "Wearable summary",
+    statistic: "value",
     unit: "bpm",
     value,
+    valueLabel: String(value),
   }));
 }
 
@@ -238,8 +246,9 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     },
     entities: [],
     generatedAt: "2026-04-30T12:00:00.000Z",
-    metricDayRows: [],
+    metricGoalProgressRows: [],
     metricRows: [],
+    metricSelectionRows: [],
     policy: {
       bodyPreviewChars: 280,
       excludedFamilies: [],

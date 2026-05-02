@@ -1,36 +1,32 @@
 import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
-  formatMetricDisplayValue,
   normalizeMetricKey,
   normalizeMetricValue,
-  resolveBrowserMetricBinding,
   resolveMetricDefinition,
   type MetricComparator,
   type MetricConfidence,
   type MetricPoint,
   type MetricPointContext,
-  type MetricPointProvenance,
   type MetricSourceKind,
 } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
 
 export type {
+  GoalMetricTarget,
   MetricComparator,
   MetricConfidence,
   MetricDefinition,
+  MetricGoalProgress,
   MetricPoint,
   MetricPointContext,
   MetricPointProvenance,
-  MetricPointSource,
   MetricSelection,
   MetricSelectionPolicy,
   MetricSelectionStatus,
   MetricSelectionWarning,
   MetricSelectionWarningCode,
-  MetricSourceFamily,
-  MetricSourceKind,
 } from "@murphai/health-metrics";
 
 export {
@@ -42,20 +38,19 @@ export {
   listMetricDefinitions,
   normalizeMetricKey,
   normalizeMetricValue,
-  resolveBrowserMetricBinding,
   resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
+  selectMetricGoalProgress,
   selectMetricValue,
 } from "@murphai/health-metrics";
 
 export interface MetricRowEvidence {
   confidence: MetricConfidence;
   date: string;
-  domain: string;
-  id: string;
-  metric: string;
+  metricKey: string;
   recordIds: readonly string[];
-  sourceFamily: string | null;
-  sourceKind: string | null;
+  sourceKind: MetricSourceKind;
+  sourceLabel: string | null;
   unit: string | null;
   value: number | null;
 }
@@ -79,15 +74,13 @@ export function extractMetricPoints(input: {
 }
 
 function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
-  const definition = resolveBrowserMetricBinding({ domain: row.domain, metric: row.metric });
+  const definition = resolveMetricDefinition(row.metricKey);
   if (!definition || typeof row.value !== "number" || !Number.isFinite(row.value)) {
     return [];
   }
 
   const observedAt = row.date.includes("T") ? row.date : `${row.date}T00:00:00.000Z`;
   const normalized = normalizeMetricValue({ metricKey: definition.key, unit: row.unit ?? definition.displayUnit, value: row.value });
-  const sourceKind = metricSourceKindForRow(row);
-
   return [createMetricPoint({
     biomarkerKey: definition.biomarkerKey,
     canonicalUnit: normalized.canonicalUnit,
@@ -96,7 +89,6 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
     confidence: row.confidence,
     context: {},
     effectiveDate: row.date.slice(0, 10),
-    grain: "day",
     metricKey: definition.key,
     observedAt,
     provenance: {
@@ -105,15 +97,15 @@ function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
       labName: null,
       provider: null,
       rawRefs: [],
-      sourceLabel: sourceLabelForMetricRow(row),
+      sourceLabel: row.sourceLabel,
     },
     recordedAt: null,
     reportedAt: null,
     source: {
       family: "derived",
-      kind: sourceKind,
+      kind: row.sourceKind,
       path: "",
-      recordId: row.id,
+      recordId: row.recordIds[0] ?? `derived:${definition.key}:${row.date}`,
       resultIndex: null,
     },
     statistic: "value",
@@ -131,10 +123,6 @@ function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[]
   switch (entity.kind) {
     case "measurement":
       return measurementMetricPoints(entity);
-    case "body_measurement":
-      return bodyMeasurementMetricPoints(entity);
-    case "observation":
-      return observationMetricPoints(entity);
     case "test":
       return testResultMetricPoints(entity);
     default:
@@ -163,45 +151,6 @@ function measurementMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   });
 }
 
-function bodyMeasurementMetricPoints(entity: CanonicalEntity): MetricPoint[] {
-  return readArray(entity.attributes.measurements).flatMap((entry, index) => {
-    const record = readRecord(entry);
-    const metric = readString(record?.type);
-    const value = readNumber(record?.value);
-    const unit = readString(record?.unit);
-    if (!metric || value === null) return [];
-
-    return [scalarMetricPoint({
-      confidence: eventConfidence(entity),
-      context: {},
-      entity,
-      index,
-      metric,
-      sourceKind: "compat-body-measurement",
-      unit,
-      value,
-    })];
-  });
-}
-
-function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
-  const metric = readString(entity.attributes.metric);
-  const value = readNumber(entity.attributes.value);
-  const unit = readString(entity.attributes.unit);
-  if (!metric || value === null) return [];
-
-  return [scalarMetricPoint({
-    confidence: eventConfidence(entity),
-    context: {},
-    entity,
-    index: 0,
-    metric,
-    sourceKind: "compat-observation",
-    unit,
-    value,
-  })];
-}
-
 function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const results = readArray(entity.attributes.results);
   const collectedAt = readString(entity.attributes.collectedAt);
@@ -209,14 +158,14 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const observedAt = collectedAt ?? entity.occurredAt ?? reportedAt ?? entity.date ?? null;
   if (!observedAt) return [];
 
-  const points = results.flatMap((entry, index) => {
+  return results.flatMap((entry, index) => {
     const record = readRecord(entry);
     const metric = readString(record?.biomarkerSlug) ?? readString(record?.slug) ?? readString(record?.analyte);
     const value = readNumber(record?.value);
     const textValue = readString(record?.textValue);
     const unit = readString(record?.unit);
-    if (!metric || (value === null && !textValue)) return [];
-    if (!resolveMetricDefinition(normalizeMetricKey(metric))) return [];
+    const definition = metric ? resolveMetricDefinition(metric) : null;
+    if (!metric || !definition || (value === null && !textValue)) return [];
 
     return [scalarMetricPoint({
       comparator: readComparator(record?.comparator),
@@ -237,8 +186,6 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
       value,
     })];
   });
-
-  return dedupeTestResultMetricPoints(points);
 }
 
 function scalarMetricPoint(input: {
@@ -270,7 +217,6 @@ function scalarMetricPoint(input: {
     confidence: input.confidence,
     context: compactContext(input.context),
     effectiveDate,
-    grain: "event",
     metricKey: definition.key,
     observedAt,
     provenance: {
@@ -320,17 +266,6 @@ function dedupeMetricPoints(points: readonly MetricPoint[]): MetricPoint[] {
   return [...byId.values()];
 }
 
-function dedupeTestResultMetricPoints(points: readonly MetricPoint[]): MetricPoint[] {
-  const byMetric = new Map<string, MetricPoint>();
-  for (const point of points) {
-    const existing = byMetric.get(point.metricKey);
-    if (!existing || (existing.canonicalValue === null && point.canonicalValue !== null)) {
-      byMetric.set(point.metricKey, point);
-    }
-  }
-  return [...byMetric.values()];
-}
-
 function compareMetricPointDesc(left: MetricPoint, right: MetricPoint): number {
   if (left.effectiveDate !== right.effectiveDate) return right.effectiveDate.localeCompare(left.effectiveDate);
   if (left.observedAt !== right.observedAt) return right.observedAt.localeCompare(left.observedAt);
@@ -339,18 +274,6 @@ function compareMetricPointDesc(left: MetricPoint, right: MetricPoint): number {
 
 function entityObservedAt(entity: CanonicalEntity): string {
   return entity.occurredAt ?? entity.date ?? new Date(0).toISOString();
-}
-
-function metricSourceKindForRow(row: MetricRowEvidence): MetricSourceKind {
-  if (row.domain === "sleep") return "sleep-summary";
-  if (row.domain === "activity") return "activity-summary";
-  return "wearable-summary";
-}
-
-function sourceLabelForMetricRow(row: MetricRowEvidence): string {
-  if (row.sourceKind && row.sourceKind !== "summary") return humanize(row.sourceKind);
-  if (row.sourceFamily && row.sourceFamily !== "derived") return humanize(row.sourceFamily);
-  return "Wearable summary";
 }
 
 function sourceLabelForEntity(entity: CanonicalEntity): string | null {

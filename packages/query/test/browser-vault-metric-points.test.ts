@@ -5,33 +5,30 @@ import { test } from "vitest";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  createBrowserVaultMetricPoints,
   createBrowserVaultMetricSelectionRows,
   createBrowserVaultQueryClient,
-  type BrowserVaultMetricRow,
+  parseBrowserVaultReplica,
+  toBrowserVaultMetricRows,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
+import type { MetricPoint } from "../src/index.ts";
 
-test("projects wearable RHR/HRV/deep/REM metric rows into metric points and selections", () => {
-  const metricRows: BrowserVaultMetricRow[] = [
-    wearableMetricRow("2026-04-28", "recovery", "restingHeartRate", 58, "bpm"),
-    wearableMetricRow("2026-04-29", "recovery", "restingHeartRate", 57, "bpm"),
-    wearableMetricRow("2026-04-29", "recovery", "hrv", 72, "ms"),
-    wearableMetricRow("2026-04-29", "sleep", "deepMinutes", 81, "minutes"),
-    wearableMetricRow("2026-04-29", "sleep", "remMinutes", 94, "minutes"),
+test("browser-vault exposes metric-key rows and selections without legacy domains", () => {
+  const points: MetricPoint[] = [
+    point("2026-04-28", "resting-heart-rate", "biomarker:resting-heart-rate", 58, "bpm"),
+    point("2026-04-29", "resting-heart-rate", "biomarker:resting-heart-rate", 57, "bpm"),
+    point("2026-04-29", "hrv-rmssd", "biomarker:hrv-rmssd", 72, "ms"),
+    point("2026-04-29", "deep-sleep-minutes", "biomarker:deep-sleep-minutes", 81, "minutes"),
+    point("2026-04-29", "rem-sleep-minutes", "biomarker:rem-sleep-minutes", 94, "minutes"),
   ];
-  const metricPoints = createBrowserVaultMetricPoints(metricRows);
+  const metricRows = toBrowserVaultMetricRows({ points });
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt: "2026-04-30T12:00:00.000Z",
-    metricPoints,
+    metricPoints: points,
   });
-  const client = createBrowserVaultQueryClient(createReplica({
-    metricPoints,
-    metricRows,
-    metricSelectionRows,
-  }));
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica({ metricRows, metricSelectionRows })));
 
-  assert.deepEqual(metricPoints.map((point) => point.metricKey).sort(), [
+  assert.deepEqual(metricRows.map((row) => row.metricKey).sort(), [
     "deep-sleep-minutes",
     "hrv-rmssd",
     "rem-sleep-minutes",
@@ -39,35 +36,32 @@ test("projects wearable RHR/HRV/deep/REM metric rows into metric points and sele
     "resting-heart-rate",
   ]);
 
-  const rhr = client.metricSelections.getByBiomarker("biomarker:resting-heart-rate");
-  assert.equal(rhr?.value, 57);
-  assert.equal(rhr?.valueLabel, "57");
-  assert.equal(rhr?.unit, "bpm");
-  assert.equal(rhr?.status, "ready");
-
+  assert.equal(client.metricSelections.getByBiomarker("biomarker:resting-heart-rate")?.value, 57);
   assert.equal(client.metricSelections.get("resting-heart-rate")?.id, "metric-selection:resting-heart-rate");
-  assert.equal(client.metricPoints.series({ metricKey: "resting-heart-rate" }).at(-1)?.value, 57);
-  assert.equal(client.metricSelections.getByBiomarker("biomarker:hrv-rmssd")?.value, 72);
-  assert.equal(client.metricSelections.getByBiomarker("biomarker:deep-sleep-minutes")?.value, 81);
-  assert.equal(client.metricSelections.getByBiomarker("biomarker:rem-sleep-minutes")?.value, 94);
+  assert.equal(client.metrics.series({ metricKey: "resting-heart-rate" }).at(-1)?.value, 57);
+  assert.deepEqual(client.metrics.seriesMany([{ metricKey: "hrv-rmssd" }, { metricKey: "deep-sleep-minutes" }]).map((series) => series.at(-1)?.value), [72, 81]);
 });
 
-function wearableMetricRow(
-  date: string,
-  domain: BrowserVaultMetricRow["domain"],
-  metric: string,
-  value: number,
-  unit: string,
-): BrowserVaultMetricRow {
+function point(date: string, metricKey: string, biomarkerKey: string | null, value: number, unit: string): MetricPoint {
   return {
+    biomarkerKey,
+    canonicalUnit: unit,
+    canonicalValue: value,
+    comparator: null,
     confidence: "high",
-    date,
-    domain,
-    id: `${domain}:${date}:${metric}`,
-    metric,
-    recordIds: [`record:${domain}:${date}:${metric}`],
-    sourceFamily: "derived",
-    sourceKind: "summary",
+    context: {},
+    effectiveDate: date,
+    grain: "day",
+    id: `metric-point:${metricKey}:${date}`,
+    metricKey,
+    observedAt: `${date}T00:00:00.000Z`,
+    provenance: { dataOrigin: null, externalRef: null, labName: null, provider: null, rawRefs: [], sourceLabel: "Wearable summary" },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point",
+    source: { family: "derived", kind: "wearable-summary", path: "", recordId: `record:${metricKey}:${date}`, resultIndex: null },
+    statistic: "value",
+    textValue: null,
     unit,
     value,
   };
@@ -75,14 +69,10 @@ function wearableMetricRow(
 
 function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVaultReplica {
   return {
-    assistantSummary: {
-      highlights: [],
-      latestDate: null,
-    },
+    assistantSummary: { highlights: [], latestDate: null },
     entities: [],
     generatedAt: "2026-04-30T12:00:00.000Z",
-    metricDayRows: [],
-    metricPoints: [],
+    metricGoalProgressRows: [],
     metricRows: [],
     metricSelectionRows: [],
     policy: {
@@ -94,10 +84,7 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     },
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: [],
-    source: {
-      dataVersion: "sha256:browser-vault-metric-points-test",
-      sourceBundleHash: "sha256:browser-vault-metric-points-source",
-    },
+    source: { dataVersion: "sha256:browser-vault-metric-points-test", sourceBundleHash: "sha256:browser-vault-metric-points-source" },
     sourceHealthRows: [],
     timelineRows: [],
     weeklySampleSummaries: [],

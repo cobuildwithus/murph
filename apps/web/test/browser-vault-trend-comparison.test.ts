@@ -122,15 +122,24 @@ function buildDailyRows(
     date.setUTCDate(date.getUTCDate() - daysBeforeLatest);
 
     return {
+      biomarkerKey: null,
       confidence: "high",
+      context: {},
       date: date.toISOString().slice(0, 10),
-      domain: "sleep",
+      grain: "day",
       id: `row-${index}`,
-      metric: "spo2",
+      metricKey: "spo2",
+      observedAt: `${date.toISOString().slice(0, 10)}T00:00:00.000Z`,
+      pointIds: [`point-${index}`],
       recordIds: [`record-${index}`],
-      sourceFamily: "wearable",
-      sourceKind: "wearable",
+      rowSchema: "murph.browser-vault.metric-row",
+      sourceFamily: "derived",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Wearable summary",
+      statistic: "value",
+      unit: "%",
       value: index < 30 ? input.baselineValue : input.currentValue,
+      valueLabel: String(index < 30 ? input.baselineValue : input.currentValue),
     } as BrowserVaultMetricRowWithValue;
   });
 }

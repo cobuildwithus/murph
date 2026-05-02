@@ -1,84 +1,53 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import type { TimelineEntry } from "../timeline.ts";
-import type { WearableConfidenceLevel } from "../wearables.ts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   type BrowserVaultAssistantSummary,
   type BrowserVaultEntity,
   type BrowserVaultEntityLink,
-  type BrowserVaultMetricDayRow,
-  type BrowserVaultMetricDomain,
-  type BrowserVaultMetricPoint,
-  type BrowserVaultMetricPointGrain,
-  type BrowserVaultMetricPointStatistic,
+  type BrowserVaultMetricGoalProgressRow,
   type BrowserVaultMetricRow,
   type BrowserVaultMetricSelectionRow,
   type BrowserVaultReplica,
   type BrowserVaultReplicaPolicy,
   type BrowserVaultReplicaSource,
-  type BrowserVaultResolvedMetric,
   type BrowserVaultSearchRow,
   type BrowserVaultSourceHealthRow,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
 
-export function parseBrowserVaultReplica(
-  value: unknown,
-  label = "Browser vault replica",
-): BrowserVaultReplica {
+export function parseBrowserVaultReplica(value: unknown, label = "Browser vault replica"): BrowserVaultReplica {
   const record = requireRecord(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
-
   if (schema !== BROWSER_VAULT_REPLICA_SCHEMA) {
     throw new TypeError(`${label}.schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
   }
 
   return {
     assistantSummary: parseAssistantSummary(record.assistantSummary, `${label}.assistantSummary`),
-    entities: requireArray(record.entities, `${label}.entities`).map((entry, index) =>
-      parseEntity(entry, `${label}.entities[${index}]`)
-    ),
+    entities: requireArray(record.entities, `${label}.entities`).map((entry, index) => parseEntity(entry, `${label}.entities[${index}]`)),
     generatedAt: requireIsoDateTime(record.generatedAt, `${label}.generatedAt`),
-    metricDayRows: requireArray(record.metricDayRows, `${label}.metricDayRows`).map((entry, index) =>
-      parseMetricDayRow(entry, `${label}.metricDayRows[${index}]`)
-    ),
-    metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) =>
-      parseMetricRow(entry, `${label}.metricRows[${index}]`)
-    ),
-    metricPoints: readOptionalArray(record.metricPoints, `${label}.metricPoints`).map((entry, index) =>
-      parseMetricPoint(entry, `${label}.metricPoints[${index}]`)
-    ),
-    metricSelectionRows: readOptionalArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) =>
-      parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)
-    ),
+    metricGoalProgressRows: readOptionalArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
+    metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) => parseMetricRow(entry, `${label}.metricRows[${index}]`)),
+    metricSelectionRows: requireArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) => parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
-    searchRows: requireArray(record.searchRows, `${label}.searchRows`).map((entry, index) =>
-      parseSearchRow(entry, `${label}.searchRows[${index}]`)
-    ),
+    searchRows: requireArray(record.searchRows, `${label}.searchRows`).map((entry, index) => parseSearchRow(entry, `${label}.searchRows[${index}]`)),
     source: parseSource(record.source, `${label}.source`),
-    sourceHealthRows: requireArray(record.sourceHealthRows, `${label}.sourceHealthRows`).map((entry, index) =>
-      parseSourceHealthRow(entry, `${label}.sourceHealthRows[${index}]`)
-    ),
-    timelineRows: requireArray(record.timelineRows, `${label}.timelineRows`).map((entry, index) =>
-      parseTimelineRow(entry, `${label}.timelineRows[${index}]`)
-    ),
-    weeklySampleSummaries: requireArray(record.weeklySampleSummaries, `${label}.weeklySampleSummaries`).map((entry, index) =>
-      parseWeeklySampleSummary(entry, `${label}.weeklySampleSummaries[${index}]`)
-    ),
+    sourceHealthRows: requireArray(record.sourceHealthRows, `${label}.sourceHealthRows`).map((entry, index) => parseSourceHealthRow(entry, `${label}.sourceHealthRows[${index}]`)),
+    timelineRows: requireArray(record.timelineRows, `${label}.timelineRows`).map((entry, index) => parseTimelineRow(entry, `${label}.timelineRows[${index}]`)),
+    weeklySampleSummaries: requireArray(record.weeklySampleSummaries, `${label}.weeklySampleSummaries`).map((entry, index) => parseWeeklySampleSummary(entry, `${label}.weeklySampleSummaries[${index}]`)),
   };
 }
 
 function parsePolicy(value: unknown, label: string): BrowserVaultReplicaPolicy {
   const record = requireRecord(value, label);
   const id = requireString(record.id, `${label}.id`);
-
   if (id !== BROWSER_VAULT_REPLICA_POLICY_ID) {
     throw new TypeError(`${label}.id must be ${BROWSER_VAULT_REPLICA_POLICY_ID}.`);
   }
-
   return {
     bodyPreviewChars: requireNonNegativeInteger(record.bodyPreviewChars, `${label}.bodyPreviewChars`),
     excludedFamilies: requireStringArray(record.excludedFamilies, `${label}.excludedFamilies`),
@@ -90,7 +59,6 @@ function parsePolicy(value: unknown, label: string): BrowserVaultReplicaPolicy {
 
 function parseSource(value: unknown, label: string): BrowserVaultReplicaSource {
   const record = requireRecord(value, label);
-
   return {
     dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
@@ -99,7 +67,6 @@ function parseSource(value: unknown, label: string): BrowserVaultReplicaSource {
 
 function parseEntity(value: unknown, label: string): BrowserVaultEntity {
   const record = requireRecord(value, label);
-
   return {
     attributes: requireRecord(record.attributes, `${label}.attributes`),
     bodyPreview: readNullableString(record.bodyPreview),
@@ -108,9 +75,7 @@ function parseEntity(value: unknown, label: string): BrowserVaultEntity {
     family: requireString(record.family, `${label}.family`),
     id: requireString(record.id, `${label}.id`),
     kind: requireString(record.kind, `${label}.kind`),
-    links: requireArray(record.links, `${label}.links`).map((entry, index) =>
-      parseEntityLink(entry, `${label}.links[${index}]`)
-    ),
+    links: requireArray(record.links, `${label}.links`).map((entry, index) => parseEntityLink(entry, `${label}.links[${index}]`)),
     lookupIds: requireStringArray(record.lookupIds, `${label}.lookupIds`),
     occurredAt: readNullableString(record.occurredAt),
     recordClass: requireRecordClass(record.recordClass, `${label}.recordClass`),
@@ -123,110 +88,82 @@ function parseEntity(value: unknown, label: string): BrowserVaultEntity {
 
 function parseEntityLink(value: unknown, label: string): BrowserVaultEntityLink {
   const record = requireRecord(value, label);
-
-  return {
-    targetId: requireString(record.targetId, `${label}.targetId`),
-    type: requireString(record.type, `${label}.type`),
-  };
+  return { targetId: requireString(record.targetId, `${label}.targetId`), type: requireString(record.type, `${label}.type`) };
 }
 
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
   const record = requireRecord(value, label);
-
-  return {
-    confidence: requireConfidenceLevel(record.confidence, `${label}.confidence`),
-    date: requireString(record.date, `${label}.date`),
-    domain: requireMetricDomain(record.domain, `${label}.domain`),
-    id: requireString(record.id, `${label}.id`),
-    metric: requireString(record.metric, `${label}.metric`),
-    recordIds: requireStringArray(record.recordIds, `${label}.recordIds`),
-    sourceFamily: readNullableString(record.sourceFamily),
-    sourceKind: readNullableString(record.sourceKind),
-    unit: readNullableString(record.unit),
-    value: readNullableFiniteNumber(record.value),
-  };
-}
-
-function parseMetricPoint(value: unknown, label: string): BrowserVaultMetricPoint {
-  const record = requireRecord(value, label);
-  const pointSchema = requireString(record.pointSchema, `${label}.pointSchema`);
-
-  if (pointSchema !== "murph.browser-vault.metric-point") {
-    throw new TypeError(`${label}.pointSchema must be murph.browser-vault.metric-point.`);
+  const rowSchema = requireString(record.rowSchema, `${label}.rowSchema`);
+  if (rowSchema !== "murph.browser-vault.metric-row") {
+    throw new TypeError(`${label}.rowSchema must be murph.browser-vault.metric-row.`);
   }
-
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
     confidence: requireConfidenceLevel(record.confidence, `${label}.confidence`),
+    context: requireRecord(record.context, `${label}.context`),
     date: requireString(record.date, `${label}.date`),
-    grain: requireMetricPointGrain(record.grain, `${label}.grain`),
+    grain: requireMetricGrain(record.grain, `${label}.grain`),
     id: requireString(record.id, `${label}.id`),
     metricKey: requireString(record.metricKey, `${label}.metricKey`),
     observedAt: requireString(record.observedAt, `${label}.observedAt`),
-    pointSchema,
+    pointIds: requireStringArray(record.pointIds, `${label}.pointIds`),
     recordIds: requireStringArray(record.recordIds, `${label}.recordIds`),
+    rowSchema,
     sourceFamily: readNullableString(record.sourceFamily),
     sourceKind: readNullableString(record.sourceKind),
     sourceLabel: readNullableString(record.sourceLabel),
-    sourceMetricRowId: requireString(record.sourceMetricRowId, `${label}.sourceMetricRowId`),
-    statistic: requireMetricPointStatistic(record.statistic, `${label}.statistic`),
+    statistic: requireMetricStatistic(record.statistic, `${label}.statistic`),
     unit: readNullableString(record.unit),
-    value: requireFiniteNumber(record.value, `${label}.value`),
-    valueLabel: requireString(record.valueLabel, `${label}.valueLabel`),
+    value: readNullableFiniteNumber(record.value),
+    valueLabel: readNullableString(record.valueLabel),
   };
 }
 
 function parseMetricSelectionRow(value: unknown, label: string): BrowserVaultMetricSelectionRow {
   const record = requireRecord(value, label);
   const selectionSchema = requireString(record.selectionSchema, `${label}.selectionSchema`);
-  const status = requireString(record.status, `${label}.status`);
-
   if (selectionSchema !== "murph.browser-vault.metric-selection") {
     throw new TypeError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.`);
   }
-  if (status !== "ready" && status !== "stale") {
-    throw new TypeError(`${label}.status must be ready or stale.`);
-  }
-
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
     confidence: requireConfidenceLevel(record.confidence, `${label}.confidence`),
-    date: requireString(record.date, `${label}.date`),
+    effectiveDate: readNullableString(record.effectiveDate),
     id: requireString(record.id, `${label}.id`),
     metricKey: requireString(record.metricKey, `${label}.metricKey`),
-    observedAt: requireString(record.observedAt, `${label}.observedAt`),
+    observedAt: readNullableString(record.observedAt),
     pointIds: requireStringArray(record.pointIds, `${label}.pointIds`),
     recordIds: requireStringArray(record.recordIds, `${label}.recordIds`),
+    selectedMetricRowId: readNullableString(record.selectedMetricRowId),
     selectionSchema,
     sourceLabel: readNullableString(record.sourceLabel),
-    status,
+    status: requireMetricSelectionStatus(record.status, `${label}.status`),
     unit: readNullableString(record.unit),
-    value: requireFiniteNumber(record.value, `${label}.value`),
-    valueLabel: requireString(record.valueLabel, `${label}.valueLabel`),
-    warnings: requireArray(record.warnings, `${label}.warnings`).map((entry, index) =>
-      parseMetricSelectionWarning(entry, `${label}.warnings[${index}]`)
-    ),
+    value: readNullableFiniteNumber(record.value),
+    valueLabel: readNullableString(record.valueLabel),
+    warnings: requireArray(record.warnings, `${label}.warnings`).map((entry, index) => parseMetricSelectionWarning(entry, `${label}.warnings[${index}]`)),
   };
 }
 
-function parseMetricDayRow(value: unknown, label: string): BrowserVaultMetricDayRow {
+function parseMetricGoalProgressRow(value: unknown, label: string): BrowserVaultMetricGoalProgressRow {
   const record = requireRecord(value, label);
-
   return {
-    attributes: requireRecord(record.attributes, `${label}.attributes`),
-    confidence: requireConfidenceLevel(record.confidence, `${label}.confidence`),
-    date: requireString(record.date, `${label}.date`),
-    domain: requireMetricDomain(record.domain, `${label}.domain`),
-    id: requireString(record.id, `${label}.id`),
-    metricIds: requireStringArray(record.metricIds, `${label}.metricIds`),
-    metrics: parseMetricMap(record.metrics, `${label}.metrics`),
-    notes: requireStringArray(record.notes, `${label}.notes`),
+    currentValue: readNullableFiniteNumber(record.currentValue),
+    currentValueLabel: readNullableString(record.currentValueLabel),
+    deltaToTarget: readNullableFiniteNumber(record.deltaToTarget),
+    goalId: requireString(record.goalId, `${label}.goalId`),
+    metricKey: requireString(record.metricKey, `${label}.metricKey`),
+    selectedPointIds: requireStringArray(record.selectedPointIds, `${label}.selectedPointIds`),
+    status: requireMetricGoalStatus(record.status, `${label}.status`),
+    targetId: requireString(record.targetId, `${label}.targetId`),
+    targetValueLabel: requireString(record.targetValueLabel, `${label}.targetValueLabel`),
+    unit: requireString(record.unit, `${label}.unit`),
+    warnings: requireArray(record.warnings, `${label}.warnings`).map((entry, index) => parseMetricSelectionWarning(entry, `${label}.warnings[${index}]`)),
   };
 }
 
 function parseTimelineRow(value: unknown, label: string): BrowserVaultTimelineRow {
   const record = requireRecord(value, label);
-
   return {
     date: requireString(record.date, `${label}.date`),
     entityId: requireString(record.entityId, `${label}.entityId`),
@@ -243,7 +180,6 @@ function parseTimelineRow(value: unknown, label: string): BrowserVaultTimelineRo
 
 function parseSearchRow(value: unknown, label: string): BrowserVaultSearchRow {
   const record = requireRecord(value, label);
-
   return {
     date: readNullableString(record.date),
     entityId: requireString(record.entityId, `${label}.entityId`),
@@ -259,7 +195,6 @@ function parseSearchRow(value: unknown, label: string): BrowserVaultSearchRow {
 
 function parseSourceHealthRow(value: unknown, label: string): BrowserVaultSourceHealthRow {
   const record = requireRecord(value, label);
-
   return {
     activityDays: requireNonNegativeInteger(record.activityDays, `${label}.activityDays`),
     bodyStateDays: requireNonNegativeInteger(record.bodyStateDays, `${label}.bodyStateDays`),
@@ -278,7 +213,6 @@ function parseSourceHealthRow(value: unknown, label: string): BrowserVaultSource
 
 function parseWeeklySampleSummary(value: unknown, label: string): OverviewWeeklySampleSummary {
   const record = requireRecord(value, label);
-
   return {
     date: requireString(record.date, `${label}.date`),
     numericSampleCount: requireNonNegativeInteger(record.numericSampleCount, `${label}.numericSampleCount`),
@@ -291,222 +225,95 @@ function parseWeeklySampleSummary(value: unknown, label: string): OverviewWeekly
 
 function parseAssistantSummary(value: unknown, label: string): BrowserVaultAssistantSummary {
   const record = requireRecord(value, label);
-
   return {
     highlights: requireStringArray(record.highlights, `${label}.highlights`),
     latestDate: readNullableString(record.latestDate),
   };
 }
 
-function parseMetricMap(value: unknown, label: string): Record<string, BrowserVaultResolvedMetric> {
-  const record = requireRecord(value, label);
-  const output: Record<string, BrowserVaultResolvedMetric> = {};
-
-  for (const [key, metricValue] of Object.entries(record)) {
-    output[key] = parseResolvedMetric(metricValue, `${label}.${key}`);
-  }
-
-  return output;
-}
-
-function parseResolvedMetric(value: unknown, label: string): BrowserVaultResolvedMetric {
-  const record = requireRecord(value, label);
-  const selection = requireRecord(record.selection, `${label}.selection`);
-
-  return {
-    selection: {
-      unit: readNullableString(selection.unit),
-      value: readNullableFiniteNumber(selection.value),
-    },
-  };
-}
-
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
   return value as Record<string, unknown>;
 }
-
 function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
   return value.slice();
 }
-
 function readOptionalArray(value: unknown, label: string): unknown[] {
-  if (value === undefined) {
-    return [];
-  }
-
-  return requireArray(value, label);
+  return value === undefined ? [] : requireArray(value, label);
 }
-
 function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
-  }
-
+  if (typeof value !== "string" || value.length === 0) throw new TypeError(`${label} must be a non-empty string.`);
   return value;
 }
-
 function requireStringArray(value: unknown, label: string): string[] {
   return requireArray(value, label).map((entry, index) => requireString(entry, `${label}[${index}]`));
 }
-
 function requireFiniteNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
-  }
-
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError(`${label} must be a finite number.`);
   return value;
 }
-
 function readNullableFiniteNumber(value: unknown): number | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return requireFiniteNumber(value, "nullable number");
+  return value === null || value === undefined ? null : requireFiniteNumber(value, "nullable number");
 }
-
 function requireNonNegativeInteger(value: unknown, label: string): number {
   const parsed = requireFiniteNumber(value, label);
-
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
-  }
-
+  if (!Number.isInteger(parsed) || parsed < 0) throw new TypeError(`${label} must be a non-negative integer.`);
   return parsed;
 }
-
 function readNullableNonNegativeInteger(value: unknown, label: string): number | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return requireNonNegativeInteger(value, label);
+  return value === null || value === undefined ? null : requireNonNegativeInteger(value, label);
 }
-
 function readNullableString(value: unknown): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError("Expected nullable string.");
-  }
-
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") throw new TypeError("Expected nullable string.");
   return value;
 }
-
 function requireIsoDateTime(value: unknown, label: string): string {
   const text = requireString(value, label);
-  const parsed = Date.parse(text);
-
-  if (Number.isNaN(parsed)) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
-  }
-
+  if (Number.isNaN(Date.parse(text))) throw new TypeError(`${label} must be an ISO timestamp.`);
   return text;
 }
-
 function requireRecordClass(value: unknown, label: string): CanonicalRecordClass {
   const text = requireString(value, label);
-
-  if (text === "bank" || text === "ledger" || text === "sample" || text === "snapshot") {
-    return text;
-  }
-
+  if (text === "bank" || text === "ledger" || text === "sample" || text === "snapshot") return text;
   throw new TypeError(`${label} must be a canonical record class.`);
 }
-
-function requireMetricDomain(value: unknown, label: string): BrowserVaultMetricDomain {
+function requireConfidenceLevel(value: unknown, label: string) {
   const text = requireString(value, label);
-
-  if (text === "activity" || text === "body_state" || text === "recovery" || text === "sleep") {
-    return text;
-  }
-
-  throw new TypeError(`${label} must be a browser vault metric domain.`);
+  if (text === "none" || text === "low" || text === "medium" || text === "high") return text;
+  throw new TypeError(`${label} must be a metric confidence level.`);
 }
-
-function requireConfidenceLevel(value: unknown, label: string): WearableConfidenceLevel {
+function requireMetricGrain(value: unknown, label: string) {
   const text = requireString(value, label);
-
-  if (text === "none" || text === "low" || text === "medium" || text === "high") {
-    return text;
-  }
-
-  throw new TypeError(`${label} must be a wearable confidence level.`);
+  if (text === "instant" || text === "event" || text === "day" || text === "week" || text === "month" || text === "window") return text;
+  throw new TypeError(`${label} must be a metric grain.`);
 }
-
-function requireMetricPointGrain(value: unknown, label: string): BrowserVaultMetricPointGrain {
+function requireMetricStatistic(value: unknown, label: string) {
   const text = requireString(value, label);
-
-  if (
-    text === "instant" ||
-    text === "event" ||
-    text === "day" ||
-    text === "week" ||
-    text === "month" ||
-    text === "window"
-  ) {
-    return text;
-  }
-
-  throw new TypeError(`${label} must be a metric point grain.`);
+  if (text === "value" || text === "latest" || text === "mean" || text === "median" || text === "min" || text === "max" || text === "sum" || text === "count") return text;
+  throw new TypeError(`${label} must be a metric statistic.`);
 }
-
-function requireMetricPointStatistic(value: unknown, label: string): BrowserVaultMetricPointStatistic {
+function requireMetricSelectionStatus(value: unknown, label: string) {
   const text = requireString(value, label);
-
-  if (
-    text === "value" ||
-    text === "latest" ||
-    text === "mean" ||
-    text === "median" ||
-    text === "min" ||
-    text === "max" ||
-    text === "sum" ||
-    text === "count"
-  ) {
-    return text;
-  }
-
-  throw new TypeError(`${label} must be a metric point statistic.`);
+  if (text === "insufficient_data" || text === "no_data" || text === "ready" || text === "stale" || text === "unsupported") return text;
+  throw new TypeError(`${label} must be a metric selection status.`);
 }
-
-function parseMetricSelectionWarning(
-  value: unknown,
-  label: string,
-): BrowserVaultMetricSelectionRow["warnings"][number] {
+function requireMetricGoalStatus(value: unknown, label: string) {
+  const text = requireString(value, label);
+  if (text === "behind" || text === "met" || text === "no_data" || text === "on_track" || text === "stale" || text === "unsupported") return text;
+  throw new TypeError(`${label} must be a metric goal status.`);
+}
+function parseMetricSelectionWarning(value: unknown, label: string): BrowserVaultMetricSelectionRow["warnings"][number] {
   const record = requireRecord(value, label);
   const code = requireString(record.code, `${label}.code`);
-
-  if (
-    code !== "LOW_SAMPLE_COUNT" &&
-    code !== "COMPARATOR_VALUE" &&
-    code !== "MIXED_SOURCES" &&
-    code !== "SOURCE_STALE" &&
-    code !== "UNIT_NOT_NORMALIZED" &&
-    code !== "METHOD_CHANGED"
-  ) {
+  if (code !== "COMPARATOR_VALUE" && code !== "LOW_SAMPLE_COUNT" && code !== "MIXED_SOURCES" && code !== "SOURCE_STALE" && code !== "UNIT_NOT_NORMALIZED" && code !== "METHOD_CHANGED") {
     throw new TypeError(`${label}.code is not a supported metric selection warning code.`);
   }
-
   return { code, message: requireString(record.message, `${label}.message`) };
 }
-
 function requireTimelineEntryType(value: unknown, label: string): TimelineEntry["entryType"] {
   const text = requireString(value, label);
-
-  if (text === "assessment" || text === "event" || text === "journal" || text === "sample_summary") {
-    return text;
-  }
-
+  if (text === "assessment" || text === "event" || text === "journal" || text === "sample_summary") return text;
   throw new TypeError(`${label} must be a timeline entry type.`);
 }
