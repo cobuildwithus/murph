@@ -658,6 +658,34 @@ researchLandscape:
     - source_artifact:pmid-28045890
     - source_artifact:pmid-29371177
     - source_artifact:pmid-39486024
+    - source_artifact:pmid-26860430
+    - source_artifact:pmid-16911238
+    - source_artifact:pmid-23059868
+    - source_artifact:pmid-21918241
+    - source_artifact:pmid-25493265
+    - source_artifact:pmid-29899015
+    - source_artifact:pmid-24393423
+    - source_artifact:pmid-28918547
+    - source_artifact:pmid-33252961
+    - source_artifact:pmid-26139447
+    - source_artifact:pmid-32182353
+    - source_artifact:pmid-26150019
+    - source_artifact:pmid-19362695
+    - source_artifact:pmid-38583084
+    - source_artifact:pmid-18655723
+    - source_artifact:pmid-24304838
+    - source_artifact:pmid-21088304
+    - source_artifact:pmid-37623330
+    - source_artifact:pmid-29165018
+    - source_artifact:doi-10.1007-s12662-022-00821-2
+    - source_artifact:pmid-26810251
+    - source_artifact:pmid-28356097
+    - source_artifact:pmid-29522529
+    - source_artifact:pmid-28074635
+    - source_artifact:pmid-26860434
+    - source_artifact:pmid-22585884
+    - source_artifact:pmid-25689364
+    - source_artifact:pmid-24349392
   - id: dose_response_cut_points
     label: Observational dose-response and cut points
     stance: context_only
@@ -668,6 +696,37 @@ researchLandscape:
     - source_artifact:pmid-21798044
     - source_artifact:pmid-35247352
     - source_artifact:pmid-40713949
+    - source_artifact:pmid-23438219
+    - source_artifact:pmid-34029758
+    - source_artifact:pmid-36066874
+    - source_artifact:pmid-32207799
+    - source_artifact:pmid-32427398
+    - source_artifact:pmid-36216933
+    - source_artifact:pmid-31141585
+    - source_artifact:pmid-35050362
+    - source_artifact:pmid-35428253
+    - source_artifact:pmid-29685125
+    - source_artifact:pmid-33256704
+    - source_artifact:pmid-38442950
+    - source_artifact:clinicaltrials-nct03845478-2026-04-26
+    - source_artifact:pmid-18022061
+    - source_artifact:pmid-27556393
+    - source_artifact:pmid-26536618
+    - source_artifact:pmid-36094529
+    - source_artifact:pmid-38566344
+    - source_artifact:pmid-34477847
+    - source_artifact:pmid-19453204
+    - source_artifact:pmid-34417979
+    - source_artifact:pmid-39680407
+    - source_artifact:pmid-31095077
+    - source_artifact:pmid-38901742
+    - source_artifact:pmid-21798015
+    - source_artifact:pmid-36537288
+    - source_artifact:pmid-37676198
+    - source_artifact:pmid-18562971
+    - source_artifact:pmid-32563261
+    - source_artifact:pmid-37555441
+    - source_artifact:pmid-34547483
   - id: measurement-validity-standards-reviews-general-validation
     label: Measurement validity and source-of-truth rules
     stance: context_only
@@ -680,6 +739,32 @@ researchLandscape:
     - source_artifact:pmid-33447097
     - source_artifact:pmid-31518367
     - source_artifact:pmid-36188762
+    - source_artifact:pmid-22157772
+    - source_artifact:pmid-25517396
+    - source_artifact:pmid-21904249
+    - source_artifact:pmid-27589592
+    - source_artifact:pmid-31851949
+    - source_artifact:pmid-31524786
+    - source_artifact:pmid-35060915
+    - source_artifact:pmid-30093371
+    - source_artifact:pmid-25668268
+    - source_artifact:pmid-28666177
+    - source_artifact:pmid-31828072
+    - source_artifact:pmid-25121517
+    - source_artifact:pmid-28078908
+    - source_artifact:pmid-36535270
+    - source_artifact:doi-10.1186-s12984-022-01085-5
+    - source_artifact:pmid-27912681
+    - source_artifact:pmid-28659255
+    - source_artifact:pmid-35679106
+    - source_artifact:pmid-32897239
+    - source_artifact:pmid-28005190
+    - source_artifact:pmid-26684758
+    - source_artifact:pmid-29704922
+    - source_artifact:pmid-25890168
+    - source_artifact:pmid-38481238
+    - source_artifact:doi-10.3390-technologies11010029
+    - source_artifact:pmid-29179653
   - id: measurement_validity_device_placement_gait_adl_tracker_comparisons
     label: Device placement, gait, and ADL comparisons
     stance: context_only
@@ -691,6 +776,29 @@ researchLandscape:
     - source_artifact:pmid-18091020
     - source_artifact:pmid-22483530
     - source_artifact:pmid-24795762
+    - source_artifact:pmid-29662048
+    - source_artifact:pmid-30117355
+    - source_artifact:pmid-39532924
+    - source_artifact:pmid-29718452
+    - source_artifact:pmid-29977979
+    - source_artifact:pmid-35783129
+    - source_artifact:pmid-29729611
+    - source_artifact:pmid-28138464
+    - source_artifact:pmid-38384680
+    - source_artifact:pmid-29610110
+    - source_artifact:pmid-33447097
+    - source_artifact:pmid-30373549
+    - source_artifact:pmid-36812638
+    - source_artifact:pmid-37966891
+    - source_artifact:pmid-32601613
+    - source_artifact:pmid-28777710
+    - source_artifact:pmid-32509137
+    - source_artifact:pmid-30545810
+    - source_artifact:pmid-40724167
+    - source_artifact:pmid-25881662
+    - source_artifact:pmid-36188762
+    - source_artifact:pmid-28339904
+    - source_artifact:pmid-31518367
   - id: cadence_intensity_bouts_mvpa_context
     label: Cadence, MVPA, and bout context
     stance: context_only
@@ -702,6 +810,26 @@ researchLandscape:
     - source_artifact:pmid-33168018
     - source_artifact:pmid-34556146
     - source_artifact:pmid-38031156
+    - source_artifact:pmid-31698337
+    - source_artifact:pmid-36403207
+    - source_artifact:pmid-29858465
+    - source_artifact:pmid-30400331
+    - source_artifact:pmid-31095078
+    - source_artifact:pmid-33568188
+    - source_artifact:pmid-39554950
+    - source_artifact:pmid-38852004
+    - source_artifact:pmid-28253056
+    - source_artifact:pmid-29567764
+    - source_artifact:clinicaltrials-nct07204834-2026-04-26
+    - source_artifact:pmid-36976556
+    - source_artifact:pmid-35876127
+    - source_artifact:pmid-38326857
+    - source_artifact:pmid-21297184
+    - source_artifact:pmid-41088002
+    - source_artifact:pmid-31518246
+    - source_artifact:pmid-23335555
+    - source_artifact:pmid-22462794
+    - source_artifact:pmid-40668771
   - id: sedentary_time_and_activity_pattern_outcomes
     label: Sedentary time and activity pattern outcomes
     stance: mixed
@@ -712,6 +840,35 @@ researchLandscape:
     - source_artifact:pmid-25907181
     - source_artifact:pmid-26334900
     - source_artifact:pmid-39045858
+    - source_artifact:pmid-34169503
+    - source_artifact:pmid-40229981
+    - source_artifact:pmid-37252261
+    - source_artifact:pmid-26623654
+    - source_artifact:pmid-41317975
+    - source_artifact:pmid-39235836
+    - source_artifact:pmid-31409357
+    - source_artifact:pmid-39551583
+    - source_artifact:pmid-41526810
+    - source_artifact:pmid-40217539
+    - source_artifact:pmid-29566746
+    - source_artifact:pmid-38219269
+    - source_artifact:pmid-26431257
+    - source_artifact:pmid-31695350
+    - source_artifact:pmid-29926475
+    - source_artifact:pmid-27526175
+    - source_artifact:pmid-37810519
+    - source_artifact:pmid-31434697
+    - source_artifact:pmid-35977732
+    - source_artifact:pmid-35868813
+    - source_artifact:pmid-40175011
+    - source_artifact:pmid-27604226
+    - source_artifact:pmid-33239356
+    - source_artifact:pmid-29663984
+    - source_artifact:pmid-28892811
+    - source_artifact:pmid-28599680
+    - source_artifact:pmid-27094749
+    - source_artifact:pmid-35552166
+    - source_artifact:pmid-28800736
   - id: cardiometabolic-fitness-diabetes-blood-pressure-endpoints
     label: Cardiometabolic, fitness, diabetes, and blood-pressure endpoints
     stance: mixed
@@ -722,6 +879,23 @@ researchLandscape:
     - source_artifact:pmid-24128075
     - source_artifact:pmid-30127487
     - source_artifact:pmid-38220510
+    - source_artifact:pmid-20484759
+    - source_artifact:pmid-27589017
+    - source_artifact:pmid-30513777
+    - source_artifact:pmid-30603352
+    - source_artifact:clinicaltrials-nct01475201-2026-04-26
+    - source_artifact:pmid-27753558
+    - source_artifact:pmid-20732776
+    - source_artifact:pmid-23492248
+    - source_artifact:pmid-33630309
+    - source_artifact:pmid-34496859
+    - source_artifact:pmid-31678965
+    - source_artifact:pmid-28173623
+    - source_artifact:pmid-34283229
+    - source_artifact:pmid-26926674
+    - source_artifact:pmid-24571580
+    - source_artifact:pmid-24528783
+    - source_artifact:pmid-32700325
   - id: mental-health-sleep-qol-direct-step-floor-trials
     label: Mood, sleep, and quality-of-life outcomes
     stance: mixed
@@ -732,6 +906,8 @@ researchLandscape:
     - source_artifact:pmid-25895747
     - source_artifact:pmid-29361921
     - source_artifact:pmid-33218524
+    - source_artifact:doi-10.1186-s13690-019-0368-7
+    - source_artifact:pmid-27471879
   - id: self-monitoring-digital-support
     label: Self-monitoring and digital-support add-ons
     stance: mixed
@@ -752,6 +928,22 @@ researchLandscape:
     - source_artifact:who-physical-activity-guidelines-2020-11-25
     - source_artifact:10000steps-counting-your-steps-2026-04-26
     - source_artifact:10000steps-setting-step-goal-2026-04-26
+    - source_artifact:doi-10.1111-nbu.12409
+    - source_artifact:pmid-35782159
+    - source_artifact:govuk-physical-activity-guidelines-2019-09-07
+    - source_artifact:pmid-30860691
+    - source_artifact:pmid-28870978
+    - source_artifact:doi-10.1071-he03095
+    - source_artifact:pmid-36129746
+    - source_artifact:pmid-17716553
+    - source_artifact:pmid-22260810
+    - source_artifact:pmid-22390341
+    - source_artifact:pmid-21205290
+    - source_artifact:pmid-26180040
+    - source_artifact:pmid-23503570
+    - source_artifact:doi-10.1123-jpah.3.1.1
+    - source_artifact:pmid-21393377
+    - source_artifact:pmid-41339900
   - id: clinical-walking-safety-monitoring
     label: Clinical walking safety monitoring
     stance: safety_boundary
@@ -771,6 +963,8 @@ researchLandscape:
     - source_artifact:pmid-12840628
     - source_artifact:pmid-18801859
     - source_artifact:pmid-37243880
+    - source_artifact:pmid-20798179
+    - source_artifact:pmid-23276801
   - id: chronic-pain-walking
     label: Chronic-pain and pain-flare boundaries
     stance: safety_boundary

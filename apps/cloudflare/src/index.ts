@@ -610,6 +610,12 @@ async function handleBrowserVaultSessionRoute(
       error: "Browser vault replica was not found.",
     }, 404);
   }
+  if (replicaEnvelope.keyId !== getBrowserVaultReplicaStorageKeyId(body.replicaRef)) {
+    return json({
+      code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+      error: "Browser vault replica was not found.",
+    }, 404);
+  }
 
   let replicaKey;
   try {
@@ -642,6 +648,12 @@ async function handleBrowserVaultSessionRoute(
     replicaRef: body.replicaRef,
     state: "ready",
   });
+}
+
+function getBrowserVaultReplicaStorageKeyId(
+  ref: HostedBrowserVaultReplicaRef,
+): string {
+  return ref.dataKeyEnvelope?.dataKeyId ?? ref.keyId;
 }
 
 function parseJsonValue(value: string): unknown {
