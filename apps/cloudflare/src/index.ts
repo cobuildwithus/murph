@@ -610,7 +610,8 @@ async function handleBrowserVaultSessionRoute(
       error: "Browser vault replica was not found.",
     }, 404);
   }
-  if (replicaEnvelope.keyId !== getBrowserVaultReplicaStorageKeyId(body.replicaRef)) {
+  const replicaStorageKeyId = getBrowserVaultReplicaStorageKeyId(body.replicaRef);
+  if (replicaEnvelope.keyId !== replicaStorageKeyId) {
     return json({
       code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
       error: "Browser vault replica was not found.",
@@ -632,7 +633,7 @@ async function handleBrowserVaultSessionRoute(
   }
   const replicaKeyEnvelope = await wrapHostedBrowserSessionKey({
     keyBytes: replicaKey,
-    keyId: body.replicaRef.dataKeyEnvelope?.dataKeyId ?? body.replicaRef.keyId,
+    keyId: replicaStorageKeyId,
     publicKeyJwk: body.browserPublicKeyJwk,
     purpose: "browser-vault-replica",
     userId,

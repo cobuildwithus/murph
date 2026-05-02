@@ -350,6 +350,7 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
           rootKeyId: envelope.rootKeyId,
           signedEnvelopeJson: envelope,
           status: "active",
+          updatedAt: envelope.updatedAt,
           userId: envelope.userId,
         }]
         : []) as T;

@@ -24,7 +24,7 @@ import {
 } from "@murphai/runtime-state";
 
 import { getPrisma } from "../prisma";
-import { getHostedWebCryptoConfig } from "./env";
+import { getHostedWebCryptoConfig, selectActiveHostedCloudflareAutomationRecipient } from "./env";
 
 type HostedCryptoTx = Prisma.TransactionClient;
 type HostedCryptoClient = PrismaClient | Prisma.TransactionClient;
@@ -35,6 +35,7 @@ type HostedCryptoTransactionRoot = {
 const ALL_DOMAINS: readonly HostedCryptoDomain[] = ["control", "device", "ingress", "runtime"];
 const WEB_UNWRAP_DOMAINS = new Set<HostedCryptoDomain>(["control", "device", "ingress"]);
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+const HOSTED_RUNTIME_CRYPTO_CONTEXT_POLICY_VERSION = "hosted-runtime-crypto-context-policy:v1";
 
 interface HostedUserCryptoEnvelopeRow {
   id: string;
@@ -43,6 +44,14 @@ interface HostedUserCryptoEnvelopeRow {
   rootKeyId: string;
   status: string;
   signedEnvelopeJson: unknown;
+  updatedAt: Date | string;
+}
+
+interface VerifiedHostedDomainRootEnvelopeRecord {
+  envelope: HostedDomainRootKeyEnvelopeV1;
+  rootKeyId: string;
+  status: string;
+  updatedAt: string;
 }
 
 export interface UnwrappedHostedDomainRoot {
@@ -150,12 +159,12 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   userId: string;
 }> {
   const prisma = input.prisma ?? getPrisma();
-  const ingress = await readActiveHostedDomainRootEnvelopeOrThrow({
+  const ingress = await readActiveHostedDomainRootEnvelopeRecordOrThrow({
     domain: "ingress",
     prisma,
     userId: input.userId,
   });
-  const runtime = await readActiveHostedDomainRootEnvelopeOrThrow({
+  const runtime = await readActiveHostedDomainRootEnvelopeRecordOrThrow({
     domain: "runtime",
     prisma,
     userId: input.userId,
@@ -167,7 +176,7 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
       runtime,
       userId: input.userId,
     }),
-    envelopes: { ingress, runtime },
+    envelopes: { ingress: ingress.envelope, runtime: runtime.envelope },
     schema: "murph.hosted-runtime-crypto-context.v1",
     userId: input.userId,
   };
@@ -269,12 +278,13 @@ async function createSignedHostedDomainRootEnvelope(input: {
     }
 
     if (input.domain === "ingress" || input.domain === "runtime") {
+      const cloudflareAutomation = selectActiveHostedCloudflareAutomationRecipient(config);
       wraps.push(
         await createEcdhWrap({
           domain: input.domain,
-          publicJwk: config.cloudflareAutomationPublicJwk,
+          publicJwk: cloudflareAutomation.publicJwk,
           recipient: "cloudflare-automation-secret",
-          recipientKeyId: config.cloudflareAutomationRecipientKeyId,
+          recipientKeyId: cloudflareAutomation.recipientKeyId,
           rootKey,
           rootKeyId,
           userId: input.userId,
@@ -449,7 +459,8 @@ async function readActiveHostedDomainRootEnvelopeRow(input: {
       domain::text AS domain,
       root_key_id AS "rootKeyId",
       status::text AS status,
-      signed_envelope_json AS "signedEnvelopeJson"
+      signed_envelope_json AS "signedEnvelopeJson",
+      updated_at AS "updatedAt"
     FROM hosted_user_crypto_envelope
     WHERE user_id = ${input.userId}
       AND domain = ${input.domain}::hosted_crypto_domain
@@ -473,7 +484,8 @@ async function readDecryptableHostedDomainRootEnvelopeRow(input: {
       domain::text AS domain,
       root_key_id AS "rootKeyId",
       status::text AS status,
-      signed_envelope_json AS "signedEnvelopeJson"
+      signed_envelope_json AS "signedEnvelopeJson",
+      updated_at AS "updatedAt"
     FROM hosted_user_crypto_envelope
     WHERE user_id = ${input.userId}
       AND domain = ${input.domain}::hosted_crypto_domain
@@ -490,6 +502,14 @@ export async function readActiveHostedDomainRootEnvelopeOrThrow(input: {
   prisma?: HostedCryptoClient;
   userId: string;
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
+  return (await readActiveHostedDomainRootEnvelopeRecordOrThrow(input)).envelope;
+}
+
+async function readActiveHostedDomainRootEnvelopeRecordOrThrow(input: {
+  domain: HostedCryptoDomain;
+  prisma?: HostedCryptoClient;
+  userId: string;
+}): Promise<VerifiedHostedDomainRootEnvelopeRecord> {
   const prisma = input.prisma ?? getPrisma();
   const row = await readActiveHostedDomainRootEnvelopeRow({
     domain: input.domain,
@@ -499,7 +519,12 @@ export async function readActiveHostedDomainRootEnvelopeOrThrow(input: {
   if (!row) {
     throw new Error(`Hosted ${input.domain} domain root envelope is not provisioned.`);
   }
-  return parseAssertAndVerifyEnvelope(row, input);
+  return {
+    envelope: await parseAssertAndVerifyEnvelope(row, input),
+    rootKeyId: row.rootKeyId,
+    status: row.status,
+    updatedAt: normalizeHostedCryptoRowTimestamp(row.updatedAt, "Hosted domain root envelope updatedAt"),
+  };
 }
 
 export async function readHostedDomainRootEnvelopeByRootKeyIdOrThrow(input: {
@@ -586,20 +611,33 @@ function kmsRecipientForDomain(domain: HostedCryptoDomain): HostedCryptoKmsRecip
 }
 
 function createHostedRuntimeCryptoContextVersion(input: {
-  ingress: HostedDomainRootKeyEnvelopeV1;
-  runtime: HostedDomainRootKeyEnvelopeV1;
+  ingress: VerifiedHostedDomainRootEnvelopeRecord;
+  runtime: VerifiedHostedDomainRootEnvelopeRecord;
   userId: string;
 }): string {
   const hash = createHash("sha256");
   hash.update(JSON.stringify({
-    ingressRootKeyId: input.ingress.rootKeyId,
-    ingressSignedAt: input.ingress.authoritySignature.signedAt,
-    runtimeRootKeyId: input.runtime.rootKeyId,
-    runtimeSignedAt: input.runtime.authoritySignature.signedAt,
+    cryptoPolicyVersion: HOSTED_RUNTIME_CRYPTO_CONTEXT_POLICY_VERSION,
+    ingressRootKeyId: input.ingress.envelope.rootKeyId,
+    ingressSignedAt: input.ingress.envelope.authoritySignature.signedAt,
+    ingressStatus: input.ingress.status,
+    ingressUpdatedAt: input.ingress.updatedAt,
+    runtimeRootKeyId: input.runtime.envelope.rootKeyId,
+    runtimeSignedAt: input.runtime.envelope.authoritySignature.signedAt,
+    runtimeStatus: input.runtime.status,
+    runtimeUpdatedAt: input.runtime.updatedAt,
     schema: "murph.hosted-runtime-crypto-context.version.v1",
     userId: input.userId,
   }));
   return `hccv_${hash.digest("hex").slice(0, 32)}`;
+}
+
+function normalizeHostedCryptoRowTimestamp(value: Date | string, label: string): string {
+  const timestampMs = value instanceof Date ? value.getTime() : Date.parse(value);
+  if (!Number.isFinite(timestampMs)) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return new Date(timestampMs).toISOString();
 }
 
 function hasPrismaTransactionRoot(

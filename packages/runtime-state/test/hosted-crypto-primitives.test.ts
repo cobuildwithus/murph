@@ -96,7 +96,7 @@ test("hosted data-key envelopes fail closed on lane/domain and root mismatches",
       rootKey: ROOT_KEY,
       rootKeyId: "udrk:runtime:root-2",
     }),
-  ).rejects.toThrow(/rootKeyId mismatch/u);
+  ).rejects.toThrow(/missing domain-root wrap udrk:runtime:root-2/u);
 });
 
 test("hosted crypto keyrings select old verify and decrypt keys by id", async () => {
