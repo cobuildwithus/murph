@@ -122,7 +122,6 @@ export type {
   SearchResult,
 } from "./search-shared.ts";
 export {
-  buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   listMetricDefinitions,
@@ -131,6 +130,7 @@ export {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
+  selectMetricSeries,
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
@@ -141,6 +141,10 @@ export {
   type MetricPoint,
   type MetricSelection,
   type MetricSelectionPolicy,
+  type MetricSeries,
+  type MetricSeriesAggregation,
+  type MetricSeriesDuplicatePolicy,
+  type MetricSeriesPoint,
   type MetricTrend,
   type MetricWindowComparison,
   type MetricWindowSummary,

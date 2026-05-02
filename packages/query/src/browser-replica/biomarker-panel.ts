@@ -1,4 +1,5 @@
 import {
+  resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricTrend,
   type MetricConfidence,
@@ -8,6 +9,7 @@ import type {
   BrowserVaultMetricRow,
   BrowserVaultQueryClient,
 } from "./shared.ts";
+import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
 
 export const BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA = "murph.browser-vault-biomarker-panel";
 
@@ -30,7 +32,9 @@ export type BrowserVaultBiomarkerPanelWarningCode =
 
 export interface BrowserVaultBiomarkerMetricBinding {
   metricKey: string;
+  label?: string | null;
   role?: "context" | "primary" | "secondary" | null;
+  source?: string | null;
   unit?: string | null;
 }
 
@@ -48,6 +52,7 @@ export interface SelectBrowserVaultBiomarkerPanelInput {
   label: string;
   metricKey?: string;
   now?: string;
+  privateMetricBindings?: readonly BrowserVaultBiomarkerMetricBinding[];
   staleAfterDays?: number;
   trendDefaults: BrowserVaultBiomarkerTrendDefaults;
   unit: string;
@@ -104,12 +109,14 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
   const base = createBasePanel(input, generatedAt);
   if (!input.client) return { ...base, emptyState: emptyStateForStatus("no_private_vault"), status: "no_private_vault" };
 
-  const metricKey = input.metricKey ?? resolveMetricDefinitionForBiomarker(input.biomarkerKey)?.key ?? null;
+  const primaryBinding = resolvePrimaryMetricBinding(input);
+  const metricKey = input.metricKey ?? primaryBinding?.metricKey ?? resolveMetricDefinitionForBiomarker(input.biomarkerKey)?.key ?? null;
   if (!metricKey) {
     return { ...base, emptyState: { body: "Private tracking for this biomarker is not available yet.", title: "Biomarker unavailable" }, status: "unsupported" };
   }
 
-  const primary = buildMetricPanel({ input, metricKey });
+  const primary = buildMetricPanel({ binding: primaryBinding ?? { metricKey, role: "primary" }, input, metricKey });
+  const context = resolveContextMetricBindings(input, metricKey).map((binding) => buildMetricPanel({ binding, input, metricKey: binding.metricKey }));
   const warnings = buildWarnings({ primary, trendDefaults: input.trendDefaults });
   if (primary.sampleCount === 0) {
     return { ...base, emptyState: { body: `No ${input.label} values were found in the current browser-vault snapshot.`, title: "No private values yet" }, status: "no_data", warnings };
@@ -121,6 +128,7 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
   const stale = isPrimarySeriesStale({ now: input.now ?? generatedAt, primary, staleAfterDays: input.staleAfterDays ?? DEFAULT_STALE_AFTER_DAYS });
   return {
     ...base,
+    context,
     primary,
     status: stale ? "stale" : "ready",
     warnings: stale ? [...warnings, { code: "SOURCE_STALE", message: `Latest ${input.label} value is older than ${input.staleAfterDays ?? DEFAULT_STALE_AFTER_DAYS} days.` }] : warnings,
@@ -145,23 +153,45 @@ function createBasePanel(input: SelectBrowserVaultBiomarkerPanelInput, generated
   };
 }
 
-function buildMetricPanel(input: { metricKey: string; input: SelectBrowserVaultBiomarkerPanelInput }): BrowserVaultBiomarkerMetricPanel {
+function resolvePrimaryMetricBinding(input: SelectBrowserVaultBiomarkerPanelInput): BrowserVaultBiomarkerMetricBinding | null {
+  return input.privateMetricBindings?.find((binding) => binding.role === "primary")
+    ?? input.privateMetricBindings?.find((binding) => binding.role !== "context")
+    ?? input.privateMetricBindings?.[0]
+    ?? null;
+}
+
+function resolveContextMetricBindings(
+  input: SelectBrowserVaultBiomarkerPanelInput,
+  primaryMetricKey: string,
+): BrowserVaultBiomarkerMetricBinding[] {
+  return (input.privateMetricBindings ?? [])
+    .filter((binding) => binding.role === "context" || binding.role === "secondary")
+    .filter((binding) => binding.metricKey !== primaryMetricKey);
+}
+
+function buildMetricPanel(input: {
+  binding: BrowserVaultBiomarkerMetricBinding;
+  metricKey: string;
+  input: SelectBrowserVaultBiomarkerPanelInput;
+}): BrowserVaultBiomarkerMetricPanel {
   const rows = (input.input.client?.metrics.series({ metricKey: input.metricKey }) ?? [])
     .filter(hasNumericMetricValue)
     .sort((left, right) => left.date.localeCompare(right.date));
   const latest = rows.at(-1) ?? null;
-  const unit = latest?.unit ?? input.input.unit;
+  const definition = resolveMetricDefinition(input.metricKey);
+  const unit = latest?.unit ?? input.binding.unit ?? input.input.unit;
+  const trendPoints = rows.map(browserMetricRowToSeriesPoint);
   return {
     binding: { metricKey: input.metricKey },
-    label: input.input.label,
+    label: input.binding.label ?? definition?.displayName ?? input.input.label,
     latest: latest ? { confidence: latest.confidence, date: latest.date, sourceLabel: latest.sourceLabel ?? latest.sourceKind ?? "metric", unit: latest.unit, value: latest.value } : null,
     sampleCount: rows.length,
     series: rows.map((row) => ({ confidence: row.confidence, date: row.date, unit: row.unit, value: row.value })),
     trend: selectMetricTrend({
       metricKey: input.metricKey,
-      points: rows,
+      points: trendPoints,
       policy: input.input.trendDefaults,
-      unit: input.input.unit,
+      unit,
       valuePrecision: input.input.valuePrecision,
     }),
     unit,

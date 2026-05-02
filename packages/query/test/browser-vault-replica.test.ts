@@ -10,7 +10,6 @@ import {
   parseBrowserVaultReplica,
   selectBrowserVaultHistory,
   selectBrowserVaultOverview,
-  selectBrowserVaultSignals,
   selectBrowserVaultTrackedExperiments,
 } from "../src/browser.ts";
 
@@ -73,12 +72,10 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
   const overview = selectBrowserVaultOverview(client);
   const history = selectBrowserVaultHistory(client);
-  const signals = selectBrowserVaultSignals(client);
 
   assert.equal(selectBrowserVaultTrackedExperiments(client)[0]?.title, "Morning walk");
   assert.equal(overview.recentJournals[0]?.title, "Travel recovery note");
   assert.ok(history.timeline.some((entry) => entry.title === "Travel recovery note"));
-  assert.equal(signals.assistantSummary.latestDate, null);
   assert.equal(client.entities.get("exp_1")?.title, "Morning walk");
   assert.ok(client.search("steadier").some((row) => row.entityId === "journal_1"));
 });

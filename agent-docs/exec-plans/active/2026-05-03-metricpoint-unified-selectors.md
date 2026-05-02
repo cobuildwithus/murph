@@ -37,6 +37,7 @@ Updated: 2026-05-03
 - Metric projection remains derived from canonical vault evidence plus sample and wearable summaries.
 - Browser-vault schema version bumps must stay explicit and parser-enforced.
 - Existing goal-progress status semantics from the in-flight identity/status patch must be preserved while applying the follow-up.
+- This metric architecture slice is greenfield: do not preserve legacy `body_measurement` or `observation` compatibility extraction into MetricPoint.
 - Package boundaries should use declared owner entrypoints.
 - Product/process constraints:
 - Do not expose local filesystem identifiers or sensitive health payloads in code, docs, tests, logs, or commits.
@@ -63,6 +64,7 @@ Updated: 2026-05-03
 
 - Use a plan-bearing path because the patch is multi-file and needs manual porting after stale hunks.
 - Treat the downloaded script as patch intent, not overwrite authority; reconcile it with the existing in-flight metric identity and goal-progress status changes.
+- User clarified this is greenfield; hard-cut metric-specific compat extraction instead of preserving old row/provenance shapes.
 
 ## Verification
 

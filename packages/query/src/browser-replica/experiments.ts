@@ -21,6 +21,7 @@ import type {
   BrowserVaultQueryClient,
   BrowserVaultSummaryConfidence,
 } from "./shared.ts";
+import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -557,6 +558,7 @@ function buildBiomarkerResult(
   }
 
   const metricRows = collectMetricRows(client, sourceMetric, metricWindow);
+  const metricSeriesPoints = metricRows.map(browserMetricRowToSeriesPoint);
   const points = metricRowsToExperimentPoints(metricRows, sourceMetric, metricWindow);
   const comparison = selectMetricWindowComparison({
     baselineWindow: {
@@ -570,7 +572,7 @@ function buildBiomarkerResult(
       totalDays: metricWindow.interventionDates.length,
     },
     metricKey: sourceMetric.metricKey,
-    points: metricRows,
+    points: metricSeriesPoints,
     statistic: "mean",
   });
   const baseline = experimentWindowSummaryFromMetricWindow(comparison.baseline);

@@ -57,7 +57,7 @@ import BiomarkerDetailLayout, {
   generateStaticParams,
 } from "../app/(dashboard)/biomarkers/[biomarkerId]/layout";
 import { generateMetadata } from "../app/(dashboard)/biomarkers/[biomarkerId]/page";
-import { createHealthCommonsCatalogReader } from "../src/lib/health-commons/catalog";
+import { createHealthCommonsCatalogReader } from "@murphai/health-commons/runtime";
 
 function createFixtureCatalog(): HealthCommonsCatalog {
   return structuredClone(healthCommonsCatalogSchema.parse(healthCommonsCatalogJson));

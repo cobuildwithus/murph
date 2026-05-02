@@ -37,16 +37,6 @@ test("browser-vault metric points project manual measurements and blood-test res
             source: "manual",
           },
         }),
-        createEvent("evt_body_measurement", "body_measurement", {
-          occurredAt: "2026-04-29T07:30:00.000Z",
-          title: "Legacy body check",
-          attributes: {
-            measurements: [
-              { type: "weight", value: 181, unit: "lb" },
-            ],
-            source: "manual",
-          },
-        }),
         createEvent("evt_blood_panel", "test", {
           occurredAt: "2026-05-01T10:00:00.000Z",
           title: "Function Health panel",
@@ -133,9 +123,7 @@ test("browser-vault metric points project manual measurements and blood-test res
   const apobSeries = client.metrics.series({ metricKey: "apob" });
   assert.deepEqual(apobSeries.map((point) => ({ unit: point.unit, value: point.value })), [
     { unit: "mg/dL", value: 87 },
-    { unit: "mg/dL", value: 87 },
   ]);
-  assert.equal(new Set(apobSeries.flatMap((point) => point.pointIds)).size, 2);
   assert.equal(apobSeries.every((point) => /^metric-point:[0-9a-f]{16}$/u.test(point.pointIds[0] ?? "")), true);
 
   const glucose = client.metricSelections.getByBiomarker("biomarker:blood-glucose");
@@ -150,7 +138,7 @@ test("browser-vault metric points project manual measurements and blood-test res
       .map((point) => point.value)
       .filter((value): value is number => typeof value === "number")
       .sort((left, right) => left - right),
-    [82, 88, 99.1001],
+    [82],
   );
 
   const crp = client.metricSelections.get("hs-crp");
@@ -166,8 +154,8 @@ test("browser-vault metric points project manual measurements and blood-test res
     [5],
   );
 
-  assert.equal(client.metrics.series({ metricKey: "body-weight" }).length, 2);
-  assert.equal(client.metrics.latest({ metricKey: "apob" })?.sourceKind, "test-result");
+  assert.equal(client.metrics.series({ metricKey: "body-weight" }).length, 1);
+  assert.equal(client.metrics.latestRow({ metricKey: "apob" })?.sourceKind, "test-result");
 });
 
 test("browser-vault metric goal targets honor startAt when selecting rolling-window progress", async () => {
@@ -243,38 +231,18 @@ test("browser-vault metric goal targets honor startAt when selecting rolling-win
   assert.equal(progress.selectedPointIds.length, 6);
 });
 
-test("browser-vault metric points keep observation inputs while selecting the higher-priority stale reading", async () => {
+test("browser-vault metric selections can use old points while metric rows stay lookback bounded", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-05-02T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
       entities: [
         createEvent("evt_weight_measurement", "measurement", {
-          occurredAt: "2026-03-01T07:30:00.000Z",
+          occurredAt: "2024-01-01T07:30:00.000Z",
           title: "Old body check",
           attributes: {
             measurements: [
               { metric: "body_weight", value: 180, unit: "lb" },
-            ],
-            source: "manual",
-          },
-        }),
-        createEvent("evt_weight_observation", "observation", {
-          occurredAt: "2026-03-01T07:30:00.000Z",
-          title: "Observation body check",
-          attributes: {
-            metric: "bodyWeight",
-            source: "manual",
-            unit: "lb",
-            value: 181,
-          },
-        }),
-        createEvent("evt_old_weight", "measurement", {
-          occurredAt: "2024-01-01T07:30:00.000Z",
-          title: "Old body check outside browser-vault lookback",
-          attributes: {
-            measurements: [
-              { metric: "body_weight", value: 190, unit: "lb" },
             ],
             source: "manual",
           },
@@ -288,21 +256,16 @@ test("browser-vault metric points keep observation inputs while selecting the hi
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
   const bodyWeightPoints = client.metrics.series({ metricKey: "body-weight" });
-  assert.equal(bodyWeightPoints.some((point) => point.sourceKind === "measurement"), true);
-  assert.equal(bodyWeightPoints.some((point) => point.sourceKind === "compat-observation"), true);
-  assert.equal(bodyWeightPoints.some((point) => point.recordIds.includes("evt_old_weight")), false);
+  assert.deepEqual(bodyWeightPoints, []);
 
   const bodyWeight = client.metricSelections.get("body-weight");
   assert.ok(bodyWeight);
   assert.equal(bodyWeight.status, "stale");
   assert.equal(bodyWeight.unit, "kg");
   assert.equal(Number((bodyWeight.value ?? NaN).toFixed(1)), 81.6);
-  assert.equal(
-    bodyWeightPoints.find((point) => point.pointIds.includes(bodyWeight.pointIds[0] ?? ""))?.sourceKind,
-    "measurement",
-  );
+  assert.equal(bodyWeight.selectedMetricRowId, null);
+  assert.deepEqual(bodyWeight.recordIds, ["evt_weight_measurement"]);
   assert.equal(bodyWeight.warnings.some((warning) => warning.code === "SOURCE_STALE"), true);
-  assert.equal(bodyWeight.warnings.some((warning) => warning.code === "MIXED_SOURCES"), true);
 });
 
 test("query projection rebuild stores shared event and wearable metric points in the projection table", async () => {

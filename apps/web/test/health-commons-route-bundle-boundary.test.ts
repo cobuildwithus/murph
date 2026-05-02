@@ -11,20 +11,24 @@ const sourceFiles: readonly string[] = [
   "apps/web/src/lib/health-commons/generated-biomarker-artifacts.ts",
   "apps/web/src/lib/health-commons/experiment-projections.ts",
   "apps/web/src/lib/health-commons/biomarker-projections.ts",
+  "apps/web/src/lib/health-commons/measurement-method-detail.ts",
   "apps/web/app/(dashboard)/experiments/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
   "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
+  "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
 ] as const;
 
 const blockedCatalogPatterns = [
   "@murphai/health-commons/generated/catalog.json",
   "generated/catalog.json",
   "getGeneratedHealthCommonsCatalogReader",
+  "getHealthCommonsCatalogReader",
   "healthCommonsCatalog",
   "loadGeneratedHealthCommonsCatalog",
+  "from \"@/src/lib/health-commons/catalog\"",
   "from \"./catalog\"",
   "from './catalog'",
 ] as const;
@@ -188,13 +192,15 @@ function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
   return sourceFiles.includes(relativePath)
     || relativePath.startsWith("apps/web/app/(dashboard)/experiments")
     || relativePath.startsWith("apps/web/app/(dashboard)/biomarkers")
+    || relativePath.startsWith("apps/web/app/measurement-methods")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-browse")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-detail")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-images")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-projections")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-experiment-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-biomarker-artifacts")
-    || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-projections");
+    || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-projections")
+    || relativePath.startsWith("apps/web/src/lib/health-commons/measurement-method-detail");
 }
 
 function listTraceFiles(root: string): string[] {
@@ -232,7 +238,9 @@ function isHealthCommonsRouteTrace(filePath: string, source: string): boolean {
   return (
     normalizedPath.includes("/experiments/") ||
     normalizedPath.includes("/biomarkers/") ||
+    normalizedPath.includes("/measurement-methods/") ||
     source.includes("experiment-detail") ||
-    source.includes("biomarker-detail")
+    source.includes("biomarker-detail") ||
+    source.includes("measurement-method-detail")
   );
 }

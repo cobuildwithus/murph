@@ -6,10 +6,9 @@ import {
   type HealthCommonsCatalog,
 } from "@murphai/contracts";
 import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
-
 import {
   createHealthCommonsCatalogReader,
-} from "@/src/lib/health-commons/catalog";
+} from "@murphai/health-commons/runtime";
 import {
   listHealthCommonsExperimentBrowseProtocols,
 } from "@/src/lib/health-commons/experiment-browse";

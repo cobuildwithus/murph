@@ -43,7 +43,6 @@ export type {
 export {
   METRIC_POINT_SCHEMA_VERSION,
   METRIC_SELECTION_SCHEMA_VERSION,
-  buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   listMetricPoints,
@@ -221,12 +220,8 @@ function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[]
   }
 
   switch (entity.kind) {
-    case "body_measurement":
-      return measurementMetricPoints(entity, "compat-body-measurement");
     case "measurement":
       return measurementMetricPoints(entity, "measurement");
-    case "observation":
-      return observationMetricPoints(entity);
     case "test":
       return testResultMetricPoints(entity);
     default:
@@ -253,24 +248,6 @@ function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSour
       value,
     })];
   });
-}
-
-function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
-  const metric = readString(entity.attributes.metric);
-  const value = readNumber(entity.attributes.value);
-  const unit = readString(entity.attributes.unit);
-  if (!metric || value === null) return [];
-
-  return [scalarMetricPoint({
-    confidence: eventConfidence(entity),
-    context: { qualifiers: readQualifiers(entity.attributes.qualifiers) },
-    entity,
-    index: 0,
-    metric,
-    sourceKind: "compat-observation",
-    unit,
-    value,
-  })];
 }
 
 function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {

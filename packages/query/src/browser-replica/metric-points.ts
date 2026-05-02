@@ -72,25 +72,48 @@ function toBrowserVaultMetricRow(point: MetricSeriesPoint): BrowserVaultMetricRo
   if (value === null) return [];
 
   return [{
-    biomarkerKey: point.biomarkerKey,
-    confidence: point.confidence,
-    context: point.context,
+    biomarkerKey: point.biomarkerKey ?? null,
+    confidence: point.confidence ?? "none",
+    context: point.context ?? {},
     date: point.date,
-    grain: point.grain,
-    id: `metric-row:${point.id}`,
+    grain: point.grain ?? "day",
+    id: `metric-row:${point.id ?? `${point.metricKey}:${point.date}`}`,
     metricKey: point.metricKey,
-    observedAt: point.observedAt,
-    pointIds: point.pointIds,
-    recordIds: point.recordIds,
+    observedAt: point.observedAt ?? `${point.date}T00:00:00.000Z`,
+    pointIds: point.pointIds ?? (point.id ? [point.id] : []),
+    recordIds: point.recordIds ?? [],
     rowSchema: BROWSER_VAULT_METRIC_ROW_SCHEMA,
-    sourceFamily: point.sourceFamily,
-    sourceKind: point.sourceKind,
-    sourceLabel: point.sourceLabel,
-    statistic: point.statistic,
+    sourceFamily: point.sourceFamily ?? null,
+    sourceKind: point.sourceKind ?? null,
+    sourceLabel: point.sourceLabel ?? null,
+    statistic: point.statistic ?? "value",
     unit: point.unit,
     value,
-    valueLabel: point.valueLabel,
+    valueLabel: point.valueLabel ?? null,
   }];
+}
+
+export function browserMetricRowToSeriesPoint(row: BrowserVaultMetricRow): MetricSeriesPoint {
+  return {
+    biomarkerKey: row.biomarkerKey,
+    confidence: row.confidence,
+    context: row.context,
+    date: row.date,
+    grain: row.grain,
+    id: row.id,
+    metricKey: row.metricKey,
+    observedAt: row.observedAt,
+    pointIds: row.pointIds,
+    recordIds: row.recordIds,
+    sourceFamily: normalizeMetricSourceFamily(row.sourceFamily),
+    sourceKind: row.sourceKind,
+    sourceKinds: row.sourceKind ? [row.sourceKind] : [],
+    sourceLabel: row.sourceLabel,
+    statistic: row.statistic,
+    unit: row.unit,
+    value: row.value,
+    valueLabel: row.valueLabel,
+  };
 }
 
 function toBrowserVaultMetricSelectionRow(
@@ -150,4 +173,15 @@ function normalizeRequestedMetrics(
 
 function resolveMetricKey(value: string): string {
   return resolveMetricDefinition(value)?.key ?? normalizeMetricKey(value);
+}
+
+function normalizeMetricSourceFamily(value: string | null): MetricSeriesPoint["sourceFamily"] {
+  switch (value) {
+    case "derived":
+    case "event":
+    case "sample":
+      return value;
+    default:
+      return null;
+  }
 }

@@ -4,13 +4,44 @@ import {
   healthCommonsCatalogSchema,
   type HealthCommonsCatalog,
 } from "@murphai/contracts";
-import { createHealthCommonsCatalogReader } from "@/src/lib/health-commons/catalog";
-import { resolveHealthCommonsMeasurementMethodDetail } from "@/src/lib/health-commons/measurement-method-detail";
+import { createHealthCommonsCatalogReader } from "@murphai/health-commons/runtime";
+import {
+  listHealthCommonsMeasurementMethodRoutes,
+  resolveHealthCommonsMeasurementMethodDetail,
+} from "@/src/lib/health-commons/measurement-method-detail";
 
 const TEST_CATALOG_HASH = `sha256:${"0".repeat(64)}`;
 const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
 
 describe("resolveHealthCommonsMeasurementMethodDetail", () => {
+  it("resolves generated measurement-method pages from route bundles by default", () => {
+    expect(listHealthCommonsMeasurementMethodRoutes()).toContain(
+      "home-standardized-photo-roi-analysis",
+    );
+
+    const method = resolveHealthCommonsMeasurementMethodDetail(
+      "home-standardized-photo-roi-analysis",
+    );
+
+    expect(method).toMatchObject({
+      routeId: "home-standardized-photo-roi-analysis",
+      title: "Home Standardized Photo ROI Analysis",
+      outputs: expect.arrayContaining([
+        expect.objectContaining({
+          label: "Wrinkle line length or area",
+          mapsToLabel: "Periocular Wrinkle Score",
+        }),
+      ]),
+      relatedBiomarkers: expect.arrayContaining([
+        {
+          key: "biomarker:periocular-wrinkle-score",
+          title: "Periocular Wrinkle Score",
+        },
+      ]),
+    });
+    expect(method?.catalogHash).toMatch(/^sha256:/u);
+  });
+
   it("maps output biomarker labels through active biomarker pages", () => {
     const reader = createHealthCommonsCatalogReader(createFixtureCatalog({
       mapsToBiomarkerKey: "biomarker:skin-texture-roughness-score",

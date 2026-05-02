@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { selectBrowserVaultSignals } from "@murphai/query/browser";
+import type { BrowserVaultMetricRow } from "@murphai/query/browser";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -39,16 +39,17 @@ export default function SignalsPage() {
 
 function SignalsPageContent() {
   const { client, error, refresh, status } = useBrowserVault();
-  const signals = useMemo(() => client ? selectBrowserVaultSignals(client) : null, [client]);
-  const assistantSummary = signals?.assistantSummary ?? {
+  const signalRows = useMemo(() => client ? client.metrics.series() : [], [client]);
+  const signalSummaries = useMemo(() => summarizeSignalRows(signalRows), [signalRows]);
+  const assistantSummary = client?.replica.assistantSummary ?? {
     highlights: [],
     latestDate: null,
   };
-  const sleep = signals?.sleep ?? [];
-  const recovery = signals?.recovery ?? [];
-  const activity = signals?.activity ?? [];
-  const bodyState = signals?.bodyState ?? [];
-  const sourceHealth = signals?.sourceHealth ?? [];
+  const sleep = signalSummaries.sleep;
+  const recovery = signalSummaries.recovery;
+  const activity = signalSummaries.activity;
+  const bodyState = signalSummaries.bodyState;
+  const sourceHealth = client?.replica.sourceHealthRows ?? [];
   const canRenderContent = status === "empty" || client !== null;
   const hasWearableData =
     sleep.length > 0 ||
@@ -121,39 +122,39 @@ function SignalsPageContent() {
           <div className="grid gap-4 xl:grid-cols-4">
             <SignalSummaryCard
               description="Latest cross-provider sleep summary"
-              extra={sleep[0] && sleep[0].sleepScore.selection.value !== null
-                ? `Score ${formatMetricValue(sleep[0].sleepScore)}`
+              extra={sleep[0] && sleep[0].secondary.selection.value !== null
+                ? `Score ${formatMetricValue(sleep[0].secondary)}`
                 : null}
               title="Sleep"
-              value={sleep[0] ? formatMetricValue(sleep[0].totalSleepMinutes) : "—"}
-              confidence={sleep[0]?.summaryConfidence.level ?? null}
+              value={sleep[0] ? formatMetricValue(sleep[0].primary) : "—"}
+              confidence={sleep[0]?.confidence ?? null}
             />
             <SignalSummaryCard
               description="Latest recovery and readiness summary"
-              extra={recovery[0] && recovery[0].hrv.selection.value !== null
-                ? `HRV ${formatMetricValue(recovery[0].hrv)}`
+              extra={recovery[0] && recovery[0].secondary.selection.value !== null
+                ? `HRV ${formatMetricValue(recovery[0].secondary)}`
                 : null}
               title="Recovery"
-              value={recovery[0] ? formatMetricValue(recovery[0].readinessScore) : "—"}
-              confidence={recovery[0]?.summaryConfidence.level ?? null}
+              value={recovery[0] ? formatMetricValue(recovery[0].primary) : "—"}
+              confidence={recovery[0]?.confidence ?? null}
             />
             <SignalSummaryCard
               description="Latest activity aggregate"
-              extra={activity[0] && activity[0].sessionMinutes.selection.value !== null
-                ? `${formatMetricValue(activity[0].sessionMinutes)} tracked`
+              extra={activity[0] && activity[0].secondary.selection.value !== null
+                ? `${formatMetricValue(activity[0].secondary)} tracked`
                 : null}
               title="Activity"
-              value={activity[0] ? formatMetricValue(activity[0].steps) : "—"}
-              confidence={activity[0]?.summaryConfidence.level ?? null}
+              value={activity[0] ? formatMetricValue(activity[0].primary) : "—"}
+              confidence={activity[0]?.confidence ?? null}
             />
             <SignalSummaryCard
               description="Latest body-state summary"
-              extra={bodyState[0] && bodyState[0].bodyFatPercentage.selection.value !== null
-                ? `Body fat ${formatMetricValue(bodyState[0].bodyFatPercentage)}`
+              extra={bodyState[0] && bodyState[0].secondary.selection.value !== null
+                ? `Body fat ${formatMetricValue(bodyState[0].secondary)}`
                 : null}
               title="Body state"
-              value={bodyState[0] ? formatMetricValue(bodyState[0].weightKg) : "—"}
-              confidence={bodyState[0]?.summaryConfidence.level ?? null}
+              value={bodyState[0] ? formatMetricValue(bodyState[0].primary) : "—"}
+              confidence={bodyState[0]?.confidence ?? null}
             />
           </div>
 
@@ -177,34 +178,32 @@ function SignalsPageContent() {
             <SignalListCard
               items={sleep.map((entry) => ({
                 date: entry.date,
-                detail: formatMetricValue(entry.totalSleepMinutes),
-                note: entry.notes[0] ?? `Confidence ${formatConfidenceLabel(entry.summaryConfidence.level)}`,
-                secondary: entry.sleepScore.selection.value !== null ? `Score ${formatMetricValue(entry.sleepScore)}` : null,
-                title: "Sleep night",
+                detail: formatMetricValue(entry.primary),
+                note: entry.note,
+                secondary: entry.secondary.selection.value !== null ? `Score ${formatMetricValue(entry.secondary)}` : null,
+                title: entry.title,
               }))}
               title="Recent sleep"
             />
             <SignalListCard
               items={recovery.map((entry) => ({
                 date: entry.date,
-                detail: formatMetricValue(entry.readinessScore),
-                note: entry.notes[0] ?? `Confidence ${formatConfidenceLabel(entry.summaryConfidence.level)}`,
-                secondary: entry.hrv.selection.value !== null ? `HRV ${formatMetricValue(entry.hrv)}` : null,
-                title: "Recovery day",
+                detail: formatMetricValue(entry.primary),
+                note: entry.note,
+                secondary: entry.secondary.selection.value !== null ? `HRV ${formatMetricValue(entry.secondary)}` : null,
+                title: entry.title,
               }))}
               title="Recent recovery"
             />
             <SignalListCard
               items={activity.map((entry) => ({
                 date: entry.date,
-                detail: formatMetricValue(entry.steps),
-                note: entry.activityTypes.length > 0
-                  ? `Types: ${entry.activityTypes.join(", ")}`
-                  : (entry.notes[0] ?? `Confidence ${formatConfidenceLabel(entry.summaryConfidence.level)}`),
-                secondary: entry.sessionMinutes.selection.value !== null
-                  ? `Tracked ${formatMetricValue(entry.sessionMinutes)}`
+                detail: formatMetricValue(entry.primary),
+                note: entry.note,
+                secondary: entry.secondary.selection.value !== null
+                  ? `Tracked ${formatMetricValue(entry.secondary)}`
                   : null,
-                title: "Activity day",
+                title: entry.title,
               }))}
               title="Recent activity"
             />
@@ -265,6 +264,105 @@ function SignalsPageContent() {
       ) : null}
     </div>
   );
+}
+
+type SignalMetric = {
+  selection: {
+    unit: string | null;
+    value: number | null;
+  };
+};
+
+type SignalDaySummary = {
+  confidence: string | null;
+  date: string;
+  note: string;
+  primary: SignalMetric;
+  secondary: SignalMetric;
+  title: string;
+};
+
+function summarizeSignalRows(rows: readonly BrowserVaultMetricRow[]): {
+  activity: SignalDaySummary[];
+  bodyState: SignalDaySummary[];
+  recovery: SignalDaySummary[];
+  sleep: SignalDaySummary[];
+} {
+  const rowsByDate = groupMetricRowsByDate(rows);
+  const dates = [...rowsByDate.keys()].sort((left, right) => right.localeCompare(left));
+  return {
+    activity: dates
+      .map((date) => dateToSignalSummary(date, rowsByDate.get(date) ?? [], {
+        primary: "steps",
+        secondary: "activity-minutes",
+        title: "Activity day",
+      }))
+      .filter(hasSignalData),
+    bodyState: dates
+      .map((date) => dateToSignalSummary(date, rowsByDate.get(date) ?? [], {
+        primary: "body-weight",
+        secondary: "body-fat-percentage",
+        title: "Body state",
+      }))
+      .filter(hasSignalData),
+    recovery: dates
+      .map((date) => dateToSignalSummary(date, rowsByDate.get(date) ?? [], {
+        primary: "readiness-score",
+        secondary: "hrv-rmssd",
+        title: "Recovery day",
+      }))
+      .filter(hasSignalData),
+    sleep: dates
+      .map((date) => dateToSignalSummary(date, rowsByDate.get(date) ?? [], {
+        primary: "total-sleep-minutes",
+        secondary: "sleep-score",
+        title: "Sleep night",
+      }))
+      .filter(hasSignalData),
+  };
+}
+
+function dateToSignalSummary(
+  date: string,
+  rows: readonly BrowserVaultMetricRow[],
+  config: { primary: string; secondary: string; title: string },
+): SignalDaySummary {
+  const primary = findMetricRow(rows, config.primary);
+  const secondary = findMetricRow(rows, config.secondary);
+  const confidence = primary?.confidence ?? secondary?.confidence ?? "none";
+  return {
+    confidence,
+    date,
+    note: `Confidence ${formatConfidenceLabel(confidence)}`,
+    primary: metricForRow(primary),
+    secondary: metricForRow(secondary),
+    title: config.title,
+  };
+}
+
+function groupMetricRowsByDate(rows: readonly BrowserVaultMetricRow[]): Map<string, BrowserVaultMetricRow[]> {
+  const output = new Map<string, BrowserVaultMetricRow[]>();
+  for (const row of rows) {
+    const bucket = output.get(row.date) ?? [];
+    bucket.push(row);
+    output.set(row.date, bucket);
+  }
+  return output;
+}
+
+function findMetricRow(rows: readonly BrowserVaultMetricRow[], metricKey: string): BrowserVaultMetricRow | null {
+  return rows
+    .filter((row) => row.metricKey === metricKey && typeof row.value === "number")
+    .sort((left, right) => left.observedAt.localeCompare(right.observedAt) || left.id.localeCompare(right.id))
+    .at(-1) ?? null;
+}
+
+function metricForRow(row: BrowserVaultMetricRow | null): SignalMetric {
+  return { selection: { unit: row?.unit ?? null, value: row?.value ?? null } };
+}
+
+function hasSignalData(summary: SignalDaySummary): boolean {
+  return summary.primary.selection.value !== null || summary.secondary.selection.value !== null;
 }
 
 function SignalSummaryCard({

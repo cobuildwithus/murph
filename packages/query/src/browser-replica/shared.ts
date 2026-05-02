@@ -89,15 +89,6 @@ export interface BrowserVaultEntity {
   title: string | null;
 }
 
-export interface BrowserVaultMetricSelection {
-  unit: string | null;
-  value: number | null;
-}
-
-export interface BrowserVaultResolvedMetric {
-  selection: BrowserVaultMetricSelection;
-}
-
 export interface BrowserVaultSummaryConfidence {
   level: MetricConfidence;
 }
@@ -270,7 +261,7 @@ export interface BrowserVaultQueryClient {
     progress(filters?: { goalId?: string; metricKey?: string }): BrowserVaultMetricGoalProgressRow[];
   };
   metrics: {
-    latest(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow | null;
+    latestRow(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow | null;
     list(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow[];
     series(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow[];
     seriesMany(filters: readonly BrowserVaultMetricFilters[]): BrowserVaultMetricRow[][];
@@ -292,84 +283,4 @@ export interface BrowserVaultOverviewView {
   recentJournals: OverviewJournalEntry[];
   trackedExperiments: OverviewExperiment[];
   weeklySampleSummaries: OverviewWeeklySampleSummary[];
-}
-
-export interface BrowserVaultSignalsView {
-  activity: BrowserVaultActivitySummary[];
-  assistantSummary: BrowserVaultAssistantSummary;
-  bodyState: BrowserVaultBodyStateSummary[];
-  recovery: BrowserVaultRecoverySummary[];
-  sleep: BrowserVaultSleepSummary[];
-  sourceHealth: BrowserVaultSourceHealthRow[];
-}
-
-export interface BrowserVaultActivitySummary {
-  activeCalories: BrowserVaultResolvedMetric;
-  activityScore: BrowserVaultResolvedMetric;
-  activityTypes: string[];
-  altitudeChangeMeters: BrowserVaultResolvedMetric;
-  date: string;
-  dayStrain: BrowserVaultResolvedMetric;
-  distanceKm: BrowserVaultResolvedMetric;
-  estimatedVo2Max: BrowserVaultResolvedMetric;
-  maxHeartRate: BrowserVaultResolvedMetric;
-  notes: string[];
-  percentRecorded: BrowserVaultResolvedMetric;
-  sessionCount: BrowserVaultResolvedMetric;
-  sessionMinutes: BrowserVaultResolvedMetric;
-  steps: BrowserVaultResolvedMetric;
-  summaryConfidence: BrowserVaultSummaryConfidence;
-  totalElevationGainMeters: BrowserVaultResolvedMetric;
-  workoutStrain: BrowserVaultResolvedMetric;
-}
-
-export interface BrowserVaultSleepSummary {
-  averageHeartRate: BrowserVaultResolvedMetric;
-  awakeMinutes: BrowserVaultResolvedMetric;
-  date: string;
-  deepMinutes: BrowserVaultResolvedMetric;
-  hrv: BrowserVaultResolvedMetric;
-  lightMinutes: BrowserVaultResolvedMetric;
-  lowestHeartRate: BrowserVaultResolvedMetric;
-  notes: string[];
-  remMinutes: BrowserVaultResolvedMetric;
-  respiratoryRate: BrowserVaultResolvedMetric;
-  sessionMinutes: BrowserVaultResolvedMetric;
-  sleepConsistency: BrowserVaultResolvedMetric;
-  sleepEfficiency: BrowserVaultResolvedMetric;
-  sleepEndAt: string | null;
-  sleepPerformance: BrowserVaultResolvedMetric;
-  sleepScore: BrowserVaultResolvedMetric;
-  sleepStartAt: string | null;
-  sleepWindowProvider: string | null;
-  spo2: BrowserVaultResolvedMetric;
-  summaryConfidence: BrowserVaultSummaryConfidence;
-  timeInBedMinutes: BrowserVaultResolvedMetric;
-  totalSleepMinutes: BrowserVaultResolvedMetric;
-}
-
-export interface BrowserVaultRecoverySummary {
-  bodyBattery: BrowserVaultResolvedMetric;
-  date: string;
-  hrv: BrowserVaultResolvedMetric;
-  notes: string[];
-  readinessScore: BrowserVaultResolvedMetric;
-  recoveryScore: BrowserVaultResolvedMetric;
-  respiratoryRate: BrowserVaultResolvedMetric;
-  restingHeartRate: BrowserVaultResolvedMetric;
-  spo2: BrowserVaultResolvedMetric;
-  stressLevel: BrowserVaultResolvedMetric;
-  summaryConfidence: BrowserVaultSummaryConfidence;
-  temperature: BrowserVaultResolvedMetric;
-  temperatureDeviation: BrowserVaultResolvedMetric;
-}
-
-export interface BrowserVaultBodyStateSummary {
-  bmi: BrowserVaultResolvedMetric;
-  bodyFatPercentage: BrowserVaultResolvedMetric;
-  date: string;
-  notes: string[];
-  summaryConfidence: BrowserVaultSummaryConfidence;
-  temperature: BrowserVaultResolvedMetric;
-  weightKg: BrowserVaultResolvedMetric;
 }

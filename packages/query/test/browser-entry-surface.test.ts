@@ -14,7 +14,6 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
     "selectBrowserVaultBiomarkerPanel",
     "selectBrowserVaultExperimentResults",
     "selectBrowserVaultOverview",
-    "selectBrowserVaultSignals",
   ]) {
     assert.equal(exportName in queryRoot, false);
     assert.equal(exportName in queryBrowser, true);

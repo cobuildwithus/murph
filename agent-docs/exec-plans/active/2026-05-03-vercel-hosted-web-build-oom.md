@@ -55,6 +55,7 @@ Updated: 2026-05-03
 
 - Use a code-level fix before considering larger Vercel builders; the log shows an OOM during `next build`, so raising memory would only hide build graph pressure.
 - Treat the 54 MB generated Health Commons catalog static import as the first root-cause target because it is already guarded out of public Health Commons route bundles and is far larger than the route-level web artifacts.
+- Greenfield hard cut: remove the app-local Health Commons catalog helper instead of preserving a compatibility wrapper; production route code should consume generated web artifacts directly.
 
 ## Verification
 
