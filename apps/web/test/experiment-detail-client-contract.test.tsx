@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     throw new Error("not found");
   }),
   protocolTab: vi.fn(() => createElement("div", null, "protocol tab")),
+  readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   refresh: vi.fn(),
   resolveBrowserVaultExperimentRun: vi.fn(() => null),
@@ -96,6 +97,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
+  readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
@@ -119,6 +124,7 @@ beforeEach(() => {
     authenticatedMember: null,
     linkedAccounts: [],
   });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   mocks.useBrowserVault.mockReturnValue({
     client: null,
@@ -239,6 +245,17 @@ test("hosted experiment start context resolves the assigned member phone", async
     telegramThreadId: null,
     telegramUserId: null,
     telegramUserLookupKey: null,
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "member@example.test",
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    phone: {
+      number: "+14045550123",
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    telegram: null,
   });
 
   const { readHostedExperimentStartContactContext } = await import(

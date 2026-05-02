@@ -34,9 +34,9 @@ export async function readHostedMurphContactContext():
   return {
     initialContactChannels: authenticatedMember
       ? {
-          email: Boolean(account?.email.address),
-          telegram: Boolean(account?.telegram.telegramUserId),
-          text: Boolean(account?.phone.number),
+          email: Boolean(account?.email?.address),
+          telegram: Boolean(account?.telegram?.telegramUserId),
+          text: Boolean(account?.phone?.number),
         }
       : DEFAULT_MURPH_CONTACT_CHANNELS,
     murphPhoneNumber: routing?.linqRecipientPhone ?? null,

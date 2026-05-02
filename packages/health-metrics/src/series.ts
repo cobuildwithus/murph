@@ -126,7 +126,7 @@ function aggregateMetricSeriesPoints(
       .at(-1) ?? first.observedAt;
     const value = aggregateMetricValues(values, aggregation);
     const sourceKinds = uniqueStrings(datePoints.map((point) => point.source.kind));
-    const recordIds = uniqueStrings(datePoints.map((point) => point.source.recordId));
+    const recordIds = uniqueStrings(datePoints.flatMap(metricPointRecordIds));
     const pointIds = uniqueStrings(datePoints.map((point) => point.id));
     const unit = first.canonicalUnit ?? first.unit ?? definition.displayUnit;
     const statistic: MetricStatistic = aggregation;
@@ -168,7 +168,7 @@ function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefiniti
     metricKey: point.metricKey,
     observedAt: point.observedAt,
     pointIds: [point.id],
-    recordIds: [point.source.recordId],
+    recordIds: metricPointRecordIds(point),
     sourceFamily: point.source.family,
     sourceKind: point.source.kind,
     sourceKinds: [point.source.kind],
@@ -248,6 +248,18 @@ function pointNumericValue(point: MetricPoint): number | null {
   return point.canonicalValue ?? point.value;
 }
 
+function metricPointRecordIds(point: MetricPoint): string[] {
+  const contributingRecordIds = point.context.contributingRecordIds;
+  if (Array.isArray(contributingRecordIds)) {
+    return uniqueStrings([
+      ...contributingRecordIds.filter((value): value is string => typeof value === "string" && value.length > 0),
+      point.source.recordId,
+    ]);
+  }
+
+  return [point.source.recordId];
+}
+
 function aggregateMetricValues(values: readonly number[], aggregation: MetricSeriesAggregation): number {
   switch (aggregation) {
     case "count":
@@ -276,7 +288,7 @@ function median(values: readonly number[]): number {
 function seriesProvenance(points: readonly MetricPoint[]): MetricSeries["provenance"] {
   return {
     pointIds: uniqueStrings(points.map((point) => point.id)),
-    recordIds: uniqueStrings(points.map((point) => point.source.recordId)),
+    recordIds: uniqueStrings(points.flatMap(metricPointRecordIds)),
     sourceKinds: uniqueStrings(points.map((point) => point.source.kind)),
   };
 }

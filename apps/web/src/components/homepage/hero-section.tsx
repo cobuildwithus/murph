@@ -1,21 +1,14 @@
 import { LandingAuthActions } from "@/app/auth-controls";
 import { formatHostedLandingPricingShortSummary } from "@/src/lib/hosted-onboarding/billing-plans";
-import Image from "next/image";
+
+import { HeroBackground } from "./hero-background";
 
 export function HeroSection({ authenticated }: { authenticated: boolean }) {
   const launchPricingSummary = formatHostedLandingPricingShortSummary();
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#3a3028]">
-      <Image
-        preload
-        fill
-        sizes="100vw"
-        src="/hero.jpg"
-        alt=""
-        style={{ objectFit: "cover", objectPosition: "80% center" }}
-        className="sm:[object-position:center]"
-      />
+      <HeroBackground />
       <div className="absolute inset-0 bg-[#1a1612]/25" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#1a1612]/50 via-[#1a1612]/10 to-transparent" />
 

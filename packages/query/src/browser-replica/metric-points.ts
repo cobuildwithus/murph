@@ -44,14 +44,16 @@ export function createBrowserVaultMetricSelectionRows(input: {
   metricPoints: readonly MetricPoint[];
   metricRowPointIds?: ReadonlySet<string>;
   requestedMetrics?: readonly BrowserVaultRequestedMetric[];
+  selectionPoints?: readonly MetricPoint[];
 }): BrowserVaultMetricSelectionRow[] {
   const requestedMetrics = normalizeRequestedMetrics(input.requestedMetrics, input.metricPoints);
+  const selectionPoints = input.selectionPoints ?? input.metricPoints;
   return requestedMetrics.map((request) => {
     const selection = selectMetricValue({
       biomarkerKey: request.biomarkerKey ?? undefined,
       metricKey: request.metricKey,
       now: input.generatedAt,
-      points: input.metricPoints,
+      points: selectionPoints,
     });
     return toBrowserVaultMetricSelectionRow(selection, request, input.metricRowPointIds);
   });

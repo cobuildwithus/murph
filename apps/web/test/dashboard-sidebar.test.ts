@@ -9,26 +9,9 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
-type MockPrivyUser = {
-  email?: { address: string };
-  id?: string;
-  phone?: { number: string };
-} | null;
-
 const mocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
   usePathname: vi.fn(),
-  usePrivy: vi.fn<() => {
-    authenticated: boolean;
-    logout: () => void;
-    ready: boolean;
-  }>(() => ({
-    authenticated: false,
-    logout: vi.fn(),
-    ready: false,
-  })),
-  useUser: vi.fn<() => { user: MockPrivyUser }>(() => ({
-    user: { email: { address: "test@example.com" } },
-  })),
 }));
 
 vi.mock("next/link", () => ({
@@ -43,11 +26,9 @@ vi.mock("next/link", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: mocks.usePathname,
-}));
-
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: mocks.usePrivy,
-  useUser: mocks.useUser,
+  useRouter: () => ({
+    refresh: mocks.refresh,
+  }),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
@@ -147,14 +128,7 @@ import { summarizeSidebarDeviceSyncStatus } from "../src/lib/device-sync/sidebar
 
 beforeEach(() => {
   mocks.usePathname.mockReturnValue("/experiments");
-  mocks.usePrivy.mockReturnValue({
-    authenticated: false,
-    logout: vi.fn(),
-    ready: false,
-  });
-  mocks.useUser.mockReturnValue({
-    user: { email: { address: "test@example.com" } },
-  });
+  mocks.refresh.mockClear();
 });
 
 test("Sidebar does not render the Overview page as a navigation item", () => {
@@ -162,7 +136,7 @@ test("Sidebar does not render the Overview page as a navigation item", () => {
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(markup, /href="\/home"[^>]*>\s*<img[^>]*alt="Murph"/);
+  assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
 });
@@ -192,24 +166,32 @@ test("Sidebar keeps the Biomarkers tab active across biomarker section routes", 
 
 test("Sidebar renders account menu with signed-in user label", () => {
   mocks.usePathname.mockReturnValue("/experiments");
-  mocks.useUser.mockReturnValue({
-    user: { email: { address: "test@example.com" }, id: "privy-user-1" },
-  });
 
-  const markup = renderToStaticMarkup(createElement(Sidebar));
+  const markup = renderToStaticMarkup(
+    createElement(Sidebar, {
+      initialAuth: {
+        authenticated: true,
+        label: "Account",
+      },
+    }),
+  );
 
-  assert.match(markup, /test@example\.com/);
+  assert.match(markup, /Account/);
   assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
   assert.match(markup, /Sign out/);
 });
 
 test("Sidebar keeps Settings out of the primary navigation", () => {
   mocks.usePathname.mockReturnValue("/settings");
-  mocks.useUser.mockReturnValue({
-    user: { email: { address: "test@example.com" }, id: "privy-user-1" },
-  });
 
-  const markup = renderToStaticMarkup(createElement(Sidebar));
+  const markup = renderToStaticMarkup(
+    createElement(Sidebar, {
+      initialAuth: {
+        authenticated: true,
+        label: "Account",
+      },
+    }),
+  );
 
   assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
   assert.doesNotMatch(
@@ -243,7 +225,6 @@ test("Sidebar renders the supplied server chat action", () => {
 
 test("Sidebar renders a login CTA card when signed out", () => {
   mocks.usePathname.mockReturnValue("/experiments");
-  mocks.useUser.mockReturnValue({ user: null });
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
@@ -255,14 +236,8 @@ test("Sidebar renders a login CTA card when signed out", () => {
   assert.doesNotMatch(markup, /Sign out/);
 });
 
-test("Sidebar uses initial server auth while Privy client state is not ready", () => {
+test("Sidebar uses initial server app-session auth", () => {
   mocks.usePathname.mockReturnValue("/experiments");
-  mocks.usePrivy.mockReturnValue({
-    authenticated: false,
-    logout: vi.fn(),
-    ready: false,
-  });
-  mocks.useUser.mockReturnValue({ user: null });
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
@@ -278,36 +253,17 @@ test("Sidebar uses initial server auth while Privy client state is not ready", (
   assert.doesNotMatch(markup, /Log in or sign up/);
 });
 
-test("Sidebar trusts signed-out Privy client state after it becomes ready", () => {
+test("Sidebar does not render a hardcoded wearable connection status", () => {
   mocks.usePathname.mockReturnValue("/experiments");
-  mocks.usePrivy.mockReturnValue({
-    authenticated: false,
-    logout: vi.fn(),
-    ready: true,
-  });
-  mocks.useUser.mockReturnValue({ user: null });
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
       initialAuth: {
         authenticated: true,
-        label: "initial@example.com",
+        label: "Account",
       },
     }),
   );
-
-  assert.match(markup, /Log in or sign up/);
-  assert.doesNotMatch(markup, /initial@example\.com/);
-  assert.doesNotMatch(markup, /Sign out/);
-});
-
-test("Sidebar does not render a hardcoded wearable connection status", () => {
-  mocks.usePathname.mockReturnValue("/experiments");
-  mocks.useUser.mockReturnValue({
-    user: { email: { address: "test@example.com" }, id: "privy-user-1" },
-  });
-
-  const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.doesNotMatch(markup, /Oura connected/);
 });

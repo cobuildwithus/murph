@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     getHostedPageAuthSnapshot: vi.fn(),
     getPrisma: vi.fn(() => prisma),
     prisma,
+    readHostedAccountSettingsSnapshot: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
   };
 });
@@ -73,6 +74,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
+  readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
 }));
@@ -90,6 +95,7 @@ beforeEach(() => {
     memberLookup: null,
     session: null,
   });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 });
 
@@ -123,6 +129,17 @@ test("UploadLabsMurphContactAction opens assigned SMS with the lab-report messag
     telegramThreadId: null,
     telegramUserId: null,
     telegramUserLookupKey: null,
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "member@example.test",
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    phone: {
+      number: "+14045550123",
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    telegram: null,
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -169,6 +186,14 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
     telegramUserId: null,
     telegramUserLookupKey: null,
   });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "member@example.test",
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    phone: null,
+    telegram: null,
+  });
 
   const { UploadLabsMurphContactAction } = await import(
     "@/src/components/home/upload-labs-action"
@@ -207,6 +232,17 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
     session: null,
   });
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: {
+      address: "member@example.test",
+      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+    },
+    phone: null,
+    telegram: {
+      telegramUserId: "tg_user_123",
+      username: "member_handle",
+    },
+  });
 
   const { UploadLabsMurphContactAction } = await import(
     "@/src/components/home/upload-labs-action"
@@ -244,6 +280,14 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
     session: null,
   });
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: null,
+    phone: null,
+    telegram: {
+      telegramUserId: "tg_user_123",
+      username: "member_handle",
+    },
+  });
 
   const { UploadLabsMurphContactAction } = await import(
     "@/src/components/home/upload-labs-action"
@@ -281,6 +325,11 @@ test("UploadLabsMurphContactAction stays disabled when no connected channel exis
     telegramThreadId: null,
     telegramUserId: null,
     telegramUserLookupKey: null,
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
+    email: null,
+    phone: null,
+    telegram: null,
   });
 
   const { UploadLabsMurphContactAction } = await import(

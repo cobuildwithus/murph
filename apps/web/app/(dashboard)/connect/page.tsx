@@ -247,7 +247,7 @@ export default async function ConnectPage({
     <div className="flex w-full min-w-0 max-w-[calc(100vw-3rem)] flex-col gap-8 md:max-w-full">
       <PageHeader
         eyebrow="Live Well"
-        title="Connect your health"
+        title="Sync your biomarkers"
         description="Bring in sleep, activity, recovery, glucose, and device context from the tools you already use."
       />
 

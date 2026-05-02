@@ -13,6 +13,7 @@ import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
+import { HeartbeatButton } from "@/src/components/ui/heartbeat-button";
 import { Badge } from "@/src/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { Progress } from "@/src/components/ui/progress";
@@ -124,6 +125,33 @@ export function ComponentsContent() {
             />
             <PaymentButton
               onClick={() => new Promise((r) => setTimeout(r, 1500))}
+              idleLabel="Confirm purchase"
+              variant="outline"
+              size="default"
+              onSuccess={() => {}}
+            />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Heartbeat Button">
+          <p className="text-sm text-muted-foreground">Payment button with ECG heartbeat trace animation. The blip sweeps across during loading, then reveals fully with a checkmark on success.</p>
+          <div className="flex flex-wrap items-center gap-4">
+            <HeartbeatButton
+              onClick={() => new Promise((r) => setTimeout(r, 2500))}
+              idleLabel="Subscribe · $8/mo"
+              idleAdornment={<span className="text-sm">→</span>}
+              onSuccess={() => {}}
+            />
+            <HeartbeatButton
+              onClick={() => new Promise((r) => setTimeout(r, 2000))}
+              idleLabel="Upgrade plan"
+              variant="secondary"
+              onSuccess={() => {}}
+            />
+            <HeartbeatButton
+              onClick={() => new Promise((r) => setTimeout(r, 2000))}
               idleLabel="Confirm purchase"
               variant="outline"
               size="default"

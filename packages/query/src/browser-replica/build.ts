@@ -58,19 +58,25 @@ export async function createBrowserVaultReplica(
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(input.vault, generatedAt);
   const allMetricPoints = buildMetricProjection(input.vault).metricPoints;
+  const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) => point.effectiveDate >= cutoff);
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
-  const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
-  const metricSelectionRows = createBrowserVaultMetricSelectionRows({ generatedAt, metricPoints: allMetricPoints, metricRowPointIds, requestedMetrics });
+  const metricSelectionRows = createBrowserVaultMetricSelectionRows({
+    generatedAt,
+    metricPoints,
+    metricRowPointIds,
+    requestedMetrics,
+    selectionPoints: allMetricPoints,
+  });
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(input.vault)),
     entities,
     generatedAt,
-    metricGoalProgressRows: buildMetricGoalProgressRows(input.vault.entities, metricPoints, generatedAt),
+    metricGoalProgressRows: buildMetricGoalProgressRows(input.vault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
     policy,
@@ -147,9 +153,10 @@ function buildMetricGoalProgressRows(
 
 function collectRequestedBrowserVaultMetrics(entities: readonly CanonicalEntity[]): BrowserVaultRequestedMetric[] {
   return dedupeRequestedMetrics([
-    ...listMetricDefinitions().flatMap((definition) => definition.biomarkerKey
-      ? [{ metricKey: definition.key, biomarkerKey: definition.biomarkerKey }]
-      : []),
+    ...listMetricDefinitions().map((definition) => ({
+      metricKey: definition.key,
+      biomarkerKey: definition.biomarkerKey,
+    })),
     ...entities.flatMap(privateMetricBindingRequests),
     ...entities.filter(isActiveGoalEntity).flatMap((entity) =>
       parseGoalMetricTargets(entity).map((target) => ({

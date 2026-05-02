@@ -11,6 +11,10 @@ import type {
   MetricSelectionWarning,
 } from "./types.ts";
 
+type RollingWindowGoalMetricTarget = GoalMetricTarget & {
+  evaluation: Extract<GoalMetricTarget["evaluation"], { kind: "rolling-window" }>;
+};
+
 export function selectMetricGoalProgress(input: {
   goalId: string;
   now?: string;
@@ -76,24 +80,33 @@ function selectGoalMetricTargetValue(input: {
   points: readonly MetricPoint[];
   target: GoalMetricTarget;
 }): GoalMetricTargetValueSelection {
-  switch (input.target.evaluation.kind) {
-    case "rolling-window":
-      return selectRollingWindowGoalMetricValue(input);
-    case "latest-lab":
-      return metricSelectionToGoalTargetValue(selectMetricValue({
-        biomarkerKey: input.target.biomarkerKey,
+  const target = input.target;
+  switch (target.evaluation.kind) {
+    case "rolling-window": {
+      const rollingTarget: RollingWindowGoalMetricTarget = { ...target, evaluation: target.evaluation };
+      return selectRollingWindowGoalMetricValue({
+        definition: input.definition,
         metricKey: input.metricKey,
         now: input.now,
         points: input.points,
-        policyOverride: { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: input.definition.selectionPolicy.staleAfterDays },
+        target: rollingTarget,
+      });
+    }
+    case "latest-lab":
+      return metricSelectionToGoalTargetValue(selectMetricValue({
+        biomarkerKey: target.biomarkerKey,
+        metricKey: input.metricKey,
+        now: input.now,
+        points: input.points,
+        policyOverride: target.selectionPolicyOverride ?? { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: input.definition.selectionPolicy.staleAfterDays },
       }));
     case "selected-value":
       return metricSelectionToGoalTargetValue(selectMetricValue({
-        biomarkerKey: input.target.biomarkerKey,
+        biomarkerKey: target.biomarkerKey,
         metricKey: input.metricKey,
         now: input.now,
         points: input.points,
-        policyOverride: input.target.selectionPolicyOverride,
+        policyOverride: target.selectionPolicyOverride,
       }));
   }
 }
@@ -131,18 +144,9 @@ function selectRollingWindowGoalMetricValue(input: {
   metricKey: string;
   now?: string;
   points: readonly MetricPoint[];
-  target: GoalMetricTarget;
+  target: RollingWindowGoalMetricTarget;
 }): GoalMetricTargetValueSelection {
   const evaluation = input.target.evaluation;
-  if (evaluation.kind !== "rolling-window") {
-    return metricSelectionToGoalTargetValue(selectMetricValue({
-      biomarkerKey: input.target.biomarkerKey,
-      metricKey: input.metricKey,
-      now: input.now,
-      points: input.points,
-      policyOverride: input.target.selectionPolicyOverride,
-    }));
-  }
 
   const candidates = listMetricPoints({
     biomarkerKey: input.target.biomarkerKey,
@@ -176,14 +180,53 @@ function selectRollingWindowGoalMetricValue(input: {
   });
   const value = evaluation.statistic === "median" ? median(values) : mean(values);
   const precision = input.definition.valuePrecision;
+  const latestPointDate = windowPoints
+    .map((point) => point.effectiveDate)
+    .sort()
+    .at(-1) ?? anchorDate;
+  const warnings = collectRollingWindowWarnings({
+    definition: input.definition,
+    latestPointDate,
+    now: input.now,
+    target: input.target,
+    windowDays: evaluation.windowDays,
+    windowPoints,
+  });
   return {
     selectedPointIds: windowPoints.map((point) => point.id),
-    status: "behind",
+    status: warnings.some((warning) => warning.code === "SOURCE_STALE") ? "stale" : "behind",
     unit: windowPoints.at(-1)?.canonicalUnit ?? windowPoints.at(-1)?.unit ?? input.target.unit,
     value,
     valueLabel: formatNumber(value, precision),
-    warnings: [],
+    warnings,
   };
+}
+
+function collectRollingWindowWarnings(input: {
+  definition: MetricDefinition;
+  latestPointDate: string;
+  now?: string;
+  target: GoalMetricTarget;
+  windowDays: number;
+  windowPoints: readonly MetricPoint[];
+}): MetricSelectionWarning[] {
+  const warnings: MetricSelectionWarning[] = [];
+  if (input.windowPoints.length < input.windowDays) {
+    warnings.push({
+      code: "LOW_SAMPLE_COUNT",
+      message: `Only ${input.windowPoints.length} point${input.windowPoints.length === 1 ? "" : "s"} were available for ${input.definition.displayName}.`,
+    });
+  }
+
+  const staleAfterDays = input.target.selectionPolicyOverride?.staleAfterDays ?? input.definition.selectionPolicy.staleAfterDays;
+  if (input.now && staleAfterDays !== undefined) {
+    const ageDays = daysBetween(input.latestPointDate, input.now.slice(0, 10));
+    if (ageDays !== null && ageDays > staleAfterDays) {
+      warnings.push({ code: "SOURCE_STALE", message: `${input.definition.displayName} rolling window is ${ageDays} days old.` });
+    }
+  }
+
+  return warnings;
 }
 
 function mean(values: readonly number[]): number {
@@ -227,4 +270,11 @@ function subtractIsoDays(value: string, days: number): string {
   const parsed = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() - days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function daysBetween(leftDate: string, rightDate: string): number | null {
+  const left = Date.parse(`${leftDate.slice(0, 10)}T00:00:00.000Z`);
+  const right = Date.parse(`${rightDate.slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(left) || Number.isNaN(right)) return null;
+  return Math.floor((right - left) / (24 * 60 * 60 * 1000));
 }

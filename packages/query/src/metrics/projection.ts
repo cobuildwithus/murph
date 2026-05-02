@@ -19,7 +19,7 @@ import {
   type MetricRowEvidence,
 } from "./index.ts";
 
-const SIGNAL_LIMIT = 30;
+const METRIC_PROJECTION_LIMIT = 365;
 
 export interface MetricProjection {
   dailySampleSummaries: DailySampleSummary[];
@@ -43,10 +43,10 @@ export function buildMetricProjection(vault: VaultReadModel): MetricProjection {
 
 export function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
   return [
-    ...summarizeWearableSleep(vault, { limit: SIGNAL_LIMIT }).flatMap(sleepMetricEvidence),
-    ...summarizeWearableRecovery(vault, { limit: SIGNAL_LIMIT }).flatMap(recoveryMetricEvidence),
-    ...summarizeWearableActivity(vault, { limit: SIGNAL_LIMIT }).flatMap(activityMetricEvidence),
-    ...summarizeWearableBodyState(vault, { limit: SIGNAL_LIMIT }).flatMap(bodyStateMetricEvidence),
+    ...summarizeWearableSleep(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(sleepMetricEvidence),
+    ...summarizeWearableRecovery(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(recoveryMetricEvidence),
+    ...summarizeWearableActivity(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(activityMetricEvidence),
+    ...summarizeWearableBodyState(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(bodyStateMetricEvidence),
   ];
 }
 
@@ -98,16 +98,24 @@ function metricEvidence(
     ...selection.paths,
     ...(sourceCandidate?.paths ?? []),
   ]);
+  const syntheticRecordId = `${sourceKind}:${metricKey}:${date}`;
+  const contributingRecordIds = uniqueStrings([
+    ...selection.recordIds,
+    ...(sourceCandidate?.recordIds ?? []),
+  ]);
+  const recordIds = contributingRecordIds.length > 0 ? contributingRecordIds : [syntheticRecordId];
 
   return {
     confidence: resolved.confidence.level === "none" ? confidence : resolved.confidence.level,
     context: {
       candidateCount: resolved.confidence.candidateCount,
       conflictingProviders: resolved.confidence.conflictingProviders,
+      contributingRecordIds,
       exactDuplicateCount: resolved.confidence.exactDuplicateCount,
       recordedAt: selection.recordedAt,
       sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
       sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
+      syntheticRecordId,
     },
     dataOrigin: sourceCandidate?.dataOrigin ?? null,
     date,
@@ -115,7 +123,7 @@ function metricEvidence(
     metricKey,
     provider,
     rawRefs,
-    recordIds: [`${sourceKind}:${metricKey}:${date}`],
+    recordIds,
     sourceFamily: "derived",
     sourceKind,
     sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
