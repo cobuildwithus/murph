@@ -51,6 +51,59 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.hostedWebBaseUrl).toBe("http://[::1]:3000");
   });
 
+  it("allows HTTP loopback hosted web base urls in non-production worker env", () => {
+    const loopbackUrls = [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://[::1]:3000",
+    ] as const;
+
+    for (const hostedWebBaseUrl of loopbackUrls) {
+      const environment = readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
+        HOSTED_WEB_BASE_URL: hostedWebBaseUrl,
+      }));
+
+      expect(environment.hostedWebBaseUrl).toBe(hostedWebBaseUrl);
+    }
+  });
+
+  it("rejects HTTP loopback hosted web base urls in production worker env", () => {
+    const productionMarkers = [
+      { HOSTED_CRYPTO_ENV: "prod" },
+      { HOSTED_CRYPTO_ENV: "production" },
+      { NODE_ENV: "production" },
+      { VERCEL_ENV: "production" },
+    ] as const;
+    const loopbackUrls = [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://[::1]:3000",
+    ] as const;
+
+    for (const productionMarker of productionMarkers) {
+      for (const hostedWebBaseUrl of loopbackUrls) {
+        expect(() =>
+          readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
+            ...productionMarker,
+            HOSTED_WEB_BASE_URL: hostedWebBaseUrl,
+          })),
+        ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP loopback in production/u);
+      }
+    }
+
+    expect(() =>
+      readHostedExecutionWorkerEnvironment(
+        createHostedExecutionTestEnv({
+          HOSTED_CRYPTO_ENV: "production",
+          HOSTED_WEB_BASE_URL: "http://localhost:3000",
+        }),
+        {
+          allowHostedWebHttpHosts: ["localhost"],
+        },
+      ),
+    ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP loopback in production/u);
+  });
+
   it("keeps the Docker bridge host limited to local child web-control normalization", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({

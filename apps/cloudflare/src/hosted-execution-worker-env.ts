@@ -20,15 +20,31 @@ export interface HostedExecutionWorkerEnvironment {
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
+const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "[::1]",
+]);
 
 export interface HostedExecutionWorkerEnvironmentOptions {
   allowHostedWebHttpHosts?: readonly string[];
+}
+
+interface HostedExecutionWorkerBaseUrlOptions extends HostedExecutionBaseUrlNormalizationOptions {
+  rejectHttpLoopbackInProduction?: boolean;
 }
 
 export function readHostedExecutionWorkerEnvironment(
   source: EnvSource = process.env,
   options: HostedExecutionWorkerEnvironmentOptions = {},
 ): HostedExecutionWorkerEnvironment {
+  const hostedCryptoEnv = requireHostedExecutionString(
+    source.HOSTED_CRYPTO_ENV,
+    "HOSTED_CRYPTO_ENV",
+  );
+  const isProduction = isHostedWorkerProductionEnvironment(source, hostedCryptoEnv);
+
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
     hostedCryptoAuthoritySignKeyVersion: requireHostedExecutionString(
@@ -47,16 +63,14 @@ export function readHostedExecutionWorkerEnvironment(
       source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
     ),
-    hostedCryptoEnv: requireHostedExecutionString(
-      source.HOSTED_CRYPTO_ENV,
-      "HOSTED_CRYPTO_ENV",
-    ),
+    hostedCryptoEnv,
     hostedWebBaseUrl: requireHostedExecutionBaseUrl(
       source.HOSTED_WEB_BASE_URL,
       "HOSTED_WEB_BASE_URL",
       {
         allowHttpHosts: options.allowHostedWebHttpHosts,
         requireOriginOnly: true,
+        rejectHttpLoopbackInProduction: isProduction,
       },
     ),
     maxEventAttempts: parsePositiveInteger(
@@ -103,15 +117,23 @@ function requireHostedExecutionString(
 function requireHostedExecutionBaseUrl(
   value: string | null | undefined,
   label: string,
-  options?: HostedExecutionBaseUrlNormalizationOptions,
+  options?: HostedExecutionWorkerBaseUrlOptions,
 ): string {
+  const {
+    rejectHttpLoopbackInProduction = false,
+    ...normalizationOptions
+  } = options ?? {};
   const normalized = normalizeHostedExecutionBaseUrl(value, {
     allowHttpLocalhost: true,
-    ...options,
+    ...normalizationOptions,
   });
 
   if (!normalized) {
     throw new TypeError(`${label} must be a valid absolute URL.`);
+  }
+
+  if (rejectHttpLoopbackInProduction && isHostedExecutionHttpLoopbackBaseUrl(normalized)) {
+    throw new TypeError(`${label} must not use HTTP loopback in production.`);
   }
 
   return normalized;
@@ -129,4 +151,22 @@ function parsePositiveInteger(value: string | null, fallback: number, label: str
   }
 
   return parsed;
+}
+
+function isHostedWorkerProductionEnvironment(source: EnvSource, hostedCryptoEnv: string): boolean {
+  const normalizedHostedCryptoEnv = normalizeEnvironmentMarker(hostedCryptoEnv);
+  return normalizeEnvironmentMarker(source.NODE_ENV) === "production"
+    || normalizeEnvironmentMarker(source.VERCEL_ENV) === "production"
+    || normalizedHostedCryptoEnv === "prod"
+    || normalizedHostedCryptoEnv === "production";
+}
+
+function normalizeEnvironmentMarker(value: string | null | undefined): string {
+  return normalizeHostedExecutionString(value)?.toLowerCase() ?? "";
+}
+
+function isHostedExecutionHttpLoopbackBaseUrl(value: string): boolean {
+  const url = new URL(value);
+  return url.protocol.toLowerCase() === "http:"
+    && HOSTED_EXECUTION_LOOPBACK_HOSTS.has(url.hostname.toLowerCase());
 }
