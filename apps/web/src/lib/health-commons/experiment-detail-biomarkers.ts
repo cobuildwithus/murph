@@ -9,10 +9,18 @@ import type {
 } from "@murphai/health-commons/runtime";
 
 import type { ExperimentProtocol } from "@/src/types/experiments";
+import { listHealthCommonsBiomarkerRoutes } from "./biomarker-projections";
 import {
   cleanHealthCommonsUserFacingCopy,
   cleanOptionalHealthCommonsUserFacingCopy,
 } from "./user-facing-copy";
+
+let publishedBiomarkerRouteIds: Set<string> | null = null;
+
+function getPublishedBiomarkerRouteIds(): Set<string> {
+  publishedBiomarkerRouteIds ??= new Set(listHealthCommonsBiomarkerRoutes());
+  return publishedBiomarkerRouteIds;
+}
 
 type BiomarkerSignalDirection =
   ExperimentProtocol["expectedSignals"][number]["direction"];
@@ -137,7 +145,9 @@ export function toExpectedSignal(
       ? { estimatedChange }
       : {}),
     expected,
-    biomarkerRouteId: biomarker.key.replace(/^biomarker:/u, ""),
+    ...(getPublishedBiomarkerRouteIds().has(biomarker.key.replace(/^biomarker:/u, ""))
+      ? { biomarkerRouteId: biomarker.key.replace(/^biomarker:/u, "") }
+      : {}),
     ...(description ? { description } : {}),
     ...(protocolProminence
       ? { protocolProminence }
