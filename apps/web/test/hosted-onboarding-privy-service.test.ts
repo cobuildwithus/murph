@@ -42,6 +42,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 
 const NOW = new Date("2026-03-26T12:00:00.000Z");

@@ -150,6 +150,10 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
 }));
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/wallet-address", () => ({
   normalizeHostedWalletAddress: vi.fn(() => null),
 }));

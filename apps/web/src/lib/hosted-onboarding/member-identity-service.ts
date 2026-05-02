@@ -136,6 +136,7 @@ async function refreshHostedMemberForPhoneTx(input: {
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
+  assertHostedMemberNotSuspended(input.member);
   await upsertHostedMemberIdentity({
     ...buildHostedMemberPhoneIdentityFields(input.phoneNumber),
     memberId: input.member.id,
