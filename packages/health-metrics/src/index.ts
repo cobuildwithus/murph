@@ -47,6 +47,7 @@ export interface MetricTrendPolicy {
 
 export interface MetricDefinition {
   aliases: readonly string[];
+  biomarkerAliases?: readonly string[];
   biomarkerKey: string | null;
   canonicalUnit: string | null;
   category: MetricCategory;
@@ -206,6 +207,30 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
     valuePrecision: 0,
   }),
   metric({
+    aliases: ["blood-oxygen", "blood_oxygen", "oxygen-saturation", "oxygen_saturation", "spo2", "sp-o2"],
+    biomarkerKey: "biomarker:blood-oxygen-spo2",
+    canonicalUnit: "percent",
+    category: "vital",
+    displayName: "Blood oxygen",
+    displayUnit: "%",
+    key: "spo2",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 30, latestWindowDays: 7, minimumPoints: 5 },
+    valuePrecision: 1,
+  }),
+  metric({
+    aliases: ["cardio-fitness", "estimated-vo2max", "estimated_vo2max", "estimated_vo2_max", "vo2-max", "vo2_max", "vo2max"],
+    biomarkerKey: "biomarker:estimated-vo2max",
+    canonicalUnit: "mL/kg/min",
+    category: "fitness",
+    displayName: "Estimated VO2 max",
+    displayUnit: "mL/kg/min",
+    key: "estimated-vo2-max",
+    selectionPolicy: { kind: "latest-device-estimate", staleAfterDays: 45 },
+    trendPolicy: { aggregation: "median", comparisonWindowDays: 90, latestWindowDays: 14, minimumPoints: 2 },
+    valuePrecision: 1,
+  }),
+  metric({
     aliases: ["deep", "deep_minutes", "deepMinutes", "deep-sleep", "deep_sleep"],
     biomarkerKey: "biomarker:deep-sleep-minutes",
     canonicalUnit: "minutes",
@@ -319,6 +344,7 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   }),
   metric({
     aliases: ["apo-b", "apo_b", "apolipoprotein-b", "apolipoprotein_b", "apolipoprotein b"],
+    biomarkerAliases: ["biomarker:apolipoprotein-b"],
     biomarkerKey: "biomarker:apob",
     canonicalUnit: "mg/dL",
     category: "lab",
@@ -439,6 +465,11 @@ for (const definition of METRIC_DEFINITIONS) {
   }
   if (definition.biomarkerKey && !PRIMARY_METRIC_BY_BIOMARKER.has(definition.biomarkerKey)) {
     PRIMARY_METRIC_BY_BIOMARKER.set(definition.biomarkerKey, definition);
+  }
+  for (const biomarkerAlias of definition.biomarkerAliases ?? []) {
+    if (!PRIMARY_METRIC_BY_BIOMARKER.has(biomarkerAlias)) {
+      PRIMARY_METRIC_BY_BIOMARKER.set(biomarkerAlias, definition);
+    }
   }
 }
 
@@ -612,16 +643,16 @@ export function selectMetricGoalProgress(input: {
 }): MetricGoalProgress {
   const metricKey = normalizeMetricKey(input.target.metricKey);
   const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.target.unit);
-  const selection = selectMetricValue({
-    biomarkerKey: input.target.biomarkerKey,
+  const targetValueLabel = formatTargetValue(input.target, definition);
+  const current = selectGoalMetricTargetValue({
+    definition,
     metricKey,
     now: input.now,
     points: input.points,
-    policyOverride: input.target.selectionPolicyOverride,
+    target: input.target,
   });
-  const targetValueLabel = formatTargetValue(input.target, definition);
 
-  if (!selection.point || selection.value === null) {
+  if (current.value === null) {
     return {
       currentValue: null,
       currentValueLabel: null,
@@ -629,29 +660,211 @@ export function selectMetricGoalProgress(input: {
       goalId: input.goalId,
       metricKey,
       selectedPointIds: [],
-      status: "no_data",
+      status: current.status,
       targetId: input.target.targetId,
       targetValueLabel,
       unit: input.target.unit,
+      warnings: current.warnings,
+    };
+  }
+
+  const met = targetMet(current.value, input.target);
+  const deltaToTarget = deltaForTarget(current.value, input.target);
+  return {
+    currentValue: current.value,
+    currentValueLabel: current.valueLabel,
+    deltaToTarget,
+    goalId: input.goalId,
+    metricKey,
+    selectedPointIds: current.selectedPointIds,
+    status: current.status === "stale" ? "stale" : met ? "met" : "behind",
+    targetId: input.target.targetId,
+    targetValueLabel,
+    unit: current.unit ?? input.target.unit,
+    warnings: current.warnings,
+  };
+}
+
+interface GoalMetricTargetValueSelection {
+  selectedPointIds: string[];
+  status: MetricGoalProgress["status"];
+  unit: string | null;
+  value: number | null;
+  valueLabel: string | null;
+  warnings: MetricSelectionWarning[];
+}
+
+function selectGoalMetricTargetValue(input: {
+  definition: MetricDefinition;
+  metricKey: string;
+  now?: string;
+  points: readonly MetricPoint[];
+  target: GoalMetricTarget;
+}): GoalMetricTargetValueSelection {
+  switch (input.target.evaluation.kind) {
+    case "rolling-window":
+      return selectRollingWindowGoalMetricValue(input);
+    case "latest-lab":
+      return metricSelectionToGoalTargetValue(selectMetricValue({
+        biomarkerKey: input.target.biomarkerKey,
+        metricKey: input.metricKey,
+        now: input.now,
+        points: input.points,
+        policyOverride: { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: input.definition.selectionPolicy.staleAfterDays },
+      }));
+    case "selected-value":
+      return metricSelectionToGoalTargetValue(selectMetricValue({
+        biomarkerKey: input.target.biomarkerKey,
+        metricKey: input.metricKey,
+        now: input.now,
+        points: input.points,
+        policyOverride: input.target.selectionPolicyOverride,
+      }));
+  }
+}
+
+function metricSelectionToGoalTargetValue(selection: MetricSelection): GoalMetricTargetValueSelection {
+  if (!selection.point || selection.value === null) {
+    return {
+      selectedPointIds: [],
+      status: selection.status === "unsupported" ? "unsupported" : "no_data",
+      unit: selection.unit,
+      value: null,
+      valueLabel: null,
       warnings: selection.warnings,
     };
   }
 
-  const met = targetMet(selection.value, input.target);
-  const deltaToTarget = deltaForTarget(selection.value, input.target);
   return {
-    currentValue: selection.value,
-    currentValueLabel: selection.valueLabel,
-    deltaToTarget,
-    goalId: input.goalId,
-    metricKey,
     selectedPointIds: selection.provenance.pointIds,
-    status: selection.status === "stale" ? "stale" : met ? "met" : "behind",
-    targetId: input.target.targetId,
-    targetValueLabel,
-    unit: selection.unit ?? input.target.unit,
+    status: selection.status === "stale" ? "stale" : "behind",
+    unit: selection.unit,
+    value: selection.value,
+    valueLabel: selection.valueLabel,
     warnings: selection.warnings,
   };
+}
+
+function selectRollingWindowGoalMetricValue(input: {
+  definition: MetricDefinition;
+  metricKey: string;
+  now?: string;
+  points: readonly MetricPoint[];
+  target: GoalMetricTarget;
+}): GoalMetricTargetValueSelection {
+  const evaluation = input.target.evaluation;
+  if (evaluation.kind !== "rolling-window") {
+    return metricSelectionToGoalTargetValue(selectMetricValue({
+      biomarkerKey: input.target.biomarkerKey,
+      metricKey: input.metricKey,
+      now: input.now,
+      points: input.points,
+      policyOverride: input.target.selectionPolicyOverride,
+    }));
+  }
+
+  const candidates = buildMetricSeries({
+    biomarkerKey: input.target.biomarkerKey,
+    metricKey: input.metricKey,
+    points: input.points,
+  }).filter((point) => {
+    const value = point.canonicalValue ?? point.value;
+    if (value === null || !Number.isFinite(value)) return false;
+    if (input.target.startAt && point.effectiveDate < input.target.startAt) return false;
+    if (input.target.targetAt && point.effectiveDate > input.target.targetAt) return false;
+    return true;
+  });
+
+  const anchorDate = input.now ? toIsoDate(input.now) : candidates.at(-1)?.effectiveDate ?? null;
+  if (!anchorDate) {
+    return { selectedPointIds: [], status: "no_data", unit: input.target.unit, value: null, valueLabel: null, warnings: [] };
+  }
+
+  const windowStart = subtractIsoDays(anchorDate, Math.max(0, evaluation.windowDays - 1));
+  const windowPoints = candidates.filter((point) => point.effectiveDate >= windowStart && point.effectiveDate <= anchorDate);
+  if (windowPoints.length === 0) {
+    return { selectedPointIds: [], status: "no_data", unit: input.target.unit, value: null, valueLabel: null, warnings: [] };
+  }
+
+  const latestPoint = windowPoints.at(-1)!;
+  const unit = latestPoint.canonicalUnit ?? latestPoint.unit ?? input.target.unit;
+  const value = aggregateGoalMetricValues(windowPoints, evaluation.statistic);
+  const warnings = collectRollingGoalWarnings({
+    definition: input.definition,
+    evaluation,
+    latestPoint,
+    now: input.now,
+    points: windowPoints,
+  });
+
+  return {
+    selectedPointIds: windowPoints.map((point) => point.id),
+    status: warnings.some((warning) => warning.code === "SOURCE_STALE") ? "stale" : "behind",
+    unit,
+    value,
+    valueLabel: formatGoalMetricValue(value, input.definition),
+    warnings,
+  };
+}
+
+function collectRollingGoalWarnings(input: {
+  definition: MetricDefinition;
+  evaluation: { kind: "rolling-window"; statistic: "mean" | "median"; windowDays: number };
+  latestPoint: MetricPoint;
+  now?: string;
+  points: readonly MetricPoint[];
+}): MetricSelectionWarning[] {
+  const warnings: MetricSelectionWarning[] = [];
+  const staleAfterDays = staleAfterDaysForPolicy(input.definition.selectionPolicy);
+  if (input.now && staleAfterDays !== null && isOlderThanDays(input.latestPoint.observedAt, input.now, staleAfterDays)) {
+    warnings.push({
+      code: "SOURCE_STALE",
+      message: `${input.definition.displayName} has not synced in the last ${staleAfterDays} days.`,
+    });
+  }
+  if (input.points.length < input.evaluation.windowDays) {
+    warnings.push({
+      code: "LOW_SAMPLE_COUNT",
+      message: `${input.definition.displayName} rolling goal used ${input.points.length} value${input.points.length === 1 ? "" : "s"} across a ${input.evaluation.windowDays}-day window.`,
+    });
+  }
+  if (uniqueStrings(input.points.map((point) => point.source.kind)).length > 1) {
+    warnings.push({
+      code: "MIXED_SOURCES",
+      message: `${input.definition.displayName} rolling goal used values from multiple source types.`,
+    });
+  }
+  return dedupeWarnings(warnings);
+}
+
+function aggregateGoalMetricValues(points: readonly MetricPoint[], statistic: "mean" | "median"): number {
+  const values = points
+    .map((point) => point.canonicalValue ?? point.value)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) return 0;
+  if (statistic === "mean") {
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }
+  const sorted = values.slice().sort((left, right) => left - right);
+  const midpoint = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[midpoint - 1] ?? 0) + (sorted[midpoint] ?? 0)) / 2
+    : sorted[midpoint] ?? 0;
+}
+
+function formatGoalMetricValue(value: number, definition: MetricDefinition): string {
+  return Number(value.toFixed(definition.valuePrecision)).toString();
+}
+
+function toIsoDate(value: string): string {
+  return value.includes("T") ? value.slice(0, 10) : value;
+}
+
+function subtractIsoDays(date: string, days: number): string {
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime())) return date;
+  parsed.setUTCDate(parsed.getUTCDate() - days);
+  return parsed.toISOString().slice(0, 10);
 }
 
 export function formatMetricDisplayValue(point: MetricPoint, definition: MetricDefinition | null = null): string {
@@ -780,11 +993,11 @@ function sourcePriority(point: MetricPoint): number {
     case "measurement": return 1;
     case "compat-body-measurement":
     case "compat-observation": return 2;
-    case "wearable-summary":
-    case "activity-summary":
-    case "sleep-summary":
-    case "sample-summary": return 3;
-    default: return 4;
+    case "wearable-summary": return 3;
+    case "activity-summary": return 4;
+    case "sleep-summary": return 5;
+    case "sample-summary": return 6;
+    default: return 7;
   }
 }
 

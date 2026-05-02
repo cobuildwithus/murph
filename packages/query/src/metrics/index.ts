@@ -55,8 +55,23 @@ export interface MetricRowEvidence {
   value: number | null;
 }
 
+export interface SampleSummaryMetricEvidence {
+  averageValue: number | null;
+  date: string;
+  firstSampleAt: string | null;
+  lastSampleAt: string | null;
+  numericSampleCount: number;
+  sampleCount: number;
+  stream: string;
+  unit: string | null;
+}
+
 export function extractMetricPointsFromMetricRows(rows: readonly MetricRowEvidence[]): MetricPoint[] {
   return dedupeMetricPoints(rows.flatMap(metricPointFromMetricRow)).sort(compareMetricPointDesc);
+}
+
+export function extractMetricPointsFromSampleSummaries(summaries: readonly SampleSummaryMetricEvidence[]): MetricPoint[] {
+  return dedupeMetricPoints(summaries.flatMap(metricPointFromSampleSummary)).sort(compareMetricPointDesc);
 }
 
 export function extractMetricPointsFromCanonicalEntities(entities: readonly CanonicalEntity[]): MetricPoint[] {
@@ -65,12 +80,74 @@ export function extractMetricPointsFromCanonicalEntities(entities: readonly Cano
 
 export function extractMetricPoints(input: {
   metricRows?: readonly MetricRowEvidence[];
+  sampleSummaries?: readonly SampleSummaryMetricEvidence[];
   vault?: { entities: readonly CanonicalEntity[] };
 }): MetricPoint[] {
   return dedupeMetricPoints([
     ...extractMetricPointsFromMetricRows(input.metricRows ?? []),
+    ...extractMetricPointsFromSampleSummaries(input.sampleSummaries ?? []),
     ...extractMetricPointsFromCanonicalEntities(input.vault?.entities ?? []),
   ]).sort(compareMetricPointDesc);
+}
+
+function metricPointFromSampleSummary(summary: SampleSummaryMetricEvidence): MetricPoint[] {
+  if (summary.stream !== "glucose") {
+    return [];
+  }
+  if (typeof summary.averageValue !== "number" || !Number.isFinite(summary.averageValue)) {
+    return [];
+  }
+
+  const definition = resolveMetricDefinition("glucose");
+  if (!definition) {
+    return [];
+  }
+
+  const observedAt = summary.lastSampleAt ?? `${summary.date}T00:00:00.000Z`;
+  const normalized = normalizeMetricValue({
+    metricKey: definition.key,
+    unit: summary.unit ?? definition.displayUnit,
+    value: summary.averageValue,
+  });
+
+  return [createMetricPoint({
+    biomarkerKey: definition.biomarkerKey,
+    canonicalUnit: normalized.canonicalUnit,
+    canonicalValue: normalized.canonicalValue,
+    comparator: null,
+    confidence: summary.numericSampleCount >= 3 ? "medium" : "low",
+    context: {
+      firstSampleAt: summary.firstSampleAt,
+      lastSampleAt: summary.lastSampleAt,
+      numericSampleCount: summary.numericSampleCount,
+      sampleCount: summary.sampleCount,
+      sourceStream: summary.stream,
+    },
+    effectiveDate: summary.date,
+    metricKey: definition.key,
+    observedAt,
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: null,
+      rawRefs: [],
+      sourceLabel: "Glucose sample summary",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    source: {
+      family: "sample",
+      kind: "sample-summary",
+      path: "",
+      recordId: `sample-summary:${summary.stream}:${summary.date}`,
+      resultIndex: null,
+    },
+    statistic: "mean",
+    textValue: null,
+    unit: summary.unit ?? definition.displayUnit,
+    value: summary.averageValue,
+  })];
 }
 
 function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {

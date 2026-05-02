@@ -59,7 +59,10 @@ test("the biomarker overview mounts the browser-vault private card", () => {
     "utf8",
   );
   const layoutSource = readFileSync(
-    new URL("../app/biomarkers/[biomarkerId]/biomarker-layout-client.tsx", import.meta.url),
+    new URL(
+      "../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client.tsx",
+      import.meta.url,
+    ),
     "utf8",
   );
 
@@ -74,19 +77,15 @@ test("the biomarker overview lets the metric catalog decide private trend suppor
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
-    client: null,
-    dataVersion: null,
+    client: createBrowserVaultQueryClient(createReplica()),
+    dataVersion: "sha256:browser-vault-private-card-test",
     error: null,
     ref: null,
     refresh: async () => {},
-    status: "empty",
+    status: "ready",
   });
 
-  const unsupportedBiomarker = {
-    ...biomarker,
-    privateMetricBindings: [],
-    shortName: "Mood",
-  };
+  const unsupportedBiomarker = unsupportedBiomarkerFrom(biomarker);
   const markup = renderToStaticMarkup(
     createElement(BiomarkerOverview, { biomarker: unsupportedBiomarker }),
   );
@@ -135,6 +134,63 @@ test("renders private trend values from the browser-vault selector", () => {
   assert.match(markup, /7-day median vs prior 30 days/u);
   assert.match(markup, /Murph compares this to your own recent baseline/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
+});
+
+test("renders private trend values for catalog-supported biomarker keys", () => {
+  const scenarios = [
+    {
+      metricKey: "spo2",
+      routeId: "blood-oxygen-spo2",
+      rows: [
+        ["2026-04-25", 96.4],
+        ["2026-04-26", 96.8],
+        ["2026-04-27", 96.9],
+        ["2026-04-28", 97],
+        ["2026-04-29", 97.1],
+      ],
+      unit: "percent",
+      valuePattern: />97\.1</u,
+    },
+    {
+      metricKey: "estimated-vo2-max",
+      routeId: "estimated-vo2max",
+      rows: [
+        ["2026-04-15", 42.1],
+        ["2026-04-29", 42.4],
+      ],
+      unit: "mL/kg/min",
+      valuePattern: />42\.4</u,
+    },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    const biomarker = resolveHealthCommonsBiomarkerOverview(scenario.routeId);
+    assert.ok(biomarker);
+
+    mocks.useBrowserVault.mockReturnValue({
+      client: createBrowserVaultQueryClient(createReplica({
+        metricRows: metricRows({
+          biomarkerKey: biomarker.key,
+          metricKey: scenario.metricKey,
+          rows: scenario.rows,
+          unit: scenario.unit,
+        }),
+      })),
+      dataVersion: "sha256:browser-vault-private-card-test",
+      error: null,
+      ref: null,
+      refresh: async () => {},
+      status: "ready",
+    });
+
+    const markup = renderToStaticMarkup(
+      createElement(BiomarkerPrivateTrendCard, { biomarker }),
+    );
+
+    assert.match(markup, scenario.valuePattern);
+    assert.match(markup, /Murph compares this to your own recent baseline/u);
+    assert.doesNotMatch(markup, /Biomarker unavailable/u);
+  }
 });
 
 test("renders the insufficient-data state from real browser-vault rows", () => {
@@ -201,11 +257,7 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
     status: "ready",
   });
 
-  const unsupportedBiomarker = {
-    ...biomarker,
-    privateMetricBindings: [],
-    shortName: "Mood",
-  };
+  const unsupportedBiomarker = unsupportedBiomarkerFrom(biomarker);
   const markup = renderToStaticMarkup(
     createElement(BiomarkerPrivateTrendCard, { biomarker: unsupportedBiomarker }),
   );
@@ -216,26 +268,63 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
 });
 
 function restingHeartRateRows(rows: readonly (readonly [string, number])[]): BrowserVaultMetricRow[] {
-  return rows.map(([date, value]) => ({
+  return metricRows({
     biomarkerKey: "biomarker:resting-heart-rate",
+    metricKey: "resting-heart-rate",
+    rows,
+    unit: "bpm",
+  });
+}
+
+function metricRows(input: {
+  biomarkerKey: string;
+  metricKey: string;
+  rows: readonly (readonly [string, number])[];
+  unit: string;
+}): BrowserVaultMetricRow[] {
+  return input.rows.map(([date, value]) => ({
+    biomarkerKey: input.biomarkerKey,
     confidence: "high",
     context: {},
     date,
     grain: "day",
-    id: `metric-row:resting-heart-rate:${date}`,
-    metricKey: "resting-heart-rate",
+    id: `metric-row:${input.metricKey}:${date}`,
+    metricKey: input.metricKey,
     observedAt: `${date}T00:00:00.000Z`,
-    pointIds: [`metric-point:resting-heart-rate:${date}`],
+    pointIds: [`metric-point:${input.metricKey}:${date}`],
     recordIds: [],
     rowSchema: "murph.browser-vault.metric-row",
     sourceFamily: "derived",
     sourceKind: "wearable-summary",
     sourceLabel: "Wearable summary",
     statistic: "value",
-    unit: "bpm",
+    unit: input.unit,
     value,
     valueLabel: String(value),
   }));
+}
+
+function unsupportedBiomarkerFrom(
+  biomarker: NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerOverview>>,
+) {
+  return {
+    ...biomarker,
+    key: "biomarker:mood",
+    privateMetricBindings: [],
+    route: {
+      aliases: [],
+      entityType: "biomarker" as const,
+      href: "/biomarkers/mood",
+      routeId: "mood",
+      slug: "biomarkers/mood",
+    },
+    routeId: "mood",
+    shortName: "Mood",
+    slug: "biomarkers/mood",
+    title: "Mood",
+    unit: "score",
+    valuePrecision: 0,
+  };
 }
 
 function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVaultReplica {

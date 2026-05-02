@@ -33,7 +33,7 @@ vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
 }));
 
-vi.mock("../app/biomarkers/[biomarkerId]/biomarker-layout-client", () => ({
+vi.mock("../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client", () => ({
   BiomarkerLayoutClient({
     biomarker,
   }: {
@@ -55,8 +55,8 @@ vi.mock("../app/biomarkers/[biomarkerId]/biomarker-layout-client", () => ({
 
 import BiomarkerDetailLayout, {
   generateStaticParams,
-} from "../app/biomarkers/[biomarkerId]/layout";
-import { generateMetadata } from "../app/biomarkers/[biomarkerId]/page";
+} from "../app/(dashboard)/biomarkers/[biomarkerId]/layout";
+import { generateMetadata } from "../app/(dashboard)/biomarkers/[biomarkerId]/page";
 import { createHealthCommonsCatalogReader } from "../src/lib/health-commons/catalog";
 
 function createFixtureCatalog(): HealthCommonsCatalog {
@@ -152,7 +152,7 @@ describe("BiomarkerPage", () => {
 
   it("redirects the short SpO₂ overview route to the canonical biomarker page", async () => {
     const { default: BiomarkerOverviewPage } = await import(
-      "../app/biomarkers/[biomarkerId]/page"
+      "../app/(dashboard)/biomarkers/[biomarkerId]/page"
     );
 
     await expect(BiomarkerOverviewPage({
@@ -170,7 +170,7 @@ describe("BiomarkerPage", () => {
 
   it("redirects the short RHR overview route to the canonical biomarker page", async () => {
     const { default: BiomarkerOverviewPage } = await import(
-      "../app/biomarkers/[biomarkerId]/page"
+      "../app/(dashboard)/biomarkers/[biomarkerId]/page"
     );
 
     await expect(BiomarkerOverviewPage({
@@ -188,7 +188,7 @@ describe("BiomarkerPage", () => {
 
   it("redirects the short SpO₂ research route to the canonical research subpath, preserving the tab", async () => {
     const { default: BiomarkerResearchPage } = await import(
-      "../app/biomarkers/[biomarkerId]/research/page"
+      "../app/(dashboard)/biomarkers/[biomarkerId]/research/page"
     );
 
     await expect(BiomarkerResearchPage({

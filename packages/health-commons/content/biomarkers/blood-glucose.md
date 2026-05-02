@@ -43,13 +43,10 @@ biomarker:
     label: Lower spikes and safer time-in-range are usually better, but lows are dangerous.
     nuance: The right interpretation depends on diabetes status, pregnancy, medications, fasting state, meal timing, exercise timing, illness, and clinician-set targets. A lower value is not automatically better.
   privateMetricBindings:
-
     -
-      source: browser_vault_metric
-      domain: body_state
-      metric: glucose
-      unit: mg_dL
-      preferred: true
+      source: metric
+      metricKey: glucose
+      role: primary
   trendDefaults:
     latestWindowDays: 14
     comparisonWindowDays: 30

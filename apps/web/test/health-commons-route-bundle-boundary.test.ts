@@ -16,7 +16,7 @@ const sourceFiles: readonly string[] = [
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
-  "apps/web/app/biomarkers/[biomarkerId]/page.tsx",
+  "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
 ] as const;
 
 const blockedCatalogPatterns = [
@@ -57,10 +57,10 @@ describe("Health Commons route-bundle boundary", () => {
 
   it("keeps public biomarker pages on generated page projections instead of route bundles", () => {
     const files = [
-      "apps/web/app/biomarkers/page.tsx",
-      "apps/web/app/biomarkers/[biomarkerId]/layout.tsx",
-      "apps/web/app/biomarkers/[biomarkerId]/page.tsx",
-      "apps/web/app/biomarkers/[biomarkerId]/research/page.tsx",
+      "apps/web/app/(dashboard)/biomarkers/page.tsx",
+      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/layout.tsx",
+      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
+      "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/research/page.tsx",
       "apps/web/src/lib/health-commons/biomarker-projections.ts",
     ];
 
@@ -187,6 +187,7 @@ function resolveRelativeSourceFile(fromRelativePath: string, specifier: string):
 function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
   return sourceFiles.includes(relativePath)
     || relativePath.startsWith("apps/web/app/(dashboard)/experiments")
+    || relativePath.startsWith("apps/web/app/(dashboard)/biomarkers")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-browse")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-detail")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-images")

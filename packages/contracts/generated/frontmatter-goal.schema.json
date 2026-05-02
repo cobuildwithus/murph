@@ -159,6 +159,131 @@
         "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
       },
       "uniqueItems": true
+    },
+    "metricTargets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "kind": {
+            "type": "string",
+            "const": "metric"
+          },
+          "metricKey": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "biomarkerKey": {
+            "type": "string",
+            "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+          },
+          "comparator": {
+            "type": "string",
+            "enum": [
+              "<",
+              "<=",
+              ">",
+              ">=",
+              "between"
+            ]
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._/%-]+$"
+          },
+          "highValue": {
+            "type": "number"
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "selected-value"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "latest-lab"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "rolling-window"
+                  },
+                  "statistic": {
+                    "type": "string",
+                    "enum": [
+                      "mean",
+                      "median"
+                    ]
+                  },
+                  "windowDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  }
+                },
+                "required": [
+                  "kind",
+                  "statistic",
+                  "windowDays"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "startAt": {
+            "type": "string",
+            "format": "date"
+          },
+          "targetAt": {
+            "type": "string",
+            "format": "date"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "targetId",
+          "kind",
+          "metricKey",
+          "comparator",
+          "value",
+          "unit"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 20,
+      "uniqueItems": true
     }
   },
   "required": [

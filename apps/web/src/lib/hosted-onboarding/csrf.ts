@@ -14,6 +14,11 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
 
   const environment = getHostedOnboardingEnvironment();
   const canonicalOrigin = normalizeOrigin(environment.publicBaseUrl);
+  const requestOrigin = normalizeOrigin(request.url);
+
+  if (!environment.isProduction && requestOrigin && requestOrigin === origin && isLoopbackOrigin(origin)) {
+    return;
+  }
 
   if (canonicalOrigin) {
     if (canonicalOrigin === origin) {
@@ -25,12 +30,6 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
       httpStatus: 403,
       message: "Hosted browser mutation origin is not allowed.",
     });
-  }
-
-  const requestOrigin = normalizeOrigin(request.url);
-
-  if (!environment.isProduction && requestOrigin && requestOrigin === origin && isLoopbackOrigin(origin)) {
-    return;
   }
 
   throw hostedOnboardingError({

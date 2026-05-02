@@ -2,7 +2,8 @@ import { Buffer } from "node:buffer";
 
 import { getVercelOidcToken } from "@vercel/oidc";
 
-const CLOUD_KMS_SCOPE = "https://www.googleapis.com/auth/cloudkms";
+const GCP_CLOUD_KMS_SCOPE = "https://www.googleapis.com/auth/cloudkms";
+const GCP_IAM_CREDENTIALS_SCOPE = "https://www.googleapis.com/auth/iam";
 const DEFAULT_KMS_API_ROOT = "https://cloudkms.googleapis.com/v1";
 const LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
 const LOCAL_KMS_CIPHERTEXT_PREFIX = "local-kms-v1:";
@@ -460,7 +461,7 @@ class VercelOidcGcpWorkloadIdentityAccessTokenProvider implements HostedGcpAcces
         audience: this.audience,
         grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
         requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
-        scope: CLOUD_KMS_SCOPE,
+        scope: GCP_IAM_CREDENTIALS_SCOPE,
         subject_token: subjectToken,
         subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
       }),
@@ -484,7 +485,7 @@ class VercelOidcGcpWorkloadIdentityAccessTokenProvider implements HostedGcpAcces
       {
         body: JSON.stringify({
           lifetime: "3600s",
-          scope: [CLOUD_KMS_SCOPE],
+          scope: [GCP_CLOUD_KMS_SCOPE],
         }),
         headers: {
           Authorization: `Bearer ${federatedAccessToken}`,

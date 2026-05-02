@@ -34,17 +34,10 @@ biomarker:
     label: Enough REM opportunity matters; more is not automatically better.
     nuance: REM is concentrated later in the night, so low REM often reflects curtailed sleep, early wake time, fragmentation, alcohol, medications, sleep apnea, circadian disruption, or device classification changes rather than a simple deficit to hack.
   privateMetricBindings:
-
     -
-      source: browser_vault_metric
-      domain: sleep
-      metric: remMinutes
-      unit: minutes
-      preferred: true
-    -
-      source: browser_vault_signal_summary
-      accessor: sleep.remMinutes
-      unit: minutes
+      source: metric
+      metricKey: rem-sleep-minutes
+      role: primary
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 30

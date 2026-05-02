@@ -29,6 +29,16 @@ test("browser vault query clients parse final metric-key replicas and filter met
   assert.equal(signals.sleep[0]?.sleepScore.selection.value, 91);
 });
 
+test("browser vault replica parsing requires final goal progress rows", () => {
+  const replica = { ...createReplicaFixture() } as Record<string, unknown>;
+  delete replica.metricGoalProgressRows;
+
+  assert.throws(
+    () => parseBrowserVaultReplica(replica),
+    /Browser vault replica\.metricGoalProgressRows must be an array/u,
+  );
+});
+
 test("browser vault replica creation emits metric-key rows from wearable and vault evidence", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-04-20T12:00:00.000Z",

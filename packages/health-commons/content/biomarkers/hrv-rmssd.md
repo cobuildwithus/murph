@@ -38,26 +38,10 @@ biomarker:
     label: Higher or stable can be better, but context matters.
     nuance: "A rising personal baseline can reflect improved recovery capacity or aerobic adaptation, while acute drops can reflect strain. Very high, very low, or abrupt values still need context and signal-quality checks."
   privateMetricBindings:
-
     -
-      source: browser_vault_metric
-      domain: recovery
-      metric: hrv
-      unit: ms
-      preferred: true
-    -
-      source: browser_vault_metric
-      domain: sleep
-      metric: hrv
-      unit: ms
-    -
-      source: browser_vault_signal_summary
-      accessor: recovery.hrv
-      unit: ms
-    -
-      source: browser_vault_signal_summary
-      accessor: sleep.hrv
-      unit: ms
+      source: metric
+      metricKey: hrv-rmssd
+      role: primary
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 30

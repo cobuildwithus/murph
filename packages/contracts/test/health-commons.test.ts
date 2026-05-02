@@ -185,11 +185,10 @@ const validBiomarkerPage = {
     },
     privateMetricBindings: [
       {
-        source: "browser_vault_metric",
-        domain: "recovery",
-        metric: "restingHeartRate",
+        source: "metric",
+        metricKey: "resting-heart-rate",
+        role: "primary",
         unit: "bpm",
-        preferred: true,
       },
     ],
     trendDefaults: {
@@ -637,11 +636,9 @@ describe("@murphai/contracts health commons schemas", () => {
           ...validBiomarkerPage.biomarker,
           privateMetricBindings: [
             {
-              source: "browser_vault_metric",
-              domain: "recovery",
-              metric: "whoop.score.resting_heart_rate",
+              source: "metric",
+              metricKey: "whoop.score.resting_heart_rate",
               unit: "bpm",
-              preferred: true,
             },
           ],
         },
@@ -656,11 +653,9 @@ describe("@murphai/contracts health commons schemas", () => {
           ...validBiomarkerPage.biomarker,
           privateMetricBindings: [
             {
-              source: "browser_vault_metric",
-              domain: "recovery",
-              metric: "sleepEfficiency",
+              source: "metric",
+              metricKey: "sleepEfficiency",
               unit: "%",
-              preferred: true,
             },
           ],
         },

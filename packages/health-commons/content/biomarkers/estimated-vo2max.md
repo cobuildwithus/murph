@@ -80,17 +80,10 @@ biomarker:
     label: Higher usually means better cardiorespiratory fitness.
     nuance: The number is only interpretable in context. A lower value after illness, detraining, device changes, weight change, or poor sensor data may not mean your cardiovascular system truly worsened.
   privateMetricBindings:
-
     -
-      source: browser_vault_metric
-      domain: activity
-      metric: estimatedVo2Max
-      unit: ml/kg/min
-      preferred: true
-    -
-      source: browser_vault_signal_summary
-      accessor: activity.estimatedVo2Max
-      unit: ml/kg/min
+      source: metric
+      metricKey: estimated-vo2-max
+      role: primary
   trendDefaults:
     latestWindowDays: 14
     comparisonWindowDays: 90

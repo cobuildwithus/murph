@@ -68,6 +68,7 @@ export async function createBrowserVaultReplica(
   const wearableMetricRows = buildWearableMetricEvidence(input.vault);
   const allMetricPoints = extractMetricPoints({
     metricRows: wearableMetricRows,
+    sampleSummaries: summarizeDailySamples(input.vault),
     vault: input.vault,
   });
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
@@ -169,6 +170,7 @@ function activityMetricEvidence(summary: WearableActivitySummary): MetricRowEvid
   return [
     metricEvidence(summary.date, "steps", summary.steps.selection.value, summary.steps.selection.unit, summary.summaryConfidence.level, "activity-summary"),
     metricEvidence(summary.date, "activity-minutes", summary.sessionMinutes.selection.value, summary.sessionMinutes.selection.unit, summary.summaryConfidence.level, "activity-summary"),
+    metricEvidence(summary.date, "estimated-vo2-max", summary.estimatedVo2Max.selection.value, summary.estimatedVo2Max.selection.unit, summary.summaryConfidence.level, "activity-summary"),
   ];
 }
 

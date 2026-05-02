@@ -329,6 +329,23 @@ export async function selectMetric(input: {
   return mod.selectMetricRuntime(input);
 }
 
+export async function listMetricTargets(
+  vaultRoot: string,
+): Promise<import("./query-projection.ts").QueryMetricTargetRow[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listMetricTargetsRuntime(vaultRoot);
+}
+
+export async function selectMetricGoalProgressRuntime(input: {
+  goalId: string;
+  now?: string;
+  targetId: string;
+  vaultRoot: string;
+}): Promise<import("@murphai/health-metrics").MetricGoalProgress | null> {
+  const mod = await import("./query-projection.ts");
+  return mod.selectMetricGoalProgressRuntime(input);
+}
+
 export async function getQueryProjectionStatus(
   vaultRoot: string,
 ): Promise<QueryProjectionStatus> {
