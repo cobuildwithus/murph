@@ -2,6 +2,10 @@ import { type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import {
+  requireHostedAppSessionFromRequest,
+  type HostedAppSession,
+} from "./app-session";
+import {
   readHostedMemberCoreState,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
@@ -186,5 +190,42 @@ export async function requireActivePrivyMemberAuth(
 ): Promise<AuthenticatedPrivyMemberAuthContext> {
   const context = await requirePrivyMemberAuth(request, prisma);
   assertHostedMemberActiveAccessAllowed(context.member);
+  return context;
+}
+
+export async function requireFreshPrivyMemberAuthForHostedAppSession(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<{
+  appSession: HostedAppSession;
+  freshPrivy: AuthenticatedPrivyMemberAuthContext;
+}> {
+  const [appSession, freshPrivy] = await Promise.all([
+    requireHostedAppSessionFromRequest(request),
+    requirePrivyMemberAuth(request, prisma),
+  ]);
+
+  if (freshPrivy.member.id !== appSession.member.id) {
+    throw hostedOnboardingError({
+      code: "PRIVY_SESSION_MEMBER_MISMATCH",
+      message:
+        "This Privy login does not match your current Murph session. Sign out and sign back in.",
+      httpStatus: 409,
+    });
+  }
+
+  return { appSession, freshPrivy };
+}
+
+export async function requireFreshActivePrivyMemberAuthForHostedAppSession(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<{
+  appSession: HostedAppSession;
+  freshPrivy: AuthenticatedPrivyMemberAuthContext;
+}> {
+  const context = await requireFreshPrivyMemberAuthForHostedAppSession(request, prisma);
+  assertHostedMemberActiveAccessAllowed(context.appSession.member);
+  assertHostedMemberActiveAccessAllowed(context.freshPrivy.member);
   return context;
 }

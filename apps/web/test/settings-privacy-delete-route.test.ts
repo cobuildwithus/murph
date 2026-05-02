@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
   prismaClient: {
     label: "test-prisma",
   },
-  requirePrivyMemberAuth: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
+  revokeHostedAppSessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -22,8 +23,9 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
+  revokeHostedAppSessionFromRequest: mocks.revokeHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
@@ -50,11 +52,14 @@ describe("settings privacy delete route", () => {
       confirmationPhrase: "DELETE MY MURPH DATA",
       secondConfirmationAccepted: true,
     });
-    mocks.requirePrivyMemberAuth.mockResolvedValue({
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
       },
     });
+    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue(
+      "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    );
     mocks.deleteHostedAccountData.mockResolvedValue({
       deletedAt: "2026-04-29T01:02:03.000Z",
       deletedCounts: {
@@ -84,7 +89,7 @@ describe("settings privacy delete route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request), mocks.prismaClient);
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.parseHostedAccountDeletionRequest).toHaveBeenCalledWith({
       acknowledgedIrreversibleDeletion: true,
       acknowledgedProviderAndBackupLimits: true,
@@ -96,6 +101,13 @@ describe("settings privacy delete route", () => {
       prisma: mocks.prismaClient,
       request: expect.any(Request),
     });
+    expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
+      reason: "account-deleted",
+      request: expect.any(Request),
+    });
+    expect(response.headers.get("Set-Cookie")).toBe(
+      "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    );
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       result: {

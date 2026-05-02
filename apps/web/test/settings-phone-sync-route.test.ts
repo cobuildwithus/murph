@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedPhoneHint: vi.fn(),
   reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
+  requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   resolveHostedMemberEmailLinked: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
 }));
@@ -29,6 +30,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireFreshPrivyMemberAuthForHostedAppSession: mocks.requireFreshPrivyMemberAuthForHostedAppSession,
   requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
 }));
 
@@ -72,6 +74,18 @@ describe("settings phone sync route", () => {
       eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
     });
     mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
+    mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockImplementation(async (...args: unknown[]) => {
+      const freshPrivy = await mocks.requirePrivyMemberAuth(...args);
+      return {
+        appSession: {
+          expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+          member: freshPrivy.member,
+          privyUserId: "did:privy:user_123",
+          sessionId: "hws_123",
+        },
+        freshPrivy,
+      };
+    });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       identity: {
         phone: {
@@ -97,6 +111,7 @@ describe("settings phone sync route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireFreshPrivyMemberAuthForHostedAppSession).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledWith({
       identity: {

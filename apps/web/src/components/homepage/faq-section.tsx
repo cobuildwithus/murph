@@ -9,7 +9,7 @@ const FAQ_ITEMS = [
   ],
   [
     "Do I need a computer?",
-    "The web dashboard works on any device with a browser. For daily guidance, Murph texts you through iMessage, Telegram, or email. You can use just the chat if you prefer.",
+    "The web dashboard works on any device with a browser. For daily guidance, Murph texts you through iMessage, Telegram, or email.",
   ],
   [
     "Do I need a wearable?",
@@ -17,11 +17,11 @@ const FAQ_ITEMS = [
   ],
   [
     "How is this different from my wearable’s app?",
-    "Wearable apps show status. Murph turns whatever evidence you have into a bounded experiment with a baseline and a clear review at the end.",
+    "Wearable apps show status. Murph turns whatever evidence you have into a bounded experiment with a baseline and a clear outcome.",
   ],
   [
     "Can I run multiple experiments?",
-    "One at a time. That’s what makes the results trustworthy — one variable means you know what caused the change.",
+    "Yes. We recommend one at a time so you know what caused the change, but you can run more if they don’t overlap.",
   ],
   [
     "What if I can’t follow the protocol perfectly?",
@@ -37,11 +37,11 @@ const FAQ_ITEMS = [
   ],
   [
     "What happens to my data?",
-    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Hosted Murph encrypts sensitive data at rest and keeps storage scoped by purpose. Hosted Murph is not zero-knowledge. The hosted service can decrypt data when it needs to run requested tasks or maintain the service. Local Murph keeps your vault on your device.",
+    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Murph encrypts sensitive data at rest and keeps storage scoped by purpose. The service can decrypt data when it needs to run requested tasks or maintain the service. Local Murph keeps your vault on your device.",
   ],
   [
     "Can I self-host Murph?",
-    "Yes. Murph is open source under Apache 2.0. Run it locally with one command using Codex CLI and the model provider configured in Codex. The hosted version is for people who'd rather not run anything themselves.",
+    "Yes. Murph is open source under Apache 2.0. Run it locally with one command. The hosted version is for people who'd rather not run anything themselves.",
   ],
   [
     "Can I cancel anytime?",

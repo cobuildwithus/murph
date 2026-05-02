@@ -8,13 +8,17 @@ import type {
   HealthCommonsMeasurementMethodProcedure,
   HealthCommonsMeasurementMethodTier,
 } from "@murphai/contracts";
-import {
-  createHealthCommonsRouteBundleReader,
-  getGeneratedHealthCommonsWebRouteIndex,
-  loadGeneratedHealthCommonsWebRouteBundle,
-  type HealthCommonsCatalogReader,
-  type HealthCommonsEntity,
+import type {
+  HealthCommonsCatalogReader,
+  HealthCommonsEntity,
 } from "@murphai/health-commons/runtime";
+import {
+  listGeneratedMeasurementMethodRouteEntries,
+  loadGeneratedMeasurementMethodRouteBundle,
+  resolveGeneratedMeasurementMethodRoute,
+  type GeneratedMeasurementMethodRouteBundle,
+  type GeneratedMeasurementMethodRoute,
+} from "./generated-measurement-method-artifacts";
 
 const STATUS_LABELS: Record<string, string> = {
   community: "Community",
@@ -70,6 +74,15 @@ export interface MeasurementMethodPageModel {
   tier: HealthCommonsMeasurementMethodTier;
   title: string;
 }
+
+type MeasurementMethodPageCatalogReader = Pick<
+  HealthCommonsCatalogReader,
+  "catalogHash" | "findByKey"
+>;
+type MeasurementMethodRouteCatalogReader = Pick<
+  HealthCommonsCatalogReader,
+  "catalogHash" | "findByKey" | "findByRouteId"
+>;
 
 export function listHealthCommonsMeasurementMethodRoutes(
   catalog?: HealthCommonsCatalogReader,
@@ -158,36 +171,53 @@ function resolveGeneratedHealthCommonsMeasurementMethodDetail(
   return toMeasurementMethodPageModel(method, reader);
 }
 
-type GeneratedHealthCommonsRoute = ReturnType<
-  typeof getGeneratedHealthCommonsWebRouteIndex
->["routes"][number];
+type GeneratedHealthCommonsRoute = GeneratedMeasurementMethodRoute;
 
 function getGeneratedMeasurementMethodRoutes(): GeneratedHealthCommonsRoute[] {
-  return getGeneratedHealthCommonsWebRouteIndex().routes.filter((route) =>
-    route.entityType === "measurement_method"
-  );
+  return listGeneratedMeasurementMethodRouteEntries();
 }
 
 function findGeneratedMeasurementMethodRoute(
   routeId: string,
 ): GeneratedHealthCommonsRoute | null {
-  return getGeneratedMeasurementMethodRoutes().find((route) =>
-    route.routeId === routeId
-      || route.slug === routeId
-      || route.slug.split("/").at(-1) === routeId
-      || route.aliases.includes(routeId)
-  ) ?? null;
+  return resolveGeneratedMeasurementMethodRoute(routeId);
 }
 
 function loadGeneratedMeasurementMethodRouteReader(
   routeId: string,
-): HealthCommonsCatalogReader | null {
-  const bundle = loadGeneratedHealthCommonsWebRouteBundle({
-    entityType: "measurement_method",
-    routeId,
-  });
+): MeasurementMethodRouteCatalogReader | null {
+  const bundle = loadGeneratedMeasurementMethodRouteBundle(routeId);
 
-  return bundle ? createHealthCommonsRouteBundleReader(bundle) : null;
+  return bundle ? createMeasurementMethodRouteBundleReader(bundle) : null;
+}
+
+function createMeasurementMethodRouteBundleReader(
+  bundle: GeneratedMeasurementMethodRouteBundle,
+): MeasurementMethodRouteCatalogReader {
+  const entities = Object.values(bundle.entitiesByKey);
+
+  return {
+    catalogHash: bundle.catalogHash,
+    findByKey(key) {
+      return bundle.entitiesByKey[stripRevision(key)] ?? null;
+    },
+    findByRouteId(input) {
+      const routeId = normalizeRouteId(input.routeId);
+      return entities.find((entity) =>
+        entity.entityType === input.entityType && entityMatchesRouteId(entity, routeId)
+      ) ?? null;
+    },
+  };
+}
+
+function entityMatchesRouteId(entity: HealthCommonsEntity, routeId: string): boolean {
+  return entity.slug === routeId
+    || entity.slug.split("/").at(-1) === routeId
+    || (entity.aliases ?? []).includes(routeId);
+}
+
+function stripRevision(key: string): string {
+  return key.split("@").at(0) ?? key;
 }
 
 export function isPublishedMeasurementMethod(

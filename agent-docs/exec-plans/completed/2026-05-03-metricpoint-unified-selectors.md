@@ -1,6 +1,6 @@
 # Land shared metric projection and selectors patch
 
-Status: active
+Status: completed
 Created: 2026-05-03
 Updated: 2026-05-03
 
@@ -76,3 +76,4 @@ Updated: 2026-05-03
 - `pnpm typecheck`
 - `pnpm test:smoke`
 - Expected outcomes: all required checks pass, or unrelated pre-existing blockers are documented with focused proof for this change.
+Completed: 2026-05-03

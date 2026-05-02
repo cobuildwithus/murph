@@ -3,14 +3,14 @@ import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/enti
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { requireHostedStripeApi } from "@/src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
-  const auth = await requirePrivyMemberAuth(request, prisma);
+  const auth = await requireHostedAppSessionFromRequest(request);
   assertHostedMemberNotSuspended(auth.member);
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: auth.member.id,

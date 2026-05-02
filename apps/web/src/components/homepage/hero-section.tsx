@@ -13,14 +13,15 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
         sizes="100vw"
         src="/hero.jpg"
         alt=""
-        className="absolute inset-0 h-full w-full object-cover object-[80%_center] sm:object-center"
+        style={{ objectFit: "cover", objectPosition: "80% center" }}
+        className="sm:[object-position:center]"
       />
       <div className="absolute inset-0 bg-[#1a1612]/25" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#1a1612]/50 via-[#1a1612]/10 to-transparent" />
 
       <div className="relative z-10 flex min-h-svh flex-col justify-end px-5 pb-14 sm:px-10 sm:pb-18 lg:px-16 lg:pb-24">
         <div className="max-w-[560px]">
-          <h1 className="font-serif text-[clamp(2.25rem,5.2vw,4.5rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-balance text-white">
+          <h1 className="font-serif text-[clamp(2.25rem,5.2vw,4.5rem)] font-semibold leading-[1.15] tracking-[-0.04em] text-balance text-white">
             <span className="block lg:whitespace-nowrap">You measure your health.</span>
             <span className="block text-[#d4b87a] lg:whitespace-nowrap">
               Now let&apos;s experiment with&nbsp;it.
@@ -28,7 +29,7 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
           </h1>
 
           <p className="mt-6 max-w-[420px] text-base leading-[1.75] text-pretty text-white/75">
-            Murph is your personal health assistant. Sync your signals. Run an
+            Murph is your personal health assistant. Sync your biomarkers. Run an
             experiment. See what actually makes you healthier.
           </p>
 

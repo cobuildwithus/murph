@@ -352,7 +352,7 @@ function groupMetricRowsByDate(rows: readonly BrowserVaultMetricRow[]): Map<stri
 
 function findMetricRow(rows: readonly BrowserVaultMetricRow[], metricKey: string): BrowserVaultMetricRow | null {
   return rows
-    .filter((row) => row.metricKey === metricKey && typeof row.value === "number")
+    .filter((row) => row.metricKey === metricKey && typeof row.value === "number" && Number.isFinite(row.value))
     .sort((left, right) => left.observedAt.localeCompare(right.observedAt) || left.id.localeCompare(right.id))
     .at(-1) ?? null;
 }

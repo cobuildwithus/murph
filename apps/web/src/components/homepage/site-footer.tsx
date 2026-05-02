@@ -53,7 +53,7 @@ export function SiteFooter() {
         <div className="flex flex-col gap-10 py-10 sm:flex-row sm:justify-between">
           <Link href="/" aria-label="Murph home">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7" />
+            <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7 w-auto" />
           </Link>
 
           <div className="grid grid-cols-2 gap-x-20 gap-y-8 sm:gap-x-28">

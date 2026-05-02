@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     label: "test-prisma",
     $transaction: vi.fn(),
   },
+  requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   upsertHostedMemberEmailAuthorization: vi.fn(),
 }));
@@ -31,6 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireFreshActivePrivyMemberAuthForHostedAppSession: mocks.requireFreshActivePrivyMemberAuthForHostedAppSession,
   requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
 
@@ -58,6 +60,18 @@ describe("settings email sync route", () => {
     mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(mocks.prismaClient)
     );
+    mocks.requireFreshActivePrivyMemberAuthForHostedAppSession.mockImplementation(async (...args: unknown[]) => {
+      const freshPrivy = await mocks.requireActivePrivyMemberAuth(...args);
+      return {
+        appSession: {
+          expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+          member: freshPrivy.member,
+          privyUserId: "did:privy:user_123",
+          sessionId: "hws_123",
+        },
+        freshPrivy,
+      };
+    });
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [
         {
@@ -96,6 +110,7 @@ describe("settings email sync route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireFreshActivePrivyMemberAuthForHostedAppSession).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.upsertHostedMemberEmailAuthorization).toHaveBeenCalledWith({
       directPublicSender: {

@@ -51,7 +51,7 @@ export function StickyNav({
           alt="Murph"
           width={107}
           height={24}
-          className="h-6"
+          className="h-6 w-auto"
         />
       </Link>
       <div className="flex items-center gap-4 sm:gap-6">

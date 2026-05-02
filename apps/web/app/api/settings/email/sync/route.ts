@@ -8,12 +8,12 @@ import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboardin
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
-import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireFreshActivePrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireActivePrivyMemberAuth(request);
+  const { freshPrivy: auth } = await requireFreshActivePrivyMemberAuthForHostedAppSession(request);
   const body = await readOptionalJsonObject(request);
   const expectedEmailAddress = normalizeComparableEmail(
     typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,

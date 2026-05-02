@@ -7,6 +7,7 @@ import {
   parseJoinInvitePreviewStage,
 } from "./join-invite-preview";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
+import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import {
@@ -70,10 +71,13 @@ export async function buildJoinInvitePageModel(input: {
     };
   }
 
-  const authSnapshot = await getHostedPageAuthSnapshot();
+  const [authSnapshot, freshPrivySession] = await Promise.all([
+    getHostedPageAuthSnapshot(),
+    getHostedPrivySession().catch(() => null),
+  ]);
   const status = await getHostedInviteStatus({
     authenticatedMember: authSnapshot.authenticatedMember,
-    authenticatedSessionIdentity: authSnapshot.session?.identity ?? null,
+    authenticatedSessionIdentity: freshPrivySession?.identity ?? null,
     inviteCode: input.inviteCode,
   });
   const launchConsent = await resolveJoinInviteLaunchConsent({
@@ -85,7 +89,7 @@ export async function buildJoinInvitePageModel(input: {
     && status.stage === "checkout"
     && status.messagingSetupRequired
       ? sanitizeJoinInviteTelegramAccountSeed(extractHostedPrivyTelegramAccount({
-          linkedAccounts: authSnapshot.linkedAccounts,
+          linkedAccounts: freshPrivySession?.linkedAccounts ?? [],
         }))
       : null;
 
