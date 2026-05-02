@@ -9,12 +9,13 @@ export function requireObject(value: unknown, label: string): Record<string, unk
 export function rejectLegacyAliases(
   record: Record<string, unknown>,
   label: string,
-  aliases: Readonly<Record<string, string>>,
+  removedAliases: Readonly<Record<string, string>>,
 ): void {
-  for (const [legacyKey, canonicalKey] of Object.entries(aliases)) {
+  // Greenfield hard-cut guard: these keys are rejected, not translated.
+  for (const [legacyKey, activeContract] of Object.entries(removedAliases)) {
     if (Object.prototype.hasOwnProperty.call(record, legacyKey)) {
       throw new TypeError(
-        `${label} must not include legacy ${legacyKey}; use ${canonicalKey}.`,
+        `${label} must not include legacy ${legacyKey}; use ${activeContract}.`,
       );
     }
   }

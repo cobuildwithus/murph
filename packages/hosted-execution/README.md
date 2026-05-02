@@ -44,6 +44,9 @@ as deleted state.
 - new hosted runtime log contracts are structured and redacted: they accept
   event codes and allowlisted scalar metadata, not free-form messages or
   plaintext payload fields
+- runtime-control parsers may keep explicit fail-closed guards for removed
+  run/status fields, but those guards must reject the old fields rather than
+  reading, translating, or otherwise supporting them as compatibility input
 
 ## Ownership note
 
