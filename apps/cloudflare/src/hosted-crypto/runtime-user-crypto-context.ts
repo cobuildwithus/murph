@@ -10,6 +10,7 @@ import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionEnvironment } from "../env.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import {
+  fetchHostedWorkerRuntimeRootByRootKeyId,
   unwrapHostedWorkerRuntimeRoot,
   type HostedRuntimeCryptoContextResponse,
   type HostedWorkerCryptoEnv,
@@ -21,6 +22,7 @@ export interface HostedUserCryptoContext {
   domain: HostedWorkerRuntimeDomain;
   envelope: HostedDomainRootKeyEnvelopeV1;
   keysById: Readonly<Record<string, Uint8Array>>;
+  resolveKeyById(rootKeyId: string): Promise<Uint8Array | null>;
   rootKey: Uint8Array;
   rootKeyId: string;
 }
@@ -89,6 +91,10 @@ async function fetchAndUnwrapRuntimeCryptoContext(input: {
   }
 
   const domain = input.domain ?? "runtime";
+  const hostedCryptoEnv = hostedWorkerCryptoEnvFromExecutionEnvironment({
+    env: input.environment,
+    userId: input.userId,
+  });
   const context = parseHostedRuntimeCryptoContextResponse(
     await response.json(),
     input.userId,
@@ -97,16 +103,34 @@ async function fetchAndUnwrapRuntimeCryptoContext(input: {
   const root = await unwrapHostedWorkerRuntimeRoot({
     context,
     domain,
-    env: hostedWorkerCryptoEnvFromExecutionEnvironment({
-      env: input.environment,
-      userId: input.userId,
-    }),
+    env: hostedCryptoEnv,
   });
+  const keysById = new Map<string, Uint8Array>([[root.envelope.rootKeyId, root.rootKey]]);
 
   return {
     domain,
     envelope: root.envelope,
-    keysById: { [root.envelope.rootKeyId]: root.rootKey },
+    get keysById() {
+      return Object.fromEntries(keysById.entries());
+    },
+    async resolveKeyById(rootKeyId) {
+      const existing = keysById.get(rootKeyId);
+      if (existing) {
+        return existing;
+      }
+      const resolved = await fetchHostedWorkerRuntimeRootByRootKeyId({
+        baseUrl: input.environment.hostedWebBaseUrl,
+        callbackSigning: input.environment.webCallbackSigning,
+        cryptoEnv: hostedCryptoEnv,
+        domain,
+        fetchImpl: input.fetchImpl,
+        rootKeyId,
+        timeoutMs: input.environment.webControlTimeoutMs,
+        userId: input.userId,
+      });
+      keysById.set(resolved.envelope.rootKeyId, resolved.rootKey);
+      return resolved.rootKey;
+    },
     rootKey: root.rootKey,
     rootKeyId: root.envelope.rootKeyId,
   };

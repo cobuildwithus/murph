@@ -78,37 +78,31 @@ describe("memory parse and render coverage", () => {
     ]);
   });
 
-  it("normalizes legacy memory frontmatter into the shared canonical dialect on read", () => {
-    const parsed = parseMemoryDocument({
-      sourcePath: "bank/memory.md",
-      text: [
-        "---",
-        "docType: murph.memory.v1",
-        "schemaVersion: 1",
-        "title: Memory",
-        "updatedAt: 2026-04-08T03:00:00.000Z",
-        "---",
-        "# Memory",
-        "",
-        "## Identity",
-        '- Uses Murph daily <!-- murph-memory:{"id":"mem_0123456789ABCDEFGHJKMNPQRS","createdAt":"2026-04-08T02:55:00.000Z","updatedAt":"2026-04-08T03:00:00.000Z"} -->',
-      ].join("\n"),
-    });
-
-    expect(parsed.frontmatter).toEqual({
-      docType: FRONTMATTER_DOC_TYPES.memory,
-      schemaVersion: CONTRACT_SCHEMA_VERSION.memoryFrontmatter,
-      title: "Memory",
-      updatedAt: "2026-04-08T03:00:00.000Z",
-    });
-    expect(parsed.records[0]?.id).toBe("mem_0123456789ABCDEFGHJKMNPQRS");
+  it("rejects legacy memory frontmatter instead of normalizing it on read", () => {
+    expect(() =>
+      parseMemoryDocument({
+        sourcePath: "bank/memory.md",
+        text: [
+          "---",
+          "docType: murph.memory.v1",
+          "schemaVersion: 1",
+          "title: Memory",
+          "updatedAt: 2026-04-08T03:00:00.000Z",
+          "---",
+          "# Memory",
+          "",
+          "## Identity",
+          '- Uses Murph daily <!-- murph-memory:{"id":"mem_0123456789ABCDEFGHJKMNPQRS","createdAt":"2026-04-08T02:55:00.000Z","updatedAt":"2026-04-08T03:00:00.000Z"} -->',
+        ].join("\n"),
+      }),
+    ).toThrow();
   });
 
-  it("parses CRLF documents, ignores invalid metadata, and rejects invalid sections or blank memory text", () => {
+  it("parses CRLF documents and rejects invalid records, sections, or blank memory text", () => {
     const validFrontmatter = createDefaultMemoryFrontmatter(
       new Date("2026-04-08T03:00:00.000Z"),
     );
-    const malformedMetadataMarkdown = [
+    const crlfMarkdown = [
       "---",
       `docType: ${validFrontmatter.docType}`,
       `schemaVersion: ${validFrontmatter.schemaVersion}`,
@@ -118,20 +112,20 @@ describe("memory parse and render coverage", () => {
       "# Memory",
       "",
       "## Preferences",
-      '-    Prefers    direct   answers    <!-- murph-memory:{"id":} -->',
+      '-    Prefers    direct   answers    <!-- murph-memory:{"id":"mem_0123456789ABCDEFGHJKMNPQRS","createdAt":"2026-04-08T02:55:00.000Z","updatedAt":"2026-04-08T03:00:00.000Z"} -->',
     ].join("\r\n");
 
     const parsed = parseMemoryDocument({
       sourcePath: "vault/custom-memory.md",
-      text: malformedMetadataMarkdown,
+      text: crlfMarkdown,
     });
 
     expect(parsed.records).toEqual([
       expect.objectContaining({
         section: "Preferences",
         text: "Prefers direct answers",
-        createdAt: null,
-        updatedAt: null,
+        createdAt: "2026-04-08T02:55:00.000Z",
+        updatedAt: "2026-04-08T03:00:00.000Z",
         sourceLine: 4,
         sourcePath: "vault/custom-memory.md",
       }),
@@ -140,7 +134,57 @@ describe("memory parse and render coverage", () => {
       section: "Preferences",
       text: "Prefers direct answers",
     }), "mem")).toBe(true);
-    expect(parsed.records[0]?.id).toMatch(/^mem_[0-9a-f]{16}$/u);
+    expect(parsed.records[0]?.id).toBe("mem_0123456789ABCDEFGHJKMNPQRS");
+
+    expect(() =>
+      parseMemoryDocument({
+        sourcePath: "vault/custom-memory.md",
+        text: crlfMarkdown.replace(
+          '{"id":"mem_0123456789ABCDEFGHJKMNPQRS","createdAt":"2026-04-08T02:55:00.000Z","updatedAt":"2026-04-08T03:00:00.000Z"}',
+          '{"id":}',
+        ),
+      }),
+    ).toThrow("Memory record metadata comment is invalid.");
+
+    expect(() =>
+      parseMemoryDocument({
+        sourcePath: "vault/custom-memory.md",
+        text: crlfMarkdown.replace(
+          ' <!-- murph-memory:{"id":"mem_0123456789ABCDEFGHJKMNPQRS","createdAt":"2026-04-08T02:55:00.000Z","updatedAt":"2026-04-08T03:00:00.000Z"} -->',
+          "",
+        ),
+      }),
+    ).toThrow("Memory record metadata comment is required.");
+
+    expect(() =>
+      parseMemoryDocument({
+        sourcePath: "vault/custom-memory.md",
+        text: crlfMarkdown.replace(
+          "mem_0123456789ABCDEFGHJKMNPQRS",
+          "mem_0123456789abcdef",
+        ),
+      }),
+    ).toThrow("Memory record metadata comment is invalid.");
+
+    expect(() =>
+      parseMemoryDocument({
+        sourcePath: "vault/custom-memory.md",
+        text: crlfMarkdown.replace(
+          '"createdAt":"2026-04-08T02:55:00.000Z"',
+          '"createdAt":null',
+        ),
+      }),
+    ).toThrow("Memory record metadata comment is invalid.");
+
+    expect(() =>
+      parseMemoryDocument({
+        sourcePath: "vault/custom-memory.md",
+        text: crlfMarkdown.replace(
+          ',"updatedAt":"2026-04-08T03:00:00.000Z"',
+          "",
+        ),
+      }),
+    ).toThrow("Memory record metadata comment is invalid.");
 
     expect(() =>
       parseMemoryDocument({

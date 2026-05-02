@@ -86,8 +86,11 @@ export async function readHostedStoredTokenBundle(
   const keyVersion = normalizeNullableString(record.keyVersion) ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION;
   const tokenVersion = typeof record.tokenVersion === "number" ? record.tokenVersion : null;
 
-  if (!accessTokenEncrypted || !tokenVersion) {
+  if (!accessTokenEncrypted || tokenVersion === null) {
     return null;
+  }
+  if (!Number.isInteger(tokenVersion) || tokenVersion <= 0) {
+    throw new TypeError("Hosted device-sync tokenVersion must be a positive integer.");
   }
 
   return {

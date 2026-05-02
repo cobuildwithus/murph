@@ -5,7 +5,51 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const sourceRoots = ["apps", "packages"];
+const codeTextFileExtensions = new Set([
+  ".cjs",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".legacy",
+  ".mjs",
+  ".mts",
+  ".ts",
+  ".tsx",
+]);
+
+const yamlTextFileExtensions = new Set([
+  ".yaml",
+  ".yml",
+]);
+
+const recursiveScanTargets = [
+  {
+    extensions: codeTextFileExtensions,
+    honorAllowedPaths: true,
+    root: "apps",
+  },
+  {
+    extensions: codeTextFileExtensions,
+    honorAllowedPaths: true,
+    root: "packages",
+  },
+  {
+    extensions: yamlTextFileExtensions,
+    honorAllowedPaths: false,
+    root: ".github/workflows",
+  },
+  {
+    extensions: codeTextFileExtensions,
+    honorAllowedPaths: true,
+    root: "scripts/dev-hosted-local",
+  },
+];
+
+const explicitScanFiles = [
+  "apps/cloudflare/DEPLOY.md",
+  "apps/web/README.md",
+  "scripts/hosted-local.ts",
+];
 
 const ignoredDirectoryNames = new Set([
   ".git",
@@ -29,86 +73,75 @@ const allowedPathSegments = new Set([
   "__tests__",
   "agent-docs",
   "docs",
-  "legacy-backfill",
-  "legacy-v1-decrypt",
   "migrations",
   "test",
   "test-fixtures",
   "tests",
 ]);
 
-const allowedFindingLabelsByFile = new Map([
+const allowedCurrentArchitectureFindingsByFile = new Map([
   [
     "apps/web/src/lib/device-sync/env.ts",
     new Set([
-      "legacy device-sync data-encryption env",
+      "removed device-sync data-encryption env token",
     ]),
   ],
-  [
-    "packages/assistant-runtime/src/hosted-device-sync-runtime.ts",
-    new Set([
-      "legacy packaged device-sync secret codec import",
-    ]),
-  ],
-]);
-
-const textFileExtensions = new Set([
-  ".cjs",
-  ".cts",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".mts",
-  ".ts",
-  ".tsx",
 ]);
 
 const forbiddenTextPatterns = [
   {
-    label: "legacy hosted web data-encryption env",
+    label: "removed hosted web data-encryption env token",
     pattern: /\bHOSTED_WEB_ENCRYPTION_KEY(?:_VERSION|RING_JSON)?\b/u,
   },
   {
-    label: "legacy hosted wake/mailbox data-encryption env",
+    label: "removed hosted wake/mailbox data-encryption env token",
     pattern: /\bHOSTED_WAKE_ENCRYPTION_KEY(?:_VERSION|RING_JSON)?\b/u,
   },
   {
-    label: "legacy device-sync data-encryption env",
+    label: "removed device-sync data-encryption env token",
     pattern: /\bDEVICE_SYNC_ENCRYPTION_KEY(?:_VERSION|RING_JSON)?\b/u,
   },
   {
-    label: "legacy Cloudflare platform-envelope env",
+    label: "removed Cloudflare platform-envelope env token",
     pattern: /\bHOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY(?:_ID|RING_JSON)?\b/u,
   },
   {
-    label: "legacy hosted shared secret codec factory",
+    label: "removed hosted shared secret codec factory",
     pattern: /\bcreateHostedSecretCodec\b/u,
   },
   {
-    label: "legacy hosted shared secret module",
+    label: "removed hosted shared secret module",
     pattern: /hosted-encryption-shared/u,
   },
 ];
 
 const forbiddenImportPatterns = [
   {
-    label: "legacy hosted shared secret module import",
+    label: "removed hosted shared secret module import",
     pattern: /from\s+["'][^"']*hosted-encryption-shared(?:\.ts)?["']/u,
   },
   {
-    label: "legacy device-sync secret codec import",
+    label: "removed app-local device-sync secret codec import",
     pattern: /from\s+["'][^"']*device-sync\/crypto(?:\.ts)?["']/u,
   },
   {
-    label: "legacy packaged device-sync secret codec import",
+    label: "removed packaged device-sync secret codec import",
     pattern: /from\s+["']@murphai\/device-syncd\/crypto["']/u,
   },
 ];
 
 const findings = [];
 
-for (const root of sourceRoots) {
-  walk(path.join(repoRoot, root));
+for (const target of recursiveScanTargets) {
+  walk(path.join(repoRoot, target.root), target);
+}
+
+for (const file of explicitScanFiles) {
+  checkFile(path.join(repoRoot, file), { honorAllowedPaths: false });
+}
+
+for (const file of discoverAppEnvExamples()) {
+  checkFile(file, { honorAllowedPaths: false });
 }
 
 if (findings.length > 0) {
@@ -120,7 +153,7 @@ if (findings.length > 0) {
   process.exitCode = 1;
 }
 
-function walk(directory) {
+function walk(directory, target) {
   let entries;
   try {
     entries = readdirSync(directory, { withFileTypes: true });
@@ -132,23 +165,23 @@ function walk(directory) {
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       if (!shouldIgnoreDirectory(entry.name)) {
-        walk(absolutePath);
+        walk(absolutePath, target);
       }
       continue;
     }
 
-    if (!entry.isFile() || !textFileExtensions.has(path.extname(entry.name))) {
+    if (!entry.isFile() || !target.extensions.has(path.extname(entry.name))) {
       continue;
     }
 
-    checkFile(absolutePath);
+    checkFile(absolutePath, target);
   }
 }
 
-function checkFile(absolutePath) {
+function checkFile(absolutePath, options) {
   const relativePath = path.relative(repoRoot, absolutePath).split(path.sep).join("/");
 
-  if (isAllowedPath(relativePath)) {
+  if (options.honorAllowedPaths && isAllowedPath(relativePath)) {
     return;
   }
 
@@ -176,14 +209,22 @@ function checkFile(absolutePath) {
         file: relativePath,
         label,
         line: index + 1,
-        text: line,
+        text: formatFindingText(line, label),
       });
     }
   }
 }
 
+function formatFindingText(line, label) {
+  if (!label.includes("env token")) {
+    return line;
+  }
+
+  return "<redacted env-token line>";
+}
+
 function isAllowedFinding(relativePath, label) {
-  return allowedFindingLabelsByFile.get(relativePath)?.has(label) === true;
+  return allowedCurrentArchitectureFindingsByFile.get(relativePath)?.has(label) === true;
 }
 
 function shouldIgnoreDirectory(name) {
@@ -206,4 +247,18 @@ function isAllowedPath(relativePath) {
   }
 
   return false;
+}
+
+function discoverAppEnvExamples() {
+  const appsRoot = path.join(repoRoot, "apps");
+  let entries;
+  try {
+    entries = readdirSync(appsRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(appsRoot, entry.name, ".env.example"));
 }

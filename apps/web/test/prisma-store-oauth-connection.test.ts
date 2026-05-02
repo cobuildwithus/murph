@@ -964,6 +964,37 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     );
   });
 
+  it("fails closed when OAuth token rows store invalid token versions", async () => {
+    for (const tokenVersion of [0, -1, 1.5]) {
+      const connection = createConnection({
+        accessTokenEncrypted: "enc:access-token",
+        accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
+        externalAccountIdEncrypted: "enc:acct_456",
+        keyVersion: "v1",
+        provider: "oura",
+        refreshTokenEncrypted: "enc:refresh-token",
+        tokenVersion,
+        userId: "user-123",
+      });
+
+      const store = new PrismaDeviceSyncControlPlaneStore({
+        codec: TEST_CODEC,
+        prisma: {
+          deviceConnection: {
+            findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+              where.id === connection.id && where.userId === connection.userId
+                ? cloneConnection(connection)
+                : null,
+          },
+        } as never,
+      });
+
+      await expect(
+        store.getStoredConnectionAccountForUser("user-123", "dsc_123"),
+      ).rejects.toThrow("Hosted device-sync tokenVersion must be a positive integer.");
+    }
+  });
+
   it("fails closed when provider-config rows contain token material", async () => {
     const connection = createConnection({
       accessTokenEncrypted: "enc:legacy-token",

@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
 
 import {
@@ -27,10 +25,6 @@ export const memorySectionValues = [
 
 export const memorySectionSchema = z.enum(memorySectionValues);
 
-const LEGACY_MEMORY_DOCUMENT_DOC_TYPE = "murph.memory.v1";
-const LEGACY_MEMORY_DOCUMENT_SCHEMA_VERSION = 1;
-const LEGACY_MEMORY_RECORD_ID_REGEX = /^mem_[0-9a-f]{16}$/u;
-
 const canonicalMemoryRecordIdSchema = z.string().refine(
   (value) => isContractId(value, ID_PREFIXES.memory),
   {
@@ -38,19 +32,11 @@ const canonicalMemoryRecordIdSchema = z.string().refine(
   },
 );
 
-const readableMemoryRecordIdSchema = z.string().refine(
-  (value) =>
-    isContractId(value, ID_PREFIXES.memory) || LEGACY_MEMORY_RECORD_ID_REGEX.test(value),
-  {
-    message: "Memory record id must match mem_<ULID> or the legacy mem_<16 lowercase hex> format.",
-  },
-);
-
 export const memoryRecordMetadataSchema = z
   .object({
-    id: readableMemoryRecordIdSchema,
-    createdAt: z.string().min(1).nullable().default(null),
-    updatedAt: z.string().min(1).nullable().default(null),
+    id: canonicalMemoryRecordIdSchema,
+    createdAt: z.string().min(1),
+    updatedAt: z.string().min(1),
   })
   .strict();
 
@@ -67,27 +53,13 @@ export const memoryDocumentFrontmatterSchema = withContractMetadata(
   "Murph Memory Frontmatter",
 );
 
-const legacyMemoryDocumentFrontmatterSchema = z
-  .object({
-    docType: z.literal(LEGACY_MEMORY_DOCUMENT_DOC_TYPE),
-    schemaVersion: z.literal(LEGACY_MEMORY_DOCUMENT_SCHEMA_VERSION),
-    title: z.string().min(1).default("Memory"),
-    updatedAt: z.string().min(1),
-  })
-  .strict();
-
-const readableMemoryDocumentFrontmatterSchema = z.union([
-  memoryDocumentFrontmatterSchema,
-  legacyMemoryDocumentFrontmatterSchema,
-]);
-
 export const memoryRecordSchema = z
   .object({
-    id: readableMemoryRecordIdSchema,
+    id: canonicalMemoryRecordIdSchema,
     section: memorySectionSchema,
     text: z.string().min(1),
-    createdAt: z.string().min(1).nullable(),
-    updatedAt: z.string().min(1).nullable(),
+    createdAt: z.string().min(1),
+    updatedAt: z.string().min(1),
     sourceLine: z.number().int().positive(),
     sourcePath: z.string().min(1),
   })
@@ -159,9 +131,7 @@ export function createEmptyMemoryDocument(now = new Date()): MemoryDocument {
 
 export function parseMemoryDocument(input: ParseMemoryDocumentInput): MemoryDocument {
   const parsed = parseFrontmatterDocument(input.text);
-  const frontmatter = normalizeMemoryFrontmatter(
-    readableMemoryDocumentFrontmatterSchema.parse(parsed.attributes),
-  );
+  const frontmatter = memoryDocumentFrontmatterSchema.parse(parsed.attributes);
   const records = parseMemoryDocumentBody(parsed.body, input.sourcePath ?? "bank/memory.md");
 
   return {
@@ -328,18 +298,14 @@ function parseMemoryRecordLine(input: {
   }
 
   const text = normalizeMemoryText(match.groups.text);
-  const metadata = match.groups.metadata ? parseMemoryRecordMetadata(match.groups.metadata) : null;
-  const id = metadata?.id ?? createLegacyMemoryRecordId({
-    section: input.section,
-    text,
-  });
+  const metadata = parseMemoryRecordMetadata(match.groups.metadata);
 
   return memoryRecordSchema.parse({
-    id,
+    id: metadata.id,
     section: input.section,
     text,
-    createdAt: metadata?.createdAt ?? null,
-    updatedAt: metadata?.updatedAt ?? null,
+    createdAt: metadata.createdAt,
+    updatedAt: metadata.updatedAt,
     sourceLine: input.sourceLine,
     sourcePath: input.sourcePath,
   });
@@ -395,11 +361,15 @@ function renderMemoryFrontmatterValue(value: string): string {
   return JSON.stringify(value);
 }
 
-function parseMemoryRecordMetadata(value: string): MemoryRecordMetadata | null {
+function parseMemoryRecordMetadata(value: string | undefined): MemoryRecordMetadata {
+  if (value === undefined) {
+    throw new Error("Memory record metadata comment is required.");
+  }
+
   try {
     return memoryRecordMetadataSchema.parse(JSON.parse(value));
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error("Memory record metadata comment is invalid.", { cause: error });
   }
 }
 
@@ -422,7 +392,7 @@ function normalizeMemoryRecordId(
   }
 
   if (records.some((record) => record.id === normalized)) {
-    return readableMemoryRecordIdSchema.parse(normalized);
+    return canonicalMemoryRecordIdSchema.parse(normalized);
   }
 
   return canonicalMemoryRecordIdSchema.parse(normalized);
@@ -452,28 +422,4 @@ function findMemoryInsertionIndex(
   }
 
   return insertionIndex;
-}
-
-function normalizeMemoryFrontmatter(
-  frontmatter: z.infer<typeof readableMemoryDocumentFrontmatterSchema>,
-): MemoryDocumentFrontmatter {
-  if (
-    frontmatter.docType === memoryDocumentDocType &&
-    frontmatter.schemaVersion === memoryDocumentSchemaVersion
-  ) {
-    return frontmatter;
-  }
-
-  return memoryDocumentFrontmatterSchema.parse({
-    ...frontmatter,
-    docType: memoryDocumentDocType,
-    schemaVersion: memoryDocumentSchemaVersion,
-  });
-}
-
-function createLegacyMemoryRecordId(
-  input: Pick<UpsertMemoryRecordInput, "section" | "text">,
-): string {
-  const normalized = [input.section, normalizeMemoryText(input.text)].join("\u0000");
-  return `${ID_PREFIXES.memory}_${createHash("sha1").update(normalized).digest("hex").slice(0, 16)}`;
 }
