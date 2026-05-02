@@ -29,6 +29,10 @@ export function HostedSettingsIdentityLinkDialog({
   const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
 
   const copy = getSettingsIdentityLinkCopy(initialMode);
+  const closeAndRefresh = () => {
+    onOpenChange(false);
+    router.refresh();
+  };
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -50,17 +54,14 @@ export function HostedSettingsIdentityLinkDialog({
                 authenticated
                 autoOpen
                 initialLinkedAccounts={[]}
-                onLinked={() => {
-                  onOpenChange(false);
-                  router.refresh();
-                }}
+                onLinked={closeAndRefresh}
               />
             ) : null}
             {initialMode === "telegram" ? (
-              <HostedTelegramCardSettings authenticated initialLinkedAccounts={[]} />
+              <HostedTelegramCardSettings authenticated initialLinkedAccounts={[]} onSynced={closeAndRefresh} />
             ) : null}
             {initialMode === "email" ? (
-              <HostedEmailSettings authenticated initialLinkedAccounts={[]} />
+              <HostedEmailSettings authenticated initialLinkedAccounts={[]} onSynced={closeAndRefresh} />
             ) : null}
           </HostedPrivyProvider>
         )}

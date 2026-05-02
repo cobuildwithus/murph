@@ -10,6 +10,7 @@ import {
   resolveHostedTelegramSettingsDisplayState,
   syncHostedLinkedTelegram,
   type HostedTelegramSyncOverride,
+  type HostedTelegramSyncResult,
 } from "./hosted-telegram-settings-helpers";
 import { ConnectedAccountCard, SettingsContactLink, SettingsStatusLine } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
@@ -25,8 +26,9 @@ type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
 export function HostedTelegramCardSettings(props: {
   authenticated: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
-  const { authenticated, initialLinkedAccounts } = props;
+  const { authenticated, initialLinkedAccounts, onSynced } = props;
   const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser, user } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
@@ -80,6 +82,14 @@ export function HostedTelegramCardSettings(props: {
           telegramUserId: syncResult.telegramUserId,
           username: syncResult.telegramUsername,
         });
+
+        if (mode === "link") {
+          try {
+            await onSynced?.(syncResult);
+          } catch (error) {
+            setErrorMessage(toErrorMessage(error, "Telegram was linked, but we could not refresh the page state yet."));
+          }
+        }
       }
     } finally {
       if (syncRequestSequenceRef.current === syncRequestSequence) {
@@ -87,7 +97,7 @@ export function HostedTelegramCardSettings(props: {
         setIsSyncingTelegram(false);
       }
     }
-  }, []);
+  }, [onSynced]);
 
   useEffect(() => {
     if (!authenticated || isLinkingTelegram || isSyncingTelegram) return;

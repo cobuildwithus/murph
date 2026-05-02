@@ -9,6 +9,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
+  assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   prismaClient: {
     label: "test-prisma",
@@ -25,6 +26,10 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSessionFromRequest: mocks.requireActivePrivyMemberAuth,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -50,6 +55,7 @@ describe("browser vault session route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
@@ -83,6 +89,7 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -95,6 +102,32 @@ describe("browser vault session route", () => {
       replicaKeyEnvelope: null,
       replicaRef: null,
       state: "empty",
+    });
+  });
+
+  it("rejects disallowed browser vault origins before reading app session state", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
+        httpStatus: 403,
+        message: "Hosted browser mutation origin is not allowed.",
+      });
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {}),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
+        message: "Hosted browser mutation origin is not allowed.",
+        retryable: false,
+      },
     });
   });
 
