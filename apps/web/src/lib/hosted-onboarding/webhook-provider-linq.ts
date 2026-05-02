@@ -324,7 +324,7 @@ function buildHostedLinqMailboxParts(
   let textBudget = mode === "compact"
     ? HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS
     : HOSTED_LINQ_TEXT_PART_MAX_CHARS;
-  let omittedParts = Math.max(0, parts.length - maxParts);
+  const omittedParts = Math.max(0, parts.length - maxParts);
   let truncatedContent = false;
 
   for (const part of parts.slice(0, maxParts)) {
@@ -360,6 +360,7 @@ function buildHostedLinqMailboxParts(
         : { mimeType: truncateHostedLinqScalar(part.mime_type, HOSTED_LINQ_ATTACHMENT_MIME_TYPE_MAX_CHARS) }),
       ...(part.size === undefined ? {} : { size: normalizeHostedLinqPartSize(part.size) }),
       type: part.type,
+      // Do not persist signed attachment URLs in canonical mailbox payloads.
     });
   }
 
@@ -482,7 +483,7 @@ function normalizeHostedLinqPartText(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
-  const normalized = value.replace(/\s+/gu, " ").trim();
+  const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
 }
 

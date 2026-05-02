@@ -77,6 +77,12 @@ export async function createBrowserVaultReplica(
     ...glucoseSampleMetricDayRows,
   ]);
   const metricRows = metricDayRows.flatMap((day) => dayToMetricRows(day));
+  const metricPointRecords = createBrowserVaultMetricPointRecords({
+    generatedAt,
+    lookbackDays: METRIC_LOOKBACK_DAYS,
+    metricRows,
+    vault: input.vault,
+  });
   const metricPoints = createBrowserVaultMetricPoints({
     generatedAt,
     lookbackDays: METRIC_LOOKBACK_DAYS,
@@ -85,7 +91,7 @@ export async function createBrowserVaultReplica(
   });
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt,
-    metricPoints,
+    metricPoints: metricPointRecords,
   });
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);

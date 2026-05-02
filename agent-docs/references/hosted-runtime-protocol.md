@@ -86,9 +86,11 @@ provider secrets, and decrypted mailbox payloads must not be Vercel Workflow
 inputs or outputs. If the pointer workflow cannot be accepted after the mailbox
 row exists, the failure is logged as a post-commit best-effort handoff failure
 and does not make provider ingress fail. This avoids duplicate provider retries
-after the durable append, but guaranteed recovery from workflow-start
-unavailability still requires a future pending-handoff reconciler or mailbox-lag
-sweeper.
+after the durable append. The minute hosted mailbox lag sweeper is the current
+bounded recovery backstop for missed workflow starts: it compares mailbox
+high-water rows with checkpointed import status and nudges lagged runners by
+opaque user/work pointer. A DB-backed pending-handoff reconciler remains future
+hardening for exact workflow-start failure journaling.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and runner
 nudges only coalesce pending work.
@@ -125,6 +127,11 @@ assistant admission. Projection status and artifacts checkpoint separately and
 best-effort, so failed or slow projection does not delay the staged mailbox
 watermark and does not imply a durable retry queue. Successful projection may
 make parsed or bounded attachment evidence available to the same assistant turn.
+Retryable mailbox import blockers, including lane gaps, missing or temporarily
+unavailable sidecar payloads, deferred imports, and retryable importer blocks,
+stay pending instead of aging into quarantine. They do not advance lane
+watermarks, and the runtime/checkpoint result carries the next fast mailbox
+retry wake so Cloudflare can promptly reinvoke the workspace.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence

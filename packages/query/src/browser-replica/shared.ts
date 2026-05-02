@@ -162,7 +162,7 @@ export interface BrowserVaultMetricSelectionRow {
   observedAt: string;
   pointIds: string[];
   recordIds: string[];
-  selectionSchema: "murph.browser-vault.metric-selection.v1";
+  selectionSchema: "murph.browser-vault.metric-selection";
   sourceLabel: string | null;
   status: BrowserVaultMetricPointStatus;
   unit: string | null;

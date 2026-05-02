@@ -23,11 +23,14 @@ export type {
   MetricPoint,
   MetricPointContext,
   MetricPointProvenance,
+  MetricPointSource,
   MetricSelection,
   MetricSelectionPolicy,
   MetricSelectionStatus,
   MetricSelectionWarning,
   MetricSelectionWarningCode,
+  MetricSourceFamily,
+  MetricSourceKind,
 } from "@murphai/health-metrics";
 
 export {
