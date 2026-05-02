@@ -30,6 +30,8 @@ import {
   type SearchResult,
 } from "./search-shared.ts";
 import { summarizeDailySamples } from "./summaries.ts";
+import { createBrowserVaultMetricPoints } from "./browser-replica/metric-points.ts";
+import type { BrowserVaultMetricPoint } from "./browser-replica/shared.ts";
 import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
@@ -50,8 +52,8 @@ export type {
   RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
 
-const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v1";
-const QUERY_PROJECTION_SQLITE_VERSION = 1;
+const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection.v2";
+const QUERY_PROJECTION_SQLITE_VERSION = 2;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -254,6 +256,10 @@ async function rebuildQueryProjectionWithManifest(
   const snapshot = await readVaultSourceStrict(vaultRoot);
   const projectedEntities = snapshot.entities.filter((entity) => entity.family !== "sample");
   const sampleEntities = snapshot.entities.filter((entity) => entity.family === "sample");
+  const metricPoints = createBrowserVaultMetricPoints({
+    metricRows: [],
+    vault: { entities: snapshot.entities },
+  });
   const searchDocuments = [
     ...materializeSearchDocuments(projectedEntities),
     ...materializeSampleSummarySearchDocuments(snapshot),
@@ -266,6 +272,7 @@ async function rebuildQueryProjectionWithManifest(
       database.exec(`
         DELETE FROM query_entities;
         DELETE FROM query_sample_points;
+        DELETE FROM query_metric_points;
         DELETE FROM query_source_manifest;
         DELETE FROM query_search_document;
         DELETE FROM query_search_fts;
@@ -310,6 +317,28 @@ async function rebuildQueryProjectionWithManifest(
           sample_json,
           experiment_slug
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertMetricPoint = database.prepare(`
+        INSERT INTO query_metric_points (
+          metric_point_id,
+          sort_rank,
+          metric_key,
+          biomarker_key,
+          observed_at,
+          date,
+          grain,
+          statistic,
+          unit,
+          value,
+          value_label,
+          confidence,
+          source_family,
+          source_kind,
+          source_label,
+          source_id,
+          record_ids_json,
+          metric_point_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertSearchDocument = database.prepare(`
         INSERT INTO query_search_document (
@@ -372,6 +401,29 @@ async function rebuildQueryProjectionWithManifest(
           JSON.stringify(entity.tags),
           JSON.stringify(entity.attributes),
           entity.experimentSlug,
+        );
+      });
+
+      metricPoints.forEach((point: BrowserVaultMetricPoint, index: number) => {
+        insertMetricPoint.run(
+          point.id,
+          index,
+          point.metricKey,
+          point.biomarkerKey,
+          point.observedAt,
+          point.date,
+          point.grain,
+          point.statistic,
+          point.unit,
+          point.value,
+          point.valueLabel,
+          point.confidence,
+          point.sourceFamily,
+          point.sourceKind,
+          point.sourceLabel,
+          point.sourceMetricRowId,
+          JSON.stringify(point.recordIds),
+          JSON.stringify(point),
         );
       });
 
@@ -713,6 +765,7 @@ function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
     !tableExists(database, "query_meta") ||
     !tableExists(database, "query_entities") ||
     !tableExists(database, "query_sample_points") ||
+    !tableExists(database, "query_metric_points") ||
     !tableExists(database, "query_source_manifest") ||
     !tableExists(database, "query_search_document") ||
     !tableExists(database, "query_search_fts")
@@ -798,6 +851,31 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_sample_points_occurred_at_idx ON query_sample_points(occurred_at);
     CREATE INDEX IF NOT EXISTS query_sample_points_experiment_idx ON query_sample_points(experiment_slug);
 
+    CREATE TABLE IF NOT EXISTS query_metric_points (
+      metric_point_id TEXT PRIMARY KEY,
+      sort_rank INTEGER NOT NULL,
+      metric_key TEXT NOT NULL,
+      biomarker_key TEXT,
+      observed_at TEXT NOT NULL,
+      date TEXT NOT NULL,
+      grain TEXT NOT NULL,
+      statistic TEXT NOT NULL,
+      unit TEXT,
+      value REAL NOT NULL,
+      value_label TEXT NOT NULL,
+      confidence TEXT NOT NULL,
+      source_family TEXT,
+      source_kind TEXT,
+      source_label TEXT,
+      source_id TEXT NOT NULL,
+      record_ids_json TEXT NOT NULL,
+      metric_point_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS query_metric_points_metric_latest_idx ON query_metric_points(metric_key, date DESC, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx ON query_metric_points(biomarker_key, date DESC, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS query_metric_points_source_idx ON query_metric_points(source_id);
+
     CREATE TABLE IF NOT EXISTS query_source_manifest (
       relative_path TEXT PRIMARY KEY,
       size_bytes INTEGER NOT NULL,
@@ -844,6 +922,7 @@ function hasQueryProjectionTables(database: DatabaseSync): boolean {
   return (
     tableExists(database, "query_entities") &&
     tableExists(database, "query_sample_points") &&
+    tableExists(database, "query_metric_points") &&
     tableExists(database, "query_source_manifest") &&
     tableExists(database, "query_search_document") &&
     tableExists(database, "query_search_fts")

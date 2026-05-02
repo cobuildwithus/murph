@@ -38,6 +38,11 @@ import {
   warnForMissingEnv,
 } from "./environment.ts";
 import {
+  registerHostedLocalLinqWebhookSubscription,
+  resolveHostedLocalLinqWebhookSetup,
+  type HostedLocalLinqWebhookSetup,
+} from "./linq-webhook-tunnel.ts";
+import {
   assertHostedWebDevServerAvailable,
   assertHostedWebPortAvailable,
   cleanupHostedRunnerContainers,
@@ -89,10 +94,12 @@ export interface HostedLocalDevStack {
     cloudflare: BufferedNamedChildProcess | null;
     codex: HostedLocalCodexBridge | null;
     healthCommons: BufferedNamedChildProcess | null;
+    linqTunnel: BufferedNamedChildProcess | null;
     stripe: BufferedNamedChildProcess | null;
     web: BufferedNamedChildProcess | null;
   };
   ready: Promise<void>;
+  linqWebhookTargetUrl: string | null;
   runtimeEnv: NodeJS.ProcessEnv;
   stderrTail(maxChars?: number): string;
   stdoutTail(maxChars?: number): string;
@@ -180,6 +187,8 @@ export async function startHostedLocalDevStack(input: {
   let codexBridge: HostedLocalCodexBridge | null = null;
   const children: BufferedNamedChildProcess[] = [];
   let healthCommonsWatcher: BufferedNamedChildProcess | null = null;
+  let linqTunnelProcess: BufferedNamedChildProcess | null = null;
+  let linqWebhookSetup: HostedLocalLinqWebhookSetup | null = null;
   let stripeListener: BufferedNamedChildProcess | null = null;
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let workerProcessEnv: NodeJS.ProcessEnv | null = null;
@@ -224,6 +233,10 @@ export async function startHostedLocalDevStack(input: {
       useVercelDatabaseUrl: config.useVercelDatabaseUrl,
     });
     stripHostedLocalCodexBridgeProxyEnv(vercelEnv);
+    linqWebhookSetup = await resolveHostedLocalLinqWebhookSetup({
+      config,
+      env: vercelEnv,
+    });
     const localInternalProxyBaseUrl = resolveContainerReachableWorkerOrigin(config, vercelEnv);
     const codexBridgeEnv: Record<string, string> = {};
 
@@ -257,7 +270,9 @@ export async function startHostedLocalDevStack(input: {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: localInternalProxyBaseUrl,
       },
     });
-    const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);
+    const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
+      hostedOnboardingPublicBaseUrl: linqWebhookSetup?.publicBaseUrl,
+    });
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
       ...localOverrides,
@@ -449,6 +464,22 @@ export async function startHostedLocalDevStack(input: {
       }
     }
 
+    if (linqWebhookSetup?.shouldStartTunnel) {
+      linqTunnelProcess = spawnChildProcess("linq-tunnel", "cloudflared", [
+        "tunnel",
+        "--no-autoupdate",
+        "--config",
+        requireLinqWebhookTunnelConfigPath(linqWebhookSetup),
+        "run",
+        requireLinqWebhookTunnelName(linqWebhookSetup),
+      ], buildCloudflaredProcessEnv(initialProcessEnv), {
+        pipeOutput: input.pipeOutput,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+      });
+      children.push(linqTunnelProcess);
+    }
+
     stripeListener = await maybeStartStripeWebhookListener({
       config,
       initialEnv: initialProcessEnv,
@@ -599,6 +630,13 @@ export async function startHostedLocalDevStack(input: {
             );
           }),
         ]);
+        if (linqWebhookSetup?.shouldRegister) {
+          await registerHostedLocalLinqWebhookSubscription({
+            env: runtimeEnv,
+            setup: linqWebhookSetup,
+            stderrTarget: input.stderrTarget,
+          });
+        }
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
         if (workerRuntimeEnv !== null) {
           await maybeRunRunnerContainerSmoke({
@@ -630,10 +668,12 @@ export async function startHostedLocalDevStack(input: {
         cloudflare: cloudflareProcess,
         codex: codexBridge,
         healthCommons: healthCommonsWatcher,
+        linqTunnel: linqTunnelProcess,
         stripe: stripeListener,
         web: webProcess,
       },
       ready,
+      linqWebhookTargetUrl: linqWebhookSetup?.targetUrl ?? null,
       runtimeEnv,
       stderrTail: (maxChars?: number): string => tail(combineChildOutput(
         reportingChildren.map(
@@ -744,6 +784,44 @@ function formatRepoPath(filePath: string): string {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function requireLinqWebhookTunnelConfigPath(
+  setup: HostedLocalLinqWebhookSetup,
+): string {
+  if (!setup.tunnelConfigPath) {
+    throw new Error("Linq webhook tunnel config path is required to start cloudflared.");
+  }
+  return setup.tunnelConfigPath;
+}
+
+function requireLinqWebhookTunnelName(
+  setup: HostedLocalLinqWebhookSetup,
+): string {
+  if (!setup.tunnelName) {
+    throw new Error("Linq webhook tunnel name is required to start cloudflared.");
+  }
+  return setup.tunnelName;
+}
+
+function buildCloudflaredProcessEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const passthrough = [
+    "HOME",
+    "PATH",
+    "SystemRoot",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "USERPROFILE",
+  ] as const;
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of passthrough) {
+    const value = source[key];
+    if (typeof value === "string" && value.length > 0) {
+      env[key] = value;
+    }
+  }
+  return env;
 }
 
 function buildHostedLocalCodexBridgeWorkerEnv(input: {

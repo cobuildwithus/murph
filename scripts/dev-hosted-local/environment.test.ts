@@ -23,11 +23,16 @@ import type {
 const localConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  linqWebhookPublicUrl: null,
+  linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+  linqWebhookTunnelMode: "auto",
+  linqWebhookTunnelName: "dev",
   localCodexBridge: true,
   localCodexBridgeHost: "127.0.0.1",
   localCodexBridgePort: 0,
   localCodexCommand: "codex",
   skipHealthCommonsWatch: false,
+  skipLinqWebhookRegister: false,
   skipPrismaMigrate: false,
   skipRunnerSmoke: false,
   skipStripeListen: false,
@@ -561,6 +566,15 @@ describe("buildHostedLocalDevOverrides", () => {
 
     expect(overrides.HOSTED_EXECUTION_CONTROL_URL).toBe("http://127.0.0.1:8787");
     expect(overrides.HOSTED_EXECUTION_DISPATCH_URL).toBe("http://127.0.0.1:8787");
+  });
+
+  it("can use a public tunnel origin for hosted onboarding links while keeping worker web base local", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {}, {
+      hostedOnboardingPublicBaseUrl: "https://tunnel.example.test",
+    });
+
+    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("https://tunnel.example.test");
+    expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
   });
 
   it("preserves an explicit wake fetch proof key override", () => {

@@ -1,11 +1,16 @@
 export interface HostedLocalDevConfig {
   databaseUrlOverride: string | null;
   forceResetLocalDatabase: boolean;
+  linqWebhookPublicUrl: string | null;
+  linqWebhookTunnelConfigPath: string;
+  linqWebhookTunnelMode: "auto" | "disabled" | "required";
+  linqWebhookTunnelName: string;
   localCodexBridge: boolean;
   localCodexBridgeHost: string;
   localCodexBridgePort: number;
   localCodexCommand: string;
   skipHealthCommonsWatch: boolean;
+  skipLinqWebhookRegister: boolean;
   skipRunnerSmoke: boolean;
   skipPrismaMigrate: boolean;
   skipStripeListen: boolean;
@@ -20,7 +25,12 @@ export interface HostedLocalDevConfig {
   workerProtocol: "http" | "https";
 }
 
-export type HostedLocalChildProcessName = "cloudflare" | "health-commons" | "stripe" | "web";
+export type HostedLocalChildProcessName =
+  | "cloudflare"
+  | "health-commons"
+  | "linq-tunnel"
+  | "stripe"
+  | "web";
 
 export interface HostedExecutionOidcIdentity {
   environment: "development" | "preview" | "production";

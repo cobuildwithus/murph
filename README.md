@@ -227,6 +227,7 @@ pnpm --dir apps/cloudflare verify
 - keep the linked Vercel development env populated with the real hosted signup secrets you need locally, such as Privy credentials
 - optional: put local-only Stripe test checkout values in `.tmp/.env.hosted-local-stripe`; root `pnpm dev` loads that file after the Vercel env pull and before shell env overrides, so local `sk_test_...` and `price_...` values can override shared Development env without being committed
 - optional: install the [Stripe CLI](https://docs.stripe.com/stripe-cli) (`brew install stripe/stripe-cli/stripe`) and run `stripe login` once. `pnpm dev` then auto-launches `stripe listen` for hosted onboarding webhooks and captures the per-developer `whsec_...` signing secret from the listener's startup output into the web child's env. Set `MURPH_DEV_SKIP_STRIPE_LISTEN=1` to opt out; see `apps/web/README.md` for the full contract.
+- optional: for live local Linq webhook delivery, keep `LINQ_API_TOKEN` and `LINQ_WEBHOOK_SECRET` in local env and either set `MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL` to an HTTPS tunnel origin/webhook URL or keep a repo-local `cloudflared` config at `.tmp/cloudflared-linq-webhook.yml`. When those are present, `pnpm dev` starts `cloudflared tunnel --config ... run dev`, sets hosted onboarding public links to the tunnel origin, and registers `message.received` against `/api/hosted-onboarding/linq/webhook`. Set `MURPH_DEV_LINQ_WEBHOOK_TUNNEL=0` to disable this path or `MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1` to skip Linq API registration.
 
 Repeatable launcher sanity check:
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseLinqWebhookTunnelMode,
   parsePort,
   parseListenPort,
   parseWorkerProtocol,
@@ -13,11 +14,16 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(resolveHostedLocalDevConfig({})).toEqual({
       databaseUrlOverride: null,
       forceResetLocalDatabase: false,
+      linqWebhookPublicUrl: null,
+      linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+      linqWebhookTunnelMode: "auto",
+      linqWebhookTunnelName: "dev",
       localCodexBridge: true,
       localCodexBridgeHost: "127.0.0.1",
       localCodexBridgePort: 0,
       localCodexCommand: "codex",
       skipHealthCommonsWatch: false,
+      skipLinqWebhookRegister: false,
       skipPrismaMigrate: false,
       skipRunnerSmoke: false,
       skipStripeListen: false,
@@ -42,7 +48,12 @@ describe("resolveHostedLocalDevConfig", () => {
         MURPH_DEV_CODEX_BRIDGE_PORT: "4567",
         MURPH_DEV_CODEX_COMMAND: "codex-dev",
         MURPH_DEV_DATABASE_URL: "postgresql://127.0.0.1:5432/custom",
+        MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: "https://linq-webhook.example.test",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG: ".tmp/custom-linq-cloudflared.yml",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "linq-dev",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
         MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
         MURPH_DEV_SKIP_RUNNER_SMOKE: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -59,11 +70,16 @@ describe("resolveHostedLocalDevConfig", () => {
     ).toEqual({
       databaseUrlOverride: "postgresql://127.0.0.1:5432/custom",
       forceResetLocalDatabase: true,
+      linqWebhookPublicUrl: "https://linq-webhook.example.test",
+      linqWebhookTunnelConfigPath: ".tmp/custom-linq-cloudflared.yml",
+      linqWebhookTunnelMode: "required",
+      linqWebhookTunnelName: "linq-dev",
       localCodexBridge: false,
       localCodexBridgeHost: "127.0.0.1",
       localCodexBridgePort: 4567,
       localCodexCommand: "codex-dev",
       skipHealthCommonsWatch: true,
+      skipLinqWebhookRegister: true,
       skipPrismaMigrate: true,
       skipRunnerSmoke: true,
       skipStripeListen: true,
@@ -105,8 +121,29 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
     expect(output).toContain("MURPH_DEV_STRIPE_ENV_FILE=.tmp/.env.hosted-local-stripe");
+    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto");
+    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG=.tmp/cloudflared-linq-webhook.yml");
+    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...");
+    expect(output).toContain("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1");
     expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
     expect(output).toContain("stripe listen");
+  });
+});
+
+describe("parseLinqWebhookTunnelMode", () => {
+  it("defaults to auto", () => {
+    expect(parseLinqWebhookTunnelMode(undefined)).toBe("auto");
+  });
+
+  it("normalizes disabled and required values", () => {
+    expect(parseLinqWebhookTunnelMode("off")).toBe("disabled");
+    expect(parseLinqWebhookTunnelMode("true")).toBe("required");
+  });
+
+  it("rejects invalid values", () => {
+    expect(() => parseLinqWebhookTunnelMode("maybe")).toThrow(
+      "MURPH_DEV_LINQ_WEBHOOK_TUNNEL must be auto, required, 1, or 0.",
+    );
   });
 });
 

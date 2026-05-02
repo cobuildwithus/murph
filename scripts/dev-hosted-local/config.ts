@@ -6,6 +6,8 @@ import {
   DEFAULT_WORKER_PORT,
   DEFAULT_WORKER_PROTOCOL,
   DEFAULT_STRIPE_ENV_FILE,
+  DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
+  DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
 } from "./constants.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
@@ -16,6 +18,14 @@ export function resolveHostedLocalDevConfig(
   return {
     databaseUrlOverride: env.MURPH_DEV_DATABASE_URL?.trim() || null,
     forceResetLocalDatabase: env.MURPH_DEV_FORCE_RESET_LOCAL_DB === "1",
+    linqWebhookPublicUrl: env.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim() || null,
+    linqWebhookTunnelConfigPath:
+      env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim()
+      || DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
+    linqWebhookTunnelMode: parseLinqWebhookTunnelMode(env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL),
+    linqWebhookTunnelName:
+      env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME?.trim()
+      || DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME,
     localCodexBridge: env.MURPH_DEV_CODEX_BRIDGE !== "0",
     localCodexBridgeHost: env.MURPH_DEV_CODEX_BRIDGE_HOST?.trim() || "127.0.0.1",
     localCodexBridgePort: parseListenPort(
@@ -25,6 +35,7 @@ export function resolveHostedLocalDevConfig(
     ),
     localCodexCommand: env.MURPH_DEV_CODEX_COMMAND?.trim() || "codex",
     skipHealthCommonsWatch: env.MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH === "1",
+    skipLinqWebhookRegister: env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER === "1",
     skipPrismaMigrate: env.MURPH_DEV_SKIP_PRISMA_MIGRATE === "1",
     skipRunnerSmoke: env.MURPH_DEV_SKIP_RUNNER_SMOKE === "1",
     skipStripeListen: env.MURPH_DEV_SKIP_STRIPE_LISTEN === "1",
@@ -38,6 +49,27 @@ export function resolveHostedLocalDevConfig(
     workerPort: parsePort(env.MURPH_DEV_WORKER_PORT, DEFAULT_WORKER_PORT, "MURPH_DEV_WORKER_PORT"),
     workerProtocol: parseWorkerProtocol(env.MURPH_DEV_WORKER_PROTOCOL),
   };
+}
+
+export function parseLinqWebhookTunnelMode(
+  value: string | undefined,
+): HostedLocalDevConfig["linqWebhookTunnelMode"] {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === "auto") {
+    return "auto";
+  }
+
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return "disabled";
+  }
+
+  if (["1", "true", "yes", "on", "required"].includes(normalized)) {
+    return "required";
+  }
+
+  throw new Error(
+    "MURPH_DEV_LINQ_WEBHOOK_TUNNEL must be auto, required, 1, or 0.",
+  );
 }
 
 export function parseListenPort(
@@ -107,6 +139,11 @@ export function printHelp(): void {
       "  MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1  Skip the Health Commons markdown watcher after startup generation",
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",
       `  MURPH_DEV_STRIPE_ENV_FILE=${DEFAULT_STRIPE_ENV_FILE}  Load local Stripe test checkout env after Vercel env pull`,
+      "  MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto  Auto-use a local Linq cloudflared config when Linq credentials are present; set 1 to require it or 0 to disable",
+      `  MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG=${DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG}  Repo-local cloudflared config for the Linq webhook tunnel`,
+      `  MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME=${DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME}  cloudflared named tunnel to run for local Linq webhooks`,
+      "  MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...  Explicit public Linq webhook URL or HTTPS origin",
+      "  MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 Skip Linq webhook subscription registration while still using the tunnel public URL",
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",
       "  MURPH_DEV_WEB_HOST=localhost        Hosted web listen host",
       "  MURPH_DEV_WEB_PORT=3000             Hosted web listen port",

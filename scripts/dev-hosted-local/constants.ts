@@ -26,6 +26,11 @@ export const DEFAULT_WORKER_PORT = 8787;
 export const DEFAULT_WORKER_PROTOCOL = "http";
 export const DEFAULT_WORKER_PERSIST_DIR = path.join(".wrangler", "state", "dev-root");
 export const DEFAULT_STRIPE_ENV_FILE = path.join(".tmp", ".env.hosted-local-stripe");
+export const DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG = path.join(
+  ".tmp",
+  "cloudflared-linq-webhook.yml",
+);
+export const DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME = "dev";
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync";
 // Local Cloudflare startup can include a full runner bundle build and cold container prep.
 export const HEALTH_TIMEOUT_MS = 300_000;

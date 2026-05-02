@@ -378,6 +378,7 @@ function printReady(
       "",
       "Hosted-local harness is ready.",
       ...(stack.webBaseUrl ? [`web: ${stack.webBaseUrl}`] : []),
+      ...(stack.linqWebhookTargetUrl ? [`linq webhook: ${stack.linqWebhookTargetUrl}`] : []),
       `worker: ${stack.workerBaseUrl}`,
       `state: ${statePath}`,
       "",
