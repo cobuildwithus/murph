@@ -600,7 +600,7 @@ https://join.example.test/join/code_first_text`);
     );
   });
 
-  it("sends an ingress Linq read receipt before the required workflow handoff", async () => {
+  it("starts the required workflow handoff before the optional ingress Linq read receipt", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -640,8 +640,8 @@ https://join.example.test/join/code_first_text`);
       signal: undefined,
       timeoutMs: 750,
     });
-    expect(mocks.sendHostedLinqReadReceipt.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0],
+    expect(mocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendHostedLinqReadReceipt.mock.invocationCallOrder[0],
     );
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -1133,6 +1133,66 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
+  it("rejects first-contact iMessage payloads with too many parts before signup side effects", async () => {
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: Array.from({ length: 33 }, (_, index) => ({
+            type: "text",
+            value: `part ${index}`,
+          })),
+        },
+        eventId: "evt_first_contact_many_parts",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "LINQ_MESSAGE_PARTS_TOO_MANY",
+      httpStatus: 413,
+    });
+
+    expect(prismaMocks.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.update).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
   it("ignores non-iMessage first-contact texts without sending signup links", async () => {
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -1573,6 +1633,102 @@ https://join.example.test/join/code_first_text`);
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(readHostedWebhookReceiptCreateMock(prisma)).not.toHaveBeenCalled();
     expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
+    expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized non-home-line payloads before redirect side effects", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: {
+            linqChatIdEncrypted: await encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-chat-id",
+              memberId: "member_123",
+              value: "chat_home",
+            }),
+            linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-recipient-phone",
+              memberId: "member_123",
+              value: "+15550100001",
+            }),
+            memberId: "member_123",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: null,
+          },
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-chat-id",
+            memberId: "member_123",
+            value: "chat_home",
+          }),
+          linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-recipient-phone",
+            memberId: "member_123",
+            value: "+15550100001",
+          }),
+          memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted: null,
+          telegramUserLookupKey: null,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn(),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_other",
+            owner_handle: {
+              handle: "+15550100002",
+              id: "handle_owner_other",
+              is_me: true,
+              service: "sms",
+            },
+          },
+          parts: Array.from({ length: 33 }, (_, index) => ({
+            type: "text",
+            value: `part ${index}`,
+          })),
+        },
+        eventId: "evt_redirect_many_parts",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "LINQ_MESSAGE_PARTS_TOO_MANY",
+      httpStatus: 413,
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
