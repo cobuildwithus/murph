@@ -974,6 +974,180 @@ researchLandscape:
     - source_artifact:pmid-23969029
     - source_artifact:pmid-25012720
     - source_artifact:pmid-33607979
+  - id: direct-protocol-context
+    label: Direct protocol design context
+    stance: mixed
+    summary: Close step-floor protocols and follow-up reports help calibrate duration, adherence decay, and secondary endpoints without turning every design paper into efficacy evidence.
+    sourceKeys:
+    - source_artifact:pmid-23802053
+    - source_artifact:pmid-22894138
+  - id: cardiometabolic-and-weight-context
+    label: Weight and cardiometabolic context
+    stance: mixed
+    summary: Pedometer and walking studies report some weight, blood-pressure, glucose, and lipid signals, but the results are mixed enough to keep these as secondary outcomes.
+    sourceKeys:
+    - source_artifact:pmid-18029834
+    - source_artifact:pmid-18195317
+  - id: wearable-tracker-adjacent-context
+    label: Wearable tracker intervention context
+    stance: context_only
+    summary: Wearable feedback can raise activity in some trials, but broader tracker packages are not the same as testing one daily step floor.
+    sourceKeys:
+    - source_artifact:pmid-35082116
+    - source_artifact:pmid-30977740
+  - id: implementation-and-device-context
+    label: Implementation and device simplicity
+    stance: mixed
+    summary: Component evidence supports keeping the protocol simple and logging support features instead of assuming more coaching or devices always improve the result.
+    sourceKeys:
+    - source_artifact:pmid-33036635
+  - id: component-review-context
+    label: Self-monitoring component reviews
+    stance: context_only
+    summary: Reviews of self-monitoring plus added components help interpret goals, counseling, and feedback layers without making them mandatory parts of the protocol.
+    sourceKeys:
+    - source_artifact:pmid-36396151
+  - id: adjacent-coached-app-variants
+    label: Coached app and weight-loss variants
+    stance: context_only
+    summary: Coached app programs can increase steps, but counseling and weight-loss framing change the intervention and should stay adjacent to a simple step floor.
+    sourceKeys:
+    - source_artifact:pmid-32348263
+  - id: adjacent-incentive-social-variants
+    label: Incentive and social variants
+    stance: mixed
+    summary: Financial incentives, peer networks, and family gamification may change goal achievement while the support is active, but they add cost, social pressure, and maintenance questions.
+    sourceKeys:
+    - source_artifact:pmid-25274710
+    - source_artifact:pmid-26881417
+    - source_artifact:pmid-26976287
+    - source_artifact:pmid-27717766
+    - source_artifact:pmid-28973115
+    - source_artifact:pmid-30553693
+    - source_artifact:pmid-31441936
+  - id: motivation-autonomy-adherence-step-targets
+    label: Motivation, autonomy, and adherence
+    stance: mixed
+    summary: Fitness-app and goal-setting studies show that step targets can affect motivation and adherence as well as behavior, so burden and autonomy should be tracked.
+    sourceKeys:
+    - source_artifact:pmid-32422597
+    - source_artifact:doi-10.1080-1612197x.2020.1854820
+  - id: diabetes-digital-step-goals
+    label: Diabetes digital step-goal variants
+    stance: mixed
+    summary: Diabetes-specific text-message or digital goal programs are useful implementation context, but their mixed results should not be generalized to all users.
+    sourceKeys:
+    - source_artifact:pmid-29718931
+  - id: adjacent-walking-and-physical-activity-mental-health
+    label: Adjacent walking and mental-health context
+    stance: context_only
+    summary: Walking and general physical-activity reviews can inform mood expectations, but they do not prove that this step-floor protocol treats depression or anxiety.
+    sourceKeys:
+    - source_artifact:pmid-35416941
+    - source_artifact:pmid-25601182
+    - source_artifact:pmid-39045858
+  - id: mental-health-sleep-qol-step-mental-health-observational
+    label: Step count and mental-health cohorts
+    stance: context_only
+    summary: Observational step-count studies can make mood tracking worthwhile, but they are not causal evidence that raising steps will treat mental-health symptoms.
+    sourceKeys:
+    - source_artifact:pmid-34979178
+    - source_artifact:pmid-36529963
+    - source_artifact:pmid-32980870
+    - source_artifact:pmid-41674149
+  - id: mental-health-sleep-qol-sleep-step-context
+    label: Step count and sleep context
+    stance: mixed
+    summary: Daily-step and sleep studies give useful context for logging sleep quality, while endpoint-specific results remain mixed and indirect.
+    sourceKeys:
+    - source_artifact:pmid-31358470
+    - source_artifact:pmid-41352200
+  - id: mental-health-sleep-qol-clinical-population-step-trials
+    label: Clinical quality-of-life step trials
+    stance: mixed
+    summary: Cancer, cardiac, COPD, asthma, and postmenopausal samples show that pedometer programs can affect quality-of-life outcomes, but the clinical context limits consumer protocol claims.
+    sourceKeys:
+    - source_artifact:pmid-22177854
+    - source_artifact:pmid-35454330
+    - source_artifact:pmid-28799458
+    - source_artifact:pmid-17557948
+    - source_artifact:pmid-26100101
+  - id: mental-health-sleep-qol-clinical-depression-step-trials
+    label: Clinical depression step trials
+    stance: does_not_confirm
+    summary: Depression-specific pedometer trials are important guardrails because they do not support treating severe depression with a step floor alone.
+    sourceKeys:
+    - source_artifact:pmid-37589727
+  - id: protocol-registry-and-study-protocol-context
+    label: Study protocols and registries
+    stance: context_only
+    summary: Registry records and protocol papers help identify planned endpoints and safety boundaries, but results should come from completed outcome reports.
+    sourceKeys:
+    - source_artifact:clinicaltrials-nct02850341-2026-04-26
+    - source_artifact:pmid-33180994
+  - id: cardiac-rehab-step-goals
+    label: Cardiac rehab step goals
+    stance: context_only
+    summary: Cardiac-rehabilitation step-goal studies support supervised clinical use, not unsupervised escalation for people with cardiovascular symptoms or restrictions.
+    sourceKeys:
+    - source_artifact:pmid-24282749
+    - source_artifact:pmid-31714397
+    - source_artifact:doi-10.4172-2329-9096.1000157
+  - id: copd-cardiopulmonary-step-goals
+    label: COPD and cardiopulmonary step goals
+    stance: safety_boundary
+    summary: COPD and cardiopulmonary walking programs reinforce slow ramps, symptom monitoring, and clinical boundaries for breathlessness, chest pain, and functional limits.
+    sourceKeys:
+    - source_artifact:pmid-25811395
+    - source_artifact:pmid-33913819
+    - source_artifact:pmid-27502583
+    - source_artifact:pmid-41147625
+    - source_artifact:pmid-24491137
+    - source_artifact:pmid-29993339
+  - id: kidney-special-populations
+    label: Kidney disease special populations
+    stance: context_only
+    summary: Dialysis and kidney-transplant walking trials are special-population evidence and should not be used as generic step-floor proof.
+    sourceKeys:
+    - source_artifact:pmid-32912051
+    - source_artifact:pmid-31679747
+  - id: cognitive-impairment-step-prescription
+    label: Cognitive impairment step prescriptions
+    stance: context_only
+    summary: Step prescriptions in cognitive impairment may require assistance, supervision, and fall-risk planning before they resemble a self-directed experiment.
+    sourceKeys:
+    - source_artifact:pmid-40499016
+  - id: postpartum-and-cancer-special-populations
+    label: Postpartum and cancer walking contexts
+    stance: safety_boundary
+    summary: Postpartum and oncology walking studies are feasibility and boundary evidence because recovery status, treatment, fatigue, and clinician limits can dominate the step target.
+    sourceKeys:
+    - source_artifact:pmid-24460069
+    - source_artifact:pmid-22176722
+  - id: older-adult-wearable-context
+    label: Older-adult tracker context
+    stance: context_only
+    summary: Older-adult tracker trials can improve activity but are mixed on body composition and function, so age, function, and adherence should shape interpretation.
+    sourceKeys:
+    - source_artifact:pmid-40179387
+  - id: older-adult-falls
+    label: Older-adult falls context
+    stance: safety_boundary
+    summary: Falls-prevention evidence supports broader exercise and balance context, not walking-only step floors as a proven falls intervention.
+    sourceKeys:
+    - source_artifact:pmid-33239019
+  - id: long-term-health-safety-context
+    label: Long-term health and safety follow-up
+    stance: context_only
+    summary: Long-term follow-up can inform expectations about cardiovascular, fracture, falls, diabetes, and depression outcomes, but it remains indirect for a short self-experiment.
+    sourceKeys:
+    - source_artifact:pmid-31237875
+  - id: sedentary-time-context
+    label: Sedentary-time tracker context
+    stance: mixed
+    summary: Tracker studies that fail to reduce sedentary time are useful guardrails against assuming a step floor automatically fixes sitting patterns.
+    sourceKeys:
+    - source_artifact:pmid-35082116
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:
