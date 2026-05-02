@@ -18,6 +18,15 @@ const mocks = vi.hoisted(() => {
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
+    nudgeHostedRunnerUserBestEffortResult: vi.fn(async () => ({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    })),
     startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
       runId: "workflow-run-123",
     })),
@@ -117,7 +126,7 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
+  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
@@ -154,6 +163,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
@@ -265,10 +283,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_telegram:update:321",
-      source: "telegram",
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:telegram:direct",
+      timeoutMs: 5000,
+      userId: "member_telegram_123",
     });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(response).not.toHaveProperty("wakeUserId");
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
@@ -670,14 +690,21 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_telegram:update:654",
-      source: "telegram",
-    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
-  it("starts a pointer workflow for active-member Telegram messages", async () => {
+  it("falls back to a pointer workflow for active-member Telegram messages when direct runner nudge is not accepted", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: false,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -730,6 +757,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:telegram:direct",
+      timeoutMs: 5000,
+      userId: "member_telegram_123",
+    });
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_telegram:update:655",
       source: "telegram",

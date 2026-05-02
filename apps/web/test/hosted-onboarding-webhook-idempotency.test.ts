@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberSnapshot: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   nudgeHostedRunnerUserBestEffort: vi.fn(),
+  nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   startHostedWebhookNudgeWorkflow: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
@@ -30,7 +31,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
+  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
@@ -110,6 +111,15 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
@@ -269,10 +279,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       }),
     });
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_evt_123",
-      source: "linq",
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
     });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();

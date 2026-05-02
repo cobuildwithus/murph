@@ -26,6 +26,15 @@ const mocks = vi.hoisted(() => {
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
+    nudgeHostedRunnerUserBestEffortResult: vi.fn(async () => ({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    })),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
     startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
@@ -85,7 +94,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
+  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
@@ -293,6 +302,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       inFlight: false,
       nextAlarmAtPresent: false,
     });
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     mocks.sendHostedLinqReadReceipt.mockResolvedValue({
       ok: true,
       status: 204,
@@ -371,10 +389,12 @@ https://join.example.test/join/code_first_text`);
         }),
       );
       expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-      expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-        mailboxItemId: "mailbox_evt_123",
-        source: "linq",
+      expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+        context: "webhook:linq:direct",
+        timeoutMs: 5000,
+        userId: "member_123",
       });
+      expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
       expect(response).not.toHaveProperty("wakeUserId");
       expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
       expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
@@ -437,9 +457,11 @@ https://join.example.test/join/code_first_text`);
         expect.objectContaining({
           step: "hosted-onboarding.webhook.linq.wake-handoff",
         }),
-        "workflow-enqueued",
+        "runner-nudged",
         expect.objectContaining({
-          workflowRunIdSuffix: "un-123",
+          directNudgeAttempted: true,
+          directNudgeConfigured: true,
+          directNudgeErrorCode: null,
         }),
       );
       expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -514,7 +536,8 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("prioritizes active-member Linq text when attachment descriptors arrive first", async () => {
@@ -591,7 +614,8 @@ https://join.example.test/join/code_first_text`);
     expect(serializedEnvelope).not.toContain("cdn.linq.example.test");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("compacts active-member Linq messages with oversized content and still appends a wake", async () => {
@@ -659,7 +683,8 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("preserves active-member Linq link content when truncation is required", async () => {
@@ -735,7 +760,8 @@ https://join.example.test/join/code_first_text`);
     expect(serializedEnvelope).toContain("some content truncated");
     expect(serializedEnvelope).not.toContain("cdn.example.test");
     expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("omits signed Linq attachment URLs from active-member mailbox wakes", async () => {
@@ -805,7 +831,16 @@ https://join.example.test/join/code_first_text`);
     expect(JSON.stringify(envelope)).not.toContain("signed-voice-url");
   });
 
-  it("starts a pointer workflow for active-member Linq messages", async () => {
+  it("falls back to a pointer workflow for active-member Linq messages when direct runner nudge is not accepted", async () => {
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: false,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -842,6 +877,11 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
+    });
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_evt_required_nudge_failed",
       source: "linq",
@@ -857,7 +897,7 @@ https://join.example.test/join/code_first_text`);
     );
   });
 
-  it("starts the required workflow handoff before the optional ingress Linq read receipt", async () => {
+  it("accepts the direct runner nudge before the optional ingress Linq read receipt", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -897,10 +937,11 @@ https://join.example.test/join/code_first_text`);
       signal: undefined,
       timeoutMs: 750,
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.sendHostedLinqReadReceipt.mock.invocationCallOrder[0],
     );
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.ingress-read-receipt",
       expect.objectContaining({
@@ -921,7 +962,16 @@ https://join.example.test/join/code_first_text`);
     );
   });
 
-  it("skips the optional ingress Linq read receipt when workflow handoff does not start", async () => {
+  it("skips the optional ingress Linq read receipt when neither direct nudge nor workflow handoff starts", async () => {
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: false,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     mocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(new Error("workflow unavailable"));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -967,11 +1017,80 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
       }),
-      "skipped-wake-handoff-not-started",
+      "skipped-runner-nudge-not-accepted",
       expect.objectContaining({
         responseReason: "wake-appended-active-member",
+        runnerNudgeAccepted: false,
         wakeHandoffReason: "workflow-start-failed",
         wakeHandoffStarted: false,
+      }),
+    );
+  });
+
+  it("suppresses the ingress Linq read receipt when the direct nudge is rejected but the workflow fallback starts", async () => {
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: false,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
+    mocks.startHostedWebhookNudgeWorkflow.mockResolvedValueOnce({
+      runId: "workflow_run_456",
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_ingress_read_receipt_fallback",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_evt_ingress_read_receipt_fallback",
+      source: "linq",
+    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "skipped-runner-nudge-not-accepted",
+      expect.objectContaining({
+        responseReason: "wake-appended-active-member",
+        runnerNudgeAccepted: false,
+        wakeHandoffReason: "workflow-started",
+        wakeHandoffStarted: true,
+        wakeHandoffWorkflowStarted: true,
       }),
     );
   });
@@ -1029,10 +1148,8 @@ https://join.example.test/join/code_first_text`);
       }),
     );
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_evt_ingress_read_receipt_failure",
-      source: "linq",
-    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {

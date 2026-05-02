@@ -144,7 +144,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
       wakeHandoffReason: wakeHandoff?.reason ?? null,
-      wakeHandoffRunnerNudgeAccepted: wakeHandoff?.nudgeAccepted ?? false,
+      wakeHandoffRunnerNudgeAccepted: wakeHandoff?.runnerNudgeAccepted ?? false,
       wakeHandoffStarted: wakeHandoff?.started ?? false,
       wakeHandoffWorkflowStarted: wakeHandoff?.workflowStarted ?? false,
     });
@@ -176,7 +176,7 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   const timeoutMs = HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS;
   const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
   const wakeHandoffStarted = input.wakeHandoff?.started === true;
-  const runnerNudgeAccepted = input.wakeHandoff?.nudgeAccepted === true;
+  const runnerNudgeAccepted = input.wakeHandoff?.runnerNudgeAccepted === true;
   const readReceiptTiming = startHostedOnboardingTiming(
     "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
