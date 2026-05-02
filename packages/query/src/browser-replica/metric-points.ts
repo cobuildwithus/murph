@@ -26,6 +26,8 @@ interface MetricDefinition {
 type MetricPointInput =
   | readonly BrowserVaultMetricRow[]
   | {
+      readonly generatedAt?: string;
+      readonly lookbackDays?: number;
       readonly metricRows: readonly BrowserVaultMetricRow[];
       readonly vault?: {
         readonly entities: readonly CanonicalEntity[];
@@ -282,13 +284,30 @@ export function resolveBrowserVaultMetricPointBiomarkerKey(metricKey: string): s
 }
 
 export function createBrowserVaultMetricPoints(input: MetricPointInput): BrowserVaultMetricPoint[] {
-  const metricRows = isMetricRowArray(input) ? input : input.metricRows;
-  const vaultEntities = isMetricRowArray(input) ? [] : input.vault?.entities ?? [];
+  let generatedAt: string | null = null;
+  let lookbackDays: number | null = null;
+  let metricRows: readonly BrowserVaultMetricRow[];
+  let vaultEntities: readonly CanonicalEntity[];
 
-  return dedupeMetricPoints([
+  if (isMetricRowArray(input)) {
+    metricRows = input;
+    vaultEntities = [];
+  } else {
+    generatedAt = input.generatedAt ?? null;
+    lookbackDays = input.lookbackDays ?? null;
+    metricRows = input.metricRows;
+    vaultEntities = input.vault?.entities ?? [];
+  }
+
+  const metricPoints = dedupeMetricPoints([
     ...createMetricPointsFromRows(metricRows),
     ...createMetricPointsFromVaultEntities(vaultEntities),
-  ]).sort(compareMetricPointsByDateDesc);
+  ]);
+
+  return filterMetricPointsByLookback(metricPoints, {
+    generatedAt,
+    lookbackDays,
+  }).sort(compareMetricPointsByDateDesc);
 }
 
 function isMetricRowArray(input: MetricPointInput): input is readonly BrowserVaultMetricRow[] {
@@ -367,7 +386,7 @@ function extractMeasurementMetricPoints(entity: CanonicalEntity): BrowserVaultMe
       return [];
     }
 
-    return [buildMetricPointFromScalar({
+    const point = buildMetricPointFromScalar({
       confidence: readNonEmptyString(entity.attributes.source) === "manual" ? "medium" : "high",
       entity,
       index,
@@ -376,7 +395,9 @@ function extractMeasurementMetricPoints(entity: CanonicalEntity): BrowserVaultMe
       sourceLabel: sourceLabelForEvent(entity),
       unit,
       value,
-    })];
+    });
+
+    return point ? [point] : [];
   });
 }
 
@@ -393,7 +414,7 @@ function extractBodyMeasurementMetricPoints(entity: CanonicalEntity): BrowserVau
       return [];
     }
 
-    return [buildMetricPointFromScalar({
+    const point = buildMetricPointFromScalar({
       confidence: readNonEmptyString(entity.attributes.source) === "manual" ? "medium" : "high",
       entity,
       index,
@@ -402,7 +423,9 @@ function extractBodyMeasurementMetricPoints(entity: CanonicalEntity): BrowserVau
       sourceLabel: sourceLabelForEvent(entity),
       unit,
       value,
-    })];
+    });
+
+    return point ? [point] : [];
   });
 }
 
@@ -415,7 +438,7 @@ function extractObservationMetricPoints(entity: CanonicalEntity): BrowserVaultMe
     return [];
   }
 
-  return [buildMetricPointFromScalar({
+  const point = buildMetricPointFromScalar({
     confidence: readNonEmptyString(entity.attributes.source) === "manual" ? "medium" : "high",
     entity,
     index: 0,
@@ -424,7 +447,9 @@ function extractObservationMetricPoints(entity: CanonicalEntity): BrowserVaultMe
     sourceLabel: sourceLabelForEvent(entity),
     unit,
     value,
-  })];
+  });
+
+  return point ? [point] : [];
 }
 
 function extractTestResultMetricPoints(entity: CanonicalEntity): BrowserVaultMetricPoint[] {
@@ -450,7 +475,7 @@ function extractTestResultMetricPoints(entity: CanonicalEntity): BrowserVaultMet
       return [];
     }
 
-    return [buildMetricPointFromScalar({
+    const point = buildMetricPointFromScalar({
       comparator: readComparator(record?.comparator),
       confidence: "high",
       entity,
@@ -461,7 +486,9 @@ function extractTestResultMetricPoints(entity: CanonicalEntity): BrowserVaultMet
       sourceLabel: labName ?? "Lab result",
       unit,
       value,
-    })];
+    });
+
+    return point ? [point] : [];
   });
 }
 
@@ -476,11 +503,18 @@ function buildMetricPointFromScalar(input: {
   sourceLabel: string | null;
   unit: string | null;
   value: number;
-}): BrowserVaultMetricPoint {
+}): BrowserVaultMetricPoint | null {
   const metricKey = normalizeMetricSlug(input.rawMetric);
-  const definition = resolveMetricDefinition(metricKey)
-    ?? customMetricDefinition(metricKey, input.unit);
-  const normalized = normalizeMetricValue({ definition, unit: input.unit ?? definition.unit, value: input.value });
+  const definition = resolveMetricDefinition(metricKey);
+  if (!definition) {
+    return null;
+  }
+
+  const normalized = normalizeMetricValue({
+    definition,
+    unit: input.unit ?? definition.unit,
+    value: input.value,
+  });
   const observedAt = input.observedAt ?? entityObservedAt(input.entity);
   const date = observedAt.slice(0, 10);
 
@@ -788,6 +822,25 @@ function dedupeMetricPoints(points: readonly BrowserVaultMetricPoint[]): Browser
   }
 
   return [...byKey.values()];
+}
+
+function filterMetricPointsByLookback(
+  points: readonly BrowserVaultMetricPoint[],
+  input: {
+    generatedAt: string | null;
+    lookbackDays: number | null;
+  },
+): BrowserVaultMetricPoint[] {
+  const generatedAt = input.generatedAt;
+  const lookbackDays = input.lookbackDays;
+
+  if (!generatedAt || typeof lookbackDays !== "number") {
+    return points.slice();
+  }
+
+  return points.filter((point) =>
+    !isOlderThanDays(point.observedAt, generatedAt, lookbackDays)
+  );
 }
 
 function entityObservedAt(entity: CanonicalEntity): string {

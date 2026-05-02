@@ -483,6 +483,7 @@ describe("hosted onboarding routes", () => {
   });
 
   it("serializes retryable server-side Privy lag errors during completion", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.requirePrivyCompletionSession.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_WALLET_NOT_READY",
@@ -514,9 +515,20 @@ describe("hosted onboarding routes", () => {
         retryable: true,
       },
     });
+    expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorCode: "PRIVY_WALLET_NOT_READY",
+      errorMessage: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
+      errorResponseCode: "PRIVY_WALLET_NOT_READY",
+      errorResponseRetryable: true,
+      errorResponseStatus: 409,
+      errorType: "HostedOnboardingError",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+      requestMethod: "POST",
+    });
   });
 
   it("keeps no-store headers when hosted onboarding errors are serialized", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const response = hostedOnboardingHttp.jsonError(
       hostedOnboardingError({
         code: "INVITE_INVALID",
@@ -538,6 +550,15 @@ describe("hosted onboarding routes", () => {
         message: "Invite code is invalid.",
         retryable: false,
       },
+    });
+    expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorCode: "INVITE_INVALID",
+      errorMessage: "Invite code is invalid.",
+      errorResponseCode: "INVITE_INVALID",
+      errorResponseRetryable: false,
+      errorResponseStatus: 404,
+      errorType: "HostedOnboardingError",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
     });
   });
 

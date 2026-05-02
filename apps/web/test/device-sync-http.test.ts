@@ -98,6 +98,7 @@ describe("device sync callback redirect helpers", () => {
   });
 
   it("maps device-sync domain errors through the shared JSON error helper", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const sensitiveBodySnippet =
       "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=offline";
     const response = httpModule.jsonError(
@@ -129,6 +130,17 @@ describe("device sync callback redirect helpers", () => {
       },
     });
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(warnSpy).toHaveBeenCalledWith("Hosted device-sync route failed.", {
+      errorCode: "ACCOUNT_REQUIRES_REAUTH",
+      errorMessage: "Reconnect the account to continue syncing.",
+      errorResponseCode: "ACCOUNT_REQUIRES_REAUTH",
+      errorResponseRetryable: true,
+      errorResponseStatus: 409,
+      errorType: "MockDeviceSyncError",
+      internalMessage: "Hosted device-sync route failed unexpectedly.",
+    });
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("acct_fake_sensitive_123");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("tok_fake_sensitive_456");
   });
 
   it("maps shared malformed request errors to the existing 400 JSON shapes", async () => {

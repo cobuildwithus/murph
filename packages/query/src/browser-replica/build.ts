@@ -77,6 +77,8 @@ export async function createBrowserVaultReplica(
   ]);
   const metricRows = metricDayRows.flatMap((day) => dayToMetricRows(day));
   const metricPoints = createBrowserVaultMetricPoints({
+    generatedAt,
+    lookbackDays: METRIC_LOOKBACK_DAYS,
     metricRows,
     vault: input.vault,
   });

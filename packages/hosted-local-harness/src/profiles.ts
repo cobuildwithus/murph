@@ -35,6 +35,8 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
       "Hosted-local E2E with deterministic local stubs and no live assistant provider, Stripe listener, Vercel pull, or Codex CLI bridge.",
     envDefaults: {
       MURPH_DEV_CODEX_BRIDGE: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       MURPH_DEV_SKIP_VERCEL_PULL: "1",
       MURPH_E2E_ASSISTANT_PROVIDER_MODE: "stub",
@@ -49,6 +51,8 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
       "Hosted-local E2E using explicit live/test provider credentials supplied by the caller.",
     envDefaults: {
       MURPH_DEV_CODEX_BRIDGE: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       MURPH_DEV_SKIP_VERCEL_PULL: "1",
       MURPH_E2E_ASSISTANT_PROVIDER_MODE: "live",

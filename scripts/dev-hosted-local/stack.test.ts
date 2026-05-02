@@ -1,4 +1,5 @@
 import { rename, symlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -593,13 +594,14 @@ describe("hosted local dev stack", () => {
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {
+    const tunnelConfigPath = path.join(process.cwd(), ".tmp", "cloudflared-linq-webhook.yml");
     resolveHostedLocalLinqWebhookSetup.mockResolvedValueOnce({
       phoneNumbers: ["+15550000001"],
       publicBaseUrl: "https://tunnel.example.test",
       shouldRegister: true,
       shouldStartTunnel: true,
       targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
-      tunnelConfigPath: "/tmp/murph-dev-env-test/cloudflared-linq-webhook.yml",
+      tunnelConfigPath,
       tunnelName: "dev",
     });
     spawnChildProcess
@@ -634,7 +636,7 @@ describe("hosted local dev stack", () => {
         "tunnel",
         "--no-autoupdate",
         "--config",
-        "/tmp/murph-dev-env-test/cloudflared-linq-webhook.yml",
+        ".tmp/cloudflared-linq-webhook.yml",
         "run",
         "dev",
       ],

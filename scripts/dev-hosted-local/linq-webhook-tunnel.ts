@@ -1,9 +1,13 @@
-import { access, readFile } from "node:fs/promises";
+import { createHmac } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createLinqWebhookSubscription } from "@murphai/operator-config/linq-runtime";
 
-import { repoRoot } from "./constants.ts";
+import {
+  DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE,
+  repoRoot,
+} from "./constants.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
 
 export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
@@ -11,6 +15,23 @@ export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENT = "message.received";
 const LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
   "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
+
+interface CloudflaredIngressRule {
+  hostname: string | null;
+  service: string | null;
+}
+
+interface LocalHostedWebTarget {
+  webHost: string;
+  webPort: number;
+}
+
+interface LinqWebhookRegistrationCache {
+  fingerprint: string;
+  subscriptionId: string | null;
+  targetUrl: string;
+  updatedAt: string;
+}
 
 export interface HostedLocalLinqWebhookSetup {
   phoneNumbers: readonly string[] | null;
@@ -72,6 +93,10 @@ export async function resolveHostedLocalLinqWebhookSetup(input: {
     : normalizeLinqWebhookPublicUrl(`https://${parseCloudflaredTunnelHostname(
       await readTextFile(tunnelConfigPath),
       tunnelConfigPath,
+      {
+        webHost: input.config.webHost,
+        webPort: input.config.webPort,
+      },
     )}`);
 
   if (
@@ -103,10 +128,39 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   env: NodeJS.ProcessEnv;
   setup: HostedLocalLinqWebhookSetup;
   stderrTarget?: NodeJS.WritableStream;
+  registrationCachePath?: string | null;
 }): Promise<void> {
   const webhookSecret = normalizeOptionalString(input.env.LINQ_WEBHOOK_SECRET);
   if (!webhookSecret) {
     throw new Error("LINQ_WEBHOOK_SECRET must be set before registering the Linq webhook.");
+  }
+  const linqApiToken = normalizeOptionalString(input.env.LINQ_API_TOKEN);
+  if (!linqApiToken) {
+    throw new Error("LINQ_API_TOKEN must be set before registering the Linq webhook.");
+  }
+
+  const registrationFingerprint = createLinqWebhookRegistrationFingerprint({
+    phoneNumbers: input.setup.phoneNumbers,
+    targetUrl: input.setup.targetUrl,
+    webhookSecret,
+  });
+  const cachePath = input.registrationCachePath === null
+    ? null
+    : input.registrationCachePath ?? path.join(repoRoot, DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE);
+  const cachedRegistration = cachePath
+    ? await readLinqWebhookRegistrationCache(cachePath)
+    : null;
+  const phoneNumberLabel = input.setup.phoneNumbers
+    ? `${input.setup.phoneNumbers.length} configured phone number(s)`
+    : "all Linq phone numbers";
+  if (
+    cachedRegistration?.fingerprint === registrationFingerprint
+    && cachedRegistration.targetUrl === input.setup.targetUrl
+  ) {
+    (input.stderrTarget ?? process.stderr).write(
+      `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel}.\n`,
+    );
+    return;
   }
 
   const result = await createLinqWebhookSubscription(
@@ -116,7 +170,7 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
       targetUrl: input.setup.targetUrl,
     },
     {
-      env: input.env,
+      env: buildLinqWebhookRegistrationEnv(input.env, linqApiToken),
     },
   );
   const returnedSecret = normalizeOptionalString(result.signingSecret);
@@ -129,9 +183,15 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
     );
   }
 
-  const phoneNumberLabel = input.setup.phoneNumbers
-    ? `${input.setup.phoneNumbers.length} configured phone number(s)`
-    : "all Linq phone numbers";
+  if (cachePath) {
+    await writeLinqWebhookRegistrationCache(cachePath, {
+      fingerprint: registrationFingerprint,
+      subscriptionId: normalizeOptionalString(result.id),
+      targetUrl: input.setup.targetUrl,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   (input.stderrTarget ?? process.stderr).write(
     `[linq] Registered local webhook target ${input.setup.targetUrl} for ${phoneNumberLabel}.\n`,
   );
@@ -142,14 +202,15 @@ export function normalizeLinqWebhookPublicUrl(value: string): {
   targetUrl: string;
 } {
   const parsed = parseHttpsUrl(value, "MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL");
+  if (parsed.search || parsed.hash) {
+    throw new Error("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL must not include query or hash.");
+  }
   const target = new URL(parsed.href);
   const pathLooksOriginOnly =
     target.pathname === "" || target.pathname === "/";
 
   if (pathLooksOriginOnly) {
     target.pathname = HOSTED_LOCAL_LINQ_WEBHOOK_PATH;
-    target.search = "";
-    target.hash = "";
   } else {
     if (target.pathname.replace(/\/+$/u, "") !== HOSTED_LOCAL_LINQ_WEBHOOK_PATH) {
       throw new Error(
@@ -157,10 +218,6 @@ export function normalizeLinqWebhookPublicUrl(value: string): {
       );
     }
     target.pathname = HOSTED_LOCAL_LINQ_WEBHOOK_PATH;
-  }
-
-  if (target.search || target.hash) {
-    throw new Error("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL must not include query or hash.");
   }
 
   return {
@@ -172,18 +229,21 @@ export function normalizeLinqWebhookPublicUrl(value: string): {
 export function parseCloudflaredTunnelHostname(
   configText: string,
   filePath = "cloudflared config",
+  localWebTarget?: LocalHostedWebTarget,
 ): string {
-  for (const line of configText.split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
+  const rules = parseCloudflaredIngressRules(configText);
+  const hostnameRules = rules.filter((rule) => rule.hostname !== null);
+  const candidateRules = localWebTarget
+    ? hostnameRules.filter((rule) =>
+      rule.service !== null && isHostedLocalWebService(rule.service, localWebTarget)
+    )
+    : hostnameRules;
+
+  for (const rule of candidateRules) {
+    const hostname = rule.hostname;
+    if (!hostname) {
       continue;
     }
-    const match = /^(?:-\s*)?hostname:\s*(?<value>.+)$/iu.exec(trimmed);
-    const value = match?.groups?.value;
-    if (!value) {
-      continue;
-    }
-    const hostname = stripYamlScalarQuotes(value).trim();
     if (!isValidTunnelHostname(hostname)) {
       throw new Error(
         `Invalid hostname in Linq cloudflared config ${formatRepoPath(filePath)}.`,
@@ -192,9 +252,235 @@ export function parseCloudflaredTunnelHostname(
     return hostname;
   }
 
+  if (localWebTarget && hostnameRules.length > 0) {
+    throw new Error(
+      [
+        `Linq cloudflared config ${formatRepoPath(filePath)} must include an ingress hostname`,
+        `whose service routes to local hosted web port ${localWebTarget.webPort}.`,
+      ].join(" "),
+    );
+  }
+
   throw new Error(
     `Linq cloudflared config ${formatRepoPath(filePath)} must include an ingress hostname.`,
   );
+}
+
+function buildLinqWebhookRegistrationEnv(
+  source: NodeJS.ProcessEnv,
+  linqApiToken: string,
+): NodeJS.ProcessEnv {
+  const linqApiBaseUrl = normalizeOptionalString(source.LINQ_API_BASE_URL);
+  return {
+    ...(linqApiBaseUrl ? { LINQ_API_BASE_URL: linqApiBaseUrl } : {}),
+    LINQ_API_TOKEN: linqApiToken,
+  };
+}
+
+function createLinqWebhookRegistrationFingerprint(input: {
+  phoneNumbers: readonly string[] | null;
+  targetUrl: string;
+  webhookSecret: string;
+}): string {
+  const payload = JSON.stringify({
+    event: HOSTED_LOCAL_LINQ_WEBHOOK_EVENT,
+    phoneNumbers: input.phoneNumbers ?? null,
+    targetUrl: input.targetUrl,
+  });
+  return createHmac("sha256", input.webhookSecret)
+    .update(payload)
+    .digest("hex");
+}
+
+async function readLinqWebhookRegistrationCache(
+  cachePath: string,
+): Promise<LinqWebhookRegistrationCache | null> {
+  let text: string;
+  try {
+    text = await readFile(cachePath, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw new Error("Unable to read repo-local Linq webhook registration cache.");
+  }
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parseLinqWebhookRegistrationCache(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function parseLinqWebhookRegistrationCache(
+  value: unknown,
+): LinqWebhookRegistrationCache | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.fingerprint !== "string"
+    || typeof record.targetUrl !== "string"
+    || typeof record.updatedAt !== "string"
+  ) {
+    return null;
+  }
+  if (record.subscriptionId !== null && typeof record.subscriptionId !== "string") {
+    return null;
+  }
+
+  return {
+    fingerprint: record.fingerprint,
+    subscriptionId: record.subscriptionId,
+    targetUrl: record.targetUrl,
+    updatedAt: record.updatedAt,
+  };
+}
+
+async function writeLinqWebhookRegistrationCache(
+  cachePath: string,
+  cache: LinqWebhookRegistrationCache,
+): Promise<void> {
+  try {
+    await mkdir(path.dirname(cachePath), { recursive: true });
+    await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  } catch {
+    throw new Error("Unable to write repo-local Linq webhook registration cache.");
+  }
+}
+
+function parseCloudflaredIngressRules(configText: string): CloudflaredIngressRule[] {
+  const rules: CloudflaredIngressRule[] = [];
+  let currentRule: CloudflaredIngressRule | null = null;
+
+  for (const line of configText.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const listItem = /^-\s*(?<rest>.*)$/u.exec(trimmed);
+    if (listItem) {
+      currentRule = {
+        hostname: null,
+        service: null,
+      };
+      rules.push(currentRule);
+      assignCloudflaredIngressRuleValue(currentRule, listItem.groups?.rest ?? "");
+      continue;
+    }
+
+    const targetRule = currentRule ?? {
+      hostname: null,
+      service: null,
+    };
+    const changed = assignCloudflaredIngressRuleValue(targetRule, trimmed);
+    if (changed && currentRule === null) {
+      rules.push(targetRule);
+    }
+  }
+
+  return rules;
+}
+
+function assignCloudflaredIngressRuleValue(
+  rule: CloudflaredIngressRule,
+  text: string,
+): boolean {
+  const hostname = readYamlScalarProperty(text, "hostname");
+  if (hostname !== null) {
+    rule.hostname = hostname;
+    return true;
+  }
+
+  const service = readYamlScalarProperty(text, "service");
+  if (service !== null) {
+    rule.service = service;
+    return true;
+  }
+
+  return false;
+}
+
+function readYamlScalarProperty(text: string, key: string): string | null {
+  const match = new RegExp(`^${key}:\\s*(?<value>.+)$`, "iu").exec(text.trim());
+  const value = match?.groups?.value;
+  if (!value) {
+    return null;
+  }
+
+  return stripYamlScalarQuotes(stripYamlInlineComment(value)).trim();
+}
+
+function stripYamlInlineComment(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("\"") || trimmed.startsWith("'")) {
+    return trimmed;
+  }
+
+  return trimmed.replace(/\s+#.*$/u, "");
+}
+
+function isHostedLocalWebService(
+  service: string,
+  target: LocalHostedWebTarget,
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(service);
+  } catch {
+    return false;
+  }
+
+  if (
+    parsed.protocol !== "http:"
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    return false;
+  }
+
+  const port = parsed.port ? Number.parseInt(parsed.port, 10) : 80;
+  if (port !== target.webPort) {
+    return false;
+  }
+
+  return allowedHostedLocalWebServiceHosts(target.webHost).has(
+    normalizeUrlHostname(parsed.hostname),
+  );
+}
+
+function allowedHostedLocalWebServiceHosts(webHost: string): ReadonlySet<string> {
+  const configuredHost = normalizeUrlHostname(webHost);
+  const hosts = new Set<string>();
+  if (
+    configuredHost === "localhost"
+    || configuredHost === "127.0.0.1"
+    || configuredHost === "::1"
+    || configuredHost === "0.0.0.0"
+    || configuredHost === "::"
+  ) {
+    hosts.add("localhost");
+    hosts.add("127.0.0.1");
+    hosts.add("::1");
+    return hosts;
+  }
+
+  hosts.add(configuredHost);
+  return hosts;
+}
+
+function normalizeUrlHostname(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith("[") && normalized.endsWith("]")
+    ? normalized.slice(1, -1)
+    : normalized;
 }
 
 function parseHttpsUrl(value: string, label: string): URL {
@@ -294,6 +580,10 @@ async function pathExistsDefault(filePath: string): Promise<boolean> {
 
 async function readTextFileDefault(filePath: string): Promise<string> {
   return await readFile(filePath, "utf8");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 function formatRepoPath(filePath: string): string {

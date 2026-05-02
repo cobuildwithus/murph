@@ -79,6 +79,11 @@ test("browser-vault metric points project manual measurements and blood-test res
                 unit: "mg/L",
                 value: 0.3,
               },
+              {
+                analyte: "Unreviewed private panel note",
+                unit: "score",
+                value: 5,
+              },
             ],
             source: "manual",
             testCategory: "blood",
@@ -123,6 +128,7 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.ok(crp);
   assert.equal(crp.valueLabel, "<0.3");
   assert.equal(crp.unit, "mg/L");
+  assert.equal(client.metricSelections.get("unreviewed-private-panel-note"), null);
 
   assert.equal(client.metricPoints.series({ metricKey: "body-weight" }).length, 2);
   assert.equal(client.metricPoints.latest({ metricKey: "apob" })?.sourceKind, "test-result");
@@ -154,6 +160,16 @@ test("browser-vault metric points keep observation inputs while selecting the hi
             value: 181,
           },
         }),
+        createEvent("evt_old_weight", "measurement", {
+          occurredAt: "2024-01-01T07:30:00.000Z",
+          title: "Old body check outside browser-vault lookback",
+          attributes: {
+            measurements: [
+              { metric: "body_weight", value: 190, unit: "lb" },
+            ],
+            source: "manual",
+          },
+        }),
       ],
       metadata: null,
       vaultRoot: "browser://vault",
@@ -165,6 +181,7 @@ test("browser-vault metric points keep observation inputs while selecting the hi
   const bodyWeightPoints = client.metricPoints.series({ metricKey: "body-weight" });
   assert.equal(bodyWeightPoints.some((point) => point.sourceKind === "measurement"), true);
   assert.equal(bodyWeightPoints.some((point) => point.sourceKind === "compat-observation"), true);
+  assert.equal(bodyWeightPoints.some((point) => point.recordIds.includes("evt_old_weight")), false);
 
   const bodyWeight = client.metricSelections.get("body-weight");
   assert.ok(bodyWeight);
