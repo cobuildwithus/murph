@@ -5,6 +5,26 @@ export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
 }
 
+export interface WorkerQueueRetryOptionsLike {
+  delaySeconds?: number;
+}
+
+export interface WorkerQueueMessageLike<Body = unknown> {
+  readonly attempts?: number;
+  readonly body: Body;
+  readonly id?: string;
+  readonly timestamp?: Date;
+  ack(): void;
+  retry(options?: WorkerQueueRetryOptionsLike): void;
+}
+
+export interface WorkerQueueMessageBatchLike<Body = unknown> {
+  readonly messages: readonly WorkerQueueMessageLike<Body>[];
+  readonly queue?: string;
+  ackAll?(): void;
+  retryAll?(options?: WorkerQueueRetryOptionsLike): void;
+}
+
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;

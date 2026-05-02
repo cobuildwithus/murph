@@ -14,6 +14,10 @@ import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
 } from "../src/storage-paths.ts";
+import {
+  HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+  LEGACY_RUNNER_WAKE_QUEUE_NAME,
+} from "../src/legacy-runner-wake-queue.ts";
 import type {
   UserRunnerDurableObjectStubLike,
   WorkerEnvironmentSource,
@@ -39,7 +43,10 @@ import {
   createTestHostedRuntimeCryptoContext,
   getTestHostedRuntimeRootKey,
 } from "./hosted-runtime-crypto-fixtures";
-import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
+import {
+  asWorkerStringEnvironment,
+  type WorkerQueueMessageLike,
+} from "../src/worker-contracts.ts";
 
 const describe = baseDescribe.sequential;
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -896,6 +903,84 @@ describe("cloudflare worker routes", () => {
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
   });
 
+  it("drains retained legacy runner wake Queue messages through the direct Durable Object nudge path", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub);
+    const message = createQueueMessage({
+      reason: "nudge",
+      requestedAt: "2026-04-26T00:00:00.000Z",
+      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+      userId: "member_123",
+    });
+
+    await worker.queue(createQueueBatch([message]), env);
+
+    expect(stub.bindUser).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledTimes(1);
+    expect(message.retry).not.toHaveBeenCalled();
+  });
+
+  it("retries retained legacy runner wake Queue messages when the nudge fails", async () => {
+    const stub = createUserRunnerStub({
+      nudgeHostedRunner: vi.fn(async () => {
+        throw new Error("runner failed");
+      }),
+    });
+    const env = createWorkerEnv(stub);
+    const message = createQueueMessage({
+      reason: "nudge",
+      requestedAt: "2026-04-26T00:00:00.000Z",
+      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+      userId: "member_123",
+    });
+
+    await worker.queue(createQueueBatch([message]), env);
+
+    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+  });
+
+  it("acks invalid retained legacy runner wake Queue messages without touching a Durable Object", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub);
+    const message = createQueueMessage({
+      reason: "nudge",
+      requestedAt: "2026-04-26T00:00:00.000Z",
+      schema: "wrong-schema",
+      userId: "member_123",
+    });
+
+    await worker.queue(createQueueBatch([message]), env);
+
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledTimes(1);
+    expect(message.retry).not.toHaveBeenCalled();
+  });
+
+  it("retries unexpected Queue batches without touching a Durable Object", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub);
+    const message = createQueueMessage({
+      reason: "nudge",
+      requestedAt: "2026-04-26T00:00:00.000Z",
+      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+      userId: "member_123",
+    });
+    const batch = createQueueBatch([message], "unexpected-queue");
+
+    await worker.queue(batch, env);
+
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(batch.retryAll).toHaveBeenCalledWith({ delaySeconds: 30 });
+    expect(message.retry).not.toHaveBeenCalled();
+  });
+
   it("rejects runner nudge route/user mismatches before touching the Durable Object", async () => {
     const stub = createUserRunnerStub();
 
@@ -1480,6 +1565,28 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;
+}
+
+function createQueueBatch(
+  messages: readonly WorkerQueueMessageLike[],
+  queue = LEGACY_RUNNER_WAKE_QUEUE_NAME,
+) {
+  return {
+    ackAll: vi.fn(),
+    messages,
+    queue,
+    retryAll: vi.fn(),
+  };
+}
+
+function createQueueMessage(body: unknown): WorkerQueueMessageLike {
+  return {
+    ack: vi.fn(),
+    body,
+    id: "message-1",
+    retry: vi.fn(),
+    timestamp: new Date("2026-04-26T00:00:00.000Z"),
+  };
 }
 
 async function createSignedJsonControlRequest(
