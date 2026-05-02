@@ -34,6 +34,32 @@ test("hosted crypto env accepts public recipient keys without requiring WIF when
   );
 });
 
+test("hosted crypto env accepts verify and recipient public keyrings", () => {
+  const config = getHostedWebCryptoConfig(buildEnv({
+    HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+      "projects/test/old-authority": {
+        publicKeyPem: "-----BEGIN PUBLIC KEY-----\\nold\\n-----END PUBLIC KEY-----",
+        status: "verify_only",
+      },
+    }),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v2",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON: JSON.stringify({
+      "cf-key-v1": {
+        publicJwk: PUBLIC_JWK,
+        recipient: "cloudflare-automation-secret",
+        status: "disabled",
+      },
+    }),
+  }));
+
+  assert.equal(config.cloudflareAutomationRecipientKeyId, "cf-key-v2");
+  assert.equal(
+    config.authorityVerifyKeyring["projects/test/old-authority"]?.publicKeyPem,
+    "-----BEGIN PUBLIC KEY-----\nold\n-----END PUBLIC KEY-----",
+  );
+  assert.equal(config.cloudflareAutomationPublicKeyring["cf-key-v1"]?.status, "disabled");
+});
+
 test("hosted crypto env rejects private components in public recipient keys", () => {
   expect(() =>
     getHostedWebCryptoConfig({

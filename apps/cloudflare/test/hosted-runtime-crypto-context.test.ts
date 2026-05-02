@@ -89,7 +89,68 @@ test("Cloudflare hosted runtime crypto context verifies signatures and unwraps i
       },
       env: { ...env, HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "other-key" },
     }),
-  ).rejects.toThrow(/unexpected Cloudflare automation key/u);
+  ).rejects.toThrow(/not available for decrypt/u);
+});
+
+test("Cloudflare hosted runtime crypto context can verify and decrypt rotated keyring entries", async () => {
+  const oldCloudflareRecipient = await generateP256EcdhKeyPair();
+  const activeCloudflareRecipient = await generateP256EcdhKeyPair();
+  const oldSigner = await generateP256SigningKeyPair();
+  const activeSigner = await generateP256SigningKeyPair();
+  const env = {
+    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "authority-v2",
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: activeSigner.publicKeyPem,
+    HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+      "authority-v1": {
+        publicKeyPem: oldSigner.publicKeyPem,
+        status: "verify_only",
+      },
+    }),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v2",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+      activeCloudflareRecipient.privateJwk,
+    ),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON: JSON.stringify({
+      "cf-key-v1": {
+        privateJwk: oldCloudflareRecipient.privateJwk,
+        recipient: "cloudflare-automation-secret",
+        status: "decrypt_only",
+      },
+    }),
+    HOSTED_CRYPTO_ENV: "test",
+  };
+  const ingressRoot = Uint8Array.from({ length: 32 }, (_, index) => index + 20);
+  const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => index + 80);
+  const ingress = await createSignedWorkerEnvelope({
+    domain: "ingress",
+    keyVersionName: "authority-v1",
+    publicJwk: oldCloudflareRecipient.publicJwk,
+    recipientKeyId: "cf-key-v1",
+    rootKey: ingressRoot,
+    signer: oldSigner.privateKey,
+    userId: "user-1",
+  });
+  const runtime = await createSignedWorkerEnvelope({
+    domain: "runtime",
+    keyVersionName: "authority-v1",
+    publicJwk: oldCloudflareRecipient.publicJwk,
+    recipientKeyId: "cf-key-v1",
+    rootKey: runtimeRoot,
+    signer: oldSigner.privateKey,
+    userId: "user-1",
+  });
+
+  const unwrapped = await unwrapHostedWorkerRuntimeRoots({
+    context: {
+      envelopes: { ingress, runtime },
+      schema: "murph.hosted-runtime-crypto-context.v1",
+      userId: "user-1",
+    },
+    env,
+  });
+
+  assert.deepEqual(unwrapped.ingress.rootKey, ingressRoot);
+  assert.deepEqual(unwrapped.runtime.rootKey, runtimeRoot);
 });
 
 test("Cloudflare hosted runtime crypto context requires an authority key version in production", async () => {
@@ -403,6 +464,7 @@ async function createSignedWorkerEnvelope(input: {
   keyVersionName: string;
   cryptoEnv?: string;
   publicJwk: JsonWebKey;
+  recipientKeyId?: string;
   rootKey: Uint8Array;
   signer: CryptoKey;
   userId: string;
@@ -418,7 +480,7 @@ async function createSignedWorkerEnvelope(input: {
       userId: input.userId,
     }),
     recipient: "cloudflare-automation-secret",
-    recipientKeyId: "cf-key-v1",
+    recipientKeyId: input.recipientKeyId ?? "cf-key-v1",
     recipientPublicJwk: input.publicJwk,
     rootKey: input.rootKey,
   });

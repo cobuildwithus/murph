@@ -304,6 +304,22 @@ describe("createCloudflareHostedControlClient", () => {
     {
       buildResponse: () =>
         createBrowserVaultSession({
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: {
+            ...createReplicaAad(),
+            dataKeyId: "hdk:browser-vault-replica:other",
+          },
+          replicaKeyEnvelope: createReplicaKeyEnvelope(),
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        }),
+      message:
+        "Cloudflare browser vault session replicaAad.dataKeyId must match the requested replicaRef.dataKeyEnvelope.dataKeyId.",
+      name: "replica AAD data key differs from the request",
+    },
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
           encryptedReplica: {
             ...createReplicaEnvelope(),
             keyId: "browser-vault-replica:other",
@@ -314,7 +330,7 @@ describe("createCloudflareHostedControlClient", () => {
           state: "ready",
         }),
       message:
-        "Cloudflare browser vault session encryptedReplica.keyId must match the requested replicaRef.keyId.",
+        "Cloudflare browser vault session encryptedReplica.keyId must match the requested replica storage key id.",
       name: "encrypted replica key differs from the request",
     },
     {
@@ -367,7 +383,7 @@ describe("createCloudflareHostedControlClient", () => {
         });
       },
       message:
-        "Cloudflare browser vault session replicaKeyEnvelope.recipients[0].keyId must match the requested replicaRef.keyId.",
+        "Cloudflare browser vault session replicaKeyEnvelope.recipients[0].keyId must match the requested replica storage key id.",
       name: "recipient key differs from the request",
     },
   ]) {
@@ -623,6 +639,25 @@ function createBrowserVaultSession(input: {
 function createReplicaRef() {
   return {
     byteLength: 128,
+    dataKeyEnvelope: {
+      alg: "AES-256-GCM-HKDF-SHA256" as const,
+      dataKeyId: "hdk:browser-vault-replica:d",
+      domain: "runtime" as const,
+      lane: "browser-vault-replica" as const,
+      resource: {
+        objectKey: "users/browser-vault-replicas/opaque/replica.json",
+        purpose: "browser-vault-replica",
+        userId: "user_123",
+      },
+      rootKeyId: "udrk:runtime:test-root",
+      schema: "murph.hosted-data-key-envelope.v1" as const,
+      wraps: [{
+        ciphertext: "wrapped-data-key",
+        iv: "wrap-iv",
+        kind: "domain-root" as const,
+        rootKeyId: "udrk:runtime:test-root",
+      }],
+    },
     dataVersion: "d".repeat(64),
     generatedAt: "2026-04-20T08:00:00.000Z",
     keyId: "browser-vault-replica:d",
@@ -636,6 +671,8 @@ function createReplicaRef() {
 
 function createReplicaAad() {
   return {
+    dataKeyId: "hdk:browser-vault-replica:d",
+    dataKeyRootKeyId: "udrk:runtime:test-root",
     dataVersion: "d".repeat(64),
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     purpose: "browser-vault-replica" as const,
@@ -651,7 +688,7 @@ function createReplicaEnvelope() {
     algorithm: "AES-GCM" as const,
     ciphertext: "ciphertext",
     iv: "iv",
-    keyId: "browser-vault-replica:d",
+    keyId: "hdk:browser-vault-replica:d",
     schema: "murph.hosted-cipher.v1",
     scope: "browser-vault-replica" as const,
   };
@@ -660,7 +697,7 @@ function createReplicaEnvelope() {
 function createReplicaKeyEnvelope() {
   return {
     createdAt: "2026-04-20T08:00:00.000Z",
-    keyId: "browser-vault-replica:d",
+    keyId: "hdk:browser-vault-replica:d",
     purpose: "browser-vault-replica" as const,
     recipients: [
       {
@@ -672,7 +709,7 @@ function createReplicaKeyEnvelope() {
           y: "ephemeral-y",
         },
         iv: "iv",
-        keyId: "browser-vault-replica:d",
+        keyId: "hdk:browser-vault-replica:d",
         kind: "browser-session" as const,
       },
     ],

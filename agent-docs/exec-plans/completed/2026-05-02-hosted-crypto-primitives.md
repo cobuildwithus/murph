@@ -1,6 +1,6 @@
 # Land greenfield hosted crypto primitives
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -48,3 +48,4 @@ Updated: 2026-05-02
 
 - Commands to run: focused runtime-state/hosted-execution/Cloudflare/web crypto tests, `pnpm typecheck`, diff-scoped verification.
 - Expected outcomes: focused checks pass; any app-wide failures must be unrelated and named with evidence.
+Completed: 2026-05-02

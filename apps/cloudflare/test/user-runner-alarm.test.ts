@@ -1133,6 +1133,37 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("refreshes the cached runtime crypto context after the web TTL expires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner } = createRunnerCryptoContextHarness(null, {
+      cryptoContextCacheMaxAgeMs: 1_000,
+    });
+    const cryptoFetchCount = () =>
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(([input]) =>
+        input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH
+      ).length;
+
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(cryptoFetchCount()).toBe(1);
+
+    vi.setSystemTime(new Date(Date.parse(FIXED_NOW) + 500));
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(cryptoFetchCount()).toBe(1);
+
+    vi.setSystemTime(new Date(Date.parse(FIXED_NOW) + 1_001));
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(cryptoFetchCount()).toBe(2);
+  });
+
   it("keeps crypto-context fetch failures fail-closed for version-0 workspaces with a snapshot", async () => {
     const { invoke, runner } = createRunnerCryptoContextHarness(createWorkspaceState({
       snapshotRef: createBundleRef("checkpointed"),
@@ -1276,6 +1307,7 @@ function createRunnerContainerNamespace(
 function createRunnerCryptoContextHarness(
   workspace: HostedWorkspaceState | null,
   options: {
+    cryptoContextCacheMaxAgeMs?: number;
     cryptoContextStatus?: number;
     invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
   } = {},
@@ -1321,7 +1353,12 @@ function createRunnerCryptoContextHarness(
       if (options.cryptoContextStatus && options.cryptoContextStatus !== 200) {
         return Response.json({ error: "Unavailable" }, { status: options.cryptoContextStatus });
       }
-      return Response.json(await createTestHostedRuntimeCryptoContext(input.boundUserId ?? "member_123"));
+      return Response.json({
+        ...await createTestHostedRuntimeCryptoContext(input.boundUserId ?? "member_123"),
+        ...(options.cryptoContextCacheMaxAgeMs === undefined
+          ? {}
+          : { cacheMaxAgeMs: options.cryptoContextCacheMaxAgeMs }),
+      });
     }
 
     if (input.path !== HOSTED_RUNTIME_WORKSPACE_PATH) {

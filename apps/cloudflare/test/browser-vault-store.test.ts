@@ -92,11 +92,23 @@ describe("hosted browser vault replica store", () => {
       schema: "murph.hosted-browser-vault-replica-ref.v1",
       sourceBundleHash: replica.source.sourceBundleHash,
     });
+    expect(replicaRef.dataKeyEnvelope).toMatchObject({
+      alg: "AES-256-GCM-HKDF-SHA256",
+      domain: "runtime",
+      lane: "browser-vault-replica",
+      resource: {
+        objectKey: storedKey,
+        purpose: "browser-vault-replica",
+        userId: "user_123",
+      },
+      rootKeyId,
+      schema: "murph.hosted-data-key-envelope.v1",
+    });
     expect(replicaRef.keyId).toBe(`browser-vault-replica:${replica.source.dataVersion.slice(0, 32)}`);
 
     await expect(store.readBrowserVaultReplicaEnvelope(replicaRef)).resolves.toMatchObject({
       algorithm: "AES-GCM",
-      keyId: replicaRef.keyId,
+      keyId: replicaRef.dataKeyEnvelope?.dataKeyId,
       scope: "browser-vault-replica",
     });
 
@@ -106,6 +118,8 @@ describe("hosted browser vault replica store", () => {
     });
     const loadedBytes = await readEncryptedR2Payload({
       aad: buildHostedStorageAad({
+        dataKeyId: aadFields.dataKeyId,
+        dataKeyRootKeyId: aadFields.dataKeyRootKeyId,
         dataVersion: aadFields.dataVersion,
         objectKey: aadFields.objectKey,
         purpose: aadFields.purpose,
@@ -116,7 +130,7 @@ describe("hosted browser vault replica store", () => {
       }),
       bucket,
       cryptoKey: await store.deriveBrowserVaultReplicaKey(replicaRef),
-      expectedKeyId: replicaRef.keyId,
+      expectedKeyId: replicaRef.dataKeyEnvelope?.dataKeyId,
       key: replicaRef.objectKey,
       scope: "browser-vault-replica",
     });
@@ -169,7 +183,7 @@ describe("hosted browser vault replica store", () => {
     });
 
     await expect(rotatedStore.readBrowserVaultReplicaEnvelope(replicaRef)).resolves.toMatchObject({
-      keyId: replicaRef.keyId,
+      keyId: replicaRef.dataKeyEnvelope?.dataKeyId,
       scope: "browser-vault-replica",
     });
     await expect(rotatedStore.deriveBrowserVaultReplicaKey(replicaRef))
@@ -267,7 +281,46 @@ describe("hosted browser vault replica store", () => {
     expect(firstRef.objectKey).toBe(secondRef.objectKey);
     expect(firstRef.runtimeRootKeyId).toBe("runtime-root-first");
     expect(secondRef.runtimeRootKeyId).toBe("runtime-root-second");
+    expect(firstRef.dataKeyEnvelope?.rootKeyId).toBe("runtime-root-first");
+    expect(secondRef.dataKeyEnvelope?.rootKeyId).toBe("runtime-root-second");
+    expect(firstRef.dataKeyEnvelope?.dataKeyId).not.toBe(secondRef.dataKeyEnvelope?.dataKeyId);
     expectOpaqueStrings([firstRef.objectKey], ["user_123"]);
+  });
+
+  it("refuses data-key envelopes that do not bind to the requested replica object", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const rootKey = createTestRootKey(47);
+    const store = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+      rootKeyId: "runtime-root-current",
+      userId: "user_123",
+    });
+    const ref = await store.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
+        generatedAt: "2026-04-17T00:00:00.000Z",
+        sourceBundleHash: "h".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: null,
+          vaultRoot: "browser://vault",
+        }),
+      }),
+      userId: "user_123",
+    });
+
+    await expect(store.deriveBrowserVaultReplicaKey({
+      ...ref,
+      dataKeyEnvelope: ref.dataKeyEnvelope
+        ? {
+            ...ref.dataKeyEnvelope,
+            resource: {
+              ...ref.dataKeyEnvelope.resource,
+              objectKey: `${ref.objectKey}.other`,
+            },
+          }
+        : undefined,
+    })).rejects.toThrow(/dataKeyEnvelope\.resource\.objectKey must match objectKey/u);
   });
 
   it("refuses to delete a replica outside the bound user's namespace", async () => {
