@@ -21,6 +21,8 @@ relations:
 source:
   kind: "web_page"
   title: "Build a Sauna"
+  authors: "North American Sauna Society"
+  journal: "North American Sauna Society"
   url: "https://saunasociety.org/build-a-sauna"
   citation: "Build a Sauna. https://saunasociety.org/build-a-sauna"
 sourceIdentity:

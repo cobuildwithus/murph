@@ -22,9 +22,9 @@ relations:
 source:
   kind: journal_article
   title: "Effects of heat exposure in a Finnish sauna on the pharmacokinetics and metabolism of midazolam"
-  authors: "Vanakoski J, Idänpää Heikkilä JJ, Olkkola KT, Seppälä T"
+  authors: Vanakoski J, Idänpään-Heikkilä JJ, Olkkola KT, Seppälä T
   year: 1996
-  journal: "Eur J Clin Pharmacol"
+  journal: European Journal of Clinical Pharmacology
   citation: "Vanakoski J, Idänpää Heikkilä JJ, Olkkola KT, Seppälä T. Effects of heat exposure in a Finnish sauna on the pharmacokinetics and metabolism of midazolam. Eur J Clin Pharmacol 1996;51:335-338."
 researchEvidence:
   designKind: "crossover_trial"

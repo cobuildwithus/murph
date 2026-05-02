@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Provincial Knee Primary Care Clinical Pathway
+  authors: "Alberta Health Services"
+  journal: "Alberta Health Services"
   citation: Provincial Knee Primary Care Clinical Pathway
   url: https://www.albertahealthservices.ca/assets/info/aph/if-aph-prov-knee-primary-care-pathway.pdf
 researchEvidence:

@@ -23,6 +23,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Effect of a Four-Week Extreme Heat (100 ± 2 °C) Sauna Baths Program in Combination with Resistance Training on Lower Limb Strength and Body Composition: A Blinded, Randomized Study"
+  authors: "Ignacio Bartolomé, Ángel García, Jesús Siquier-Coll, et al."
+  journal: "Applied Sciences"
   doi: "10.3390/app151910762"
   url: "https://doi.org/10.3390/app151910762"
   citation: "Effect of a Four-Week Extreme Heat (100 ± 2 °C) Sauna Baths Program in Combination with Resistance Training on Lower Limb Strength and Body Composition: A Blinded, Randomized Study. https://doi.org/10.3390/app151910762"

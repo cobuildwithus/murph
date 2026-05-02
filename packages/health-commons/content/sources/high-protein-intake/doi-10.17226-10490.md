@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: guideline
   title: "Dietary Reference Intakes for Energy, Carbohydrate, Fiber, Fat, Fatty Acids, Cholesterol, Protein, and Amino Acids"
+  authors: Institute of Medicine; Food and Nutrition Board; Panel on Macronutrients et al.
+  journal: National Academies Press
   doi: 10.17226/10490
   url: https://nap.nationalacademies.org/catalog/10490/dietary-reference-intakes-for-energy-carbohydrate-fiber-fat-fatty-acids-cholesterol-protein-and-amino-acids/
 researchEvidence:

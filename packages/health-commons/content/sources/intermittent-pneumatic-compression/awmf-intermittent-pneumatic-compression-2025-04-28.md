@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: guideline
   title: "S1-Leitlinie Intermittierende pneumatische Kompressionstherapie (IPK)"
+  authors: Christine Schwahn-Schreiber, Stefanie Reich-Schupke, Franz Xaver Breu, Eberhard Rabe et al.
+  journal: AWMF Guidelines Register
   url: "https://register.awmf.org/de/leitlinien/detail/037-007"
 researchEvidence:
   designKind: guideline

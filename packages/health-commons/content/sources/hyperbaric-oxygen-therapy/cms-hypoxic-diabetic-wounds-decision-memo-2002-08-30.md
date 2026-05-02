@@ -23,6 +23,8 @@ relations:
 source:
   kind: "guideline"
   title: "Decision Memo for Hyperbaric Oxygen Therapy (HBO) in Hypoxic Wounds and Diabetic Wounds of the Lower Extremities"
+  authors: Shuren J, Dei Cas R, Kucken L, Tillman K
+  journal: CMS Medicare Coverage Database
   url: "https://www.cms.gov/medicare-coverage-database/view/ncacal-decision-memo.aspx?NCAId=37&fromdb=true&proposed=N"
 researchEvidence:
   designKind: "guideline"

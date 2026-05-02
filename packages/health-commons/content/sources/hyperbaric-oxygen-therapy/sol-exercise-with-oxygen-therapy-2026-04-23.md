@@ -23,6 +23,8 @@ relations:
 source:
   kind: "web_page"
   title: "Exercise With Oxygen Therapy (EWOT)"
+  authors: EWOT
+  journal: EWOT
   url: "https://www.sol.com.my/ewot"
 researchEvidence:
   designKind: "other"

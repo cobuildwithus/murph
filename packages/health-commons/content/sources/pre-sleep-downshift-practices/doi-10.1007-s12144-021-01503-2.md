@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "Adverse effects of meditation: A review of observational, experimental and case studies"
+  authors: Danika Lambert, Nicholas H. van den Berg, Adrianna Mendrek
+  journal: Current Psychology
   doi: "10.1007/s12144-021-01503-2"
   url: "https://link.springer.com/article/10.1007/s12144-021-01503-2"
 researchEvidence:

@@ -21,6 +21,8 @@ relations:
 source:
   kind: "external_protocol"
   title: "Deliberate Heat Exposure Protocols for Health & Performance"
+  authors: Andrew Huberman
+  journal: Huberman Lab
   url: "https://hubermanlab.com/newsletter/deliberate-heat-exposure-protocols-for-health-and-performance"
   citation: "Deliberate Heat Exposure Protocols for Health & Performance. https://hubermanlab.com/newsletter/deliberate-heat-exposure-protocols-for-health-and-performance"
 sourceIdentity:

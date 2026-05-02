@@ -23,6 +23,8 @@ relations:
 source:
   kind: "web_page"
   title: "Can Hyperbaric Oxygen Therapy Reverse Biological Aging?"
+  authors: Aviv Clinics
+  journal: Aviv Clinics
   url: "https://aviv-clinics.com/blog/brain-health/for-the-first-time-hyperbaric-oxygen-therapy-proven-to-reverse-biological-aging-in-humans"
 researchEvidence:
   designKind: "other"

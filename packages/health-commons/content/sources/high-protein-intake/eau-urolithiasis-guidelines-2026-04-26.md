@@ -30,6 +30,8 @@ sourceIdentity:
 source:
   kind: guideline
   title: "EAU Guidelines on Urolithiasis"
+  authors: EAU Guidelines Panel on Urolithiasis
+  journal: European Association of Urology Guidelines
   url: https://uroweb.org/guidelines/urolithiasis/
 researchEvidence:
   designKind: guideline

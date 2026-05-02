@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Comparative Effects of Clamshells and Frog Pump Exercises on Pain, Range of Motion and Functional Disability in Runners With ITBS
+  authors: Riphah International University
+  journal: ClinicalTrials.gov
   citation: Comparative Effects of Clamshells and Frog Pump Exercises on Pain, Range of Motion and Functional Disability in Runners With ITBS
   url: https://clinicaltrials.gov/study/NCT05973708
 researchEvidence:

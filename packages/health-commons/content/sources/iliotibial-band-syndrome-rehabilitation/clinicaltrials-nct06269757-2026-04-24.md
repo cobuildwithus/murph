@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Exercise Program for ITB Syndrome
+  authors: NYU Langone Health
+  journal: ClinicalTrials.gov
   citation: Exercise Program for ITB Syndrome
   url: https://clinicaltrials.gov/study/NCT06269757
 researchEvidence:

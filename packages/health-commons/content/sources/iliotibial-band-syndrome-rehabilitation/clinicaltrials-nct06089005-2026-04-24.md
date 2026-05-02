@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Home-based Treatment Using the Sidekick Tool for Pain Relief in Iliotibial Band Syndrome
+  authors: "Hannah Antony"
+  journal: "ClinicalTrials.gov"
   citation: Home-based Treatment Using the Sidekick Tool for Pain Relief in Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT06089005
 researchEvidence:

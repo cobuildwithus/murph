@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effects of Ultrasound Therapy in Iliotibial Band Syndrome
+  authors: "Prof. Dr. Cemil Taşcıoğlu City Hospital"
+  journal: "ClinicalTrials.gov"
   citation: Effects of Ultrasound Therapy in Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT07534605
 researchEvidence:

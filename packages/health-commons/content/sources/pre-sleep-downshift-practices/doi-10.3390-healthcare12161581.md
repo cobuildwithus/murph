@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Effects of Virtual Reality (VR)-Based Meditation on Sleep Quality, Stress, and Autonomic Nervous System Balance in Nursing Students"
+  authors: "Ki-Yong Kim, Myung-Haeng Hur, Won-Jong Kim"
+  journal: "Healthcare"
   doi: "10.3390/healthcare12161581"
   url: "https://www.mdpi.com/2227-9032/12/16/1581"
 researchEvidence:

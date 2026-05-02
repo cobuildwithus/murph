@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "A Randomized Controlled Trial of Mindfulness Meditation for Chronic Insomnia: Effects on Daytime Symptoms and Cognitive-Emotional Arousal"
+  authors: Jason C. Ong; Yinglin Xia; Christine E. Smith-Mason; Rachel Manber
+  journal: Mindfulness
   doi: "10.1007/s12671-018-0911-6"
   url: "https://link.springer.com/article/10.1007/s12671-018-0911-6"
 researchEvidence:

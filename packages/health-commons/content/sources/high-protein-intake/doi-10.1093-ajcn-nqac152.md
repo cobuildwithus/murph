@@ -34,6 +34,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "Unprocessed red meat in the dietary treatment of obesity: a randomized controlled trial of beef supplementation during weight maintenance after successful weight loss"
+  authors: "Magkos F; Rasmussen SI; Hjorth MF; Asping S et al."
+  journal: "The American Journal of Clinical Nutrition"
   doi: 10.1093/ajcn/nqac152
   url: https://doi.org/10.1093/ajcn/nqac152/
 researchEvidence:

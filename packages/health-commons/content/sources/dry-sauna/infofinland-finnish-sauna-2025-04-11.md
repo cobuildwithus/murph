@@ -21,6 +21,8 @@ relations:
 source:
   kind: "guideline"
   title: "Finnish sauna"
+  authors: "InfoFinland"
+  journal: "InfoFinland"
   url: "https://infofinland.fi/leisure/finnish-sauna"
   citation: "Finnish sauna. https://infofinland.fi/leisure/finnish-sauna"
 sourceIdentity:

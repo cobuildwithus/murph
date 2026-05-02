@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Knee pain - Lateral knee pain
+  authors: "Dorset Musculoskeletal Services"
+  journal: "MSK Dorset"
   citation: Knee pain - Lateral knee pain
   url: https://www.mskdorset.nhs.uk/knee-pain/knee-pain-lateral-knee-pain/
 researchEvidence:

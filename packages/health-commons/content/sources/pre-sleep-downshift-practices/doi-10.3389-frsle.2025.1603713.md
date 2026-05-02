@@ -20,6 +20,8 @@ relations:
 source:
   kind: "review"
   title: "The effect of breathing exercises on adults' sleep quality"
+  authors: Valērija Šteinmane, Andra Fernāte
+  journal: Frontiers in Sleep
   doi: "10.3389/frsle.2025.1603713"
   url: "https://www.frontiersin.org/articles/10.3389/frsle.2025.1603713/full"
 researchEvidence:

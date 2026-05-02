@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Physical Therapy Guide to Iliotibial Band Syndrome (IT Band Syndrome)
+  authors: "Laura Pietrosimone"
+  journal: "ChoosePT (American Physical Therapy Association)"
   citation: Physical Therapy Guide to Iliotibial Band Syndrome (IT Band Syndrome)
   url: https://www.choosept.com/guide/physical-therapy-guide-iliotibial-band-syndrome-itbs
 researchEvidence:

@@ -29,6 +29,8 @@ sourceIdentity:
 source:
   kind: guideline
   title: "S2k guidelines: diagnostics and treatment of venous leg ulcers"
+  authors: Eva Maria Valesky, Viola Hach-Wunderle, Kerstin Protz, Kim Nikola Zeiner et al.
+  journal: Journal der Deutschen Dermatologischen Gesellschaft
   doi: "10.1111/ddg.15415"
   url: "https://doi.org/10.1111/ddg.15415"
 researchEvidence:

@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Effect of a High Protein Diet on Weight Loss in Adults With Obesity"
+  authors: "Mexican National Institute of Public Health"
+  journal: "ClinicalTrials.gov"
   url: https://clinicaltrials.gov/study/NCT02278757/
 researchEvidence:
   designKind: other

@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Slow-Paced Breathing: Influence of Inhalation/Exhalation Ratio and of Respiratory Pauses on Cardiac Vagal Activity"
+  authors: Sylvain Laborde; Maša Iskra; Nina Zammit; Uirassu Borges; et al.
+  journal: Sustainability
   doi: "10.3390/su13147775"
   url: "https://doi.org/10.3390/su13147775"
 researchEvidence:

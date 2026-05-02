@@ -30,6 +30,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "High-protein supplementation during pregnancy"
+  authors: World Health Organization
+  journal: WHO eLENA
   url: https://www.who.int/tools/elena/interventions/high-protein-pregnancy/
 researchEvidence:
   designKind: guideline

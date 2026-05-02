@@ -23,6 +23,8 @@ relations:
 source:
   kind: web_page
   title: Tabata HIIT. Interval Training
+  authors: "Axiom Mobile LLC"
+  journal: "App Store"
   url: https://apps.apple.com/cn/app/tabata-hiit-interval-training/id1189869756?l=en-GB&platform=vision
 researchEvidence:
   designKind: other

@@ -31,6 +31,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "An Advanced Pneumatic Compression Therapy System Improves Leg Volume and Fluid, Adipose Tissue Thickness, Symptoms, and Quality of Life and Reduces Risk of Lymphedema in Women with Lipedema"
+  authors: "Karen L. Herbst, Carlos Zelaya, Marianne Sommerville, Taylor Zimmerman, et al."
+  journal: "Life"
   doi: "10.3390/life15050725"
   url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC12113227/"
 researchEvidence:

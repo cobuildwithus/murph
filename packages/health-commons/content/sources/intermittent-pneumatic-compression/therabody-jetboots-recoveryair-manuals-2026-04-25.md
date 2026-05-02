@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "JetBoots Get Started / RecoveryAir and JetBoots User Manuals"
+  authors: Therabody
+  journal: Therabody Support / User Manuals
   url: "https://www.therabody.com/pages/jetboots-get-started"
 researchEvidence:
   designKind: other

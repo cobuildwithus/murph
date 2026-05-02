@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Impact of Mindfulness-Based Stress Reduction on sleep-related parameters in a community sample"
+  authors: Françoise Jermann; Paolo Cordera; Christophe Carlei; Béatrice Weber; et al.
+  journal: Advances in Integrative Medicine
   doi: "10.1016/j.aimed.2024.08.005"
   url: "https://www.sciencedirect.com/science/article/pii/S2212958824000879"
 researchEvidence:

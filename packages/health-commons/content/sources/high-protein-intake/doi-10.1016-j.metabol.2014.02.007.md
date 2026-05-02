@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "High protein diets do not attenuate decrements in testosterone and IGF-I during energy deficit"
+  authors: Paul C. Henning; Lee M. Margolis; James P. McClung; Andrew J. Young et al.
+  journal: Metabolism
   doi: 10.1016/j.metabol.2014.02.007
   url: https://www.sciencedirect.com/science/article/pii/S0026049514000548/
 researchEvidence:

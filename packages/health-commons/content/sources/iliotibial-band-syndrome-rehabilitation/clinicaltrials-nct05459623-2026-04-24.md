@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effects of Myofascial Release With and Without EMMETT Technique in Iliotibial Band Syndrome
+  authors: "Riphah International University"
+  journal: "ClinicalTrials.gov"
   citation: Effects of Myofascial Release With and Without EMMETT Technique in Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT05459623
 researchEvidence:

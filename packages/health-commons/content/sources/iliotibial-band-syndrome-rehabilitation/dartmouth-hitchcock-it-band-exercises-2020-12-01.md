@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: Iliotibial Band Syndrome Strengthening Exercises (IT Band)
+  authors: Dartmouth-Hitchcock Orthopaedics
+  journal: Dartmouth-Hitchcock Medical Center
   citation: Iliotibial Band Syndrome Strengthening Exercises (IT Band)
   url: https://www.dartmouth-hitchcock.org/sites/default/files/2020-12/it-band-exercises.pdf
 researchEvidence:

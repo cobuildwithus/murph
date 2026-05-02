@@ -21,6 +21,8 @@ relations:
 source:
   kind: "external_protocol"
   title: "Most people might miss the biggest benefit of sauna"
+  authors: Bryan Johnson
+  journal: LinkedIn
   url: "https://linkedin.com/posts/bryanrjohnson_most-people-might-miss-the-biggest-benefit-activity-7451007192889024512-UFlX"
   citation: "Most people might miss the biggest benefit of sauna. https://linkedin.com/posts/bryanrjohnson_most-people-might-miss-the-biggest-benefit-activity-7451007192889024512-UFlX"
 sourceIdentity:

@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Iliotibial band syndrome in the cyclist
+  authors: Michael D. Milligan
+  journal: eMedRef
   citation: Iliotibial band syndrome in the cyclist
   url: https://mospace.umsystem.edu/xmlui/handle/10355/6407
 researchEvidence:

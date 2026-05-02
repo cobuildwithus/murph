@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Efficacy of online mindfulness for the treatment of insomnia in pregnancy: A randomized clinical trial"
+  authors: Dahee Wi, Rachel Y. Lee, Ira Kantrowitz-Gordon
+  journal: PLOS ONE
   doi: "10.1371/journal.pone.0322931"
   url: "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0322931"
 researchEvidence:

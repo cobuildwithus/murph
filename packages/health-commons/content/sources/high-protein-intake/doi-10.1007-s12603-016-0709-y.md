@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "Gastro-intestinal tolerance and renal safety of protein oral nutritional supplements in nursing home residents: A randomized controlled trial"
+  authors: Piet Ter Wee; M. Kuhn; H. van der Woude; D. van de Looverbosch et al.
+  journal: The Journal of Nutrition, Health & Aging
   doi: 10.1007/s12603-016-0709-y
   url: https://doi.org/10.1007/s12603-016-0709-y/
 researchEvidence:

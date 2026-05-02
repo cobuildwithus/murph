@@ -24,6 +24,8 @@ relations:
 source:
   kind: "review"
   title: "Irregular sleep and cardiometabolic risk: Clinical evidence and mechanisms"
+  authors: Chengjie Zhang; Gang Qin
+  journal: Frontiers in Cardiovascular Medicine
   url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC9981680/"
 researchEvidence:
   designKind: "narrative_review"

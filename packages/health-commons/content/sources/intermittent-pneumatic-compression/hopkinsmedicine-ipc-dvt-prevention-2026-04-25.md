@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "DVT Prevention: Intermittent Pneumatic Compression Devices"
+  authors: Johns Hopkins Medicine
+  journal: Johns Hopkins Medicine Health Library
   url: "https://www.hopkinsmedicine.org/health/treatment-tests-and-therapies/dvt-prevention-intermittent-pneumatic-compression-devices"
 researchEvidence:
   designKind: other

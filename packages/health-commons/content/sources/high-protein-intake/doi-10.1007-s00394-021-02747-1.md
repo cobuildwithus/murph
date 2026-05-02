@@ -34,6 +34,8 @@ sourceIdentity:
 source:
   kind: journal_article
   title: "A high-protein total diet replacement alters the regulation of food intake and energy homeostasis in healthy, normal-weight adults"
+  authors: Camila L. P. Oliveira; Normand G. Boulé; Sarah A. Elliott; Arya M. Sharma et al.
+  journal: European Journal of Nutrition
   doi: 10.1007/s00394-021-02747-1
   url: https://pmc.ncbi.nlm.nih.gov/articles/PMC9106637/
 researchEvidence:

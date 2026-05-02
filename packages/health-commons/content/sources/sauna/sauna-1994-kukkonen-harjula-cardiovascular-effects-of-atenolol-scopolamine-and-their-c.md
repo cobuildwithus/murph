@@ -22,9 +22,9 @@ relations:
 source:
   kind: journal_article
   title: "Cardiovascular effects of atenolol, scopolamine and their combination on healthy men in Finnish sauna baths"
-  authors: "Kukkonen-Harjula K, Oja P, Vuori I et al"
+  authors: Kukkonen-Harjula K, Oja P, Vuori I, et al.
   year: 1994
-  journal: "Eur J Appl Physiol"
+  journal: European Journal of Applied Physiology and Occupational Physiology
   citation: "Kukkonen-Harjula K, Oja P, Vuori I et al. Cardiovascular effects of atenolol, scopolamine and their combination on healthy men in Finnish sauna baths. Eur J Appl Physiol 1994;69:10-15."
 researchEvidence:
   designKind: "crossover_trial"

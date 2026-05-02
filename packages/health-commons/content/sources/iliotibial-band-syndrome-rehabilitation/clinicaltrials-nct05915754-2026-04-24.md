@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effects of Posterior Oblique Sling Strengthening Exercises on Pain & Flexibility Among Runners With ITBS
+  authors: Riphah International University
+  journal: ClinicalTrials.gov
   citation: Effects of Posterior Oblique Sling Strengthening Exercises on Pain & Flexibility Among Runners With ITBS
   url: https://clinicaltrials.gov/study/NCT05915754
 researchEvidence:

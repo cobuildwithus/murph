@@ -21,6 +21,8 @@ relations:
 source:
   kind: "web_page"
   title: "Can I use a sauna or hot tub early in pregnancy?"
+  authors: "American College of Obstetricians and Gynecologists"
+  journal: "ACOG"
   url: "https://acog.org/womens-health/experts-and-stories/ask-acog/can-i-use-a-sauna-or-hot-tub-early-in-pregnancy"
   citation: "Can I use a sauna or hot tub early in pregnancy?. https://acog.org/womens-health/experts-and-stories/ask-acog/can-i-use-a-sauna-or-hot-tub-early-in-pregnancy"
 sourceIdentity:

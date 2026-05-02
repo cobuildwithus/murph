@@ -21,6 +21,8 @@ relations:
 source:
   kind: "podcast"
   title: "How Sauna Detoxified My Body"
+  authors: Bryan Johnson
+  journal: Bryan Johnson Podcast
   url: "https://podcasts.apple.com/nz/podcast/how-sauna-detoxified-my-body/id1822600552"
   citation: "How Sauna Detoxified My Body. https://podcasts.apple.com/nz/podcast/how-sauna-detoxified-my-body/id1822600552"
 sourceIdentity:

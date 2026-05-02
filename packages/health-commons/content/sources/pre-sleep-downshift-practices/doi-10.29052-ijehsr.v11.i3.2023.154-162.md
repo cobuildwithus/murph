@@ -20,6 +20,8 @@ relations:
 source:
   kind: "journal_article"
   title: "ALIVE Biofeedback HRV Training for Treating Insomnia: A Pilot Randomized Controlled Study"
+  authors: Yusra Saleem, Ujala Sajid, Shamoon Noushad, Sadaf Ahmed
+  journal: International Journal of Endorsing Health Science Research
   doi: "10.29052/ijehsr.v11.i3.2023.154-162"
   url: "https://doi.org/10.29052/IJEHSR.v11.i3.2023.154-162"
 researchEvidence:

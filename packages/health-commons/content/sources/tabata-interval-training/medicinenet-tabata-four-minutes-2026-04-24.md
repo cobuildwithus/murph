@@ -23,6 +23,8 @@ relations:
 source:
   kind: web_page
   title: Why Is Tabata Only 4 Minutes? Workout for Beginners, 9 Benefits
+  authors: "Karthik Kumar; Pallavi Suyog Uttekar"
+  journal: "MedicineNet"
   url: https://www.medicinenet.com/why_is_tabata_only_4_minutes/article.htm
 researchEvidence:
   designKind: other

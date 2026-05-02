@@ -21,6 +21,8 @@ relations:
 source:
   kind: "web_page"
   title: "Instructions How to enjoy a Finnish Sauna Bath"
+  authors: "Lassi A. Liikkanen"
+  journal: "Saunologia"
   url: "https://saunologia.fi/saunomisohjeet-ulkomaalaisille-finnish-sauna-instructions"
   citation: "Instructions How to enjoy a Finnish Sauna Bath. https://saunologia.fi/saunomisohjeet-ulkomaalaisille-finnish-sauna-instructions"
 sourceIdentity:

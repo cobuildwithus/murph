@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Legacy IPC Instructions for Use: Portable Intermittent Pneumatic Compression"
+  authors: VasoCARE
+  journal: Legacy IPC Instructions for Use
   url: "https://vasocare.com/wp-content/uploads/2024/08/Legacy-User-Manual-v0.1-FINAL-10th-Oct-2023.pdf"
 researchEvidence:
   designKind: other

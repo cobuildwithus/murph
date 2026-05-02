@@ -23,6 +23,8 @@ relations:
 source:
   kind: "guideline"
   title: "Hyperbaric Oxygen (HBO) Therapy (Section C, Topical Application of Oxygen) Decision Memo"
+  authors: Jensen TS, Chin J, Rollins J, et al.
+  journal: CMS Medicare Coverage Database
   url: "https://www.cms.gov/medicare-coverage-database/view/ncacal-decision-memo.aspx?NCAId=286&proposed=N"
 researchEvidence:
   designKind: "guideline"

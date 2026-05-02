@@ -20,6 +20,8 @@ relations:
 source:
   kind: web_page
   title: Effects of Autogenic Inhibition Versus Reciprocal Inhibition Muscle Energy Techniques in Iliotibial Band Syndrome
+  authors: "Foundation University Islamabad"
+  journal: "ClinicalTrials.gov"
   citation: Effects of Autogenic Inhibition Versus Reciprocal Inhibition Muscle Energy Techniques in Iliotibial Band Syndrome
   url: https://clinicaltrials.gov/study/NCT06867159
 researchEvidence:

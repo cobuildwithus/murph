@@ -22,9 +22,9 @@ relations:
 source:
   kind: review
   title: "Facts and fables about sauna"
-  authors: "Kauppinen K"
+  authors: Kauppinen K
   year: 1997
-  journal: "Ann N Y Acad Sci"
+  journal: Annals of the New York Academy of Sciences
   citation: "Kauppinen K. Facts and fables about sauna. Ann N Y Acad Sci 1997;813:654-662."
   pmid: "9100952"
   url: https://pubmed.ncbi.nlm.nih.gov/9100952/

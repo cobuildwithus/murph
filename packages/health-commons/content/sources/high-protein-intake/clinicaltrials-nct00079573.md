@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "A TO Z Weight Loss Study"
+  authors: "National Center for Complementary and Integrative Health (NCCIH)"
+  journal: "ClinicalTrials.gov"
   url: https://clinicaltrials.gov/study/NCT00079573/
 researchEvidence:
   designKind: other

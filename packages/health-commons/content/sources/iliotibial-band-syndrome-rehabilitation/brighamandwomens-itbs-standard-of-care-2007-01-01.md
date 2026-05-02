@@ -20,6 +20,8 @@ relations:
 source:
   kind: guideline
   title: 'Standard of Care: Iliotibial Band Syndrome'
+  authors: "Brigham and Women's Hospital Department of Rehabilitation Services"
+  journal: "Brigham and Women's Hospital"
   citation: 'Standard of Care: Iliotibial Band Syndrome'
   url: https://www.brighamandwomens.org/assets/BWH/patients-and-families/pdfs/knee---iliotibial-band-syndrome.pdf
 researchEvidence:

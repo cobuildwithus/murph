@@ -26,6 +26,8 @@ sourceIdentity:
 source:
   kind: review
   title: "Intermittent pneumatic compression for preventing deep vein thrombosis in acute stroke"
+  authors: Giske L, Elvsaas IKØ, Tingulstad A, Espeland AL et al.
+  journal: Norwegian Institute of Public Health (Health Technology Assessment)
   url: "https://www.fhi.no/en/publ/2020/Intermittent-pneumatic-compression-for-preventing-deep-vein-thrombosis-in-acute-stroke/"
 researchEvidence:
   designKind: systematic_review

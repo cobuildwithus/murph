@@ -23,6 +23,8 @@ relations:
 source:
   kind: "review"
   title: "Effects of Bathtub Bathing and Sauna Practices on Cardiovascular and Systemic Health: A Narrative Review"
+  authors: "Masayo Nagai, Akiko Tanaka"
+  journal: "International Journal of Environmental Research and Public Health"
   doi: "10.3390/ijerph23030347"
   url: "https://doi.org/10.3390/ijerph23030347"
   citation: "Effects of Bathtub Bathing and Sauna Practices on Cardiovascular and Systemic Health: A Narrative Review. https://doi.org/10.3390/ijerph23030347"

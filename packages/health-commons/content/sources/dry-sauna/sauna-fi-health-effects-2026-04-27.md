@@ -21,6 +21,8 @@ relations:
 source:
   kind: "web_page"
   title: "Sauna and Health effects"
+  authors: "Finnish Sauna Society"
+  journal: "Finnish Sauna Society"
   url: "https://sauna.fi/en/sauna-knowledge/sauna-and-health-effects"
   citation: "Sauna and Health effects. https://sauna.fi/en/sauna-knowledge/sauna-and-health-effects"
 sourceIdentity:

@@ -32,6 +32,8 @@ sourceIdentity:
 source:
   kind: web_page
   title: "Protein and Exercise to Counteract Frailty in Older Adults"
+  authors: "University of Southern Denmark"
+  journal: "ClinicalTrials.gov"
   url: https://clinicaltrials.gov/study/NCT03842579/
 researchEvidence:
   designKind: other

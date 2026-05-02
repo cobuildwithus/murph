@@ -23,6 +23,8 @@ relations:
 source:
   kind: "journal_article"
   title: "Acute Finnish sauna heat exposure induces stronger immune cell than cytokine responses"
+  authors: "Ilkka H. A. Heinonen, Tiia Koivula, Maija Hollmén, et al."
+  journal: "Temperature"
   doi: "10.1080/23328940.2026.2645467"
   url: "https://doi.org/10.1080/23328940.2026.2645467"
   citation: "Acute Finnish sauna heat exposure induces stronger immune cell than cytokine responses. https://doi.org/10.1080/23328940.2026.2645467"
