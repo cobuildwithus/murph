@@ -124,6 +124,7 @@ function metricPointFromSampleSummary(summary: SampleSummaryMetricEvidence): Met
       sourceStream: summary.stream,
     },
     effectiveDate: summary.date,
+    grain: "day",
     metricKey: definition.key,
     observedAt,
     provenance: {
