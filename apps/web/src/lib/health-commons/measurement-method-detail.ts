@@ -240,7 +240,7 @@ function toMeasurementMethodPageModel(
     entityType: "measurement_method";
     measurementMethod: HealthCommonsMeasurementMethod;
   },
-  catalog: HealthCommonsCatalogReader,
+  catalog: MeasurementMethodPageCatalogReader,
 ): MeasurementMethodPageModel {
   const method = entity.measurementMethod;
 
@@ -273,7 +273,7 @@ function toMeasurementMethodPageModel(
 
 function toMeasurementMethodOutput(
   output: HealthCommonsMeasurementMethodOutput,
-  catalog: HealthCommonsCatalogReader,
+  catalog: MeasurementMethodPageCatalogReader,
 ): MeasurementMethodOutputModel {
   return {
     ...(output.direction ? { direction: output.direction } : {}),
@@ -291,7 +291,7 @@ function toMeasurementMethodOutput(
 
 function resolveRelatedBiomarkers(
   method: HealthCommonsMeasurementMethod,
-  catalog: HealthCommonsCatalogReader,
+  catalog: MeasurementMethodPageCatalogReader,
 ): MeasurementMethodRelatedBiomarkerModel[] {
   const keys = uniqueStrings([
     ...(method.measuredBiomarkerKeys ?? []),
@@ -315,7 +315,7 @@ function resolveRelatedBiomarkers(
 
 function resolveBiomarkerTitle(
   key: string,
-  catalog: HealthCommonsCatalogReader,
+  catalog: MeasurementMethodPageCatalogReader,
 ): string {
   const entity = catalog.findByKey(key);
 

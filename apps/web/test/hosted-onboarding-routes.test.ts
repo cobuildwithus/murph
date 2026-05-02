@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   createHostedBillingCheckout: vi.fn(),
   getHostedInviteStatus: vi.fn(),
   getPrisma: vi.fn(),
+  issueHostedAppSession: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -72,6 +73,10 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requirePrivyCompletionSession: mocks.requirePrivyCompletionSession,
   requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  issueHostedAppSession: mocks.issueHostedAppSession,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
@@ -143,6 +148,10 @@ describe("hosted onboarding routes", () => {
       stage: "checkout",
     });
     mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("checkout"));
+    mocks.issueHostedAppSession.mockResolvedValue({
+      cookie: "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+      sessionId: "hws_123",
+    });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.createHostedBillingCheckout.mockResolvedValue({
       alreadyActive: false,
@@ -217,6 +226,9 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Set-Cookie")).toBe(
+      "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
+    );
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       identity: {
         phone: {
@@ -235,6 +247,10 @@ describe("hosted onboarding routes", () => {
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
+    });
+    expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
+      memberId: "member_123",
+      privyUserId: "did:privy:user_123",
     });
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite-code",

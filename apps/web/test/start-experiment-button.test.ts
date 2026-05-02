@@ -36,6 +36,11 @@ vi.mock("@/src/components/ui/auth-button", () => ({
         "data-slot": "auth-button",
         disabled: !mocks.authButtonClicksEnabled,
         onClick(event: MouseEvent<HTMLButtonElement>) {
+          if (!mocks.authButtonClicksEnabled) {
+            event.preventDefault();
+            return;
+          }
+
           buttonProps.onClick?.(event);
         },
         type: "button",
@@ -147,7 +152,7 @@ describe("StartExperimentButton", () => {
     );
     cleanupRender = cleanup;
 
-    expect(container.textContent).toContain("Start experiment");
+    expect(container.textContent).toContain("Start Experiment");
     expect(button.disabled).toBe(true);
 
     await act(async () => {

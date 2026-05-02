@@ -4,8 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   lookupHostedMemberForPrivyIdentity: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPrivySessionFromRequest: vi.fn(),
 }));
+
+vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   lookupHostedMemberForPrivyIdentity: mocks.lookupHostedMemberForPrivyIdentity,
@@ -19,9 +22,15 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   resolveHostedPrivySessionFromRequest: mocks.resolveHostedPrivySessionFromRequest,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
+}));
+
 import {
   requirePrivyCompletionSession,
   requireActivePrivyMemberAuth,
+  requireFreshActivePrivyMemberAuthForHostedAppSession,
+  requireFreshPrivyMemberAuthForHostedAppSession,
   resolvePrivyMemberAuthFromSession,
   requirePrivyMemberAuth,
   requirePrivySession,
@@ -78,6 +87,12 @@ describe("hosted Privy request auth", () => {
       },
     });
     mocks.readHostedMemberCoreState.mockResolvedValue(null);
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember(),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
       createHostedMemberLookup(),
     );
@@ -452,6 +467,62 @@ describe("hosted Privy request auth", () => {
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
       message: "Your subscription is canceled. Open billing to resume access.",
+    });
+  });
+
+  it("requires a valid app session and fresh Privy proof for identity-sensitive member operations", async () => {
+    await expect(
+      requireFreshPrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+    ).resolves.toMatchObject({
+      appSession: {
+        member: {
+          id: "member_123",
+        },
+        sessionId: "hws_123",
+      },
+      freshPrivy: {
+        member: {
+          id: "member_123",
+        },
+      },
+    });
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+  });
+
+  it("rejects fresh Privy proof for a different hosted member than the app session", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        id: "member_other",
+      }),
+      privyUserId: "did:privy:user_other",
+      sessionId: "hws_other",
+    });
+
+    await expect(
+      requireFreshPrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+    ).rejects.toMatchObject({
+      code: "PRIVY_SESSION_MEMBER_MISMATCH",
+      httpStatus: 409,
+    });
+  });
+
+  it("applies active-member checks to both app session and fresh Privy proof", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        billingStatus: HostedBillingStatus.unpaid,
+      }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+
+    await expect(
+      requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
     });
   });
 });

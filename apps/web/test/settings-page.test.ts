@@ -100,7 +100,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   ]);
 });
 
-test("SettingsPage reads the server-side Privy session and threads it into the settings tree", async () => {
+test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
