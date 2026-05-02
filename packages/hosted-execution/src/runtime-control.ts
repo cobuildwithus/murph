@@ -34,6 +34,65 @@ export type HostedMailboxKind = (typeof HOSTED_MAILBOX_KINDS)[number];
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";
 export const HOSTED_MAILBOX_PAYLOAD_SCHEMA = "murph.hosted-mailbox-payload.v1";
 
+export const HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD = "hosted-mailbox-inline-payload";
+export const HOSTED_MAILBOX_REF_PAYLOAD_FIELD = "hosted-mailbox-ref-payload";
+
+export type HostedMailboxPayloadStorage = "inline" | "sidecar";
+
+export interface HostedMailboxPayloadCryptoMetadata {
+  dedupeKey: string;
+  itemId: string;
+  kind: string;
+  lane: string;
+  laneSeq: bigint | number | string;
+  occurredAt: string;
+  payloadSchema: string;
+  payloadStorage: HostedMailboxPayloadStorage;
+  userId: string;
+}
+
+export function resolveHostedMailboxPayloadField(
+  payloadStorage: HostedMailboxPayloadStorage,
+): typeof HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD | typeof HOSTED_MAILBOX_REF_PAYLOAD_FIELD {
+  switch (payloadStorage) {
+    case "inline":
+      return HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD;
+    case "sidecar":
+      return HOSTED_MAILBOX_REF_PAYLOAD_FIELD;
+  }
+}
+
+export function buildHostedMailboxPayloadAadObjectKey(
+  input: Pick<
+    HostedMailboxPayloadCryptoMetadata,
+    | "dedupeKey"
+    | "kind"
+    | "lane"
+    | "occurredAt"
+    | "payloadSchema"
+    | "payloadStorage"
+  >,
+): string {
+  return JSON.stringify({
+    dedupeKey: requireHostedMailboxPayloadAadString(input.dedupeKey, "dedupeKey"),
+    kind: requireHostedMailboxPayloadAadString(input.kind, "kind"),
+    lane: requireHostedMailboxPayloadAadString(input.lane, "lane"),
+    occurredAt: requireHostedMailboxPayloadAadString(input.occurredAt, "occurredAt"),
+    payloadSchema: requireHostedMailboxPayloadAadString(input.payloadSchema, "payloadSchema"),
+    payloadStorage: input.payloadStorage,
+  });
+}
+
+function requireHostedMailboxPayloadAadString(value: string, label: string): string {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    throw new TypeError(`Hosted mailbox payload AAD ${label} must be a non-empty string.`);
+  }
+
+  return normalized;
+}
+
 export interface HostedMailboxItem {
   createdAt: string;
   dedupeKey: string;

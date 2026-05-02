@@ -935,6 +935,7 @@ export class HostedUserRunner {
       crypto.rootKey,
       crypto.rootKeyId,
       crypto.keysById,
+      crypto.resolveKeyById,
       this.readAllowedRunnerSecretsSource(),
     );
   }

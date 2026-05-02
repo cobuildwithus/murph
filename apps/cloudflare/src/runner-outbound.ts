@@ -148,6 +148,7 @@ async function handleRunnerArtifactRequest(input: {
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
+    resolveKeyById: crypto.resolveKeyById,
     userId: input.userId,
   });
 

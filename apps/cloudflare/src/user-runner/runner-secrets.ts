@@ -12,6 +12,7 @@ export class RunnerSecretsService {
     private readonly runnerSecretsEncryptionKey: Uint8Array,
     private readonly runnerSecretsEncryptionKeyId: string,
     private readonly runnerSecretsEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
+    private readonly resolveRunnerSecretsEncryptionKeyById: (keyId: string) => Promise<Uint8Array | null>,
     private readonly allowedRunnerSecretsSource: Readonly<Record<string, string | undefined>>,
   ) {}
 
@@ -28,6 +29,7 @@ export class RunnerSecretsService {
       key: this.runnerSecretsEncryptionKey,
       keyId: this.runnerSecretsEncryptionKeyId,
       keysById: this.runnerSecretsEncryptionKeysById,
+      resolveKeyById: this.resolveRunnerSecretsEncryptionKeyById,
     });
   }
 }

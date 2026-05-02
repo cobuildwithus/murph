@@ -149,6 +149,7 @@ export function createHostedBundleStore(input: {
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  resolveKeyById?: (keyId: string) => Promise<Uint8Array | null>;
   userId?: string | null;
 }): HostedBundleStore {
   return {
@@ -183,6 +184,7 @@ export function createHostedBundleStore(input: {
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
+        resolveCryptoKeyById: input.resolveKeyById,
         key: ref.key,
         scope: "bundle",
       });
@@ -230,7 +232,6 @@ export function createHostedBundleStore(input: {
 
 async function assertHostedBundleOwnedByUser(
   input: {
-    key: Uint8Array;
     userId?: string | null;
   },
   ref: HostedExecutionBundleRef,
@@ -250,6 +251,7 @@ export function createHostedArtifactStore(input: {
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  resolveKeyById?: (keyId: string) => Promise<Uint8Array | null>;
   userId: string;
 }): HostedArtifactStore {
   return {
@@ -282,6 +284,7 @@ export function createHostedArtifactStore(input: {
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
+        resolveCryptoKeyById: input.resolveKeyById,
         key,
         scope: "artifact",
       });
@@ -316,6 +319,7 @@ export function createHostedRunnerSecretsReader(input: {
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  resolveKeyById?: (keyId: string) => Promise<Uint8Array | null>;
 }): HostedRunnerSecretsReader {
   return {
     async readRunnerSecrets(userId) {
@@ -331,6 +335,7 @@ export function createHostedRunnerSecretsReader(input: {
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
+        resolveCryptoKeyById: input.resolveKeyById,
         key,
         scope: "runner-secrets",
       });
