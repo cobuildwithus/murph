@@ -22,6 +22,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   ASSISTANT_USAGE_SCHEMA,
@@ -2188,7 +2189,7 @@ function createMailboxPort(input: {
             createdAt: TEST_NOW,
             mailboxItemId: payloadFetchRequest.mailboxItemId,
             payloadCiphertext: "ciphertext_synthetic_sidecar",
-            payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
             userId: TEST_USER_ID,
           },
         };

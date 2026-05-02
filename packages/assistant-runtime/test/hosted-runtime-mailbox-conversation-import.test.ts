@@ -16,6 +16,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
@@ -1219,7 +1220,9 @@ function createResolvedMailboxItem(
     item,
     payload: {
       payloadCiphertext: item.payloadInlineCiphertext ?? "ciphertext_sidecar_synthetic",
-      payloadSchema: item.payloadSchema,
+      payloadSchema: item.payloadInlineCiphertext
+        ? item.payloadSchema
+        : HOSTED_MAILBOX_PAYLOAD_SCHEMA,
       requestId: null,
       source: item.payloadInlineCiphertext ? "inline" : "sidecar",
       status: "resolved",

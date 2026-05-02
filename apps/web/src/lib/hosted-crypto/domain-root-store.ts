@@ -67,7 +67,7 @@ export async function provisionHostedCryptoDomainRootsForUserTx(input: {
   userId: string;
 }): Promise<void> {
   for (const domain of ALL_DOMAINS) {
-    await getOrCreateActiveHostedDomainRootEnvelopeTx({
+    await provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
       domain,
       reason: input.reason ?? "hosted-crypto.provision",
       tx: input.tx,
@@ -76,7 +76,7 @@ export async function provisionHostedCryptoDomainRootsForUserTx(input: {
   }
 }
 
-export async function getOrCreateActiveHostedDomainRootEnvelope(input: {
+export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
   reason?: string;
@@ -85,17 +85,17 @@ export async function getOrCreateActiveHostedDomainRootEnvelope(input: {
   const prisma = input.prisma ?? getPrisma();
   if (hasPrismaTransactionRoot(prisma)) {
     return prisma.$transaction((tx) =>
-      getOrCreateActiveHostedDomainRootEnvelopeTx({
+      provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
         domain: input.domain,
-        reason: input.reason ?? "hosted-crypto.get-or-create",
+        reason: input.reason ?? "hosted-crypto.provision-domain-root",
         tx,
         userId: input.userId,
       }),
     );
   }
-  return getOrCreateActiveHostedDomainRootEnvelopeTx({
+  return provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
     domain: input.domain,
-    reason: input.reason ?? "hosted-crypto.get-or-create",
+    reason: input.reason ?? "hosted-crypto.provision-domain-root",
     tx: prisma,
     userId: input.userId,
   });
@@ -161,7 +161,7 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   };
 }
 
-async function getOrCreateActiveHostedDomainRootEnvelopeTx(input: {
+async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
   domain: HostedCryptoDomain;
   reason: string;
   tx: HostedCryptoTx;

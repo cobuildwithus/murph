@@ -19,6 +19,8 @@ import {
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
+  buildHostedMailboxPayloadScope,
+  buildHostedMailboxPayloadSecureBoxAad,
   isHostedMailboxKind,
   isHostedMailboxLane,
 } from "../src/runtime-control.ts";
@@ -95,6 +97,42 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxLane("global")).toBe(false);
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
+  });
+
+  it("builds one shared mailbox payload secure-box aad and scope contract", () => {
+    const metadata = {
+      dedupeKey: "conversation:member_123:message_1",
+      itemId: "mailbox_item_1",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "7",
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      payloadStorage: "inline" as const,
+      userId: "member_123",
+    };
+
+    expect(buildHostedMailboxPayloadScope("inline")).toBe(
+      "hosted-mailbox-payload:hosted-mailbox-inline-payload",
+    );
+    expect(buildHostedMailboxPayloadScope("sidecar")).toBe(
+      "hosted-mailbox-payload:hosted-mailbox-ref-payload",
+    );
+    expect(buildHostedMailboxPayloadSecureBoxAad(metadata)).toEqual({
+      field: "hosted-mailbox-inline-payload",
+      objectKey: JSON.stringify({
+        dedupeKey: "conversation:member_123:message_1",
+        kind: "conversation.message",
+        lane: "conversation",
+        occurredAt: "2026-04-26T00:00:00.000Z",
+        payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+        payloadStorage: "inline",
+      }),
+      purpose: "hosted-mailbox-payload",
+      rowId: "mailbox_item_1",
+      sequence: "7",
+      table: "hosted_mailbox_item",
+    });
   });
 
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {

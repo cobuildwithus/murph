@@ -64,20 +64,20 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   });
 
   const {
-    getOrCreateActiveHostedDomainRootEnvelope,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
     readHostedRuntimeCryptoContextForWorker,
   } = await import(
     "../src/lib/hosted-crypto/domain-root-store"
   );
   const tx = createCapturingTransaction();
 
-  await getOrCreateActiveHostedDomainRootEnvelope({
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
     domain: "ingress",
     prisma: tx.prisma,
     reason: "test.provision",
     userId: "member-test-1",
   });
-  await getOrCreateActiveHostedDomainRootEnvelope({
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
     domain: "runtime",
     prisma: tx.prisma,
     reason: "test.provision",
@@ -205,11 +205,11 @@ test("hosted web private-field encryption fails closed when control roots are mi
 
 test("hosted web private-field encryption uses already-provisioned control roots", async () => {
   const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture();
-  const { getOrCreateActiveHostedDomainRootEnvelope } = await import(
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
     "../src/lib/hosted-crypto/domain-root-store"
   );
 
-  await getOrCreateActiveHostedDomainRootEnvelope({
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
     domain: "control",
     prisma: tx.prisma,
     reason: "test.provision",
@@ -245,14 +245,14 @@ test("hosted member identity upsert keeps private-field crypto inside the caller
   const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture(
     createHostedMemberIdentityTransaction,
   );
-  const { getOrCreateActiveHostedDomainRootEnvelope } = await import(
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
     "../src/lib/hosted-crypto/domain-root-store"
   );
   const { upsertHostedMemberIdentity } = await import(
     "../src/lib/hosted-onboarding/hosted-member-identity-store"
   );
 
-  await getOrCreateActiveHostedDomainRootEnvelope({
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
     domain: "control",
     prisma: tx.prisma,
     reason: "test.provision",

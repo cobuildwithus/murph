@@ -3,7 +3,7 @@ import {
   parseHostedUserRecipientPublicKeyJwk,
   type HostedUserRecipientPrivateKeyJwk,
   type HostedUserRecipientPublicKeyJwk,
-} from "./hosted-user-keys.ts";
+} from "./hosted-ecdh-jwk.ts";
 
 const HOSTED_BROWSER_SESSION_KEY_WRAP_SALT = new TextEncoder().encode(
   "murph.cloudflare.hosted.browser-session-key.wrap.v1",

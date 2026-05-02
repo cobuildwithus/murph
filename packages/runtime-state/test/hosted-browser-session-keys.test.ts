@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 
 import {
   generateHostedUserRecipientKeyPair,
-} from "../src/hosted-user-keys.ts";
+} from "../src/hosted-ecdh-jwk.ts";
 import {
   HOSTED_BROWSER_SESSION_KEY_ENVELOPE_SCHEMA,
   HOSTED_BROWSER_SESSION_KEY_RECIPIENT_KIND,

@@ -135,18 +135,18 @@ test("hosted storage parsing and decryption fail closed on invalid envelopes", a
       }),
     /Hosted cipher envelope\.scope must be a supported hosted storage scope\./u,
   );
-  assert.equal(
-    parseHostedCipherEnvelope({
-      algorithm: "AES-GCM",
-      ciphertext: "abc",
-      iv: "def",
-      keyId: "key-v1",
-      schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
-      scope: "root-key-recipient",
-    }).scope,
-    "root-key-recipient",
+  assert.throws(
+    () =>
+      parseHostedCipherEnvelope({
+        algorithm: "AES-GCM",
+        ciphertext: "abc",
+        iv: "def",
+        keyId: "key-v1",
+        schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
+        scope: "root-key-recipient",
+      }),
+    /Hosted cipher envelope\.scope must be a supported hosted storage scope\./u,
   );
-
   const aad = buildHostedStorageAad({ scope: "bundle" });
   const envelope = await encryptHostedStoragePayload({
     aad,

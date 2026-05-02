@@ -28,10 +28,6 @@ function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
       return "Hosted bundle envelope";
     case "email-raw":
       return "Hosted email raw message envelope";
-    case "root-key-envelope":
-      return "Hosted user root key envelope";
-    case "root-key-recipient":
-      return "Hosted user root key recipient envelope";
     case "runner-secrets":
       return "Hosted runner secrets envelope";
   }

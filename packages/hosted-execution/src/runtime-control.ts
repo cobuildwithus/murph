@@ -51,7 +51,7 @@ export interface HostedMailboxPayloadCryptoMetadata {
   userId: string;
 }
 
-export function resolveHostedMailboxPayloadField(
+function resolveHostedMailboxPayloadField(
   payloadStorage: HostedMailboxPayloadStorage,
 ): typeof HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD | typeof HOSTED_MAILBOX_REF_PAYLOAD_FIELD {
   switch (payloadStorage) {
@@ -62,7 +62,7 @@ export function resolveHostedMailboxPayloadField(
   }
 }
 
-export function buildHostedMailboxPayloadAadObjectKey(
+function buildHostedMailboxPayloadAadObjectKey(
   input: Pick<
     HostedMailboxPayloadCryptoMetadata,
     | "dedupeKey"
@@ -81,6 +81,38 @@ export function buildHostedMailboxPayloadAadObjectKey(
     payloadSchema: requireHostedMailboxPayloadAadString(input.payloadSchema, "payloadSchema"),
     payloadStorage: input.payloadStorage,
   });
+}
+
+export type HostedMailboxPayloadField =
+  typeof HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD | typeof HOSTED_MAILBOX_REF_PAYLOAD_FIELD;
+export type HostedMailboxPayloadScope = `hosted-mailbox-payload:${HostedMailboxPayloadField}`;
+
+export interface HostedMailboxPayloadSecureBoxAad {
+  field: HostedMailboxPayloadField;
+  objectKey: string;
+  purpose: "hosted-mailbox-payload";
+  rowId: string;
+  sequence: HostedMailboxPayloadCryptoMetadata["laneSeq"];
+  table: "hosted_mailbox_item";
+}
+
+export function buildHostedMailboxPayloadScope(
+  payloadStorage: HostedMailboxPayloadStorage,
+): HostedMailboxPayloadScope {
+  return `hosted-mailbox-payload:${resolveHostedMailboxPayloadField(payloadStorage)}`;
+}
+
+export function buildHostedMailboxPayloadSecureBoxAad(
+  input: HostedMailboxPayloadCryptoMetadata,
+): HostedMailboxPayloadSecureBoxAad {
+  return {
+    field: resolveHostedMailboxPayloadField(input.payloadStorage),
+    objectKey: buildHostedMailboxPayloadAadObjectKey(input),
+    purpose: "hosted-mailbox-payload",
+    rowId: input.itemId,
+    sequence: input.laneSeq,
+    table: "hosted_mailbox_item",
+  };
 }
 
 function requireHostedMailboxPayloadAadString(value: string, label: string): string {

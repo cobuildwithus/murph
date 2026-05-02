@@ -4,8 +4,8 @@ import {
   parseSerializedHostedSecureBoxEnvelope,
 } from "@murphai/runtime-state";
 import {
-  buildHostedMailboxPayloadAadObjectKey,
-  resolveHostedMailboxPayloadField,
+  buildHostedMailboxPayloadScope,
+  buildHostedMailboxPayloadSecureBoxAad,
   type HostedMailboxPayloadCryptoMetadata,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -65,18 +65,12 @@ export async function decryptHostedMailboxPayloadCiphertext(input: {
 }): Promise<unknown> {
   const envelope = parseSerializedHostedSecureBoxEnvelope(input.ciphertext);
   const ingressRoot = await input.environment.readIngressRoot(envelope.rootKeyId);
-  const field = resolveHostedMailboxPayloadField(input.metadata.payloadStorage);
-  const scope = `hosted-mailbox-payload:${field}`;
+  const scope = buildHostedMailboxPayloadScope(input.metadata.payloadStorage);
   const aad = buildHostedSecureBoxAad({
+    ...buildHostedMailboxPayloadSecureBoxAad(input.metadata),
     domain: "ingress",
-    field,
     lane: "mailbox-payload",
-    objectKey: buildHostedMailboxPayloadAadObjectKey(input.metadata),
-    purpose: "hosted-mailbox-payload",
-    rowId: input.metadata.itemId,
     scope,
-    sequence: input.metadata.laneSeq,
-    table: "hosted_mailbox_item",
     userId: input.metadata.userId,
   });
   const plaintext = await openHostedSecureBox({
