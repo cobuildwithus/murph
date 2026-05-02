@@ -118,26 +118,37 @@ export type BrowserVaultMetricPointStatistic = "value" | "latest" | "mean" | "me
 
 export interface BrowserVaultMetricPoint {
   biomarkerKey: string | null;
+  canonicalUnit?: string | null;
+  canonicalValue?: number | null;
+  comparator?: "<" | "<=" | ">" | ">=" | null;
   confidence: WearableConfidenceLevel;
+  context?: Record<string, unknown>;
   date: string;
+  effectiveDate?: string;
   grain: BrowserVaultMetricPointGrain;
   id: string;
   metricKey: string;
   observedAt: string;
-  pointSchema: "murph.browser-vault.metric-point.v1";
+  pointSchema: "murph.browser-vault.metric-point";
+  provenance?: Record<string, unknown>;
+  recordedAt?: string | null;
   recordIds: string[];
+  reportedAt?: string | null;
+  schemaVersion?: "murph.metric-point";
+  source?: Record<string, unknown>;
   sourceFamily: string | null;
   sourceKind: string | null;
   sourceLabel: string | null;
   sourceMetricRowId: string;
   statistic: BrowserVaultMetricPointStatistic;
+  textValue?: string | null;
   unit: string | null;
   value: number;
   valueLabel: string;
 }
 
 export interface BrowserVaultMetricSelectionWarning {
-  code: "LOW_SAMPLE_COUNT" | "MIXED_SOURCES" | "SOURCE_STALE" | "UNIT_NOT_NORMALIZED" | "METHOD_CHANGED";
+  code: "COMPARATOR_VALUE" | "LOW_SAMPLE_COUNT" | "MIXED_SOURCES" | "SOURCE_STALE" | "UNIT_NOT_NORMALIZED" | "METHOD_CHANGED";
   message: string;
 }
 
@@ -145,6 +156,7 @@ export interface BrowserVaultMetricSelectionRow {
   biomarkerKey: string | null;
   confidence: WearableConfidenceLevel;
   date: string;
+  effectiveDate?: string;
   id: string;
   metricKey: string;
   observedAt: string;

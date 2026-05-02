@@ -867,7 +867,10 @@ type HostedMailboxEncryptedPayloadStorage =
     storage: "ref";
   };
 
-const HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES = 16 * 1024;
+// Keep active conversation messages stageable from the mailbox item itself.
+// Sidecar payloads remain available for unusually large system/background work,
+// but normal Linq/Telegram/email conversation wakes should not depend on a second fetch.
+const HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES = 128 * 1024;
 const HOSTED_MAILBOX_PAYLOAD_REF_PREFIX = "hosted-mailbox-payload:";
 
 function serializeHostedMailboxPayload(value: unknown): Pick<HostedMailboxStoredPayloadMetadata, "serialized"> {

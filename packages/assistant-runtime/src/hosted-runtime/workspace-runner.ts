@@ -455,6 +455,12 @@ async function importHostedMailboxForWorkspaceRunner(input: {
     createCheckpointRequest: (requestInput) =>
       input.checkpointRequestBuilder.createRequest({
         ...requestInput,
+        ...(requestInput.importResult.nextRetryAt
+          ? {
+              nextWakeAt: requestInput.importResult.nextRetryAt,
+              nextWakeReason: "mailbox",
+            }
+          : {}),
         reason: input.checkpointReason,
       }),
     expectedUserId: input.input.expectedUserId,

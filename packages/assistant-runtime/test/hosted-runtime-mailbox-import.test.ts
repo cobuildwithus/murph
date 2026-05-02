@@ -111,6 +111,7 @@ describe("hosted mailbox import loop", () => {
         seq: "2",
       },
     ]);
+    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
     assert.equal(result.state.watermarks.conversation, "0");
   });
 
@@ -158,10 +159,11 @@ describe("hosted mailbox import loop", () => {
         seq: "1",
       },
     ]);
+    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
     assert.equal(result.state.watermarks.conversation, "0");
   });
 
-  test("quarantines stale retryable blockers and advances the lane", async () => {
+  test("keeps stale retryable blockers pending and schedules a retry", async () => {
     const staleCreatedAt = "2026-04-25T23:29:59.000Z";
     const missingSidecar = createMailboxItem({
       createdAt: staleCreatedAt,
@@ -223,33 +225,15 @@ describe("hosted mailbox import loop", () => {
       {
         itemId: "mailbox_item_conversation_stale_sidecar",
         lane: "conversation",
-        reasonCode: "payload.sidecar_missing.retry_exhausted",
-        retryable: false,
+        reasonCode: "payload.sidecar_missing",
+        retryable: true,
         seq: "1",
       },
-      {
-        itemId: "mailbox_item_conversation_stale_deferred",
-        lane: "conversation",
-        reasonCode: "import.deferred.retry_exhausted",
-        retryable: false,
-        seq: "2",
-      },
-      {
-        itemId: "mailbox_item_conversation_stale_blocked",
-        lane: "conversation",
-        reasonCode: "temporary.retryable_block.retry_exhausted",
-        retryable: false,
-        seq: "3",
-      },
     ]);
-    assert.deepEqual(imported, ["mailbox_item_conversation_after_stale_blockers"]);
-    assert.equal(result.state.watermarks.conversation, "4");
-    assert.deepEqual(result.state.recentStatuses.map((status) => status.status), [
-      "quarantined",
-      "quarantined",
-      "quarantined",
-      "imported",
-    ]);
+    assert.deepEqual(imported, []);
+    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
+    assert.equal(result.state.watermarks.conversation, "0");
+    assert.deepEqual(result.state.recentStatuses, []);
   });
 
   test("quarantines malformed route metadata without exposing payload details", async () => {
@@ -358,6 +342,7 @@ describe("hosted mailbox import loop", () => {
         seq: "1",
       },
     ]);
+    assert.equal(deferredResult.nextRetryAt, "2026-04-26T00:00:15.000Z");
     assert.deepEqual(deferredResult.state.recentStatuses, []);
     assert.equal(deferredResult.state.watermarks.conversation, "0");
 
@@ -465,6 +450,57 @@ describe("hosted mailbox import loop", () => {
     ]);
     assert.equal(result.importedCount, 1);
     assert.equal(result.state.watermarks.conversation, "2");
+  });
+
+  test("keeps retryable blocked import outcomes pending and schedules a retry", async () => {
+    const retryableItem = createMailboxItem({
+      id: "mailbox_item_conversation_retryable_block",
+      laneSeq: "1",
+    });
+    const validItem = createMailboxItem({
+      id: "mailbox_item_conversation_after_retryable_block",
+      laneSeq: "2",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [retryableItem, validItem],
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        if (input.item.id === "mailbox_item_conversation_retryable_block") {
+          return {
+            reasonCode: "temporary.retryable_block",
+            retryable: true,
+            status: "blocked",
+          };
+        }
+        imported.push(input.item.id);
+        return {
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_retryable_block",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(result.blocked, [
+      {
+        itemId: "mailbox_item_conversation_retryable_block",
+        lane: "conversation",
+        reasonCode: "temporary.retryable_block",
+        retryable: true,
+        seq: "1",
+      },
+    ]);
+    assert.deepEqual(imported, []);
+    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
+    assert.deepEqual(result.state.recentStatuses, []);
+    assert.equal(result.state.watermarks.conversation, "0");
   });
 
   test("rejects mailbox fetch responses for another user before import", async () => {

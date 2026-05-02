@@ -940,21 +940,26 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.checkpoint",
       ]);
       assert.equal(checkpointRequests.length, 1);
+      const mailboxRetryWakeAt = checkpointRequests[0]?.nextWakeAt;
+      assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
       assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
         hostedMailboxBlockedCount: 1,
         hostedMailboxConversationImportedSeq: "1",
         hostedMailboxFetchedCount: 2,
         hostedMailboxImportedCount: 1,
+        hostedMailboxNextRetryAtPresent: true,
         hostedMailboxRetryableBlockedCount: 1,
         hostedMailboxSystemImportedSeq: "0",
       });
       assert.deepEqual(result, {
-        nextWakeAt: null,
+        nextWakeAt: mailboxRetryWakeAt,
         redactedStatus: {
           hostedMailboxBlockedCount: 1,
           hostedMailboxConversationImportedSeq: "1",
           hostedMailboxFetchedCount: 2,
           hostedMailboxImportedCount: 1,
+          hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
           hostedMailboxSystemImportedSeq: "0",
         },

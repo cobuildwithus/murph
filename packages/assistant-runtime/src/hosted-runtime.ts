@@ -385,9 +385,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
+    const mailboxImportRetryAt = result.initialMailboxImport.importResult.nextRetryAt ?? null;
     const nextWakeAt = resolveHostedWorkspaceRunNextWakeAt({
       assistantPhaseResult: result.assistantPhaseResult,
       committedWorkspace,
+      mailboxImportRetryAt,
     });
 
     return {
@@ -646,13 +648,36 @@ function resolveHostedWorkspaceRunNextWakeAt(input: {
     "assistantPhaseResult"
   ];
   committedWorkspace: HostedWorkspaceState | null;
+  mailboxImportRetryAt?: string | null;
 }): string | null {
+  const mailboxImportRetryAt = input.mailboxImportRetryAt ?? null;
   if (
     input.assistantPhaseResult
     && Object.hasOwn(input.assistantPhaseResult, "nextWakeAt")
   ) {
-    return input.assistantPhaseResult.nextWakeAt ?? null;
+    return earliestHostedRuntimeWakeAt(input.assistantPhaseResult.nextWakeAt ?? null, mailboxImportRetryAt);
   }
 
-  return input.committedWorkspace?.nextWakeAt ?? null;
+  return earliestHostedRuntimeWakeAt(input.committedWorkspace?.nextWakeAt ?? null, mailboxImportRetryAt);
+}
+
+function earliestHostedRuntimeWakeAt(
+  left: string | null,
+  right: string | null,
+): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
+  }
+  if (!Number.isFinite(rightMs)) {
+    return left;
+  }
+  return rightMs < leftMs ? right : left;
 }

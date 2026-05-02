@@ -137,7 +137,7 @@ describe("appendHostedMailboxItemTx", () => {
       hostedMailboxPayload,
     });
     const payloadSerializedJson = JSON.stringify({
-      body: "x".repeat(100_000),
+      body: "x".repeat(140_000),
       kind: "sidecar-test",
     });
     const payloadBytes = Buffer.byteLength(payloadSerializedJson, "utf8");
@@ -224,7 +224,7 @@ describe("appendHostedMailboxItemTx", () => {
         hostedMailboxPayload: sidecarMailboxPayload,
       });
       const sidecarPayload = {
-        body: "x".repeat(100_000),
+        body: "x".repeat(140_000),
         kind: "sidecar-aad-test",
       };
       const sidecarResult = await appendHostedMailboxItemTx({

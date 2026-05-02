@@ -59,17 +59,17 @@ vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
   },
 }));
 
-vi.mock("@/src/components/ui/checkout-button", () => ({
-  CheckoutButton(props: {
+vi.mock("@/src/components/ui/payment-button", () => ({
+  PaymentButton(props: {
     disabled?: boolean;
     idleLabel: string;
-    onCheckout: () => Promise<void> | void;
+    onClick: () => Promise<void> | void;
     onError?: (error: unknown) => void;
     onSuccess?: () => void;
   }) {
     async function handleClick() {
       try {
-        await props.onCheckout();
+        await props.onClick();
         props.onSuccess?.();
       } catch (error) {
         props.onError?.(error);

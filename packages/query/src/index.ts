@@ -122,6 +122,27 @@ export type {
   SearchResult,
 } from "./search-shared.ts";
 export {
+  buildMetricSeries,
+  createCustomMetricDefinition,
+  formatMetricDisplayValue,
+  listMetricDefinitions,
+  normalizeMetricKey,
+  normalizeMetricValue,
+  resolveMetricDefinition,
+  selectMetricValue,
+  type MetricDefinition,
+  type MetricPoint,
+  type MetricSelection,
+  type MetricSelectionPolicy,
+  type MetricSelectionWarning,
+} from "@murphai/health-metrics";
+export {
+  extractMetricPoints,
+  extractMetricPointsFromCanonicalEntities,
+  extractMetricPointsFromMetricRows,
+  type MetricRowEvidence,
+} from "./metrics/index.ts";
+export {
   type QueryProjectionStatus,
   type RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
@@ -285,6 +306,24 @@ export {
 export * from "./automation.ts";
 export * from "./health/index.ts";
 export * from "./memory.ts";
+
+export async function listMetricPoints(
+  vaultRoot: string,
+  filters: import("./query-projection.ts").QueryMetricPointFilters = {},
+): Promise<import("@murphai/health-metrics").MetricPoint[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listMetricPointsRuntime(vaultRoot, filters);
+}
+
+export async function selectMetric(input: {
+  biomarkerKey?: string;
+  metricKey?: string;
+  now?: string;
+  vaultRoot: string;
+}): Promise<import("@murphai/health-metrics").MetricSelection> {
+  const mod = await import("./query-projection.ts");
+  return mod.selectMetricRuntime(input);
+}
 
 export async function getQueryProjectionStatus(
   vaultRoot: string,

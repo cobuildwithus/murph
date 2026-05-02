@@ -46,7 +46,8 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@murphai/health-metrics": "workspace:*"
   },
   "engines": {
     "node": ">=24.14.1"

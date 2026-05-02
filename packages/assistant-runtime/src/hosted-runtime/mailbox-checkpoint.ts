@@ -190,6 +190,9 @@ export function buildHostedMailboxImportRedactedStatus(
     hostedMailboxImportedCount: importResult.importedCount,
     hostedMailboxRetryableBlockedCount: importResult.blocked.filter((item) => item.retryable)
       .length,
+    ...(importResult.nextRetryAt
+      ? { hostedMailboxNextRetryAtPresent: true }
+      : {}),
     hostedMailboxSystemImportedSeq: importResult.state.watermarks.system,
   };
 }

@@ -12,6 +12,7 @@ import { ActiveExperimentBanner } from "@/src/components/overview/active-experim
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
+import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { Progress } from "@/src/components/ui/progress";
@@ -101,6 +102,33 @@ export function ComponentsContent() {
             <Button size="sm">Small</Button>
             <Button size="default">Default</Button>
             <Button size="lg">Large</Button>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Payment Button">
+          <p className="text-sm text-muted-foreground">Async action button with spinner → checkmark animation. Auth-gated by default. Click to see the flow.</p>
+          <div className="flex flex-wrap items-center gap-4">
+            <PaymentButton
+              onClick={() => new Promise((r) => setTimeout(r, 2000))}
+              idleLabel="Subscribe · $8/mo"
+              idleAdornment={<span className="text-sm">→</span>}
+              onSuccess={() => {}}
+            />
+            <PaymentButton
+              onClick={() => new Promise((r) => setTimeout(r, 1500))}
+              idleLabel="Upgrade plan"
+              variant="secondary"
+              onSuccess={() => {}}
+            />
+            <PaymentButton
+              onClick={() => new Promise((r) => setTimeout(r, 1500))}
+              idleLabel="Confirm purchase"
+              variant="outline"
+              size="default"
+              onSuccess={() => {}}
+            />
           </div>
         </Section>
 

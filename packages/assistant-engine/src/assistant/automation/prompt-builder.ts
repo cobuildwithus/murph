@@ -63,6 +63,8 @@ export function buildAssistantAutoReplyPrompt(
         }),
         inputText: normalizeNullableString(entry.capture.text),
         index,
+        projectionReasonCode: entry.projectionReasonCode ?? null,
+        projectionStatus: entry.projectionStatus ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         totalInputs: inputs.length,
       }),
@@ -111,6 +113,8 @@ export async function prepareAssistantAutoReplyInput(
         }),
         inputText: normalizeNullableString(entry.capture.text),
         index,
+        projectionReasonCode: entry.projectionReasonCode ?? null,
+        projectionStatus: entry.projectionStatus ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         totalInputs: preparedInputs.length,
       }),
@@ -220,6 +224,8 @@ function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
   inputText: string | null
   index: number
+  projectionReasonCode?: string | null
+  projectionStatus?: AssistantInputProjectionStatus | null
   replyContext: string | null
   totalInputs: number
 }): string | null {
@@ -227,6 +233,16 @@ function renderAssistantAutoReplyInputSection(input: {
   if (input.replyContext) {
     sections.push(`Reply context:
 ${input.replyContext}`)
+  }
+  const projectionNote = input.attachmentSections.length === 0
+    ? renderAssistantInputProjectionPromptNote({
+        reasonCode: input.projectionReasonCode ?? null,
+        status: input.projectionStatus ?? null,
+      })
+    : null
+  if (projectionNote) {
+    sections.push(`Message enrichment:
+${projectionNote}`)
   }
   if (input.inputText) {
     sections.push(`Message text:
@@ -450,6 +466,24 @@ function renderAssistantInputDescriptorEnrichmentStatus(input: {
   }
 
   return 'parser/search enrichment: pending'
+}
+
+function renderAssistantInputProjectionPromptNote(input: {
+  reasonCode: string | null
+  status: AssistantInputProjectionStatus | null
+}): string | null {
+  if (input.status === 'failed' || input.status === 'quarantined') {
+    const reason = normalizeNullableString(input.reasonCode)
+    return reason
+      ? `inbox/parser enrichment failed (${reason}); use the staged message text and available metadata only.`
+      : 'inbox/parser enrichment failed; use the staged message text and available metadata only.'
+  }
+
+  if (input.status === 'pending') {
+    return 'inbox/parser enrichment is pending; use the staged message text and available metadata only.'
+  }
+
+  return null
 }
 
 function uniqueSortedStrings(values: readonly string[]): string[] {
