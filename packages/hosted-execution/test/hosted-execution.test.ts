@@ -65,6 +65,10 @@ describe("hosted execution coverage gaps", () => {
     })).toThrow(
       new RegExp(HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
     );
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      runtimeRootKeyId: undefined,
+    })).toThrow(/runtimeRootKeyId/u);
   });
 
   it("parses hosted AI usage billing mode with a disabled default", () => {

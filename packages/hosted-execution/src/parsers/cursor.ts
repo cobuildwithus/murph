@@ -57,9 +57,6 @@ export function parseHostedBrowserVaultReplicaRef(
     throw new TypeError(`${label}.replicaSchema must be murph.browser-vault-replica.v1.`);
   }
 
-  const runtimeRootKeyId = record.runtimeRootKeyId === undefined
-    ? undefined
-    : requireString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`);
   return {
     byteLength: requireNumber(record.byteLength, `${label}.byteLength`),
     dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
@@ -68,7 +65,7 @@ export function parseHostedBrowserVaultReplicaRef(
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
     replicaSchema,
     schema,
-    ...(runtimeRootKeyId === undefined ? {} : { runtimeRootKeyId }),
+    runtimeRootKeyId: requireString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`),
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
   } satisfies HostedBrowserVaultReplicaRef;
 }
