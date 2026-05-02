@@ -507,6 +507,7 @@ export function buildHostedLocalDevOverrides(
   return {
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
+    HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS: webOrigin,
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: hostedOnboardingPublicBaseUrl,
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK"),

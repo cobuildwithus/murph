@@ -51,24 +51,28 @@ describe("assertHostedOnboardingMutationOrigin", () => {
     ).not.toThrow();
   });
 
-  it("allows same-origin localhost development even when a canonical public origin is configured", async () => {
+  it("allows an explicitly configured local development mutation origin", async () => {
+    mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
+      allowedMutationOrigins: ["http://127.0.0.2:3000"],
+      publicBaseUrl: "https://app.example.test",
+    }));
+
     const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
 
     expect(() =>
       assertHostedOnboardingMutationOrigin(
-        new Request("http://localhost:3000/api/hosted-onboarding/invites", {
+        new Request("http://127.0.0.2:3000/api/hosted-onboarding/invites", {
           method: "POST",
           headers: {
-            origin: "http://localhost:3000",
+            origin: "http://127.0.0.2:3000",
           },
         }),
       )
     ).not.toThrow();
   });
 
-  it("rejects localhost development fallback in production when a canonical public origin is configured", async () => {
+  it("rejects unconfigured localhost development origins when a canonical public origin is configured", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
-      isProduction: true,
       publicBaseUrl: "https://app.example.test",
     }));
 
@@ -126,8 +130,9 @@ describe("assertHostedOnboardingMutationOrigin", () => {
     }));
   });
 
-  it("allows matching localhost origins in non-production when no canonical origin is configured", async () => {
+  it("allows explicitly configured localhost origins when no canonical origin is configured", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
+      allowedMutationOrigins: ["http://localhost:3000"],
       publicBaseUrl: null,
     }));
 
@@ -145,9 +150,8 @@ describe("assertHostedOnboardingMutationOrigin", () => {
     ).not.toThrow();
   });
 
-  it("rejects localhost fallback in production when no canonical origin is configured", async () => {
+  it("rejects unconfigured localhost origins when no canonical origin is configured", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
-      isProduction: true,
       publicBaseUrl: null,
     }));
 

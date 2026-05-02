@@ -21,6 +21,7 @@ describe("readHostedOnboardingEnvironment", () => {
     }));
 
     expect(environment.aiUsageBillingMode).toBe("disabled");
+    expect(environment.allowedMutationOrigins).toEqual([]);
     expect(environment.publicBaseUrl).toBe("https://join.example.test");
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
@@ -83,6 +84,31 @@ describe("readHostedOnboardingEnvironment", () => {
 
     expect(environment.publicBaseUrl).toBe("https://www.withmurph.ai");
   });
+
+  it("reads explicit hosted onboarding browser mutation origins", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
+        "http://localhost:3000, http://127.0.0.2:3000, https://preview.example.test",
+    }));
+
+    expect(environment.allowedMutationOrigins).toEqual([
+      "http://localhost:3000",
+      "http://127.0.0.2:3000",
+      "https://preview.example.test",
+    ]);
+  });
+
+  it.each(["http://localhost:3000", "https://localhost:3000", "https://127.0.0.2:3000"])(
+    "rejects loopback mutation origin %s in production",
+    (origin) => {
+      expect(() =>
+        readHostedOnboardingEnvironment(createProcessEnv({
+          HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS: origin,
+          NODE_ENV: "production",
+        })),
+      ).toThrow(/must not include loopback origins in production/u);
+    },
+  );
 
   it("ignores removed branded Linq aliases", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({

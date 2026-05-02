@@ -17,7 +17,7 @@ Murph hosted users need a real, backend-backed way to export account data and de
 The export and delete endpoints are intentionally stricter than normal settings reads.
 
 1. `POST /api/settings/data-export` and `POST /api/settings/privacy/delete` require an authenticated Privy-backed hosted member session via `requirePrivyMemberAuth`, including members who need privacy access after losing active billing state.
-2. Both routes enforce same-origin mutation protection with `assertHostedOnboardingMutationOrigin`.
+2. Both routes enforce browser mutation-origin protection with `assertHostedOnboardingMutationOrigin`, allowing only the canonical hosted origin or explicitly trusted mutation origins.
 3. Both routes parse JSON through the hosted onboarding JSON helper with a 4 KiB body limit instead of accepting form-encoded, ambiguous, or oversized bodies.
 4. `parseHostedDataExportRequest` requires the exact `EXPORT MY DATA` phrase plus sensitive-download acknowledgement. Lowercase, extra spaces, or omitted acknowledgement fail with structured 400 errors.
 5. `parseHostedAccountDeletionRequest` requires the exact deletion confirmation phrase. Lowercase, extra spaces, or omitted acknowledgements fail with structured 400 errors.

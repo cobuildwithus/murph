@@ -571,6 +571,7 @@ describe("buildHostedLocalDevOverrides", () => {
     expect(overrides).toMatchObject({
       HOSTED_EXECUTION_CONTROL_URL: "http://127.0.0.1:8787",
       HOSTED_EXECUTION_DISPATCH_URL: "http://127.0.0.1:8787",
+      HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS: "http://localhost:3000",
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
       HOSTED_MAILBOX_FINGERPRINT_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
       HOSTED_WEB_BASE_URL: "http://localhost:3000",
@@ -624,6 +625,7 @@ describe("buildHostedLocalDevOverrides", () => {
     });
 
     expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("https://tunnel.example.test");
+    expect(overrides.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS).toBe("http://localhost:3000");
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
   });
 

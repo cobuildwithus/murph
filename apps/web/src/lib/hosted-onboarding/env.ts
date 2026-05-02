@@ -25,6 +25,7 @@ export interface HostedContactPrivacyKeyring {
 
 export interface HostedOnboardingEnvironment {
   aiUsageBillingMode: HostedAiUsageBillingMode;
+  allowedMutationOrigins?: readonly string[];
   contactPrivacyKeyring: HostedContactPrivacyKeyring;
   inviteTtlHours: number;
   isProduction: boolean;
@@ -54,16 +55,18 @@ export function readHostedOnboardingEnvironment(
 ): HostedOnboardingEnvironment {
   const publicBaseUrl = readHostedPublicBaseUrl(source);
   const linq = readLinqEnvironment(source as NodeJS.ProcessEnv);
+  const isProduction = (source.NODE_ENV ?? "development") === "production";
 
   return {
     aiUsageBillingMode: readHostedAiUsageBillingMode(source),
+    allowedMutationOrigins: readHostedOnboardingAllowedMutationOrigins(source, isProduction),
     contactPrivacyKeyring: readHostedContactPrivacyKeyring(source),
     inviteTtlHours: readPositiveInteger(
       readEnv(source, "HOSTED_ONBOARDING_INVITE_TTL_HOURS"),
       24 * 7,
       "HOSTED_ONBOARDING_INVITE_TTL_HOURS",
     ),
-    isProduction: (source.NODE_ENV ?? "development") === "production",
+    isProduction,
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
@@ -86,6 +89,93 @@ export function readHostedOnboardingEnvironment(
     telegramBotUsername: readEnv(source, "TELEGRAM_BOT_USERNAME"),
     telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
   };
+}
+
+function readHostedOnboardingAllowedMutationOrigins(
+  source: HostedOnboardingEnvSource,
+  isProduction: boolean,
+): string[] {
+  const configured = readEnv(source, "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS");
+
+  if (!configured) {
+    return [];
+  }
+
+  const origins: string[] = [];
+
+  for (const value of configured.split(/[\n,]+/u)) {
+    const origin = normalizeHostedOnboardingMutationOrigin(value, isProduction);
+
+    if (origin && !origins.includes(origin)) {
+      origins.push(origin);
+    }
+  }
+
+  return origins;
+}
+
+function normalizeHostedOnboardingMutationOrigin(
+  value: string,
+  isProduction: boolean,
+): string | null {
+  const normalized = normalizeNullableString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new TypeError(
+      `HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS contains an invalid origin: ${JSON.stringify(normalized)}.`,
+    );
+  }
+
+  const protocol = url.protocol.toLowerCase();
+  const hostname = url.hostname.toLowerCase();
+  const isHttpsOrigin = protocol === "https:";
+  const isLoopbackOrigin = isLoopbackHost(hostname);
+  const isHttpLoopbackOrigin = protocol === "http:" && isLoopbackOrigin;
+
+  if (!isHttpsOrigin && !isHttpLoopbackOrigin) {
+    throw new TypeError(
+      "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS entries must be HTTPS origins or HTTP loopback origins for local development.",
+    );
+  }
+
+  if (isProduction && isLoopbackOrigin) {
+    throw new TypeError(
+      "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS must not include loopback origins in production.",
+    );
+  }
+
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new TypeError(
+      "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS entries must be origins without credentials, paths, queries, or fragments.",
+    );
+  }
+
+  return url.origin;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalizedHostname =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+
+  if (normalizedHostname === "localhost" || normalizedHostname === "::1") {
+    return true;
+  }
+
+  const ipv4Parts = normalizedHostname.split(".");
+  return ipv4Parts.length === 4
+    && ipv4Parts.every((part) => /^[0-9]+$/u.test(part))
+    && Number(ipv4Parts[0]) === 127
+    && ipv4Parts.every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
 
 function readHostedContactPrivacyKeyring(
