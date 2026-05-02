@@ -467,7 +467,7 @@ test("goal progress keeps behind for scheduled rolling-window targets that miss 
 
   const progress = selectMetricGoalProgress({
     goalId: "goal_rhr",
-    now: "2026-04-30T00:00:00.000Z",
+    now: "2026-05-10T00:00:00.000Z",
     points: Array.from({ length: 7 }, (_, index) => metricPoint({
       effectiveDate: `2026-04-${String(23 + index).padStart(2, "0")}`,
       id: `metric-point:resting-heart-rate:2026-04-${String(23 + index).padStart(2, "0")}:wearable:0`,
