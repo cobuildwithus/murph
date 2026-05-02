@@ -19,6 +19,7 @@ export type BrowserVaultBiomarkerPanelStatus =
   | "ready"
   | "no_private_vault"
   | "no_data"
+  | "missing_selection"
   | "insufficient_data"
   | "stale"
   | "unsupported"
@@ -121,7 +122,7 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
   const primary = buildMetricPanel({ binding: primaryBinding ?? { metricKey, role: "primary" }, input, metricKey });
   const context = resolveContextMetricBindings(input, metricKey).map((binding) => buildMetricPanel({ binding, input, metricKey: binding.metricKey }));
   const warnings = buildWarnings({ primary, trendDefaults: input.trendDefaults });
-  const selectionStatus = primary.selection?.status ?? (primary.latest ? "ready" : "no_data");
+  const selectionStatus = primary.selection?.status ?? "no_data";
 
   if (selectionStatus === "unsupported") {
     return {
@@ -133,10 +134,6 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
     };
   }
 
-  if (selectionStatus === "no_data" || !primary.latest) {
-    return { ...base, emptyState: { body: `No ${input.label} values were found in the current browser-vault snapshot.`, title: "No private values yet" }, status: "no_data", warnings };
-  }
-
   if (selectionStatus === "insufficient_data") {
     return {
       ...base,
@@ -145,6 +142,24 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
       status: "insufficient_data",
       warnings,
     };
+  }
+
+  if (selectionStatus === "no_data" || !primary.latest) {
+    if (primary.sampleCount > 0) {
+      return {
+        ...base,
+        context,
+        emptyState: {
+          body: `${input.label} trend rows were found, but this browser-vault snapshot did not include a selected current value.`,
+          title: "No current private value selected",
+        },
+        primary,
+        status: "missing_selection",
+        warnings,
+      };
+    }
+
+    return { ...base, emptyState: { body: `No ${input.label} values were found in the current browser-vault snapshot.`, title: "No private values yet" }, status: "no_data", warnings };
   }
 
   return {
@@ -206,7 +221,7 @@ function buildMetricPanel(input: {
   return {
     binding: { metricKey: input.metricKey },
     label: input.binding.label ?? definition?.displayName ?? input.input.label,
-    latest: metricSelectionToLatest(selection) ?? (latest ? { confidence: latest.confidence, date: latest.date, sourceLabel: latest.sourceLabel ?? latest.sourceKind ?? "metric", unit: latest.unit, value: latest.value } : null),
+    latest: metricSelectionToLatest(selection),
     sampleCount: rows.length,
     selection,
     series: rows.map((row) => ({ confidence: row.confidence, date: row.date, unit: row.unit, value: row.value })),

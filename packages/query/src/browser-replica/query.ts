@@ -37,7 +37,6 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
     }
   }
 
-
   return {
     entities: {
       get(idOrLookupId) {

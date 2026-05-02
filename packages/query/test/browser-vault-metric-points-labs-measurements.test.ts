@@ -19,7 +19,7 @@ import { rebuildQueryProjection } from "../src/index.ts";
 
 type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
-test("browser-vault metric points project manual measurements and blood-test results through one primitive", async () => {
+test("browser-vault metric points project manual measurements, metric samples, and blood-test results through one primitive", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-05-02T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
@@ -94,6 +94,30 @@ test("browser-vault metric points project manual measurements and blood-test res
             testName: "functional_health_panel",
           },
         }),
+        createMetricSample("smp_metric_rhr_manual", {
+          recordedAt: "2026-05-03T07:00:00.000Z",
+          attributes: {
+            metric: "resting-heart-rate",
+            recordedAt: "2026-05-03T07:00:00.000Z",
+            dayKey: "2026-05-03",
+            source: "manual",
+            quality: "raw",
+            value: 55,
+            unit: "bpm",
+          },
+        }),
+        createMetricSample("smp_metric_rhr_raw_device", {
+          recordedAt: "2026-05-04T07:00:00.000Z",
+          attributes: {
+            metric: "resting-heart-rate",
+            recordedAt: "2026-05-04T07:00:00.000Z",
+            dayKey: "2026-05-04",
+            source: "device",
+            quality: "raw",
+            value: 40,
+            unit: "bpm",
+          },
+        }),
       ],
       metadata: null,
       vaultRoot: "browser://vault",
@@ -113,6 +137,23 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.ok(bodyFat);
   assert.equal(bodyFat.valueLabel, "14.8");
   assert.equal(bodyFat.unit, "percent");
+
+  const restingHeartRate = client.metricSelections.getByBiomarker("biomarker:resting-heart-rate");
+  assert.ok(restingHeartRate);
+  assert.equal(restingHeartRate.value, 55);
+  assert.equal(restingHeartRate.sourceLabel, "Manual");
+  assert.equal(restingHeartRate.recordIds[0], "smp_metric_rhr_manual");
+  assert.deepEqual(client.metrics.series({ metricKey: "resting-heart-rate" }).map((point) => point.value), [55]);
+  assert.deepEqual(
+    client.entities.list({ families: ["sample"], kinds: ["metric_sample"] }).map((entity) => entity.id),
+    ["smp_metric_rhr_manual"],
+  );
+  assert.deepEqual(
+    client.replica.weeklySampleSummaries
+      .filter((summary) => summary.stream === "resting-heart-rate")
+      .map((summary) => [summary.date, summary.sampleCount, summary.sumValue]),
+    [["2026-05-03", 1, 55]],
+  );
 
   const apob = client.metricSelections.get("apob");
   assert.ok(apob);
@@ -446,7 +487,7 @@ test("query projection rebuild stores shared event and wearable metric points in
         value: number;
       }>;
 
-      assert.deepEqual(rows.map((row) => row.metricKey), ["apob", "body-weight", "steps"]);
+      assert.deepEqual(rows.map((row) => row.metricKey), ["apob", "body-weight", "resting-heart-rate", "steps"]);
       assert.equal(rows.find((row) => row.metricKey === "body-weight")?.unit, "kg");
       assert.equal(rows.find((row) => row.metricKey === "body-weight")?.value, 81.6466);
       assert.equal(
@@ -455,6 +496,8 @@ test("query projection rebuild stores shared event and wearable metric points in
       );
       assert.equal(rows.find((row) => row.metricKey === "apob")?.biomarkerKey, "biomarker:apob");
       assert.equal(rows.find((row) => row.metricKey === "apob")?.sourceKind, "test-result");
+      assert.equal(rows.find((row) => row.metricKey === "resting-heart-rate")?.sourceKind, "metric-sample");
+      assert.equal(rows.find((row) => row.metricKey === "resting-heart-rate")?.sourceRecordId, "smp_projection_rhr");
       assert.deepEqual(
         [rows.find((row) => row.metricKey === "apob")?.sourceRecordId],
         ["evt_projection_test"],
@@ -509,12 +552,44 @@ function createEvent(
   } satisfies CanonicalEntity;
 }
 
+function createMetricSample(
+  entityId: string,
+  input: {
+    attributes: Record<string, unknown>;
+    recordedAt: string;
+  },
+): CanonicalEntity {
+  return {
+    attributes: input.attributes,
+    body: null,
+    date: input.recordedAt.slice(0, 10),
+    entityId,
+    experimentSlug: null,
+    family: "sample",
+    frontmatter: null,
+    kind: "metric_sample",
+    links: [],
+    lookupIds: [entityId],
+    occurredAt: input.recordedAt,
+    path: `ledger/metric-samples/${input.attributes.metric ?? "metric"}/2026/2026-05.jsonl`,
+    primaryLookupId: entityId,
+    recordClass: "sample",
+    relatedIds: [],
+    status: typeof input.attributes.quality === "string" ? input.attributes.quality : null,
+    stream: typeof input.attributes.metric === "string" ? input.attributes.metric : null,
+    tags: [],
+    title: "Metric sample",
+  } satisfies CanonicalEntity;
+}
+
 async function createMetricPointProjectionVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-metric-points-"));
   const eventsDir = path.join(vaultRoot, "ledger/events/2026");
+  const metricSamplesDir = path.join(vaultRoot, "ledger/metric-samples/resting-heart-rate/2026");
   const stepsDir = path.join(vaultRoot, "ledger/samples/steps/2026");
 
   await mkdir(eventsDir, { recursive: true });
+  await mkdir(metricSamplesDir, { recursive: true });
   await mkdir(stepsDir, { recursive: true });
   await writeFile(
     path.join(vaultRoot, "vault.json"),
@@ -565,6 +640,23 @@ async function createMetricPointProjectionVault(): Promise<string> {
             value: 87,
           },
         ],
+      }),
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(metricSamplesDir, "2026-05.jsonl"),
+    [
+      JSON.stringify({
+        schemaVersion: "murph.metric-sample.v1",
+        id: "smp_projection_rhr",
+        metric: "resting-heart-rate",
+        recordedAt: "2026-05-02T07:00:00.000Z",
+        dayKey: "2026-05-02",
+        source: "import",
+        quality: "normalized",
+        value: 56,
+        unit: "bpm",
       }),
       "",
     ].join("\n"),

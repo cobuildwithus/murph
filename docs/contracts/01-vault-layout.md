@@ -47,6 +47,7 @@ Status: frozen current contract plus health extension fence
   ledger/inbox-captures/YYYY/YYYY-MM.jsonl
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
+  ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl
   ledger/samples/<stream>/YYYY/YYYY-MM.jsonl
   audit/YYYY/YYYY-MM.jsonl
   derived/knowledge/index.md
@@ -85,6 +86,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
+- Metric-sample shards use `recordedAt`: `ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl`.
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
 - Export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
