@@ -1,7 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  findMany: vi.fn(),
+  groupBy: vi.fn(),
+  hostedWorkspaceFindMany: vi.fn(),
   getPrisma: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
 }));
@@ -26,8 +27,11 @@ describe("hosted mailbox lag sweeper", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({
-      hostedMailboxLaneCounter: {
-        findMany: mocks.findMany,
+      hostedMailboxItem: {
+        groupBy: mocks.groupBy,
+      },
+      hostedWorkspace: {
+        findMany: mocks.hostedWorkspaceFindMany,
       },
     });
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
@@ -41,68 +45,66 @@ describe("hosted mailbox lag sweeper", () => {
     });
   });
 
-  it("nudges lagged users and bounds the number of nudge attempts", async () => {
-    mocks.findMany.mockResolvedValue([
-      buildCounter({
+  it("nudges lagged users from mailbox item high-water rows", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
         lane: "conversation",
-        nextSeq: 4n,
-        redactedStatusJson: {
-          hostedMailboxConversationImportedSeq: "2",
-          hostedMailboxSystemImportedSeq: "0",
-        },
+        maxSeq: 3n,
         userId: "member_lag_1",
       }),
-      buildCounter({
+      buildHighWater({
         lane: "system",
-        nextSeq: 2n,
+        maxSeq: 1n,
+        userId: "member_lag_1",
+      }),
+      buildHighWater({
+        lane: "conversation",
+        maxSeq: 2n,
+        userId: "member_current",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
         redactedStatusJson: {
           hostedMailboxConversationImportedSeq: "2",
           hostedMailboxSystemImportedSeq: "0",
         },
         userId: "member_lag_1",
       }),
-      buildCounter({
-        lane: "conversation",
-        nextSeq: 3n,
+      buildWorkspace({
         redactedStatusJson: {
           hostedMailboxConversationImportedSeq: "2",
         },
         userId: "member_current",
       }),
-      buildCounter({
-        lane: "conversation",
-        nextSeq: 10n,
-        redactedStatusJson: {
-          hostedMailboxConversationImportedSeq: "0",
-        },
-        userId: "member_lag_2",
-      }),
-      buildCounter({
-        lane: "unknown-lane",
-        nextSeq: 2n,
-        redactedStatusJson: null,
-        userId: "member_invalid",
-      }),
     ]);
-    const logger = {
-      info: vi.fn(),
-      warn: vi.fn(),
-    };
+    const logger = buildLogger();
 
     const result = await lagSweeper.runHostedMailboxLagSweeper({
-      counterLimit: 10,
       logger,
-      nudgeLimit: 1,
+      now: new Date("1970-01-01T00:00:00.000Z"),
+      nudgeLimit: 5,
     });
 
-    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 10,
+    expect(mocks.groupBy).toHaveBeenCalledWith({
+      _max: {
+        laneSeq: true,
+        updatedAt: true,
+      },
+      by: ["userId", "lane"],
+    });
+    expect(mocks.hostedWorkspaceFindMany).toHaveBeenCalledWith({
+      select: {
+        checkpointedAt: true,
+        redactedStatusJson: true,
+        userId: true,
+      },
       where: {
-        nextSeq: {
-          gt: 1n,
+        userId: {
+          in: ["member_lag_1", "member_current"],
         },
       },
-    }));
+    });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "hosted-mailbox-lag-sweeper",
@@ -110,37 +112,68 @@ describe("hosted mailbox lag sweeper", () => {
       userId: "member_lag_1",
     });
     expect(result).toEqual({
-      candidateCounters: 5,
-      currentCounters: 1,
-      invalidLaneCounters: 1,
-      laggedCounters: 3,
-      laggedUsers: 2,
+      highWaterRows: 3,
+      laggedUsers: 1,
       nudgeAccepted: 1,
       nudgeAttempted: 1,
-      nudgeLimit: 1,
+      nudgeLimit: 5,
       nudgeNotAccepted: 0,
-      skippedLaggedUsers: 1,
+      skippedLaggedUsers: 0,
     });
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted mailbox lag sweeper nudging runner for mailbox lag.",
       expect.objectContaining({
-        userId: "member_lag_1",
+        userFingerprint: expect.stringMatching(/^[0-9a-f]{12}$/u),
       }),
     );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_lag_1");
+  });
+
+  it("rotates the nudge window when lagged users exceed the per-run limit", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({ lane: "conversation", maxSeq: 1n, userId: "member_lag_1" }),
+      buildHighWater({ lane: "conversation", maxSeq: 1n, userId: "member_lag_2" }),
+      buildHighWater({ lane: "conversation", maxSeq: 1n, userId: "member_lag_3" }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({ redactedStatusJson: { hostedMailboxConversationImportedSeq: "0" }, userId: "member_lag_1" }),
+      buildWorkspace({ redactedStatusJson: { hostedMailboxConversationImportedSeq: "0" }, userId: "member_lag_2" }),
+      buildWorkspace({ redactedStatusJson: { hostedMailboxConversationImportedSeq: "0" }, userId: "member_lag_3" }),
+    ]);
+    const logger = buildLogger();
+
+    const result = await lagSweeper.runHostedMailboxLagSweeper({
+      logger,
+      now: new Date("1970-01-01T00:01:00.000Z"),
+      nudgeLimit: 1,
+    });
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "member_lag_2",
+      }),
+    );
+    expect(result.skippedLaggedUsers).toBe(2);
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted mailbox lag sweeper skipped lagged users after nudge limit.",
       {
         nudgeLimit: 1,
-        skippedLaggedUsers: 1,
+        skippedLaggedUsers: 2,
       },
     );
   });
 
   it("logs a warning when a lag nudge is not accepted", async () => {
-    mocks.findMany.mockResolvedValue([
-      buildCounter({
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
         lane: "conversation",
-        nextSeq: 4n,
+        maxSeq: 4n,
+        userId: "member_lag_1",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
         redactedStatusJson: {
           hostedMailboxConversationImportedSeq: "0",
         },
@@ -156,10 +189,7 @@ describe("hosted mailbox lag sweeper", () => {
       inFlight: null,
       nextAlarmAtPresent: null,
     });
-    const logger = {
-      info: vi.fn(),
-      warn: vi.fn(),
-    };
+    const logger = buildLogger();
 
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger,
@@ -171,28 +201,42 @@ describe("hosted mailbox lag sweeper", () => {
       {
         configured: true,
         errorCode: "TimeoutError",
-        userId: "member_lag_1",
+        userFingerprint: expect.stringMatching(/^[0-9a-f]{12}$/u),
       },
     );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_lag_1");
   });
 });
 
-function buildCounter(input: {
+function buildHighWater(input: {
   lane: string;
-  nextSeq: bigint;
+  maxSeq: bigint;
+  userId: string;
+}) {
+  return {
+    _max: {
+      laneSeq: input.maxSeq,
+      updatedAt: new Date("2026-05-02T00:01:00.000Z"),
+    },
+    lane: input.lane,
+    userId: input.userId,
+  };
+}
+
+function buildWorkspace(input: {
   redactedStatusJson: Record<string, unknown> | null;
   userId: string;
 }) {
   return {
-    lane: input.lane,
-    member: {
-      hostedWorkspace: {
-        checkpointedAt: new Date("2026-05-02T00:00:00.000Z"),
-        redactedStatusJson: input.redactedStatusJson,
-      },
-    },
-    nextSeq: input.nextSeq,
-    updatedAt: new Date("2026-05-02T00:01:00.000Z"),
+    checkpointedAt: new Date("2026-05-02T00:00:00.000Z"),
+    redactedStatusJson: input.redactedStatusJson,
     userId: input.userId,
+  };
+}
+
+function buildLogger() {
+  return {
+    info: vi.fn(),
+    warn: vi.fn(),
   };
 }

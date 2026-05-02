@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   isHostedMailboxLane,
   type HostedMailboxLaneLag,
@@ -8,17 +10,13 @@ import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control"
 import { getPrisma } from "../prisma";
 import { computeHostedMailboxLaneLag } from "./lag";
 
-const DEFAULT_COUNTER_LIMIT = 500;
-const DEFAULT_NUDGE_LIMIT = 50;
-const MAX_COUNTER_LIMIT = 5_000;
+const DEFAULT_NUDGE_LIMIT = 25;
 const MAX_NUDGE_LIMIT = 250;
 const NUDGE_TIMEOUT_MS = 5_000;
+const NUDGE_CONCURRENCY = 5;
 
 export interface HostedMailboxLagSweeperResult {
-  candidateCounters: number;
-  currentCounters: number;
-  invalidLaneCounters: number;
-  laggedCounters: number;
+  highWaterRows: number;
   laggedUsers: number;
   nudgeAccepted: number;
   nudgeAttempted: number;
@@ -27,155 +25,146 @@ export interface HostedMailboxLagSweeperResult {
   skippedLaggedUsers: number;
 }
 
-type HostedMailboxLagSweeperPrisma = Pick<PrismaClient, "hostedMailboxLaneCounter">;
+type HostedMailboxLagSweeperPrisma =
+  Pick<PrismaClient, "hostedMailboxItem" | "hostedWorkspace">;
 
 type HostedMailboxLagSweeperLogger = Pick<Console, "info" | "warn">;
 
+interface HostedMailboxLaggedUser {
+  lanes: HostedMailboxLaneLag[];
+  latestMailboxUpdatedAt: Date | null;
+  workspaceCheckpointedAt: Date | null;
+}
+
+type HostedMailboxLaggedUserEntry = [string, HostedMailboxLaggedUser];
+
 export async function runHostedMailboxLagSweeper(input: {
-  counterLimit?: number;
   logger?: HostedMailboxLagSweeperLogger;
+  now?: Date;
   nudgeLimit?: number;
   prisma?: HostedMailboxLagSweeperPrisma;
 } = {}): Promise<HostedMailboxLagSweeperResult> {
   const prisma = input.prisma ?? getPrisma();
   const logger = input.logger ?? console;
-  const counterLimit = normalizeLimit(input.counterLimit, DEFAULT_COUNTER_LIMIT, MAX_COUNTER_LIMIT);
+  const now = input.now ?? new Date();
   const nudgeLimit = normalizeLimit(input.nudgeLimit, DEFAULT_NUDGE_LIMIT, MAX_NUDGE_LIMIT);
-  const counters = await prisma.hostedMailboxLaneCounter.findMany({
-    orderBy: [
-      {
-        updatedAt: "desc",
-      },
-      {
-        userId: "asc",
-      },
-      {
-        lane: "asc",
-      },
-    ],
-    select: {
-      lane: true,
-      member: {
-        select: {
-          hostedWorkspace: {
-            select: {
-              checkpointedAt: true,
-              redactedStatusJson: true,
-            },
-          },
-        },
-      },
-      nextSeq: true,
+  const highWaterRows = await prisma.hostedMailboxItem.groupBy({
+    _max: {
+      laneSeq: true,
       updatedAt: true,
+    },
+    by: ["userId", "lane"],
+  });
+  const userIds = Array.from(new Set(highWaterRows.map((row) => row.userId)));
+  const workspaces = await prisma.hostedWorkspace.findMany({
+    select: {
+      checkpointedAt: true,
+      redactedStatusJson: true,
       userId: true,
     },
-    take: counterLimit,
     where: {
-      nextSeq: {
-        gt: 1n,
+      userId: {
+        in: userIds,
       },
     },
   });
+  const workspaceByUserId = new Map(
+    workspaces.map((workspace) => [workspace.userId, workspace]),
+  );
+  const laggedByUser = new Map<string, HostedMailboxLaggedUser>();
 
-  const laggedByUser = new Map<string, {
-    checkpointedAt: Date | null;
-    lanes: HostedMailboxLaneLag[];
-    latestCounterUpdatedAt: Date;
-  }>();
-  let currentCounters = 0;
-  let invalidLaneCounters = 0;
-  let laggedCounters = 0;
-
-  for (const counter of counters) {
-    if (!isHostedMailboxLane(counter.lane)) {
-      invalidLaneCounters += 1;
-      logger.warn("Hosted mailbox lag sweeper skipped mailbox counter with invalid lane.", {
-        lane: counter.lane,
-        userId: counter.userId,
-      });
+  for (const highWater of highWaterRows) {
+    if (!isHostedMailboxLane(highWater.lane) || highWater._max.laneSeq === null) {
       continue;
     }
 
-    const maxSeq = counter.nextSeq > 0n ? counter.nextSeq - 1n : 0n;
+    const workspace = workspaceByUserId.get(highWater.userId) ?? null;
     const lag = computeHostedMailboxLaneLag({
       highWater: {
-        lane: counter.lane,
-        maxSeq: maxSeq.toString(),
+        lane: highWater.lane,
+        maxSeq: highWater._max.laneSeq.toString(),
       },
-      redactedStatusJson: counter.member.hostedWorkspace?.redactedStatusJson ?? null,
+      redactedStatusJson: workspace?.redactedStatusJson ?? null,
     });
 
     if (lag.lag === "0") {
-      currentCounters += 1;
       continue;
     }
 
-    laggedCounters += 1;
-    const existing = laggedByUser.get(counter.userId);
+    const existing = laggedByUser.get(highWater.userId);
     if (existing) {
       existing.lanes.push(lag);
-      if (counter.updatedAt > existing.latestCounterUpdatedAt) {
-        existing.latestCounterUpdatedAt = counter.updatedAt;
-      }
+      existing.latestMailboxUpdatedAt = maxNullableDate(
+        existing.latestMailboxUpdatedAt,
+        highWater._max.updatedAt,
+      );
       continue;
     }
 
-    laggedByUser.set(counter.userId, {
-      checkpointedAt: counter.member.hostedWorkspace?.checkpointedAt ?? null,
+    laggedByUser.set(highWater.userId, {
       lanes: [lag],
-      latestCounterUpdatedAt: counter.updatedAt,
+      latestMailboxUpdatedAt: highWater._max.updatedAt,
+      workspaceCheckpointedAt: workspace?.checkpointedAt ?? null,
     });
   }
 
-  logger.info("Hosted mailbox lag sweeper scanned mailbox counters.", {
-    candidateCounters: counters.length,
-    currentCounters,
-    invalidLaneCounters,
-    laggedCounters,
+  const selectedLaggedUsers = selectRotatingNudgeWindow({
+    laggedUsers: Array.from(laggedByUser.entries()),
+    now,
+    nudgeLimit,
+  });
+
+  logger.info("Hosted mailbox lag sweeper scanned mailbox high-water rows.", {
+    highWaterRows: highWaterRows.length,
     laggedUsers: laggedByUser.size,
     nudgeLimit,
+    selectedLaggedUsers: selectedLaggedUsers.length,
   });
 
   let nudgeAccepted = 0;
   let nudgeAttempted = 0;
   let nudgeNotAccepted = 0;
-  const laggedUsers = Array.from(laggedByUser.entries()).slice(0, nudgeLimit);
 
-  for (const [userId, lagged] of laggedUsers) {
-    nudgeAttempted += 1;
-    logger.warn("Hosted mailbox lag sweeper nudging runner for mailbox lag.", {
-      checkpointedAt: lagged.checkpointedAt?.toISOString() ?? null,
-      lanes: lagged.lanes,
-      latestCounterUpdatedAt: lagged.latestCounterUpdatedAt.toISOString(),
-      userId,
-    });
-    const nudge = await nudgeHostedRunnerUserBestEffortResult({
-      context: "hosted-mailbox-lag-sweeper",
-      timeoutMs: NUDGE_TIMEOUT_MS,
-      userId,
-    });
-
-    if (nudge.accepted) {
-      nudgeAccepted += 1;
-      logger.info("Hosted mailbox lag sweeper runner nudge accepted.", {
-        alarmScheduled: nudge.alarmScheduled,
-        alreadyRunning: nudge.alreadyRunning,
-        inFlight: nudge.inFlight,
-        nextAlarmAtPresent: nudge.nextAlarmAtPresent,
+  await runWithConcurrency(
+    selectedLaggedUsers,
+    NUDGE_CONCURRENCY,
+    async ([userId, lagged]) => {
+      nudgeAttempted += 1;
+      const userFingerprint = fingerprintHostedMailboxLagUser(userId);
+      logger.warn("Hosted mailbox lag sweeper nudging runner for mailbox lag.", {
+        lanes: lagged.lanes,
+        latestMailboxUpdatedAt: lagged.latestMailboxUpdatedAt?.toISOString() ?? null,
+        userFingerprint,
+        workspaceCheckpointedAt: lagged.workspaceCheckpointedAt?.toISOString() ?? null,
+      });
+      const nudge = await nudgeHostedRunnerUserBestEffortResult({
+        context: "hosted-mailbox-lag-sweeper",
+        timeoutMs: NUDGE_TIMEOUT_MS,
         userId,
       });
-      continue;
-    }
 
-    nudgeNotAccepted += 1;
-    logger.warn("Hosted mailbox lag sweeper runner nudge was not accepted.", {
-      configured: nudge.configured,
-      errorCode: nudge.errorCode,
-      userId,
-    });
-  }
+      if (nudge.accepted) {
+        nudgeAccepted += 1;
+        logger.info("Hosted mailbox lag sweeper runner nudge accepted.", {
+          alarmScheduled: nudge.alarmScheduled,
+          alreadyRunning: nudge.alreadyRunning,
+          inFlight: nudge.inFlight,
+          nextAlarmAtPresent: nudge.nextAlarmAtPresent,
+          userFingerprint,
+        });
+        return;
+      }
 
-  const skippedLaggedUsers = Math.max(0, laggedByUser.size - laggedUsers.length);
+      nudgeNotAccepted += 1;
+      logger.warn("Hosted mailbox lag sweeper runner nudge was not accepted.", {
+        configured: nudge.configured,
+        errorCode: nudge.errorCode,
+        userFingerprint,
+      });
+    },
+  );
+
+  const skippedLaggedUsers = Math.max(0, laggedByUser.size - selectedLaggedUsers.length);
   if (skippedLaggedUsers > 0) {
     logger.warn("Hosted mailbox lag sweeper skipped lagged users after nudge limit.", {
       nudgeLimit,
@@ -184,10 +173,7 @@ export async function runHostedMailboxLagSweeper(input: {
   }
 
   return {
-    candidateCounters: counters.length,
-    currentCounters,
-    invalidLaneCounters,
-    laggedCounters,
+    highWaterRows: highWaterRows.length,
     laggedUsers: laggedByUser.size,
     nudgeAccepted,
     nudgeAttempted,
@@ -195,6 +181,60 @@ export async function runHostedMailboxLagSweeper(input: {
     nudgeNotAccepted,
     skippedLaggedUsers,
   };
+}
+
+function selectRotatingNudgeWindow(input: {
+  laggedUsers: HostedMailboxLaggedUserEntry[];
+  now: Date;
+  nudgeLimit: number;
+}): HostedMailboxLaggedUserEntry[] {
+  const laggedUsers = [...input.laggedUsers].sort(([left], [right]) => left.localeCompare(right));
+
+  if (laggedUsers.length <= input.nudgeLimit) {
+    return laggedUsers;
+  }
+
+  const minute = Math.floor(input.now.getTime() / 60_000);
+  const offset = minute % laggedUsers.length;
+  const rotated = laggedUsers.slice(offset).concat(laggedUsers.slice(0, offset));
+
+  return rotated.slice(0, input.nudgeLimit);
+}
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex];
+      nextIndex += 1;
+      await worker(item);
+    }
+  }));
+}
+
+function fingerprintHostedMailboxLagUser(userId: string): string {
+  return createHash("sha256")
+    .update(userId)
+    .digest("hex")
+    .slice(0, 12);
+}
+
+function maxNullableDate(left: Date | null, right: Date | null): Date | null {
+  if (left === null) {
+    return right;
+  }
+
+  if (right === null) {
+    return left;
+  }
+
+  return left > right ? left : right;
 }
 
 function normalizeLimit(
