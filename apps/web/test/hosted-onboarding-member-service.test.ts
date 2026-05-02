@@ -58,6 +58,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+}));
+
 const NOW = new Date("2026-04-07T01:00:00.000Z");
 
 describe("ensureHostedMemberForPhone", () => {
@@ -185,8 +189,12 @@ describe("ensureHostedMemberForPhone", () => {
         signupPhoneNumber: "+15551234567",
       }),
     );
-    const create = vi.fn().mockResolvedValue(makeMember({
-      id: "member_123",
+    const create = vi.fn(async ({
+      data,
+    }: {
+      data: { id: string };
+    }) => makeMember({
+      id: data.id,
       suspendedAt: null,
     }));
     const prisma = asRootPrisma({
@@ -301,6 +309,46 @@ describe("ensureHostedMemberForPhone", () => {
         signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
     }));
+  });
+
+  it("does not provision control roots or rewrite identity for suspended existing phone members", async () => {
+    const suspendedMember = makeMember({
+      id: "member_suspended",
+      suspendedAt: new Date("2026-04-07T02:00:00.000Z"),
+    });
+    const currentIdentity = await makeIdentityRecord({
+      memberId: "member_suspended",
+      phoneLookupKey: "hbidx:phone:v1:suspended",
+      signupPhoneNumber: "+15550001111",
+    });
+    const identityUpsert = vi.fn().mockResolvedValue(currentIdentity);
+    const prisma = asRootPrisma({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(suspendedMember),
+      },
+      hostedMemberIdentity: {
+        findFirst: vi.fn().mockResolvedValue({
+          ...currentIdentity,
+          member: suspendedMember,
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: identityUpsert,
+      },
+    });
+
+    const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+      "@/src/lib/hosted-crypto/domain-root-store"
+    );
+
+    await expect(ensureHostedMemberForPhone({
+      phoneNumber: "+15551234567",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(provisionActiveHostedDomainRootEnvelopeForUserOnly).not.toHaveBeenCalled();
+    expect(identityUpsert).not.toHaveBeenCalled();
   });
 
   it("rejects invalid phone numbers", async () => {

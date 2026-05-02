@@ -1,6 +1,6 @@
 # Fix hosted onboarding crypto transaction visibility
 
-Status: active
+Status: completed
 Created: 2026-05-02
 Updated: 2026-05-02
 
@@ -71,6 +71,11 @@ Updated: 2026-05-02
 - Private-field encryption for identity/routing/billing now runs sequentially
   within each builder so first-use domain-root provisioning cannot race itself
   inside one transaction.
+- Follow-up Privy completion failures were caused by identity private-field
+  writes before activation-time `control` root provisioning. The store now owns
+  that invariant: hosted member identity writes provision the `control` root in
+  the caller transaction before encrypting private identity columns. Suspended
+  phone members are rejected before provisioning or identity rewrites.
 
 ## Verification
 
@@ -83,6 +88,38 @@ Updated: 2026-05-02
   - Focused tests and typecheck pass, or any unrelated red lane is documented.
 
 Latest:
+
+```txt
+2026-05-02 follow-up:
+pnpm exec vitest run apps/web/test/hosted-crypto-domain-root-store.test.ts apps/web/test/hosted-onboarding-privy-service.test.ts apps/web/test/hosted-onboarding-privy-complete-route.test.ts apps/web/test/hosted-onboarding-routes.test.ts --config apps/web/vitest.config.ts --no-coverage
+pnpm exec vitest run apps/web/test/hosted-onboarding-member-store.test.ts apps/web/test/hosted-onboarding-member-identity-service.test.ts apps/web/test/hosted-onboarding-member-service.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts --config apps/web/vitest.config.ts --no-coverage
+pnpm --dir apps/web typecheck
+git diff --check -- apps/web/src/lib/hosted-onboarding/hosted-member-identity-store.ts apps/web/src/lib/hosted-onboarding/member-identity-service.ts apps/web/test/hosted-crypto-domain-root-store.test.ts apps/web/test/hosted-onboarding-privy-service.test.ts apps/web/test/hosted-onboarding-member-store.test.ts apps/web/test/hosted-onboarding-member-identity-service.test.ts apps/web/test/hosted-onboarding-member-service.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts
+```
+
+All passed. The production follow-up centralizes `control` domain root
+provisioning in `hosted-member-identity-store.ts` before private identity
+columns are encrypted. Focused real-secure-box coverage proves new Privy member
+creation provisions the control root using the caller transaction before writing
+encrypted identity fields. Unit tests that use the hosted secure-box test codec
+mock only the provisioning side effect explicitly.
+
+```txt
+bash scripts/workspace-verify.sh test:diff apps/web/src/lib/hosted-onboarding/hosted-member-identity-store.ts apps/web/src/lib/hosted-onboarding/member-identity-service.ts apps/web/test/hosted-crypto-domain-root-store.test.ts apps/web/test/hosted-onboarding-privy-service.test.ts apps/web/test/hosted-onboarding-member-store.test.ts apps/web/test/hosted-onboarding-member-identity-service.test.ts apps/web/test/hosted-onboarding-member-service.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts
+```
+
+Reached `apps/web verify`; dependency policy, workspace boundary checks,
+stale-name guard, raw-log guard, legal PDF generation, Prisma generation, dev
+smoke, lint, and `next build` passed. An intermediate run also exposed a missing
+mock in `apps/web/test/hosted-onboarding-member-store.test.ts`; that harness is
+now fixed and the focused store/onboarding tests pass. The full app test substep
+remains red only on the unrelated pre-existing homepage assertion in
+`apps/web/test/page.test.ts`, where dirty landing-page edits changed the hero H1
+class from
+`text-[clamp(2.5rem,5.2vw,4.5rem)] ... lg:text-balance` to
+`text-[clamp(2.25rem,5.2vw,4.5rem)] ... text-balance`.
+
+Prior run:
 
 ```txt
 pnpm exec vitest run apps/web/test/hosted-crypto-domain-root-store.test.ts --config apps/web/vitest.config.ts --no-coverage
@@ -102,3 +139,4 @@ hosted-web lint, dev smoke, and `next build` passed. The hosted-web test
 substep remains red on unrelated existing expectations in migration snapshots,
 Health Commons generated copy/projection tests, device-sync random-id mocks, and
 a Junction connect-target fixture.
+Completed: 2026-05-02

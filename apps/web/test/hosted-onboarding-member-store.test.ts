@@ -45,6 +45,14 @@ import {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-crypto/domain-root-store")>();
+  return {
+    ...actual,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 const TEST_CONTACT_PRIVACY_ROTATED_KEY = Buffer.alloc(32, 1).toString("base64");
 
@@ -1281,7 +1289,18 @@ describe("hosted-member-store", () => {
       walletCreatedAt: null,
       walletProvider: "privy",
     });
+    const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+      "@/src/lib/hosted-crypto/domain-root-store"
+    );
 
+    expect(vi.mocked(provisionActiveHostedDomainRootEnvelopeForUserOnly)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain: "control",
+        prisma,
+        reason: "hosted-member.identity-private-fields",
+        userId: "member_123",
+      }),
+    );
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",

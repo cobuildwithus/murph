@@ -22,6 +22,7 @@ import {
   type HostedOnboardingReadClient,
   normalizeNullableString,
 } from "./shared";
+import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "../hosted-crypto/domain-root-store";
 
 export interface HostedMemberIdentityState {
   maskedPhoneNumberHint: string | null;
@@ -198,6 +199,11 @@ export async function readHostedMemberIdentity(input: {
 export async function upsertHostedMemberIdentity(
   input: HostedMemberIdentityWriteInput,
 ): Promise<HostedMemberIdentityState> {
+  await ensureHostedMemberIdentityControlRootTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
   const identity = await input.prisma.hostedMemberIdentity.upsert({
     where: {
       memberId: input.memberId,
@@ -224,6 +230,10 @@ export async function writeHostedMemberSignupPhoneState(
     data.signupPhoneCodeSentAt = input.signupPhoneCodeSentAt;
   }
   if (input.signupPhoneNumber !== undefined) {
+    await ensureHostedMemberIdentityControlRootTx({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
     data.signupPhoneNumberEncrypted = (await buildHostedMemberIdentityPrivateColumns({
       memberId: input.memberId,
       phoneNumber: null,
@@ -342,4 +352,16 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
     walletCreatedAt: input.walletCreatedAt,
     walletProvider: input.walletProvider,
   };
+}
+
+async function ensureHostedMemberIdentityControlRootTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: input.prisma,
+    reason: "hosted-member.identity-private-fields",
+    userId: input.memberId,
+  });
 }

@@ -1,7 +1,12 @@
 import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 
-import { Prisma, type HostedMemberIdentity } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  Prisma,
+  type HostedMember,
+  type HostedMemberIdentity,
+} from "@prisma/client";
 import {
   findHostedDomainRootWrap,
   parseHostedDomainRootKeyEnvelope,
@@ -290,6 +295,41 @@ test("hosted member identity upsert keeps private-field crypto inside the caller
   assert.equal(signCalls.length, 1);
 });
 
+test("hosted Privy member creation provisions the control root before private identity fields", async () => {
+  const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture(
+    createHostedMemberIdentityServiceTransaction,
+  );
+  const { ensureHostedMemberForPrivyIdentityTx } = await import(
+    "../src/lib/hosted-onboarding/member-identity-service"
+  );
+
+  const member = await ensureHostedMemberForPrivyIdentityTx({
+    identity: {
+      email: null,
+      phone: {
+        number: "+15551234567",
+        verifiedAt: 1770000000,
+      },
+      telegram: null,
+      userId: "did:privy:user_test_control_root",
+      wallet: {
+        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        chainType: "ethereum",
+        id: "wallet_test_control_root",
+        type: "wallet",
+      },
+    },
+    now: new Date("2026-05-02T00:00:00.000Z"),
+    prisma: tx.prisma,
+  });
+
+  assert.equal(tx.persistedEnvelopes.length, 1);
+  assert.equal(tx.persistedEnvelopes[0]?.domain, "control");
+  assert.equal(tx.persistedEnvelopes[0]?.userId, member.id);
+  assert.equal(encryptCalls.length, 1);
+  assert.equal(signCalls.length, 1);
+});
+
 async function createHostedWebCryptoTransactionFixture(
   createTransaction: () => HostedCryptoTestTransaction = createCapturingTransaction,
 ): Promise<{
@@ -336,7 +376,7 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
     ): Promise<T> => {
       const values = args.slice(1);
       const userId = values.find((value): value is string =>
-        typeof value === "string" && value.startsWith("member-"));
+        typeof value === "string" && (value.startsWith("member-") || value.startsWith("hbm_")));
       const rootKeyId = values.find((value): value is string =>
         typeof value === "string" && value.startsWith("udrk:"));
       const domain = values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
@@ -373,6 +413,36 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
   return {
     persistedEnvelopes: tx.persistedEnvelopes,
     prisma: Object.assign(tx.prisma, {
+      hostedMemberIdentity,
+    }),
+  };
+}
+
+function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransaction {
+  const tx = createHostedMemberIdentityTransaction();
+  const hostedMember = {
+    async create(input: {
+      data: Prisma.HostedMemberUncheckedCreateInput;
+    }): Promise<HostedMember> {
+      const now = new Date("2026-05-02T00:00:00.000Z");
+      return {
+        billingStatus: input.data.billingStatus ?? HostedBillingStatus.not_started,
+        createdAt: now,
+        id: input.data.id,
+        pendingActivationTimeZone: null,
+        suspendedAt: input.data.suspendedAt instanceof Date ? input.data.suspendedAt : null,
+        updatedAt: now,
+      };
+    },
+  };
+  const hostedMemberIdentity = Object.assign({}, tx.prisma.hostedMemberIdentity, {
+    findFirst: async (): Promise<null> => null,
+  });
+
+  return {
+    persistedEnvelopes: tx.persistedEnvelopes,
+    prisma: Object.assign(tx.prisma, {
+      hostedMember,
       hostedMemberIdentity,
     }),
   };

@@ -8,6 +8,10 @@ import {
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+}));
+
 const NOW = new Date("2026-04-06T10:00:00.000Z");
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 
