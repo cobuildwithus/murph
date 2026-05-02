@@ -156,7 +156,10 @@ function selectRollingWindowGoalMetricValue(input: {
     return true;
   });
 
-  const anchorDate = input.now ? input.now.slice(0, 10) : candidates.at(-1)?.effectiveDate ?? null;
+  const requestedAnchorDate = input.now ? input.now.slice(0, 10) : candidates.at(-1)?.effectiveDate ?? null;
+  const anchorDate = requestedAnchorDate && input.target.targetAt && requestedAnchorDate > input.target.targetAt
+    ? input.target.targetAt
+    : requestedAnchorDate;
   if (!anchorDate) {
     return { selectedPointIds: [], status: "no_data", unit: input.target.unit, value: null, valueLabel: null, warnings: [] };
   }

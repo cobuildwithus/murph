@@ -246,7 +246,7 @@ test("returns empty and stale selections without losing metric identity", () => 
 
   const stale = selectMetricValue({
     metricKey: "body-weight",
-    now: "2026-04-30T00:00:00.000Z",
+    now: "2026-05-10T00:00:00.000Z",
     points: [
       metricPoint({
         effectiveDate: "2026-01-01",
@@ -459,7 +459,7 @@ test("goal progress keeps behind for scheduled rolling-window targets that miss 
     kind: "metric",
     metricKey: "resting-heart-rate",
     startAt: "2026-04-01",
-    targetAt: "2026-05-01",
+    targetAt: "2026-04-29",
     targetId: "rhr-under-40",
     unit: "bpm",
     value: 40,
