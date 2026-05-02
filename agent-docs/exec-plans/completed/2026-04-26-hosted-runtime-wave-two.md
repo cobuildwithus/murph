@@ -86,3 +86,6 @@ Next:
 - `pnpm typecheck`
 - `pnpm test:smoke`
 - `git diff --check` on touched files
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02

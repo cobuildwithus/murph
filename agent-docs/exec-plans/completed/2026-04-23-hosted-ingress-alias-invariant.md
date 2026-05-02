@@ -1,8 +1,8 @@
 # Harden hosted ingress alias invariants
 
-Status: in_progress
+Status: completed
 Created: 2026-04-23
-Updated: 2026-04-23
+Updated: 2026-05-02
 
 ## Goal
 
@@ -99,3 +99,4 @@ Updated: 2026-04-23
 ## Commit note
 
 - No scoped commit was created. The touched schema and hosted-ingress files already contain overlapping unrelated active changes in this shared dirty tree, so staging exact paths would absorb work outside this alias task.
+Completed: 2026-05-02

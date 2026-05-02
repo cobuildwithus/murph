@@ -56,6 +56,7 @@ export COBUILD_DRIFT_CODE_CHANGE_LABEL='Architecture-sensitive code/process'
 export COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD='10'
 export COBUILD_DRIFT_CHANGED_COUNT_EXCLUDE_PATTERN='^agent-docs/generated/|^agent-docs/exec-plans/(active|completed)/|^pnpm-lock\.yaml$'
 export COBUILD_DRIFT_ALLOW_RELEASE_ARTIFACTS_ONLY='0'
+export COBUILD_DOC_GARDENING_EXCLUDE_PATTERN='^agent-docs/exec-plans/completed/'
 # Murph accepts ordinary descriptive commit messages in helper flows; do not require
 # Conventional Commit syntax unless the caller opts back into it manually.
 export COMMITTER_ALLOW_NON_CONVENTIONAL='1'

@@ -54,3 +54,6 @@ the hosted-assistant runner env suite. The broader node-runner suite now passes
 protocol/regimen fixture drift from the removed share-pack path has been resolved by
 the completed share-pack hard cut. Full owner typechecks may still be blocked by
 unrelated active hosted/CLI dirty work in the shared checkout.
+Status: completed
+Updated: 2026-05-02
+Completed: 2026-05-02
