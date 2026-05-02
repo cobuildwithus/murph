@@ -729,28 +729,48 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
       workspace: createWorkspaceState(),
     };
+    const webStatus = {
+      mailboxLag: [],
+      userId: "member_123",
+      workspace: null,
+    };
+    const removedRunnerStatusFields = [
+      "bundleRef",
+      "committedSeq",
+      "lastError",
+      "lastEventId",
+      "nextWakeAt",
+      "pendingIngressEventCount",
+      "pendingWakeCount",
+      "run",
+      "runId",
+      "timeline",
+    ] as const;
 
     expect(parseHostedRunnerNudgeResult(nudge)).toEqual(nudge);
     expect(parseHostedRunnerStatusResponse(status)).toEqual(status);
     expect(parseHostedRunnerNudgeResult(nudge)).not.toHaveProperty("runId");
-    expect(() => parseHostedRunnerStatusResponse({
-      ...status,
-      committedSeq: "10",
-    })).toThrow(/must not include legacy committedSeq/u);
+    for (const field of removedRunnerStatusFields) {
+      const removedValue = field === "run" ? { runId: "run_legacy" } : "legacy";
+      expect(() => parseHostedRunnerStatusResponse({
+        ...status,
+        [field]: removedValue,
+      })).toThrow(`Hosted runner status response must not include legacy ${field}`);
+      expect(() => parseHostedRuntimeWebStatusResponse({
+        ...webStatus,
+        [field]: removedValue,
+      })).toThrow(`Hosted runtime web status response must not include legacy ${field}`);
+    }
     expect(() => parseHostedRunnerNudgeResult({
       ...nudge,
       leaseGeneration: "9",
     })).toThrow(/leaseGeneration has been removed/u);
     expect(() => parseHostedRuntimeWebStatusResponse({
-      mailboxLag: [],
-      userId: "member_123",
-      workspace: null,
+      ...webStatus,
       lastRunAt: "2026-04-26T00:00:01.000Z",
     })).toThrow(/lastRunAt has been renamed to lastInvocationAt/u);
     expect(() => parseHostedRuntimeWebStatusResponse({
-      mailboxLag: [],
-      userId: "member_123",
-      workspace: null,
+      ...webStatus,
       leaseGeneration: "9",
     })).toThrow(/leaseGeneration has been removed/u);
     expect(parseHostedRunnerNudgeResult({
