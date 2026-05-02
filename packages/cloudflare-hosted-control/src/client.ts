@@ -39,6 +39,8 @@ export interface CloudflareHostedControlBrowserVaultSession {
 }
 
 export interface CloudflareHostedControlBrowserVaultReplicaAad {
+  dataKeyId?: string;
+  dataKeyRootKeyId?: string;
   dataVersion: string;
   objectKey: string;
   purpose: "browser-vault-replica";
@@ -278,9 +280,9 @@ function parseCloudflareHostedControlBrowserVaultSession(
 
   assertMatchingString(
     encryptedReplica.keyId,
-    expected.replicaRef.keyId,
+    getHostedBrowserVaultReplicaStorageKeyId(expected.replicaRef),
     "Cloudflare browser vault session encryptedReplica.keyId",
-    "the requested replicaRef.keyId",
+    "the requested replica storage key id",
   );
   assertMatchingString(
     encryptedReplica.scope,
@@ -318,6 +320,20 @@ function parseCloudflareHostedControlBrowserVaultSession(
     "Cloudflare browser vault session replicaAad.runtimeRootKeyId",
     "the requested replicaRef.runtimeRootKeyId",
   );
+  if (expected.replicaRef.dataKeyEnvelope) {
+    assertMatchingString(
+      replicaAad.dataKeyId ?? "",
+      expected.replicaRef.dataKeyEnvelope.dataKeyId,
+      "Cloudflare browser vault session replicaAad.dataKeyId",
+      "the requested replicaRef.dataKeyEnvelope.dataKeyId",
+    );
+    assertMatchingString(
+      replicaAad.dataKeyRootKeyId ?? "",
+      expected.replicaRef.dataKeyEnvelope.rootKeyId,
+      "Cloudflare browser vault session replicaAad.dataKeyRootKeyId",
+      "the requested replicaRef.dataKeyEnvelope.rootKeyId",
+    );
+  }
   assertMatchingString(
     replicaKeyEnvelope.userId,
     expected.userId,
@@ -326,9 +342,9 @@ function parseCloudflareHostedControlBrowserVaultSession(
   );
   assertMatchingString(
     replicaKeyEnvelope.keyId,
-    expected.replicaRef.keyId,
+    getHostedBrowserVaultReplicaStorageKeyId(expected.replicaRef),
     "Cloudflare browser vault session replicaKeyEnvelope.keyId",
-    "the requested replicaRef.keyId",
+    "the requested replica storage key id",
   );
 
   if (replicaKeyEnvelope.recipients.length === 0) {
@@ -338,9 +354,9 @@ function parseCloudflareHostedControlBrowserVaultSession(
   for (const [index, recipient] of replicaKeyEnvelope.recipients.entries()) {
     assertMatchingString(
       recipient.keyId,
-      expected.replicaRef.keyId,
+      getHostedBrowserVaultReplicaStorageKeyId(expected.replicaRef),
       `Cloudflare browser vault session replicaKeyEnvelope.recipients[${index}].keyId`,
-      "the requested replicaRef.keyId",
+      "the requested replica storage key id",
     );
   }
 
@@ -369,6 +385,17 @@ function parseCloudflareHostedControlBrowserVaultReplicaAad(
   }
 
   return {
+    ...(record.dataKeyId === undefined
+      ? {}
+      : { dataKeyId: requireString(record.dataKeyId, `${label}.dataKeyId`) }),
+    ...(record.dataKeyRootKeyId === undefined
+      ? {}
+      : {
+          dataKeyRootKeyId: requireString(
+            record.dataKeyRootKeyId,
+            `${label}.dataKeyRootKeyId`,
+          ),
+        }),
     dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
     purpose,
@@ -507,6 +534,12 @@ function assertHostedBrowserVaultReplicaRefMatches(
     `${label}.runtimeRootKeyId`,
     "the requested replicaRef.runtimeRootKeyId",
   );
+  assertMatchingOptionalJson(
+    actual.dataKeyEnvelope,
+    expected.dataKeyEnvelope,
+    `${label}.dataKeyEnvelope`,
+    "the requested replicaRef.dataKeyEnvelope",
+  );
 }
 
 function assertMatchingNumber(
@@ -540,6 +573,44 @@ function assertMatchingOptionalString(
   if ((actual ?? null) !== (expected ?? null)) {
     throw new TypeError(`${label} must match ${expectedLabel}.`);
   }
+}
+
+function assertMatchingOptionalJson(
+  actual: unknown,
+  expected: unknown,
+  label: string,
+  expectedLabel: string,
+): void {
+  if (canonicalJson(actual ?? null) !== canonicalJson(expected ?? null)) {
+    throw new TypeError(`${label} must match ${expectedLabel}.`);
+  }
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJson);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, sortJson(entry)]),
+    );
+  }
+
+  return value;
+}
+
+function getHostedBrowserVaultReplicaStorageKeyId(
+  replicaRef: HostedBrowserVaultReplicaRef,
+): string {
+  return replicaRef.dataKeyEnvelope?.dataKeyId ?? replicaRef.keyId;
 }
 
 function requireHostedBrowserVaultReplicaRuntimeRootKeyId(
