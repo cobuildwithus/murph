@@ -30,7 +30,7 @@ describe("appendHostedMailboxItemTx", () => {
       lane: "conversation",
       occurredAt: "2026-04-26T00:00:00.000Z",
       payloadBytes: 64,
-      payloadInlineCiphertext: "cipher_inline_1",
+      payloadSerializedJson: JSON.stringify({ kind: "inline-test" }),
       tx,
       userId: "member_mailbox_1",
     });
@@ -44,7 +44,7 @@ describe("appendHostedMailboxItemTx", () => {
         kind: "conversation.message",
         lane: "conversation",
         laneSeq: "1",
-        payloadInlineCiphertext: "cipher_inline_1",
+        payloadInlineCiphertext: expect.any(String),
         payloadRef: null,
       },
     });
@@ -55,7 +55,7 @@ describe("appendHostedMailboxItemTx", () => {
         lane: "conversation",
         laneSeq: 1n,
         payloadBytes: 64,
-        payloadInlineCiphertext: "cipher_inline_1",
+        payloadInlineCiphertext: expect.any(String),
         payloadRef: null,
         payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
         userId: "member_mailbox_1",
@@ -99,7 +99,7 @@ describe("appendHostedMailboxItemTx", () => {
       lane: "system",
       occurredAt: FIXED_NOW,
       payloadBytes: 128_000,
-      payloadCiphertext: "cipher_ref_1",
+      payloadSerializedJson: JSON.stringify({ kind: "sidecar-test" }),
       tx,
       userId: "member_mailbox_1",
     });
@@ -116,7 +116,7 @@ describe("appendHostedMailboxItemTx", () => {
     expect(hostedMailboxPayload.create).toHaveBeenCalledWith({
       data: {
         mailboxItemId: result.item.id,
-        payloadCiphertext: "cipher_ref_1",
+        payloadCiphertext: expect.any(String),
         payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         userId: "member_mailbox_1",
       },
@@ -146,7 +146,7 @@ describe("appendHostedMailboxItemTx", () => {
       lane: "system",
       occurredAt: FIXED_NOW,
       payloadBytes: 256,
-      payloadInlineCiphertext: "cipher_retry_1",
+      payloadSerializedJson: JSON.stringify({ kind: "duplicate-test" }),
       tx,
       userId: "member_mailbox_1",
     });

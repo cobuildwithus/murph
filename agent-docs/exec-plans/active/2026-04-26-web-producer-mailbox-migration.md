@@ -1,3 +1,6 @@
+Status: CLOSED / superseded. Retained only as historical migration context; do
+not use this plan as current hosted-mailbox or hosted-crypto guidance.
+
 Goal (incl. success criteria):
 - Migrate one coherent hosted web producer slice from hosted ingress/run events to encrypted HostedMailboxItem append for the greenfield hosted runtime cut.
 - Keep product/control-plane mutation and mailbox append in one transaction where applicable.

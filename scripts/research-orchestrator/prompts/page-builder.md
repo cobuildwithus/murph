@@ -47,10 +47,46 @@ Protocol page requirements:
   - stopConditions
 - at least one testPlan
 - experimentOnboarding when the protocol should be runnable in Murph
-- whyItWorks
+- whyItWorks (see copy guidelines below)
+- mechanismChain (see copy guidelines below)
 - claims
 - researchLandscape
 - safety
+
+whyItWorks copy guidelines:
+- Each item is a markdown string starting with an `## H2` header followed by a body paragraph.
+- Headers are direct claims, not cautious observations. Drop leading "The" when possible. Drop hedge words like "can" or "may" — state the mechanism. Good: `## Recovery keeps the next rep useful`. Bad: `## The recovery can keep the next rep useful`.
+- Use numerals (4, 3) instead of spelling out numbers.
+- Body paragraphs use plain, consistent prose — no mixed fonts or special first-paragraph treatment.
+- Keep paragraphs short (2–4 sentences). Each paragraph should explain one link in the causal chain.
+- The section should read as a top-to-bottom explanation: what the dose is → what happens acutely → why repeating it matters → what adapts over time.
+
+mechanismChain copy guidelines:
+- The mechanism chain renders as a numbered vertical stepper under the heading "How the Body Adapts" on the protocol page.
+- Each step has a `label` (rendered as an uppercase section label) and a `content` string (rendered as body text).
+- Use 3–4 steps. Prefer 3 when the causal chain is simple. The typical shape is: Session → Acute physiology → Adaptation. Add a middle step only when there is a distinct bridging mechanism worth calling out.
+- Do NOT include an "Outcome" step — outcomes are already shown in the expected signals section.
+- Labels should be short noun phrases: "Session", "Acute physiology", "Heat load", "Adaptation". Not full sentences.
+- Content should be scannable fragments separated by middot (·) or semicolons, not full prose sentences. Good: `Heart pumps near capacity; working muscle pulls hard on oxygen`. Bad: `The heart pumps near its maximum capacity while the working muscles pull hard on available oxygen supplies.`
+- Capitalize the first word of each content string.
+- Use numerals and symbols for density: `4 × (4′ hard · 3′ easy)`, `HR 85–95% HRmax`, `3×/week`.
+- The adaptation step should say what physically changes, not just list body parts. Good: `heart pumps more per beat · more capillaries · muscles build more and stronger mitochondria`. Bad: `stroke volume · capillaries · mitochondria`.
+
+Safety section formatting:
+- `safety.cautionLevel`: use `low`, `high`, or omit (defaults to moderate).
+- `safety.avoidOrGetClinicianGuidance`: a list of short unquoted snake_case tokens, one condition per item. Each token renders as a compact pill in the UI, so it must fit on a single line (~3-6 words, under 50 characters). Never write long prose sentences or comma-separated condition lists here. Split compound conditions into separate tokens.
+  Good: `pregnancy_or_early_postpartum`, `heart_failure`, `diabetes`, `seizure_disorder`
+  Bad: `"pregnancy, possible pregnancy, trying to become pregnant, early postpartum, or active fertility concerns"`
+  Bad: `unstable_cardiovascular_disease_recent_cardiac_event_unexplained_chest_pain_serious_arrhythmia_heart_failure` (compound — split into separate tokens)
+- `safety.stopIf`: same format as avoidOrGetClinicianGuidance — short unquoted snake_case tokens, one symptom per item. Each renders as its own "Stop if:" precaution line with an icon.
+  Good: `chest_pain_or_pressure`, `faintness`, `severe_dizziness`, `confusion`
+  Bad: `"chest pain, faintness, severe dizziness, confusion, or palpitations"` (these must be separate items)
+- `safety.notes`: short, action-first precaution bullets. Each note renders as a single line with an icon in the Precautions card. Aim for ~50-80 characters (8-15 words). Lead with the action or key fact. Cut hedging language ("may need", "if X is a concern", "people who"). Use em dashes (—) to connect related clauses. Do not include source artifact keys or citation references in notes.
+  Good: `Wellness experiment, not a treatment plan.`
+  Good: `Skip sessions when ill, febrile, or recovering from infection.`
+  Good: `HR-limiting meds can distort zone targets — get clinician guidance on intensity.`
+  Bad: `This is a bounded wellness self-experiment, not a treatment plan for any medical condition.`
+  Bad: `People on heart-rate-limiting medication may need clinician-guided intensity targets because HR zones can be misleading.`
 
 User-facing prose hygiene:
 - User-facing Health Commons Markdown prose must not contain raw `source_artifact:*` tokens, `sourceKeys`, source-key labels, or source-ID footnotes.

@@ -80,6 +80,7 @@ export async function readEncryptedR2Payload(input: {
   cryptoKey: Uint8Array;
   cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
   expectedKeyId?: string;
+  resolveCryptoKeyById?: (keyId: string) => Promise<Uint8Array | null>;
   key: string;
   scope: HostedStorageScope;
 }): Promise<Uint8Array | null> {
@@ -95,12 +96,24 @@ export async function readEncryptedR2Payload(input: {
     input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
   );
 
+  let cryptoKeysById = input.cryptoKeysById;
+  if (
+    input.resolveCryptoKeyById
+    && !cryptoKeysById?.[envelope.keyId]
+    && envelope.keyId !== input.expectedKeyId
+  ) {
+    const resolvedKey = await input.resolveCryptoKeyById(envelope.keyId);
+    if (resolvedKey) {
+      cryptoKeysById = { ...(cryptoKeysById ?? {}), [envelope.keyId]: resolvedKey };
+    }
+  }
+
   return decryptHostedStorageEnvelope({
     aad: input.aad,
     envelope,
     expectedKeyId: input.expectedKeyId,
     key: input.cryptoKey,
-    keysById: input.cryptoKeysById,
+    keysById: cryptoKeysById,
     label: input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
     scope: input.scope,
   });
@@ -132,6 +145,7 @@ export async function readEncryptedR2Json<T>(input: {
   cryptoKey: Uint8Array;
   cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
   expectedKeyId?: string;
+  resolveCryptoKeyById?: (keyId: string) => Promise<Uint8Array | null>;
   key: string;
   parse(value: unknown): T;
   scope: HostedStorageScope;
@@ -142,6 +156,7 @@ export async function readEncryptedR2Json<T>(input: {
     cryptoKey: input.cryptoKey,
     cryptoKeysById: input.cryptoKeysById,
     expectedKeyId: input.expectedKeyId,
+    resolveCryptoKeyById: input.resolveCryptoKeyById,
     key: input.key,
     scope: input.scope,
   });

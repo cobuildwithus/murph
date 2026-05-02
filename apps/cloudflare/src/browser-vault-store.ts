@@ -140,7 +140,6 @@ export function createHostedBrowserVaultReplicaStore(input: {
 
 async function assertHostedBrowserVaultReplicaOwnedByUser(
   input: {
-    rootKey: Uint8Array;
     userId?: string | null;
   },
   ref: HostedBrowserVaultReplicaRef,

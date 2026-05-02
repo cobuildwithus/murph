@@ -5,6 +5,10 @@ import {
   sealHostedSecureBox,
   serializeHostedSecureBoxEnvelope,
 } from "@murphai/runtime-state";
+import {
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   createHostedMailboxEncryptionEnvironmentFromIngressRoot,
@@ -32,7 +36,9 @@ describe("hosted mailbox secure-box encryption", () => {
         lane: "system",
         laneSeq: field === "hosted-mailbox-inline-payload" ? "1" : "2",
         occurredAt: "2026-05-01T00:00:00.000Z",
-        payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+        payloadSchema: payloadStorage === "inline"
+          ? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA
+          : HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         payloadStorage,
         userId: "member_mailbox_1",
       };
