@@ -576,9 +576,12 @@ export function selectMetricValue(input: {
 }): MetricSelection {
   const definitionFromBiomarker = input.biomarkerKey ? resolveMetricDefinitionForBiomarker(input.biomarkerKey) : null;
   const metricKey = input.metricKey ? normalizeMetricKey(input.metricKey) : definitionFromBiomarker?.key ?? null;
+  const biomarkerKeys = input.biomarkerKey
+    ? biomarkerSelectionKeys(input.biomarkerKey, definitionFromBiomarker)
+    : null;
   const points = input.points.filter((point) => {
     if (metricKey && point.metricKey !== metricKey) return false;
-    if (input.biomarkerKey && point.biomarkerKey !== input.biomarkerKey) return false;
+    if (biomarkerKeys && (!point.biomarkerKey || !biomarkerKeys.includes(point.biomarkerKey))) return false;
     return true;
   });
   const resolvedMetricKey = metricKey ?? points[0]?.metricKey ?? "unknown";
@@ -626,13 +629,27 @@ export function buildMetricSeries(input: {
   points: readonly MetricPoint[];
   to?: string;
 }): MetricPoint[] {
-  const metricKey = input.metricKey ? normalizeMetricKey(input.metricKey) : null;
+  const definitionFromBiomarker = input.biomarkerKey ? resolveMetricDefinitionForBiomarker(input.biomarkerKey) : null;
+  const metricKey = input.metricKey ? normalizeMetricKey(input.metricKey) : definitionFromBiomarker?.key ?? null;
+  const biomarkerKeys = input.biomarkerKey
+    ? biomarkerSelectionKeys(input.biomarkerKey, definitionFromBiomarker)
+    : null;
   return input.points
     .filter((point) => !metricKey || point.metricKey === metricKey)
-    .filter((point) => !input.biomarkerKey || point.biomarkerKey === input.biomarkerKey)
+    .filter((point) => !biomarkerKeys || (point.biomarkerKey !== null && biomarkerKeys.includes(point.biomarkerKey)))
     .filter((point) => !input.from || point.effectiveDate >= input.from)
     .filter((point) => !input.to || point.effectiveDate <= input.to)
     .sort(compareMetricPointsAsc);
+}
+
+function biomarkerSelectionKeys(
+  biomarkerKey: string,
+  definition: MetricDefinition | null,
+): string[] {
+  return uniqueStrings([
+    biomarkerKey,
+    ...(definition?.biomarkerKey ? [definition.biomarkerKey] : []),
+  ]);
 }
 
 export function selectMetricGoalProgress(input: {

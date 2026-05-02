@@ -155,6 +155,7 @@ function sleepMetricEvidence(summary: WearableSleepSummary): MetricRowEvidence[]
     metricEvidence(summary.date, "deep-sleep-minutes", summary.deepMinutes.selection.value, summary.deepMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
     metricEvidence(summary.date, "rem-sleep-minutes", summary.remMinutes.selection.value, summary.remMinutes.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
     metricEvidence(summary.date, "hrv-rmssd", summary.hrv.selection.value, summary.hrv.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
+    metricEvidence(summary.date, "spo2", summary.spo2.selection.value, summary.spo2.selection.unit, summary.summaryConfidence.level, "sleep-summary"),
   ];
 }
 

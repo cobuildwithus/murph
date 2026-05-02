@@ -73,7 +73,7 @@ test("the biomarker overview mounts the browser-vault private card", () => {
 });
 
 test("the biomarker overview lets the metric catalog decide private trend support", () => {
-  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("sleep-quality");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
@@ -85,9 +85,8 @@ test("the biomarker overview lets the metric catalog decide private trend suppor
     status: "ready",
   });
 
-  const unsupportedBiomarker = unsupportedBiomarkerFrom(biomarker);
   const markup = renderToStaticMarkup(
-    createElement(BiomarkerOverview, { biomarker: unsupportedBiomarker }),
+    createElement(BiomarkerOverview, { biomarker }),
   );
 
   assert.match(markup, /data-browser-vault-provider/u);
@@ -245,7 +244,7 @@ test("renders a no-data state when the browser-vault replica has no matching row
 });
 
 test("renders an unsupported state for biomarkers without browser-vault metric bindings", () => {
-  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("sleep-quality");
   assert.ok(biomarker);
 
   mocks.useBrowserVault.mockReturnValue({
@@ -257,9 +256,8 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
     status: "ready",
   });
 
-  const unsupportedBiomarker = unsupportedBiomarkerFrom(biomarker);
   const markup = renderToStaticMarkup(
-    createElement(BiomarkerPrivateTrendCard, { biomarker: unsupportedBiomarker }),
+    createElement(BiomarkerPrivateTrendCard, { biomarker }),
   );
 
   assert.match(markup, /Biomarker unavailable/u);
@@ -302,29 +300,6 @@ function metricRows(input: {
     value,
     valueLabel: String(value),
   }));
-}
-
-function unsupportedBiomarkerFrom(
-  biomarker: NonNullable<ReturnType<typeof resolveHealthCommonsBiomarkerOverview>>,
-) {
-  return {
-    ...biomarker,
-    key: "biomarker:mood",
-    privateMetricBindings: [],
-    route: {
-      aliases: [],
-      entityType: "biomarker" as const,
-      href: "/biomarkers/mood",
-      routeId: "mood",
-      slug: "biomarkers/mood",
-    },
-    routeId: "mood",
-    shortName: "Mood",
-    slug: "biomarkers/mood",
-    title: "Mood",
-    unit: "score",
-    valuePrecision: 0,
-  };
 }
 
 function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVaultReplica {

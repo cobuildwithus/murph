@@ -46,6 +46,7 @@ test("browser vault replica creation emits metric-key rows from wearable and vau
     vault: createVaultReadModel({
       entities: [
         createCanonicalEntity("sample", "sample_steps", { attributes: { externalRef: { resourceId: "steps-1", resourceType: "summary", system: "garmin" }, recordedAt: "2026-04-20T07:00:00.000Z", value: 920 }, date: "2026-04-20", stream: "steps", title: "Daily steps" }),
+        createCanonicalEntity("sample", "sample_spo2", { attributes: { externalRef: { resourceId: "spo2-1", resourceType: "summary", system: "oura" }, recordedAt: "2026-04-20T07:20:00.000Z", unit: "%", value: 97.5 }, date: "2026-04-20", stream: "spo2", title: "Blood oxygen" }),
         createCanonicalEntity("event", "evt_measurement", { attributes: { measurements: [{ metric: "body-weight", unit: "lb", value: 180 }], source: "manual" }, kind: "measurement", occurredAt: "2026-04-20T07:30:00.000Z", title: "Body check" }),
         createCanonicalEntity("event", "evt_test", { attributes: { collectedAt: "2026-04-20T08:00:00.000Z", labName: "Function Health", results: [{ biomarkerSlug: "apob", unit: "mg/dL", value: 87 }] }, kind: "test", occurredAt: "2026-04-20T08:00:00.000Z", title: "Blood panel" }),
       ],
@@ -55,6 +56,7 @@ test("browser vault replica creation emits metric-key rows from wearable and vau
   });
 
   assert.equal(replica.metricRows.some((row) => row.metricKey === "steps"), true);
+  assert.equal(replica.metricRows.some((row) => row.metricKey === "spo2" && row.value === 97.5), true);
   assert.equal(replica.metricRows.some((row) => row.metricKey === "body-weight"), true);
   assert.equal(replica.metricSelectionRows.some((row) => row.metricKey === "apob" && row.value === 87), true);
   assert.equal(Object.hasOwn(replica, "metricDayRows"), false);

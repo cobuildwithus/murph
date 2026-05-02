@@ -203,6 +203,30 @@ test("selects metric points by policy and exposes provenance warnings", () => {
     selected.warnings.map((warning) => warning.code).sort(),
     ["COMPARATOR_VALUE", "MIXED_SOURCES"],
   );
+
+  const apoB = selectMetricValue({
+    biomarkerKey: "biomarker:apolipoprotein-b",
+    points: [
+      metricPoint({
+        biomarkerKey: "biomarker:apob",
+        effectiveDate: "2026-04-29",
+        id: "metric-point:apob:2026-04-29:lab:0",
+        metricKey: "apob",
+        observedAt: "2026-04-29T08:00:00.000Z",
+        recordId: "lab_apob",
+        sourceKind: "test-result",
+        unit: "mg/dL",
+        value: 87,
+      }),
+    ],
+  });
+
+  assert.equal(apoB.status, "ready");
+  assert.equal(apoB.value, 87);
+  assert.deepEqual(buildMetricSeries({
+    biomarkerKey: "biomarker:apolipoprotein-b",
+    points: [apoB.point].filter((point): point is MetricPoint => point !== null),
+  }).map((point) => point.id), ["metric-point:apob:2026-04-29:lab:0"]);
 });
 
 test("returns empty and stale selections without losing metric identity", () => {
@@ -347,6 +371,7 @@ test("builds chronological metric series and formats display values", () => {
 });
 
 function metricPoint(input: {
+  biomarkerKey?: string | null;
   comparator?: MetricPoint["comparator"];
   context?: MetricPoint["context"];
   effectiveDate: string;
@@ -366,7 +391,7 @@ function metricPoint(input: {
   });
 
   return {
-    biomarkerKey: metricKey === "glucose" ? "biomarker:blood-glucose" : null,
+    biomarkerKey: input.biomarkerKey ?? (metricKey === "glucose" ? "biomarker:blood-glucose" : null),
     canonicalUnit: normalized.canonicalUnit,
     canonicalValue: normalized.canonicalValue,
     comparator: input.comparator ?? null,
