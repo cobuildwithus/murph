@@ -58,7 +58,7 @@ relations:
     target: source_artifact:bryan-johnson-morning-routine-2026-04-08
   -
     type: cites
-    target: source_artifact:bryan-johnson-saunamaxx-2026-04-14
+    target: source_artifact:bryanjohns0n-saunamaxx-2026-04-14
   -
     type: cites
     target: source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
@@ -620,7 +620,7 @@ claims:
     strength: low
     sourceKeys:
       - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
-      - source_artifact:bryan-johnson-saunamaxx-2026-04-14
+      - source_artifact:bryanjohns0n-saunamaxx-2026-04-14
       - source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06
     caveats:
       - Single-person self-experiment data is useful context but not population-level causal evidence.
@@ -631,7 +631,7 @@ claims:
     text: In April 2026, Bryan Johnson reported that his prior 20-minute daily 200 F dry-sauna sessions likely did not reach his 102.4 F / 39 C core-temperature threshold; in a pill-sensor experiment he crossed that threshold at about 31 minutes without face or neck cooling and about 40 minutes with face or neck cooling.
     strength: low
     sourceKeys:
-      - source_artifact:bryan-johnson-saunamaxx-2026-04-14
+      - source_artifact:bryanjohns0n-saunamaxx-2026-04-14
       - source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
     caveats:
       - This is a higher-burden experimental variant, not an appropriate default beginner protocol.
@@ -653,7 +653,7 @@ claims:
     text: For the specific goal of preserving above-threshold core-temperature time after sauna, Bryan Johnson's April 2026 saunamaxx post advises against showering or cold plunging immediately after sauna.
     strength: low
     sourceKeys:
-      - source_artifact:bryan-johnson-saunamaxx-2026-04-14
+      - source_artifact:bryanjohns0n-saunamaxx-2026-04-14
     caveats:
       - This is specific to Bryan Johnson's heat-shock or core-temperature goal and should not be generalized to every sauna user or every sauna protocol.
   -
@@ -718,80 +718,391 @@ researchLandscape:
       id: source-routine-spec
       label: What the Blueprint routine says
       stance: supports
-      summary: These sources establish the external routine itself: a high-temperature dry-sauna session around 20 minutes daily, usually after exercise, with low humidity, rehydration, and source-specific cooling tactics. The clearest direct Blueprint sources give the 200 F / 93 C default wording; a January 2026 protocol extraction has a 175 F / 93 C unit mismatch. Use these sources for dose provenance, not clinical efficacy.
+      summary: These sources establish the external routine itself: a high-temperature dry-sauna session around 20 minutes daily, usually after exercise, with low humidity, rehydration, and source-specific cooling tactics. Use them for dose provenance and protocol wording, not clinical efficacy.
       sourceKeys:
-        - source_artifact:bryan-johnson-morning-routine-2026-04-08
         - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
+        - source_artifact:bryan-johnson-morning-routine-2026-04-08
+        - source_artifact:bryan-johnson-protocol-2026-01-23
+        - source_artifact:bryan-johnson-hot-truth-finnish-saunas-2025-04-13
       defaultOpen: true
     -
       id: personal-outcomes-not-causal
       label: Personal outcomes, not causal proof
       stance: does_not_confirm
-      summary: Johnson reports toxin, microplastic, fertility, vascular, blood, and resting-heart-rate observations around his sauna practice. Those sources explain the protocol's motivation, but they are one-person reports with many confounders and should not be rendered as expected user outcomes.
+      summary: Johnson reports toxin, microplastic, fertility, vascular, blood, biological-age, and resting-heart-rate observations around his sauna practice. These sources explain why the protocol exists, but they are one-person reports with many co-interventions and should not be rendered as expected user outcomes.
       sourceKeys:
         - source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06
         - source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06
+        - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
         - source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12
-    -
-      id: independent-sauna-physiology-context
-      label: Independent heat-load context
-      stance: context_only
-      summary: Independent reviews and acute physiology studies make the basic mechanism easier to trust: sauna raises heat strain, heart rate, sweating, vascular demand, and recovery burden. This supports tracking pulse, blood pressure, symptoms, and cooldown context, but it does not validate the exact daily Blueprint dose.
-      sourceKeys:
-        - source_artifact:doi-10.1155-2014-106049
-        - source_artifact:mayo-2018-sauna-review
-        - source_artifact:pmid-29269746
-        - source_artifact:pmid-31126559
-      defaultOpen: true
-    -
-      id: long-term-cohort-context
-      label: Long-term cohort context
-      stance: context_only
-      summary: Large Finnish cohort studies link more frequent sauna bathing with lower long-term cardiovascular and hypertension risk, which helps explain why sauna is interesting. These are not randomized tests and cannot prove a 21-day Blueprint-style self-experiment caused a wearable change.
-      sourceKeys:
-        - source_artifact:pmid-25705824
-        - source_artifact:pmid-28633297
-    -
-      id: post-workout-training-context
-      label: Post-workout and recovery evidence
-      stance: mixed
-      summary: The post-exercise literature is not one-note: a modern exercise-plus-sauna RCT found cardiovascular add-on benefits, a newer HRV RCT found no extra HRV benefit, a swim-recovery crossover found worse next-day sprint performance, and a tiny runner crossover found endurance benefit. That is why this page asks users to log training load and next-workout performance.
-      sourceKeys:
-        - source_artifact:pmid-16877041
-        - source_artifact:pmid-31869820
-        - source_artifact:pmid-35785965
-        - source_artifact:pmid-40611569
-      defaultOpen: true
+        - source_artifact:bryan-johnson-protocol-2026-01-23
+        - source_artifact:bryanjohns0n-saunamaxx-2026-04-14
+        - source_artifact:bryan-johnson-biological-age-sauna-2025-05-27
+        - source_artifact:pmid-22505948
     -
       id: core-temperature-dose-variant
       label: Core-temperature dose variant
       stance: mixed
-      summary: The April 2026 core-temperature posts change the interpretation of the original 20-minute routine: Johnson reports that reaching roughly 102.4 F / 39 C took closer to 31 minutes, and longer with face or neck cooling. This makes the threshold-targeted saunamaxx version a higher-burden variant rather than a silent replacement for the default page protocol.
+      summary: The April 2026 core-temperature posts change the interpretation of the original 20-minute routine: Johnson reports that reaching roughly 102.4 F / 39 C took closer to 31 minutes, and longer with face or neck cooling. Treat the threshold-targeted saunamaxx version as a higher-burden variant, with cooling used as a tolerability tactic rather than proof of safety.
       sourceKeys:
+        - source_artifact:bryanjohns0n-saunamaxx-2026-04-14
         - source_artifact:bryan-johnson-saunamaxx-2026-04-14
+        - source_artifact:bryanjohns0n-core-temp-prototype-2026-04-03
+        - source_artifact:x-bryan-johnson-fired-review-2026-04-06
+        - source_artifact:pmid-14648127
+        - source_artifact:pmid-16916892
+        - source_artifact:pmid-40041158
         - source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
         - source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03
+        - source_artifact:pmid-35092517
+        - source_artifact:pmid-40355096
+        - source_artifact:pmid-33646422
         - source_artifact:x-bryan-johnson-core-temp-2026-04-16
         - source_artifact:x-bryan-johnson-core-temp-update-2026-04-03
-        - source_artifact:x-bryan-johnson-fired-review-2026-04-06
+        - source_artifact:pmid-17928942
+        - source_artifact:pmid-18704483
+        - source_artifact:pmid-22222935
+        - source_artifact:pmid-26264882
+        - source_artifact:pmid-28944271
+        - source_artifact:pmid-20414820
+        - source_artifact:pmid-22488284
+        - source_artifact:pmid-24085588
+        - source_artifact:pmid-25722377
+        - source_artifact:pmid-28842615
+      defaultOpen: true
+    -
+      id: core-temperature-measurement-context
+      label: Core-temperature measurement limits
+      stance: context_only
+      summary: Core-temperature sources explain why swallowed pills, rectal probes, skin sensors, ear readings, hydration, timing, and recovery lag can disagree. This supports careful measurement caveats; it does not turn a specific core-temperature threshold into a required target.
+      sourceKeys:
+        - source_artifact:pmid-17178778
+        - source_artifact:pmid-18379216
+        - source_artifact:pmid-28496414
+        - source_artifact:pmid-12427049
+        - source_artifact:pmid-18059987
+        - source_artifact:pmid-19295956
+        - source_artifact:pmid-22892415
+        - source_artifact:pmid-24561595
+        - source_artifact:pmid-26485169
+        - source_artifact:pmid-27857951
+        - source_artifact:pmid-28816921
+        - source_artifact:pmid-33449102
+        - source_artifact:pmid-33997115
+        - source_artifact:pmid-34502822
+        - source_artifact:pmid-36939844
+        - source_artifact:pmid-40118073
+        - source_artifact:pmid-33553501
+        - source_artifact:pmid-36236737
+        - source_artifact:pmid-35813051
+        - source_artifact:pmid-27186918
+    -
+      id: independent-sauna-physiology-context
+      label: Independent sauna physiology
+      stance: context_only
+      summary: Independent reviews and acute physiology studies make the basic mechanism easier to trust: dry sauna raises heat strain, heart rate, sweating, vascular demand, autonomic load, immune markers, and recovery burden. This supports tracking pulse, blood pressure, symptoms, and cooldown context, but it does not validate the exact daily Blueprint dose.
+      sourceKeys:
+        - source_artifact:pmid-29849692
+        - source_artifact:pmid-29048215
+        - source_artifact:pmid-29269746
+        - source_artifact:pmid-31126559
+        - source_artifact:pmid-41461792
+        - source_artifact:pmid-31293098
+        - source_artifact:mayo-2018-sauna-review
+        - source_artifact:pmid-34622026
+        - source_artifact:nct-NCT06125639
+        - source_artifact:pmid-25001587
+        - source_artifact:pmid-2759081
+        - source_artifact:pmid-31136202
+        - source_artifact:pmid-3218894
+        - source_artifact:pmid-33922289
+        - source_artifact:pmid-34770018
+        - source_artifact:pmid-36813265
+        - source_artifact:pmid-38271083
+        - source_artifact:doi-10.1155-2014-106049
+        - source_artifact:pmid-29971466
+        - source_artifact:pmid-24304490
+        - source_artifact:pmid-31331560
+        - source_artifact:doi-10.1080-23328940.2026.2645467
+        - source_artifact:pmid-24511348
+        - source_artifact:pmid-28378983
+      defaultOpen: true
+    -
+      id: adjacent-passive-heat-context
+      label: Adjacent passive-heat evidence
+      stance: mixed
+      summary: Hot-water immersion and broader passive-heat syntheses provide useful cardiovascular, metabolic, and thermal-load context, but they use different heat transfer, temperatures, durations, and populations. Keep them as plausibility and caution evidence rather than direct dry-sauna proof.
+      sourceKeys:
+        - source_artifact:pmid-41049507
+        - source_artifact:pmid-41603269
+        - source_artifact:pmid-27270841
+        - source_artifact:pmid-31642205
+        - source_artifact:pmid-40087302
+        - source_artifact:pmid-32814462
+        - source_artifact:pmid-33866630
+        - source_artifact:doi-10.1016-j.aimed.2024.09.009
+        - source_artifact:pmid-30335579
+        - source_artifact:pmid-33792402
+        - source_artifact:pmid-27857958
+        - source_artifact:nct-NCT05618197
+    -
+      id: long-term-cohort-context
+      label: Long-term cohort context
+      stance: context_only
+      summary: Large Finnish cohort and review sources link frequent sauna bathing with long-term health outcomes, which helps explain why sauna is interesting. These are mostly observational or broad-context sources and cannot prove a short Blueprint-style self-experiment caused a wearable or biomarker change.
+      sourceKeys:
+        - source_artifact:pmid-25706401
+        - source_artifact:pmid-34158458
+        - source_artifact:pmid-34363927
+        - source_artifact:pmid-35908583
+        - source_artifact:pmid-28905164
+        - source_artifact:pmid-31102597
+        - source_artifact:pmid-31372865
+        - source_artifact:pmid-33426640
+        - source_artifact:pmid-33797457
+        - source_artifact:pmid-38836690
+        - source_artifact:pmid-27932366
+        - source_artifact:pmid-29209938
+        - source_artifact:pmid-29229091
+        - source_artifact:pmid-29897261
+        - source_artifact:pmid-33088678
+        - source_artifact:pmid-38410962
+        - source_artifact:pmid-31590079
+        - source_artifact:pmid-37270272
+        - source_artifact:pmid-38577299
+        - source_artifact:pmid-32951736
+        - source_artifact:pmid-36255556
+        - source_artifact:pmid-37029766
+        - source_artifact:pmid-28972808
+        - source_artifact:pmid-29551418
+        - source_artifact:pmid-29720543
+        - source_artifact:pmid-30077204
+        - source_artifact:pmid-37248758
+        - source_artifact:pmid-26436738
+        - source_artifact:pmid-25705824
+        - source_artifact:pmid-28633297
+        - source_artifact:pmid-30486813
+    -
+      id: post-workout-training-context
+      label: Post-workout, recovery, and performance evidence
+      stance: mixed
+      summary: The exercise-coupled literature is mixed: some post-exercise sauna and high-heat acclimation studies report cardiovascular or performance signals, while other recovery, HRV, hydration, gut, and neuromuscular studies are null or negative. This is why the protocol asks users to log training load, soreness, hydration, and next-workout performance.
+      sourceKeys:
+        - source_artifact:pmid-35785965
+        - source_artifact:pmid-40611569
+        - source_artifact:pmid-16877041
+        - source_artifact:pmid-31490429
+        - source_artifact:pmid-31869820
+        - source_artifact:pmid-33211153
+        - source_artifact:pmid-34297227
+        - source_artifact:pmid-41032138
+        - source_artifact:pmid-40104529
+        - source_artifact:doi-10.2478-v10036-008-0028-4
+        - source_artifact:pmid-26446307
+        - source_artifact:pmid-37398966
+        - source_artifact:pmid-32599642
+        - source_artifact:pmid-39762944
+        - source_artifact:pmid-34727008
+        - source_artifact:pmid-35710395
+        - source_artifact:pmid-38846523
+        - source_artifact:pmid-26180741
+        - source_artifact:pmid-29444412
+        - source_artifact:pmid-22163272
+        - source_artifact:doi-10.3390-app151910762
+        - source_artifact:pmid-36078656
+        - source_artifact:isrctn-ISRCTN48038929
+        - source_artifact:nct-NCT04540718
+        - source_artifact:nct-NCT04556422
+        - source_artifact:pmid-29470824
+        - source_artifact:pmid-35254558
+      defaultOpen: true
+    -
+      id: heat-acclimation-and-heat-shock-context
+      label: Heat acclimation and heat-shock context
+      stance: context_only
+      summary: Heat-acclimation and heat-shock-protein sources support mechanistic interest in repeated heat strain, plasma-volume adaptation, cytokines, and HSP expression. They are mostly exercise-heat, hot-water, or high-heat adjacent studies, so they should calibrate hypotheses rather than become Blueprint efficacy claims.
+      sourceKeys:
+        - source_artifact:pmid-33627275
+        - source_artifact:pmid-36767447
+        - source_artifact:pmid-25432420
+        - source_artifact:pmid-34503795
+        - source_artifact:pmid-11795467
+        - source_artifact:pmid-27511024
+        - source_artifact:pmid-31823288
+        - source_artifact:pmid-34127636
+        - source_artifact:pmid-34199101
+        - source_artifact:pmid-27188431
+        - source_artifact:pmid-17615280
+    -
+      id: measurement-and-wearable-context
+      label: Wearable, sweat, and hydration measurement
+      stance: context_only
+      summary: Wearable HR, HRV, sweat, sodium, and hydration-method papers help interpret the measurements a self-experiment will rely on. They support logging device quality, sweat loss, fluids, electrolytes, and missing data, but they do not show the sauna protocol works.
+      sourceKeys:
+        - source_artifact:pmid-32047863
+        - source_artifact:pmid-17277604
+        - source_artifact:pmid-36016077
+        - source_artifact:pmid-19541738
+        - source_artifact:pmid-26708360
+        - source_artifact:pmid-28332116
+        - source_artifact:pmid-28538708
+        - source_artifact:pmid-29420145
+        - source_artifact:pmid-32748563
+        - source_artifact:pmid-32897239
+        - source_artifact:pmid-36081005
+        - source_artifact:pmid-40834291
+        - source_artifact:pmid-24436351
+        - source_artifact:pmid-30855232
+        - source_artifact:pmid-36376641
+        - source_artifact:pmid-38131698
     -
       id: safety-fertility-cooling-boundary
       label: Fertility and groin-cooling boundary
       stance: safety_boundary
-      summary: The independent fertility studies make the heat-risk caveat real, while Johnson's groin-cooling posts explain why his named routine includes an ice-pack tactic. Together they support a warning, not a promise that groin cooling prevents sauna-related fertility effects.
+      summary: Independent semen and heat-stress literature makes the fertility caveat real, while Johnson's groin-cooling sources explain why his named routine includes an ice-pack tactic. Together they support a warning and an off-ramp, not a promise that groin cooling prevents sauna-related fertility effects.
       sourceKeys:
-        - source_artifact:pmid-23411620
-        - source_artifact:pmid-9972494
+        - source_artifact:pmid-5891617
+        - source_artifact:isrctn-ISRCTN94041896
+        - source_artifact:pmid-3275550
+        - source_artifact:pmid-35722894
+        - source_artifact:pmid-36412227
+        - source_artifact:pmid-41875434
+        - source_artifact:pmid-6103260
+        - source_artifact:pmid-1288761
+        - source_artifact:pmid-16130271
+        - source_artifact:pmid-22540417
+        - source_artifact:pmid-25456164
+        - source_artifact:pmid-2888735
+        - source_artifact:pmid-3678498
+        - source_artifact:pmid-39145501
+        - source_artifact:pmid-3959246
+        - source_artifact:pmid-3987927
+        - source_artifact:pmid-9756281
+        - source_artifact:uroweb-male-infertility-guideline-2026-04-27
         - source_artifact:x-bryan-johnson-ice-balls-2026-04-09
+        - source_artifact:pmid-18076419
+        - source_artifact:pmid-29928539
+        - source_artifact:pmid-32787870
+        - source_artifact:pmid-34553153
+        - source_artifact:pmid-34729240
+        - source_artifact:pmid-35924639
+        - source_artifact:pmid-6471178
+        - source_artifact:who-semen-manual-2021-07-27
+        - source_artifact:pmid-11277880
+        - source_artifact:pmid-27410176
+        - source_artifact:pmid-6476971
+        - source_artifact:pmid-9240266
+        - source_artifact:pmid-9972494
+        - source_artifact:bryanjohnson-posts-icing-protocol-2025-07-15
+        - source_artifact:pmid-23654310
+        - source_artifact:pmid-25652627
+        - source_artifact:bryan-johnson-fertility-sauna-2025-06-19
+        - source_artifact:bryan-johnson-sperm-health-protocol-2025-06-10
+        - source_artifact:bryanjohnson-posts-sauna-heat-swimmers-2025-07-10
+        - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
+        - source_artifact:pmid-23411620
       defaultOpen: true
     -
-      id: general-sauna-safety-screening
-      label: General sauna safety screen
+      id: clinical-cardiovascular-boundaries
+      label: Clinical cardiovascular boundaries
       stance: safety_boundary
-      summary: General safety reviews support a conservative screen for cardiovascular disease, uncontrolled blood pressure, dehydration, alcohol or drug use, heat intolerance, pregnancy, medication issues, and red-flag symptoms. This matters more for a daily 200 F post-workout routine than for a gentler starter protocol.
+      summary: Hypertension, coronary disease, heart-failure, Waon-therapy, medication, and registry sources belong in a supervised clinical boundary. They help identify who needs medical review and why disease-population findings should not be generalized to a high-temperature consumer routine.
       sourceKeys:
+        - source_artifact:nct-NCT07468344
+        - source_artifact:pmid-10492315
+        - source_artifact:pmid-26152773
+        - source_artifact:pmid-2741821
+        - source_artifact:pmid-37650138
+        - source_artifact:pmid-7957149
+        - source_artifact:pmid-32615263
+        - source_artifact:pmid-15564698
+        - source_artifact:pmid-22561416
+        - source_artifact:pmid-22863164
+        - source_artifact:pmid-10955262
+        - source_artifact:pmid-30239008
+        - source_artifact:nct-NCT03620539
+        - source_artifact:pmid-34115020
+        - source_artifact:pmid-20884178
+        - source_artifact:pmid-11869837
+        - source_artifact:pmid-29409954
+        - source_artifact:pmid-11583886
+    -
+      id: general-sauna-safety-screening
+      label: General heat and sauna safety
+      stance: safety_boundary
+      summary: General heat, sauna, pregnancy, medication, dehydration, alcohol, skin, and emergency-medicine sources support a conservative screen before a daily 200 F post-workout routine. They are safety and exclusion context, not evidence that the Blueprint protocol is safe for every user.
+      sourceKeys:
+        - source_artifact:doi-10.3390-jcm15051910
+        - source_artifact:doi-10.1016-j.heliyon.2025.e43031
+        - source_artifact:cdc-clinical-heat-pregnancy-2025-09-18
+        - source_artifact:mothertobaby-fever-hyperthermia-pregnancy-2025-02-01
+        - source_artifact:pmid-30800676
+        - source_artifact:pmid-38425235
+        - source_artifact:pmid-39513185
+        - source_artifact:pmid-7112434
+        - source_artifact:pmid-7260810
+        - source_artifact:pmid-7589027
+        - source_artifact:pmid-8299674
+        - source_artifact:pmid-9571303
+        - source_artifact:sccm-heat-stroke-guideline-2025-02-22
+        - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
+        - source_artifact:cdc-heat-medications-2025-09-18
+        - source_artifact:bryan-johnson-protocol-2026-01-23
+        - source_artifact:cdc-heat-clinical-overview-2025-09-18
+        - source_artifact:pmid-15703536
+        - source_artifact:pmid-1640616
+        - source_artifact:cdc-heat-older-adults-2024-06-25
+        - source_artifact:pmid-1588256
+        - source_artifact:pmid-29496695
+        - source_artifact:pmid-19749613
+        - source_artifact:pmid-18471223
+        - source_artifact:pmid-36170473
+        - source_artifact:pmid-1017928
         - source_artifact:pmid-11165553
+        - source_artifact:pmid-11874249
+        - source_artifact:pmid-1267582
+        - source_artifact:pmid-3218897
+        - source_artifact:pmid-38344040
+        - source_artifact:pmid-37211472
+        - source_artifact:facebook-bryan-johnson-sweat-electrolytes-2025-05-14
+        - source_artifact:pmid-26381473
+        - source_artifact:pmid-17473783
+        - source_artifact:pmid-11834331
+        - source_artifact:pmid-12075060
         - source_artifact:pmid-16871826
+        - source_artifact:pmid-16998815
+        - source_artifact:pmid-1853995
+        - source_artifact:pmid-1882775
+        - source_artifact:pmid-19506509
+        - source_artifact:pmid-26566054
+        - source_artifact:pmid-28748097
+        - source_artifact:pmid-32219708
+        - source_artifact:pmid-3538994
+        - source_artifact:pmid-39660118
+        - source_artifact:pmid-41228151
+        - source_artifact:pmid-707206
+        - source_artifact:pmid-9100952
+        - source_artifact:pmid-3218903
+        - source_artifact:pmid-3218901
+      defaultOpen: true
+    -
+      id: adjacent-modality-boundaries
+      label: Adjacent heat modalities
+      stance: context_only
+      summary: Far-infrared sauna, hot yoga, hot-water, steam, portable sauna, and modality-comparison sources help prevent false equivalence. They can explain why heat exposure is active and sometimes risky, but their results should not be merged into this dry-sauna protocol claim.
+      sourceKeys:
+        - source_artifact:pmid-27107927
+        - source_artifact:pmid-40332494
+        - source_artifact:pmid-22927272
+        - source_artifact:pmid-41320841
+        - source_artifact:pmid-24899780
+        - source_artifact:pmid-37870668
+        - source_artifact:pmid-37979477
+        - source_artifact:pmid-41032153
+        - source_artifact:pmid-19602651
+        - source_artifact:pmid-26504475
+        - source_artifact:pmid-32509120
+        - source_artifact:pmid-34188383
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
