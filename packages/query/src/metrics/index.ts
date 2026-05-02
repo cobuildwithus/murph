@@ -209,13 +209,14 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const observedAt = collectedAt ?? entity.occurredAt ?? reportedAt ?? entity.date ?? null;
   if (!observedAt) return [];
 
-  return results.flatMap((entry, index) => {
+  const points = results.flatMap((entry, index) => {
     const record = readRecord(entry);
     const metric = readString(record?.biomarkerSlug) ?? readString(record?.slug) ?? readString(record?.analyte);
     const value = readNumber(record?.value);
     const textValue = readString(record?.textValue);
     const unit = readString(record?.unit);
     if (!metric || (value === null && !textValue)) return [];
+    if (!resolveMetricDefinition(normalizeMetricKey(metric))) return [];
 
     return [scalarMetricPoint({
       comparator: readComparator(record?.comparator),
@@ -236,6 +237,8 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
       value,
     })];
   });
+
+  return dedupeTestResultMetricPoints(points);
 }
 
 function scalarMetricPoint(input: {
@@ -315,6 +318,17 @@ function dedupeMetricPoints(points: readonly MetricPoint[]): MetricPoint[] {
     byId.set(point.id, point);
   }
   return [...byId.values()];
+}
+
+function dedupeTestResultMetricPoints(points: readonly MetricPoint[]): MetricPoint[] {
+  const byMetric = new Map<string, MetricPoint>();
+  for (const point of points) {
+    const existing = byMetric.get(point.metricKey);
+    if (!existing || (existing.canonicalValue === null && point.canonicalValue !== null)) {
+      byMetric.set(point.metricKey, point);
+    }
+  }
+  return [...byMetric.values()];
 }
 
 function compareMetricPointDesc(left: MetricPoint, right: MetricPoint): number {
