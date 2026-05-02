@@ -628,15 +628,15 @@ claims:
   caveats:
   - These populations may need different timing, supervision, outcomes, and safety framing.
 researchLandscape:
-  bottomLine: 'Best treated as a low-burden, safety-bounded evening-light self-experiment only after a negative safety screen and a visually safe, task-free wear window: the mechanism is plausible and some small trials show signals, but direct adult glasses evidence is small, mixed, and weakest for objective wearable outcomes.'
+  bottomLine: "Best treated as a low-burden, safety-bounded evening-light self-experiment only after a negative safety screen and a visually safe, task-free wear window: the mechanism is plausible and some small trials show signals, but direct adult glasses evidence is small, mixed, and weakest for objective wearable outcomes."
   confidenceLabel: mixed
-  primaryClaim: High-filtering amber, red, or orange glasses are a reasonable mechanism-based test for some users whose pre-bed routine includes enough screen or room light to plausibly matter; this is not a direct subgroup finding for specific room-light or screen contexts.
-  mainCaveat: Do not promise insomnia treatment, objective wearable improvement, sleep-stage gains, eye-strain relief, retinal protection, or benefits in clinical/special populations.
+  primaryClaim: "High-filtering amber, red, or orange glasses are a reasonable mechanism-based test for some users whose pre-bed routine includes enough screen or room light to plausibly matter; this is not a direct subgroup finding for specific room-light or screen contexts."
+  mainCaveat: "Do not promise insomnia treatment, objective wearable improvement, sleep-stage gains, eye-strain relief, retinal protection, or benefits in clinical/special populations."
   groups:
   - id: direct_adult_bedtime_eyewear_trials
-    label: Direct adult bedtime eyewear trials
+    label: "Direct adult bedtime eyewear trials"
     stance: mixed
-    summary: Small direct trials justify a personal test of pre-bed wiredness, perceived sleep onset, subjective sleep quality, and sometimes actigraphy total sleep time; they do not justify promising broad objective wearable gains.
+    summary: "Small direct trials justify a personal test of pre-bed wiredness, perceived sleep onset, subjective sleep quality, and sometimes actigraphy total sleep time; they do not justify promising broad objective wearable gains."
     sourceKeys:
     - source_artifact:evening-light-reduction-pmid-26730983
     - source_artifact:evening-light-reduction-pmid-29101797
@@ -644,27 +644,37 @@ researchLandscape:
     - source_artifact:evening-light-reduction-pmid-30410784
     - source_artifact:evening-light-reduction-pmid-30427265
     - source_artifact:pmid-30890197
+    - source_artifact:pmid-20030543
+    - source_artifact:pmid-26730983
+    - source_artifact:pmid-29101797
+    - source_artifact:pmid-30410784
+    - source_artifact:pmid-30427265
+    - source_artifact:pmid-31752544
+    - source_artifact:pmid-32658494
     defaultOpen: true
   - id: direct_eyewear_evidence_synthesis
-    label: Review-level eyewear sleep evidence
+    label: "Review-level eyewear sleep evidence"
     stance: mixed
-    summary: 'Review-level evidence sets cautious expectations: a broad review reported promising but heterogeneous sleep-onset evidence, an abstract-only meta-analysis was mixed, and the extracted adult actigraphy meta-analysis found no statistically significant pooled benefit for sleep onset latency, total sleep time, sleep efficiency, or WASO.'
+    summary: "Review-level evidence sets cautious expectations: a broad review reported promising but heterogeneous sleep-onset evidence, an abstract-only meta-analysis was mixed, and the extracted adult actigraphy meta-analysis found no statistically significant pooled benefit for sleep onset latency, total sleep time, sleep efficiency, or WASO."
     sourceKeys:
     - source_artifact:evening-light-reduction-pmid-34030534
     - source_artifact:evening-light-reduction-pmid-41341515
     - source_artifact:doi-10.1093-sleep-zsaa056.170
+    - source_artifact:pmid-34030534
+    - source_artifact:pmid-37192881
+    - source_artifact:pmid-41341515
     defaultOpen: true
   - id: healthy_adult_mixed_null_trials
-    label: Healthy-adult null or mixed boundary
+    label: "Healthy-adult null or mixed boundary"
     stance: does_not_confirm
-    summary: The healthy-adult crossover trial did not find overall objective or subjective sleep-time or sleep-quality improvement, so null results are expected for some stable sleepers; low evening light is a mechanism-based reason to expect a smaller signal, not a directly extracted subgroup result.
+    summary: "The healthy-adult crossover trial did not find overall objective or subjective sleep-time or sleep-quality improvement, so null results are expected for some stable sleepers; low evening light is a mechanism-based reason to expect a smaller signal, not a directly extracted subgroup result."
     sourceKeys:
     - source_artifact:pmid-33707105
     defaultOpen: false
   - id: lens_dose_and_implementation_guardrails
-    label: Lens dose and implementation guardrails
+    label: "Lens dose and implementation guardrails"
     stance: mixed
-    summary: Commercial lens performance varies; spectral filtering, melanopic/alpha-opic measures, fit, leakage, screens, and room light determine whether the intervention meaningfully lowers evening retinal light input.
+    summary: "Commercial lens performance varies; spectral filtering, melanopic/alpha-opic measures, fit, leakage, screens, and room light determine whether the intervention meaningfully lowers evening retinal light input."
     sourceKeys:
     - source_artifact:evening-light-reduction-pmid-40728371
     - source_artifact:evening-light-reduction-doi-10.25039-s026.2018
@@ -677,11 +687,29 @@ researchLandscape:
     - source_artifact:pmid-39259700
     - source_artifact:pmid-32864077
     - source_artifact:doi-10.21273-horttech05673-25
+    - source_artifact:doi-10.1177-1477153515584979
+    - source_artifact:evening-light-reduction-pmid-15713707
+    - source_artifact:pmid-20463367
+    - source_artifact:pmid-28656675
+    - source_artifact:pmid-36412580
+    - source_artifact:pmid-36508661
+    - source_artifact:doi-10.17617-1.4a6s-ec74
+    - source_artifact:pmid-16842544
+    - source_artifact:pmid-21193540
+    - source_artifact:pmid-25535358
+    - source_artifact:pmid-28045969
+    - source_artifact:pmid-31504080
+    - source_artifact:pmid-32168244
+    - source_artifact:pmid-35298459
+    - source_artifact:pmid-36051910
+    - source_artifact:pmid-36854795
+    - source_artifact:pmid-40728371
+    - source_artifact:pmid-41565717
     defaultOpen: true
   - id: measurement-and-claim-guardrails
-    label: Measurement and wearable guardrails
+    label: "Measurement and wearable guardrails"
     stance: context_only
-    summary: Actigraphy and consumer wearables are useful for repeated within-person trends, but wake detection, scoring rules, algorithms, and sleep-stage estimates are imperfect; pair device data with subjective sleep-onset and pre-bed-wiredness logs.
+    summary: "Actigraphy and consumer wearables are useful for repeated within-person trends, but wake detection, scoring rules, algorithms, and sleep-stage estimates are imperfect; pair device data with subjective sleep-onset and pre-bed-wiredness logs."
     sourceKeys:
     - source_artifact:evening-light-reduction-pmid-12749556
     - source_artifact:pmid-12749557
@@ -696,11 +724,40 @@ researchLandscape:
     - source_artifact:evening-light-reduction-pmid-38149978
     - source_artifact:evening-light-reduction-pmid-40300398
     - source_artifact:pmid-40303381
+    - source_artifact:pmid-1455130
+    - source_artifact:evening-light-reduction-pmid-17520797
+    - source_artifact:evening-light-reduction-pmid-19544753
+    - source_artifact:evening-light-reduction-pmid-21237680
+    - source_artifact:evening-light-reduction-pmid-21447050
+    - source_artifact:evening-light-reduction-pmid-21652563
+    - source_artifact:evening-light-reduction-pmid-25845697
+    - source_artifact:pmid-28323455
+    - source_artifact:evening-light-reduction-pmid-29235907
+    - source_artifact:evening-light-reduction-pmid-29734997
+    - source_artifact:evening-light-reduction-pmid-29991438
+    - source_artifact:evening-light-reduction-pmid-30472879
+    - source_artifact:evening-light-reduction-pmid-30789439
+    - source_artifact:pmid-30941838
+    - source_artifact:evening-light-reduction-pmid-31154154
+    - source_artifact:evening-light-reduction-pmid-31621129
+    - source_artifact:evening-light-reduction-pmid-31778122
+    - source_artifact:evening-light-reduction-pmid-32882005
+    - source_artifact:evening-light-reduction-pmid-36256631
+    - source_artifact:evening-light-reduction-pmid-37917155
+    - source_artifact:evening-light-reduction-pmid-38557808
+    - source_artifact:evening-light-reduction-pmid-39460013
+    - source_artifact:pmid-41768372
+    - source_artifact:pmid-7939118
+    - source_artifact:pmid-25687438
+    - source_artifact:pmid-31538605
+    - source_artifact:doi-10.1111-opo.12406
+    - source_artifact:pmid-29991437
+    - source_artifact:pmid-33587901
     defaultOpen: false
   - id: safety-visual-performance-eye-health-claim-boundaries
-    label: Safety, visual tasks, and eye-health claim boundaries
+    label: "Safety, visual tasks, and eye-health claim boundaries"
     stance: safety_boundary
-    summary: Strong filtering or tinted lenses can create visibility or color-performance tradeoffs and should not be marketed here as eye-strain treatment, retinal protection, AMD prevention, macular-health support, night-driving aids, or a substitute for eye care.
+    summary: "Strong filtering or tinted lenses can create visibility or color-performance tradeoffs and should not be marketed here as eye-strain treatment, retinal protection, AMD prevention, macular-health support, night-driving aids, or a substitute for eye care."
     sourceKeys:
     - source_artifact:evening-light-reduction-pmid-37593770
     - source_artifact:aao-digital-devices-eyes-2025-12-05
@@ -722,11 +779,84 @@ researchLandscape:
     - source_artifact:pmid-35057697
     - source_artifact:pmid-33001489
     - source_artifact:pmid-31696535
+    - source_artifact:pmid-15302349
+    - source_artifact:pmid-25838942
+    - source_artifact:pmid-26900325
+    - source_artifact:evening-light-reduction-pmid-27855740
+    - source_artifact:evening-light-reduction-pmid-28045969
+    - source_artifact:pmid-28118668
+    - source_artifact:pmid-29044670
+    - source_artifact:pmid-31635988
+    - source_artifact:pmid-31824984
+    - source_artifact:pmid-33181732
+    - source_artifact:pmid-33734926
+    - source_artifact:pmid-35809192
+    - source_artifact:pmid-35911990
+    - source_artifact:pmid-36042717
+    - source_artifact:pmid-37991308
+    - source_artifact:pmid-37593770
     defaultOpen: true
-  - id: clinical_supervised_mood_dark_therapy
-    label: Mood and virtual-darkness clinical variants
+  - id: screen-room-light-and-device-context
+    label: "Adjacent screen, room-light, and device context"
+    stance: context_only
+    summary: "Screen-use, room-light, and device-filter sources explain why the glasses signal can be confounded, but they stay separate from the eyewear protocol and do not turn this into a generic screen-curfew experiment."
+    sourceKeys:
+    - source_artifact:evening-light-reduction-pmid-20673649
+    - source_artifact:evening-light-reduction-pmid-25193149
+    - source_artifact:evening-light-reduction-pmid-27802500
+    - source_artifact:pmid-29093040
+    - source_artifact:evening-light-reduction-pmid-31260534
+    - source_artifact:evening-light-reduction-pmid-32168244
+    - source_artifact:evening-light-reduction-pmid-32658494
+    - source_artifact:evening-light-reduction-pmid-38657359
+    - source_artifact:evening-light-reduction-pmid-38806392
+    - source_artifact:evening-light-reduction-pmid-38846535
+    - source_artifact:pmid-32954412
+    - source_artifact:evening-light-reduction-pmid-37812713
+    - source_artifact:pmid-31915891
+    defaultOpen: false
+  - id: adolescent-pediatric-and-neurodevelopmental-context
+    label: "Youth and neurodevelopmental variants"
+    stance: context_only
+    summary: "Child, adolescent, school, myopia, ADHD, and child-psychiatry evidence is useful for mechanism and boundary context, but it needs separate age- and condition-specific safety and outcomes framing."
+    sourceKeys:
+    - source_artifact:doi-10.59720-23-028
+    - source_artifact:doi-10.1001-jamapediatrics.2026.0976
+    - source_artifact:doi-10.2147-cpt.s37985
+    - source_artifact:evening-light-reduction-pmid-24397302
+    - source_artifact:evening-light-reduction-pmid-25287985
+    - source_artifact:pmid-36064209
+    - source_artifact:evening-light-reduction-pmid-41166315
+    - source_artifact:pmid-33556454
+    defaultOpen: false
+  - id: clinical-circadian-and-insomnia-boundaries
+    label: "Clinical circadian and insomnia boundaries"
     stance: mixed
-    summary: Mood-disorder and virtual-darkness sources are clinical, supervised, inpatient, registry, case-report, or hypothesis-level contexts with mixed results; they set safety boundaries rather than consumer sleep claims.
+    summary: "Delayed-sleep-phase, CBT-I adjunct, inpatient light-environment, registry, and other clinical sources should guide referral and variant separation rather than ordinary unsupervised bedtime-glasses claims."
+    sourceKeys:
+    - source_artifact:evening-light-reduction-pmid-26414986
+    - source_artifact:evening-light-reduction-pmid-27322730
+    - source_artifact:evening-light-reduction-pmid-31752544
+    - source_artifact:evening-light-reduction-pmid-39642162
+    - source_artifact:pmid-15713707
+    - source_artifact:pmid-25287985
+    - source_artifact:pmid-26414986
+    - source_artifact:pmid-27226262
+    - source_artifact:pmid-27322730
+    - source_artifact:pmid-28488943
+    - source_artifact:pmid-31967375
+    - source_artifact:pmid-32276301
+    - source_artifact:pmid-35024497
+    - source_artifact:pmid-35089982
+    - source_artifact:pmid-35268469
+    - source_artifact:pmid-39642162
+    - source_artifact:pmid-41166315
+    - source_artifact:pmid-41421618
+    defaultOpen: false
+  - id: clinical_supervised_mood_dark_therapy
+    label: "Mood and virtual-darkness clinical variants"
+    stance: mixed
+    summary: "Mood-disorder and virtual-darkness sources are clinical, supervised, inpatient, registry, case-report, or hypothesis-level contexts with mixed results; they set safety boundaries rather than consumer sleep claims."
     sourceKeys:
     - source_artifact:pmid-15654938
     - source_artifact:pmid-17637502
@@ -739,11 +869,14 @@ researchLandscape:
     - source_artifact:evening-light-reduction-pmid-35268469
     - source_artifact:evening-light-reduction-pmid-41421618
     - source_artifact:evening-light-reduction-pmid-28488943
+    - source_artifact:pmid-38109922
+    - source_artifact:pmid-33561902
+    - source_artifact:pmid-40781930
     defaultOpen: false
   - id: shift_work_timing_variants
-    label: Shift-work timing variants
+    label: "Shift-work timing variants"
     stance: context_only
-    summary: Shift-work eyewear sources use different timing goals and often combined light packages, so they should not be folded into the default pre-bed adult protocol.
+    summary: "Shift-work eyewear sources use different timing goals and often combined light packages, so they should not be folded into the default pre-bed adult protocol."
     sourceKeys:
     - source_artifact:pmid-19637050
     - source_artifact:pmid-20599459
@@ -751,11 +884,12 @@ researchLandscape:
     - source_artifact:pmid-33588653
     - source_artifact:pmid-37429599
     - source_artifact:pmid-41353624
+    - source_artifact:pmid-30700675
     defaultOpen: false
   - id: pregnancy_evening_eyewear_context
-    label: Pregnancy eyewear context
+    label: "Pregnancy eyewear context"
     stance: mixed
-    summary: Pregnancy sources are special-population context with mixed sleep findings and transient side effects; pregnancy should stay outside the default unsupervised adult protocol.
+    summary: "Pregnancy sources are special-population context with mixed sleep findings and transient side effects; pregnancy should stay outside the default unsupervised adult protocol."
     sourceKeys:
     - source_artifact:evening-light-reduction-pmid-35024497
     - source_artifact:evening-light-reduction-pmid-35089982

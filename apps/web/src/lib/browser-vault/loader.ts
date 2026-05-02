@@ -101,6 +101,8 @@ export async function loadBrowserVaultReplica({
 
   const plaintext = await decryptHostedStoragePayload({
     aad: buildHostedStorageAad({
+      dataKeyId: session.replicaAad.dataKeyId,
+      dataKeyRootKeyId: session.replicaAad.dataKeyRootKeyId,
       dataVersion: session.replicaAad.dataVersion,
       objectKey: session.replicaAad.objectKey,
       purpose: session.replicaAad.purpose,
@@ -110,7 +112,7 @@ export async function loadBrowserVaultReplica({
       userId: session.replicaAad.userId,
     }),
     envelope: session.encryptedReplica,
-    expectedKeyId: session.replicaRef.keyId,
+    expectedKeyId: getBrowserVaultReplicaStorageKeyId(session.replicaRef),
     key: replicaKey,
     scope: "browser-vault-replica",
   });
@@ -236,6 +238,8 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
 }
 
 export interface BrowserVaultReplicaAad {
+  dataKeyId?: string;
+  dataKeyRootKeyId?: string;
   dataVersion: string;
   objectKey: string;
   purpose: "browser-vault-replica";
@@ -268,6 +272,19 @@ function assertBrowserVaultReplicaAadMatchesRef(input: {
   if (input.aad.runtimeRootKeyId !== input.ref.runtimeRootKeyId) {
     throw new Error("Browser vault replica AAD runtimeRootKeyId did not match its session ref.");
   }
+
+  const dataKeyEnvelope = input.ref.dataKeyEnvelope;
+  if (!dataKeyEnvelope) {
+    return;
+  }
+
+  if (input.aad.dataKeyId !== dataKeyEnvelope.dataKeyId) {
+    throw new Error("Browser vault replica AAD dataKeyId did not match its session ref.");
+  }
+
+  if (input.aad.dataKeyRootKeyId !== dataKeyEnvelope.rootKeyId) {
+    throw new Error("Browser vault replica AAD dataKeyRootKeyId did not match its session ref.");
+  }
 }
 
 function assertBrowserVaultReplicaRefsMatch(input: {
@@ -297,6 +314,17 @@ function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaul
   }
 
   return {
+    ...(record.dataKeyId === undefined
+      ? {}
+      : { dataKeyId: requireNonEmptyString(record.dataKeyId, `${label}.dataKeyId`) }),
+    ...(record.dataKeyRootKeyId === undefined
+      ? {}
+      : {
+          dataKeyRootKeyId: requireNonEmptyString(
+            record.dataKeyRootKeyId,
+            `${label}.dataKeyRootKeyId`,
+          ),
+        }),
     dataVersion: requireNonEmptyString(record.dataVersion, `${label}.dataVersion`),
     objectKey: requireNonEmptyString(record.objectKey, `${label}.objectKey`),
     purpose,
@@ -305,6 +333,12 @@ function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaul
     sourceBundleHash: requireNonEmptyString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireNonEmptyString(record.userId, `${label}.userId`),
   };
+}
+
+function getBrowserVaultReplicaStorageKeyId(
+  ref: HostedBrowserVaultReplicaRef,
+): string {
+  return ref.dataKeyEnvelope?.dataKeyId ?? ref.keyId;
 }
 
 function parseRequiredReplicaRef(value: unknown, label: string): HostedBrowserVaultReplicaRef {
