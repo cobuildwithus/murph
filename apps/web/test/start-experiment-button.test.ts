@@ -15,15 +15,7 @@ import { MURPH_EXPERIMENT_TELEGRAM_URL } from "@/src/lib/experiments/start-exper
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  authButtonState: {
-    authenticated: true,
-    ready: true,
-  },
-  useUser: vi.fn(),
-}));
-
-vi.mock("@privy-io/react-auth", () => ({
-  useUser: mocks.useUser,
+  authButtonClicksEnabled: true,
 }));
 
 vi.mock("@/src/components/ui/auth-button", () => ({
@@ -37,27 +29,18 @@ vi.mock("@/src/components/ui/auth-button", () => ({
     void size;
     void variant;
 
-    const isAuthenticated = mocks.authButtonState.ready && mocks.authButtonState.authenticated;
-    const content = isAuthenticated || !connectLabel ? children : connectLabel;
-
     return createElement(
       "button",
       {
         ...buttonProps,
-        "aria-busy": !mocks.authButtonState.ready,
         "data-slot": "auth-button",
-        disabled: !mocks.authButtonState.ready,
+        disabled: !mocks.authButtonClicksEnabled,
         onClick(event: MouseEvent<HTMLButtonElement>) {
-          if (!isAuthenticated) {
-            event.preventDefault();
-            return;
-          }
-
           buttonProps.onClick?.(event);
         },
         type: "button",
       },
-      content,
+      children ?? connectLabel,
     );
   },
 }));
@@ -94,13 +77,7 @@ let cleanupRender: (() => Promise<void>) | null = null;
 describe("StartExperimentButton", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authButtonState.authenticated = true;
-    mocks.authButtonState.ready = true;
-    mocks.useUser.mockReturnValue({
-      user: {
-        linkedAccounts: [],
-      },
-    });
+    mocks.authButtonClicksEnabled = true;
   });
 
   afterEach(async () => {
@@ -111,32 +88,16 @@ describe("StartExperimentButton", () => {
   });
 
   it("opens a channel picker when multiple connected channels are available", async () => {
-    mocks.useUser.mockReturnValue({
-      user: {
-        linkedAccounts: [
-          {
-            latest_verified_at: 1771977600,
-            phone_number: "+14045550123",
-            type: "phone",
-          },
-          {
-            id: "tg_user_123",
-            type: "telegram",
-            username: "member_handle",
-          },
-          {
-            address: "member@example.test",
-            latest_verified_at: 1771977600,
-            type: "email",
-          },
-        ],
-      },
-    });
     const { StartExperimentButton } = await import(
       "@/src/components/experiments/experiment-detail/start-experiment-button"
     );
     const { button, cleanup, container, window } = await renderClientComponent(
       createElement(StartExperimentButton, {
+        initialContactChannels: {
+          email: true,
+          telegram: true,
+          text: true,
+        },
         murphPhoneNumber: "+15550100001",
         protocolDays: 14,
         protocolTitle: "Finnish Dry Sauna",
@@ -173,19 +134,8 @@ describe("StartExperimentButton", () => {
     expect(renderedContactSurface).not.toContain("member_handle");
   });
 
-  it("lets AuthButton gate unauthenticated clicks before contact routing runs", async () => {
-    mocks.authButtonState.authenticated = false;
-    mocks.useUser.mockReturnValue({
-      user: {
-        linkedAccounts: [
-          {
-            id: "tg_user_123",
-            type: "telegram",
-            username: "member_handle",
-          },
-        ],
-      },
-    });
+  it("does not run contact routing while the rendered button is disabled", async () => {
+    mocks.authButtonClicksEnabled = false;
     const { StartExperimentButton } = await import(
       "@/src/components/experiments/experiment-detail/start-experiment-button"
     );
@@ -198,6 +148,7 @@ describe("StartExperimentButton", () => {
     cleanupRender = cleanup;
 
     expect(container.textContent).toContain("Start experiment");
+    expect(button.disabled).toBe(true);
 
     await act(async () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -208,9 +159,6 @@ describe("StartExperimentButton", () => {
   });
 
   it("uses initial channel flags without needing raw linked accounts in props", async () => {
-    mocks.useUser.mockReturnValue({
-      user: null,
-    });
     const { StartExperimentButton } = await import(
       "@/src/components/experiments/experiment-detail/start-experiment-button"
     );
@@ -243,9 +191,6 @@ describe("StartExperimentButton", () => {
   });
 
   it("inherits layout contact defaults when rendered without explicit channel props", async () => {
-    mocks.useUser.mockReturnValue({
-      user: null,
-    });
     const { StartExperimentButton } = await import(
       "@/src/components/experiments/experiment-detail/start-experiment-button"
     );
@@ -279,22 +224,14 @@ describe("StartExperimentButton", () => {
   });
 
   it("opens a single connected Telegram channel directly", async () => {
-    mocks.useUser.mockReturnValue({
-      user: {
-        linkedAccounts: [
-          {
-            id: "tg_user_123",
-            type: "telegram",
-            username: "member_handle",
-          },
-        ],
-      },
-    });
     const { StartExperimentButton } = await import(
       "@/src/components/experiments/experiment-detail/start-experiment-button"
     );
     const { assign, button, cleanup, container, open, window } = await renderClientComponent(
       createElement(StartExperimentButton, {
+        initialContactChannels: {
+          telegram: true,
+        },
         protocolDays: 14,
         protocolTitle: "Norwegian 4x4",
       }),

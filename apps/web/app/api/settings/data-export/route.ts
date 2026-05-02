@@ -3,7 +3,7 @@ import {
   readJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import {
   buildHostedDataExport,
   parseHostedDataExportRequest,
@@ -39,7 +39,7 @@ export function GET() {
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
-  const auth = await requirePrivyMemberAuth(request, prisma);
+  const auth = await requireHostedAppSessionFromRequest(request);
   parseHostedDataExportRequest(await readJsonObject(request, {
     limitBytes: HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES,
   }));

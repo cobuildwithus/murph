@@ -4,10 +4,10 @@ import { cache } from "react";
 
 import {
   DEFAULT_MURPH_CONTACT_CHANNELS,
-  resolveMurphContactChannels,
   type MurphContactChannels,
 } from "@/src/lib/murph-contact-routing";
 import { getPrisma } from "@/src/lib/prisma";
+import { readHostedAccountSettingsSnapshot } from "./account-settings-snapshot";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { getHostedPageAuthSnapshot } from "./page-auth";
 
@@ -18,17 +18,26 @@ export interface HostedMurphContactContext {
 
 export async function readHostedMurphContactContext():
   Promise<HostedMurphContactContext> {
-  const { authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
-  const routing = authenticatedMember
-    ? await readHostedMemberRoutingState({
-        memberId: authenticatedMember.id,
-        prisma: getPrisma(),
-      })
-    : null;
+  const { authenticatedMember } = await getHostedPageAuthSnapshot();
+  const [routing, account] = authenticatedMember
+    ? await Promise.all([
+        readHostedMemberRoutingState({
+          memberId: authenticatedMember.id,
+          prisma: getPrisma(),
+        }),
+        readHostedAccountSettingsSnapshot({
+          memberId: authenticatedMember.id,
+        }),
+      ])
+    : [null, null];
 
   return {
     initialContactChannels: authenticatedMember
-      ? resolveMurphContactChannels({ linkedAccounts })
+      ? {
+          email: Boolean(account?.email.address),
+          telegram: Boolean(account?.telegram.telegramUserId),
+          text: Boolean(account?.phone.number),
+        }
       : DEFAULT_MURPH_CONTACT_CHANNELS,
     murphPhoneNumber: routing?.linqRecipientPhone ?? null,
   };

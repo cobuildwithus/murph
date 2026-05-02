@@ -13,12 +13,12 @@ import {
   resolveHostedMemberEmailLinked,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { reconcileHostedPrivyIdentityOnMemberTx } from "@/src/lib/hosted-onboarding/member-identity-service";
-import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  const auth = await requirePrivyMemberAuth(request);
+  const { freshPrivy: auth } = await requireFreshPrivyMemberAuthForHostedAppSession(request);
   assertHostedMemberNotSuspended(auth.member);
   const phoneNumber = auth.identity.phone?.number ?? null;
 

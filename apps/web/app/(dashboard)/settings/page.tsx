@@ -3,15 +3,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
+import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
-import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
-import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
-import { HostedTelegramCardSettings } from "@/src/components/settings/hosted-telegram-card-settings";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { getPrisma } from "@/src/lib/prisma";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -20,18 +19,23 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function SettingsPage() {
-  const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
+  const { authenticated, authenticatedMember } = await getHostedPageAuthSnapshot();
 
   if (!authenticated) {
     redirect("/");
   }
 
-  const routing = authenticatedMember
-    ? await readHostedMemberRoutingState({
-        memberId: authenticatedMember.id,
-        prisma: getPrisma(),
-      })
-    : null;
+  const [routing, account] = authenticatedMember
+    ? await Promise.all([
+        readHostedMemberRoutingState({
+          memberId: authenticatedMember.id,
+          prisma: getPrisma(),
+        }),
+        readHostedAccountSettingsSnapshot({
+          memberId: authenticatedMember.id,
+        }),
+      ])
+    : [null, null];
 
   return (
     <HostedPhoneCountryCodeBoundary>
@@ -53,15 +57,12 @@ export default async function SettingsPage() {
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Messaging
           </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <HostedPhoneSettings
-              authenticated={authenticated}
-              initialLinkedAccounts={linkedAccounts}
+          {account ? (
+            <HostedAccountSettingsCards
+              account={account}
               murphPhoneNumber={routing?.linqRecipientPhone ?? null}
             />
-            <HostedTelegramCardSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
-            <HostedEmailSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
-          </div>
+          ) : null}
         </section>
 
         <section className="flex flex-col gap-4">

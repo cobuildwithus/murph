@@ -165,7 +165,7 @@ function TeaserVaultGlyph({ className }: { className?: string }) {
         x="170"
         y="308"
       >
-        ENCRYPTED &middot; TASK WORKERS
+        ENCRYPTED &middot; OPEN SOURCE
       </text>
     </svg>
   );

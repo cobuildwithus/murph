@@ -40,7 +40,7 @@ export function HowItWorksSection() {
           Improve your health, one experiment at a time.
         </h2>
         <p className="mt-5 max-w-[48ch] text-base leading-[1.7] text-pretty text-[#635a48]">
-          Sync your signals. Run an experiment. See what changes.
+          Sync your biomarkers. Run an experiment. See what changes.
         </p>
 
         <div className="mt-12 grid gap-4 sm:gap-5 lg:mt-14 md:grid-cols-12">

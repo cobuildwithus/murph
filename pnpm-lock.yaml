@@ -503,6 +503,9 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:../health-metrics
     devDependencies:
       '@types/node':
         specifier: ^25.5.0

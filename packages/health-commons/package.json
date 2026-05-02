@@ -42,7 +42,8 @@
     "artifacts:r2": "pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/sync-cloudflare-r2.ts"
   },
   "dependencies": {
-    "@murphai/contracts": "workspace:*"
+    "@murphai/contracts": "workspace:*",
+    "@murphai/health-metrics": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

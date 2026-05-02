@@ -1,8 +1,8 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { usePrivy, useUser } from "@privy-io/react-auth";
+import { usePathname, useRouter } from "next/navigation";
 import { Activity, ChevronsUpDown, FlaskConical, Home } from "lucide-react";
 import {
   useEffect,
@@ -13,7 +13,6 @@ import {
 } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
-import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -70,6 +69,14 @@ const navItems: {
   },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
+
+const HostedAuthPanelIsland = dynamic(
+  () => import("@/src/components/hosted-onboarding/hosted-auth-panel-island").then((mod) => mod.HostedAuthPanelIsland),
+  {
+    ssr: false,
+    loading: () => <div className="text-sm text-white/60">Loading sign in...</div>,
+  },
+);
 
 const sidebarThemeStyle = {
   "--sidebar": "transparent",
@@ -157,7 +164,7 @@ function SidebarAuthActions() {
             </DialogDescription>
           </DialogHeader>
           {authDialogOpen ? (
-            <HostedAuthPanel
+            <HostedAuthPanelIsland
               methods={["phone", "telegram", "email"]}
               requireLaunchConsentOnCompletion
               size="compact"
@@ -174,17 +181,15 @@ function AccountMenu({
 }: {
   initialAuth: HostedSidebarAuthSnapshot;
 }) {
-  const { user } = useUser();
-  const { authenticated, logout, ready } = usePrivy();
+  const router = useRouter();
   const [deviceSyncStatusState, setDeviceSyncStatusState] =
     useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
-  const hasAccount = ready
-    ? authenticated
-    : Boolean(user) || initialAuth.authenticated;
-  const userKey = hasAccount ? user?.id ?? null : null;
+  const [signOutPending, setSignOutPending] = useState(false);
+  const hasAccount = initialAuth.authenticated;
+  const userKey = hasAccount ? initialAuth.label ?? "app-session" : null;
 
   const primaryLabel =
-    user?.email?.address ?? user?.phone?.number ?? initialAuth.label ?? "Account";
+    initialAuth.label ?? "Account";
   const initials =
     primaryLabel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
   const deviceSyncStatus =
@@ -227,6 +232,20 @@ function AccountMenu({
 
   if (!hasAccount) {
     return <SidebarAuthActions />;
+  }
+
+  async function handleSignOut() {
+    setSignOutPending(true);
+
+    try {
+      await requestHostedOnboardingJson({
+        method: "POST",
+        url: "/api/hosted-onboarding/session/logout",
+      });
+      router.refresh();
+    } finally {
+      setSignOutPending(false);
+    }
   }
 
   return (
@@ -275,8 +294,8 @@ function AccountMenu({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => void logout()}>
-                Sign out
+              <DropdownMenuItem onClick={() => void handleSignOut()}>
+                {signOutPending ? "Signing out..." : "Sign out"}
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>

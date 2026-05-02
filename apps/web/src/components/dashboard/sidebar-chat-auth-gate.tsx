@@ -1,9 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 
-import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,14 @@ import {
   SIDEBAR_NAV_ICON_CLASS,
   SIDEBAR_NAV_ITEM_CLASS,
 } from "./sidebar-nav-classes";
+
+const HostedAuthPanelIsland = dynamic(
+  () => import("@/src/components/hosted-onboarding/hosted-auth-panel-island").then((mod) => mod.HostedAuthPanelIsland),
+  {
+    ssr: false,
+    loading: () => <div className="text-sm text-muted-foreground">Loading sign in...</div>,
+  },
+);
 
 export function SidebarChatWithMurphAuthGate() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
@@ -44,7 +52,7 @@ export function SidebarChatWithMurphAuthGate() {
             </DialogDescription>
           </DialogHeader>
           {authDialogOpen ? (
-            <HostedAuthPanel
+            <HostedAuthPanelIsland
               methods={["phone", "telegram", "email"]}
               requireLaunchConsentOnCompletion
               size="compact"

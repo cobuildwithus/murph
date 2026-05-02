@@ -8,6 +8,7 @@ import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/mem
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
+import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -31,13 +32,17 @@ export const POST = withJsonError(async (request: Request) => {
       authenticatedSessionIdentity: auth.identity,
       inviteCode: result.inviteCode,
     });
+    const appSession = await issueHostedAppSession({
+      memberId: result.memberId,
+      privyUserId: auth.identity.userId,
+    });
 
     finishHostedOnboardingTiming(timing, "completed", {
       stage: result.stage,
       messagingSetupRequired: result.messagingSetupRequired,
     });
 
-    return jsonOk({
+    const response = jsonOk({
       inviteCode: result.inviteCode,
       joinUrl: result.joinUrl,
       messagingSetupRequired: result.messagingSetupRequired,
@@ -45,6 +50,8 @@ export const POST = withJsonError(async (request: Request) => {
       stage: result.stage,
       status,
     });
+    response.headers.append("Set-Cookie", appSession.cookie);
+    return response;
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),

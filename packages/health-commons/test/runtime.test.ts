@@ -5,6 +5,7 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
+import { resolveMetricDefinition } from "@murphai/health-metrics";
 
 import {
   createHealthCommonsCatalogReader,
@@ -249,6 +250,38 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       key: "biomarker:estimated-vo2max",
       published: true,
     }));
+  });
+
+  it("keeps published biomarker private metric bindings aligned with the metric catalog", () => {
+    const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
+    const publishedBiomarkers = biomarkerIndex.biomarkers
+      .filter((entry) => entry.published && entry.hidden !== true);
+
+    for (const entry of publishedBiomarkers) {
+      const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+        entityType: "biomarker",
+        routeId: entry.routeId,
+      });
+      expect(bundle, `Expected biomarker route bundle for ${entry.routeId}`).not.toBeNull();
+      if (!bundle) {
+        continue;
+      }
+
+      const reader = createHealthCommonsRouteBundleReader(bundle);
+      const entity = reader.findByKey(entry.key);
+      expect(entity?.entityType).toBe("biomarker");
+      if (!entity || entity.entityType !== "biomarker") {
+        continue;
+      }
+
+      for (const binding of entity.biomarker?.privateMetricBindings ?? []) {
+        const definition = resolveMetricDefinition(binding.metricKey);
+        expect(definition, `${entry.key} private metric ${binding.metricKey}`).not.toBeNull();
+        if (binding.role === "primary") {
+          expect(definition?.biomarkerKey).toBe(entry.key);
+        }
+      }
+    }
   });
 
   it("keeps protocol sort rank in the generated experiment index", () => {

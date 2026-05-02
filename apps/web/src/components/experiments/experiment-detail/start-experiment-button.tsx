@@ -9,7 +9,6 @@ import {
   NotebookPenIcon,
   SendIcon,
 } from "lucide-react";
-import { useUser } from "@privy-io/react-auth";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { buttonVariants } from "@/src/components/ui/button";
@@ -57,7 +56,6 @@ export function StartExperimentButton({
   protocolDays,
   protocolTitle,
 }: StartExperimentButtonProps) {
-  const { user } = useUser();
   const contactDefaults = useExperimentStartContactContext();
   const resolvedInitialContactChannels =
     initialContactChannels ?? contactDefaults.initialContactChannels;
@@ -65,12 +63,11 @@ export function StartExperimentButton({
   const [channelDialogOpen, setChannelDialogOpen] = useState(false);
   const startContactAction = useMemo(
     () => resolveExperimentStartContactAction({
-      accountContainer: user,
       initialContactChannels: resolvedInitialContactChannels,
       murphPhoneNumber: resolvedMurphPhoneNumber,
       protocolTitle,
     }),
-    [protocolTitle, resolvedInitialContactChannels, resolvedMurphPhoneNumber, user],
+    [protocolTitle, resolvedInitialContactChannels, resolvedMurphPhoneNumber],
   );
 
   function handleAuthenticatedStartClick() {

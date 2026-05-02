@@ -18,6 +18,7 @@ import type {
   GoalFrontmatter,
   InboxCaptureRecord,
   JournalDayFrontmatter,
+  MetricSampleRecord,
   ProviderFrontmatter,
   RecipeFrontmatter,
   ProtocolFrontmatter,
@@ -634,6 +635,23 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
     quality: "raw",
     value: 96,
     unit: "mg_dL",
+  },
+]);
+
+export const exampleMetricSampleRecords: readonly Readonly<MetricSampleRecord>[] = Object.freeze([
+  {
+    schemaVersion: "murph.metric-sample.v1",
+    id: "smp_01JNV47H7XFG84X7Q7Z9WD2B4Y",
+    metric: "resting-heart-rate",
+    recordedAt: "2026-03-12T06:05:00Z",
+    dayKey: "2026-03-12",
+    source: "device",
+    quality: "normalized",
+    value: 58,
+    unit: "bpm",
+    qualifiers: {
+      provider: "oura",
+    },
   },
 ]);
 

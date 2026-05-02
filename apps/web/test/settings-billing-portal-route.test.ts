@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
-  requirePrivyMemberAuth: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedStripeApi: vi.fn(),
 }));
 
@@ -20,8 +20,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -36,7 +36,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({} as never);
-  mocks.requirePrivyMemberAuth.mockResolvedValue({
+  mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: {
       id: "member_123",
       suspendedAt: null,
@@ -75,10 +75,7 @@ test("creates a Stripe billing portal session for an authenticated hosted member
   await expect(response.json()).resolves.toEqual({
     url: "https://stripe.example.test/portal/session_123",
   });
-  expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(
-    expect.any(Request),
-    expect.any(Object),
-  );
+  expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
     memberId: "member_123",
@@ -87,7 +84,7 @@ test("creates a Stripe billing portal session for an authenticated hosted member
 });
 
 test("keeps billing self-serve available for canceled members with a stored Stripe customer", async () => {
-  mocks.requirePrivyMemberAuth.mockResolvedValueOnce({
+  mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
     member: {
       billingStatus: "canceled",
       id: "member_123",

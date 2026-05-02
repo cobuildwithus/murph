@@ -248,6 +248,7 @@ function resolvePrivateTrend(input: {
     biomarkerKey: input.biomarker.key,
     client: input.client,
     label: input.biomarker.shortName,
+    privateMetricBindings: input.biomarker.privateMetricBindings,
     trendDefaults: input.biomarker.trendDefaults,
     unit: input.biomarker.unit,
     valuePrecision: input.biomarker.valuePrecision,

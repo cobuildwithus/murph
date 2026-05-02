@@ -9,6 +9,7 @@ const sourceFiles: readonly string[] = [
   "apps/web/src/lib/health-commons/experiment-browse.ts",
   "apps/web/src/lib/health-commons/generated-experiment-artifacts.ts",
   "apps/web/src/lib/health-commons/generated-biomarker-artifacts.ts",
+  "apps/web/src/lib/health-commons/generated-measurement-method-artifacts.ts",
   "apps/web/src/lib/health-commons/experiment-projections.ts",
   "apps/web/src/lib/health-commons/biomarker-projections.ts",
   "apps/web/src/lib/health-commons/measurement-method-detail.ts",
@@ -199,6 +200,7 @@ function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-projections")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-experiment-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/generated-biomarker-artifacts")
+    || relativePath.startsWith("apps/web/src/lib/health-commons/generated-measurement-method-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-projections")
     || relativePath.startsWith("apps/web/src/lib/health-commons/measurement-method-detail");
 }

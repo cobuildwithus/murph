@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   resolveHostedMemberEmailLinked: vi.fn(),
+  requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
   upsertHostedMemberTelegramRoutingBindingTx: vi.fn(),
 }));
@@ -21,6 +22,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireFreshPrivyMemberAuthForHostedAppSession: mocks.requireFreshPrivyMemberAuthForHostedAppSession,
   requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
 }));
 
@@ -71,6 +73,18 @@ describe("settings telegram sync route", () => {
       eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
     });
     mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
+    mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockImplementation(async (...args: unknown[]) => {
+      const freshPrivy = await mocks.requirePrivyMemberAuth(...args);
+      return {
+        appSession: {
+          expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+          member: freshPrivy.member,
+          privyUserId: "did:privy:user_123",
+          sessionId: "hws_123",
+        },
+        freshPrivy,
+      };
+    });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
       member: {
@@ -110,6 +124,7 @@ describe("settings telegram sync route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireFreshPrivyMemberAuthForHostedAppSession).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
       memberId: "member_123",

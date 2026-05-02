@@ -10,6 +10,8 @@ const forbiddenGeneratedCatalogSubstring =
   /packages[/\\]health-commons[/\\]generated[/\\]catalog\.json/u;
 const forbiddenRouteBundleSubstring =
   /packages[/\\]health-commons[/\\]generated[/\\]web[/\\]bundles[/\\]/u;
+const allowedMeasurementMethodRouteBundleSubstring =
+  /packages[/\\]health-commons[/\\]generated[/\\]web[/\\]bundles[/\\]measurement_method[/\\]/u;
 const requiredExperimentTraceArtifacts = [
   "packages/health-commons/generated/web/routes/index.json",
   "packages/health-commons/generated/web/shell/experiments/finnish-sauna.json",
@@ -19,6 +21,10 @@ const requiredExperimentTraceArtifacts = [
 ] as const;
 const requiredBrowseTraceArtifacts = [
   "packages/health-commons/generated/web/browse/experiments.json",
+] as const;
+const requiredMeasurementMethodTraceArtifacts = [
+  "packages/health-commons/generated/web/routes/index.json",
+  "packages/health-commons/generated/web/bundles/measurement_method/home-standardized-photo-roi-analysis.json",
 ] as const;
 
 if (!existsSync(distDir)) {
@@ -31,6 +37,7 @@ const traceFiles = listFiles(distDir).filter((file) => file.endsWith(".nft.json"
 const violations: string[] = [];
 const experimentTraceArtifacts = new Set<string>();
 const browseTraceArtifacts = new Set<string>();
+const measurementMethodTraceArtifacts = new Set<string>();
 
 for (const traceFile of traceFiles) {
   const trace = JSON.parse(readFileSync(traceFile, "utf8")) as unknown;
@@ -42,13 +49,21 @@ for (const traceFile of traceFiles) {
   const isExperimentBrowseTrace = relativeTraceFile.endsWith(
     "server/app/(dashboard)/experiments/page.js.nft.json",
   );
+  const isMeasurementMethodTrace = relativeTraceFile.includes(
+    "server/app/measurement-methods/[measurementMethodId]/",
+  );
 
   for (const tracedFile of files) {
     const normalizedTracedFile = tracedFile.replace(/\\/gu, "/");
     if (
       forbiddenGeneratedCatalogPattern.test(normalizedTracedFile) ||
       forbiddenGeneratedCatalogSubstring.test(normalizedTracedFile) ||
-      (isExperimentDetailTrace && forbiddenRouteBundleSubstring.test(normalizedTracedFile))
+      (isExperimentDetailTrace && forbiddenRouteBundleSubstring.test(normalizedTracedFile)) ||
+      (
+        isMeasurementMethodTrace
+        && forbiddenRouteBundleSubstring.test(normalizedTracedFile)
+        && !allowedMeasurementMethodRouteBundleSubstring.test(normalizedTracedFile)
+      )
     ) {
       violations.push(`${relativeTraceFile} -> ${tracedFile}`);
     }
@@ -68,13 +83,21 @@ for (const traceFile of traceFiles) {
         }
       }
     }
+
+    if (isMeasurementMethodTrace) {
+      for (const requiredArtifact of requiredMeasurementMethodTraceArtifacts) {
+        if (normalizedTracedFile.endsWith(requiredArtifact)) {
+          measurementMethodTraceArtifacts.add(requiredArtifact);
+        }
+      }
+    }
   }
 }
 
 if (violations.length > 0) {
   throw new Error([
     "Health Commons generated catalog leaked into Next build traces.",
-    "Public experiment routes must use web projections instead of the monolithic catalog or route bundles.",
+    "Public experiment routes must use web projections; measurement routes may trace only measurement-method route bundles.",
     ...violations.map((violation) => `- ${violation}`),
   ].join("\n"));
 }
@@ -85,13 +108,21 @@ const missingExperimentArtifacts = requiredExperimentTraceArtifacts.filter((arti
 const missingBrowseArtifacts = requiredBrowseTraceArtifacts.filter((artifact) =>
   !browseTraceArtifacts.has(artifact)
 );
+const missingMeasurementMethodArtifacts = requiredMeasurementMethodTraceArtifacts.filter((artifact) =>
+  !measurementMethodTraceArtifacts.has(artifact)
+);
 
-if (missingExperimentArtifacts.length > 0 || missingBrowseArtifacts.length > 0) {
+if (
+  missingExperimentArtifacts.length > 0 ||
+  missingBrowseArtifacts.length > 0 ||
+  missingMeasurementMethodArtifacts.length > 0
+) {
   throw new Error([
     "Health Commons generated web projections are missing from Next build traces.",
-    "Public experiment routes need compact generated/web artifacts at runtime.",
+    "Public Health Commons routes need compact generated/web artifacts at runtime.",
     ...missingExperimentArtifacts.map((artifact) => `- missing experiment detail trace artifact: ${artifact}`),
     ...missingBrowseArtifacts.map((artifact) => `- missing experiment browse trace artifact: ${artifact}`),
+    ...missingMeasurementMethodArtifacts.map((artifact) => `- missing measurement method trace artifact: ${artifact}`),
   ].join("\n"));
 }
 
