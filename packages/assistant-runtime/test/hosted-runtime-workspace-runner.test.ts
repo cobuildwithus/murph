@@ -1751,6 +1751,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     const retryable = await runActiveTurnRefreshSummaryScenario({
       lateItem: createMailboxItem({
+        createdAt: "9999-01-01T00:00:00.000Z",
         id: "mailbox_item_runner_sidecar_retry",
         laneSeq: "2",
         payloadInlineCiphertext: null,
