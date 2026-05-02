@@ -5,7 +5,7 @@ import type {
   BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-projections";
 import { cn } from "@/src/lib/utils";
-import { biomarkerFitToneClassName } from "./biomarker-fit-tone";
+import { biomarkerFitDisplayLabel, biomarkerFitToneClassName } from "./biomarker-fit-tone";
 
 const CARD_IMAGE_SIZES = "(min-width: 1024px) 33vw, 100vw";
 
@@ -62,7 +62,7 @@ export function BiomarkerExperimentCard({
                 biomarkerFitToneClassName(protocol.fitLabel),
               )}
             >
-              {protocol.fitLabel}
+              {biomarkerFitDisplayLabel(protocol.fitLabel)}
             </span>
             <span className="font-mono text-[9px]/3 uppercase tracking-[0.14em] text-muted-foreground">
               fit

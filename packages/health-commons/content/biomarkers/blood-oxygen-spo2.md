@@ -67,7 +67,7 @@ biomarker:
 
     -
       title: "What it is"
-      body: "SpO₂ is a pulse-oximetry estimate of the percentage of hemoglobin carrying oxygen. Murph treats it as a respiratory, sleep, altitude, illness, and safety-context signal rather than a performance score."
+      body: "SpO₂ is a pulse-oximetry estimate of the percentage of hemoglobin carrying oxygen. It is a respiratory, sleep, altitude, illness, and safety-context signal rather than a performance score."
     -
       title: Why people care
       body: "Contextualizes breathing during sleep, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings."
@@ -151,7 +151,7 @@ claims:
   -
     claimId: spo2-skin-tone-perfusion-and-motion-can-bias-readings
     type: design_guardrail
-    text: Skin pigmentation, low perfusion, motion, nail polish, cold hands, and sensor fit can bias SpO₂ readings enough that Murph should keep measurement caveats visible next to the trend.
+    text: Skin pigmentation, low perfusion, motion, nail polish, cold hands, and sensor fit can bias SpO₂ readings enough that measurement caveats should stay visible next to the trend.
     strength: high
     sourceKeys:
       - source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025
@@ -184,7 +184,7 @@ claims:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
-  placeholder: Early Murph outcome summaries will appear here once enough opted-in experiment runs are available.
+  placeholder: Early outcome summaries will appear here once enough opted-in experiment runs are available.
 ---
 
 SpO₂ is the pulse-oximetry estimate of arterial oxygen saturation: the percentage of hemoglobin binding sites carrying oxygen at the moment of measurement. In consumer health tracking, it is best treated as a respiratory and sleep-context biomarker, not as a score to maximize.
@@ -193,7 +193,7 @@ SpO₂ is the pulse-oximetry estimate of arterial oxygen saturation: the percent
 
 Many healthy sea-level adults will usually see readings in the mid-to-high 90s. The exact acceptable range is contextual: altitude, chronic lung disease, congenital or cardiac conditions, medication effects, recent respiratory illness, and clinician-directed oxygen targets can all change what is normal for a specific person.
 
-For Murph, the most useful pattern is not “highest possible SpO₂.” It is whether the value remains stable in the user's own normal range and whether there are repeated unexplained lows, especially overnight or during illness.
+The most useful pattern is not “highest possible SpO₂.” It is whether the value remains stable in your own normal range and whether there are repeated unexplained lows, especially overnight or during illness.
 
 ## Daytime spot checks versus overnight wearable trends
 
@@ -209,8 +209,4 @@ A stable median does not rule out short desaturation events. A single low wearab
 
 ## Why this is not an optimization target
 
-In healthy users, SpO₂ already operates near a physiological ceiling. Exercise, sauna, sleep hygiene, and light protocols may improve other biomarkers without moving SpO₂ at all. That is not a failure. Murph should score most wellness protocols against their true primary endpoints and use SpO₂ as a guardrail, confounder, and respiratory-safety context marker.
-
-## Source posture
-
-This page uses FDA pulse-oximeter guidance for device and home-monitoring caveats, clinical references for broad oxygen-saturation context, and sleep-medicine diagnostic guidance to avoid treating consumer overnight oxygen trends as a diagnosis of obstructive sleep apnea.
+In healthy users, SpO₂ already operates near a physiological ceiling. Exercise, sauna, sleep hygiene, and light protocols may improve other biomarkers without moving SpO₂ at all. That is not a failure. Most wellness protocols should be scored against their true primary endpoints, with SpO₂ serving as a guardrail, confounder, and respiratory-safety context marker.

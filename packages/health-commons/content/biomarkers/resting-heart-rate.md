@@ -51,7 +51,7 @@ biomarker:
 
     -
       title: What it is
-      body: Resting heart rate is your pulse when your body is at rest. Murph treats it as a trend signal, not a one-morning verdict.
+      body: Resting heart rate is your pulse when your body is at rest. It is a trend signal, not a one-morning verdict.
     -
       title: Why people care
       body: "Reflects aerobic fitness, recovery load, stress, illness, alcohol, sleep disruption, and whether an experiment adds strain."
@@ -102,12 +102,12 @@ relations:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
-  placeholder: Early Murph outcome summaries will appear here once enough opted-in experiment runs are available.
+  placeholder: Early outcome summaries will appear here once enough opted-in experiment runs are available.
 ---
 
 Resting heart rate is useful because it is available on most consumer wearables and easier to explain than composite recovery scores.
 
-For Murph experiments, a useful read usually looks like this:
+For self-experiments, a useful read usually looks like this:
 
 - compare a stable **baseline window** against a clearly defined **intervention window**,
 - keep exercise load, bedtime, alcohol, illness, and travel notes visible,

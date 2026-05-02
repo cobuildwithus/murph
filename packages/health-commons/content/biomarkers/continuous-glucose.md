@@ -58,4 +58,4 @@ biomarker:
       - sleep disruption
 ---
 
-Continuous glucose can help document acute response and safety context, but it must not be used to make medication changes inside a Murph-run fasting experiment.
+Continuous glucose can help document acute response and safety context, but it must not be used to make medication changes inside a fasting experiment.

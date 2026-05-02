@@ -1,7 +1,11 @@
 import {
   buildHostedDomainRootWrapContext,
+  createHostedAuthorityVerifyKeyring,
+  createHostedRecipientPrivateKeyring,
   findHostedDomainRootWrap,
   parseHostedDomainRootKeyEnvelope,
+  selectHostedAuthorityVerifyPublicKeyPem,
+  selectHostedRecipientPrivateKeyForDecrypt,
   serializeAdditionalAuthenticatedData,
   unwrapHostedDomainRootKeyWithP256Ecdh,
   verifyHostedDomainRootEnvelopeSignatureWithPublicKey,
@@ -22,14 +26,30 @@ import type {
 export interface HostedWorkerCryptoEnv {
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION?: string;
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: string;
+  HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON?: string;
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: string;
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: string;
+  HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON?: string;
   HOSTED_CRYPTO_ENV: string;
   NODE_ENV?: string;
   VERCEL_ENV?: string;
 }
 
+export class HostedRuntimeCryptoRootUnavailableError extends Error {
+  readonly rootKeyId: string;
+  readonly status: number;
+
+  constructor(input: { rootKeyId: string; status: number }) {
+    super(`Hosted runtime crypto root ${input.rootKeyId} is unavailable.`);
+    this.name = "HostedRuntimeCryptoRootUnavailableError";
+    this.rootKeyId = input.rootKeyId;
+    this.status = input.status;
+  }
+}
+
 export interface HostedRuntimeCryptoContextResponse {
+  cacheMaxAgeMs?: number;
+  cryptoContextVersion?: string;
   envelopes: {
     ingress?: unknown;
     runtime?: unknown;
@@ -40,6 +60,8 @@ export interface HostedRuntimeCryptoContextResponse {
 }
 
 export interface HostedRuntimeCryptoRootResponse {
+  cacheMaxAgeMs?: number;
+  cryptoContextVersion?: string;
   domain: "ingress" | "runtime";
   envelope: unknown;
   fetchedAt?: string;
@@ -144,6 +166,12 @@ export async function fetchHostedWorkerRuntimeRootByRootKeyId(input: {
     timeoutMs: input.timeoutMs,
   });
   if (!response.ok) {
+    if (response.status === 404) {
+      throw new HostedRuntimeCryptoRootUnavailableError({
+        rootKeyId: input.rootKeyId,
+        status: response.status,
+      });
+    }
     throw new Error(`Hosted runtime crypto root fetch failed with HTTP ${response.status}.`);
   }
   const context = await response.json() as HostedRuntimeCryptoRootResponse;
@@ -166,20 +194,17 @@ export async function unwrapHostedWorkerRuntimeRoots(input: {
 }): Promise<UnwrappedHostedWorkerRuntimeRoots> {
   const ingressEnvelope = requireHostedRuntimeCryptoContextEnvelope(input.context, "ingress");
   const runtimeEnvelope = requireHostedRuntimeCryptoContextEnvelope(input.context, "runtime");
-  const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
   const [ingress, runtime] = await Promise.all([
     unwrapWorkerDomainRoot({
       domain: "ingress",
       envelope: parseHostedDomainRootKeyEnvelope(ingressEnvelope),
       env: input.env,
-      privateJwk,
       userId: input.context.userId,
     }),
     unwrapWorkerDomainRoot({
       domain: "runtime",
       envelope: parseHostedDomainRootKeyEnvelope(runtimeEnvelope),
       env: input.env,
-      privateJwk,
       userId: input.context.userId,
     }),
   ]);
@@ -206,12 +231,10 @@ async function unwrapHostedWorkerRuntimeRootEnvelope(input: {
   env: HostedWorkerCryptoEnv;
   userId: string;
 }): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
-  const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
   return await unwrapWorkerDomainRoot({
     domain: input.domain,
     envelope: input.envelope,
     env: input.env,
-    privateJwk,
     userId: input.userId,
   });
 }
@@ -220,7 +243,6 @@ async function unwrapWorkerDomainRoot(input: {
   domain: "ingress" | "runtime";
   envelope: HostedDomainRootKeyEnvelopeV1;
   env: HostedWorkerCryptoEnv;
-  privateJwk: JsonWebKey;
   userId: string;
 }): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
   assertEnvelopeMatches({
@@ -231,16 +253,19 @@ async function unwrapWorkerDomainRoot(input: {
   if (!input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION && isHostedCryptoProductionEnv(input.env)) {
     throw new Error("HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION is required in production.");
   }
-  if (
-    input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION
-    && input.envelope.authoritySignature.keyVersionName
-      !== input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION
-  ) {
-    throw new Error(`Hosted ${input.domain} root envelope uses an unexpected authority signing key.`);
-  }
+  const authorityVerifyKeyring = createHostedAuthorityVerifyKeyring({
+    activeKeyVersionName: input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION
+      ?? input.envelope.authoritySignature.keyVersionName,
+    activePublicKeyPem: input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM.replace(/\\n/g, "\n"),
+    keyringJson: input.env.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
+  });
+  const authorityPublicKeyPem = selectHostedAuthorityVerifyPublicKeyPem({
+    keyring: authorityVerifyKeyring,
+    keyVersionName: input.envelope.authoritySignature.keyVersionName,
+  });
   const valid = await verifyHostedDomainRootEnvelopeSignatureWithPublicKey({
     envelope: input.envelope,
-    publicKeyPem: input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM.replace(/\\n/g, "\n"),
+    publicKeyPem: authorityPublicKeyPem,
   });
   if (!valid) {
     throw new Error(`Hosted ${input.domain} root envelope authority signature is invalid.`);
@@ -252,9 +277,6 @@ async function unwrapWorkerDomainRoot(input: {
   if (!wrap || wrap.kind !== "p256-ecdh-aesgcm") {
     throw new Error(`Hosted ${input.domain} root envelope is missing Cloudflare automation wrap.`);
   }
-  if (wrap.recipientKeyId !== input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID) {
-    throw new Error(`Hosted ${input.domain} root envelope uses an unexpected Cloudflare automation key.`);
-  }
   const expectedContext = buildHostedDomainRootWrapContext({
     domain: input.domain,
     env: input.env.HOSTED_CRYPTO_ENV,
@@ -265,8 +287,21 @@ async function unwrapWorkerDomainRoot(input: {
   if (serializeAdditionalAuthenticatedData(expectedContext) !== serializeAdditionalAuthenticatedData(wrap.encryptionContext)) {
     throw new Error(`Hosted ${input.domain} root envelope wrap context mismatch.`);
   }
+  const recipientPrivateKeyring = createHostedRecipientPrivateKeyring({
+    activePrivateJwk: parseP256PrivateJwk(
+      input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+    ),
+    activeRecipient: "cloudflare-automation-secret",
+    activeRecipientKeyId: input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
+    keyringJson: input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
+  });
+  const recipientPrivateKey = selectHostedRecipientPrivateKeyForDecrypt({
+    keyring: recipientPrivateKeyring,
+    recipient: "cloudflare-automation-secret",
+    recipientKeyId: wrap.recipientKeyId,
+  });
   const rootKey = await unwrapHostedDomainRootKeyWithP256Ecdh({
-    privateJwk: input.privateJwk,
+    privateJwk: recipientPrivateKey.privateJwk,
     wrap,
   });
   if (rootKey.byteLength !== 32) {

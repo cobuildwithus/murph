@@ -1393,7 +1393,7 @@ researchLandscape:
     id: beverage-and-sweetener-substitution-boundaries
     label: Beverage and sweetener substitutions
     stance: mixed
-    summary: 'This bucket keeps substitution advice useful but bounded. SSB-reduction and beverage-replacement trials suggest drinks can be a high-leverage first target, especially when sugar intake is concentrated in beverages, but most evidence is SSB-only, pediatric, workplace, or otherwise adjacent. Low/no-calorie sweeteners can help when directly replacing sugar or SSBs, yet results vary by comparator, water sometimes performs similarly or better, and long-term safety signals remain uncertain. Plain-language takeaway: lead with water or noncaloric beverage replacement for SSBs; make sweeteners optional, not mandatory.'
+    summary: 'This bucket keeps substitution advice useful but bounded. SSB-reduction, fruit-juice, and beverage-replacement evidence suggests drinks can be a high-leverage first target, especially when sugar intake is concentrated in beverages, but most evidence is beverage-only, pediatric, workplace, or otherwise adjacent. Low/no-calorie sweeteners can help when directly replacing sugar or SSBs, yet results vary by comparator, water sometimes performs similarly or better, and long-term safety signals remain uncertain. Plain-language takeaway: lead with water or noncaloric beverage replacement for SSBs; log juice and sweeteners as substitutions, not proof that the whole protocol works.'
     sourceKeys:
     - source_artifact:pmid-16510646
     - source_artifact:pmid-22998339
@@ -1409,6 +1409,9 @@ researchLandscape:
     - source_artifact:pmid-30602577
     - source_artifact:pmid-36638072
     - source_artifact:pmid-37794246
+    - source_artifact:pmid-24743260
+    - source_artifact:pmid-24944060
+    - source_artifact:pmid-25746935
     defaultOpen: false
   -
     id: adherence-support-and-tracking
@@ -1466,6 +1469,7 @@ researchLandscape:
     - source_artifact:pmid-37019180
     - source_artifact:pmid-39725418
     - source_artifact:pmid-41833907
+    - source_artifact:pmid-35406113
     defaultOpen: false
   -
     id: direct-safety-evidence-and-monitoring
@@ -1498,6 +1502,19 @@ researchLandscape:
     - source_artifact:pmid-35306388
     - source_artifact:pmid-35978344
     - source_artifact:pmid-36436144
+    - source_artifact:pmid-18524314
+    - source_artifact:pmid-25670731
+    - source_artifact:pmid-28679610
+    - source_artifact:pmid-29325892
+    - source_artifact:pmid-29674185
+    - source_artifact:pmid-30501650
+    - source_artifact:pmid-33266375
+    - source_artifact:pmid-33415750
+    - source_artifact:pmid-34432049
+    - source_artifact:pmid-34742138
+    - source_artifact:pmid-35251356
+    - source_artifact:pmid-38078584
+    - source_artifact:pmid-7930336
     defaultOpen: true
   -
     id: sweetener-and-adjacent-diet-safety-boundaries
@@ -1515,6 +1532,14 @@ researchLandscape:
     - source_artifact:pmid-39106867
     - source_artifact:pmid-32537539
     - source_artifact:pmid-40730806
+    - source_artifact:pmid-22539069
+    - source_artifact:pmid-24932880
+    - source_artifact:pmid-31582428
+    - source_artifact:pmid-32529512
+    - source_artifact:pmid-33441384
+    - source_artifact:pmid-36326863
+    - source_artifact:pmid-37202868
+    - source_artifact:pmid-29596460
     defaultOpen: false
   -
     id: outcome-monitoring-and-measurement
@@ -1543,6 +1568,14 @@ researchLandscape:
     - source_artifact:pmid-37019448
     - source_artifact:pmid-40122386
     - source_artifact:pmid-35353466
+    - source_artifact:pmid-26261186
+    - source_artifact:pmid-31099861
+    - source_artifact:pmid-33732727
+    - source_artifact:pmid-35058605
+    - source_artifact:pmid-35651837
+    - source_artifact:pmid-37182401
+    - source_artifact:pmid-38195258
+    - source_artifact:pmid-39717036
     defaultOpen: true
 safety:
   cautionLevel: moderate

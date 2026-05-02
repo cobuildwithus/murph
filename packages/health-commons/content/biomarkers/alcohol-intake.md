@@ -102,11 +102,11 @@ claims:
   - source_artifact:pmid-7334801
   - source_artifact:pmid-26690637
   caveats:
-  - Older voluntary abstinence studies and self-selected campaign cohorts may not generalize to all Murph users.
+  - Older voluntary abstinence studies and self-selected campaign cohorts may not generalize to all users.
 -
   claimId: audit-c-context-not-diagnosis
   type: evidence_scope
-  text: AUDIT-C-style consumption questions can provide compact drinking-pattern context, but Murph should not use a self-experiment page to diagnose or rule out alcohol-use disorder.
+  text: AUDIT-C-style consumption questions can provide compact drinking-pattern context, but a self-experiment page should not be used to diagnose or rule out alcohol-use disorder.
   strength: high
   sourceKeys:
   - source_artifact:pmid-9738608
@@ -115,7 +115,7 @@ claims:
 ---
 
 
-## How Murph uses this
+## How to use this
 
 Alcohol intake gives the challenge a baseline and off-ramp context: what was usual before the alcohol-free window, whether any drinks occurred during it, and what happened afterward.
 

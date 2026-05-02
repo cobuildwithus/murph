@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   attachHostedDomainRootEnvelopeSignature,
@@ -8,6 +10,7 @@ import {
   generateHostedDomainRootKey,
   parseHostedDomainRootKeyEnvelope,
   serializeAdditionalAuthenticatedData,
+  selectHostedAuthorityVerifyPublicKeyPem,
   verifyHostedDomainRootEnvelopeSignatureWithPublicKey,
   wrapHostedDomainRootKeyWithP256Ecdh,
   type HostedCryptoDomain,
@@ -31,6 +34,7 @@ type HostedCryptoTransactionRoot = {
 
 const ALL_DOMAINS: readonly HostedCryptoDomain[] = ["control", "device", "ingress", "runtime"];
 const WEB_UNWRAP_DOMAINS = new Set<HostedCryptoDomain>(["control", "device", "ingress"]);
+const HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 
 interface HostedUserCryptoEnvelopeRow {
   id: string;
@@ -136,6 +140,8 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   prisma?: HostedCryptoClient;
   userId: string;
 }): Promise<{
+  cacheMaxAgeMs: number;
+  cryptoContextVersion: string;
   envelopes: {
     ingress: HostedDomainRootKeyEnvelopeV1;
     runtime: HostedDomainRootKeyEnvelopeV1;
@@ -155,6 +161,12 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
     userId: input.userId,
   });
   return {
+    cacheMaxAgeMs: HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS,
+    cryptoContextVersion: createHostedRuntimeCryptoContextVersion({
+      ingress,
+      runtime,
+      userId: input.userId,
+    }),
     envelopes: { ingress, runtime },
     schema: "murph.hosted-runtime-crypto-context.v1",
     userId: input.userId,
@@ -384,12 +396,13 @@ async function unwrapEnvelopeForWeb(input: {
 
 async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnvelopeV1): Promise<void> {
   const config = getHostedWebCryptoConfig();
-  if (envelope.authoritySignature.keyVersionName !== config.authoritySignKeyVersionName) {
-    throw new Error("Hosted domain root envelope is signed by an unexpected GCP KMS key version.");
-  }
+  const publicKeyPem = selectHostedAuthorityVerifyPublicKeyPem({
+    keyring: config.authorityVerifyKeyring,
+    keyVersionName: envelope.authoritySignature.keyVersionName,
+  });
   const valid = await verifyHostedDomainRootEnvelopeSignatureWithPublicKey({
     envelope,
-    publicKeyPem: config.authoritySignPublicKeyPem,
+    publicKeyPem,
   });
   if (!valid) {
     throw new Error("Hosted domain root envelope authority signature verification failed.");
@@ -570,6 +583,23 @@ function kmsRecipientForDomain(domain: HostedCryptoDomain): HostedCryptoKmsRecip
     case "runtime":
       return null;
   }
+}
+
+function createHostedRuntimeCryptoContextVersion(input: {
+  ingress: HostedDomainRootKeyEnvelopeV1;
+  runtime: HostedDomainRootKeyEnvelopeV1;
+  userId: string;
+}): string {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify({
+    ingressRootKeyId: input.ingress.rootKeyId,
+    ingressSignedAt: input.ingress.authoritySignature.signedAt,
+    runtimeRootKeyId: input.runtime.rootKeyId,
+    runtimeSignedAt: input.runtime.authoritySignature.signedAt,
+    schema: "murph.hosted-runtime-crypto-context.version.v1",
+    userId: input.userId,
+  }));
+  return `hccv_${hash.digest("hex").slice(0, 32)}`;
 }
 
 function hasPrismaTransactionRoot(

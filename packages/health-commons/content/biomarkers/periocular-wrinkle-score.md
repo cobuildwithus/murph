@@ -39,7 +39,7 @@ measurementContexts:
 unit: "0-10 score"
 interpretationFrame:
   principle: "Compare repeated baseline and intervention windows using the same camera, lighting, region, expression, and scoring rule."
-  caveat: "This is a practical Murph self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
+  caveat: "This is a practical self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
 biomarker:
   shortName: "Periocular Wrinkle Score"
   displayName: "Periocular Wrinkle Score"
@@ -60,10 +60,10 @@ biomarker:
       title: "What it is"
       body: "A region-specific score for crow's-feet or periocular line visibility using standardized photos or a consistent self-rating rubric."
     -
-      title: "How Murph uses it"
+      title: "How to use it"
       body: "Use it as a before-and-after region score across a predefined baseline and intervention window, then review adherence and confounders before interpreting any change."
   measurement:
-    bestContext: "Use a validated wrinkle scale or investigator photo review when available; Murph uses same-region standardized photos and self-ratings as a personal proxy."
+    bestContext: "Use a validated wrinkle scale or investigator photo review when available; same-region standardized photos and self-ratings serve as a personal proxy."
     howToMeasure:
       - "Choose the periocular or crow's-feet region before starting."
       - "Use the same expression rule each time, such as neutral face plus optional standardized smile photo."

@@ -32,3 +32,16 @@ export function biomarkerFitToneClassName(
       return "text-foreground";
   }
 }
+
+export function biomarkerFitDisplayLabel(
+  fitLabel: BiomarkerFitLabel,
+): string {
+  switch (fitLabel) {
+    case "Context":
+      return "Indirect";
+    case "Exploratory":
+      return "Speculative";
+    default:
+      return fitLabel;
+  }
+}

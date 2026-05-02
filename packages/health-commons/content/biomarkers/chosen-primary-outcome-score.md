@@ -47,7 +47,7 @@ biomarker:
     body: A manually configured score for the single outcome the user chose before starting the run.
   -
     title: Why it matters
-    body: HCP evidence is endpoint-specific, so Murph needs one primary target rather than a vague all-purpose collagen readout.
+    body: HCP evidence is endpoint-specific, so one primary target is needed rather than a vague all-purpose collagen readout.
   -
     title: How to measure it
     body: Use the same scale, timing, lighting or activity context, and weekly review cadence throughout the run.

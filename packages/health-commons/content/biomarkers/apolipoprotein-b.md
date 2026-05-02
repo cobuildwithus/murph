@@ -42,8 +42,8 @@ biomarker:
       title: "What it is"
       body: "A blood marker reflecting the number of apoB-containing atherogenic lipoprotein particles; an optional higher-resolution secondary endpoint."
     -
-      title: "How Murph uses it"
-      body: "Murph compares a pre-intervention lipid panel with a repeat panel after the protocol-specific intervention window."
+      title: "How it works"
+      body: "A pre-intervention lipid panel is compared with a repeat panel after the protocol-specific intervention window."
   measurement:
     bestContext: "A blood lipid panel drawn before the intervention and repeated after the planned intervention window, ideally with similar lab and fasting conditions."
     howToMeasure:
@@ -68,6 +68,6 @@ relations:
 communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20
-  placeholder: "Opted-in Murph lipid experiment summaries will appear once enough comparable runs are available."
+  placeholder: "Opted-in lipid experiment summaries will appear once enough comparable runs are available."
 ---
 Apolipoprotein B is used here as a lab-measured lipid marker. These cholesterol protocols treat LDL-C as the primary endpoint and use other lipid markers as supportive or contextual measures.

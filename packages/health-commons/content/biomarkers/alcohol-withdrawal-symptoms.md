@@ -59,7 +59,7 @@ biomarker:
     howToMeasure:
     - Before starting, record any history of withdrawal seizure, delirium tremens, severe withdrawal, dependence, or needing alcohol to avoid symptoms.
     - Daily during days 1–7, check tremor, sweats, racing heart, severe anxiety, agitation, insomnia, nausea/vomiting, confusion, hallucinations, or seizure.
-    - Use the highest symptom severity of the day for Murph stop-condition logic.
+    - Use the highest symptom severity of the day for stop-condition logic.
     - Seek urgent help for seizure, confusion, hallucinations, delirium, fainting, chest pain, severe dehydration, repeated vomiting, severe agitation, or suicidal thoughts.
     - Do not attempt self-guided abrupt abstinence when risk is uncertain and clinically significant withdrawal is possible.
     confounders:
@@ -112,7 +112,7 @@ claims:
 -
   claimId: risk-tools-clinical-context
   type: evidence_scope
-  text: Alcohol-withdrawal prediction or severity tools can inform clinical risk context, but Murph should not turn them into self-managed detox instructions.
+  text: Alcohol-withdrawal prediction or severity tools can inform clinical risk context, but should not be turned into self-managed detox instructions.
   strength: high
   sourceKeys:
   - source_artifact:pmid-24657098
@@ -123,7 +123,7 @@ claims:
 ---
 
 
-## How Murph uses this
+## How to use this
 
 This is the protocol’s safety gate. Symptoms are not an efficacy endpoint. They decide whether the self-guided challenge should continue, pause, or be replaced by clinician-guided care.
 

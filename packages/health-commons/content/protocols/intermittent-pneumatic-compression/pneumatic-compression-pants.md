@@ -804,6 +804,12 @@ researchLandscape:
     - source_artifact:pmid-40555415
     - source_artifact:pmid-41656279
     - source_artifact:pmid-41718172
+    - source_artifact:pmid-40094188
+    - source_artifact:pmid-41048245
+    - source_artifact:pmid-29513036
+    - source_artifact:pmid-35475921
+    - source_artifact:pmid-41003610
+    - source_artifact:pmid-34774089
     - source_artifact:pmid-39846675
     defaultOpen: true
   - id: dose-and-implementation-map
@@ -841,6 +847,9 @@ researchLandscape:
     - source_artifact:pmid-21083651
     - source_artifact:pmid-28042639
     - source_artifact:pmid-33878207
+    - source_artifact:pmid-30738701
+    - source_artifact:pmid-16879230
+    - source_artifact:pmid-17012016
   - id: clinical-supervised-boundary
     label: Clinical IPC boundary
     stance: safety_boundary
@@ -850,8 +859,12 @@ researchLandscape:
     - source_artifact:pmid-22315261
     - source_artifact:pmid-30482763
     - source_artifact:fhi-ipc-acute-stroke-hta-2020-12-22
+    - source_artifact:pmid-23727163
+    - source_artifact:pmid-30779530
     - source_artifact:cms-pneumatic-compression-devices-2002-01-14
     - source_artifact:pmid-39207406
+    - source_artifact:pmid-32521126
+    - source_artifact:pmid-30339493
     - source_artifact:pmid-38743805
     - source_artifact:doi-10.1177-02683555221145779
     - source_artifact:doi-10.3390-life15050725

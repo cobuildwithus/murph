@@ -41,7 +41,7 @@ measurementContexts:
 unit: "0-10 score"
 interpretationFrame:
   principle: "Compare repeated baseline and intervention windows using the same camera, lighting, region, expression, and scoring rule."
-  caveat: "This is a practical Murph self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
+  caveat: "This is a practical self-experiment proxy, not a dermatologist diagnosis or a validated clinical trial endpoint in the individual user."
 biomarker:
   shortName: "Standardized Skin Photo Score"
   displayName: "Standardized Skin Photo Score"
@@ -62,10 +62,10 @@ biomarker:
       title: "What it is"
       body: "A same-camera, same-lighting before-and-after photo score for facial texture, pores, pigment appearance, and overall photoaging impression."
     -
-      title: "How Murph uses it"
+      title: "How to use it"
       body: "Use it as a before-and-after region score across a predefined baseline and intervention window, then review adherence and confounders before interpreting any change."
   measurement:
-    bestContext: "A blinded dermatologist or validated imaging system is strongest; Murph uses standardized self photos only as a low-burden personal trend proxy."
+    bestContext: "A blinded dermatologist or validated imaging system is strongest; standardized self photos serve only as a low-burden personal trend proxy."
     howToMeasure:
       - "Take baseline photos before starting the intervention and repeat at the same time of day at week 4 and week 6 or later."
       - "Use the same camera, lens, distance, background, lighting, face angle, expression, and no-makeup or same-makeup rule."
@@ -85,4 +85,4 @@ communityOutcomeSummary:
   placeholder: "Outcome summaries will appear only after enough opted-in runs use comparable photo workflow, adherence logs, and safety reporting."
 ---
 
-Standardized skin-photo scoring is the primary Murph-readable signal for this protocol because consumer facial LED/PBM studies rely on visual, photographic, investigator, imaging, or participant-facing skin-appearance outcomes rather than a wearable biomarker. Keep the score humble: it is useful for personal pattern-finding, not for diagnosis or proof of rejuvenation.
+Standardized skin-photo scoring is the primary trackable signal for this protocol because consumer facial LED/PBM studies rely on visual, photographic, investigator, imaging, or participant-facing skin-appearance outcomes rather than a wearable biomarker. Keep the score humble: it is useful for personal pattern-finding, not for diagnosis or proof of rejuvenation.

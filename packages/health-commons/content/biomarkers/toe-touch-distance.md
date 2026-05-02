@@ -59,7 +59,7 @@ biomarker:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
-  placeholder: Early Murph outcome summaries will appear here once enough opted-in static-stretching runs are available.
+  placeholder: Early outcome summaries will appear here once enough opted-in static-stretching runs are available.
 ---
 
 A low-equipment posterior-chain reach measure used to track whether fingertips move closer to or past the floor over repeated tests.

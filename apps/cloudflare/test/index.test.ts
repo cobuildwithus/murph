@@ -6,8 +6,15 @@ import { fileURLToPath } from "node:url";
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import type { HostedAssistantWorkspaceRuntimeJobResult } from "@murphai/assistant-runtime";
 import {
+  createBrowserVaultReplica,
+  createVaultReadModel,
+} from "@murphai/query/browser";
+import {
   createHostedWebCallbackSignatureHeaders,
 } from "../src/web-callback-auth.ts";
+import {
+  createHostedBrowserVaultReplicaStore,
+} from "../src/browser-vault-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import {
@@ -31,6 +38,7 @@ import {
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
 } from "@murphai/hosted-execution/routes";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
@@ -685,6 +693,50 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([
       replicaRef.objectKey,
     ]);
+  });
+
+  it("returns the stable browser-vault missing-replica code when the replica runtime root is unavailable", async () => {
+    const env = createWorkerEnv();
+    const unavailableRootKeyId = "udrk:runtime:retired-root";
+    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: Uint8Array.from({ length: 32 }, (_, index) => 201 - index),
+      rootKeyId: unavailableRootKeyId,
+    });
+    const signedRequest = await signControlRequest(new Request(
+      "https://runner.example.test/internal/users/member_123/browser-vault/session",
+      {
+        body: JSON.stringify({
+          browserPublicKeyJwk: createBrowserSessionPublicKeyJwk(),
+          replicaRef,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    ));
+    const rootFetches: unknown[] = [];
+    installOidcJwksFetch(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname !== HOSTED_RUNTIME_CRYPTO_ROOT_PATH) {
+        throw new Error(`Unexpected delegated fetch during browser-vault root lookup test: ${String(input)}`);
+      }
+
+      rootFetches.push(JSON.parse(String(init?.body)));
+      return Response.json({ error: "Runtime root not found." }, { status: 404 });
+    });
+
+    const response = await worker.fetch(signedRequest, env);
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+      error: "Browser vault replica was not found.",
+    });
+    expect(rootFetches).toEqual([{
+      domain: "runtime",
+      rootKeyId: unavailableRootKeyId,
+    }]);
   });
 
   it("rejects browser-vault replica refs outside the bound user's namespace before bucket lookup", async () => {
@@ -1417,9 +1469,37 @@ async function createMissingBrowserVaultReplicaRefForTest(
       userId,
     }),
     replicaSchema: "murph.browser-vault-replica.v1",
+    runtimeRootKeyId: crypto.rootKeyId,
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash: "a".repeat(64),
   };
+}
+
+async function createStoredBrowserVaultReplicaRefForTest(
+  env: WorkerTestEnv,
+  userId: string,
+  input: {
+    rootKey: Uint8Array;
+    rootKeyId: string;
+  },
+) {
+  await resolveHostedUserCryptoContextForTest(env, userId);
+  const store = createHostedBrowserVaultReplicaStore({
+    bucket: env.BUNDLES,
+    rootKey: input.rootKey,
+    rootKeyId: input.rootKeyId,
+    userId,
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T08:00:00.000Z",
+    sourceBundleHash: "a".repeat(64),
+    vault: createVaultReadModel({
+      entities: [],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  return store.writeBrowserVaultReplica({ replica, userId });
 }
 
 async function hostedArtifactObjectKeyForTest(

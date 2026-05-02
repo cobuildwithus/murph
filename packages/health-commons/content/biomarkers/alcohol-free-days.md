@@ -108,11 +108,11 @@ claims:
   - source_artifact:pmid-41110619
   - source_artifact:pmid-32021698
   caveats:
-  - Campaign cohorts are self-selected and may include social support, media framing, or motivations that differ from a private Murph self-experiment.
+  - Campaign cohorts are self-selected and may include social support, media framing, or motivations that differ from a private self-experiment.
 ---
 
 
-## How Murph uses this
+## How to use this
 
 Alcohol-free days are the primary adherence signal for the Short-Term Alcohol Abstinence Challenge. They answer the basic question: did the selected 7-, 14-, or 30-day window actually remove alcoholic beverages?
 

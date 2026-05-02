@@ -19,8 +19,13 @@ interface BiomarkerBodySection {
 const DUPLICATIVE_RESEARCH_NOTE_HEADINGS = new Set([
   "how murph should interpret your trend",
   "how murph should display it",
+  "how murph uses this",
+  "how murph uses it",
   "protocol interpretation",
   "protocol ranking logic",
+  "source posture",
+  "why murph includes it",
+  "bottom line for murph",
 ]);
 
 export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerResearchProjection }) {

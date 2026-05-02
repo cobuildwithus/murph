@@ -217,10 +217,22 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
       workerEnv.hostedCryptoAuthoritySignKeyVersion,
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
       workerEnv.hostedCryptoAuthoritySignPublicKeyPem,
+    ...(workerEnv.hostedCryptoAuthorityVerifyKeyringJson
+      ? {
+          HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON:
+            workerEnv.hostedCryptoAuthorityVerifyKeyringJson,
+        }
+      : {}),
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
       workerEnv.hostedCryptoCloudflareAutomationKeyId,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
       workerEnv.hostedCryptoCloudflareAutomationPrivateJwk,
+    ...(workerEnv.hostedCryptoCloudflareAutomationPrivateKeyringJson
+      ? {
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+            workerEnv.hostedCryptoCloudflareAutomationPrivateKeyringJson,
+        }
+      : {}),
     HOSTED_CRYPTO_ENV: workerEnv.hostedCryptoEnv,
     ...(input.platformEnv.NODE_ENV ? { NODE_ENV: input.platformEnv.NODE_ENV } : {}),
     ...(input.platformEnv.VERCEL_ENV ? { VERCEL_ENV: input.platformEnv.VERCEL_ENV } : {}),

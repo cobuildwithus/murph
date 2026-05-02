@@ -1,4 +1,7 @@
-import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
+import {
+  parseHostedDataKeyEnvelope,
+  parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef,
+} from "@murphai/runtime-state";
 
 import {
   HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
@@ -56,9 +59,16 @@ export function parseHostedBrowserVaultReplicaRef(
   if (replicaSchema !== "murph.browser-vault-replica.v1") {
     throw new TypeError(`${label}.replicaSchema must be murph.browser-vault-replica.v1.`);
   }
+  const dataKeyEnvelope = record.dataKeyEnvelope === undefined
+    ? undefined
+    : parseHostedDataKeyEnvelope(
+        record.dataKeyEnvelope,
+        `${label}.dataKeyEnvelope`,
+      );
 
   return {
     byteLength: requireNumber(record.byteLength, `${label}.byteLength`),
+    ...(dataKeyEnvelope === undefined ? {} : { dataKeyEnvelope }),
     dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
     generatedAt: requireString(record.generatedAt, `${label}.generatedAt`),
     keyId: requireString(record.keyId, `${label}.keyId`),

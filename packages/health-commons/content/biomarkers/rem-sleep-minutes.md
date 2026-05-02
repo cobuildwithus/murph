@@ -125,12 +125,12 @@ relations:
 communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
-  placeholder: Early Murph outcome summaries will appear here once enough opted-in runs include consistent REM sleep estimates and contextual sleep notes.
+  placeholder: Early outcome summaries will appear here once enough opted-in runs include consistent REM sleep estimates and contextual sleep notes.
 ---
 
 REM sleep minutes are useful because they give a simple view of one part of sleep architecture that many people already see in their wearable dashboards.
 
-Murph should keep this marker intentionally conservative. REM is biologically real when scored from polysomnography, but consumer devices infer it. The practical question is not “did I maximize REM last night?” The better question is whether an intervention produced a repeatable, context-aware change in REM opportunity without worsening total sleep, sleep continuity, recovery, or daytime function.
+This marker is intentionally conservative. REM is biologically real when scored from polysomnography, but consumer devices infer it. The practical question is not “did I maximize REM last night?” The better question is whether an intervention produced a repeatable, context-aware change in REM opportunity without worsening total sleep, sleep continuity, recovery, or daytime function.
 
 A useful REM read usually looks like this:
 
@@ -140,4 +140,4 @@ A useful REM read usually looks like this:
 - avoid treating a single low-REM night as failure or a single high-REM night as success,
 - escalate possible clinical patterns — dream enactment, severe snoring, witnessed apneas, or persistent disabling sleepiness — to proper sleep evaluation.
 
-For Murph experiments, REM should usually be a **secondary context marker**. It can strengthen a sleep story when it moves alongside better sleep duration, efficiency, subjective restfulness, and daytime function, but it should not carry the whole verdict by itself.
+In self-experiments, REM should usually be a **secondary context marker**. It can strengthen a sleep story when it moves alongside better sleep duration, efficiency, subjective restfulness, and daytime function, but it should not carry the whole verdict by itself.
