@@ -10,6 +10,7 @@ import {
 
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
@@ -24,6 +25,8 @@ export interface HostedWorkerCryptoEnv {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: string;
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: string;
   HOSTED_CRYPTO_ENV: string;
+  NODE_ENV?: string;
+  VERCEL_ENV?: string;
 }
 
 export interface HostedRuntimeCryptoContextResponse {
@@ -33,6 +36,15 @@ export interface HostedRuntimeCryptoContextResponse {
   };
   fetchedAt?: string;
   schema: "murph.hosted-runtime-crypto-context.v1";
+  userId: string;
+}
+
+export interface HostedRuntimeCryptoRootResponse {
+  domain: "ingress" | "runtime";
+  envelope: unknown;
+  fetchedAt?: string;
+  rootKeyId: string;
+  schema: "murph.hosted-runtime-crypto-root.v1";
   userId: string;
 }
 
@@ -106,6 +118,48 @@ export async function fetchHostedWorkerRuntimeRoot(input: {
   });
 }
 
+export async function fetchHostedWorkerRuntimeRootByRootKeyId(input: {
+  baseUrl: string;
+  callbackSigning: HostedWebCallbackSigningEnvironment;
+  cryptoEnv: HostedWorkerCryptoEnv;
+  domain: "ingress" | "runtime";
+  rootKeyId: string;
+  allowHttpHosts?: readonly string[];
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+  userId: string;
+}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body: JSON.stringify({
+      domain: input.domain,
+      rootKeyId: input.rootKeyId,
+    }),
+    boundUserId: input.userId,
+    allowHttpHosts: input.allowHttpHosts,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+  if (!response.ok) {
+    throw new Error(`Hosted runtime crypto root fetch failed with HTTP ${response.status}.`);
+  }
+  const context = await response.json() as HostedRuntimeCryptoRootResponse;
+  assertHostedRuntimeCryptoRootContext(context, {
+    domain: input.domain,
+    rootKeyId: input.rootKeyId,
+    userId: input.userId,
+  });
+  return unwrapHostedWorkerRuntimeRootEnvelope({
+    domain: input.domain,
+    envelope: parseHostedDomainRootKeyEnvelope(context.envelope),
+    env: input.cryptoEnv,
+    userId: input.userId,
+  });
+}
+
 export async function unwrapHostedWorkerRuntimeRoots(input: {
   context: HostedRuntimeCryptoContextResponse;
   env: HostedWorkerCryptoEnv;
@@ -138,13 +192,27 @@ export async function unwrapHostedWorkerRuntimeRoot(input: {
   env: HostedWorkerCryptoEnv;
 }): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
   const envelope = requireHostedRuntimeCryptoContextEnvelope(input.context, input.domain);
-  const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
-  return await unwrapWorkerDomainRoot({
+  return unwrapHostedWorkerRuntimeRootEnvelope({
     domain: input.domain,
     envelope: parseHostedDomainRootKeyEnvelope(envelope),
     env: input.env,
-    privateJwk,
     userId: input.context.userId,
+  });
+}
+
+async function unwrapHostedWorkerRuntimeRootEnvelope(input: {
+  domain: "ingress" | "runtime";
+  envelope: HostedDomainRootKeyEnvelopeV1;
+  env: HostedWorkerCryptoEnv;
+  userId: string;
+}): Promise<{ envelope: HostedDomainRootKeyEnvelopeV1; rootKey: Uint8Array }> {
+  const privateJwk = parseP256PrivateJwk(input.env.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK);
+  return await unwrapWorkerDomainRoot({
+    domain: input.domain,
+    envelope: input.envelope,
+    env: input.env,
+    privateJwk,
+    userId: input.userId,
   });
 }
 
@@ -160,7 +228,7 @@ async function unwrapWorkerDomainRoot(input: {
     envelope: input.envelope,
     userId: input.userId,
   });
-  if (!input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION && isHostedCryptoProductionEnv(input.env.HOSTED_CRYPTO_ENV)) {
+  if (!input.env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION && isHostedCryptoProductionEnv(input.env)) {
     throw new Error("HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION is required in production.");
   }
   if (
@@ -207,8 +275,16 @@ async function unwrapWorkerDomainRoot(input: {
   return { envelope: input.envelope, rootKey };
 }
 
-function isHostedCryptoProductionEnv(value: string): boolean {
-  return value === "production";
+function isHostedCryptoProductionEnv(env: HostedWorkerCryptoEnv): boolean {
+  const hostedCryptoEnv = normalizeProductionEnvValue(env.HOSTED_CRYPTO_ENV);
+  return normalizeProductionEnvValue(env.NODE_ENV) === "production"
+    || normalizeProductionEnvValue(env.VERCEL_ENV) === "production"
+    || hostedCryptoEnv === "prod"
+    || hostedCryptoEnv === "production";
+}
+
+function normalizeProductionEnvValue(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
 }
 
 function assertEnvelopeMatches(input: {
@@ -233,6 +309,27 @@ function assertHostedRuntimeCryptoContext(value: HostedRuntimeCryptoContextRespo
   }
   if (!value.envelopes || typeof value.envelopes !== "object") {
     throw new TypeError("Hosted runtime crypto context envelopes must be an object.");
+  }
+}
+
+function assertHostedRuntimeCryptoRootContext(
+  value: HostedRuntimeCryptoRootResponse,
+  expected: { domain: "ingress" | "runtime"; rootKeyId: string; userId: string },
+): void {
+  if (value.schema !== "murph.hosted-runtime-crypto-root.v1") {
+    throw new TypeError("Hosted runtime crypto root schema mismatch.");
+  }
+  if (value.userId !== expected.userId) {
+    throw new TypeError("Hosted runtime crypto root userId mismatch.");
+  }
+  if (value.domain !== expected.domain) {
+    throw new TypeError(`Hosted runtime crypto root expected ${expected.domain} envelope.`);
+  }
+  if (value.rootKeyId !== expected.rootKeyId) {
+    throw new TypeError("Hosted runtime crypto root rootKeyId mismatch.");
+  }
+  if (!value.envelope) {
+    throw new TypeError("Hosted runtime crypto root envelope is required.");
   }
 }
 

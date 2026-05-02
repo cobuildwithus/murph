@@ -637,7 +637,6 @@ async function encryptHostedMailboxPayloadForFixture(input: {
 }): Promise<string | null> {
   return encryptHostedMailboxPayloadString({
     dedupeKey: input.dedupeKey,
-    field: "hosted-mailbox-inline-payload",
     itemId: input.itemId,
     kind: input.kind,
     lane: input.lane,

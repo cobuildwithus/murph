@@ -270,6 +270,7 @@ describe("hosted execution coverage gaps", () => {
     expect("HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH" in routeModule).toBe(false);
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
+      "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LOG_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",

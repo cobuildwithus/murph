@@ -12,8 +12,12 @@ describe('cloudflare hosted e2e workflow guards', () => {
     const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
 
     expect(workflow).toContain('DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test')
+    expect(workflow).toContain('HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101')
+    expect(workflow).toContain('HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
     expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}')
     expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')
+    expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY')
+    expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY_VERSION')
     expect(workflow.match(/image: postgres/g)).toHaveLength(3)
     expect(workflow.match(/POSTGRES_DB: murph_test/g)).toHaveLength(3)
     expect(workflow.match(/POSTGRES_PASSWORD: postgres/g)).toHaveLength(3)

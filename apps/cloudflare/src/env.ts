@@ -46,6 +46,8 @@ export function readHostedExecutionEnvironment(
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
         workerEnvironment.hostedCryptoCloudflareAutomationPrivateJwk,
       HOSTED_CRYPTO_ENV: workerEnvironment.hostedCryptoEnv,
+      ...(source.NODE_ENV ? { NODE_ENV: source.NODE_ENV } : {}),
+      ...(source.VERCEL_ENV ? { VERCEL_ENV: source.VERCEL_ENV } : {}),
     },
     vercelOidcValidation: requireHostedExecutionVercelOidcValidationEnvironment(source),
     webCallbackSigning: readHostedWebCallbackSigningEnvironment(source),

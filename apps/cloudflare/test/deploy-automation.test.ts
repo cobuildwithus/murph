@@ -357,7 +357,7 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
   });
 
-  it("keeps the hosted deploy workflow env surface, fallback defaults, and summary aligned", async () => {
+  it("keeps the hosted deploy workflow env surface, defaults, and summary aligned", async () => {
     const workflow = await readFile(
       new URL("../../../.github/workflows/deploy-cloudflare-hosted.yml", import.meta.url),
       "utf8",
@@ -379,8 +379,8 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
-      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID || (inputs.environment == 'production' && vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID || '') }}",
-      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK || (inputs.environment == 'production' && secrets.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK || '') }}",
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}",
+      "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}",
       "HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}",
       "Container rollout: \\`${{ inputs.container_rollout }}\\`",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
@@ -406,6 +406,7 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toContain("uses: docker/build-push-action@v7");
     expect(workflow).not.toContain("cache-from: type=gha,scope=cloudflare-runner-base");
     expect(workflow).not.toContain("cache-to: type=gha,mode=max,scope=cloudflare-runner-base");
+    expect(workflow).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT");
     const prepareArtifactsStepIndex = workflow.indexOf("- name: Prepare deploy artifacts");
     const prepareRunnerBaseImageStepIndex = workflow.indexOf("- name: Prepare runner base image");
     const parallelChecksAndSmokeStepIndex = workflow.indexOf(

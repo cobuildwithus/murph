@@ -32,14 +32,14 @@ import {
 } from "./runtime-bridge-checkpoint.ts";
 import {
   decryptHostedMailboxPayloadCiphertext,
-  createHostedMailboxEncryptionEnvironmentFromIngressRoot,
+  createHostedMailboxEncryptionEnvironmentFromIngressRootResolver,
   type HostedMailboxEncryptionEnvironment,
 } from "./hosted-mailbox-encryption.ts";
 import {
   readHostedExecutionWorkerEnvironment,
 } from "./hosted-execution-worker-env.ts";
 import {
-  fetchHostedWorkerRuntimeRoot,
+  fetchHostedWorkerRuntimeRootByRootKeyId,
   type HostedWorkerCryptoEnv,
 } from "./hosted-crypto/runtime-crypto-context.ts";
 import {
@@ -212,29 +212,44 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
   const workerEnv = readHostedExecutionWorkerEnvironment(input.platformEnv, {
     allowHostedWebHttpHosts: input.webControlAllowHttpHosts,
   });
-  const ingressRoot = await fetchHostedWorkerRuntimeRoot({
-    baseUrl: input.webControlBaseUrl ?? workerEnv.hostedWebBaseUrl,
-    callbackSigning: readHostedWebCallbackSigningEnvironment(input.platformEnv),
-    cryptoEnv: {
-      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
-        workerEnv.hostedCryptoAuthoritySignKeyVersion,
-      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
-        workerEnv.hostedCryptoAuthoritySignPublicKeyPem,
-      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
-        workerEnv.hostedCryptoCloudflareAutomationKeyId,
-      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
-        workerEnv.hostedCryptoCloudflareAutomationPrivateJwk,
-      HOSTED_CRYPTO_ENV: workerEnv.hostedCryptoEnv,
-    } satisfies HostedWorkerCryptoEnv,
-    domain: "ingress",
-    allowHttpHosts: input.webControlAllowHttpHosts,
-    fetchImpl: input.webControlFetch,
-    timeoutMs: workerEnv.webControlTimeoutMs,
-    userId: input.userId,
-  });
-  return createHostedMailboxEncryptionEnvironmentFromIngressRoot({
-    rootKey: ingressRoot.rootKey,
-    rootKeyId: ingressRoot.envelope.rootKeyId,
+  const cryptoEnv = {
+    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
+      workerEnv.hostedCryptoAuthoritySignKeyVersion,
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+      workerEnv.hostedCryptoAuthoritySignPublicKeyPem,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+      workerEnv.hostedCryptoCloudflareAutomationKeyId,
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+      workerEnv.hostedCryptoCloudflareAutomationPrivateJwk,
+    HOSTED_CRYPTO_ENV: workerEnv.hostedCryptoEnv,
+    ...(input.platformEnv.NODE_ENV ? { NODE_ENV: input.platformEnv.NODE_ENV } : {}),
+    ...(input.platformEnv.VERCEL_ENV ? { VERCEL_ENV: input.platformEnv.VERCEL_ENV } : {}),
+  } satisfies HostedWorkerCryptoEnv;
+  const rootsById = new Map<string, Promise<{ rootKey: Uint8Array; rootKeyId: string }>>();
+
+  return createHostedMailboxEncryptionEnvironmentFromIngressRootResolver({
+    readIngressRoot(rootKeyId) {
+      const existing = rootsById.get(rootKeyId);
+      if (existing) {
+        return existing;
+      }
+      const created = fetchHostedWorkerRuntimeRootByRootKeyId({
+        baseUrl: input.webControlBaseUrl ?? workerEnv.hostedWebBaseUrl,
+        callbackSigning: readHostedWebCallbackSigningEnvironment(input.platformEnv),
+        cryptoEnv,
+        domain: "ingress",
+        allowHttpHosts: input.webControlAllowHttpHosts,
+        fetchImpl: input.webControlFetch,
+        rootKeyId,
+        timeoutMs: workerEnv.webControlTimeoutMs,
+        userId: input.userId,
+      }).then((root) => ({
+        rootKey: root.rootKey,
+        rootKeyId: root.envelope.rootKeyId,
+      }));
+      rootsById.set(rootKeyId, created);
+      return created;
+    },
   });
 }
 

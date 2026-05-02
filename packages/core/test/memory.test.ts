@@ -269,7 +269,7 @@ describe("core memory package wrapper", () => {
     ).rejects.toThrow('Memory record "mem_missing" does not exist.');
   });
 
-  test("reads legacy on-disk memory docs and preserves legacy ids through update and forget", async () => {
+  test("fails closed on legacy on-disk memory docs and legacy ids", async () => {
     const vaultRoot = await makeVaultRoot();
     const legacyRecordId = "mem_0123456789abcdef";
     const legacyDocumentPath = path.join(vaultRoot, "bank/memory.md");
@@ -292,38 +292,18 @@ describe("core memory package wrapper", () => {
       "utf8",
     );
 
-    const snapshot = await readMemoryDocument(vaultRoot);
-    expect(snapshot.frontmatter).toMatchObject({
-      docType: FRONTMATTER_DOC_TYPES.memory,
-      schemaVersion: CONTRACT_SCHEMA_VERSION.memoryFrontmatter,
-    });
-    expect(snapshot.records).toHaveLength(1);
-    expect(snapshot.records[0]?.id).toBe(legacyRecordId);
+    await expect(readMemoryDocument(vaultRoot)).rejects.toThrow();
 
-    const updated = await updateMemory(vaultRoot, {
-      now: new Date("2026-04-08T00:05:00.000Z"),
-      recordId: legacyRecordId,
-      section: "Identity",
-      text: "Uses Murph daily",
-    });
+    await expect(
+      updateMemory(vaultRoot, {
+        now: new Date("2026-04-08T00:05:00.000Z"),
+        recordId: legacyRecordId,
+        section: "Identity",
+        text: "Uses Murph daily",
+      }),
+    ).rejects.toThrow();
 
-    expect(updated.record).toMatchObject({
-      id: legacyRecordId,
-      section: "Identity",
-      text: "Uses Murph daily",
-      updatedAt: "2026-04-08T00:05:00.000Z",
-    });
-    expect(updated.document.markdown).toContain("docType: memory");
-    expect(updated.document.markdown).toContain(
-      "schemaVersion: murph.frontmatter.memory.v1",
-    );
-
-    const forgotten = await forgetMemory(vaultRoot, {
-      recordId: legacyRecordId,
-    });
-    expect(forgotten.existed).toBe(true);
-    expect(forgotten.record?.id).toBe(legacyRecordId);
-    expect(await getMemoryRecord(vaultRoot, legacyRecordId)).toBeNull();
+    await expect(forgetMemory(vaultRoot, { recordId: legacyRecordId })).rejects.toThrow();
   });
 
   test("fails closed when post-write read-back omits the upserted memory record", async () => {

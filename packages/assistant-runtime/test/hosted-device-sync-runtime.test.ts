@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, test } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
-import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/crypto";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import {
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
