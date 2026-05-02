@@ -13,6 +13,7 @@ import {
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
 import { metricRowMatchesFilters } from "./metric-points.ts";
+import { normalizeMetricKey, resolveMetricDefinition } from "@murphai/health-metrics";
 
 export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): BrowserVaultQueryClient {
   const frozenReplica = deepFreezeBrowserVaultValue(replica);
@@ -45,32 +46,40 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
     },
     metricGoals: {
       progress(filters = {}) {
-        return frozenReplica.metricGoalProgressRows.filter((row) => matchesMetricGoalFilters(row, filters));
+        return frozenReplica.metricGoalProgressRows.filter((row) => matchesMetricGoalFilters(row, normalizeMetricGoalFilters(filters)));
       },
     },
     metrics: {
-      latest(filters = {}) {
-        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters))).at(-1) ?? null;
+      latestRow(filters = {}) {
+        const normalizedFilters = normalizeMetricFilters(filters);
+        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters))).at(-1) ?? null;
       },
       list(filters = {}) {
-        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters)));
+        const normalizedFilters = normalizeMetricFilters(filters);
+        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters)));
       },
       series(filters = {}) {
-        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filters)));
+        const normalizedFilters = normalizeMetricFilters(filters);
+        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters)));
       },
       seriesMany(filters) {
-        return filters.map((filter) => sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, filter))));
+        return filters.map((filter) => {
+          const normalizedFilters = normalizeMetricFilters(filter);
+          return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters)));
+        });
       },
     },
     metricSelections: {
       get(idOrMetricKey) {
-        return metricSelectionById.get(idOrMetricKey) ?? null;
+        return metricSelectionById.get(idOrMetricKey)
+          ?? metricSelectionById.get(normalizeMetricFilterKey(idOrMetricKey) ?? idOrMetricKey)
+          ?? null;
       },
       getByBiomarker(biomarkerKey) {
         return metricSelectionById.get(biomarkerKey) ?? null;
       },
       list(filters = {}) {
-        return frozenReplica.metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, filters));
+        return frozenReplica.metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, normalizeMetricSelectionFilters(filters)));
       },
     },
     replica: frozenReplica,
@@ -114,7 +123,7 @@ function matchesEntityFilters(entity: BrowserVaultEntity, filters: BrowserVaultE
 }
 
 function matchesMetricSelectionFilters(row: BrowserVaultMetricSelectionRow, filters: BrowserVaultMetricSelectionFilters): boolean {
-  if (filters.metricKey && row.metricKey !== filters.metricKey) return false;
+  if (filters.metricKey && row.metricKey !== normalizeMetricFilterKey(filters.metricKey)) return false;
   if (filters.biomarkerKey && row.biomarkerKey !== filters.biomarkerKey) return false;
   return true;
 }
@@ -132,8 +141,37 @@ function matchesMetricGoalFilters(
   filters: { goalId?: string; metricKey?: string },
 ): boolean {
   if (filters.goalId && row.goalId !== filters.goalId) return false;
-  if (filters.metricKey && row.metricKey !== filters.metricKey) return false;
+  if (filters.metricKey && row.metricKey !== normalizeMetricFilterKey(filters.metricKey)) return false;
   return true;
+}
+
+function normalizeMetricFilterKey(metricKey?: string): string | undefined {
+  if (!metricKey) return undefined;
+  return resolveMetricDefinition(metricKey)?.key ?? normalizeMetricKey(metricKey);
+}
+
+function normalizeMetricFilters(filters: BrowserVaultMetricFilters): BrowserVaultMetricFilters {
+  const metricKey = normalizeMetricFilterKey(filters.metricKey);
+  return {
+    ...filters,
+    ...(metricKey ? { metricKey } : {}),
+  };
+}
+
+function normalizeMetricSelectionFilters(filters: BrowserVaultMetricSelectionFilters): BrowserVaultMetricSelectionFilters {
+  const metricKey = normalizeMetricFilterKey(filters.metricKey);
+  return {
+    ...filters,
+    ...(metricKey ? { metricKey } : {}),
+  };
+}
+
+function normalizeMetricGoalFilters(filters: { goalId?: string; metricKey?: string }): { goalId?: string; metricKey?: string } {
+  const metricKey = normalizeMetricFilterKey(filters.metricKey);
+  return {
+    ...filters,
+    ...(metricKey ? { metricKey } : {}),
+  };
 }
 
 function matchesTimelineFilters(row: BrowserVaultTimelineRow, filters: BrowserVaultTimelineFilters): boolean {
