@@ -62,6 +62,14 @@ test("browser-vault metric points project manual measurements and blood-test res
                 biomarkerSlug: "apob",
                 flag: "normal",
                 referenceRange: { text: "<90" },
+                unit: "g/L",
+                value: 0.87,
+              },
+              {
+                analyte: "Apolipoprotein B",
+                biomarkerSlug: "apob",
+                flag: "normal",
+                referenceRange: { text: "<90" },
                 unit: "mg/dL",
                 value: 87,
               },
@@ -122,6 +130,12 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.equal(apob.unit, "mg/dL");
   assert.equal(apob.sourceLabel, "Function Health");
   assert.equal(apob.recordIds[0], "evt_blood_panel");
+  assert.deepEqual(
+    client.metricPoints
+      .series({ metricKey: "apob" })
+      .map((point) => ({ unit: point.unit, value: point.value })),
+    [{ unit: "mg/dL", value: 87 }],
+  );
 
   const glucose = client.metricSelections.getByBiomarker("biomarker:blood-glucose");
   assert.ok(glucose);
@@ -142,6 +156,7 @@ test("browser-vault metric points project manual measurements and blood-test res
   assert.equal(crp.valueLabel, "<0.3");
   assert.equal(crp.unit, "mg/L");
   assert.equal(client.metricSelections.get("unreviewed-private-panel-note"), null);
+  assert.deepEqual(client.metricPoints.series({ metricKey: "unreviewed-private-panel-note" }), []);
 
   assert.equal(client.metricPoints.series({ metricKey: "body-weight" }).length, 2);
   assert.equal(client.metricPoints.latest({ metricKey: "apob" })?.sourceKind, "test-result");
@@ -247,6 +262,7 @@ test("query projection rebuild stores event-backed metric points in the projecti
 
       assert.deepEqual(rows.map((row) => row.metricKey), ["apob", "body-weight"]);
       assert.equal(rows.find((row) => row.metricKey === "body-weight")?.unit, "kg");
+      assert.equal(rows.find((row) => row.metricKey === "body-weight")?.value, 81.6466);
       assert.equal(
         Number(rows.find((row) => row.metricKey === "body-weight")?.canonicalValue?.toFixed(1)),
         81.6,
