@@ -1603,6 +1603,18 @@ test("summarizeDailySamples honors filters and ignores incomplete sample records
       sourcePath: "ledger/samples/glucose/2026/2026-03-c.jsonl",
       data: { value: 110, unit: "mg_dL" },
     }),
+    {
+      ...createSampleRecord({
+        id: "smp_filter_raw_metric_sample",
+        occurredAt: "2026-03-10T21:00:00Z",
+        stream: "glucose",
+        experimentSlug: "recovery-plan",
+        sourcePath: "ledger/metric-samples/glucose/2026/2026-03.jsonl",
+        data: { metric: "glucose", source: "device", quality: "raw", value: 400, unit: "mg_dL" },
+      }),
+      kind: "metric_sample",
+      status: "raw",
+    },
   ];
   syncVaultDerivedFields(vault);
 
@@ -1670,6 +1682,17 @@ test("summarizeSampleWindow summarizes stored sample windows with oxygen thresho
       sourcePath: "ledger/samples/heart_rate/2026/2026-04.jsonl",
       data: { value: 72, unit: "bpm" },
     }),
+    {
+      ...createSampleRecord({
+        id: "smp_spo2_raw_metric_sample",
+        occurredAt: "2026-04-17T00:00:02.500Z",
+        stream: "spo2",
+        sourcePath: "ledger/metric-samples/spo2/2026/2026-04.jsonl",
+        data: { metric: "spo2", source: "device", quality: "raw", value: 40, unit: "%" },
+      }),
+      kind: "metric_sample",
+      status: "raw",
+    },
   ];
   syncVaultDerivedFields(vault);
 

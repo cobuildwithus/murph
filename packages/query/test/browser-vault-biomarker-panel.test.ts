@@ -8,6 +8,7 @@ import {
   createBrowserVaultQueryClient,
   selectBrowserVaultBiomarkerPanel,
   type BrowserVaultMetricRow,
+  type BrowserVaultMetricSelectionRow,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
 
@@ -28,24 +29,26 @@ test("returns no_private_vault when no browser-vault client is available", () =>
   assert.match(panel.emptyState?.body ?? "", /Your data stays private/u);
 });
 
-test("builds a ready biomarker panel from browser-vault metric rows", () => {
+test("builds a ready biomarker panel from browser-vault metric selections and rows", () => {
+  const metricRows = restingHeartRateRows([
+    ["2026-03-23", 62],
+    ["2026-03-24", 61],
+    ["2026-03-25", 63],
+    ["2026-03-26", 62],
+    ["2026-03-27", 61],
+    ["2026-03-28", 62],
+    ["2026-04-23", 58],
+    ["2026-04-24", 57],
+    ["2026-04-25", 58],
+    ["2026-04-26", 56],
+    ["2026-04-27", 57],
+    ["2026-04-28", 56],
+    ["2026-04-29", 57],
+  ]);
   const client = createBrowserVaultQueryClient(
     createReplica({
-      metricRows: restingHeartRateRows([
-        ["2026-03-23", 62],
-        ["2026-03-24", 61],
-        ["2026-03-25", 63],
-        ["2026-03-26", 62],
-        ["2026-03-27", 61],
-        ["2026-03-28", 62],
-        ["2026-04-23", 58],
-        ["2026-04-24", 57],
-        ["2026-04-25", 58],
-        ["2026-04-26", 56],
-        ["2026-04-27", 57],
-        ["2026-04-28", 56],
-        ["2026-04-29", 57],
-      ]),
+      metricRows,
+      metricSelectionRows: [metricSelectionFromRows(metricRows)],
     }),
   );
 
@@ -69,13 +72,39 @@ test("builds a ready biomarker panel from browser-vault metric rows", () => {
   assert.equal("provider" in (panel.sources[0] ?? {}), false);
 });
 
+test("does not promote chart series rows to a current value without a metric selection", () => {
+  const metricRows = restingHeartRateRows([
+    ["2026-04-28", 56],
+    ["2026-04-29", 57],
+  ]);
+  const client = createBrowserVaultQueryClient(createReplica({ metricRows }));
+
+  const panel = selectBrowserVaultBiomarkerPanel({
+    biomarkerKey: "biomarker:resting-heart-rate",
+    client,
+    label: "RHR",
+    now: "2026-04-30T12:00:00.000Z",
+    trendDefaults: trendDefaults(),
+    unit: "bpm",
+    valuePrecision: 0,
+  });
+
+  assert.equal(client.metrics.series({ metricKey: "resting-heart-rate" }).at(-1)?.value, 57);
+  assert.equal(panel.status, "missing_selection");
+  assert.equal(panel.primary?.latest, null);
+  assert.equal(panel.primary?.sampleCount, 2);
+  assert.match(panel.emptyState?.body ?? "", /did not include a selected current value/u);
+});
+
 test("returns insufficient_data before the biomarker minimum point threshold", () => {
+  const metricRows = restingHeartRateRows([
+    ["2026-04-28", 56],
+    ["2026-04-29", 57],
+  ]);
   const client = createBrowserVaultQueryClient(
     createReplica({
-      metricRows: restingHeartRateRows([
-        ["2026-04-28", 56],
-        ["2026-04-29", 57],
-      ]),
+      metricRows,
+      metricSelectionRows: [metricSelectionFromRows(metricRows, { status: "insufficient_data", value: null, valueLabel: null })],
     }),
   );
 
@@ -130,16 +159,21 @@ test("returns unsupported for biomarker pages without a metric-catalog mapping",
   assert.equal(panel.primary, null);
 });
 
-test("marks old metric series as stale while keeping the selected value", () => {
+test("uses stale metric selection state while keeping the selected value", () => {
+  const metricRows = restingHeartRateRows([
+    ["2026-04-01", 62],
+    ["2026-04-02", 61],
+    ["2026-04-03", 63],
+    ["2026-04-04", 62],
+    ["2026-04-05", 61],
+  ]);
   const client = createBrowserVaultQueryClient(
     createReplica({
-      metricRows: restingHeartRateRows([
-        ["2026-04-01", 62],
-        ["2026-04-02", 61],
-        ["2026-04-03", 63],
-        ["2026-04-04", 62],
-        ["2026-04-05", 61],
-      ]),
+      metricRows,
+      metricSelectionRows: [metricSelectionFromRows(metricRows, {
+        status: "stale",
+        warnings: [{ code: "SOURCE_STALE", message: "Latest RHR value is older than 7 days." }],
+      })],
     }),
   );
 
@@ -189,6 +223,34 @@ function restingHeartRateRows(rows: readonly (readonly [string, number])[]): Bro
     value,
     valueLabel: String(value),
   }));
+}
+
+function metricSelectionFromRows(
+  rows: readonly BrowserVaultMetricRow[],
+  overrides: Partial<BrowserVaultMetricSelectionRow> = {},
+): BrowserVaultMetricSelectionRow {
+  const latest = rows.at(-1);
+  if (!latest) throw new Error("Expected at least one metric row.");
+  const biomarkerKey = latest.biomarkerKey;
+  return {
+    biomarkerKey,
+    confidence: latest.confidence,
+    effectiveDate: latest.date,
+    id: `metric-selection:${latest.metricKey}:${biomarkerKey ?? "none"}`,
+    metricKey: latest.metricKey,
+    observedAt: latest.observedAt,
+    pointIds: latest.pointIds,
+    recordIds: latest.recordIds,
+    selectedMetricRowId: latest.id,
+    selectionSchema: "murph.browser-vault.metric-selection.v1",
+    sourceLabel: latest.sourceLabel,
+    status: "ready",
+    unit: latest.unit,
+    value: latest.value,
+    valueLabel: latest.valueLabel,
+    warnings: [],
+    ...overrides,
+  };
 }
 
 function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVaultReplica {

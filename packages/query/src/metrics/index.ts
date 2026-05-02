@@ -248,6 +248,7 @@ function metricSampleMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const normalized = normalizeMetricValue({ metricKey: definition.key, unit: unit ?? definition.displayUnit, value });
   const quality = readString(entity.attributes.quality) ?? entity.status ?? null;
   const source = readString(entity.attributes.source);
+  if (!isDisplayGradeMetricSample(source, quality)) return [];
   const provider = providerForMetricSample(entity);
 
   return [createMetricPoint({
@@ -294,6 +295,18 @@ function metricSampleConfidence(quality: string | null): MetricConfidence {
   if (quality === "raw") return "medium";
   if (quality === "normalized" || quality === "derived") return "high";
   return "medium";
+}
+
+export function isDisplayGradeMetricSample(source: string | null, quality: string | null): boolean {
+  if (source === "manual" || source === "derived") return true;
+  return quality === "normalized" || quality === "derived";
+}
+
+export function isDisplayGradeMetricSampleEntity(entity: CanonicalEntity): boolean {
+  if (entity.family !== "sample" || entity.kind !== "metric_sample") return false;
+  const quality = readString(entity.attributes.quality) ?? entity.status ?? null;
+  const source = readString(entity.attributes.source);
+  return isDisplayGradeMetricSample(source, quality);
 }
 
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {

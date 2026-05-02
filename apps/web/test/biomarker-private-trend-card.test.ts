@@ -6,6 +6,7 @@ import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   createBrowserVaultQueryClient,
   type BrowserVaultMetricRow,
+  type BrowserVaultMetricSelectionRow,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
 import { createElement, type ReactNode } from "react";
@@ -97,24 +98,31 @@ test("the biomarker overview lets the metric catalog decide private trend suppor
 test("renders private trend values from the browser-vault selector", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
+  const metricRows = restingHeartRateRows([
+    ["2026-03-23", 62],
+    ["2026-03-24", 61],
+    ["2026-03-25", 63],
+    ["2026-03-26", 62],
+    ["2026-03-27", 61],
+    ["2026-03-28", 62],
+    ["2026-04-23", 58],
+    ["2026-04-24", 57],
+    ["2026-04-25", 58],
+    ["2026-04-26", 56],
+    ["2026-04-27", 57],
+    ["2026-04-28", 56],
+    ["2026-04-29", 57],
+  ]);
 
   mocks.useBrowserVault.mockReturnValue({
     client: createBrowserVaultQueryClient(createReplica({
-      metricRows: restingHeartRateRows([
-        ["2026-03-23", 62],
-        ["2026-03-24", 61],
-        ["2026-03-25", 63],
-        ["2026-03-26", 62],
-        ["2026-03-27", 61],
-        ["2026-03-28", 62],
-        ["2026-04-23", 58],
-        ["2026-04-24", 57],
-        ["2026-04-25", 58],
-        ["2026-04-26", 56],
-        ["2026-04-27", 57],
-        ["2026-04-28", 56],
-        ["2026-04-29", 57],
-      ]),
+      metricRows,
+      metricSelectionRows: [metricSelectionFromRows(metricRows, {
+        effectiveDate: "2026-04-28",
+        observedAt: "2026-04-28T00:00:00.000Z",
+        value: 56,
+        valueLabel: "56",
+      })],
     })),
     dataVersion: "sha256:browser-vault-private-card-test",
     error: null,
@@ -128,11 +136,40 @@ test("renders private trend values from the browser-vault selector", () => {
   );
 
   assert.match(markup, /Your RHR trend/u);
-  assert.match(markup, />57</u);
+  assert.match(markup, />56</u);
   assert.match(markup, /WHOOP/u);
   assert.match(markup, /7-day median vs prior 30 days/u);
   assert.match(markup, /Murph compares this to your own recent baseline/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
+});
+
+test("keeps chart rows from becoming private current values without a selector row", () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
+  assert.ok(biomarker);
+
+  mocks.useBrowserVault.mockReturnValue({
+    client: createBrowserVaultQueryClient(createReplica({
+      metricRows: restingHeartRateRows([
+        ["2026-04-28", 56],
+        ["2026-04-29", 57],
+      ]),
+      metricSelectionRows: [],
+    })),
+    dataVersion: "sha256:browser-vault-private-card-test",
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerPrivateTrendCard, { biomarker }),
+  );
+
+  assert.match(markup, /No current private value selected/u);
+  assert.match(markup, /did not include a selected current value/u);
+  assert.doesNotMatch(markup, />57</u);
+  assert.doesNotMatch(markup, /Connect a device/u);
 });
 
 test("renders private trend values for catalog-supported biomarker keys", () => {
@@ -195,13 +232,15 @@ test("renders private trend values for catalog-supported biomarker keys", () => 
 test("renders the insufficient-data state from real browser-vault rows", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
+  const metricRows = restingHeartRateRows([
+    ["2026-04-28", 56],
+    ["2026-04-29", 57],
+  ]);
 
   mocks.useBrowserVault.mockReturnValue({
     client: createBrowserVaultQueryClient(createReplica({
-      metricRows: restingHeartRateRows([
-        ["2026-04-28", 56],
-        ["2026-04-29", 57],
-      ]),
+      metricRows,
+      metricSelectionRows: [metricSelectionFromRows(metricRows, { status: "insufficient_data", value: null, valueLabel: null })],
     })),
     dataVersion: "sha256:browser-vault-private-card-test",
     error: null,
@@ -302,7 +341,43 @@ function metricRows(input: {
   }));
 }
 
+function metricSelectionFromRows(
+  rows: readonly BrowserVaultMetricRow[],
+  overrides: Partial<BrowserVaultMetricSelectionRow> = {},
+): BrowserVaultMetricSelectionRow {
+  const latest = rows.at(-1);
+  if (!latest) throw new Error("Expected at least one metric row.");
+  const biomarkerKey = latest.biomarkerKey;
+  return {
+    biomarkerKey,
+    confidence: latest.confidence,
+    effectiveDate: latest.date,
+    id: `metric-selection:${latest.metricKey}:${biomarkerKey ?? "none"}`,
+    metricKey: latest.metricKey,
+    observedAt: latest.observedAt,
+    pointIds: latest.pointIds,
+    recordIds: latest.recordIds,
+    selectedMetricRowId: latest.id,
+    selectionSchema: "murph.browser-vault.metric-selection.v1",
+    sourceLabel: latest.sourceLabel,
+    status: "ready",
+    unit: latest.unit,
+    value: latest.value,
+    valueLabel: latest.valueLabel,
+    warnings: [],
+    ...overrides,
+  };
+}
+
 function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVaultReplica {
+  const metricRows = overrides.metricRows ?? [];
+  const hasMetricSelectionRows = Object.prototype.hasOwnProperty.call(overrides, "metricSelectionRows");
+  const metricSelectionRows = hasMetricSelectionRows
+    ? overrides.metricSelectionRows ?? []
+    : metricRows.length > 0
+      ? [metricSelectionFromRows(metricRows)]
+      : [];
+
   return {
     assistantSummary: {
       highlights: [],
@@ -311,8 +386,6 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     entities: [],
     generatedAt: "2026-04-30T12:00:00.000Z",
     metricGoalProgressRows: [],
-    metricRows: [],
-    metricSelectionRows: [],
     policy: {
       bodyPreviewChars: 280,
       excludedFamilies: [],
@@ -345,5 +418,7 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     timelineRows: [],
     weeklySampleSummaries: [],
     ...overrides,
+    metricRows,
+    metricSelectionRows,
   };
 }

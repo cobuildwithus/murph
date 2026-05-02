@@ -5,6 +5,7 @@ import {
   type SampleSummaryProfile,
   type SampleWindowSummary,
 } from "@murphai/importers/sample-series-summary";
+import { isDisplayGradeMetricSampleEntity } from "./metrics/index.ts";
 
 export interface DailySampleSummary {
   date: string;
@@ -51,6 +52,10 @@ export function summarizeDailySamples(
   >();
 
   for (const sample of vault.samples) {
+    if (!isSummarizableSample(sample)) {
+      continue;
+    }
+
     const date = sample.date;
     const stream = sample.stream;
 
@@ -116,6 +121,7 @@ export function summarizeSampleWindow(
   filters: SampleWindowSummaryFilter,
 ): SampleWindowSummary {
   const samples = vault.samples
+    .filter(isSummarizableSample)
     .filter((sample) => sample.stream === filters.stream)
     .map((sample) => ({
       recordedAt: sample.occurredAt ?? "",
@@ -135,6 +141,11 @@ export function summarizeSampleWindow(
     gapSeconds: filters.gapSeconds,
     profile: filters.profile,
   });
+}
+
+function isSummarizableSample(sample: CanonicalEntity): boolean {
+  if (sample.kind !== "metric_sample") return true;
+  return isDisplayGradeMetricSampleEntity(sample);
 }
 
 function getOrCreateSummaryGroup(

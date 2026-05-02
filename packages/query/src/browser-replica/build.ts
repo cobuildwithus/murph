@@ -13,6 +13,7 @@ import {
   listMetricDefinitions,
   normalizeMetricKey,
   parseGoalMetricTargets,
+  isDisplayGradeMetricSampleEntity,
   selectMetricGoalProgress,
   type GoalMetricTarget,
   type MetricPoint,
@@ -54,6 +55,7 @@ export async function createBrowserVaultReplica(
   const policy = createBrowserVaultReplicaPolicy();
   const entities = input.vault.entities
     .filter((entity) => isBrowserVaultIncludedFamily(entity.family))
+    .filter(isBrowserVaultIncludedEntity)
     .map(projectEntity);
   const timelineRows = buildTimeline(input.vault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
@@ -138,6 +140,14 @@ function createBrowserVaultReplicaPolicy(): BrowserVaultReplicaPolicy {
 
 function isBrowserVaultIncludedFamily(family: string): boolean {
   return (INCLUDED_FAMILIES as readonly string[]).includes(family);
+}
+
+function isBrowserVaultIncludedEntity(entity: CanonicalEntity): boolean {
+  if (entity.family === "sample" && entity.kind === "metric_sample") {
+    return isDisplayGradeMetricSampleEntity(entity);
+  }
+
+  return true;
 }
 
 function buildMetricGoalProgressRows(

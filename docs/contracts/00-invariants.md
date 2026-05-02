@@ -3,7 +3,7 @@
 ## Canonical Storage
 
 - Human-facing truth lives in Markdown: `CORE.md`, `journal/`, and `bank/`.
-- Machine-facing truth lives in JSONL: `ledger/events`, `ledger/samples`, and `audit`.
+- Machine-facing truth lives in JSONL: `ledger/events`, `ledger/metric-samples`, `ledger/samples`, and `audit`.
 - Imported originals live in `raw/` and are immutable once copied into the vault.
 
 ## Write Authority
