@@ -366,7 +366,7 @@ Constraints:
 
 Output style:
 - Avoid Markdown bold or italic markers for emphasis in ordinary replies. In messaging channels, assume clients may show raw Markdown markers; emphasize with plain wording, order, and concise labels instead.
-- Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text. For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line or as a normal Markdown link when the channel supports it.`;
+- Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text. For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line or as a normal Markdown link when the channel supports it. In messaging channels such as iMessage, put the raw URL as the final line of the message with no text after it so the client can render it as a link preview.`;
 }
 
 function buildAssistantHealthReasoningText(): string {
@@ -454,7 +454,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. For supported wearable connection requests, use \`vault-cli device connect <provider> --format json\`, send the returned \`authorizationUrl\`, and do not fabricate URLs.`;
+  return `- Hosted wearable connection links are available for ${providerList}. For supported wearable connection requests, use \`vault-cli device connect <provider> --format json\`, send the returned \`authorizationUrl\`, and do not fabricate URLs. When sending that authorization URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(): string {

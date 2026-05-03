@@ -105,6 +105,12 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'For supported wearable connection requests, use `vault-cli device connect <provider> --format json`',
     )
+    expect(prompt).toContain(
+      'put it on its own final line with no text after it',
+    )
+    expect(prompt).toContain(
+      'put the raw URL as the final line of the message with no text after it',
+    )
     expect(prompt).not.toContain('Do not route supported hosted connect flows through local `device connect`')
     expect(prompt).toContain(
       'Python is available for small local scripts when it makes the task easier',
@@ -242,7 +248,7 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'f8092ae196bf4bf8687e14caa7e09a8ec0296363998b57c8c07005d8f83d2b61',
+      '9df7a06c05b367c2ec360e8b5f414ec27cb9fbcaa453c0cf1d8183afc0c39587',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
