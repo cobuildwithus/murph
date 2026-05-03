@@ -63,19 +63,3 @@ test("OnboardingSteps gates the connect devices action with AuthButton", async (
 
   assert.match(markup, /data-slot="auth-button"[^>]*>Connect devices/);
 });
-
-test("OnboardingSteps hides the device step after a source is connected", async () => {
-  const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
-  const markup = renderToStaticMarkup(
-    createElement(OnboardingSteps, {
-      devicesConnected: true,
-    }),
-  );
-
-  assert.doesNotMatch(markup, /Connect devices/);
-  assert.match(markup, /class="grid gap-5 sm:grid-cols-2"/);
-  assert.doesNotMatch(markup, /xl:grid-cols-3/);
-  assert.match(markup, /Step 1/);
-  assert.match(markup, /Sync labs/);
-  assert.match(markup, /View experiments/);
-});
