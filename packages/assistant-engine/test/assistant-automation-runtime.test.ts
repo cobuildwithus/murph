@@ -2954,8 +2954,13 @@ describe('assistant auto-reply runtime', () => {
     })
     const lateInput = assistantInputCandidateFromInboxCapture(lateCapture)
     replyMocks.prepareAssistantAutoReplyInput.mockImplementation(
-      async (captures: readonly { capture: { captureId: string } }[]) => {
-        const captureIds = captures.map((entry) => entry.capture.captureId)
+      async (inputs: readonly {
+        inputId: string
+        projection: { inboxCaptureId: string | null } | null
+      }[]) => {
+        const captureIds = inputs.map(
+          (entry) => entry.projection?.inboxCaptureId ?? entry.inputId,
+        )
         return {
           kind: 'ready',
           prompt: `reply prompt for ${captureIds.join(',')}`,
@@ -3183,14 +3188,14 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
       1,
       [expect.objectContaining({
-        capture: expect.objectContaining({ captureId: 'capture-1' }),
+        projection: expect.objectContaining({ inboxCaptureId: 'capture-1' }),
       })],
       '/tmp/assistant-automation-vault',
     )
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
       2,
       [expect.objectContaining({
-        capture: expect.objectContaining({ captureId: 'capture-late' }),
+        projection: expect.objectContaining({ inboxCaptureId: 'capture-late' }),
       })],
       '/tmp/assistant-automation-vault',
     )
@@ -4630,7 +4635,11 @@ describe('assistant auto-reply runtime', () => {
       skipped: 0,
       stopScanning: false,
     })
-    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(inboxServices.show).toHaveBeenCalledWith({
+      captureId: 'capture-1',
+      requestId: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
   })
 
   it('sends rich content when any configured route supports multimodal input', async () => {
@@ -4991,7 +5000,11 @@ describe('assistant auto-reply runtime', () => {
         acceptedInputIds: [hostedInput.event.inputId],
       }),
     )
-    expect(inboxServices.show).not.toHaveBeenCalled()
+    expect(inboxServices.show).toHaveBeenCalledWith({
+      captureId: 'capture-projected-initial',
+      requestId: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5135,7 +5148,7 @@ describe('assistant auto-reply runtime', () => {
       {
         ...groupItem,
         summary: {
-        ...groupItem.summary,
+          ...groupItem.summary,
           projectionCaptureId,
         },
       },
@@ -5165,12 +5178,15 @@ describe('assistant auto-reply runtime', () => {
       [
         expect.objectContaining({
           attachmentDescriptors: hostedInput.event.attachmentDescriptors,
-          capture: expect.objectContaining({
+          enrichment: expect.objectContaining({
             attachments: projectedCapture.attachments,
-            captureId: projectionCaptureId,
+            inboxCaptureId: projectionCaptureId,
           }),
-          projectionReasonCode: null,
-          projectionStatus: 'succeeded',
+          projection: expect.objectContaining({
+            inboxCaptureId: projectionCaptureId,
+            reasonCode: null,
+            status: 'succeeded',
+          }),
         }),
       ],
       '/tmp/assistant-automation-vault',

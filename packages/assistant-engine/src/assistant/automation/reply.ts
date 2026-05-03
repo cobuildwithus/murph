@@ -347,7 +347,9 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     enabledChannels: input.enabledChannels,
     group: context,
     inboxServices: input.inboxServices,
+    onEvent: input.onEvent,
     requestId: input.requestId,
+    signal: input.signal,
     vault: input.vault,
   })
   if (decision.kind === 'ignore') {
@@ -776,7 +778,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
   enabledChannels: readonly string[]
   group: AssistantAutoReplyGroupContext
   inboxServices: InboxServices
+  onEvent?: (event: AssistantRunEvent) => void
   requestId: string | null
+  signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutoReplyDecision> {
   if (!input.enabledChannels.includes(input.group.firstItem.summary.source)) {
@@ -851,13 +855,16 @@ async function evaluateAssistantAutoReplyGroup(input: {
   const promptInputs = await loadAssistantAutoReplyPromptInputs({
     group: input.group,
     inboxServices: input.inboxServices,
+    onEvent: input.onEvent,
     requestId: input.requestId,
+    signal: input.signal,
     vault: input.vault,
   })
-  const primaryCapture = promptInputs[0]?.capture
-  if (!primaryCapture) {
+  const primaryInput = promptInputs[0]
+  if (!primaryInput) {
     return { kind: 'ignore' }
   }
+  const primaryCapture = createSyntheticAutoReplyCapture(primaryInput)
   const handledReceipt = await resolveAssistantAutoReplyHandledTurnReceipt(
     input.vault,
     input.group.inputIds,
@@ -922,111 +929,147 @@ async function evaluateAssistantAutoReplyGroup(input: {
 async function loadAssistantAutoReplyPromptInputs(input: {
   group: AssistantAutoReplyGroupContext
   inboxServices: InboxServices
+  onEvent?: (event: AssistantRunEvent) => void
   requestId: string | null
+  signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutoReplyPromptInput[]> {
   return Promise.all(
     input.group.items.map(async (item) => {
-      if (item.inputCandidate) {
-        const projectionCaptureId =
-          item.summary.projectionCaptureId ?? item.inputCandidate.projection.captureId
-        if (
-          projectionCaptureId &&
-          item.inputCandidate.event.sourceRef.kind === 'hosted-mailbox'
-        ) {
-          return createAssistantAutoReplyPromptInputFromProjectedInput({
-            capture: (
-              await input.inboxServices.show({
-                vault: input.vault,
-                requestId: input.requestId,
-                captureId: projectionCaptureId,
-              })
-            ).capture,
-            item,
-          })
-        }
-
-        return createAssistantAutoReplyPromptInputFromInput(item)
-      }
+      const base = createAssistantAutoReplyPromptInputFromEvent(item)
+      const enrichment = await tryLoadInboxProjectionEnrichment({
+        inboxCaptureId: base.projection?.inboxCaptureId ?? null,
+        inboxServices: input.inboxServices,
+        inputId: base.inputId,
+        onEvent: input.onEvent,
+        requestId: input.requestId,
+        signal: input.signal,
+        vault: input.vault,
+      })
 
       return {
-        capture: (
-          await input.inboxServices.show({
-            vault: input.vault,
-            requestId: input.requestId,
-            captureId: item.summary.projectionCaptureId ?? item.summary.inputId,
-          })
-        ).capture,
-        telegramMetadata: item.telegramMetadata,
+        ...base,
+        enrichment,
       }
     }),
   )
 }
 
-function createAssistantAutoReplyPromptInputFromProjectedInput(input: {
-  capture: InboxShowResult['capture']
-  item: AssistantAutoReplyGroupItem
-}): AssistantAutoReplyPromptInput {
-  const candidate = input.item.inputCandidate
-  return {
-    attachmentDescriptors: candidate?.event.attachmentDescriptors ?? [],
-    capture: input.capture,
-    projectionReasonCode: candidate?.projection.reasonCode ?? null,
-    projectionStatus: candidate?.projection.status ?? null,
-    telegramMetadata:
-      input.item.telegramMetadata ??
-      (candidate
-        ? readTelegramAutoReplyMetadataFromAssistantInput({
-            replyTarget: candidate.event.replyTarget,
-            sourceMetadata: candidate.event.sourceMetadata,
-          })
-        : null),
-  }
-}
-
-function createAssistantAutoReplyPromptInputFromInput(
+function createAssistantAutoReplyPromptInputFromEvent(
   item: AssistantAutoReplyGroupItem,
 ): AssistantAutoReplyPromptInput {
   const candidate = item.inputCandidate
-  const captureId = item.summary.projectionCaptureId ?? item.summary.inputId
+  if (!candidate) {
+    throw new Error('Assistant auto-reply prompt input requires an assistant input candidate.')
+  }
+  const event = candidate.event
+  const conversation = event.conversation ?? item.summary.conversation
+
   return {
-    attachmentDescriptors: candidate?.event.attachmentDescriptors ?? [],
-    capture: {
-      captureId,
-      source: item.summary.source,
-      text:
-        candidate?.event.transcriptText ??
-        candidate?.event.text ??
-        item.summary.text,
-      occurredAt: item.summary.occurredAt,
-      receivedAt: item.summary.receivedAt,
-      accountId: item.summary.conversation.accountId,
-      actorId: item.summary.conversation.actorId,
-      actorIsSelf: item.summary.actorIsSelf,
-      actorName: null,
-      attachmentCount: candidate?.event.attachmentCount ?? item.summary.attachmentCount,
-      attachments: [],
-      createdAt:
-        item.summary.receivedAt ??
-        item.summary.occurredAt,
-      envelopePath: `assistant-input-events/${item.summary.inputId}.json`,
-      eventId: item.summary.inputId,
-      externalId: item.summary.inputId,
-      promotions: [],
-      threadId: item.summary.conversation.threadId ?? item.summary.inputId,
-      threadIsDirect: item.summary.conversation.threadIsDirect ?? false,
-      threadTitle: null,
+    actorIsSelf: conversation.actorIsSelf,
+    attachmentDescriptors: event.attachmentDescriptors,
+    conversation,
+    enrichment: null,
+    inputId: event.inputId,
+    occurredAt: event.occurredAt,
+    projection: {
+      inboxCaptureId: candidate.projection.captureId,
+      reasonCode: candidate.projection.reasonCode,
+      status: candidate.projection.status,
     },
-    projectionReasonCode: candidate?.projection.reasonCode ?? null,
-    projectionStatus: candidate?.projection.status ?? null,
+    receivedAt: event.receivedAt,
+    replyTarget: event.replyTarget,
+    source: event.source,
     telegramMetadata:
       item.telegramMetadata ??
-      (candidate
-        ? readTelegramAutoReplyMetadataFromAssistantInput({
-            replyTarget: candidate.event.replyTarget,
-            sourceMetadata: candidate.event.sourceMetadata,
-          })
-        : null),
+      readTelegramAutoReplyMetadataFromAssistantInput({
+        replyTarget: event.replyTarget,
+        sourceMetadata: event.sourceMetadata,
+      }),
+    text:
+      event.transcriptText ??
+      event.text ??
+      item.summary.text,
+  }
+}
+
+async function tryLoadInboxProjectionEnrichment(input: {
+  inboxCaptureId: string | null
+  inboxServices: InboxServices
+  inputId: string
+  onEvent?: (event: AssistantRunEvent) => void
+  requestId: string | null
+  signal?: AbortSignal
+  vault: string
+}): Promise<AssistantAutoReplyPromptInput['enrichment']> {
+  if (!input.inboxCaptureId) {
+    return null
+  }
+
+  try {
+    const result = await input.inboxServices.show({
+      vault: input.vault,
+      requestId: input.requestId,
+      captureId: input.inboxCaptureId,
+    })
+    return {
+      attachments: result.capture.attachments,
+      inboxCaptureId: input.inboxCaptureId,
+    }
+  } catch (error) {
+    if (shouldRethrowInboxProjectionEnrichmentError(error, input.signal)) {
+      throw error
+    }
+    input.onEvent?.({
+      type: 'input.reply-progress',
+      inputId: input.inputId,
+      details: 'nonblocking inbox projection enrichment failed',
+      safeDetails: 'inbox_projection_enrichment_failed_nonblocking',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+    return null
+  }
+}
+
+function shouldRethrowInboxProjectionEnrichmentError(
+  error: unknown,
+  signal?: AbortSignal,
+): boolean {
+  return (
+    signal?.aborted === true ||
+    (error instanceof Error && error.name === 'AbortError')
+  )
+}
+
+function createSyntheticAutoReplyCapture(
+  input: AssistantAutoReplyPromptInput,
+): InboxShowResult['capture'] {
+  const captureId =
+    input.enrichment?.inboxCaptureId ??
+    input.projection?.inboxCaptureId ??
+    input.inputId
+  const attachments = [...(input.enrichment?.attachments ?? [])]
+  return {
+    accountId: input.conversation.accountId,
+    actorId: input.conversation.actorId,
+    actorIsSelf: input.actorIsSelf,
+    actorName: null,
+    attachmentCount: attachments.length || input.attachmentDescriptors.length,
+    attachments,
+    captureId,
+    createdAt: input.receivedAt ?? input.occurredAt,
+    envelopePath: `assistant-input-events/${input.inputId}.json`,
+    eventId: input.inputId,
+    externalId: input.replyTarget?.messageId ?? input.inputId,
+    occurredAt: input.occurredAt,
+    promotions: [],
+    receivedAt: input.receivedAt,
+    source: input.source,
+    text: input.text,
+    threadId: input.conversation.threadId ?? input.inputId,
+    threadIsDirect: input.conversation.threadIsDirect ?? false,
+    threadTitle: null,
   }
 }
 
@@ -1227,7 +1270,9 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     const shownAcceptedInput = await loadAssistantAutoReplyPromptInputs({
       group: acceptedInputContext,
       inboxServices: input.inboxServices,
+      onEvent: input.onEvent,
       requestId: input.requestId,
+      signal: admissionInput.signal,
       vault: input.vault,
     })
     const preparedInput = await prepareAssistantAutoReplyInput(
@@ -1243,7 +1288,9 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     const shownFinalGroup = await loadAssistantAutoReplyPromptInputs({
       group: nextContext,
       inboxServices: input.inboxServices,
+      onEvent: input.onEvent,
       requestId: input.requestId,
+      signal: admissionInput.signal,
       vault: input.vault,
     })
 
@@ -1837,8 +1884,8 @@ async function createAssistantAutoReplyContextForInputSummaries(input: {
 }
 
 function readAutoReplyDeliveryReplyToMessageId(input: {
-  inputs: readonly AssistantAutoReplyPromptInput[]
   context: AssistantAutoReplyGroupContext
+  inputs: readonly AssistantAutoReplyPromptInput[]
 }): string | null {
   const inputReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
     candidates: autoReplyInputCandidatesFromContext(input.context),
@@ -1848,14 +1895,17 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
     return inputReplyToMessageId
   }
 
-  const primaryCapture = input.inputs[0]?.capture
-  if (!primaryCapture) {
+  const primaryInput = input.inputs[0]
+  if (!primaryInput) {
     return null
   }
 
-  if (primaryCapture.source === 'linq') {
+  if (primaryInput.source === 'linq') {
     for (let index = input.inputs.length - 1; index >= 0; index -= 1) {
-      const messageId = readLinqReplyToMessageId(input.inputs[index]?.capture)
+      const messageId = readPromptInputReplyTargetMessageId({
+        expectedChannel: primaryInput.source,
+        input: input.inputs[index] ?? null,
+      })
       if (messageId) {
         return messageId
       }
@@ -1863,7 +1913,7 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
     return null
   }
 
-  if (primaryCapture.source !== 'telegram') {
+  if (primaryInput.source !== 'telegram') {
     return null
   }
 
@@ -1877,6 +1927,19 @@ function readAutoReplyDeliveryReplyToMessageId(input: {
   }
 
   return null
+}
+
+function readPromptInputReplyTargetMessageId(input: {
+  expectedChannel: string | null
+  input: AssistantAutoReplyPromptInput | null
+}): string | null {
+  const expectedChannel = normalizeNullableString(input.expectedChannel)
+  const replyTarget = input.input?.replyTarget
+  if (!expectedChannel || normalizeNullableString(replyTarget?.channel) !== expectedChannel) {
+    return null
+  }
+
+  return readProviderRouteScalar(replyTarget?.messageId)
 }
 
 function readAutoReplyDeliveryTarget(
@@ -1971,24 +2034,6 @@ function readAssistantInputCandidateChannel(
     normalizeNullableString(candidate.event.conversation?.source) ??
     normalizeNullableString(candidate.event.source)
   )
-}
-
-function readLinqReplyToMessageId(capture: InboxShowResult['capture']): string | null {
-  if (capture.source !== 'linq') {
-    return null
-  }
-
-  const externalId = normalizeNullableString(capture.externalId)
-  if (!externalId?.startsWith('linq:')) {
-    return null
-  }
-
-  const messageId = normalizeNullableString(externalId.slice('linq:'.length))
-  if (!messageId) {
-    return null
-  }
-
-  return readProviderRouteScalar(messageId)
 }
 
 function resolveAssistantAutoReplySendResult(input: {

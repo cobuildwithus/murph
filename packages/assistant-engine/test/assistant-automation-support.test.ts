@@ -313,17 +313,46 @@ function createPromptInput(input: {
     createdAt: '2026-04-08T00:00:01.000Z',
     ...input.captureOverrides,
   }
+  const parsedCapture = inboxShowResultSchema.parse({
+    vault: '/tmp/automation-support-vault',
+    capture: {
+      ...capture,
+      attachmentCount:
+        input.captureOverrides?.attachmentCount ?? resolvedAttachments.length,
+      attachments: resolvedAttachments,
+    },
+  }).capture
   return {
-    capture: inboxShowResultSchema.parse({
-      vault: '/tmp/automation-support-vault',
-      capture: {
-        ...capture,
-        attachmentCount:
-          input.captureOverrides?.attachmentCount ?? resolvedAttachments.length,
-        attachments: resolvedAttachments,
-      },
-    }).capture,
+    actorIsSelf: parsedCapture.actorIsSelf,
+    attachmentDescriptors: [],
+    conversation: {
+      accountId: parsedCapture.accountId,
+      actorId: parsedCapture.actorId,
+      actorIsSelf: parsedCapture.actorIsSelf,
+      source: parsedCapture.source,
+      threadId: parsedCapture.threadId,
+      threadIsDirect: parsedCapture.threadIsDirect,
+    },
+    enrichment: parsedCapture.attachments.length > 0
+      ? {
+          attachments: parsedCapture.attachments,
+          inboxCaptureId: parsedCapture.captureId,
+        }
+      : null,
+    inputId: parsedCapture.eventId,
+    occurredAt: parsedCapture.occurredAt,
+    projection: parsedCapture.attachments.length > 0
+      ? {
+          inboxCaptureId: parsedCapture.captureId,
+          reasonCode: null,
+          status: 'succeeded',
+        }
+      : null,
+    receivedAt: parsedCapture.receivedAt,
+    replyTarget: null,
+    source: parsedCapture.source,
     telegramMetadata: input.telegramMetadata ?? null,
+    text: parsedCapture.text,
   }
 }
 
