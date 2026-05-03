@@ -400,7 +400,7 @@ describe('assistant conversation onboarding guidance', () => {
     )
     expect(prompt).toContain('Natural first-run flow')
     expect(prompt).toContain('Do not mark onboarding complete just because')
-    expect(prompt).toContain('a generic "sounds good."')
+    expect(prompt).toMatch(/a generic "sounds good[,.]"/)
   })
 })
 

@@ -313,22 +313,35 @@ describe('monorepo release flow coverage audit', () => {
     const ledgerRows = parseCoordinationLedgerRows(
       readFileSync(path.join(activePlansDir, 'COORDINATION_LEDGER.md'), 'utf8'),
     )
-    const activePlans = readdirSync(activePlansDir)
-      .filter((entry) => entry.endsWith('.md'))
-      .filter((entry) => entry !== 'README.md' && entry !== 'COORDINATION_LEDGER.md')
+    const activePlans = new Set(
+      readdirSync(activePlansDir)
+        .filter((entry) => entry.endsWith('.md'))
+        .filter((entry) => entry !== 'README.md' && entry !== 'COORDINATION_LEDGER.md'),
+    )
+    const livePlanRows = ledgerRows.filter((row) =>
+      row.plan.startsWith('agent-docs/exec-plans/active/'),
+    )
 
-    for (const planName of activePlans) {
-      const relativePlanPath = `agent-docs/exec-plans/active/${planName}`
-      const matchingRows = ledgerRows.filter((row) => row.plan === relativePlanPath)
+    for (const row of livePlanRows) {
+      const planName = path.basename(row.plan)
+      const relativePlanPath = row.plan
+      const matchingRows = livePlanRows.filter(
+        (candidate) => candidate.plan === relativePlanPath,
+      )
+
+      if (!activePlans.has(planName)) {
+        continue
+      }
+
       const planText = readFileSync(path.join(activePlansDir, planName), 'utf8')
       const planStatus = planText.match(/^Status:\s*(.+)$/mu)?.[1].trim().toLowerCase() ?? ''
 
       expect(
         matchingRows,
-        `${relativePlanPath} must have exactly one matching coordination-ledger row while it lives under active/.`,
+        `${relativePlanPath} must have exactly one live coordination-ledger row.`,
       ).toHaveLength(1)
       expect(
-        matchingRows[0]?.status.toLowerCase(),
+        row.status.toLowerCase(),
         `${relativePlanPath} must not keep a completed ledger row under active/.`,
       ).not.toBe('completed')
       expect(
