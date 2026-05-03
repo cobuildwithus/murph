@@ -48,8 +48,8 @@ import {
   HOSTED_PHONE_COUNTRY_OPTIONS,
 } from "./hosted-phone-country-options";
 import {
-  useHostedPhoneCountryCodeHint,
-} from "./hosted-phone-country-code-provider";
+  usePhoneCountryCode,
+} from "./phone-country-code-client-provider";
 import type {
   HostedAuthenticatedPhoneAuthView,
   HostedPhoneAuthIntent,
@@ -94,7 +94,7 @@ export function useHostedPhoneAuthController({
     useState<HostedPrivyFinalizationState>("idle");
   const [pendingAction, setPendingAction] =
     useState<HostedPrivyClientPendingAction>(null);
-  const phoneCountryCodeHint = useHostedPhoneCountryCodeHint();
+  const phoneCountryCodeHint = usePhoneCountryCode();
   const initialPhoneCountryCode = resolveInitialHostedPhoneCountryCode({
     countryCodeHint: phoneCountryCodeHint,
   });

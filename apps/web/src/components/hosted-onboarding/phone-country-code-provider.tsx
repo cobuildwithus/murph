@@ -2,16 +2,16 @@ import type { PropsWithChildren } from "react";
 
 import { readHostedPhoneCountryCodeHint } from "@/src/lib/hosted-onboarding/phone-country-hint-server";
 
-import { HostedPhoneCountryCodeProvider } from "./hosted-phone-country-code-provider";
+import { PhoneCountryCodeClientProvider } from "./phone-country-code-client-provider";
 
-export async function HostedPhoneCountryCodeBoundary({
+export async function PhoneCountryCodeProvider({
   children,
 }: PropsWithChildren) {
   const countryCode = await readHostedPhoneCountryCodeHint();
 
   return (
-    <HostedPhoneCountryCodeProvider countryCode={countryCode}>
+    <PhoneCountryCodeClientProvider countryCode={countryCode}>
       {children}
-    </HostedPhoneCountryCodeProvider>
+    </PhoneCountryCodeClientProvider>
   );
 }

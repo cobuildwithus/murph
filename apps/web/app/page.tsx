@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroSection } from "@/src/components/homepage/hero-section";
@@ -65,8 +64,7 @@ export default async function HomePage() {
       };
 
   return (
-    <HostedPhoneCountryCodeBoundary>
-      <main className="min-h-screen bg-[#f5f0e8] antialiased">
+    <main className="min-h-screen bg-[#f5f0e8] antialiased">
         <StickyNav
           authenticated={authenticated}
           githubStarCount={githubStarCount}
@@ -81,6 +79,5 @@ export default async function HomePage() {
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
       </main>
-    </HostedPhoneCountryCodeBoundary>
   );
 }

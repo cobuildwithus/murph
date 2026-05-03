@@ -54,9 +54,9 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 }));
 
 vi.mock(
-  "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary",
+  "@/src/components/hosted-onboarding/phone-country-code-provider",
   () => ({
-    HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
+    PhoneCountryCodeProvider(input: { children: React.ReactNode }) {
       return createElement(
         "div",
         {

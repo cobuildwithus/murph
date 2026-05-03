@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Activity, ChevronsUpDown, FlaskConical, Home } from "lucide-react";
@@ -13,16 +12,10 @@ import {
 } from "react";
 
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
+import { useAuthDialog } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Button } from "@/src/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/src/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,14 +63,6 @@ const navItems: {
   },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
-
-const HostedAuthPanelIsland = dynamic(
-  () => import("@/src/components/hosted-onboarding/hosted-auth-panel-island").then((mod) => mod.HostedAuthPanelIsland),
-  {
-    ssr: false,
-    loading: () => <div className="text-sm text-white/60">Loading sign in...</div>,
-  },
-);
 
 const sidebarThemeStyle = {
   "--sidebar": "transparent",
@@ -134,7 +119,7 @@ function BrandMark() {
 }
 
 function SidebarAuthActions() {
-  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const { openAuthDialog } = useAuthDialog();
 
   return (
     <div className="-mx-2 border-t border-white/10 px-4 py-5">
@@ -150,29 +135,10 @@ function SidebarAuthActions() {
         type="button"
         size="sm"
         className="h-9 w-full rounded-2xl bg-[#5a6e32] text-sm font-medium text-white hover:bg-[#7a8c6e]"
-        onClick={() => setAuthDialogOpen(true)}
+        onClick={openAuthDialog}
       >
         Log in or sign up
       </Button>
-      <Dialog open={authDialogOpen} onOpenChange={setAuthDialogOpen}>
-        <DialogContent className="max-w-md p-6 md:p-7">
-          <DialogHeader className="pr-10">
-            <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-              Log in or sign up
-            </DialogTitle>
-            <DialogDescription>
-              Discover what actually makes you healthier.
-            </DialogDescription>
-          </DialogHeader>
-          {authDialogOpen ? (
-            <HostedAuthPanelIsland
-              methods={["phone", "telegram", "email"]}
-              requireLaunchConsentOnCompletion
-              size="compact"
-            />
-          ) : null}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   joinInvitePageViewProps: null as { model: JoinInvitePageModel } | null,
   readHostedConsentStatus: vi.fn(),
+  resourceHintOrigins: null as readonly string[] | null,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-page-view", () => ({
@@ -53,8 +54,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
-  HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
+vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
+  PhoneCountryCodeProvider(input: { children: React.ReactNode }) {
     return createElement(
       "div",
       {
@@ -77,6 +78,15 @@ vi.mock("@/src/components/hosted-onboarding/hosted-privy-boundary", () => ({
   },
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-privy-resource-hints", () => ({
+  HostedPrivyResourceHints(input: { origins: readonly string[] }) {
+    mocks.resourceHintOrigins = input.origins;
+    return createElement("meta", {
+      "data-privy-resource-hints": input.origins.join("|"),
+    });
+  },
+}));
+
 vi.mock("@/src/lib/legal/consent", () => ({
   readHostedConsentStatus: mocks.readHostedConsentStatus,
 }));
@@ -88,6 +98,7 @@ vi.mock("@/src/lib/prisma", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.joinInvitePageViewProps = null;
+  mocks.resourceHintOrigins = null;
   mocks.getPrisma.mockReturnValue({ prisma: true });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -142,6 +153,26 @@ beforeEach(() => {
   }));
 });
 
+test("JoinLayout warms hosted Privy for the join route segment", async () => {
+  const { default: JoinLayout } = await import("../app/join/layout");
+
+  const markup = renderToStaticMarkup(
+    createElement(
+      JoinLayout,
+      null,
+      createElement("main", { "data-join-child": "true" }, "Join child"),
+    ),
+  );
+
+  expect(mocks.resourceHintOrigins).toEqual(expect.arrayContaining([
+    "https://auth.privy.io",
+    "https://challenges.cloudflare.com",
+  ]));
+  assert.match(markup, /data-hosted-privy-boundary="true"/);
+  assert.match(markup, /data-privy-resource-hints=/);
+  assert.match(markup, /data-join-child="true"/);
+});
+
 test("JoinInvitePage builds a server model with the app-session member", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
   const legacyShareSearchParams = { preview: undefined, share: "share-code" };
@@ -172,8 +203,8 @@ test("JoinInvitePage builds a server model with the app-session member", async (
       stage: "verify",
     },
   });
-  assert.match(markup, /data-phone-country-code="GB"/);
-  assert.match(markup, /data-hosted-privy-boundary="true"/);
+  assert.doesNotMatch(markup, /data-phone-country-code/);
+  assert.doesNotMatch(markup, /data-hosted-privy-boundary/);
   assert.match(markup, /data-invite-code="invite code"/);
   assert.doesNotMatch(markup, /data-share-code/);
 });

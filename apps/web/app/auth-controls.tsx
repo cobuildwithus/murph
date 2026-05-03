@@ -1,101 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/src/components/ui/dialog";
+  AuthDialog,
+  preloadHostedAuthPanelIsland,
+  useHostedAuthPanelIslandIdlePreload,
+} from "@/src/components/hosted-onboarding/auth-dialog";
 import { cn } from "@/src/lib/utils";
 
 type LandingAuthContext = "nav" | "hero" | "footer";
 type LandingAuthMode = "login" | "signup";
-type HostedAuthPanelIslandComponent = typeof import(
-  "@/src/components/hosted-onboarding/hosted-auth-panel-island"
-)["HostedAuthPanelIsland"];
-
-type WindowWithIdleCallback = typeof window & {
-  cancelIdleCallback?: (handle: number) => void;
-  requestIdleCallback?: (
-    callback: () => void,
-    options?: { timeout?: number },
-  ) => number;
-};
-
-let hostedAuthPanelIslandComponent: HostedAuthPanelIslandComponent | null = null;
-let hostedAuthPanelIslandLoadPromise: Promise<HostedAuthPanelIslandComponent> | null =
-  null;
-
-function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
-  if (hostedAuthPanelIslandComponent) {
-    return Promise.resolve(hostedAuthPanelIslandComponent);
-  }
-
-  if (!hostedAuthPanelIslandLoadPromise) {
-    hostedAuthPanelIslandLoadPromise = import(
-      "@/src/components/hosted-onboarding/hosted-auth-panel-island"
-    )
-      .then((mod) => {
-        hostedAuthPanelIslandComponent = mod.HostedAuthPanelIsland;
-        return mod.HostedAuthPanelIsland;
-      })
-      .catch((error: unknown) => {
-        hostedAuthPanelIslandLoadPromise = null;
-        throw error;
-      });
-  }
-
-  return hostedAuthPanelIslandLoadPromise;
-}
-
-function readLoadedHostedAuthPanelIsland(): HostedAuthPanelIslandComponent | null {
-  return hostedAuthPanelIslandComponent;
-}
-
-function preloadHostedAuthPanelIsland() {
-  if (hostedAuthPanelIslandComponent) {
-    return;
-  }
-
-  void loadHostedAuthPanelIsland().catch(() => {
-    // The click path retries and shows the user-facing load error if needed.
-  });
-}
-
-function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
-  useEffect(() => {
-    if (!enabled || typeof window === "undefined" || hostedAuthPanelIslandComponent) {
-      return;
-    }
-
-    let cancelled = false;
-    const preload = () => {
-      if (!cancelled) {
-        preloadHostedAuthPanelIsland();
-      }
-    };
-    const idleWindow = window as WindowWithIdleCallback;
-
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preload, { timeout: 2500 });
-
-      return () => {
-        cancelled = true;
-        idleWindow.cancelIdleCallback?.(handle);
-      };
-    }
-
-    const handle = window.setTimeout(preload, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [enabled]);
-}
 
 function getLandingAuthDialogCopy(mode: LandingAuthMode) {
   if (mode === "login") {
@@ -133,33 +48,7 @@ function LandingAuthDialogButton({
   title?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [AuthPanelIsland, setAuthPanelIsland] =
-    useState<HostedAuthPanelIslandComponent | null>(() =>
-      readLoadedHostedAuthPanelIsland(),
-    );
-  const [authPanelLoadError, setAuthPanelLoadError] = useState<string | null>(null);
   const defaultCopy = getLandingAuthDialogCopy(authMode);
-
-  async function loadAuthPanelIsland() {
-    if (AuthPanelIsland) {
-      return;
-    }
-
-    setAuthPanelLoadError(null);
-
-    const loadedAuthPanelIsland = readLoadedHostedAuthPanelIsland();
-    if (loadedAuthPanelIsland) {
-      setAuthPanelIsland(() => loadedAuthPanelIsland);
-      return;
-    }
-
-    try {
-      const Component = await loadHostedAuthPanelIsland();
-      setAuthPanelIsland(() => Component);
-    } catch {
-      setAuthPanelLoadError("Sign in did not load. Try again.");
-    }
-  }
 
   return (
     <>
@@ -169,10 +58,7 @@ function LandingAuthDialogButton({
         onFocus={preloadHostedAuthPanelIsland}
         onPointerDown={preloadHostedAuthPanelIsland}
         onPointerEnter={preloadHostedAuthPanelIsland}
-        onClick={() => {
-          setOpen(true);
-          void loadAuthPanelIsland();
-        }}
+        onClick={() => setOpen(true)}
       >
         <span>{buttonLabel}</span>
         {showArrow ? (
@@ -184,64 +70,16 @@ function LandingAuthDialogButton({
           </span>
         ) : null}
       </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md gap-6 p-6 md:p-7">
-          <DialogHeader className="pr-10">
-            <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
-              {title ?? defaultCopy.title}
-            </DialogTitle>
-            <DialogDescription>
-              {description ?? defaultCopy.description}
-            </DialogDescription>
-          </DialogHeader>
-          {open ? (
-            AuthPanelIsland ? (
-              <AuthPanelIsland
-                authMode={authMode}
-                methods={["phone", "telegram", "email"]}
-                requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
-                showPassiveLegalNotice={showPassiveLegalNotice}
-                size="compact"
-              />
-            ) : authPanelLoadError ? (
-              <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-                {authPanelLoadError}
-              </div>
-            ) : (
-              <AuthPanelSkeleton />
-            )
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      <AuthDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={title ?? defaultCopy.title}
+        description={description ?? defaultCopy.description}
+        authMode={authMode}
+        requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
+        showPassiveLegalNotice={showPassiveLegalNotice}
+      />
     </>
-  );
-}
-
-function AuthPanelSkeleton() {
-  return (
-    <div className="animate-pulse space-y-4">
-      <div className="space-y-3">
-        <div className="space-y-3">
-          <div className="h-3.5 w-20 rounded-full bg-muted" />
-          <div className="flex gap-3">
-            <div className="h-14 w-28 shrink-0 rounded-2xl bg-muted" />
-            <div className="h-14 flex-1 rounded-2xl bg-muted" />
-          </div>
-        </div>
-        <div className="h-14 w-full rounded-2xl bg-muted" />
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="h-px flex-1 bg-border" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-          OR
-        </span>
-        <span className="h-px flex-1 bg-border" />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="h-11 rounded-2xl bg-muted" />
-        <div className="h-11 rounded-2xl bg-muted" />
-      </div>
-    </div>
   );
 }
 

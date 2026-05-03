@@ -51,8 +51,8 @@ vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
   readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
-  HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
+vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
+  PhoneCountryCodeProvider(input: { children: React.ReactNode }) {
     return React.createElement(
       "div",
       {

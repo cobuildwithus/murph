@@ -14,8 +14,8 @@ vi.mock("@/src/lib/hosted-onboarding/phone-country-hint-server", () => ({
   readHostedPhoneCountryCodeHint: mocks.readHostedPhoneCountryCodeHint,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
-  HostedPhoneCountryCodeProvider(input: {
+vi.mock("@/src/components/hosted-onboarding/phone-country-code-client-provider", () => ({
+  PhoneCountryCodeClientProvider(input: {
     children: React.ReactNode;
     countryCode: string | null;
   }) {
@@ -29,15 +29,15 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider",
   },
 }));
 
-test("HostedPhoneCountryCodeBoundary reads the current request hint and provides it to children", async () => {
+test("PhoneCountryCodeProvider reads the current request hint and provides it to children", async () => {
   mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("GB");
 
-  const { HostedPhoneCountryCodeBoundary } = await import(
-    "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary"
+  const { PhoneCountryCodeProvider } = await import(
+    "@/src/components/hosted-onboarding/phone-country-code-provider"
   );
 
   const markup = renderToStaticMarkup(
-    await HostedPhoneCountryCodeBoundary({
+    await PhoneCountryCodeProvider({
       children: createElement("div", null, "child"),
     }),
   );
