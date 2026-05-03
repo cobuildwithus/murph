@@ -2,12 +2,25 @@ import { z } from 'zod'
 import {
   assistantPersistedSessionSchema,
   assistantSessionResumeStateSchema,
-  normalizeAssistantThreadInstructionsFingerprint,
   parseAssistantSessionRecord,
   type AssistantSession,
   type AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
+
+const assistantThreadInstructionsFingerprintPattern =
+  /^thread-instructions-v1:[a-f0-9]{64}:[a-f0-9]{64}$/u
+
+function normalizeAssistantThreadInstructionsFingerprint(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  return assistantThreadInstructionsFingerprintPattern.test(normalized)
+    ? normalized
+    : null
+}
 
 export function readAssistantProviderResumeRouteId(input: {
   resumeState?: AssistantSessionResumeState | null
