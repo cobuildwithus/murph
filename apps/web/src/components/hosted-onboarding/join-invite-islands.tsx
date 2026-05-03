@@ -239,7 +239,9 @@ export function JoinInviteLegalConsentIsland({
 
   return (
     <HostedLegalConsentCard
+      acceptedPendingLabel="Continuing..."
       initialStatus={initialStatus}
+      keepVisibleAfterAccepted
       mode="compact"
       onAccepted={refreshRoute}
       onRequirementChange={(required) => {

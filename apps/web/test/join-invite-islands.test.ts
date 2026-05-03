@@ -5,6 +5,7 @@ import { renderClientComponent } from "./render-client-component";
 
 import {
   JoinInviteCheckoutPlanButtonIsland,
+  JoinInviteLegalConsentIsland,
   JoinInviteMessagingSetupIsland,
   JoinInviteStatusRefreshIsland,
 } from "@/src/components/hosted-onboarding/join-invite-islands";
@@ -13,11 +14,13 @@ import {
   listHostedBillingPlanPresentations,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildJoinInviteStatusRefreshSnapshot } from "@/src/components/hosted-onboarding/join-invite-state";
 
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
+  requestHostedOnboardingJson: vi.fn(),
   hostedPhoneAuthProps: null as Record<string, unknown> | null,
   useHostedInviteStatusRefresh: vi.fn(),
 }));
@@ -94,6 +97,7 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
   return {
     ...actual,
     requestHostedBillingCheckout: mocks.requestHostedBillingCheckout,
+    requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
   };
 });
 
@@ -323,6 +327,55 @@ test("JoinInviteMessagingSetupIsland keeps phone first without a Telegram seed",
   await cleanup();
 });
 
+test("JoinInviteLegalConsentIsland keeps accepted consent visible while route refresh loads", async () => {
+  const currentStatus = createConsentStatus({
+    launchGranted: false,
+  });
+  const legalAcceptedStatus = createConsentStatus({
+    launchHealthDataGranted: false,
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    launchGranted: true,
+  });
+
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce(legalAcceptedStatus)
+    .mockResolvedValueOnce(acceptedStatus);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(JoinInviteLegalConsentIsland, {
+      initialStatus: currentStatus,
+    }),
+    { requireButton: false },
+  );
+
+  const checkboxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+  expect(checkboxes).toHaveLength(2);
+
+  for (const checkbox of checkboxes) {
+    await act(async () => {
+      setCheckboxChecked(window, checkbox, true);
+    });
+  }
+
+  const continueButton = findButtonByText(container, /Continue/);
+
+  await act(async () => {
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  expect(container.textContent).toContain("Terms of Service");
+  expect(container.textContent).toContain("Consumer Health Data Notice");
+  expect(container.textContent).toContain("Continuing...");
+  expect(continueButton.disabled).toBe(true);
+  await cleanup();
+});
+
 function createStatus(
   overrides: Partial<HostedInviteStatusPayload> & {
     capabilities?: Partial<HostedInviteStatusPayload["capabilities"]>;
@@ -358,4 +411,94 @@ function createStatus(
     stage: "verify",
     ...overrides,
   };
+}
+
+function createConsentStatus(input: {
+  launchGranted?: boolean;
+  launchHealthDataGranted?: boolean;
+  launchLegalGranted?: boolean;
+}): HostedConsentStatus {
+  const legalDocuments = [
+    consentDocument("terms-of-service", "Murph Terms of Service", "/legal/terms"),
+    consentDocument("privacy-policy", "Murph Privacy Policy", "/legal/privacy"),
+    consentDocument(
+      "health-ai-safety-disclosure",
+      "Murph Health AI Safety Disclosure",
+      "/legal/health-ai-safety-disclosure",
+    ),
+  ];
+  const healthDataDocuments = [
+    consentDocument(
+      "consumer-health-data-notice",
+      "Murph Consumer Health Data Notice",
+      "/consumer-health-data-privacy-policy",
+    ),
+  ];
+  const allDocuments = [...legalDocuments, ...healthDataDocuments];
+  const launchLegalGranted = input.launchLegalGranted ?? input.launchGranted ?? false;
+  const launchHealthDataGranted = input.launchHealthDataGranted ?? input.launchGranted ?? false;
+  const launchGranted = launchLegalGranted && launchHealthDataGranted;
+
+  return {
+    documents: allDocuments,
+    generatedAt: "2026-04-30T00:00:00.000Z",
+    launchGranted,
+    launchScopes: [
+      { granted: launchLegalGranted, missingDocuments: launchLegalGranted ? [] : legalDocuments, scope: "launch.legal" as const },
+      { granted: launchHealthDataGranted, missingDocuments: launchHealthDataGranted ? [] : healthDataDocuments, scope: "launch.health-data" as const },
+    ],
+    ok: true,
+    schema: "murph.hosted-consent-status.v1",
+    scopes: [
+      consentScope("launch.legal", "Terms, privacy, and AI disclosure", legalDocuments, launchLegalGranted),
+      consentScope("launch.health-data", "Health data collection consent", healthDataDocuments, launchHealthDataGranted),
+    ],
+  };
+}
+
+function consentDocument(id: string, title: string, href: string) {
+  return {
+    href,
+    id: id as HostedConsentStatus["documents"][number]["id"],
+    pdfHref: `${href}.pdf`,
+    title,
+    version: "2026-04-29",
+  };
+}
+
+function consentScope(
+  scope: HostedConsentStatus["scopes"][number]["scope"],
+  label: string,
+  documents: HostedConsentStatus["documents"],
+  granted: boolean,
+): HostedConsentStatus["scopes"][number] {
+  return {
+    current: granted,
+    documents,
+    grant: null,
+    granted,
+    label,
+    missingDocuments: granted ? [] : documents,
+    revocable: false,
+    scope,
+  };
+}
+
+function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find((candidate) =>
+    pattern.test(candidate.textContent ?? ""),
+  );
+  expect(button).toBeTruthy();
+  return button as HTMLButtonElement;
+}
+
+function setCheckboxChecked(
+  window: Window & typeof globalThis,
+  input: HTMLInputElement,
+  checked: boolean,
+) {
+  input.checked = checked;
+  input.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true }));
+  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new window.Event("change", { bubbles: true }));
 }
