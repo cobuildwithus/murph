@@ -21,6 +21,11 @@ const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set([
 ]);
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
+export type AssistantProviderRequestOutcome =
+  | "aborted"
+  | "failed"
+  | "partial"
+  | "succeeded";
 export type AssistantUsageStripeMeterSource = "murph" | "vercel-ai-gateway";
 
 export interface AssistantUsageRecord {
@@ -38,7 +43,11 @@ export interface AssistantUsageRecord {
   outputTokens: number | null;
   provider: string;
   providerName: string | null;
+  providerRequestId: string | null;
+  providerRequestOutcome?: AssistantProviderRequestOutcome;
   providerRequestOrdinal?: number;
+  rawUsageJson: Record<string, unknown> | null;
+  rawUsageJsonHash: string | null;
   reasoningTokens: number | null;
   reportingUserId: string | null;
   requestedModel: string | null;
@@ -52,6 +61,8 @@ export interface AssistantUsageRecord {
   triggerKind: string | null;
   turnId: string;
   usageId: string;
+  usageExtractionSourcePath: string | null;
+  usageExtractionVersion: string;
 }
 
 export interface PendingAssistantUsageRecordParseFailure {
@@ -201,7 +212,17 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     outputTokens,
     provider: normalizeRequiredString(record.provider, "provider"),
     providerName: normalizeOptionalString(record.providerName, "providerName"),
+    providerRequestId: normalizeOptionalString(record.providerRequestId, "providerRequestId"),
+    ...(record.providerRequestOutcome === undefined
+      ? {}
+      : {
+          providerRequestOutcome: normalizeProviderRequestOutcome(
+            record.providerRequestOutcome,
+          ),
+        }),
     ...(record.providerRequestOrdinal === undefined ? {} : { providerRequestOrdinal }),
+    rawUsageJson: normalizeOptionalJsonRecord(record.rawUsageJson, "rawUsageJson"),
+    rawUsageJsonHash: normalizeOptionalString(record.rawUsageJsonHash, "rawUsageJsonHash"),
     reasoningTokens: normalizeOptionalInteger(record.reasoningTokens, "reasoningTokens"),
     reportingUserId: normalizeOptionalString(record.reportingUserId, "reportingUserId"),
     requestedModel: normalizeOptionalString(record.requestedModel, "requestedModel"),
@@ -215,6 +236,12 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     triggerKind: normalizeOptionalString(record.triggerKind, "triggerKind"),
     turnId,
     usageId,
+    usageExtractionSourcePath: normalizeOptionalString(
+      record.usageExtractionSourcePath,
+      "usageExtractionSourcePath",
+    ),
+    usageExtractionVersion:
+      normalizeOptionalString(record.usageExtractionVersion, "usageExtractionVersion") ?? "legacy",
   };
 }
 
@@ -313,6 +340,29 @@ function normalizeCredentialSource(value: unknown): AssistantUsageCredentialSour
   return normalized;
 }
 
+export function normalizeAssistantProviderRequestOutcome(
+  value: unknown,
+): AssistantProviderRequestOutcome {
+  return normalizeProviderRequestOutcome(value);
+}
+
+function normalizeProviderRequestOutcome(value: unknown): AssistantProviderRequestOutcome {
+  const normalized = normalizeRequiredString(value, "providerRequestOutcome");
+
+  if (
+    normalized === "aborted" ||
+    normalized === "failed" ||
+    normalized === "partial" ||
+    normalized === "succeeded"
+  ) {
+    return normalized;
+  }
+
+  throw new TypeError(
+    "providerRequestOutcome must be succeeded, failed, aborted, or partial.",
+  );
+}
+
 export function normalizeAssistantUsageStripeMeterSource(
   value: unknown,
 ): AssistantUsageStripeMeterSource {
@@ -378,6 +428,33 @@ function normalizeOptionalStringArray(value: unknown, label: string): string[] {
   }
 
   return normalizedValues;
+}
+
+function normalizeOptionalJsonRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be a JSON object when provided.`);
+  }
+
+  const serialized = JSON.stringify(value);
+
+  if (serialized === undefined) {
+    throw new TypeError(`${label} must be JSON-serializable when provided.`);
+  }
+
+  const normalized: unknown = JSON.parse(serialized);
+
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    throw new TypeError(`${label} must be a JSON object when provided.`);
+  }
+
+  return normalized as Record<string, unknown>;
 }
 
 function normalizeRequiredInteger(value: unknown, label: string): number {

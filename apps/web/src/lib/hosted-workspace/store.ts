@@ -54,9 +54,9 @@ const FORBIDDEN_HOSTED_RUNTIME_REDACTED_KEY_PARTS = [
   "text",
   "token",
 ] as const;
-const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 24;
+const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 48;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
-const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 128;
+const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWorkspaceMutationTx = Prisma.TransactionClient;

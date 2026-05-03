@@ -11,7 +11,7 @@ import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import {
   executeProviderTurnWithRecovery,
-  type AssistantProviderTurnContinuityProfile,
+  type AssistantProviderTurnThreadScopeProfile,
 } from './provider-turn-runner.js'
 import type { CodexThreadIdentity } from './provider-route.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
@@ -65,11 +65,11 @@ const assistantNotificationDecisionSchema = z.discriminatedUnion('kind', [
 ])
 
 const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
-  Omit<AssistantProviderTurnContinuityProfile, 'nativeResumePolicy'>
+  Omit<AssistantProviderTurnThreadScopeProfile, 'nativeResumePolicy'>
 > = {
   promptProfile: 'notification-decision',
+  threadScope: 'isolated-thread',
   toolProfile: 'notification-turn',
-  turnContinuityPolicy: 'murph-history-only',
 }
 
 export type AssistantNotificationDecision = z.infer<
@@ -192,6 +192,21 @@ export async function sendAssistantNotificationLocal(
           turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {
+          await persistPendingAssistantUsageEvent({
+            executionContext,
+            providerRequestOutcome: providerOutcome.providerRequestOutcome,
+            providerResult: {
+              attemptCount: providerOutcome.attemptCount,
+              provider: providerOutcome.route.provider,
+              providerOptions: providerOutcome.route.providerOptions,
+              route: providerOutcome.route,
+              session: providerOutcome.session ?? resolved.session,
+              usage: providerOutcome.usage,
+              usageAttribution: providerOutcome.usageAttribution,
+            },
+            turnId,
+            vault: input.vault,
+          })
           throw annotateAssistantNotificationError(
             providerOutcome.error,
             buildAssistantNotificationObservabilityDetails({
@@ -249,8 +264,8 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           persistUserPromptToTranscript: false,
           providerResult,
+          providerResumeStateAction: 'preserve-existing',
           session: providerResult.session,
-          turnContinuityPolicy: 'murph-history-only',
           turnCreatedAt,
           turnId,
         })

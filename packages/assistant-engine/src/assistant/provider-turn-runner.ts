@@ -8,7 +8,11 @@ import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
 } from './provider-registry.js'
-import type { AssistantProviderAttemptMetadata } from './providers/types.js'
+import type {
+  AssistantProviderAttemptMetadata,
+  AssistantProviderRequestOutcome,
+  AssistantProviderUsage,
+} from './providers/types.js'
 import { errorMessage } from './shared.js'
 import {
   recordAssistantToolFailureRuntimeIssues,
@@ -56,31 +60,38 @@ import {
 } from './provider-turn/planning.js'
 import type {
   AssistantProviderAttemptPlan,
-  AssistantProviderTurnContinuityProfile,
   AssistantProviderTurnExecutionPlan,
   AssistantProviderTurnExecutionProfile,
+  AssistantProviderTurnThreadScopeProfile,
 } from './provider-turn/planning.js'
 
 export {
-  resolveAssistantProviderTurnContinuityPolicy,
-  resolveAssistantProviderTurnContinuityPlan,
+  resolveAssistantProviderThreadPlan,
+  resolveAssistantProviderThreadScope,
 } from './provider-turn/planning.js'
 export type {
-  AssistantProviderTurnContinuityPlan,
-  AssistantProviderTurnContinuityPolicy,
-  AssistantProviderTurnContinuityProfile,
+  AssistantProviderThreadPlan,
   AssistantProviderTurnExecutionProfile,
   AssistantProviderTurnNativeResumePolicy,
   AssistantProviderTurnPromptProfile,
+  AssistantProviderThreadScope,
+  AssistantProviderTurnThreadScopeProfile,
   AssistantProviderTurnToolProfile,
 } from './provider-turn/planning.js'
 
 type AssistantProviderAttemptOutcome =
   | {
       kind: 'failed_terminal'
+      attemptCount: number
       error: unknown
+      providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       providerContinuation: AssistantProviderContinuation
+      providerSessionId: string | null
+      providerTurnId: string | null
+      rawEvents: unknown[]
       session: AssistantSession
+      usage: AssistantProviderUsage | null
+      usageAttribution: AssistantUsageAttribution | null
     }
   | {
       kind: 'succeeded'
@@ -92,10 +103,17 @@ const VERCEL_AI_GATEWAY_MODEL_PROVIDER_ID = 'vercel-ai-gateway' as const
 export type AssistantProviderTurnRecoveryOutcome =
   | {
       kind: 'failed_terminal'
+      attemptCount: number
       error: unknown
+      providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       providerContinuation: AssistantProviderContinuation
+      providerSessionId: string | null
+      providerTurnId: string | null
+      rawEvents: unknown[]
       route: CodexThreadIdentity
       session: AssistantSession
+      usage: AssistantProviderUsage | null
+      usageAttribution: AssistantUsageAttribution | null
     }
   | {
       kind: 'succeeded'
@@ -111,7 +129,7 @@ export async function executeProviderTurnWithRecovery(input: {
     providerContinuation: AssistantProviderContinuation
   }) => Promise<void>
   plan: AssistantTurnSharedPlan
-  profile?: AssistantProviderTurnContinuityProfile | null
+  profile?: AssistantProviderTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   turnCreatedAt: string
@@ -143,10 +161,17 @@ export async function executeProviderTurnWithRecovery(input: {
     case 'failed_terminal':
       return {
         kind: 'failed_terminal',
+        attemptCount: attemptOutcome.attemptCount,
         error: attemptOutcome.error,
+        providerRequestOutcome: attemptOutcome.providerRequestOutcome,
         providerContinuation: attemptOutcome.providerContinuation,
+        providerSessionId: attemptOutcome.providerSessionId,
+        providerTurnId: attemptOutcome.providerTurnId,
+        rawEvents: attemptOutcome.rawEvents,
         route: attemptPlan.route,
         session: attemptOutcome.session,
+        usage: attemptOutcome.usage,
+        usageAttribution: attemptOutcome.usageAttribution,
       }
   }
 }
@@ -223,6 +248,13 @@ async function executeAssistantProviderAttempt(input: {
     vault: executionPlan.input.vault,
   })
   let effectiveProviderContinuation = attemptPlan.routePlan.providerContinuation
+  let usageAttribution: AssistantUsageAttribution | null = null
+  let failedAttemptProviderSessionId: string | null = null
+  let failedAttemptProviderTurnId: string | null = null
+  let failedAttemptRawEvents: unknown[] = []
+  let failedAttemptUsage: AssistantProviderUsage | null = null
+  let failedAttemptOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'> | null =
+    null
 
   try {
     maybeThrowInjectedAssistantFault({
@@ -234,7 +266,7 @@ async function executeAssistantProviderAttempt(input: {
       ...attemptPlan.routePlan.cliEnv,
       ...executionPlan.memoryTurnEnv,
     }
-    const usageAttribution = createAssistantProviderUsageAttribution({
+    usageAttribution = createAssistantProviderUsageAttribution({
       attemptPlan,
       env: attemptEnv,
       executionPlan,
@@ -248,6 +280,7 @@ async function executeAssistantProviderAttempt(input: {
       provider: attemptPlan.route.provider,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
       env: attemptEnv,
+      developerInstructions: attemptPlan.routePlan.developerInstructions,
       usageAttribution,
       userPrompt: executionPlan.input.prompt,
       userMessageContent: resolveCodexRouteUserMessageContent({
@@ -256,6 +289,7 @@ async function executeAssistantProviderAttempt(input: {
       }),
       continuityContext: attemptPlan.routePlan.continuityContext,
       systemPrompt: attemptPlan.routePlan.systemPrompt,
+      turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
       sessionContext: attemptPlan.routePlan.sessionContext
         ? {
             binding: attemptPlan.session.binding,
@@ -287,6 +321,17 @@ async function executeAssistantProviderAttempt(input: {
       vault: executionPlan.input.vault,
     }).catch(() => undefined)
     if (!attemptResult.ok) {
+      failedAttemptProviderSessionId = attemptResult.providerSessionId ?? null
+      failedAttemptProviderTurnId = attemptResult.providerTurnId ?? null
+      failedAttemptRawEvents = [...(attemptResult.rawEvents ?? [])]
+      failedAttemptUsage = attemptResult.usage ?? null
+      failedAttemptOutcome =
+        attemptResult.providerRequestOutcome ??
+        resolveFailedAssistantProviderRequestOutcome({
+          error: attemptResult.error,
+          rawEvents: failedAttemptRawEvents,
+          usage: failedAttemptUsage,
+        })
       effectiveProviderContinuation =
         attemptResult.providerContinuation ?? attemptPlan.routePlan.providerContinuation
       throw attemptResult.error
@@ -323,7 +368,7 @@ async function executeAssistantProviderAttempt(input: {
   } catch (error) {
     const errorCode = readAssistantErrorCode(error)
     const recoveredSession =
-      executionPlan.profile.turnContinuityPolicy === 'continuous-provider-thread'
+      executionPlan.profile.threadScope === 'session-thread'
         ? await recoverAssistantSessionAfterProviderFailure({
             error,
             routeId: attemptPlan.route.routeId,
@@ -358,11 +403,57 @@ async function executeAssistantProviderAttempt(input: {
 
     return {
       kind: 'failed_terminal',
+      attemptCount: attemptPlan.attemptCount,
       error,
+      providerRequestOutcome:
+        failedAttemptOutcome ??
+        resolveFailedAssistantProviderRequestOutcome({
+          error,
+          rawEvents: failedAttemptRawEvents,
+          usage: failedAttemptUsage,
+        }),
       providerContinuation: effectiveProviderContinuation,
+      providerSessionId: failedAttemptProviderSessionId,
+      providerTurnId: failedAttemptProviderTurnId,
+      rawEvents: failedAttemptRawEvents,
       session,
+      usage: failedAttemptUsage,
+      usageAttribution,
     }
   }
+}
+
+function resolveFailedAssistantProviderRequestOutcome(input: {
+  error: unknown
+  rawEvents: readonly unknown[]
+  usage: AssistantProviderUsage | null
+}): Exclude<AssistantProviderRequestOutcome, 'succeeded'> {
+  if (isAssistantProviderAbortError(input.error)) {
+    return 'aborted'
+  }
+
+  return input.usage && input.rawEvents.length > 0 ? 'partial' : 'failed'
+}
+
+function isAssistantProviderAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const code = 'code' in error ? (error as { code?: unknown }).code : null
+  if (typeof code === 'string') {
+    const normalizedCode = code.toUpperCase()
+    if (
+      normalizedCode.includes('ABORT') ||
+      normalizedCode.includes('CANCEL') ||
+      normalizedCode.includes('INTERRUPT')
+    ) {
+      return true
+    }
+  }
+
+  const name = 'name' in error ? (error as { name?: unknown }).name : null
+  return typeof name === 'string' && name === 'AbortError'
 }
 
 function readAssistantErrorCode(error: unknown): string | null {

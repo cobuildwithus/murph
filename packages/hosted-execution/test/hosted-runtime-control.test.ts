@@ -663,9 +663,15 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {
-        source: "x".repeat(129),
+        source: "x".repeat(2049),
       },
-    })).toThrow(/at most 128 characters/u);
+    })).toThrow(/at most 2048 characters/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: Object.fromEntries(
+        Array.from({ length: 49 }, (_, index) => [`count${index}`, index]),
+      ),
+    })).toThrow(/at most 48 fields/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {
@@ -907,6 +913,9 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     outputTokens: 5,
     provider: "openai",
     providerName: null,
+    providerRequestId: null,
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: "member_123",
     requestedModel: "model_test",
@@ -920,6 +929,8 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     triggerKind: "conversation.message",
     turnId: "turn_usage",
     usageId: "turn_usage.attempt-1",
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "legacy",
   };
 }
 

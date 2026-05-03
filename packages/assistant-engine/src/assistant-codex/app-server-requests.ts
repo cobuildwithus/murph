@@ -41,6 +41,7 @@ export function buildCodexThreadStartParams(
   },
 ): Record<string, unknown> {
   return buildCodexThreadContextParams({
+    includeInstructions: true,
     includeServiceName: true,
     input,
   })
@@ -54,14 +55,17 @@ export function buildCodexThreadResumeParams(input: {
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
     ...buildCodexThreadContextParams({
+      includeInstructions: input.input.refreshThreadInstructions !== false,
       includeServiceName: false,
       input: input.input,
     }),
+    excludeTurns: input.input.excludeResumeTurns === true ? true : undefined,
     threadId: input.providerSessionId,
   })
 }
 
 export function buildCodexThreadContextParams(input: {
+  includeInstructions: boolean
   includeServiceName: boolean
   input: CodexAppServerTurnInput & {
     workingDirectory: string
@@ -69,7 +73,13 @@ export function buildCodexThreadContextParams(input: {
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
     approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+    baseInstructions: input.includeInstructions
+      ? normalizeNullableString(input.input.baseInstructions)
+      : undefined,
     cwd: input.input.workingDirectory,
+    developerInstructions: input.includeInstructions
+      ? normalizeNullableString(input.input.developerInstructions)
+      : undefined,
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),

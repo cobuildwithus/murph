@@ -65,6 +65,13 @@ test("assistant usage records round-trip through pending storage and sort by occ
       outputTokens: 45,
       provider: "codex-cli",
       providerName: "vercel-ai-gateway",
+      providerRequestId: "req_123",
+      rawUsageJson: {
+        input_tokens: 120,
+        output_tokens: 45,
+        total_tokens: 165,
+      },
+      rawUsageJsonHash: "sha256:usage-hash",
       reasoningTokens: 8,
       reportingUserId: "musr_example",
       requestedModel: "gpt-5.4-mini",
@@ -81,6 +88,8 @@ test("assistant usage records round-trip through pending storage and sort by occ
         attemptCount: 2,
         turnId: "turn_123",
       }),
+      usageExtractionSourcePath: "params.usage",
+      usageExtractionVersion: "codex-usage-v1",
     };
     const earlierRecord: AssistantUsageRecord = {
       ...laterRecord,
@@ -153,6 +162,9 @@ test("assistant usage listing rejects raw pending files unless invalid records a
     outputTokens: 5,
     provider: "codex-cli",
     providerName: null,
+    providerRequestId: null,
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
     requestedModel: null,
@@ -169,6 +181,8 @@ test("assistant usage listing rejects raw pending files unless invalid records a
       attemptCount: 1,
       turnId: "turn_legacy",
     }),
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "legacy",
   };
 
   try {
@@ -359,6 +373,9 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       outputTokens: 5,
       provider: "codex-cli",
       providerName: null,
+      providerRequestId: null,
+      rawUsageJson: null,
+      rawUsageJsonHash: null,
       reasoningTokens: null,
       reportingUserId: null,
       requestedModel: null,
@@ -372,6 +389,8 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       triggerKind: null,
       turnId: "turn_123",
       usageId: "turn_123.attempt-1",
+      usageExtractionSourcePath: null,
+      usageExtractionVersion: "legacy",
     },
   );
 });
@@ -473,6 +492,22 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
         usageId: "turn_123.attempt-1",
       }),
     /stripeMeterSource must be 'murph' or 'vercel-ai-gateway' when provided/u,
+  );
+
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        attemptCount: 1,
+        credentialSource: "platform",
+        occurredAt: "2026-03-29T12:00:00.000Z",
+        provider: "codex-cli",
+        providerRequestOutcome: "retried",
+        schema: ASSISTANT_USAGE_SCHEMA,
+        sessionId: "asst_123",
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-1",
+      }),
+    /providerRequestOutcome must be succeeded, failed, aborted, or partial/u,
   );
 });
 
