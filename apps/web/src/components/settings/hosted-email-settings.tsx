@@ -2,11 +2,13 @@
 
 import { useRef } from "react";
 
-import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 import type { HostedEmailSyncResult } from "./hosted-email-settings-helpers";
 
 import { SettingsStatusLine } from "./connected-account-card";
-import { useHostedEmailSettingsController } from "./hosted-email-settings-controller";
+import {
+  useHostedEmailSettingsController,
+  type HostedEmailSettingsInitialEmail,
+} from "./hosted-email-settings-controller";
 import {
   HostedEmailSettingsContent,
   HostedEmailVerificationDialog,
@@ -15,13 +17,13 @@ import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 export function HostedEmailSettings(props: {
   authenticated: boolean;
-  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  initialEmail?: HostedEmailSettingsInitialEmail | null;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const controller = useHostedEmailSettingsController({
     authenticated: props.authenticated,
-    initialLinkedAccounts: props.initialLinkedAccounts,
+    initialEmail: props.initialEmail ?? null,
     onSynced: props.onSynced,
   });
 

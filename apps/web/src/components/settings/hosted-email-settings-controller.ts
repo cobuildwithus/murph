@@ -19,13 +19,18 @@ import {
 } from "./hosted-email-settings-helpers";
 import { toErrorMessage } from "./hosted-settings-utils";
 
+export interface HostedEmailSettingsInitialEmail {
+  address: string;
+  verifiedAt: number | null;
+}
+
 export function useHostedEmailSettingsController(input: {
   authenticated: boolean;
-  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  initialEmail: HostedEmailSettingsInitialEmail | null;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
-  const { refreshUser, user } = useUser();
-  const linkedAccounts = readPrivyLinkedAccounts(user) ?? input.initialLinkedAccounts;
+  const { refreshUser } = useUser();
+  const linkedAccounts = toInitialEmailLinkedAccounts(input.initialEmail);
   const baseDisplayState = resolveHostedEmailSettingsDisplayState({
     linkedAccounts,
   });
@@ -319,4 +324,20 @@ function readPrivyLinkedAccounts(input: { linkedAccounts?: unknown } | null | un
 
 function isPrivyLinkedAccountLike(value: unknown): value is PrivyLinkedAccountLike {
   return typeof value === "object" && value !== null;
+}
+
+function toInitialEmailLinkedAccounts(
+  initialEmail: HostedEmailSettingsInitialEmail | null,
+): readonly PrivyLinkedAccountLike[] {
+  if (!initialEmail?.address) {
+    return [];
+  }
+
+  return [
+    {
+      address: initialEmail.address,
+      latest_verified_at: initialEmail.verifiedAt,
+      type: "email",
+    },
+  ];
 }

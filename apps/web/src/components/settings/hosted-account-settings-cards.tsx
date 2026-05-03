@@ -47,6 +47,7 @@ export function HostedAccountSettingsCards({
       </div>
       {linkMode ? (
         <HostedSettingsIdentityLinkDialog
+          account={account}
           initialMode={linkMode}
           onOpenChange={(open) => {
             if (!open) {

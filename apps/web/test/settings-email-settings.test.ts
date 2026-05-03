@@ -112,23 +112,16 @@ describe("HostedEmailSettings", () => {
     }
   });
 
-  it("shows the best verified email account as the current email and offers a direct resync action", async () => {
+  it("shows the server-provided verified email as the current email and offers a direct resync action", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
 
     const markup = renderToStaticMarkup(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            address: "stale@example.com",
-            type: "email",
-          },
-          {
-            address: "verified@example.com",
-            latest_verified_at: 1741194420,
-            type: "email",
-          },
-        ],
+        initialEmail: {
+          address: "verified@example.com",
+          verifiedAt: 1741194420,
+        },
       }),
     );
 
@@ -140,13 +133,42 @@ describe("HostedEmailSettings", () => {
     assert.match(markup, /Email murph@mail\.withmurph\.ai/);
   });
 
+  it("does not use Privy client user state as the displayed email authority", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            address: "privy@example.com",
+            latest_verified_at: 1771977600,
+            type: "email",
+          },
+        ],
+      },
+    });
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+
+    const markup = renderToStaticMarkup(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: {
+          address: "server@example.com",
+          verifiedAt: 1741194420,
+        },
+      }),
+    );
+
+    assert.match(markup, /server@example\.com/);
+    assert.doesNotMatch(markup, /privy@example\.com/);
+  });
+
   it("uses Privy's email link flow when the hosted account has no email yet", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
 
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialEmail: null,
       }),
     );
     cleanupRender = cleanup;
@@ -198,7 +220,7 @@ describe("HostedEmailSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialEmail: null,
         onSynced,
       }),
     );
@@ -250,13 +272,10 @@ describe("HostedEmailSettings", () => {
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            address: "old@example.com",
-            latest_verified_at: 1771891200,
-            type: "email",
-          },
-        ],
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
       }),
     );
     cleanupRender = cleanup;
@@ -319,13 +338,10 @@ describe("HostedEmailSettings", () => {
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            address: "old@example.com",
-            latest_verified_at: 1771891200,
-            type: "email",
-          },
-        ],
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
       }),
     );
     cleanupRender = cleanup;
@@ -370,13 +386,10 @@ describe("HostedEmailSettings", () => {
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            address: "old@example.com",
-            latest_verified_at: 1771891200,
-            type: "email",
-          },
-        ],
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
       }),
     );
     cleanupRender = cleanup;
@@ -418,13 +431,10 @@ describe("HostedEmailSettings", () => {
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            address: "old@example.com",
-            latest_verified_at: 1771891200,
-            type: "email",
-          },
-        ],
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
       }),
     );
     cleanupRender = cleanup;
@@ -466,13 +476,10 @@ describe("HostedEmailSettings", () => {
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            address: "old@example.com",
-            latest_verified_at: 1771891200,
-            type: "email",
-          },
-        ],
+        initialEmail: {
+          address: "old@example.com",
+          verifiedAt: 1771891200,
+        },
       }),
     );
     cleanupRender = cleanup;

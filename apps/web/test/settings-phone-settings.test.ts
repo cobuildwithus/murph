@@ -46,13 +46,7 @@ describe("HostedPhoneSettings", () => {
     const markup = renderToStaticMarkup(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            latest_verified_at: 1771977600,
-            phone_number: "+14046257706",
-            type: "phone",
-          },
-        ],
+        initialPhoneNumber: "+14046257706",
         murphPhoneNumber: "+15550100001",
       }),
     );
@@ -74,13 +68,7 @@ describe("HostedPhoneSettings", () => {
     const markup = renderToStaticMarkup(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        initialLinkedAccounts: [
-          {
-            latest_verified_at: 1771977600,
-            phone_number: "+14046257706",
-            type: "phone",
-          },
-        ],
+        initialPhoneNumber: "+14046257706",
         murphPhoneNumber: null,
       }),
     );
@@ -99,7 +87,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialPhoneNumber: null,
       }),
     );
     cleanupRender = cleanup;
@@ -122,5 +110,32 @@ describe("HostedPhoneSettings", () => {
     });
 
     expect(container.querySelector('[data-testid="hosted-phone-auth"]')).toBeTruthy();
+  });
+
+  it("does not use Privy client user state as the displayed phone authority", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            latest_verified_at: 1771977600,
+            phone_number: "+14046257706",
+            type: "phone",
+          },
+        ],
+      },
+    });
+
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+
+    const markup = renderToStaticMarkup(
+      createElement(HostedPhoneSettings, {
+        authenticated: true,
+        initialPhoneNumber: null,
+      }),
+    );
+
+    expect(markup).toContain("Not connected");
+    expect(markup).not.toContain("•••• 7706");
   });
 });
