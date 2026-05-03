@@ -24,18 +24,11 @@ vi.mock("next/font/google", () => ({
   },
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
-  HostedPhoneCountryCodeProvider(input: {
+vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
+  PhoneCountryCodeProvider(input: {
     children: React.ReactNode;
-    countryCode: string | null;
   }) {
-    return createElement(
-      "div",
-      {
-        "data-phone-country-code": input.countryCode ?? "",
-      },
-      input.children,
-    );
+    return createElement("div", null, input.children);
   },
 }));
 

@@ -94,13 +94,13 @@ describe("HostedPhoneAuth", () => {
 
   it("seeds the initial country picker from the hosted phone country hint", async () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-    const { HostedPhoneCountryCodeProvider } = await import(
-      "@/src/components/hosted-onboarding/hosted-phone-country-code-provider"
+    const { PhoneCountryCodeClientProvider } = await import(
+      "@/src/components/hosted-onboarding/phone-country-code-client-provider"
     );
 
     const markup = renderToStaticMarkup(
       React.createElement(
-        HostedPhoneCountryCodeProvider,
+        PhoneCountryCodeClientProvider,
         {
           countryCode: "GB",
         },
@@ -163,13 +163,13 @@ describe("HostedPhoneAuth", () => {
     }));
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-    const { HostedPhoneCountryCodeProvider } = await import(
-      "@/src/components/hosted-onboarding/hosted-phone-country-code-provider"
+    const { PhoneCountryCodeClientProvider } = await import(
+      "@/src/components/hosted-onboarding/phone-country-code-client-provider"
     );
 
     const { cleanup, container } = await renderClientComponent(
       React.createElement(
-        HostedPhoneCountryCodeProvider,
+        PhoneCountryCodeClientProvider,
         {
           countryCode: "GB",
         },
@@ -899,13 +899,13 @@ describe("HostedPhoneAuth", () => {
 
   it("falls back to manual invite phone entry when there is no masked hint", async () => {
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
-    const { HostedPhoneCountryCodeProvider } = await import(
-      "@/src/components/hosted-onboarding/hosted-phone-country-code-provider"
+    const { PhoneCountryCodeClientProvider } = await import(
+      "@/src/components/hosted-onboarding/phone-country-code-client-provider"
     );
 
     const markup = renderToStaticMarkup(
       React.createElement(
-        HostedPhoneCountryCodeProvider,
+        PhoneCountryCodeClientProvider,
         {
           countryCode: "US",
         },

@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 
-import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
-import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { buildJoinInvitePageModel } from "@/src/components/hosted-onboarding/join-invite-page-model";
 import { JoinInvitePageView } from "@/src/components/hosted-onboarding/join-invite-page-view";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -26,11 +24,5 @@ export default async function JoinInvitePage(input: {
     preview: searchParams.preview,
   });
 
-  return (
-    <HostedPhoneCountryCodeBoundary>
-      <HostedPrivyBoundary>
-        <JoinInvitePageView model={model} />
-      </HostedPrivyBoundary>
-    </HostedPhoneCountryCodeBoundary>
-  );
+  return <JoinInvitePageView model={model} />;
 }

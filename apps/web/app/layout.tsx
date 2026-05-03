@@ -3,9 +3,11 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import Script from "next/script";
 
-import { HostedPhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/hosted-phone-country-code-provider";
+import { AuthDialogProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { PhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/phone-country-code-provider";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
+import { getHostedSidebarAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   createMurphPageMetadata,
   MURPH_DEFAULT_METADATA_DESCRIPTION,
@@ -36,16 +38,20 @@ export const metadata: Metadata = {
   metadataBase,
 };
 
-export default function RootLayout(input: { children: React.ReactNode }) {
+export default async function RootLayout(input: { children: React.ReactNode }) {
+  const { authenticated } = await getHostedSidebarAuthSnapshot();
+
   return (
     <html lang="en" className={cn(fraunces.variable, dmSans.variable, dmMono.variable)}>
       <body className="bg-background text-foreground font-sans antialiased">
-        <HostedPhoneCountryCodeProvider countryCode={null}>
-          <div className="flex min-h-screen flex-col">
-            <div className="flex-1">{input.children}</div>
-            <SiteFooter />
-          </div>
-        </HostedPhoneCountryCodeProvider>
+        <AuthDialogProvider authenticated={authenticated}>
+          <PhoneCountryCodeProvider>
+            <div className="flex min-h-screen flex-col">
+              <div className="flex-1">{input.children}</div>
+              <SiteFooter />
+            </div>
+          </PhoneCountryCodeProvider>
+        </AuthDialogProvider>
         <Analytics />
         <SpeedInsights />
         {process.env.NODE_ENV === "development" ? (

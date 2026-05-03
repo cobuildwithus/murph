@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
@@ -38,8 +37,7 @@ export default async function SettingsPage() {
     : [null, null];
 
   return (
-    <HostedPhoneCountryCodeBoundary>
-      <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8">
         <PageHeader
           eyebrow="Settings"
           title="Your account"
@@ -83,7 +81,6 @@ export default async function SettingsPage() {
           </div>
           <HostedDataPrivacySettings authenticated={authenticated} />
         </section>
-      </div>
-    </HostedPhoneCountryCodeBoundary>
+    </div>
   );
 }

@@ -4,7 +4,7 @@ import { createContext, useContext, type PropsWithChildren } from "react";
 
 const HostedPhoneCountryCodeContext = createContext<string | null>(null);
 
-export function HostedPhoneCountryCodeProvider({
+export function PhoneCountryCodeClientProvider({
   children,
   countryCode,
 }: PropsWithChildren<{
@@ -17,6 +17,6 @@ export function HostedPhoneCountryCodeProvider({
   );
 }
 
-export function useHostedPhoneCountryCodeHint(): string | null {
+export function usePhoneCountryCode(): string | null {
   return useContext(HostedPhoneCountryCodeContext);
 }
