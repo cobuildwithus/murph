@@ -513,18 +513,15 @@ function ConnectConsentDialog({
       <DialogContent className="max-w-md gap-6 p-6 md:p-7">
         <DialogHeader className="pr-10">
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            Connect health sources
+            {source ? `Before you connect ${source.name}` : "Before you connect"}
           </DialogTitle>
           <DialogDescription>
-            {source
-              ? `Review the current health-source consent before connecting ${source.name}.`
-              : "Review the current health-source consent before connecting a source."}
+            Review Murph&apos;s current legal and health-data consent before continuing.
           </DialogDescription>
         </DialogHeader>
         {source ? (
           <HostedLegalConsentCard
             mode="compact"
-            preferredScope="feature.connected-health-source"
             source="connect-page"
             onAccepted={async () => {
               await onAccepted(source);

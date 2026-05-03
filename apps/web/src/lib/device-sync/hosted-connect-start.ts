@@ -7,7 +7,6 @@ import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/a
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import { readOptionalJsonObject } from "../hosted-onboarding/http";
 import {
-  assertHostedConsentScopeGranted,
   assertHostedLaunchRequiredConsentGranted,
 } from "../legal/consent";
 import { getPrisma } from "../prisma";
@@ -29,11 +28,6 @@ export async function startHostedDeviceSyncConnection(input: {
   await assertHostedLaunchRequiredConsentGranted({
     memberId: auth.member.id,
     prisma,
-  });
-  await assertHostedConsentScopeGranted({
-    memberId: auth.member.id,
-    prisma,
-    scope: "feature.connected-health-source",
   });
   const body = await readOptionalJsonObject(input.request, {
     limitBytes: HOSTED_CONNECT_START_BODY_LIMIT_BYTES,

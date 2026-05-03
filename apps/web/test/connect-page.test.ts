@@ -686,7 +686,7 @@ test("ConnectSourcesGrid opens the consent dialog when connect start needs conse
         error: {
           code: "HOSTED_CONSENT_REQUIRED",
           details: {
-            scope: "feature.connected-health-source",
+            missingScopes: ["launch.health-data"],
           },
           message: "Accept the current Murph legal consent before continuing.",
         },
@@ -721,7 +721,7 @@ test("ConnectSourcesGrid opens the consent dialog when connect start needs conse
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Connect health sources/);
+    assert.match(rendered.container.textContent ?? "", /Before you connect Garmin/);
   });
 
   assert.equal(rendered.assign.mock.calls.length, 0);
@@ -731,12 +731,12 @@ test("ConnectSourcesGrid opens the consent dialog when connect start needs conse
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /Review the current health-source consent before connecting Garmin\./,
+    /Review Murph's current legal and health-data consent before continuing\./,
   );
   const consentButton = rendered.container.querySelector("[data-hosted-legal-consent-card='true']");
   assert.ok(consentButton instanceof rendered.window.HTMLButtonElement);
   assert.equal(consentButton.getAttribute("data-consent-mode"), "compact");
-  assert.equal(consentButton.getAttribute("data-consent-scope"), "feature.connected-health-source");
+  assert.equal(consentButton.getAttribute("data-consent-scope"), null);
   assert.equal(consentButton.getAttribute("data-consent-source"), "connect-page");
 
   await act(async () => {
