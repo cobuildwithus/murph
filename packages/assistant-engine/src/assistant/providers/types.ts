@@ -69,6 +69,7 @@ export interface AssistantProviderTurnInput {
     content: string | AssistantUserMessageContentPart[]
     role: 'assistant' | 'user'
   }>
+  developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
   model?: string | null
   modelProvider?: string | null
@@ -86,6 +87,7 @@ export interface AssistantProviderTurnInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
+  turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
@@ -107,6 +109,7 @@ export interface AssistantProviderTurnExecutionInput {
     role: 'assistant' | 'user'
   }>
   env?: NodeJS.ProcessEnv
+  developerInstructions?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
@@ -117,6 +120,7 @@ export interface AssistantProviderTurnExecutionInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
+  turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
@@ -134,11 +138,20 @@ export interface AssistantProviderUsage {
   providerName: string | null
   providerRequestId: string | null
   rawUsageJson: unknown | null
+  rawUsageJsonHash?: string | null
   reasoningTokens: number | null
   requestedModel: string | null
   servedModel: string | null
   totalTokens: number | null
+  usageExtractionSourcePath?: string | null
+  usageExtractionVersion?: string | null
 }
+
+export type AssistantProviderRequestOutcome =
+  | 'aborted'
+  | 'failed'
+  | 'partial'
+  | 'succeeded'
 
 export interface AssistantProviderTurnExecutionResult {
   provider: AssistantChatProvider
@@ -168,5 +181,10 @@ export type AssistantProviderTurnAttemptResult =
       error: unknown
       metadata: AssistantProviderAttemptMetadata
       ok: false
+      providerRequestOutcome?: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       providerContinuation?: AssistantProviderContinuation
+      providerSessionId?: string | null
+      providerTurnId?: string | null
+      rawEvents?: unknown[]
+      usage?: AssistantProviderUsage | null
     }

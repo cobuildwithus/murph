@@ -166,31 +166,6 @@ export interface AssistantProviderAttemptPlan {
   session: AssistantSession
 }
 
-export type AssistantProviderAttemptOutcome =
-  | {
-      kind: 'failed_terminal'
-      error: unknown
-      providerContinuation: AssistantProviderContinuation
-      session: AssistantSession
-    }
-  | {
-      kind: 'succeeded'
-      result: ExecutedAssistantProviderTurnResult
-    }
-
-export type AssistantProviderTurnRecoveryOutcome =
-  | {
-      kind: 'failed_terminal'
-      error: unknown
-      providerContinuation: AssistantProviderContinuation
-      route: CodexThreadIdentity
-      session: AssistantSession
-    }
-  | {
-      kind: 'succeeded'
-      providerTurn: ExecutedAssistantProviderTurnResult
-    }
-
 export type AssistantDeliveryOutcome =
   | {
       kind: 'failed'

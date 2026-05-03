@@ -588,7 +588,7 @@ describe('assistant accepted active-turn input journal', () => {
 
     const journal = await recordAssistantAcceptedTurnInputProviderRequest({
       continuation: {
-        kind: 'flat-prompt-replay',
+        kind: 'thread-start',
       },
       now: new Date('2026-04-22T10:01:00.000Z'),
       ordinal: 0,
@@ -597,7 +597,7 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     expect(journal?.providerRequests[0]?.continuation).toEqual({
-      kind: 'flat-prompt-replay',
+      kind: 'thread-start',
     })
   })
 

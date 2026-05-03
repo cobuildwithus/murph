@@ -23,9 +23,11 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
-import type {
-  AssistantProviderTurnContinuityPolicy,
-} from './provider-turn/planning.js'
+
+export type AssistantProviderResumeStateAction =
+  | 'clear'
+  | 'persist-from-provider-turn'
+  | 'preserve-existing'
 
 export function resolveAssistantResumeStateFromProviderTurn(input: {
   providerSessionId: string | null
@@ -39,13 +41,12 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
 
 export async function persistAssistantTurnAndSession(input: {
   assistantTranscriptText?: string | null
-  activeTurnUsedExplicitHistory?: boolean
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   persistUserPromptToTranscript?: boolean
   providerResult: ExecutedAssistantProviderTurnResult
+  providerResumeStateAction: AssistantProviderResumeStateAction
   session: AssistantSession
-  turnContinuityPolicy: AssistantProviderTurnContinuityPolicy
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantSession> {
@@ -53,9 +54,6 @@ export async function persistAssistantTurnAndSession(input: {
   const persistUserPromptToTranscript = input.persistUserPromptToTranscript ?? true
   const assistantTranscriptText = input.assistantTranscriptText
     ?? input.providerResult.response
-  const shouldPersistProviderResumeState =
-    input.turnContinuityPolicy === 'continuous-provider-thread' &&
-    input.activeTurnUsedExplicitHistory !== true
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     await state.transcripts.append(
@@ -110,13 +108,12 @@ export async function persistAssistantTurnAndSession(input: {
   }
   const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
   const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
-  const nextResumeState =
-    !shouldPersistProviderResumeState
-      ? null
-      : resolveAssistantResumeStateFromProviderTurn({
-          providerSessionId: input.providerResult.providerSessionId,
-          routeId: input.providerResult.route.routeId,
-        })
+  const nextResumeState = resolveAssistantNextResumeState({
+    action: input.providerResumeStateAction,
+    providerSessionId: input.providerResult.providerSessionId,
+    routeId: input.providerResult.route.routeId,
+    sessionResumeState: input.session.resumeState,
+  })
 
   const savedSession = await state.sessions.save({
     ...input.session,
@@ -130,4 +127,23 @@ export async function persistAssistantTurnAndSession(input: {
   })
 
   return savedSession
+}
+
+function resolveAssistantNextResumeState(input: {
+  action: AssistantProviderResumeStateAction
+  providerSessionId: string | null
+  routeId: string
+  sessionResumeState: AssistantSession['resumeState']
+}): AssistantSession['resumeState'] {
+  switch (input.action) {
+    case 'clear':
+      return null
+    case 'preserve-existing':
+      return input.sessionResumeState
+    case 'persist-from-provider-turn':
+      return resolveAssistantResumeStateFromProviderTurn({
+        providerSessionId: input.providerSessionId,
+        routeId: input.routeId,
+      })
+  }
 }

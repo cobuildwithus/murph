@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { getAssistantBindingContextLines } from '../bindings.js'
 import {
   normalizeNullableString,
@@ -13,6 +15,8 @@ import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
 } from './types.js'
+
+const CODEX_USAGE_EXTRACTION_VERSION = 'codex-usage-v1'
 
 function requireAssistantProviderUserPrompt(
   input: AssistantProviderTurnExecutionInput,
@@ -70,11 +74,13 @@ function resolveAssistantProviderContextSections(
     input.sessionContext?.binding
       ? getAssistantBindingContextLines(input.sessionContext.binding)
       : []
+  const turnContextPrompt = normalizeNullableString(input.turnContextPrompt)
   const continuityContext = hasAssistantProviderUsableNativeResume(input)
     ? null
     : normalizeNullableString(input.continuityContext)
 
   return [
+    turnContextPrompt,
     contextLines.length > 0
       ? `Conversation context:\n${contextLines.join('\n')}`
       : null,
@@ -186,12 +192,7 @@ export function resolveAssistantProviderPrompt(
     return explicitPrompt
   }
 
-  const systemPrompt = hasAssistantProviderUsableNativeResume(input)
-    ? null
-    : normalizeNullableString(input.systemPrompt)
-
   return [
-    systemPrompt,
     resolveAssistantProviderFlatPromptTranscriptSection(input),
     resolveAssistantProviderFlatPromptActiveTurnSection(input),
     resolveAssistantProviderComposedUserContent(input, {
@@ -248,21 +249,29 @@ export function extractCodexAssistantProviderUsage(input: {
   const completionMetrics =
     readAssistantProviderRecord(completionParams?.metrics) ??
     readAssistantProviderRecord(completionRecord?.metrics)
-  const usageRecord =
-    readAssistantProviderRecord(completionParams?.usage) ??
-    readAssistantProviderRecord(completionTurn?.usage) ??
-    readAssistantProviderRecord(completionMetrics?.usage) ??
-    readAssistantProviderRecord(completionRecord?.usage) ??
-    null
+  const usageSource = resolveAssistantProviderUsageSource({
+    completionMetrics,
+    completionParams,
+    completionRecord,
+    completionTurn,
+  })
+  const usageRecord = usageSource?.record ?? null
+  const sanitizedRawUsageJson = sanitizeAssistantProviderRawUsageJson(
+    usageRecord ?? completionRecord,
+  )
   const inputTokens = readAssistantProviderInteger(
     usageRecord ?? completionRecord,
     'inputTokens',
     'input_tokens',
+    'prompt_tokens',
+    'promptTokens',
   )
   const outputTokens = readAssistantProviderInteger(
     usageRecord ?? completionRecord,
     'outputTokens',
     'output_tokens',
+    'completion_tokens',
+    'completionTokens',
   )
 
   return {
@@ -277,6 +286,10 @@ export function extractCodexAssistantProviderUsage(input: {
       usageRecord ?? completionRecord,
       'cachedInputTokens',
       'cached_input_tokens',
+    ) ?? readAssistantProviderNestedInteger(
+      usageRecord ?? completionRecord,
+      'input_tokens_details',
+      'cached_tokens',
     ),
     inputTokens,
     outputTokens,
@@ -291,10 +304,17 @@ export function extractCodexAssistantProviderUsage(input: {
       completionTurn?.id,
       completionRecord?.id,
     ),
-    rawUsageJson: usageRecord ?? completionRecord ?? null,
+    rawUsageJson: sanitizedRawUsageJson,
+    rawUsageJsonHash: sanitizedRawUsageJson
+      ? hashAssistantProviderStableJson(sanitizedRawUsageJson)
+      : null,
     reasoningTokens: readAssistantProviderInteger(
       usageRecord ?? completionRecord,
       'reasoningTokens',
+      'reasoning_tokens',
+    ) ?? readAssistantProviderNestedInteger(
+      usageRecord ?? completionRecord,
+      'output_tokens_details',
       'reasoning_tokens',
     ),
     requestedModel: input.providerConfig.target.model,
@@ -310,7 +330,46 @@ export function extractCodexAssistantProviderUsage(input: {
         inputTokens,
         outputTokens,
       }),
+    usageExtractionSourcePath: usageSource?.sourcePath ?? (completionRecord ? 'completion' : null),
+    usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
   }
+}
+
+function resolveAssistantProviderUsageSource(input: {
+  completionMetrics: Record<string, unknown> | null
+  completionParams: Record<string, unknown> | null
+  completionRecord: Record<string, unknown> | null
+  completionTurn: Record<string, unknown> | null
+}): { record: Record<string, unknown>; sourcePath: string } | null {
+  const candidates = [
+    {
+      record: readAssistantProviderRecord(input.completionParams?.usage),
+      sourcePath: 'params.usage',
+    },
+    {
+      record: readAssistantProviderRecord(input.completionTurn?.usage),
+      sourcePath: input.completionParams?.turn ? 'params.turn.usage' : 'turn.usage',
+    },
+    {
+      record: readAssistantProviderRecord(input.completionMetrics?.usage),
+      sourcePath: input.completionParams?.metrics ? 'params.metrics.usage' : 'metrics.usage',
+    },
+    {
+      record: readAssistantProviderRecord(input.completionRecord?.usage),
+      sourcePath: 'usage',
+    },
+  ]
+
+  for (const candidate of candidates) {
+    if (candidate.record) {
+      return {
+        record: candidate.record,
+        sourcePath: candidate.sourcePath,
+      }
+    }
+  }
+
+  return null
 }
 
 function findAssistantCodexCompletionEvent(
@@ -380,6 +439,121 @@ function readAssistantProviderInteger(
   }
 
   return null
+}
+
+function readAssistantProviderNestedInteger(
+  record: Record<string, unknown> | null | undefined,
+  objectKey: string,
+  valueKey: string,
+): number | null {
+  return readAssistantProviderInteger(
+    readAssistantProviderRecord(record?.[objectKey]),
+    valueKey,
+  )
+}
+
+function sanitizeAssistantProviderRawUsageJson(
+  record: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!record) {
+    return null
+  }
+
+  const sanitized: Record<string, unknown> = {}
+  copyAssistantProviderIntegerFields(sanitized, record, [
+    'cacheWriteTokens',
+    'cache_write_tokens',
+    'cachedInputTokens',
+    'cached_input_tokens',
+    'completionTokens',
+    'completion_tokens',
+    'inputTokens',
+    'input_tokens',
+    'outputTokens',
+    'output_tokens',
+    'promptTokens',
+    'prompt_tokens',
+    'reasoningTokens',
+    'reasoning_tokens',
+    'totalTokens',
+    'total_tokens',
+  ])
+  copyAssistantProviderTokenDetails(
+    sanitized,
+    record,
+    'input_tokens_details',
+    ['cached_tokens'],
+  )
+  copyAssistantProviderTokenDetails(
+    sanitized,
+    record,
+    'output_tokens_details',
+    ['reasoning_tokens'],
+  )
+
+  return Object.keys(sanitized).length > 0 ? sanitized : null
+}
+
+function copyAssistantProviderIntegerFields(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): void {
+  for (const key of keys) {
+    const value = source[key]
+
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+      target[key] = value
+    }
+  }
+}
+
+function copyAssistantProviderTokenDetails(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  objectKey: string,
+  valueKeys: readonly string[],
+): void {
+  const sourceDetails = readAssistantProviderRecord(source[objectKey])
+
+  if (!sourceDetails) {
+    return
+  }
+
+  const sanitizedDetails: Record<string, unknown> = {}
+  copyAssistantProviderIntegerFields(sanitizedDetails, sourceDetails, valueKeys)
+
+  if (Object.keys(sanitizedDetails).length > 0) {
+    target[objectKey] = sanitizedDetails
+  }
+}
+
+function hashAssistantProviderStableJson(value: unknown): string {
+  return `sha256:${createHash('sha256')
+    .update(stableStringifyAssistantProviderJson(value))
+    .digest('hex')}`
+}
+
+function stableStringifyAssistantProviderJson(value: unknown): string {
+  return JSON.stringify(sortAssistantProviderJson(value))
+}
+
+function sortAssistantProviderJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortAssistantProviderJson(entry))
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((result, key) => {
+        result[key] = sortAssistantProviderJson(record[key])
+        return result
+      }, {})
+  }
+
+  return value
 }
 
 function resolveAssistantProviderTotalTokens(input: {

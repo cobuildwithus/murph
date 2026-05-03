@@ -3,6 +3,7 @@ import {
 } from '../../assistant-cli-access.js'
 import {
   executeCodexAppServerTurn,
+  readCodexAppServerTurnFailureContext,
 } from '../../assistant-codex.js'
 import {
   resolveSupportedCodexAppServerApprovalPolicy,
@@ -25,6 +26,7 @@ import {
   type AssistantProviderCapabilities,
   type AssistantProviderTurnAttemptResult,
   type AssistantProviderTurnExecutionInput,
+  type AssistantProviderUsage,
 } from './types.js'
 import { normalizeNullableString } from '../shared.js'
 import type {
@@ -60,10 +62,12 @@ export async function executeCodexAssistantTurnAttempt(
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(
     providerConfig.policy.approvalPolicy,
   )
+  const developerInstructions = normalizeNullableString(input.developerInstructions)
 
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
     approvalPolicy,
+    developerInstructions,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides: mergeCodexConfigOverrides({
@@ -103,6 +107,7 @@ export async function executeCodexAssistantTurnAttempt(
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
+    excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
     workingDirectory: input.workingDirectory,
@@ -131,10 +136,35 @@ export async function executeCodexAssistantTurnAttempt(
         resumeSessionId: undefined,
       })
       providerContinuation = {
-        kind: 'flat-prompt-replay' as const,
+        kind: 'thread-start' as const,
       }
     } else {
-      throw error
+      const failureContext = readCodexAppServerTurnFailureContext(error)
+      const rawEvents = failureContext?.jsonEvents ?? []
+      const usage = rawEvents.length > 0
+        ? extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents,
+          })
+        : null
+      return {
+        error,
+        metadata: {
+          activityLabels: [],
+          executedToolCount: 0,
+          providerActionCount: failureContext?.providerActionCount ?? 0,
+          rawToolEvents: [],
+        },
+        ok: false,
+        ...(failureContext
+          ? {
+              providerSessionId: failureContext.providerSessionId,
+              providerTurnId: failureContext.providerTurnId,
+              rawEvents,
+            }
+          : {}),
+        ...(hasCodexAssistantProviderUsageData(usage) ? { usage } : {}),
+      }
     }
   }
 
@@ -164,6 +194,23 @@ export async function executeCodexAssistantTurnAttempt(
       }),
     },
   }
+}
+
+function hasCodexAssistantProviderUsageData(
+  usage: AssistantProviderUsage | null,
+): boolean {
+  if (!usage) {
+    return false
+  }
+
+  return (
+    usage.cacheWriteTokens !== null ||
+    usage.cachedInputTokens !== null ||
+    usage.inputTokens !== null ||
+    usage.outputTokens !== null ||
+    usage.reasoningTokens !== null ||
+    usage.totalTokens !== null
+  )
 }
 
 export function resolveCodexAssistantLabel(

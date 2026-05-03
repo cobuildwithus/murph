@@ -38,6 +38,9 @@ async function writePendingRecord(vaultRoot: string, turnId: string) {
       outputTokens: 5,
       provider: "codex-cli",
       providerName: "Vercel AI Gateway",
+      providerRequestId: null,
+      rawUsageJson: null,
+      rawUsageJsonHash: null,
       reasoningTokens: null,
       reportingUserId: null,
       requestedModel: "gpt-5.5",
@@ -51,6 +54,8 @@ async function writePendingRecord(vaultRoot: string, turnId: string) {
       triggerKind: null,
       turnId,
       usageId,
+      usageExtractionSourcePath: null,
+      usageExtractionVersion: "legacy",
     },
     vault: vaultRoot,
   });

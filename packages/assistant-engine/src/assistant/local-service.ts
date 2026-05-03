@@ -62,7 +62,8 @@ import {
 } from './provider-turn-recovery.js'
 import {
   executeProviderTurnWithRecovery,
-  resolveAssistantProviderTurnContinuityPolicy,
+  resolveAssistantProviderThreadScope,
+  type AssistantProviderThreadScope,
 } from './provider-turn-runner.js'
 import {
   normalizeAssistantAskResultForReturn,
@@ -329,7 +330,7 @@ export async function sendAssistantMessageLocal(
           journal: initialAcceptedInputJournal,
           vault: input.vault,
         })
-        const turnContinuityPolicy = resolveAssistantProviderTurnContinuityPolicy({
+        const threadScope = resolveAssistantProviderThreadScope({
           turnTrigger: input.turnTrigger ?? null,
         })
         let currentInput = input
@@ -364,7 +365,7 @@ export async function sendAssistantMessageLocal(
             route: activeTurnRouteLock ?? route,
             plan: sharedPlan,
             profile: {
-              turnContinuityPolicy,
+              threadScope,
             },
             resolvedSession: currentSession,
             turnCreatedAt: currentUserTurn.turnCreatedAt,
@@ -386,6 +387,22 @@ export async function sendAssistantMessageLocal(
                 turnId: currentUserTurn.turnId,
               })
             }
+            await persistPendingAssistantUsageEvent({
+              executionContext,
+              providerRequestOrdinal,
+              providerRequestOutcome: providerOutcome.providerRequestOutcome,
+              providerResult: {
+                attemptCount: providerOutcome.attemptCount,
+                provider: providerOutcome.route.provider,
+                providerOptions: providerOutcome.route.providerOptions,
+                route: providerOutcome.route,
+                session: providerOutcome.session,
+                usage: providerOutcome.usage,
+                usageAttribution: providerOutcome.usageAttribution,
+              },
+              turnId: currentUserTurn.turnId,
+              vault: currentInput.vault,
+            })
             throw providerOutcome.error
           }
 
@@ -575,12 +592,14 @@ export async function sendAssistantMessageLocal(
           turnId: currentUserTurn.turnId,
         })
         const session = await finalizeAssistantTurnArtifacts({
-          activeTurnUsedExplicitHistory: activeTurnHistory !== null,
           input: currentInput,
           plan: sharedPlan,
           providerResult,
+          providerResumeStateAction: resolveProviderResumeStateAction({
+            activeTurnUsedExplicitHistory: activeTurnHistory !== null,
+            threadScope,
+          }),
           persistUserPromptToTranscript: !userPromptPersistedToTranscript,
-          turnContinuityPolicy,
           session: providerResult.session,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
@@ -750,6 +769,19 @@ async function runAssistantTurnBestEffort(
   try {
     await task()
   } catch {}
+}
+
+function resolveProviderResumeStateAction(input: {
+  activeTurnUsedExplicitHistory: boolean
+  threadScope: AssistantProviderThreadScope
+}): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
+  if (input.threadScope === 'isolated-thread') {
+    return 'preserve-existing'
+  }
+
+  return input.activeTurnUsedExplicitHistory
+    ? 'clear'
+    : 'persist-from-provider-turn'
 }
 
 async function resolveAssistantActiveTurnInputAdmission(input: {

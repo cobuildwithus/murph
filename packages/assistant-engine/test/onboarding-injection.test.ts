@@ -17,7 +17,7 @@ import {
   saveAssistantSession,
 } from '../src/assistant/store.js'
 import {
-  resolveAssistantProviderTurnContinuityPlan,
+  resolveAssistantProviderThreadPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
   resolveAssistantTurnSharedPlan,
@@ -146,7 +146,7 @@ describe('assistant onboarding prompt injection', () => {
 
   it('preserves native resume while keeping onboarding guidance open on conversation turns', () => {
     expect(
-      resolveAssistantProviderTurnContinuityPlan({
+      resolveAssistantProviderThreadPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
         onboardingGuidanceOpen: true,
         promptProfile: 'conversation',
@@ -157,7 +157,7 @@ describe('assistant onboarding prompt injection', () => {
       shouldInjectBootstrapContext: false,
     })
     expect(
-      resolveAssistantProviderTurnContinuityPlan({
+      resolveAssistantProviderThreadPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
         onboardingGuidanceOpen: true,
         promptProfile: 'notification-decision',

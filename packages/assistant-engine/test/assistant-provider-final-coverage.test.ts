@@ -478,7 +478,7 @@ describe('Codex model catalog', () => {
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',
-        turnContinuityPolicy: 'continuous-provider-thread',
+        threadScope: 'session-thread',
       },
       promptTimeContext: {
         currentLocalDate: '2026-04-29',
@@ -495,6 +495,7 @@ describe('Codex model catalog', () => {
         activeTurnMessages: undefined,
         assistantCliContract: null,
         cliEnv: {},
+        developerInstructions: null,
         continuityContext: null,
         diagnosticsPolicy: {
           environment: 'local',
@@ -510,6 +511,7 @@ describe('Codex model catalog', () => {
         resumeProviderSessionId: null,
         sessionContext: undefined,
         systemPrompt: null,
+        turnContextPrompt: null,
         workingDirectory: '/work',
       } satisfies AssistantRouteTurnPlan,
       session,
@@ -577,7 +579,7 @@ describe('Codex model catalog', () => {
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',
-        turnContinuityPolicy: 'continuous-provider-thread',
+        threadScope: 'session-thread',
       },
       promptTimeContext: {
         currentLocalDate: '2026-04-30',
@@ -594,6 +596,7 @@ describe('Codex model catalog', () => {
         activeTurnMessages: undefined,
         assistantCliContract: null,
         cliEnv: {},
+        developerInstructions: null,
         continuityContext: null,
         diagnosticsPolicy: {
           environment: 'hosted',
@@ -609,6 +612,7 @@ describe('Codex model catalog', () => {
         resumeProviderSessionId: null,
         sessionContext: undefined,
         systemPrompt: null,
+        turnContextPrompt: null,
         workingDirectory: '/work',
       } satisfies AssistantRouteTurnPlan,
       session,

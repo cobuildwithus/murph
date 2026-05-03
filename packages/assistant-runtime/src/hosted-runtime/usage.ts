@@ -22,6 +22,17 @@ export interface HostedPendingAssistantUsageExportResult {
   pending: number;
 }
 
+export interface HostedUsageMayBeStrandedIssueInput {
+  exported: number;
+  failed: number;
+  invalid: number;
+  invalidIssueRecorded: boolean;
+  now?: () => string;
+  pending: number;
+  reason: "assistant_phase_failed";
+  vaultRoot: string;
+}
+
 const HOSTED_USAGE_EXPORT_BATCH_LIMIT = 50;
 
 export async function exportHostedPendingAssistantUsage(input: {
@@ -165,6 +176,65 @@ async function writeHostedMalformedUsageRuntimeIssueBestEffort(input: {
     return true;
   } catch (error) {
     console.warn("Failed to record malformed hosted AI usage runtime issue.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return false;
+  }
+}
+
+export async function writeHostedUsageMayBeStrandedRuntimeIssueBestEffort(
+  input: HostedUsageMayBeStrandedIssueInput,
+): Promise<boolean> {
+  try {
+    const fingerprint = createAssistantRuntimeIssueFingerprint({
+      component: "hosted.usage_export",
+      errorCode: "pending_usage_may_be_stranded",
+      issueKind: "fallback_used",
+      operation: "pending_usage_may_be_stranded",
+      phase: "hosted_commit",
+      summary:
+        "Assistant runtime issue: fallback used during hosted_commit (pending_usage_may_be_stranded).",
+    });
+    const issueId = `ari_${fingerprint.slice(0, 16)}_${fingerprint}`;
+    const existingIssues = await listPendingAssistantRuntimeIssueRecords({
+      skipInvalidRecords: true,
+      vault: input.vaultRoot,
+    });
+    if (existingIssues.some((issue) => issue.issueId === issueId)) {
+      return false;
+    }
+
+    await writePendingAssistantRuntimeIssueRecord({
+      record: {
+        component: "hosted.usage_export",
+        details: {
+          exported: input.exported,
+          failed: input.failed,
+          invalid: input.invalid,
+          invalidIssueRecorded: input.invalidIssueRecorded,
+          pending: input.pending,
+          reason: input.reason,
+        },
+        environment: "hosted",
+        errorCode: "pending_usage_may_be_stranded",
+        fingerprint,
+        issueId,
+        issueKind: "fallback_used",
+        occurredAt: input.now?.() ?? new Date().toISOString(),
+        operation: "pending_usage_may_be_stranded",
+        phase: "hosted_commit",
+        schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+        severity: "warning",
+        summary:
+          "Assistant runtime issue: fallback used during hosted_commit (pending_usage_may_be_stranded).",
+        surface: null,
+      },
+      vault: input.vaultRoot,
+    });
+
+    return true;
+  } catch (error) {
+    console.warn("Failed to record potentially stranded hosted AI usage runtime issue.", {
       errorName: error instanceof Error ? error.name : typeof error,
     });
     return false;
