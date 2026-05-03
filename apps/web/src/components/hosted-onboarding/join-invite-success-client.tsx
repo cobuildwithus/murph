@@ -46,12 +46,13 @@ export function JoinInviteSuccessClient({
   const [delayedSetupSupportStage, setDelayedSetupSupportStage] = useState<
     HostedInviteStatusPayload["stage"] | null
   >(null);
-  const [successSyncCompletionCount, setSuccessSyncCompletionCount] = useState(0);
-  const mountedRef = useRef(true);
+  const homeRedirectStartedRef = useRef(false);
   const successSyncStartedRef = useRef(false);
-  const successSyncInFlightRef = useRef(false);
   const shouldPoll = isHostedOnboardingPendingStage(status.stage);
-  const shouldRedirectToHome = shouldRedirectHostedInviteSuccessToHome(status);
+  const shouldRedirectToHome = shouldRedirectHostedInviteSuccessToHome({
+    sessionId,
+    status,
+  });
 
   useHostedInviteStatusRefresh({
     inviteCode,
@@ -67,12 +68,6 @@ export function JoinInviteSuccessClient({
   });
 
   useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (
       preview ||
       successSyncStartedRef.current ||
@@ -85,7 +80,6 @@ export function JoinInviteSuccessClient({
 
     let cancelled = false;
     successSyncStartedRef.current = true;
-    successSyncInFlightRef.current = true;
 
     void requestHostedBillingSuccess({
       inviteCode,
@@ -105,12 +99,6 @@ export function JoinInviteSuccessClient({
         }
 
         setErrorMessage(error instanceof Error ? error.message : "Unable to refresh setup status.");
-      })
-      .finally(() => {
-        successSyncInFlightRef.current = false;
-        if (mountedRef.current) {
-          setSuccessSyncCompletionCount((count) => count + 1);
-        }
       });
 
     return () => {
@@ -136,14 +124,15 @@ export function JoinInviteSuccessClient({
   useEffect(() => {
     if (
       preview ||
-      successSyncInFlightRef.current ||
+      homeRedirectStartedRef.current ||
       !shouldRedirectToHome
     ) {
       return;
     }
 
+    homeRedirectStartedRef.current = true;
     router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
-  }, [preview, router, shouldRedirectToHome, successSyncCompletionCount]);
+  }, [preview, router, shouldRedirectToHome]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}`;
   const successState = resolveHostedInviteSuccessState(status);
@@ -239,10 +228,6 @@ export function JoinInviteSuccessClient({
             type="button"
             onClick={() => {
               if (!preview && shouldRedirectToHome) {
-                if (successSyncInFlightRef.current) {
-                  return;
-                }
-
                 router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
                 return;
               }
@@ -264,10 +249,19 @@ function shouldRequestHostedBillingSuccess(stage: HostedInviteStatusPayload["sta
   return stage === "checkout" || stage === "activating" || stage === "active";
 }
 
-function shouldRedirectHostedInviteSuccessToHome(status: HostedInviteStatusPayload): boolean {
-  return status.stage === "active"
-    && status.session.authenticated
-    && status.session.matchesInvite;
+function shouldRedirectHostedInviteSuccessToHome(input: {
+  sessionId: string | null;
+  status: HostedInviteStatusPayload;
+}): boolean {
+  const canOpenHome = input.status.stage === "active"
+    || (
+      input.sessionId !== null
+      && shouldRequestHostedBillingSuccess(input.status.stage)
+    );
+
+  return canOpenHome
+    && input.status.session.authenticated
+    && input.status.session.matchesInvite;
 }
 
 function shouldShowHostedInviteSuccessUi(input: {
