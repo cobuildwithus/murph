@@ -4,6 +4,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routeTypesImportPattern = /import\s+["'](\.\/[^"'`]*types\/routes\.d\.ts)["'];/u;
+const defaultRouteTypesImportPath = "./.next/types/routes.d.ts";
+const nextEnvCommonLines = [
+  '/// <reference types="next" />',
+  '/// <reference types="next/image-types/global" />',
+];
+const nextEnvTrailingLines = [
+  "",
+  "// NOTE: This file should not be edited",
+  "// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.",
+  "",
+];
 const routeTypesStubContents = [
   "// Auto-generated route-type stub for clean typecheck flows.",
   "export {};",
@@ -28,7 +39,7 @@ export function extractNextRouteTypesImport(nextEnvContents: string): string | n
 }
 
 export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<string | null> {
-  const nextEnvContents = await readFile(nextEnvPath, "utf8");
+  const nextEnvContents = await readOrCreateNextEnvDeclaration(nextEnvPath);
   const stubRelativeImportPath = extractNextRouteTypesImport(nextEnvContents);
 
   if (!stubRelativeImportPath) {
@@ -48,6 +59,30 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
   await removeStaleNextValidatorStub(stubPath);
 
   return stubPath;
+}
+
+async function readOrCreateNextEnvDeclaration(nextEnvPath: string): Promise<string> {
+  try {
+    return await readFile(nextEnvPath, "utf8");
+  } catch (error) {
+    if (!isNodeErrorWithCode(error, "ENOENT")) {
+      throw error;
+    }
+  }
+
+  const contents = buildNextEnvDeclarationArtifact(defaultRouteTypesImportPath);
+  await writeFile(nextEnvPath, contents, "utf8");
+  return contents;
+}
+
+function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
+  return [...nextEnvCommonLines, `import "${routeTypesImportPath}";`, ...nextEnvTrailingLines].join(
+    "\n",
+  );
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return error instanceof Error && Reflect.get(error, "code") === code;
 }
 
 async function ensureNextRouteTypesRuntimeStub(routeTypesStubPath: string): Promise<void> {
