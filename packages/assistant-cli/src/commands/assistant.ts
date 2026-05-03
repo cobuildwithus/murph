@@ -7,8 +7,6 @@ import {
   assistantChatResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
-  assistantOnboardingCompletionReasonValues,
-  assistantOnboardingResultSchema,
   assistantRunResultSchema,
   assistantSelfDeliveryTargetClearResultSchema,
   assistantSelfDeliveryTargetListResultSchema,
@@ -39,12 +37,8 @@ import {
   redactAssistantSessionsForDisplay,
 } from '@murphai/assistant-engine/assistant-runtime'
 import {
-  completeAssistantOnboarding,
   redactAssistantDisplayPath,
   getAssistantSession,
-  readAssistantOnboardingState,
-  reopenAssistantOnboarding,
-  resolveAssistantOnboardingStatePath,
   listAssistantSessions,
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
@@ -467,14 +461,6 @@ function buildAssistantStateRootResultPaths(vault: string, stateRoot: string) {
 function buildAssistantStateResultPaths(vault: string) {
   const statePaths = resolveAssistantStatePaths(vault)
   return buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot)
-}
-
-function buildAssistantOnboardingResult(vault: string, onboarding: unknown) {
-  return assistantOnboardingResultSchema.parse({
-    ...buildAssistantStateResultPaths(vault),
-    statePath: redactAssistantDisplayPath(resolveAssistantOnboardingStatePath(vault)),
-    onboarding,
-  })
 }
 
 function buildAssistantOperatorConfigResult() {
@@ -1024,68 +1010,6 @@ export function registerAssistantCommands(
     assistant.command('stop', createAssistantStopCommandDefinition())
   }
 
-  const registerOnboardingCommands = () => {
-    const onboarding = Cli.create('onboarding', {
-      description:
-        'Inspect or update the local assistant conversation-onboarding lifecycle state shared across user-facing channels for this vault.',
-    })
-
-    onboarding.command('status', {
-      args: emptyArgsSchema,
-      description:
-        'Show whether assistant conversational onboarding is still open or has already been completed for this vault.',
-      options: withBaseOptions(),
-      output: assistantOnboardingResultSchema,
-      async run(context) {
-        return buildAssistantOnboardingResult(
-          context.options.vault,
-          await readAssistantOnboardingState(context.options.vault),
-        )
-      },
-    })
-
-    onboarding.command('complete', {
-      args: emptyArgsSchema,
-      description:
-        'Mark assistant conversational onboarding complete for this vault so the onboarding prompt policy stops being injected on future turns.',
-      options: withBaseOptions({
-        reason: z
-          .enum(assistantOnboardingCompletionReasonValues)
-          .describe(
-            'Why onboarding is done: user_answered, user_declined, concrete_request, or manual.',
-          ),
-      }),
-      output: assistantOnboardingResultSchema,
-      async run(context) {
-        return buildAssistantOnboardingResult(
-          context.options.vault,
-          await completeAssistantOnboarding({
-            reason: context.options.reason,
-            vault: context.options.vault,
-          }),
-        )
-      },
-    })
-
-    onboarding.command('reopen', {
-      args: emptyArgsSchema,
-      description:
-        'Reopen assistant conversational onboarding for this vault so onboarding guidance is injected again until it is completed later.',
-      options: withBaseOptions(),
-      output: assistantOnboardingResultSchema,
-      async run(context) {
-        return buildAssistantOnboardingResult(
-          context.options.vault,
-          await reopenAssistantOnboarding({
-            vault: context.options.vault,
-          }),
-        )
-      },
-    })
-
-    assistant.command(onboarding)
-  }
-
   const registerSessionCommands = () => {
     const session = Cli.create('session', {
       description:
@@ -1181,7 +1105,6 @@ export function registerAssistantCommands(
   registerConversationCommands()
   registerSelfTargetCommands()
   registerObservabilityCommands()
-  registerOnboardingCommands()
   registerSessionCommands()
 
   cli.command(assistant)

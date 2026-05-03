@@ -22,19 +22,41 @@ export async function hasAssistantSeenFirstContact(input: {
   docIds: readonly string[]
   vault: string
 }): Promise<boolean> {
-  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
-  for (const docId of uniqueAssistantFirstContactDocIds(input.docIds)) {
-    const snapshot = await readAssistantFirstContactStateRecord(stateDirectory, docId)
-    if (snapshot !== null) {
-      return true
-    }
-  }
+  return hasAssistantSeenStateDocs(input)
+}
 
-  return false
+export async function hasAssistantSeenOnboardingBootstrap(input: {
+  docIds: readonly string[]
+  vault: string
+}): Promise<boolean> {
+  return hasAssistantSeenStateDocs(input)
 }
 
 export async function markAssistantFirstContactSeen(input: {
   docIds: readonly string[]
+  seenAt: string
+  vault: string
+}): Promise<void> {
+  await markAssistantStateDocsSeen({
+    ...input,
+    schemaVersion: 'murph.assistant-first-contact.v1',
+  })
+}
+
+export async function markAssistantOnboardingBootstrapSeen(input: {
+  docIds: readonly string[]
+  seenAt: string
+  vault: string
+}): Promise<void> {
+  await markAssistantStateDocsSeen({
+    ...input,
+    schemaVersion: 'murph.assistant-onboarding-bootstrap.v1',
+  })
+}
+
+async function markAssistantStateDocsSeen(input: {
+  docIds: readonly string[]
+  schemaVersion: string
   seenAt: string
   vault: string
 }): Promise<void> {
@@ -47,7 +69,7 @@ export async function markAssistantFirstContactSeen(input: {
     )
     await ensureAssistantStateDirectory(path.dirname(documentPath))
     await writeJsonFileAtomic(documentPath, {
-      schemaVersion: 'murph.assistant-first-contact.v1',
+      schemaVersion: input.schemaVersion,
       seenAt: input.seenAt,
     })
   }
@@ -56,12 +78,29 @@ export async function markAssistantFirstContactSeen(input: {
 export function resolveAssistantFirstContactStateDocIds(
   input: AssistantFirstContactLocator,
 ): string[] {
-  const channel = normalizeNullableString(input.channel)
-  const identityId = normalizeNullableString(input.identityId)
-  const actorId = normalizeNullableString(input.actorId)
-  const threadId = normalizeNullableString(input.threadId)
+  return resolveAssistantScopedOnboardingStateDocIds({
+    input,
+    scopeName: 'first-contact',
+  })
+}
+
+export function resolveAssistantOnboardingBootstrapStateDocIds(
+  input: AssistantFirstContactLocator,
+): string[] {
+  void input
+  return ['onboarding/bootstrap/vault']
+}
+
+function resolveAssistantScopedOnboardingStateDocIds(input: {
+  input: AssistantFirstContactLocator
+  scopeName: 'bootstrap' | 'first-contact'
+}): string[] {
+  const channel = normalizeNullableString(input.input.channel)
+  const identityId = normalizeNullableString(input.input.identityId)
+  const actorId = normalizeNullableString(input.input.actorId)
+  const threadId = normalizeNullableString(input.input.threadId)
   const threadIsDirect =
-    typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null
+    typeof input.input.threadIsDirect === 'boolean' ? input.input.threadIsDirect : null
 
   if (!channel) {
     return []
@@ -72,6 +111,7 @@ export function resolveAssistantFirstContactStateDocIds(
       ? buildAssistantFirstContactStateDocId({
           channel,
           identityId,
+          scopeName: input.scopeName,
           scope: ['actor', actorId],
         })
       : null,
@@ -79,6 +119,7 @@ export function resolveAssistantFirstContactStateDocIds(
       ? buildAssistantFirstContactStateDocId({
           channel,
           identityId,
+          scopeName: input.scopeName,
           scope: ['thread', threadId],
         })
       : null,
@@ -88,6 +129,7 @@ export function resolveAssistantFirstContactStateDocIds(
 function buildAssistantFirstContactStateDocId(input: {
   channel: string
   identityId: string | null
+  scopeName: 'bootstrap' | 'first-contact'
   scope: ['actor' | 'thread', string]
 }): string {
   const key = [
@@ -98,7 +140,7 @@ function buildAssistantFirstContactStateDocId(input: {
     .filter((value): value is string => value !== null)
     .join('|')
 
-  return `onboarding/first-contact/${createHash('sha256').update(key).digest('hex')}`
+  return `onboarding/${input.scopeName}/${createHash('sha256').update(key).digest('hex')}`
 }
 
 function uniqueAssistantFirstContactDocIds(
@@ -133,4 +175,19 @@ async function readAssistantFirstContactStateRecord(
 
     return null
   }
+}
+
+async function hasAssistantSeenStateDocs(input: {
+  docIds: readonly string[]
+  vault: string
+}): Promise<boolean> {
+  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
+  for (const docId of uniqueAssistantFirstContactDocIds(input.docIds)) {
+    const snapshot = await readAssistantFirstContactStateRecord(stateDirectory, docId)
+    if (snapshot !== null) {
+      return true
+    }
+  }
+
+  return false
 }

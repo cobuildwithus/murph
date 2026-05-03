@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -235,7 +236,7 @@ test('buildAssistantCliSurfaceContract falls back to a truncated description-onl
   assert.equal(contract.endsWith(' '), false)
 })
 
-test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract payload', async () => {
+test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract payload when manifest fingerprints match', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-assistant-cli-surface-contract-persisted-',
   )
@@ -251,16 +252,30 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
   await mkdir(path.dirname(docPath), {
     recursive: true,
   })
+  const manifest = {
+    commands: [
+      {
+        description: 'Current status',
+        name: 'status',
+      },
+    ],
+  }
+  const manifestFingerprint = createHash('sha256')
+    .update('full')
+    .update('\0')
+    .update(JSON.stringify(manifest))
+    .digest('hex')
   await writeFile(
     docPath,
     JSON.stringify({
       contract: 'Persisted assistant cli contract',
+      manifestFingerprint,
       schemaVersion: 'test',
     }),
     'utf8',
   )
 
-  const readAssistantCliLlmsManifest = vi.fn()
+  const readAssistantCliLlmsManifest = vi.fn().mockResolvedValue(manifest)
   vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
     buildAssistantCliProcessEnv: () => ({}),
@@ -275,7 +290,64 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
   })
 
   assert.equal(contract, 'Persisted assistant cli contract')
-  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 1)
+})
+
+test('resolveAssistantCliSurfaceBootstrapContext rewrites stale persisted contracts when manifest fingerprints change', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-stale-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const stateDirectory = resolveAssistantStatePaths(vaultRoot).stateDirectory
+  const docPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory,
+    },
+    'sessions/session-stale/cli-surface-bootstrap',
+  )
+  await mkdir(path.dirname(docPath), {
+    recursive: true,
+  })
+  await writeFile(
+    docPath,
+    JSON.stringify({
+      contract: 'Stale assistant cli contract',
+      manifestFingerprint: '0'.repeat(64),
+      schemaVersion: 'test',
+    }),
+    'utf8',
+  )
+
+  const readAssistantCliLlmsManifest = vi.fn().mockResolvedValue({
+    commands: [
+      {
+        description: 'Fresh manifest command',
+        name: 'status',
+      },
+    ],
+  })
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
+  }))
+  const {
+    resolveAssistantCliSurfaceBootstrapContext,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = await resolveAssistantCliSurfaceBootstrapContext({
+    sessionId: 'session-stale',
+    vault: vaultRoot,
+  })
+
+  assert.match(contract ?? '', /Fresh manifest command/u)
+  assert.doesNotMatch(contract ?? '', /Stale assistant cli contract/u)
+  const persisted = JSON.parse(await readFile(docPath, 'utf8')) as {
+    contract: string
+    manifestFingerprint: string
+  }
+  assert.equal(persisted.contract, contract)
+  assert.notEqual(persisted.manifestFingerprint, '0'.repeat(64))
 })
 
 test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only docs and rewrites them with a generated contract', async () => {
@@ -350,9 +422,11 @@ test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only 
   const persisted = JSON.parse(await readFile(summaryDocPath, 'utf8')) as {
     contract: string
     generatedAt: string
+    manifestFingerprint: string
     schemaVersion: string
   }
   assert.equal(persisted.contract, generatedContract)
+  assert.match(persisted.manifestFingerprint, /^[a-f0-9]{64}$/u)
   assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v1')
   assert.match(persisted.generatedAt, /^\d{4}-\d{2}-\d{2}T/u)
 })

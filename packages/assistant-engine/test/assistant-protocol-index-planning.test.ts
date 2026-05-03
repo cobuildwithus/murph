@@ -19,6 +19,8 @@ const planningMocks = vi.hoisted(() => ({
     supportsNativeResume: false,
   })),
 }))
+const staleThreadInstructionsFingerprint =
+  `thread-instructions-v1:${'0'.repeat(64)}:${'1'.repeat(64)}`
 
 vi.mock('@murphai/health-commons/runtime', () => ({
   listGeneratedAssistantProtocolIndexEntries:
@@ -59,6 +61,11 @@ afterEach(() => {
 
 describe('assistant protocol index planning', () => {
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
+    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
     const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -92,6 +99,101 @@ describe('assistant protocol index planning', () => {
     expect(plan.assistantCliContract).toBe('bootstrap contract')
     expect(plan.systemPrompt).toContain('Execution style:')
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
+  })
+
+  it('skips resumed thread-instruction refresh when the fingerprint matches', async () => {
+    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const route = createRoute()
+
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(initialPlan.threadInstructionsFingerprint).toEqual(
+      expect.stringContaining('thread-instructions-v1:'),
+    )
+    planningMocks.resolveAssistantVaultOverviewBlock.mockClear()
+
+    const resumedPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession({
+        resumeState: {
+          providerSessionId: 'thread-resume',
+          resumeRouteId: route.routeId,
+          threadInstructionsFingerprint:
+            initialPlan.threadInstructionsFingerprint,
+        },
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(resumedPlan.resumeProviderSessionId).toBe('thread-resume')
+    expect(resumedPlan.refreshThreadInstructions).toBe(false)
+    expect(resumedPlan.threadInstructionsFingerprint).toBe(
+      initialPlan.threadInstructionsFingerprint,
+    )
+    expect(resumedPlan.sessionContext).toBeUndefined()
+    expect(planningMocks.resolveAssistantVaultOverviewBlock).not.toHaveBeenCalled()
+  })
+
+  it('refreshes resumed thread instructions when the fingerprint changed', async () => {
+    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const route = createRoute()
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession({
+        resumeState: {
+          providerSessionId: 'thread-resume',
+          resumeRouteId: route.routeId,
+          threadInstructionsFingerprint: staleThreadInstructionsFingerprint,
+        },
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(plan.resumeProviderSessionId).toBe('thread-resume')
+    expect(plan.refreshThreadInstructions).toBe(true)
   })
 })
 
@@ -137,7 +239,9 @@ function createRoute(): CodexThreadIdentity {
   }
 }
 
-function createSession(): AssistantSession {
+function createSession(input?: {
+  resumeState?: AssistantSession['resumeState']
+}): AssistantSession {
   const target = createDefaultLocalAssistantModelTarget()
   if (!target) {
     throw new Error('Expected a default assistant model target.')
@@ -162,7 +266,7 @@ function createSession(): AssistantSession {
         provider: 'codex-cli',
       }),
     ),
-    resumeState: null,
+    resumeState: input?.resumeState ?? null,
     schema: 'murph.assistant-session.v1',
     sessionId: 'session-test',
     target,
@@ -196,6 +300,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
       operatorAuthority: 'direct-operator',
     },
     firstContactStateDocIds: [],
+    onboardingBootstrapStateDocIds: [],
     onboardingGuidanceOpen: false,
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: false,

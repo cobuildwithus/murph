@@ -80,6 +80,7 @@ export interface AssistantProviderTurnInput {
   prompt?: string | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
+  refreshThreadInstructions?: boolean
   resumeProviderSessionId?: string | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
@@ -114,6 +115,7 @@ export interface AssistantProviderTurnExecutionInput {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
   providerConfig: AssistantProviderConfig
+  refreshThreadInstructions?: boolean
   resumeProviderSessionId?: string | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null

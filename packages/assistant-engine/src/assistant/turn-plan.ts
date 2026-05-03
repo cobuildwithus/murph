@@ -1,8 +1,11 @@
 import { resolveAssistantCliAccessContext } from '../assistant-cli-access.js'
 import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
-import { resolveAssistantFirstContactStateDocIds } from './first-contact.js'
-import { isAssistantOnboardingOpen } from './onboarding-state.js'
+import {
+  hasAssistantSeenOnboardingBootstrap,
+  resolveAssistantOnboardingBootstrapStateDocIds,
+  resolveAssistantFirstContactStateDocIds,
+} from './first-contact.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -39,9 +42,22 @@ export async function resolveAssistantTurnSharedPlan(
             conversationPolicy.audience.threadIsDirect ?? resolved.session.binding.threadIsDirect,
         })
       : []
+  const onboardingBootstrapStateDocIds =
+    includeOnboardingGuidance
+      ? resolveAssistantOnboardingBootstrapStateDocIds({
+          actorId: conversationPolicy.audience.actorId ?? resolved.session.binding.actorId,
+          channel: conversationPolicy.audience.channel ?? resolved.session.binding.channel,
+          identityId: conversationPolicy.audience.identityId ?? resolved.session.binding.identityId,
+          threadId: conversationPolicy.audience.threadId ?? resolved.session.binding.threadId,
+          threadIsDirect:
+            conversationPolicy.audience.threadIsDirect ?? resolved.session.binding.threadIsDirect,
+        })
+      : []
   const onboardingGuidanceOpen =
-    await resolveAssistantOnboardingGuidanceOpenForVault({
+    await resolveAssistantOnboardingGuidanceOpenForSession({
       includeOnboardingGuidance,
+      onboardingBootstrapStateDocIds,
+      sessionTurnCount: resolved.session.turnCount,
       vault: input.vault,
     })
   return {
@@ -50,29 +66,64 @@ export async function resolveAssistantTurnSharedPlan(
     conversationPolicy,
     onboardingGuidanceOpen,
     firstContactStateDocIds,
+    onboardingBootstrapStateDocIds,
     operatorAuthority: resolveAssistantOperatorAuthority(input.operatorAuthority),
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,
   }
 }
 
-export async function resolveAssistantOnboardingGuidanceOpenForVault(input: {
+export async function resolveAssistantOnboardingGuidanceOpenForSession(input: {
   includeOnboardingGuidance: boolean
+  onboardingBootstrapStateDocIds: readonly string[]
+  sessionTurnCount: number
   vault: string
 }): Promise<boolean> {
   if (!input.includeOnboardingGuidance) {
     return false
   }
 
+  const onboardingBootstrapSeen =
+    input.onboardingBootstrapStateDocIds.length > 0
+      ? await hasAssistantSeenOnboardingBootstrap({
+          docIds: input.onboardingBootstrapStateDocIds,
+          vault: input.vault,
+        })
+      : false
+
   return resolveAssistantOnboardingGuidanceOpen({
     includeOnboardingGuidance: input.includeOnboardingGuidance,
-    onboardingOpen: await isAssistantOnboardingOpen(input.vault),
+    onboardingBootstrapMarkerResolvable:
+      input.onboardingBootstrapStateDocIds.length > 0,
+    onboardingBootstrapSeen,
+    sessionTurnCount: input.sessionTurnCount,
   })
 }
 
+const ASSISTANT_ONBOARDING_BOOTSTRAP_TURN_LIMIT = 1
+
 export function resolveAssistantOnboardingGuidanceOpen(input: {
   includeOnboardingGuidance: boolean
-  onboardingOpen: boolean
+  onboardingBootstrapMarkerResolvable: boolean
+  onboardingBootstrapSeen: boolean
+  sessionTurnCount: number
 }): boolean {
-  return input.includeOnboardingGuidance && input.onboardingOpen
+  if (!input.includeOnboardingGuidance) {
+    return false
+  }
+
+  if (input.onboardingBootstrapSeen) {
+    return false
+  }
+
+  if (input.onboardingBootstrapMarkerResolvable) {
+    return true
+  }
+
+  const sessionTurnCount =
+    Number.isFinite(input.sessionTurnCount) && input.sessionTurnCount > 0
+      ? Math.trunc(input.sessionTurnCount)
+      : 0
+
+  return sessionTurnCount < ASSISTANT_ONBOARDING_BOOTSTRAP_TURN_LIMIT
 }

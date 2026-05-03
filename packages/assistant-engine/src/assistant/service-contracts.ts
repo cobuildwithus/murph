@@ -4,7 +4,6 @@ import type {
   AssistantChatProvider,
   AssistantBindingDeliveryKind,
   AssistantDeliveryError,
-  AssistantOnboardingCompletionReason,
   AssistantDeliverySource,
   AssistantProviderSessionOptions,
   AssistantSandbox,
@@ -109,6 +108,7 @@ export interface AssistantTurnSharedPlan {
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
   onboardingGuidanceOpen: boolean
   firstContactStateDocIds: string[]
+  onboardingBootstrapStateDocIds: string[]
   operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
   requestedWorkingDirectory: string
@@ -141,12 +141,12 @@ export interface PersistedUserTurn {
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   attemptCount: number
   nonReplayableProviderWork?: boolean
-  onboardingCompletionFallbackReason?: AssistantOnboardingCompletionReason | null
   onboardingGuidanceInjected?: boolean
   providerContinuation: AssistantProviderContinuation
   providerOptions: AssistantProviderSessionOptions
   route: CodexThreadIdentity
   session: AssistantSession
+  threadInstructionsFingerprint?: string | null
   usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
 }

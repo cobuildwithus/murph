@@ -596,7 +596,7 @@ export async function sendAssistantMessageLocal(
           plan: sharedPlan,
           providerResult,
           providerResumeStateAction: resolveProviderResumeStateAction({
-            activeTurnUsedExplicitHistory: activeTurnHistory !== null,
+            usedFallbackProviderFork: activeTurnHistory !== null,
             threadScope,
           }),
           persistUserPromptToTranscript: !userPromptPersistedToTranscript,
@@ -613,10 +613,10 @@ export async function sendAssistantMessageLocal(
         })
 
         await finalizeDeliveredAssistantTurn({
-          onboardingCompletionFallbackReason:
-            providerResult.onboardingCompletionFallbackReason,
           onboardingGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
+          onboardingBootstrapStateDocIds:
+            sharedPlan.onboardingBootstrapStateDocIds,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: deliveryOutcome,
           response: providerResult.response,
@@ -772,15 +772,15 @@ async function runAssistantTurnBestEffort(
 }
 
 function resolveProviderResumeStateAction(input: {
-  activeTurnUsedExplicitHistory: boolean
+  usedFallbackProviderFork: boolean
   threadScope: AssistantProviderThreadScope
 }): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
   if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
   }
 
-  return input.activeTurnUsedExplicitHistory
-    ? 'clear'
+  return input.usedFallbackProviderFork
+    ? 'preserve-existing'
     : 'persist-from-provider-turn'
 }
 

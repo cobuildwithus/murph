@@ -296,6 +296,7 @@ async function executeAssistantProviderAttempt(input: {
           }
         : undefined,
       resumeProviderSessionId: attemptPlan.routePlan.resumeProviderSessionId,
+      refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
       codexCommand:
         attemptPlan.route.codexCommand ??
         executionPlan.input.codexCommand ??
@@ -353,14 +354,14 @@ async function executeAssistantProviderAttempt(input: {
         nonReplayableProviderWork:
           attemptMetadata.executedToolCount > 0 ||
           attemptMetadata.providerActionCount > 0,
-        onboardingCompletionFallbackReason:
-          attemptPlan.routePlan.onboardingCompletionFallbackReason,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
         providerContinuation:
           result.providerContinuation ?? effectiveProviderContinuation,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,
+        threadInstructionsFingerprint:
+          attemptPlan.routePlan.threadInstructionsFingerprint,
         usageAttribution,
         workingDirectory: attemptPlan.routePlan.workingDirectory,
       },
