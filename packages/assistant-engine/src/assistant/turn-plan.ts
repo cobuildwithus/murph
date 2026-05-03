@@ -2,7 +2,7 @@ import { resolveAssistantCliAccessContext } from '../assistant-cli-access.js'
 import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
 import {
-  hasAssistantSeenOnboardingBootstrap,
+  hasAssistantOnboardingBootstrapInjected,
   resolveAssistantOnboardingBootstrapStateDocIds,
   resolveAssistantFirstContactStateDocIds,
 } from './first-contact.js'
@@ -85,7 +85,7 @@ export async function resolveAssistantOnboardingGuidanceOpenForSession(input: {
 
   const onboardingBootstrapSeen =
     input.onboardingBootstrapStateDocIds.length > 0
-      ? await hasAssistantSeenOnboardingBootstrap({
+      ? await hasAssistantOnboardingBootstrapInjected({
           docIds: input.onboardingBootstrapStateDocIds,
           vault: input.vault,
         })
@@ -114,10 +114,6 @@ export function resolveAssistantOnboardingGuidanceOpen(input: {
 
   if (input.onboardingBootstrapSeen) {
     return false
-  }
-
-  if (input.onboardingBootstrapMarkerResolvable) {
-    return true
   }
 
   const sessionTurnCount =

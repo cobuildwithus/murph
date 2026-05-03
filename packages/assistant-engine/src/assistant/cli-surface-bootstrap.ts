@@ -68,7 +68,7 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
     workingDirectory: input.workingDirectory,
   })
   if (!contractSnapshot) {
-    return null
+    return persistedContract?.contract ?? null
   }
   if (
     persistedContract !== null &&
@@ -126,24 +126,37 @@ async function readPersistedAssistantCliSurfaceContract(
   documentPath: string,
 ): Promise<{
   contract: string
-  manifestFingerprint: string | null
+  manifestFingerprint: string
 } | null> {
   try {
     const raw = await readFile(documentPath, 'utf8')
     const value = JSON.parse(raw) as Record<string, unknown>
     const contract = value.contract
-    if (typeof contract === 'string' && contract.trim().length > 0) {
-      return {
-        contract: contract.trim(),
-        manifestFingerprint:
-          typeof value.manifestFingerprint === 'string' &&
-          value.manifestFingerprint.trim().length > 0
-            ? value.manifestFingerprint.trim()
-            : null,
-      }
+    const manifestFingerprint = value.manifestFingerprint
+    const sourceDetail = value.sourceDetail
+    if (
+      value.schemaVersion !== assistantCliSurfaceBootstrapSchemaVersion ||
+      typeof contract !== 'string' ||
+      typeof manifestFingerprint !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(manifestFingerprint) ||
+      (sourceDetail !== 'compact' && sourceDetail !== 'full')
+    ) {
+      return null
     }
 
-    return null
+    const normalizedContract = contract.trim()
+    if (
+      normalizedContract.length === 0 ||
+      normalizedContract.length > assistantCliSurfaceBootstrapContractCharBudget ||
+      !normalizedContract.startsWith('Murph CLI Contract:')
+    ) {
+      return null
+    }
+
+    return {
+      contract: normalizedContract,
+      manifestFingerprint,
+    }
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -173,9 +186,7 @@ async function loadAssistantCliSurfaceContract(input: {
 
   try {
     const contract = await cachedAssistantCliSurfaceContractPromise
-    if (contract === null) {
-      cachedAssistantCliSurfaceContractPromises.delete(cacheKey)
-    }
+    cachedAssistantCliSurfaceContractPromises.delete(cacheKey)
 
     return contract
   } catch {
