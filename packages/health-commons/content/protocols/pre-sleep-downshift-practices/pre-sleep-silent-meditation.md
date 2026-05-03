@@ -180,6 +180,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: Could improve slightly
+    expectedDirection: up_or_stable
     description: Less pre-sleep arousal shortens the awake stretch at the start of the night, turning more time in bed into sleep.
     estimatedChange:
       kind: absolute
@@ -193,6 +194,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:deep-sleep-minutes
     expected: Likely unchanged or slightly higher
+    expectedDirection: up_or_stable
     description: A calmer, less fragmented first part of the night protects early deep-sleep cycles.
     estimatedChange:
       kind: absolute
@@ -206,6 +208,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Could rise modestly
+    expectedDirection: up_or_stable
     description: Lower threat-checking reduces sympathetic load, leaving more room for parasympathetic recovery during sleep.
     estimatedChange:
       kind: relative_percent
@@ -219,6 +222,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
+    expectedDirection: down_or_stable
     description: Lower mental arousal before sleep lets the heart enter the night from a calmer stress set point.
     estimatedChange:
       kind: absolute

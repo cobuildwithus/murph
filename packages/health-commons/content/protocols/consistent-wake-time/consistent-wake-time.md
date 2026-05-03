@@ -390,6 +390,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:hrv-rmssd"
     description: "Stable sleep timing reduces autonomic arousal and supports stronger parasympathetic recovery during the night."
     expected: "May rise if recoverable"
+    expectedDirection: up_or_stable
     estimatedChange:
       kind: "absolute"
       low: 0
@@ -416,6 +417,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:daytime-sleepiness"
     description: "Wake regularity reduces circadian whiplash; enough sleep opportunity lets daytime alertness recover."
     expected: "Should fall, not rise"
+    expectedDirection: down_or_stable
     estimatedChange:
       kind: "absolute"
       low: -2

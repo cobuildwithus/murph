@@ -517,6 +517,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: "biomarker:sleep-efficiency"
   expected: "Could improve slightly"
+  expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: "absolute"
     low: -1

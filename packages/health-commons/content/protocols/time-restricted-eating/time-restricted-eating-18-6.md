@@ -260,6 +260,7 @@ expectedSignalDescriptions:
     basis: Early 6-hour studies lowered 24-hour or mean glucose by a few mg/dL, while fasting-glucose, later-window, isocaloric, and adjacent-window results are weaker or null.
 - biomarkerKey: biomarker:morning-blood-pressure
   expected: down_or_stable
+  expectedDirection: down
   protocolProminence: focus
   description: "Earlier calories and a longer overnight fast lower insulin exposure and support daytime salt and vascular rhythm handling."
   estimatedChange:
@@ -284,6 +285,7 @@ expectedSignalDescriptions:
     basis: Waist reduction is supported mainly by adjacent TRE trials and syntheses rather than direct 18:6 evidence, so it belongs behind weight, glucose, and blood pressure.
 - biomarkerKey: biomarker:sleep-efficiency
   expected: stable
+  expectedDirection: mixed_or_contextual
   protocolProminence: context
   description: "Less late eating reduces nighttime digestion, while hunger, underfueling, and caffeine compensation fragment sleep."
   estimatedChange:

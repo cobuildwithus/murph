@@ -495,6 +495,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:body-weight
   expected: Could trend lower
+  expectedDirection: down
   protocolProminence: focus
   estimatedChange:
     kind: absolute
@@ -508,6 +509,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:waist-circumference
   expected: Could shrink slowly
+  expectedDirection: down
   protocolProminence: focus
   estimatedChange:
     kind: absolute

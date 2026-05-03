@@ -36,8 +36,6 @@ relations:
   target: biomarker:leg-heaviness-score
 - type: secondary_biomarker
   target: biomarker:perceived-recovery-score
-- type: safety_outcome
-  target: biomarker:adverse-symptoms
 - type: cites
   target: source_artifact:doi-10.1519-ssc.0000000000000892
 - type: cites

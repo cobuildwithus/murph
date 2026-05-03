@@ -527,6 +527,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
+    expectedDirection: down_or_stable
     description: "Aerobic power and stroke volume adapt, letting each beat move more blood and lowering the pulse needed at rest."
     estimatedChange:
       kind: absolute
@@ -540,6 +541,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Possible change
+    expectedDirection: mixed_or_contextual
     description: "The workout spikes stress first; adequate recovery restores parasympathetic rebound, while overload suppresses RMSSD."
     estimatedChange:
       kind: relative_percent
@@ -553,6 +555,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: Possible change
+    expectedDirection: mixed_or_contextual
     description: "Recoverable hard sessions raise sleep pressure; late timing or overload keeps arousal high and fragments sleep."
     estimatedChange:
       kind: absolute
@@ -566,6 +569,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:morning-blood-pressure
     expected: Could trend lower
+    expectedDirection: down_or_stable
     description: "Repeated vigorous aerobic work improves vessel relaxation, reducing resistance against each heartbeat."
     estimatedChange:
       kind: absolute

@@ -517,6 +517,7 @@ testPlans:
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:postprandial-glucose-excursion
   expected: meal-window rise may shrink
+  expectedDirection: down
   protocolProminence: focus
   description: Walking pairs gentle leg-muscle contractions with incoming meal glucose, pulling more glucose out of circulation during the post-meal window.
   estimatedChange:
@@ -529,6 +530,7 @@ expectedSignalDescriptions:
     basis: The clearest direct T2D advice trial reported a 3-hour post-meal glucose iAUC ratio of 0.88 overall and 0.78 at dinner; small 10-15 minute after-meal walking studies support the same meal-window direction, with weaker general-adult certainty.
 - biomarkerKey: biomarker:morning-blood-pressure
   expected: should stay stable
+  expectedDirection: mixed_or_contextual
   protocolProminence: context
   description: Post-meal walking shifts blood flow toward digestion and working muscle, interacting with meal-related pressure dips and dizziness risk.
   estimatedChange:
@@ -541,6 +543,7 @@ expectedSignalDescriptions:
     basis: Direct BP efficacy evidence for this exact protocol is not established; postprandial-hypotension and safety sources support monitoring, so a near-baseline morning SBP range is the practical expectation.
 - biomarkerKey: biomarker:resting-heart-rate
   expected: usually stable
+  expectedDirection: mixed_or_contextual
   protocolProminence: context
   description: Small repeated walking bouts add light activity load; inadequate recovery, sleep disruption, illness, or underfueling raise resting pulse.
   estimatedChange:

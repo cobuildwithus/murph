@@ -152,7 +152,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-efficiency
   description: "Earlier sleep onset reduces awake time in bed when time in bed stays stable."
   expected: up_or_stable
-  expectedDirection: up_or_stable
+  expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: absolute
     low: -1

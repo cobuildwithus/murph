@@ -199,6 +199,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:ldl-c"
     description: "Monacolin K inhibits liver cholesterol synthesis, increasing LDL-receptor clearance and pulling LDL particles out of blood."
     expected: "Likely lower"
+    expectedDirection: down
     estimatedChange:
       kind: "absolute"
       low: -40
@@ -212,6 +213,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:apolipoprotein-b"
     description: "Each LDL-related particle carries one ApoB; receptor-driven particle clearance lowers ApoB alongside LDL particles."
     expected: "Could fall"
+    expectedDirection: down
     estimatedChange:
       kind: "relative_percent"
       low: -25
@@ -225,6 +227,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:non-hdl-c"
     description: "Non-HDL-C falls when LDL and other ApoB-containing particles clear faster while HDL stays stable."
     expected: "Could fall"
+    expectedDirection: down
     estimatedChange:
       kind: "absolute"
       low: -40
@@ -238,6 +241,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:total-cholesterol"
     description: "LDL-C makes up much of total cholesterol, so LDL clearance pulls total cholesterol down too."
     expected: "Likely lower"
+    expectedDirection: down
     estimatedChange:
       kind: "absolute"
       low: -45
@@ -251,6 +255,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:triglycerides"
     description: "Lower liver cholesterol synthesis reduces VLDL assembly and secretion, lowering fasting triglyceride traffic."
     expected: "May decrease"
+    expectedDirection: down
     estimatedChange:
       kind: "absolute"
       low: -25
@@ -264,6 +269,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:hdl-c"
     description: "RYR targets LDL production and clearance rather than HDL formation, leaving HDL mostly stable."
     expected: "Usually stable"
+    expectedDirection: mixed_or_contextual
     estimatedChange:
       kind: "absolute"
       low: -3

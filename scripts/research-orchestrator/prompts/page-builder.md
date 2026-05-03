@@ -45,6 +45,7 @@ Protocol page requirements:
   - keepInMind
   - logFields
   - stopConditions
+- expectedSignalDescriptions with `expectedDirection` on every signal that has a numeric `estimatedChange` (see shared-header for direction-matching rules)
 - at least one testPlan
 - experimentOnboarding when the protocol should be runnable in Murph
 - whyItWorks (see copy guidelines below)

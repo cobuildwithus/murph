@@ -1040,6 +1040,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:training-performance
     expected: "Max strength may improve"
+    expectedDirection: up
     protocolProminence: focus
     description: "Creatine raises muscle phosphocreatine stores, helping regenerate ATP during heavy lifts, sprints, and repeated high-intensity efforts."
     estimatedChange:
@@ -1053,6 +1054,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:body-weight
     expected: "May increase"
+    expectedDirection: up
     protocolProminence: focus
     description: "Creatine draws water into muscle and supports training volume, increasing scale weight even before true tissue gain."
     estimatedChange:
@@ -1066,6 +1068,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:lean-body-mass
     expected: "May increase"
+    expectedDirection: up
     protocolProminence: focus
     description: "Intramuscular water retention and training-supported muscle gain raise lean-mass readings over weeks."
     estimatedChange:

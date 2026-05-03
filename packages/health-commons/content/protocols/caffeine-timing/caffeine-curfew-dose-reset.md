@@ -166,6 +166,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:deep-sleep-minutes
   description: "Lower nighttime caffeine exposure allows deeper NREM sleep to return when late caffeine was keeping sleep lighter."
   expected: Could increase
+  expectedDirection: up
   estimatedChange:
     kind: absolute
     low: 5
