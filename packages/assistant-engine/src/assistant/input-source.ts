@@ -1,6 +1,7 @@
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import {
   listAssistantInputEvents,
+  type AssistantInputAttachmentEvidence,
   type AssistantInputAttachmentDescriptor,
   type AssistantInputConversationRef,
   type AssistantInputCursor,
@@ -34,6 +35,7 @@ export interface AssistantInputProjection {
 
 export interface AssistantInputEvent {
   attachmentCount: number
+  attachmentEvidence: AssistantInputAttachmentEvidence
   attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
   conversation: AssistantInputConversationRef | null
   cursor: AssistantInputCursor
@@ -214,6 +216,7 @@ export function assistantInputCandidateFromStoredEvent(
     },
     event: {
       attachmentCount: event.content.attachmentDescriptors.length,
+      attachmentEvidence: event.attachmentEvidence,
       attachmentDescriptors: event.content.attachmentDescriptors,
       conversation: event.conversation,
       cursor: event.cursor,

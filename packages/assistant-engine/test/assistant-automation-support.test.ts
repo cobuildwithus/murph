@@ -46,6 +46,15 @@ function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value))
 }
 
+const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
+  attachments: [],
+  optionalInboxCaptureId: null,
+  reasonCode: null,
+  source: null,
+  status: 'not_attempted',
+  updatedAt: null,
+} satisfies AssistantInputCandidate['event']['attachmentEvidence']
+
 const promptBuilderMocks = vi.hoisted(() => ({
   buildInboxModelAttachmentBundles: vi.fn(),
   hasInboxMultimodalAttachmentEvidenceCandidate: vi.fn(),
@@ -180,6 +189,7 @@ function createTelegramAssistantInputCandidate(input: {
     },
     event: {
       attachmentCount: 0,
+      attachmentEvidence: DEFAULT_TEST_ATTACHMENT_EVIDENCE,
       attachmentDescriptors: [],
       conversation: {
         accountId: 'account-1',
