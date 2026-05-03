@@ -31,7 +31,10 @@ import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
-import type { HostedRuntimePlatform } from "./hosted-runtime/platform.ts";
+import type {
+  HostedRuntimeDeviceSyncMessagingReturnTarget,
+  HostedRuntimePlatform,
+} from "./hosted-runtime/platform.ts";
 import {
   startRuntimeLivenessHeartbeat,
   type RuntimeLivenessRejectionReason,
@@ -90,6 +93,7 @@ export type {
   HostedRuntimeActiveTurnInputCheckpointInput,
   HostedRuntimeActiveTurnInputMailboxRefresh,
   HostedRuntimeActiveTurnInputMailboxRefreshInput,
+  HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeIssueExportPort,
@@ -187,6 +191,9 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  recordMessagingReturnTarget?(
+    target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
+  ): void;
   signal?: AbortSignal | null;
 }
 
@@ -322,8 +329,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     assertRuntimeLiveness();
+    let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
+      null;
     const hostedCliBridge = await startHostedCliRuntimeBridge({
       deviceSyncPort: guardedRuntime.platform.deviceSyncPort,
+      messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
     });
     const runtimeEnv = {
       ...hostedCodexRuntime.runtimeEnv,
@@ -362,6 +372,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     return outcome;
                   },
                   {
+                    recordMessagingReturnTarget: (target) => {
+                      hostedCliBridgeMessagingReturnTarget = target;
+                    },
                     signal: livenessAbortController.signal,
                   },
                 ),

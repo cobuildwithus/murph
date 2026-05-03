@@ -62,6 +62,46 @@ test("hosted CLI runtime bridge creates device connect links through the runtime
   }
 });
 
+test("hosted CLI runtime bridge adds only server-owned messaging return targets", async () => {
+  let serverOwnedReturnTarget: "imessage" | "telegram" | null = "telegram";
+  const deviceSyncPort = createDeviceSyncPortStub();
+  const bridge = await startHostedCliRuntimeBridge({
+    deviceSyncPort,
+    messagingReturnTarget: () => serverOwnedReturnTarget,
+  });
+  assert.ok(bridge);
+
+  try {
+    await requestHostedCliDeviceConnectLink({
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+      connectTarget: "whoop",
+    });
+
+    expect(deviceSyncPort.createConnectLink).toHaveBeenLastCalledWith({
+      connectTarget: "whoop",
+      messagingReturnTarget: "telegram",
+    });
+
+    serverOwnedReturnTarget = null;
+    await requestHostedCliDeviceConnectLink({
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+      connectTarget: "oura",
+    });
+
+    expect(deviceSyncPort.createConnectLink).toHaveBeenLastCalledWith({
+      connectTarget: "oura",
+    });
+  } finally {
+    await bridge.stop();
+  }
+});
+
 test("hosted CLI runtime bridge rejects bad tokens and model-owned return metadata", async () => {
   const bridge = await startHostedCliRuntimeBridge({
     deviceSyncPort: createDeviceSyncPortStub(),

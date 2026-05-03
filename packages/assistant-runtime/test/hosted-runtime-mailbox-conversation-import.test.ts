@@ -863,6 +863,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
   test("keeps deterministic local-capture dedupe out of hosted cursor terms", async () => {
     const item = createResolvedConversationMailboxItem();
+    const decodedWakes: HostedExecutionConversationMessageWake[] = [];
     const importItem = createHostedConversationMailboxImportItem({
       decodePayload: createDecodedPayloadDecoder(createConversationWake()),
       async importConversationWake() {
@@ -873,6 +874,9 @@ describe("hosted mailbox conversation import adapter", () => {
             parserProcessed: 0,
           },
         };
+      },
+      onDecodedConversationWake(wake) {
+        decodedWakes.push(wake);
       },
       async prepareWakeContext() {},
       runtime: createRuntime(),
@@ -885,6 +889,11 @@ describe("hosted mailbox conversation import adapter", () => {
     if (first.status !== "imported" || second.status !== "imported") {
       throw new Error("Expected imported mailbox outcomes.");
     }
+    assert.equal(decodedWakes.length, 2);
+    assert.deepEqual(
+      decodedWakes.map((wake) => wake.kind),
+      ["conversation.message", "conversation.message"],
+    );
 
     assert.deepEqual(
       { ...first, afterCheckpoint: typeof first.afterCheckpoint },

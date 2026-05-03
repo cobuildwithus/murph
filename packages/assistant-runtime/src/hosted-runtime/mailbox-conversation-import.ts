@@ -167,6 +167,7 @@ export function createHostedConversationMailboxImportItem(input: {
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
+  onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -188,6 +189,7 @@ export async function importHostedConversationMailboxItem(input: {
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
   item: HostedMailboxResolvedImportItem;
+  onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -239,6 +241,8 @@ export async function importHostedConversationMailboxItem(input: {
       status: "blocked",
     };
   }
+
+  input.onDecodedConversationWake?.(decoded.wake);
 
   const stageAssistantInputEvent =
     input.stageAssistantInputEvent ?? stageHostedConversationAssistantInputEvent;
