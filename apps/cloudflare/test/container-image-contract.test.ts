@@ -550,6 +550,12 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["runner:bundle:assemble-only"]).toBe(
       "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
     );
+    expect(packageJson.scripts?.["runner:bundle:hosted-local"]).toBe(
+      "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
+    );
+    expect(packageJson.scripts?.["runner:bundle:hosted-local"]).not.toContain(
+      "--skip-bundle-only-dependencies",
+    );
     expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).not.toContain("runner:bundle:assemble-only");
     expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain(".deploy/runner-smoke-bundle");
     expect(packageJson.scripts?.["runner:docker:smoke:image"]).toBe(
