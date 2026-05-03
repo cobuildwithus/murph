@@ -10,6 +10,9 @@ import {
 } from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
 import {
+  listGeneratedAssistantProtocolIndexEntries,
+} from '@murphai/health-commons/runtime'
+import {
   resolveCodexAssistantTargetCapabilities,
 } from '../provider-registry.js'
 import { buildAssistantActiveExperimentContextBlock } from '../active-experiment-context.js'
@@ -352,6 +355,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           workingDirectory,
         })
       : null
+  const assistantSupportedExperimentProtocols =
+    input.profile.promptProfile === 'conversation'
+      ? resolveAssistantSupportedExperimentProtocols()
+      : []
   const vaultOverview = shouldPrepareBootstrapContext
     ? await resolveAssistantVaultOverviewBlock(input.input.vault)
     : null
@@ -391,6 +398,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+            assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
@@ -426,6 +434,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     workingDirectory,
     systemPrompt,
+  }
+}
+
+function resolveAssistantSupportedExperimentProtocols() {
+  try {
+    return listGeneratedAssistantProtocolIndexEntries()
+  } catch {
+    return []
   }
 }
 

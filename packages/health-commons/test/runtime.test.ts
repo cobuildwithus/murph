@@ -14,6 +14,7 @@ import {
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebExperimentIndex,
   getGeneratedHealthCommonsWebRouteIndex,
+  listGeneratedAssistantProtocolIndexEntries,
   loadGeneratedHealthCommonsCatalog,
   loadGeneratedHealthCommonsWebExperimentProtocolTab,
   loadGeneratedHealthCommonsWebExperimentResearchTab,
@@ -301,6 +302,31 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(
       experimentIndex.experiments.find((entry) => entry.routeId === "finnish-sauna"),
     ).toEqual(expect.objectContaining({ sortRank: 10 }));
+  });
+
+  it("exposes a compact assistant protocol index from generated experiments", () => {
+    const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
+    const entries = listGeneratedAssistantProtocolIndexEntries();
+
+    expect(entries).toEqual(
+      experimentIndex.experiments
+        .filter((entry) => entry.status !== "deprecated")
+        .map((entry) => ({
+          category: entry.category,
+          routeId: entry.routeId,
+          title: entry.title,
+        })),
+    );
+    expect(entries).toContainEqual({
+      category: "Supplementation",
+      routeId: "creatine-monohydrate",
+      title: "Creatine Monohydrate",
+    });
+    expect(
+      entries.every((entry) =>
+        Object.keys(entry).sort().join(",") === "category,routeId,title"
+      ),
+    ).toBe(true);
   });
 
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {

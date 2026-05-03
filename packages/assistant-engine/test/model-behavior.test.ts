@@ -324,6 +324,34 @@ describe('assistant system prompt cache stability', () => {
 })
 
 describe('assistant experiment onboarding guidance', () => {
+  it('renders the compact supported experiment protocol index when provided', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantSupportedExperimentProtocols: [
+        {
+          category: 'Recovery',
+          routeId: 'finnish-sauna',
+          title: 'Finnish Dry Sauna',
+        },
+        {
+          category: 'Exercise',
+          routeId: 'norwegian-4x4',
+          title: 'Norwegian 4x4',
+        },
+      ],
+    }))
+
+    expect(prompt).toContain('Supported experiment protocols:')
+    expect(prompt).toContain('- finnish-sauna | Finnish Dry Sauna | Recovery')
+    expect(prompt).toContain('- norwegian-4x4 | Norwegian 4x4 | Exercise')
+    expect(prompt).toContain('Use this index only for first-pass recognition')
+    expect(prompt).toContain(
+      'Before setup, run `vault-cli commons protocol show <routeId> --format json`',
+    )
+    expect(prompt).toContain(
+      'For broad or ambiguous requests, run `vault-cli commons protocol explore <query> --format json`',
+    )
+  })
+
   it('points richer experiment setup at the typed apply-onboarding command', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,

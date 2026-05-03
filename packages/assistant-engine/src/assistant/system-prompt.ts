@@ -23,6 +23,7 @@ export interface AssistantSystemPromptInput {
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantKnowledgeToolsAvailable?: boolean;
+  assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
@@ -32,6 +33,12 @@ export interface AssistantSystemPromptInput {
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
   vaultOverview?: string | null;
+}
+
+export interface AssistantSupportedExperimentProtocol {
+  category: string;
+  routeId: string;
+  title: string;
 }
 
 export interface AssistantNotificationDecisionSystemPromptInput {
@@ -164,6 +171,9 @@ function buildStableRouteCapabilityPrompt(
 ): string {
   return joinPromptSections(
     buildAssistantHealthCommonsGuidanceText(),
+    buildAssistantSupportedExperimentProtocolIndexText(
+      input.assistantSupportedExperimentProtocols ?? []
+    ),
     buildAssistantVaultNavigationText({
       assistantHostedDeviceConnectAvailable:
         input.assistantHostedDeviceConnectAvailable ?? false,
@@ -383,6 +393,25 @@ function buildAssistantHealthCommonsCoreGuidanceText(): string {
 
 function buildHealthCommonsDiscoverySurfaceText(): string {
   return "Use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for discovery, `vault-cli commons protocol show <key-or-slug> --format json` for the exact page, and `vault-cli commons source list --protocol <key-or-slug> --format json` when the user asks what evidence backs a protocol.";
+}
+
+function buildAssistantSupportedExperimentProtocolIndexText(
+  protocols: readonly AssistantSupportedExperimentProtocol[]
+): string | null {
+  if (protocols.length === 0) {
+    return null;
+  }
+
+  const lines = protocols.map((protocol) =>
+    `- ${protocol.routeId} | ${protocol.title} | ${protocol.category}`
+  );
+
+  return [
+    "Supported experiment protocols:",
+    ...lines,
+    "",
+    "Use this index only for first-pass recognition. Before setup, run `vault-cli commons protocol show <routeId> --format json`. For broad or ambiguous requests, run `vault-cli commons protocol explore <query> --format json`.",
+  ].join("\n");
 }
 
 function buildAssistantVaultNavigationText(input: {
