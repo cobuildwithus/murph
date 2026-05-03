@@ -186,6 +186,7 @@ function AccountMenu({
   const [deviceSyncStatusState, setDeviceSyncStatusState] =
     useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
   const [signOutPending, setSignOutPending] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const hasAccount = initialAuth.authenticated;
   const userKey = hasAccount ? "app-session" : null;
 
@@ -232,68 +233,88 @@ function AccountMenu({
   }
 
   async function handleSignOut() {
+    if (signOutPending) {
+      return;
+    }
+
+    setSignOutError(null);
     setSignOutPending(true);
 
     try {
       await logoutHostedAppSession();
       router.refresh();
+    } catch {
+      setSignOutError("Sign out did not finish. Try again.");
     } finally {
       setSignOutPending(false);
     }
   }
 
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <SidebarMenuButton
-                size="lg"
-                aria-label="Open user menu"
-                className="h-auto py-3 text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5 md:py-2"
-              />
-            }
-          >
-            <Avatar className="size-10 border border-white/15 md:size-8">
-              <AvatarFallback className="bg-white/5 text-[0.6875rem] font-medium text-white/80">
-                M
-              </AvatarFallback>
-            </Avatar>
-            {deviceSyncStatus ? (
-              <div className="grid flex-1 text-left leading-tight">
-                <span className="flex items-center gap-1.5 text-[0.6875rem] text-white/50">
-                  <span
-                    className={cn(
-                      "size-1.5 shrink-0 rounded-full",
-                      accountStatusDotClass(deviceSyncStatus.tone),
-                    )}
-                  />
-                  <span className="truncate">{deviceSyncStatus.message}</span>
-                </span>
-              </div>
-            ) : null}
-            <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="end" className="min-w-56">
-            <DropdownMenuGroup>
-              <DropdownMenuItem render={<Link href="/connect" />}>
-                Devices
-              </DropdownMenuItem>
-              <DropdownMenuItem render={<Link href="/settings" />}>
-                Settings
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => void handleSignOut()}>
-                {signOutPending ? "Signing out..." : "Sign out"}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <>
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <SidebarMenuButton
+                  size="lg"
+                  aria-label="Open user menu"
+                  className="h-auto py-3 text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5 md:py-2"
+                />
+              }
+            >
+              <Avatar className="size-10 border border-white/15 md:size-8">
+                <AvatarFallback className="bg-white/5 text-[0.6875rem] font-medium text-white/80">
+                  M
+                </AvatarFallback>
+              </Avatar>
+              {deviceSyncStatus ? (
+                <div className="grid flex-1 text-left leading-tight">
+                  <span className="flex items-center gap-1.5 text-[0.6875rem] text-white/50">
+                    <span
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full",
+                        accountStatusDotClass(deviceSyncStatus.tone),
+                      )}
+                    />
+                    <span className="truncate">{deviceSyncStatus.message}</span>
+                  </span>
+                </div>
+              ) : null}
+              <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end" className="min-w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuItem render={<Link href="/connect" />}>
+                  Devices
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/settings" />}>
+                  Settings
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  disabled={signOutPending}
+                  onClick={() => void handleSignOut()}
+                >
+                  {signOutPending ? "Signing out..." : "Sign out"}
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarMenuItem>
+      </SidebarMenu>
+      {signOutError ? (
+        <p
+          className="mt-2 px-2 text-[0.6875rem] leading-snug text-[#f0c6b0]"
+          role="alert"
+        >
+          {signOutError}
+        </p>
+      ) : null}
+    </>
   );
 }
 

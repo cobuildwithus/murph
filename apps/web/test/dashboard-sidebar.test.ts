@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 
 import {
+  act,
   cloneElement,
   createElement,
   isValidElement,
   type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  logoutHostedAppSession: vi.fn(),
   refresh: vi.fn(),
+  requestHostedOnboardingJson: vi.fn(),
   usePathname: vi.fn(),
 }));
 
@@ -33,6 +36,14 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
   HostedAuthPanel: () => createElement("div", null, "Hosted auth panel"),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
+  logoutHostedAppSession: mocks.logoutHostedAppSession,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
+  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
 }));
 
 vi.mock("@/src/components/ui/button", () => ({
@@ -114,13 +125,25 @@ vi.mock("@/src/components/ui/dropdown-menu", () => ({
     createElement("div", null, children),
   DropdownMenuItem: ({
     children,
+    disabled,
+    onClick,
     render,
   }: {
     children: ReactNode;
+    disabled?: boolean;
+    onClick?: () => void;
     render?: ReactNode;
   }) => isValidElement<{ children?: ReactNode }>(render)
     ? createElement("div", null, cloneElement(render, undefined, children))
-    : createElement("div", null, children),
+    : createElement(
+        "div",
+        {
+          "aria-disabled": disabled ? "true" : undefined,
+          onClick,
+          role: "menuitem",
+        },
+        children,
+      ),
   DropdownMenuLabel: ({ children }: { children: ReactNode }) =>
     createElement("div", null, children),
   DropdownMenuSeparator: () => createElement("hr"),
@@ -129,9 +152,23 @@ vi.mock("@/src/components/ui/dropdown-menu", () => ({
 import { Sidebar } from "../src/components/dashboard/sidebar";
 import type { HostedDeviceSyncSettingsSource } from "../src/lib/device-sync/settings-surface";
 import { summarizeSidebarDeviceSyncStatus } from "../src/lib/device-sync/sidebar-status";
+import { renderClientComponent } from "./render-client-component";
+
+let cleanupRender: (() => Promise<void>) | null = null;
+
+afterEach(async () => {
+  if (cleanupRender) {
+    await cleanupRender();
+    cleanupRender = null;
+  }
+});
 
 beforeEach(() => {
   mocks.usePathname.mockReturnValue("/experiments");
+  mocks.logoutHostedAppSession.mockReset();
+  mocks.logoutHostedAppSession.mockResolvedValue(undefined);
+  mocks.requestHostedOnboardingJson.mockReset();
+  mocks.requestHostedOnboardingJson.mockRejectedValue(new Error("unavailable"));
   mocks.refresh.mockClear();
 });
 
@@ -205,6 +242,80 @@ test("Sidebar renders signed-in account controls without a visible fallback labe
   assert.doesNotMatch(markup, /\*{3,4}\s*\d{4}/);
   assert.doesNotMatch(markup, /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/);
   assert.doesNotMatch(markup, /\bdid:[a-z]+:[\w.-]+\b/);
+});
+
+test("Sidebar surfaces a visible error when sign out fails", async () => {
+  let rejectSignOut!: (reason?: unknown) => void;
+
+  mocks.logoutHostedAppSession.mockImplementationOnce(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectSignOut = reject;
+      }),
+  );
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(Sidebar, {
+      initialAuth: {
+        authenticated: true,
+        label: null,
+      },
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  const signOutItem = Array.from(
+    container.querySelectorAll('[role="menuitem"]'),
+  ).find((element) => element.textContent === "Sign out");
+  assert.ok(signOutItem);
+
+  await act(async () => {
+    signOutItem.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  assert.equal(mocks.logoutHostedAppSession.mock.calls.length, 1);
+  assert.match(container.textContent ?? "", /Signing out\.\.\./);
+
+  await act(async () => {
+    signOutItem.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  assert.equal(mocks.logoutHostedAppSession.mock.calls.length, 1);
+
+  await act(async () => {
+    rejectSignOut(new Error("network"));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  assert.equal(mocks.refresh.mock.calls.length, 0);
+  assert.match(
+    container.textContent ?? "",
+    /Sign out did not finish\. Try again\./,
+  );
+  assert.equal(
+    container.querySelector('[role="alert"]')?.textContent,
+    "Sign out did not finish. Try again.",
+  );
+
+  mocks.logoutHostedAppSession.mockResolvedValueOnce(undefined);
+
+  await act(async () => {
+    signOutItem.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  assert.equal(mocks.logoutHostedAppSession.mock.calls.length, 2);
+  assert.equal(mocks.refresh.mock.calls.length, 1);
+  assert.doesNotMatch(
+    container.textContent ?? "",
+    /Sign out did not finish\. Try again\./,
+  );
+  assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
 test("Sidebar keeps Settings out of the primary navigation", () => {
