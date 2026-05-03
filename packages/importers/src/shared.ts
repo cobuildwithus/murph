@@ -41,7 +41,9 @@ function parseValue<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
 
   if (!result.success) {
-    throw new TypeError(result.error.issues[0]?.message ?? "Invalid value");
+    throw new TypeError(result.error.issues[0]?.message ?? "Invalid value", {
+      cause: result.error,
+    });
   }
 
   return result.data;
