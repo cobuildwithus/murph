@@ -164,21 +164,41 @@ test("Sidebar keeps the Biomarkers tab active across biomarker section routes", 
   );
 });
 
-test("Sidebar renders account menu with signed-in user label", () => {
+test("Sidebar renders account menu with a supplied signed-in user label", () => {
   mocks.usePathname.mockReturnValue("/experiments");
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
       initialAuth: {
         authenticated: true,
-        label: "Account",
+        label: "Research profile",
       },
     }),
   );
 
-  assert.match(markup, /Account/);
+  assert.match(markup, /Research profile/);
   assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
   assert.match(markup, /Sign out/);
+});
+
+test("Sidebar renders signed-in account controls without a visible fallback label", () => {
+  mocks.usePathname.mockReturnValue("/experiments");
+
+  const markup = renderToStaticMarkup(
+    createElement(Sidebar, {
+      initialAuth: {
+        authenticated: true,
+        label: null,
+      },
+    }),
+  );
+
+  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
+  assert.match(markup, /Sign out/);
+  assert.doesNotMatch(markup, />Account</);
+  assert.doesNotMatch(markup, /\*{3,4}\s*\d{4}/);
+  assert.doesNotMatch(markup, /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/);
+  assert.doesNotMatch(markup, /\bdid:[a-z]+:[\w.-]+\b/);
 });
 
 test("Sidebar keeps Settings out of the primary navigation", () => {
@@ -188,7 +208,7 @@ test("Sidebar keeps Settings out of the primary navigation", () => {
     createElement(Sidebar, {
       initialAuth: {
         authenticated: true,
-        label: "Account",
+        label: null,
       },
     }),
   );
@@ -260,7 +280,7 @@ test("Sidebar does not render a hardcoded wearable connection status", () => {
     createElement(Sidebar, {
       initialAuth: {
         authenticated: true,
-        label: "Account",
+        label: null,
       },
     }),
   );

@@ -50,7 +50,7 @@ const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAu
 
   return {
     authenticated: true,
-    label: "Account",
+    label: null,
   };
 });
 

@@ -28,6 +28,7 @@ describe("hosted retention cron route", () => {
     mocks.runHostedRetentionCleanup.mockResolvedValue({
       expiredMailboxItemsDeleted: 7,
       oldRuntimeLogsDeleted: 6,
+      staleWebSessionsDeleted: 5,
     });
   });
 
@@ -44,6 +45,7 @@ describe("hosted retention cron route", () => {
       cleanup: {
         expiredMailboxItemsDeleted: 7,
         oldRuntimeLogsDeleted: 6,
+        staleWebSessionsDeleted: 5,
       },
     });
   });

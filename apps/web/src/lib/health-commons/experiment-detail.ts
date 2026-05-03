@@ -934,20 +934,34 @@ function formatFrequency(protocol: HealthCommonsProtocolSpec): string | null {
   return null;
 }
 
+function formatDurationValue(minutes: number): string {
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  if (minutes >= 120) {
+    const hours = Math.round((minutes / 60) * 10) / 10;
+    return `${hours} hours`;
+  }
+  return `${minutes} minutes`;
+}
+
 function formatDuration(protocol: HealthCommonsProtocolSpec): string | null {
   const min = protocol.durationMinutes?.min;
   const max = protocol.durationMinutes?.max;
 
   if (typeof min === "number" && typeof max === "number") {
-    return min === max ? `${min} minutes per session.` : `${min}–${max} minutes per session.`;
+    return min === max
+      ? `${formatDurationValue(min)} per session.`
+      : `${formatDurationValue(min)}–${formatDurationValue(max)} per session.`;
   }
 
   if (typeof min === "number") {
-    return `At least ${min} minutes per session.`;
+    return `At least ${formatDurationValue(min)} per session.`;
   }
 
   if (typeof max === "number") {
-    return `Up to ${max} minutes per session.`;
+    return `Up to ${formatDurationValue(max)} per session.`;
   }
 
   return null;

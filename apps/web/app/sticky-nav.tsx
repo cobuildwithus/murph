@@ -11,10 +11,12 @@ const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 export function StickyNav({
   authenticated,
   githubStarCount = null,
+  preloadAuthPanel = false,
   splitUnauthenticatedAuth = false,
 }: {
   authenticated: boolean;
   githubStarCount?: number | null;
+  preloadAuthPanel?: boolean;
   splitUnauthenticatedAuth?: boolean;
 }) {
   const [scrolled, setScrolled] = useState(false);
@@ -95,6 +97,7 @@ export function StickyNav({
           authLabel="Dashboard"
           authenticated={authenticated}
           context="nav"
+          {...(preloadAuthPanel ? { preloadAuthPanel: true } : {})}
           splitUnauthenticated={splitUnauthenticatedAuth}
         />
       </div>
