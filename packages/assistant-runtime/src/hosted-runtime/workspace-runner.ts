@@ -25,6 +25,8 @@ import {
 } from "./mailbox-checkpoint.ts";
 import type {
   HostedMailboxItemImportOutcome,
+  HostedMailboxPostCheckpointEffect,
+  HostedMailboxPostCheckpointEffectResult,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
 import type {
@@ -37,6 +39,7 @@ import {
   buildHostedRuntimeLogContextFields,
   compactHostedRuntimeLogCodes,
   type HostedRuntimeLogContext,
+  toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 import {
@@ -139,15 +142,19 @@ export interface HostedWorkspaceRunnerInput {
   now?: () => string;
 }
 
-type HostedMailboxPostCheckpointEffect = () => Promise<void>;
-
 interface HostedMailboxPostCheckpointEffectsResult {
   attempted: boolean;
+  effectAttachmentEvidenceUpdated: readonly (boolean | null)[];
+  effectKinds: readonly HostedMailboxPostCheckpointEffectResult["kind"][];
+  effectProjectionUpdated: readonly (boolean | null)[];
+  effectReasonCodes: readonly (string | null)[];
+  effectStatuses: readonly HostedMailboxPostCheckpointEffectResult["status"][];
   errorCodes: readonly string[];
   failureCodeDetails: readonly string[];
   failureNames: readonly string[];
   failureSummaries: readonly string[];
   failed: number;
+  partial: number;
   succeeded: number;
 }
 
@@ -830,7 +837,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder,
 ): HostedWorkspaceCheckpointRequestSession {
   let expectedWorkspaceVersion: string | null = null;
-  const mailboxPostCheckpointEffects: Array<() => Promise<void>> = [];
+  const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
 
@@ -880,16 +887,35 @@ function createHostedWorkspaceCheckpointRequestSession(
 async function runHostedMailboxPostCheckpointEffectsBestEffort(
   effects: readonly HostedMailboxPostCheckpointEffect[],
 ): Promise<HostedMailboxPostCheckpointEffectsResult> {
+  const effectAttachmentEvidenceUpdated: Array<boolean | null> = [];
+  const effectKinds: Array<HostedMailboxPostCheckpointEffectResult["kind"]> = [];
+  const effectProjectionUpdated: Array<boolean | null> = [];
+  const effectReasonCodes: Array<string | null> = [];
+  const effectStatuses: Array<HostedMailboxPostCheckpointEffectResult["status"]> = [];
   const errorCodes: string[] = [];
   const failureCodeDetails: string[] = [];
   const failureNames: string[] = [];
   const failureSummaries: string[] = [];
   let failed = 0;
+  let partial = 0;
   let succeeded = 0;
   for (const effect of effects) {
     try {
-      await effect();
-      succeeded += 1;
+      const result = await effect();
+      effectAttachmentEvidenceUpdated.push(result.attachmentEvidenceUpdated);
+      effectKinds.push(result.kind);
+      effectProjectionUpdated.push(result.projectionUpdated);
+      effectReasonCodes.push(normalizeHostedMailboxPostCheckpointEffectReasonCode(result.reasonCode));
+      effectStatuses.push(result.status);
+      if (result.status === "failed") {
+        failed += 1;
+        errorCodes.push("post_checkpoint_effect_reported_failed");
+      } else if (result.status === "partial") {
+        partial += 1;
+        errorCodes.push("post_checkpoint_effect_reported_partial");
+      } else {
+        succeeded += 1;
+      }
     } catch (error) {
       // Mailbox post-checkpoint effects are enrichment only. They must not roll
       // back durable mailbox or assistant checkpoints.
@@ -910,11 +936,17 @@ async function runHostedMailboxPostCheckpointEffectsBestEffort(
   }
   return {
     attempted: effects.length > 0,
+    effectAttachmentEvidenceUpdated,
+    effectKinds,
+    effectProjectionUpdated,
+    effectReasonCodes,
+    effectStatuses,
     errorCodes,
     failureCodeDetails: compactHostedMailboxPostCheckpointFailureValues(failureCodeDetails),
     failureNames: compactHostedMailboxPostCheckpointFailureValues(failureNames),
     failureSummaries: compactHostedMailboxPostCheckpointFailureValues(failureSummaries),
     failed,
+    partial,
     succeeded,
   };
 }
@@ -940,6 +972,12 @@ function buildHostedMailboxPostCheckpointEffectFailureLog(error: unknown): {
 
 function compactHostedMailboxPostCheckpointFailureValues(values: readonly string[]): string[] {
   return Array.from(new Set(values)).slice(0, 16);
+}
+
+function normalizeHostedMailboxPostCheckpointEffectReasonCode(
+  reasonCode: string | null,
+): string | null {
+  return reasonCode === null ? null : toHostedRuntimeLogCode(reasonCode);
 }
 
 function normalizeHostedMailboxPostCheckpointFailureValue(value: unknown): string | null {
@@ -997,10 +1035,15 @@ async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(inpu
       ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
       component: "mailbox",
       eventCode: "mailbox.post_checkpoint_effects_finished",
-      level: result.failed > 0 ? "warn" : "info",
+      level: result.failed > 0 || result.partial > 0 ? "warn" : "info",
       phase: "import",
       redactedJson: {
         attemptedCount: effects.length,
+        effectAttachmentEvidenceUpdated: result.effectAttachmentEvidenceUpdated.slice(0, 16),
+        effectKinds: result.effectKinds.slice(0, 16),
+        effectProjectionUpdated: result.effectProjectionUpdated.slice(0, 16),
+        effectReasonCodes: result.effectReasonCodes.slice(0, 16),
+        effectStatuses: result.effectStatuses.slice(0, 16),
         errorCodes: compactHostedRuntimeLogCodes(result.errorCodes),
         ...(result.failureCodeDetails.length > 0
           ? { failureCodeDetails: [...result.failureCodeDetails] }
@@ -1010,6 +1053,7 @@ async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(inpu
           ? { failureSummaries: [...result.failureSummaries] }
           : {}),
         failedCount: result.failed,
+        partialCount: result.partial,
         succeededCount: result.succeeded,
       },
     },

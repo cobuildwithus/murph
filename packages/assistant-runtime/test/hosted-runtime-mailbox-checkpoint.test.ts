@@ -32,12 +32,25 @@ import {
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import type {
+  HostedMailboxPostCheckpointEffectResult,
+} from "../src/hosted-runtime/mailbox-import.ts";
+import type {
   HostedRuntimeMailboxPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_checkpoint";
+
+function createInboxProjectionEffectResult(): HostedMailboxPostCheckpointEffectResult {
+  return {
+    attachmentEvidenceUpdated: null,
+    kind: "inbox_projection",
+    projectionUpdated: true,
+    reasonCode: null,
+    status: "succeeded",
+  };
+}
 
 describe("hosted mailbox import checkpoint wrapper", () => {
   test("writes changed mailbox import state before checkpointing the workspace", async () => {
@@ -183,6 +196,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
           return {
             afterCheckpoint: async () => {
               order.push("afterCheckpoint");
+              return createInboxProjectionEffectResult();
             },
             status: "imported",
           };
@@ -198,7 +212,8 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       assert.equal(result.stateChanged, true);
       assert.deepEqual(order, ["import", "checkpoint"]);
       assert.equal(result.afterCheckpointEffects.length, 1);
-      await result.afterCheckpointEffects[0]?.();
+      const effectResult = await result.afterCheckpointEffects[0]?.();
+      assert.deepEqual(effectResult, createInboxProjectionEffectResult());
       assert.deepEqual(order, ["import", "checkpoint", "afterCheckpoint"]);
     } finally {
       await rm(vaultRoot, {
@@ -243,6 +258,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
           return {
             afterCheckpoint: async () => {
               effectRan = true;
+              return createInboxProjectionEffectResult();
             },
             status: "imported",
           };

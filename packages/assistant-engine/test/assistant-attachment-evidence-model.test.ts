@@ -61,6 +61,51 @@ describe('assistant input attachment evidence model materialization', () => {
   })
 
   it.each([
+    {
+      mime: null,
+      mediaType: 'image/jpeg',
+      rawPath: 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.jpg',
+    },
+    {
+      mime: 'application/octet-stream',
+      mediaType: 'image/png',
+      rawPath: 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.png',
+    },
+  ])('infers routable image evidence from assistant-input extension for $rawPath', async ({
+    mediaType,
+    mime,
+    rawPath,
+  }) => {
+    const vaultRoot = await createTempVaultRoot()
+    await writeVaultFile(vaultRoot, rawPath, Buffer.from([0xff, 0xd8, 0xff]))
+
+    const bundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: createAttachmentEvidence({
+        kind: 'image',
+        mime,
+        rawPath,
+      }),
+      vaultRoot,
+    })
+
+    expect(hasAssistantInputAttachmentEvidenceCandidate(bundle)).toBe(true)
+    expect(bundle.routingImage).toMatchObject({
+      eligible: true,
+      mediaType,
+      reason: 'supported-format',
+    })
+
+    const prepared = await prepareAssistantInputMultimodalUserMessageContent({
+      attachmentSources: [bundle],
+      prompt: 'Look at this image.',
+      vaultRoot,
+    })
+
+    expect(prepared.inputMode).toBe('multimodal')
+    expect(prepared.userMessageContent?.some((part) => part.type === 'image')).toBe(true)
+  })
+
+  it.each([
     'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
     'raw/inbox/capture-1/attachments/01__scan.pdf',
   ])('keeps PDF raw artifact ref %s as inspectable local filesystem metadata without forcing multimodal input', async (pdfPath) => {
@@ -139,6 +184,42 @@ describe('assistant input attachment evidence model materialization', () => {
         attachmentOrdinal: 1,
         details: 'attachment 1 image evidence unavailable',
         errorCode: 'image_read_failed',
+        kind: 'image',
+      }),
+    ])
+  })
+
+  it('preserves input ids on attachment read failures for paired sources', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const bundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: createAttachmentEvidence({
+        kind: 'image',
+        mime: 'image/jpeg',
+        rawPath: 'raw/inbox/capture-1/attachments/missing.jpg',
+      }),
+      vaultRoot,
+    })
+    const failures: unknown[] = []
+
+    await prepareAssistantInputMultimodalUserMessageContent({
+      attachmentSources: [
+        {
+          bundle,
+          inputId: 'event-2',
+        },
+      ],
+      onEvidenceReadFailure(failure) {
+        failures.push(failure)
+      },
+      prompt: 'Missing image.',
+      vaultRoot,
+    })
+
+    expect(failures).toEqual([
+      expect.objectContaining({
+        attachmentOrdinal: 1,
+        errorCode: 'image_read_failed',
+        inputId: 'event-2',
         kind: 'image',
       }),
     ])
@@ -348,7 +429,7 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, bytes: Bu
 
 function createAttachmentEvidence(input: {
   kind: AssistantInputAttachmentEvidenceItem['kind']
-  mime: string
+  mime: string | null
   ordinal?: number
   rawPath: string
 }): AssistantInputAttachmentEvidenceItem {

@@ -10,6 +10,23 @@ const INLINE_FRAGMENT_TEXT_MAX_LENGTH = 6_000
 const SAFE_EVIDENCE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,190}$/u
 const SAFE_CONTENT_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
 const SAFE_SHA256_PATTERN = /^[0-9a-f]{64}$/u
+const SAFE_ATTACHMENT_EVIDENCE_EXTENSIONS = new Set([
+  '.csv',
+  '.gif',
+  '.jpeg',
+  '.jpg',
+  '.json',
+  '.m4a',
+  '.mp3',
+  '.mp4',
+  '.ogg',
+  '.pdf',
+  '.png',
+  '.txt',
+  '.wav',
+  '.webm',
+  '.webp',
+])
 
 type EvidenceSource = NonNullable<AssistantInputAttachmentEvidence['source']>
 
@@ -178,6 +195,7 @@ export async function materializeAssistantInputAttachmentRawArtifactRefs(input: 
       kind: normalizeAttachmentKind(attachment.kind),
       mediaType: normalizeContentType(attachment.mime),
       ordinal,
+      sourcePath,
     })
     if (!targetPath) {
       return
@@ -216,6 +234,7 @@ function createAssistantInputRawArtifactPath(input: {
   kind: AssistantInputAttachmentEvidenceItem['kind']
   mediaType: string | null
   ordinal: number
+  sourcePath: string
 }): string | null {
   const inputId = normalizeEvidenceToken(input.inputId, null)
   if (!inputId) {
@@ -229,8 +248,23 @@ function createAssistantInputRawArtifactPath(input: {
 function extensionForAttachmentArtifact(input: {
   kind: AssistantInputAttachmentEvidenceItem['kind']
   mediaType: string | null
+  sourcePath: string
 }): string {
-  switch (input.mediaType) {
+  const fromMime = extensionForMediaType(input.mediaType)
+  if (fromMime) {
+    return fromMime
+  }
+
+  const sourceExtension = path.posix.extname(input.sourcePath).toLowerCase()
+  if (SAFE_ATTACHMENT_EVIDENCE_EXTENSIONS.has(sourceExtension)) {
+    return sourceExtension
+  }
+
+  return input.kind === 'document' ? '.bin' : '.dat'
+}
+
+function extensionForMediaType(mediaType: string | null): string | null {
+  switch (mediaType) {
     case 'application/json':
       return '.json'
     case 'application/pdf':
@@ -257,7 +291,7 @@ function extensionForAttachmentArtifact(input: {
     case 'video/mp4':
       return '.mp4'
     default:
-      return input.kind === 'document' ? '.bin' : '.dat'
+      return null
   }
 }
 

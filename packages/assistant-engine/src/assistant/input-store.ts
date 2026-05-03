@@ -688,6 +688,7 @@ export async function updateAssistantInputAttachmentEvidence(input: {
   inputId: string
   now?: Date
   paths?: AssistantStatePaths
+  preserveUsefulEvidenceOnFailure?: boolean
   vault?: string
 }): Promise<AssistantInputEventRecord> {
   const context = resolveAssistantInputContext(input)
@@ -711,6 +712,13 @@ export async function updateAssistantInputAttachmentEvidence(input: {
     const parsedEvidence = assistantInputAttachmentEvidenceUpdateSchema.parse(
       input.attachmentEvidence,
     )
+    if (
+      input.preserveUsefulEvidenceOnFailure === true &&
+      parsedEvidence.status === 'failed' &&
+      isUsefulAssistantInputAttachmentEvidence(existing.attachmentEvidence)
+    ) {
+      return existing
+    }
     const nextEvidence = applyAssistantInputAttachmentEvidenceUpdate({
       now,
       update: parsedEvidence,
@@ -731,6 +739,12 @@ export async function updateAssistantInputAttachmentEvidence(input: {
     })
     return updated
   })
+}
+
+function isUsefulAssistantInputAttachmentEvidence(
+  evidence: AssistantInputAttachmentEvidence,
+): boolean {
+  return evidence.status === 'available' || evidence.status === 'partial'
 }
 
 async function ensureAssistantInputEventStore(

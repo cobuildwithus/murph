@@ -40,8 +40,19 @@ export type HostedMailboxItemImportOutcome =
   | {
       status: "imported" | "skipped";
       reasonCode?: string | null;
-      afterCheckpoint?: (() => Promise<void>) | null;
+      afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
     };
+
+export interface HostedMailboxPostCheckpointEffectResult {
+  kind: "inbox_projection";
+  projectionUpdated: boolean | null;
+  attachmentEvidenceUpdated: boolean | null;
+  status: "succeeded" | "failed" | "partial";
+  reasonCode: string | null;
+}
+
+export type HostedMailboxPostCheckpointEffect = () =>
+  Promise<HostedMailboxPostCheckpointEffectResult>;
 
 export interface HostedMailboxResolvedImportItem {
   item: HostedMailboxItem;
