@@ -210,7 +210,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         wakeMailboxItemId: mailboxAppend.item.id,
         wakeUserId: existingMember.id,
       }),
-      ingressReadReceiptChatId: summary.chatId,
     };
   }
 

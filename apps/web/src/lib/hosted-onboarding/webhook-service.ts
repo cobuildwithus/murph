@@ -6,7 +6,6 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageReceivedEvent,
-  sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
@@ -37,8 +36,6 @@ export {
 export type {
   HostedStripeWebhookResponse,
 } from "./webhook-service-types";
-
-const HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS = 750;
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -109,7 +106,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
       desiredSideEffectCount: plan.desiredSideEffects.length,
       duplicate: Boolean(plan.response.duplicate),
-      ingressReadReceiptRequested: Boolean(plan.ingressReadReceiptChatId),
       ok: plan.response.ok,
       wakeUserPresent: Boolean(plan.wakeUserId),
     });
@@ -129,12 +125,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       response: plan.response,
       source: "linq",
       userId: plan.wakeUserId,
-    });
-
-    await maybeSendHostedLinqIngressReadReceipt({
-      plan,
-      signal: input.signal,
-      wakeHandoff,
     });
 
     finishHostedOnboardingTiming(timing, "completed", {
@@ -158,74 +148,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
     });
     throw error;
-  }
-}
-
-async function maybeSendHostedLinqIngressReadReceipt(input: {
-  plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
-  signal?: AbortSignal;
-  wakeHandoff: Awaited<ReturnType<typeof maybeHandoffHostedExecutionWebhookWake>>;
-}): Promise<void> {
-  const chatId = input.plan.ingressReadReceiptChatId?.trim() ?? "";
-
-  if (chatId.length === 0) {
-    return;
-  }
-
-  const responseReason = input.plan.response.reason ?? null;
-  const timeoutMs = HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS;
-  const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
-  const wakeHandoffStarted = input.wakeHandoff?.started === true;
-  const runnerNudgeAccepted = input.wakeHandoff?.runnerNudgeAccepted === true;
-  const readReceiptTiming = startHostedOnboardingTiming(
-    "hosted-onboarding.webhook.linq.ingress-read-receipt",
-    {
-      chatIdPresent: true,
-      responseReason,
-      timeoutMs,
-      wakeHandoffReason,
-      runnerNudgeAccepted,
-      wakeHandoffStarted,
-      wakeHandoffWorkflowStarted: input.wakeHandoff?.workflowStarted ?? false,
-    },
-  );
-
-  if (!runnerNudgeAccepted) {
-    finishHostedOnboardingTiming(readReceiptTiming, "skipped-runner-nudge-not-accepted", {
-      runnerNudgeAccepted,
-      responseReason,
-      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
-      wakeHandoffReason,
-      wakeHandoffStarted,
-      wakeHandoffWorkflowStarted: input.wakeHandoff?.workflowStarted ?? false,
-    });
-    return;
-  }
-
-  try {
-    const result = await sendHostedLinqReadReceipt({
-      chatId,
-      signal: input.signal,
-      timeoutMs,
-    });
-
-    finishHostedOnboardingTiming(readReceiptTiming, result.ok ? "sent" : "failed", {
-      httpStatus: result.status,
-      responseReason,
-      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
-      runnerNudgeAccepted,
-      wakeHandoffReason,
-      wakeHandoffStarted,
-    });
-  } catch (error) {
-    finishHostedOnboardingTiming(readReceiptTiming, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      runnerNudgeAccepted,
-      responseReason,
-      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
-      wakeHandoffReason,
-      wakeHandoffStarted,
-    });
   }
 }
 

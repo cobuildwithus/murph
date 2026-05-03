@@ -91,7 +91,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
   });
 
-  it("directly nudges the runner for webhook handoff after mailbox append", async () => {
+  it("starts the Linq pointer workflow for webhook handoff after mailbox append", async () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -116,18 +116,21 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      reason: "runner-nudged",
-      runnerNudgeAccepted: true,
+      reason: "workflow-started",
+      runnerNudgeAccepted: false,
       started: true,
-      workflowStarted: false,
+      workflowStarted: true,
     });
 
-    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000);
-    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(nudgeUserRunner).not.toHaveBeenCalled();
+    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    });
   });
 
-  it("falls back to a pointer workflow when direct webhook nudge is not configured", async () => {
+  it("does not require direct webhook nudge config for Linq handoff", async () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue(null);
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
@@ -146,7 +149,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       workflowStarted: true,
     });
 
-    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000);
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
       source: "linq",
@@ -174,7 +177,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       started: false,
     });
 
-    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000);
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
       source: "linq",
