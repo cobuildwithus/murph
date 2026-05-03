@@ -1,6 +1,7 @@
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
+import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
   type AssistantExecutionContext,
   type AssistantRunEvent,
@@ -30,10 +31,15 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeDeviceSyncPort,
+  HostedRuntimePlatform,
 } from "./platform.ts";
 import {
   createHostedAssistantInputSource,
 } from "./turn-input.ts";
+import {
+  toHostedRuntimeLogCode,
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { emitHostedAssistantProviderTraceLog } from "./events.ts";
 import {
@@ -407,6 +413,9 @@ export async function runHostedDeviceSyncPass(
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null,
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
+  options: {
+    runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  } = {},
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
@@ -452,6 +461,13 @@ export async function runHostedDeviceSyncPass(
 
     await service.runSchedulerOnce();
     const processedJobs = await service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS);
+    await writeHostedDeviceSyncJobFailureRuntimeLogs({
+      platform: options.runtimeLogPlatform ?? null,
+      processedJobs,
+      service,
+      state: syncState,
+      wake,
+    });
 
     if (secret && controlPlaneSynced) {
       try {
@@ -483,6 +499,7 @@ export async function runHostedDeviceSyncPass(
 
 export async function runHostedDeviceSyncWakeLane(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   wake: HostedRuntimeEvent;
   resolvedConfig: {
     deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
@@ -496,6 +513,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
     input.resolvedConfig.deviceSync,
     input.deviceSyncPort,
     input.timeoutMs,
+    {
+      runtimeLogPlatform: input.runtimeLogPlatform ?? null,
+    },
   );
 
   return {
@@ -528,6 +548,131 @@ function reportHostedDeviceSyncControlPlaneFailure(
     message: `Hosted device-sync control-plane ${phase} failed; continuing hosted job.`,
     phase: "wake.running",
   });
+}
+
+async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  processedJobs: number;
+  service: HostedDeviceSyncRuntimeService;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  if (!input.platform?.logPort || input.processedJobs === 0 || !input.state.snapshot) {
+    return;
+  }
+
+  const baselineByHostedConnectionId = new Map(
+    input.state.snapshot.connections.map((entry) => [entry.connection.id, entry]),
+  );
+
+  for (const account of input.service.listAccounts()) {
+    const hostedConnectionId = input.state.localToHostedAccountIds.get(account.id) ?? null;
+    if (!hostedConnectionId) {
+      continue;
+    }
+
+    const baseline = baselineByHostedConnectionId.get(hostedConnectionId) ?? null;
+
+    if (!account.lastSyncErrorAt || baseline?.localState.lastSyncErrorAt === account.lastSyncErrorAt) {
+      continue;
+    }
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        at: account.lastSyncErrorAt,
+        component: "device-sync",
+        errorCode: toHostedRuntimeLogCode(account.lastErrorCode),
+        eventCode: "device-sync.job_failed",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
+          account,
+          baseline,
+          hostedConnectionKnown: Boolean(hostedConnectionId),
+          processedJobs: input.processedJobs,
+          wake: input.wake,
+        }),
+      },
+      platform: input.platform,
+    });
+  }
+}
+
+type HostedDeviceSyncRuntimeService = NonNullable<ReturnType<typeof createHostedDeviceSyncRuntime>>;
+type HostedDeviceSyncRuntimeSnapshotEntry = NonNullable<HostedDeviceSyncRuntimeSyncState["snapshot"]>["connections"][number];
+
+function buildHostedDeviceSyncFailureLogRedactedJson(input: {
+  account: ReturnType<HostedDeviceSyncRuntimeService["listAccounts"]>[number];
+  baseline: HostedDeviceSyncRuntimeSnapshotEntry | null;
+  hostedConnectionKnown: boolean;
+  processedJobs: number;
+  wake: HostedRuntimeEvent;
+}): Record<string, boolean | number | string | null> {
+  const summary = sanitizeHostedDeviceSyncFailureSummary(input.account.lastErrorMessage);
+  const priorLocalState = input.baseline?.localState ?? null;
+
+  return {
+    failureCode: toHostedRuntimeLogCode(input.account.lastErrorCode),
+    ...(summary ? { failureSummary: summary } : {}),
+    hadPriorFailure: Boolean(priorLocalState?.lastSyncErrorAt),
+    hadPriorSuccess: Boolean(priorLocalState?.lastSyncCompletedAt),
+    hostedConnectionKnown: input.hostedConnectionKnown,
+    nextReconcileAt: input.account.nextReconcileAt,
+    processedJobs: input.processedJobs,
+    provider: toHostedRuntimeLogCode(input.account.provider),
+    setupPhase: input.account.setupPhase ?? null,
+    status: toHostedRuntimeLogCode(input.account.status),
+    syncCompletedAt: input.account.lastSyncCompletedAt,
+    syncFailedAt: input.account.lastSyncErrorAt,
+    syncStartedAt: input.account.lastSyncStartedAt,
+    wakeKind: toHostedRuntimeLogCode(input.wake.kind),
+    wakeReason: "reason" in input.wake
+      ? toHostedRuntimeLogCode(input.wake.reason)
+      : "runtime_timer",
+  };
+}
+
+function sanitizeHostedDeviceSyncFailureSummary(value: string | null): string | null {
+  const sanitized = sanitizeHostedRuntimeErrorText(value);
+
+  if (!sanitized) {
+    return null;
+  }
+
+  const redacted = sanitized
+    .replace(/\bfile:\/\/[^\s)"']+/giu, "<redacted-path>")
+    .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
+    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<redacted-path>")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
+    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
+    .replace(
+      /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+/giu,
+      "<redacted-secret>",
+    )
+    .trim();
+
+  const bounded = redacted.length <= 128
+    ? redacted
+    : `${redacted.slice(0, 125).trimEnd()}...`;
+
+  return isHostedDeviceSyncSafeRuntimeLogSummary(bounded)
+    ? bounded
+    : "[redacted]";
+}
+
+function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
+  return value.length > 0
+    && value.length <= 128
+    && !(
+      /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
+      || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
+      || /\+\d[\d().\s-]{7,}\d/u.test(value)
+      || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
+        .test(value)
+      || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
+      || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
+      || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
+    );
 }
 
 function createHostedDeviceSyncRuntime(input: {

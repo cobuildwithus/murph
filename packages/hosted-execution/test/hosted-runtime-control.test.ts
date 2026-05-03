@@ -82,6 +82,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.appended");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.dedupe_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("assistant.device_connect");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.job_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.inbox_enrichment_warmup_finished");

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
   closeHostedRuntimeDeviceSyncService: vi.fn(),
@@ -868,6 +869,130 @@ describe("runHostedDeviceSyncPass", () => {
         message: "Hosted device-sync control-plane reconcile failed; continuing hosted job.",
       }),
     );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes sanitized durable logs for newly failed device-sync jobs", async () => {
+    const close = vi.fn();
+    const drainWorker = vi.fn(async () => 1);
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listAccounts: vi.fn(() => [
+        {
+          id: "local_account_sensitive",
+          lastErrorCode: "SYNC_JOB_FAILED",
+          lastErrorMessage:
+            "Importer failed reading file://<fixture-path> for owner@example.test with access_token=<fixture-secret>.",
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: "2026-04-08T00:00:03.000Z",
+          lastSyncStartedAt: "2026-04-08T00:00:01.000Z",
+          nextReconcileAt: "2026-04-08T02:00:00.000Z",
+          provider: "whoop",
+          setupPhase: null,
+          status: "active",
+        },
+      ]),
+      runSchedulerOnce,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
+      hostedToLocalAccountIds: new Map([
+        ["hosted_connection_sensitive", "local_account_sensitive"],
+      ]),
+      localToHostedAccountIds: new Map([
+        ["local_account_sensitive", "hosted_connection_sensitive"],
+      ]),
+      observedTokenVersions: new Map(),
+      snapshot: {
+        connections: [
+          {
+            connection: {
+              id: "hosted_connection_sensitive",
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_failure_log",
+        hint: null,
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      {
+        applyUpdates: vi.fn(),
+        createConnectLink: vi.fn(),
+        fetchSnapshot: vi.fn(),
+      },
+      45_000,
+      {
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              return {
+                loggedCount: request.entries.length,
+              };
+            },
+          },
+        },
+      },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T02:00:00.000Z",
+      processedJobs: 1,
+      skipped: false,
+    });
+    assert.equal(logRequests.length, 1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    assert.equal(entry.component, "device-sync");
+    assert.equal(entry.errorCode, "SYNC_JOB_FAILED");
+    assert.equal(entry.eventCode, "device-sync.job_failed");
+    assert.equal(entry.level, "warn");
+    assert.equal(entry.phase, "invoke");
+    assert.deepEqual(entry.redactedJson, {
+      failureCode: "SYNC_JOB_FAILED",
+      failureSummary:
+        "Importer failed reading <redacted-path> for <redacted-email> with <redacted-secret>",
+      hadPriorFailure: false,
+      hadPriorSuccess: false,
+      hostedConnectionKnown: true,
+      nextReconcileAt: "2026-04-08T02:00:00.000Z",
+      processedJobs: 1,
+      provider: "whoop",
+      setupPhase: null,
+      status: "active",
+      syncCompletedAt: null,
+      syncFailedAt: "2026-04-08T00:00:03.000Z",
+      syncStartedAt: "2026-04-08T00:00:01.000Z",
+      wakeKind: "device-sync.wake",
+      wakeReason: "webhook_hint",
+    });
+    const serialized = JSON.stringify(logRequests);
+    expect(serialized).not.toContain("local_account_sensitive");
+    expect(serialized).not.toContain("hosted_connection_sensitive");
+    expect(serialized).not.toContain("file://");
+    expect(serialized).not.toContain("owner@example.test");
+    expect(serialized).not.toContain("<fixture-secret>");
     expect(close).toHaveBeenCalledTimes(1);
   });
 

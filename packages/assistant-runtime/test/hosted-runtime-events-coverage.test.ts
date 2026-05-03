@@ -150,6 +150,7 @@ describe("hosted runtime event coverage", () => {
     });
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith({
       deviceSyncPort: null,
+      runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
       timeoutMs: null,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
