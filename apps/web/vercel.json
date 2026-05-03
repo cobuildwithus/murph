@@ -19,7 +19,7 @@
     },
     {
       "path": "/api/internal/hosted-execution/stale-runner-cleanup/cron",
-      "schedule": "*/10 * * * *"
+      "schedule": "* * * * *"
     }
   ]
 }
