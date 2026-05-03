@@ -235,6 +235,10 @@ under `raw/inbox/**`, `raw/assistant-input/**`, `derived/inbox/**`, and
 hold absolute paths, signed URLs, raw hosted payloads, auth headers, provider
 request bodies, cookies, or attachment bytes.
 
+`raw/assistant-input/**` is the assistant-owned raw artifact namespace for
+input-owned evidence. Producer hooks may copy safe source artifacts there when
+they need a filename-neutral handle decoupled from inbox capture layout.
+
 `replyTarget` is the one narrow exception to the no-provider-id rule. It may
 carry the private provider thread/message id needed to send a reply, but it is
 not a conversation identity, scanner key, prompt identity, search field, or

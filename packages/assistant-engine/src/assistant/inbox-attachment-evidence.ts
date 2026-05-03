@@ -196,6 +196,10 @@ export async function materializeAssistantInputAttachmentRawArtifactRefs(input: 
           'file path',
         )
         await mkdir(path.dirname(targetAbsolutePath), { recursive: true })
+        // `raw/assistant-input/**` is the assistant-owned raw evidence
+        // namespace for event-owned attachment evidence. These copies keep
+        // prompts decoupled from inbox capture layout while preserving durable
+        // vault-relative artifact handles.
         await copyFile(sourceAbsolutePath, targetAbsolutePath)
       }
       refs.set(index, targetPath)

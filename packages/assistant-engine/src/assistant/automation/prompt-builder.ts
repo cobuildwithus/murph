@@ -62,6 +62,10 @@ export type AssistantAutoReplyPreparedInput =
     }
   | { kind: 'skip'; reason: string }
 
+type AssistantAutoReplyPromptInputWithBundles = AssistantAutoReplyPromptInput & {
+  attachmentBundles: readonly AssistantInputAttachmentModelBundle[]
+}
+
 export function buildAssistantAutoReplyPrompt(
   inputs: readonly AssistantAutoReplyPromptInput[],
 ): AssistantAutoReplyPrompt {
@@ -161,6 +165,23 @@ export async function prepareAssistantAutoReplyInput(
   const preparedMultimodalInput =
     await prepareAssistantInputMultimodalUserMessageContent({
       attachmentSources: preparedInputs.flatMap((entry) => entry.attachmentBundles),
+      onEvidenceReadFailure(failure) {
+        options.onEvent?.({
+          type: 'input.reply-progress',
+          inputId: resolveAttachmentEvidenceReadFailureInputId(
+            preparedInputs,
+            failure.attachmentOrdinal,
+          ),
+          details: 'nonblocking attachment evidence read failed',
+          errorCode: failure.errorCode,
+          failureContext: {
+            attachmentOrdinal: failure.attachmentOrdinal,
+          },
+          safeDetails: 'attachment_evidence_read_failed_nonblocking',
+          providerKind: 'status',
+          providerState: 'completed',
+        })
+      },
       prompt: nextPrompt,
       vaultRoot,
     })
@@ -318,10 +339,12 @@ function buildAssistantAutoReplyAttachmentSections(input: {
 function renderAttachmentEvidencePromptSection(
   attachment: AssistantInputAttachmentEvidenceItem,
 ): string | null {
+  const storedPathLine = renderAttachmentEvidencePromptStoredPath(attachment)
   const metadataLines = [
     attachment.sourceAttachmentId ? `attachmentId: ${attachment.sourceAttachmentId}` : null,
     attachment.mime ? `mime: ${attachment.mime}` : null,
     typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
+    storedPathLine,
     attachment.parseState ? `parseState: ${attachment.parseState}` : null,
   ].filter((line): line is string => line !== null)
   const chunks: string[] = []
@@ -345,10 +368,15 @@ function renderAttachmentEvidencePromptSection(
 
   if (chunks.length === 0) {
     const status = renderAttachmentParserStatus(attachment.parseState ?? null)
-    if (status === null) {
+    if (status !== null) {
+      chunks.push(status)
+    } else if (storedPathLine !== null) {
+      chunks.push(
+        'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
+      )
+    } else {
       return null
     }
-    chunks.push(status)
   }
 
   if (metadataLines.length > 0) {
@@ -357,6 +385,29 @@ function renderAttachmentEvidencePromptSection(
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind})`
   return `${label}\n${chunks.join('\n\n')}`
+}
+
+function renderAttachmentEvidencePromptStoredPath(
+  attachment: AssistantInputAttachmentEvidenceItem,
+): string | null {
+  const rawPath = normalizeNullableString(attachment.raw?.path ?? null)
+  if (!rawPath || !hasPdfAttachmentEvidencePath(attachment, rawPath)) {
+    return null
+  }
+
+  return `storedPath: ${rawPath}`
+}
+
+function hasPdfAttachmentEvidencePath(
+  attachment: AssistantInputAttachmentEvidenceItem,
+  rawPath: string,
+): boolean {
+  const mime = normalizeNullableString(
+    attachment.mime ?? attachment.raw?.mediaType ?? null,
+  )?.toLowerCase() ?? null
+  return mime === 'application/pdf' ||
+    mime === 'application/x-pdf' ||
+    rawPath.toLowerCase().endsWith('.pdf')
 }
 
 function renderInlineAttachmentFragmentTitle(
@@ -493,6 +544,15 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
     })
     return []
   }
+}
+
+function resolveAttachmentEvidenceReadFailureInputId(
+  inputs: readonly AssistantAutoReplyPromptInputWithBundles[],
+  attachmentOrdinal: number,
+): string | undefined {
+  return inputs.find((entry) =>
+    entry.attachmentBundles.some((bundle) => bundle.ordinal === attachmentOrdinal)
+  )?.inputId ?? inputs[0]?.inputId
 }
 
 function normalizeAttachmentDescriptorPromptKind(

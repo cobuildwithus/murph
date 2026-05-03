@@ -60,10 +60,11 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(prepared.userMessageContent?.some((part) => part.type === 'image')).toBe(true)
   })
 
-  it('keeps PDF raw artifact refs as inspectable local filesystem metadata without forcing multimodal input', async () => {
+  it.each([
+    'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+    'raw/inbox/capture-1/attachments/01__scan.pdf',
+  ])('keeps PDF raw artifact ref %s as inspectable local filesystem metadata without forcing multimodal input', async (pdfPath) => {
     const vaultRoot = await createTempVaultRoot()
-    const pdfPath =
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf'
     const bundle = await buildAssistantInputAttachmentModelBundle({
       attachment: createAttachmentEvidence({
         kind: 'document',
@@ -137,6 +138,68 @@ describe('assistant input attachment evidence model materialization', () => {
       expect.objectContaining({
         attachmentOrdinal: 1,
         details: 'attachment 1 image evidence unavailable',
+        errorCode: 'image_read_failed',
+        kind: 'image',
+      }),
+    ])
+  })
+
+  it('keeps available images and adds a prompt note when another image is missing', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const availablePath = 'raw/inbox/capture-1/attachments/01__meal.jpg'
+    await writeVaultFile(vaultRoot, availablePath, Buffer.from([0xff, 0xd8, 0xff]))
+    const availableBundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: createAttachmentEvidence({
+        kind: 'image',
+        mime: 'image/jpeg',
+        ordinal: 1,
+        rawPath: availablePath,
+      }),
+      vaultRoot,
+    })
+    const missingBundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: createAttachmentEvidence({
+        kind: 'image',
+        mime: 'image/jpeg',
+        ordinal: 2,
+        rawPath: 'raw/inbox/capture-1/attachments/02__missing.jpg',
+      }),
+      vaultRoot,
+    })
+    const failures: unknown[] = []
+
+    const prepared = await prepareAssistantInputMultimodalUserMessageContent({
+      attachmentSources: [availableBundle, missingBundle],
+      onEvidenceReadFailure(failure) {
+        failures.push(failure)
+      },
+      prompt: 'Review both images.',
+      vaultRoot,
+    })
+
+    expect(prepared.inputMode).toBe('multimodal')
+    expect(prepared.fallbackError).toBe(null)
+    expect(prepared.userMessageContent).toEqual([
+      {
+        type: 'text',
+        text: 'Review both images.',
+      },
+      {
+        type: 'text',
+        text: 'Some image attachments could not be loaded; only available image evidence was attached.',
+      },
+      {
+        type: 'text',
+        text: 'Attachment image 1.',
+      },
+      expect.objectContaining({
+        type: 'image',
+        mediaType: 'image/jpeg',
+      }),
+    ])
+    expect(failures).toEqual([
+      expect.objectContaining({
+        attachmentOrdinal: 2,
         errorCode: 'image_read_failed',
         kind: 'image',
       }),
@@ -286,6 +349,7 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, bytes: Bu
 function createAttachmentEvidence(input: {
   kind: AssistantInputAttachmentEvidenceItem['kind']
   mime: string
+  ordinal?: number
   rawPath: string
 }): AssistantInputAttachmentEvidenceItem {
   return {
@@ -296,7 +360,7 @@ function createAttachmentEvidence(input: {
     inlineFragments: [],
     kind: input.kind,
     mime: input.mime,
-    ordinal: 1,
+    ordinal: input.ordinal ?? 1,
     parseState: 'failed',
     raw: {
       byteSize: null,

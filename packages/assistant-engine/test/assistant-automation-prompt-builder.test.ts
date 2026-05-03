@@ -8,6 +8,9 @@ import {
   inboxModelAttachmentBundleSchema,
   type InboxModelAttachmentBundle,
 } from '../src/inbox-model-contracts.ts'
+import type {
+  AssistantInputAttachmentEvidenceReadFailure,
+} from '../src/assistant/attachment-evidence-model.ts'
 import type { AssistantUserMessageContentPart } from '../src/assistant/content-types.ts'
 import type {
   AssistantInputAttachmentEvidence,
@@ -222,6 +225,7 @@ function createAttachmentEvidenceItem(
   attachment: InboxShowResult['capture']['attachments'][number],
 ): AssistantInputAttachmentEvidenceItem {
   const inlineFragments: AssistantInputAttachmentEvidenceItem['inlineFragments'] = []
+  const rawPath = normalizeAttachmentEvidenceRawPath(attachment.storedPath)
   if (attachment.transcriptText) {
     inlineFragments.push({
       kind: 'attachment_transcript',
@@ -249,9 +253,24 @@ function createAttachmentEvidenceItem(
     mime: attachment.mime ?? null,
     ordinal: attachment.ordinal,
     parseState: normalizeAttachmentEvidenceParseState(attachment.parseState),
-    raw: null,
+    raw: rawPath
+      ? {
+          byteSize: attachment.byteSize ?? null,
+          kind: 'vault-relative-file',
+          mediaType: attachment.mime ?? null,
+          path: rawPath,
+          sha256: attachment.sha256 ?? null,
+        }
+      : null,
     sourceAttachmentId: attachment.attachmentId ?? `attachment-${attachment.ordinal}`,
   }
+}
+
+function normalizeAttachmentEvidenceRawPath(value: string | null | undefined): string | null {
+  return value?.startsWith('raw/inbox/') ||
+    value?.startsWith('raw/assistant-input/')
+    ? value
+    : null
 }
 
 function normalizeAttachmentEvidenceItemKind(
@@ -362,6 +381,32 @@ describe('buildAssistantAutoReplyPrompt', () => {
       kind: 'skip',
       reason: 'input has no text or parsed attachment content',
     })
+  })
+
+  it('renders raw inbox PDF refs as inspectable metadata in the direct prompt path', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        attachments: [
+          createAttachment({
+            kind: 'document',
+            mime: 'application/pdf',
+            parseState: 'succeeded',
+            storedPath: 'raw/inbox/capture-1/attachments/01__scan.pdf',
+          }),
+        ],
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain(
+      'storedPath: raw/inbox/capture-1/attachments/01__scan.pdf',
+    )
+    expect(result.prompt).toContain(
+      'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
+    )
   })
 
   it('renders projection failure context when inbox enrichment is unavailable', () => {
@@ -823,6 +868,75 @@ describe('prepareAssistantAutoReplyInput', () => {
       inputId: 'event-1',
       details: 'nonblocking attachment evidence bundle preparation failed',
       safeDetails: 'attachment_evidence_bundle_preparation_failed_nonblocking',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+  })
+
+  it('emits a safe nonblocking event when rich attachment evidence cannot be read', async () => {
+    const onEvent = vi.fn()
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValueOnce([
+      createAttachmentBundle({
+        kind: 'image',
+        mime: 'image/jpeg',
+        routingImage: {
+          eligible: true,
+          reason: 'supported-format',
+          mediaType: 'image/jpeg',
+          extension: '.jpg',
+        },
+      }),
+    ])
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(true)
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockImplementationOnce(
+      async (input: {
+        onEvidenceReadFailure?: (
+          failure: AssistantInputAttachmentEvidenceReadFailure,
+        ) => void
+      }) => {
+        input.onEvidenceReadFailure?.({
+          attachmentOrdinal: 1,
+          details: 'attachment 1 image evidence unavailable',
+          errorCode: 'image_read_failed',
+          kind: 'image',
+        })
+        return {
+          fallbackError: null,
+          inputMode: 'text-only',
+          userMessageContent: null,
+        }
+      },
+    )
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              kind: 'image',
+              mime: 'image/jpeg',
+              storedPath: 'raw/inbox/capture-1/attachments/01__image.jpg',
+            }),
+          ],
+          captureOverrides: {
+            text: 'Please review the attachment.',
+          },
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+      { onEvent },
+    )
+
+    expect(result.kind).toBe('ready')
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'input.reply-progress',
+      inputId: 'event-1',
+      details: 'nonblocking attachment evidence read failed',
+      errorCode: 'image_read_failed',
+      failureContext: {
+        attachmentOrdinal: 1,
+      },
+      safeDetails: 'attachment_evidence_read_failed_nonblocking',
       providerKind: 'status',
       providerState: 'completed',
     })
