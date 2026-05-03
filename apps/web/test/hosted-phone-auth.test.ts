@@ -1239,8 +1239,8 @@ describe("HostedPhoneAuth", () => {
 
       expect(fetch).not.toHaveBeenCalled();
       expect(mocks.sendCode).not.toHaveBeenCalled();
-      assert.equal(sendButton.disabled, false);
-      assert.doesNotMatch(container.textContent ?? "", /Sending code\.\.\./);
+      assert.equal(sendButton.disabled, true);
+      assert.match(container.textContent ?? "", /Sending code\.\.\./);
 
       const updatePrivyReady = readyHarnessState.setPrivyReady;
       assert.ok(updatePrivyReady);
