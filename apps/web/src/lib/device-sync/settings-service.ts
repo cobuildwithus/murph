@@ -12,6 +12,7 @@ import {
   readHostedPublicBaseUrl,
 } from "../hosted-web/public-url";
 import { assertHostedMemberActiveAccessAllowed } from "../hosted-onboarding/entitlement";
+import { getPrisma } from "../prisma";
 
 export async function buildHostedDeviceSyncSettingsResponse(input: {
   member: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
@@ -34,6 +35,32 @@ export async function buildHostedDeviceSyncSettingsResponse(input: {
       providers,
     }),
   };
+}
+
+export async function hasActiveHostedDeviceSyncConnectionForMember(input: {
+  member: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
+}): Promise<boolean> {
+  assertHostedMemberActiveAccessAllowed({
+    billingStatus: input.member.billingStatus,
+    suspendedAt: input.member.suspendedAt,
+  });
+
+  const activeConnectionCount = await getPrisma().deviceConnection.count({
+    where: {
+      userId: input.member.id,
+      status: "active",
+      OR: [
+        {
+          setupPhase: null,
+        },
+        {
+          setupPhase: "source_confirmed",
+        },
+      ],
+    },
+  });
+
+  return activeConnectionCount > 0;
 }
 
 function buildHostedDeviceSyncSyntheticRequestUrl(): string {

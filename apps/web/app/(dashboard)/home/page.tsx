@@ -8,6 +8,9 @@ import {
   UploadLabsActionFallback,
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
+import { hasActiveHostedDeviceSyncConnectionForMember } from "@/src/lib/device-sync/settings-service";
+import type { HostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -15,7 +18,12 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Your personal health dashboard.",
 });
 
-export default function HomePage() {
+export default async function HomePage() {
+  const auth = await getHostedPageAuthSnapshot();
+  const devicesConnected = auth.authenticatedMember
+    ? await resolveHomeDevicesConnected(auth.authenticatedMember)
+    : false;
+
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
@@ -25,13 +33,26 @@ export default function HomePage() {
       />
 
       <OnboardingSteps
+        devicesConnected={devicesConnected}
         uploadLabsAction={
-          <Suspense fallback={<UploadLabsActionFallback />}>
-            <UploadLabsMurphContactAction />
+          <Suspense
+            fallback={<UploadLabsActionFallback isPrimary={devicesConnected} />}
+          >
+            <UploadLabsMurphContactAction isPrimary={devicesConnected} />
           </Suspense>
         }
       />
       <FeatureHighlights />
     </div>
   );
+}
+
+export async function resolveHomeDevicesConnected(
+  member: Pick<HostedMemberCoreState, "billingStatus" | "id" | "suspendedAt">,
+): Promise<boolean> {
+  try {
+    return await hasActiveHostedDeviceSyncConnectionForMember({ member });
+  } catch {
+    return false;
+  }
 }

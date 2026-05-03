@@ -10,11 +10,15 @@ export const UPLOAD_LABS_CONTACT_BODY =
 
 export const UPLOAD_LABS_CONTACT_SUBJECT = "Lab reports for Murph";
 
-export function UploadLabsActionFallback() {
+export function UploadLabsActionFallback({
+  isPrimary = false,
+}: {
+  isPrimary?: boolean;
+} = {}) {
   return (
     <button
       type="button"
-      className={cn(getOnboardingStepActionClass(false), "opacity-70")}
+      className={cn(getOnboardingStepActionClass(isPrimary), "opacity-70")}
       disabled
       aria-busy="true"
     >
@@ -24,7 +28,11 @@ export function UploadLabsActionFallback() {
   );
 }
 
-export async function UploadLabsMurphContactAction() {
+export async function UploadLabsMurphContactAction({
+  isPrimary = false,
+}: {
+  isPrimary?: boolean;
+} = {}) {
   const option = await resolveHostedMurphContactOption({
     message: {
       body: UPLOAD_LABS_CONTACT_BODY,
@@ -35,7 +43,7 @@ export async function UploadLabsMurphContactAction() {
   return (
     <MurphContactAuthButton
       actionLabel="Sync labs with Murph"
-      className={getOnboardingStepActionClass(false)}
+      className={getOnboardingStepActionClass(isPrimary)}
       option={option}
     >
       Sync labs

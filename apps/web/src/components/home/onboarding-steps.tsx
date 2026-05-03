@@ -58,13 +58,23 @@ export function getOnboardingStepActionClass(isPrimary: boolean): string {
 }
 
 export function OnboardingSteps({
+  devicesConnected = false,
   uploadLabsAction = null,
 }: {
+  devicesConnected?: boolean;
   uploadLabsAction?: ReactNode;
 }) {
+  const visibleSteps = devicesConnected
+    ? steps.filter((step) => step.id !== "devices")
+    : steps;
+  const gridClassName =
+    visibleSteps.length === 2
+      ? "grid gap-5 sm:grid-cols-2"
+      : "grid gap-5 sm:grid-cols-2 xl:grid-cols-3";
+
   return (
-    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-      {steps.map((step, i) => {
+    <div className={gridClassName}>
+      {visibleSteps.map((step, i) => {
         const Icon = step.icon;
         const isPrimary = i === 0;
         const customAction = step.id === "labs" ? uploadLabsAction : null;
@@ -100,7 +110,7 @@ export function OnboardingSteps({
             <div>
               <div className="mb-6 flex items-start justify-between">
                 <span className="rounded-full bg-foreground/[0.04] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Step {step.step}
+                  Step {i + 1}
                 </span>
                 <div className="flex size-14 items-center justify-center rounded-2xl bg-[#f0ede8] ring-1 ring-[#e5e0d8]/60 transition-transform duration-300 group-hover:scale-105">
                   <Icon className="size-6 text-[#7a8c6e]" />
