@@ -105,6 +105,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
 
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedSettingsIdentityLinkDialog, {
+        account: makeAccountSnapshot(),
         initialMode,
         onOpenChange: mocks.onOpenChange,
       }),
@@ -129,3 +130,19 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     }
   });
 });
+
+function makeAccountSnapshot() {
+  return {
+    email: {
+      address: "member@example.com",
+      verifiedAt: "2026-05-02T00:00:00.000Z",
+    },
+    phone: {
+      number: "+14045550123",
+      verifiedAt: "2026-05-02T00:00:00.000Z",
+    },
+    telegram: {
+      telegramUserId: "12345",
+    },
+  };
+}

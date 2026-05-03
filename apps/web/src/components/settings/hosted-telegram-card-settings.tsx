@@ -4,7 +4,6 @@ import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
-import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   resolveHostedTelegramSettingsDisplayState,
@@ -25,12 +24,12 @@ type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
 
 export function HostedTelegramCardSettings(props: {
   authenticated: boolean;
-  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  initialTelegramAccount?: HostedTelegramSyncOverride | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
-  const { authenticated, initialLinkedAccounts, onSynced } = props;
+  const { authenticated, initialTelegramAccount, onSynced } = props;
   const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
-  const { refreshUser, user } = useUser();
+  const { refreshUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
   const syncRequestSequenceRef = useRef(0);
   const [botLink, setBotLink] = useState<string | null>(null);
@@ -42,8 +41,9 @@ export function HostedTelegramCardSettings(props: {
   const [syncedTelegramOverride, setSyncedTelegramOverride] = useState<HostedTelegramSyncOverride | null>(null);
 
   const displayState = resolveHostedTelegramSettingsDisplayState({
+    initialTelegramAccount: initialTelegramAccount ?? null,
     syncedTelegramOverride,
-    user: user ?? { linkedAccounts: initialLinkedAccounts },
+    user: null,
   });
   const currentTelegram = displayState.currentTelegram;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
@@ -134,7 +134,7 @@ export function HostedTelegramCardSettings(props: {
       await linkTelegram();
       const refreshedUser = await refreshUser().catch(() => null);
       const refreshedTelegram = resolveHostedTelegramSettingsDisplayState({
-        user: refreshedUser ?? user ?? { linkedAccounts: initialLinkedAccounts },
+        user: refreshedUser,
       }).currentTelegram;
 
       await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);

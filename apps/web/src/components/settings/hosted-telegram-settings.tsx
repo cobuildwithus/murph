@@ -27,7 +27,7 @@ export function ConnectTelegram(props: {
 }) {
   const { authenticated, initialTelegramAccount, onSynced } = props;
   const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
-  const { refreshUser, user } = useUser();
+  const { refreshUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
   const syncRequestSequenceRef = useRef(0);
   const [botLink, setBotLink] = useState<string | null>(null);
@@ -39,10 +39,9 @@ export function ConnectTelegram(props: {
   const [syncedTelegramOverride, setSyncedTelegramOverride] = useState<HostedTelegramSyncOverride | null>(null);
 
   const displayState = resolveHostedTelegramSettingsDisplayState({
+    initialTelegramAccount,
     syncedTelegramOverride,
-    user: user ?? {
-      telegram: expandInitialTelegramAccount(initialTelegramAccount),
-    },
+    user: null,
   });
   const currentTelegram = displayState.currentTelegram;
   const canManageTelegram = authenticated;
@@ -140,9 +139,7 @@ export function ConnectTelegram(props: {
       await linkTelegram();
       const refreshedUser = await refreshUser().catch(() => null);
       const refreshedTelegram = resolveHostedTelegramSettingsDisplayState({
-        user: refreshedUser ?? user ?? {
-          telegram: expandInitialTelegramAccount(initialTelegramAccount),
-        },
+        user: refreshedUser,
       }).currentTelegram;
 
       await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
@@ -193,20 +190,4 @@ export function ConnectTelegram(props: {
       )}
     </div>
   );
-}
-
-function expandInitialTelegramAccount(
-  account: JoinInviteTelegramAccountSeed | null,
-) {
-  if (!account) {
-    return null;
-  }
-
-  return {
-    firstName: null,
-    lastName: null,
-    photoUrl: null,
-    telegramUserId: account.telegramUserId,
-    username: account.username,
-  };
 }

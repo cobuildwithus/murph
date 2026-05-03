@@ -1,14 +1,9 @@
 "use client";
 
 import { useUser } from "@privy-io/react-auth";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
-import {
-  extractHostedPrivyPhoneAccount,
-  resolveHostedPrivyLinkedAccounts,
-  type PrivyLinkedAccountLike,
-} from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { HostedPhoneAuth } from "../hosted-onboarding/hosted-phone-auth";
 import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
@@ -26,26 +21,17 @@ import {
 export function HostedPhoneSettings(props: {
   authenticated: boolean;
   autoOpen?: boolean;
-  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  initialPhoneNumber?: string | null;
   murphPhoneNumber?: string | null;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
 }) {
-  const { refreshUser, user } = useUser();
+  const { refreshUser } = useUser();
   const [expanded, setExpanded] = useState(Boolean(props.autoOpen));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [linkedPhoneOverride, setLinkedPhoneOverride] = useState<HostedPhoneLinkPayload | null>(null);
 
-  const currentPhoneNumber = useMemo(() => {
-    if (linkedPhoneOverride?.phoneNumber) {
-      return linkedPhoneOverride.phoneNumber;
-    }
-
-    const linkedAccounts = resolveHostedPrivyLinkedAccounts(user ?? {
-      linkedAccounts: props.initialLinkedAccounts,
-    });
-    return extractHostedPrivyPhoneAccount(linkedAccounts)?.number ?? null;
-  }, [linkedPhoneOverride, props.initialLinkedAccounts, user]);
+  const currentPhoneNumber = linkedPhoneOverride?.phoneNumber ?? props.initialPhoneNumber ?? null;
   const showLinkForm = expanded;
 
   async function handleLinked(payload: HostedPhoneLinkPayload) {

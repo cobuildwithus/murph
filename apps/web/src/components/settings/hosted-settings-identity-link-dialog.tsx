@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
 import { HostedEmailSettings } from "./hosted-email-settings";
 import { HostedPhoneSettings } from "./hosted-phone-settings";
@@ -18,9 +19,11 @@ import { HostedTelegramCardSettings } from "./hosted-telegram-card-settings";
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
 
 export function HostedSettingsIdentityLinkDialog({
+  account,
   initialMode,
   onOpenChange,
 }: {
+  account: HostedAccountSettingsSnapshot;
   initialMode: HostedSettingsIdentityLinkMode;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -53,15 +56,28 @@ export function HostedSettingsIdentityLinkDialog({
               <HostedPhoneSettings
                 authenticated
                 autoOpen
-                initialLinkedAccounts={[]}
+                initialPhoneNumber={account.phone.number}
                 onLinked={closeAndRefresh}
               />
             ) : null}
             {initialMode === "telegram" ? (
-              <HostedTelegramCardSettings authenticated initialLinkedAccounts={[]} onSynced={closeAndRefresh} />
+              <HostedTelegramCardSettings
+                authenticated
+                initialTelegramAccount={account.telegram.telegramUserId
+                  ? {
+                      telegramUserId: account.telegram.telegramUserId,
+                      username: null,
+                    }
+                  : null}
+                onSynced={closeAndRefresh}
+              />
             ) : null}
             {initialMode === "email" ? (
-              <HostedEmailSettings authenticated initialLinkedAccounts={[]} onSynced={closeAndRefresh} />
+              <HostedEmailSettings
+                authenticated
+                initialEmail={toInitialEmail(account.email)}
+                onSynced={closeAndRefresh}
+              />
             ) : null}
           </HostedPrivyProvider>
         )}
@@ -91,4 +107,26 @@ function getSettingsIdentityLinkCopy(mode: HostedSettingsIdentityLinkMode): {
         title: "Link email",
       };
   }
+}
+
+function toInitialEmail(
+  email: HostedAccountSettingsSnapshot["email"],
+) {
+  if (!email.address) {
+    return null;
+  }
+
+  return {
+    address: email.address,
+    verifiedAt: toPrivyTimestampSeconds(email.verifiedAt),
+  };
+}
+
+function toPrivyTimestampSeconds(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs) ? Math.trunc(timestampMs / 1000) : null;
 }

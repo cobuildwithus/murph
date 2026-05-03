@@ -86,7 +86,7 @@ describe("ConnectTelegram", () => {
     }
   });
 
-  it("syncs an existing linked Telegram account in the background without a manual save button", async () => {
+  it("syncs an existing server-provided Telegram account in the background without a manual save button", async () => {
     const { ConnectTelegram } = await import(
       "@/src/components/settings/hosted-telegram-settings"
     );
@@ -96,7 +96,10 @@ describe("ConnectTelegram", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(ConnectTelegram, {
         authenticated: true,
-        initialTelegramAccount: null,
+        initialTelegramAccount: {
+          telegramUserId: "12345",
+          username: "murph_user",
+        },
       }),
     );
     cleanupRender = cleanup;
@@ -138,14 +141,20 @@ describe("ConnectTelegram", () => {
     });
   });
 
-  it("renders the unconnected Telegram state with the same compact link row", async () => {
+  it("renders the unconnected Telegram state from the server snapshot instead of Privy client user", async () => {
     const { ConnectTelegram } = await import(
       "@/src/components/settings/hosted-telegram-settings"
     );
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
       user: {
-        linkedAccounts: [],
+        linkedAccounts: [
+          {
+            id: 12345,
+            type: "telegram",
+            username: "murph_user",
+          },
+        ],
       },
     });
 
@@ -158,6 +167,7 @@ describe("ConnectTelegram", () => {
     cleanupRender = cleanup;
 
     expect(container.textContent).toContain("Connect Telegram");
+    expect(container.textContent).not.toContain("@murph_user");
     expect(container.textContent).not.toContain("Message @withmurph_bot");
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
@@ -221,7 +231,10 @@ describe("ConnectTelegram", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(ConnectTelegram, {
         authenticated: true,
-        initialTelegramAccount: null,
+        initialTelegramAccount: {
+          telegramUserId: "12345",
+          username: "murph_user",
+        },
       }),
     );
     cleanupRender = cleanup;
@@ -319,6 +332,36 @@ describe("HostedTelegramCardSettings", () => {
     }
   });
 
+  it("renders card display from the server snapshot instead of Privy client user", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            id: 67890,
+            type: "telegram",
+            username: "new_user",
+          },
+        ],
+      },
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.textContent).toContain("Link Telegram");
+    expect(container.textContent).not.toContain("@new_user");
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
   it("notifies its parent after a manual Telegram link sync succeeds", async () => {
     const { HostedTelegramCardSettings } = await import(
       "@/src/components/settings/hosted-telegram-card-settings"
@@ -328,7 +371,7 @@ describe("HostedTelegramCardSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedTelegramCardSettings, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialTelegramAccount: null,
         onSynced,
       }),
     );
@@ -380,7 +423,10 @@ describe("HostedTelegramCardSettings", () => {
     const { cleanup } = await renderClientComponent(
       createElement(HostedTelegramCardSettings, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialTelegramAccount: {
+          telegramUserId: "67890",
+          username: "new_user",
+        },
         onSynced,
       }),
     );
