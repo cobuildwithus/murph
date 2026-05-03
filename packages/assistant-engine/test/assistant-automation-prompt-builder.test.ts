@@ -135,20 +135,53 @@ function createPromptInput(input: {
     createdAt: '2026-04-08T00:00:01.000Z',
     ...input.captureOverrides,
   }
+  const parsedCapture = inboxShowResultSchema.parse({
+    vault: '/tmp/assistant-engine-prompt-builder-vault',
+    capture: {
+      ...capture,
+      attachmentCount:
+        input.captureOverrides?.attachmentCount ?? resolvedAttachments.length,
+      attachments: resolvedAttachments,
+    },
+  }).capture
+  const projectionStatus = input.projectionStatus ?? null
+  const projectionReasonCode = input.projectionReasonCode ?? null
+  const hasProjection =
+    projectionStatus !== null ||
+    projectionReasonCode !== null ||
+    input.attachmentDescriptors !== undefined ||
+    parsedCapture.attachments.length > 0
   return {
     attachmentDescriptors: input.attachmentDescriptors ?? [],
-    capture: inboxShowResultSchema.parse({
-      vault: '/tmp/assistant-engine-prompt-builder-vault',
-      capture: {
-        ...capture,
-        attachmentCount:
-          input.captureOverrides?.attachmentCount ?? resolvedAttachments.length,
-        attachments: resolvedAttachments,
-      },
-    }).capture,
-    projectionReasonCode: input.projectionReasonCode ?? null,
-    projectionStatus: input.projectionStatus ?? null,
+    actorIsSelf: parsedCapture.actorIsSelf,
+    conversation: {
+      accountId: parsedCapture.accountId,
+      actorId: parsedCapture.actorId,
+      actorIsSelf: parsedCapture.actorIsSelf,
+      source: parsedCapture.source,
+      threadId: parsedCapture.threadId,
+      threadIsDirect: parsedCapture.threadIsDirect,
+    },
+    enrichment: parsedCapture.attachments.length > 0
+      ? {
+          attachments: parsedCapture.attachments,
+          inboxCaptureId: parsedCapture.captureId,
+        }
+      : null,
+    inputId: parsedCapture.eventId,
+    occurredAt: parsedCapture.occurredAt,
+    projection: hasProjection
+      ? {
+          inboxCaptureId: parsedCapture.captureId,
+          reasonCode: projectionReasonCode,
+          status: projectionStatus ?? 'succeeded',
+        }
+      : null,
+    receivedAt: parsedCapture.receivedAt,
+    replyTarget: null,
+    source: parsedCapture.source,
     telegramMetadata: input.telegramMetadata ?? null,
+    text: parsedCapture.text,
   }
 }
 
@@ -373,7 +406,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain(
       'Occurred at: 2026-04-08T10:00:00.000Z -> 2026-04-08T10:03:00.000Z',
     )
-    expect(result.prompt).toContain('Thread: thread-1 (Family)')
+    expect(result.prompt).toContain('Thread: thread-1')
     expect(result.prompt).toContain('Actor: telegram-user-42 | self=false')
     expect(result.prompt).toContain('Grouped inputs: 2')
     expect(result.prompt).toContain('Telegram media group: present')
@@ -516,11 +549,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).not.toContain('private-photo.jpg')
     expect(result.prompt).not.toContain('private-voice.ogg')
     expect(result.userMessageContent).toBeNull()
-    expect(promptBuilderMocks.buildInboxModelAttachmentBundles).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachments: [],
-      }),
-    )
+    expect(promptBuilderMocks.buildInboxModelAttachmentBundles).not.toHaveBeenCalled()
   })
 
   it('prepares staged text with projection pending context when no attachment bundle is available', async () => {

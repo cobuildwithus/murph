@@ -1,5 +1,6 @@
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
+import type { AssistantConversationCaptureRef } from '../conversation-ref.js'
 import type {
   AssistantInputAttachmentDescriptor,
   AssistantInputProjectionStatus,
@@ -17,18 +18,38 @@ import { normalizeNullableString } from '../shared.js'
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
 const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
 
+export type InboxPromptAttachment = InboxShowResult['capture']['attachments'][number]
+
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
   messageId: string | null
   replyContext: string | null
 }
 
+export interface AssistantAutoReplyPromptProjection {
+  inboxCaptureId: string | null
+  reasonCode: string | null
+  status: AssistantInputProjectionStatus
+}
+
+export interface AssistantAutoReplyPromptEnrichment {
+  attachments: readonly InboxPromptAttachment[]
+  inboxCaptureId: string
+}
+
 export interface AssistantAutoReplyPromptInput {
-  attachmentDescriptors?: readonly AssistantInputAttachmentDescriptor[]
-  capture: InboxShowResult['capture']
-  projectionReasonCode?: string | null
-  projectionStatus?: AssistantInputProjectionStatus | null
+  actorIsSelf: boolean
+  attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
+  conversation: AssistantConversationCaptureRef
+  enrichment: AssistantAutoReplyPromptEnrichment | null
+  inputId: string
+  occurredAt: string
+  projection: AssistantAutoReplyPromptProjection | null
+  receivedAt: string | null
+  replyTarget: AssistantInputReplyTarget | null
+  source: string
   telegramMetadata: TelegramAutoReplyMetadata | null
+  text: string | null
 }
 
 export type AssistantAutoReplyPrompt =
@@ -53,18 +74,20 @@ export function buildAssistantAutoReplyPrompt(
       renderAssistantAutoReplyInputSection({
         attachmentSections: buildAssistantAutoReplyAttachmentSections({
           descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
-            descriptors: entry.attachmentDescriptors ?? [],
-            projectionReasonCode: entry.projectionReasonCode ?? null,
-            projectionStatus: entry.projectionStatus ?? null,
+            descriptors: entry.attachmentDescriptors,
+            enrichmentAvailable: entry.enrichment !== null,
+            projectionReasonCode: entry.projection?.reasonCode ?? null,
+            projectionStatus: entry.projection?.status ?? null,
           }),
-          renderedAttachmentSections: entry.capture.attachments
+          renderedAttachmentSections: (entry.enrichment?.attachments ?? [])
             .map((attachment) => renderAttachmentPromptSection(attachment))
             .filter((section): section is string => section !== null),
         }),
-        inputText: normalizeNullableString(entry.capture.text),
+        enrichmentAvailable: entry.enrichment !== null,
+        inputText: normalizeNullableString(entry.text),
         index,
-        projectionReasonCode: entry.projectionReasonCode ?? null,
-        projectionStatus: entry.projectionStatus ?? null,
+        projectionReasonCode: entry.projection?.reasonCode ?? null,
+        projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         totalInputs: inputs.length,
       }),
@@ -91,9 +114,8 @@ export async function prepareAssistantAutoReplyInput(
   const preparedInputs = await Promise.all(
     inputs.map(async (entry) => ({
       ...entry,
-      attachmentBundles: await buildInboxModelAttachmentBundles({
-        attachments: entry.capture.attachments,
-        captureId: entry.capture.captureId,
+      attachmentBundles: await buildPromptAttachmentBundlesBestEffort({
+        entry,
         vaultRoot,
       }),
     })),
@@ -103,18 +125,20 @@ export async function prepareAssistantAutoReplyInput(
       renderAssistantAutoReplyInputSection({
         attachmentSections: buildAssistantAutoReplyAttachmentSections({
           descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
-            descriptors: entry.attachmentDescriptors ?? [],
-            projectionReasonCode: entry.projectionReasonCode ?? null,
-            projectionStatus: entry.projectionStatus ?? null,
+            descriptors: entry.attachmentDescriptors,
+            enrichmentAvailable: entry.enrichment !== null,
+            projectionReasonCode: entry.projection?.reasonCode ?? null,
+            projectionStatus: entry.projection?.status ?? null,
           }),
           renderedAttachmentSections: entry.attachmentBundles
             .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
             .filter((section): section is string => section !== null),
         }),
-        inputText: normalizeNullableString(entry.capture.text),
+        enrichmentAvailable: entry.enrichment !== null,
+        inputText: normalizeNullableString(entry.text),
         index,
-        projectionReasonCode: entry.projectionReasonCode ?? null,
-        projectionStatus: entry.projectionStatus ?? null,
+        projectionReasonCode: entry.projection?.reasonCode ?? null,
+        projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         totalInputs: preparedInputs.length,
       }),
@@ -126,12 +150,15 @@ export async function prepareAssistantAutoReplyInput(
 
   const preparedMultimodalInput =
     await prepareInboxMultimodalUserMessageContent({
-      attachmentSources: preparedInputs.flatMap((entry) =>
-        entry.attachmentBundles.map((attachment) => ({
-          attachment,
-          captureId: entry.capture.captureId,
-        })),
-      ),
+      attachmentSources: preparedInputs.flatMap((entry) => {
+        const enrichment = entry.enrichment
+        return enrichment
+          ? entry.attachmentBundles.map((attachment) => ({
+              attachment,
+              captureId: enrichment.inboxCaptureId,
+            }))
+          : []
+      }),
       prompt: nextPrompt,
       vaultRoot,
     })
@@ -178,6 +205,7 @@ export function readTelegramAutoReplyMetadataFromAssistantInput(input: {
 
 export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
   descriptors: readonly AssistantInputAttachmentDescriptor[]
+  enrichmentAvailable?: boolean
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
 }): string | null {
@@ -212,6 +240,7 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
     mimeTypes.length > 0 ? `mime types: ${mimeTypes.join(', ')}` : null,
     sizeLine,
     renderAssistantInputDescriptorEnrichmentStatus({
+      enrichmentAvailable: input.enrichmentAvailable ?? false,
       reasonCode: input.projectionReasonCode ?? null,
       status: input.projectionStatus ?? null,
     }),
@@ -222,6 +251,7 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
 
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
+  enrichmentAvailable: boolean
   inputText: string | null
   index: number
   projectionReasonCode?: string | null
@@ -231,26 +261,23 @@ function renderAssistantAutoReplyInputSection(input: {
 }): string | null {
   const sections: string[] = []
   if (input.replyContext) {
-    sections.push(`Reply context:
-${input.replyContext}`)
+    sections.push(`Reply context:\n${input.replyContext}`)
   }
   const projectionNote = input.attachmentSections.length === 0
     ? renderAssistantInputProjectionPromptNote({
+        enrichmentAvailable: input.enrichmentAvailable,
         reasonCode: input.projectionReasonCode ?? null,
         status: input.projectionStatus ?? null,
       })
     : null
   if (projectionNote) {
-    sections.push(`Message enrichment:
-${projectionNote}`)
+    sections.push(`Message enrichment:\n${projectionNote}`)
   }
   if (input.inputText) {
-    sections.push(`Message text:
-${input.inputText}`)
+    sections.push(`Message text:\n${input.inputText}`)
   }
   if (input.attachmentSections.length > 0) {
-    sections.push(`Attachment context:
-${input.attachmentSections.join('\n\n')}`)
+    sections.push(`Attachment context:\n${input.attachmentSections.join('\n\n')}`)
   }
 
   if (sections.length === 0) {
@@ -261,8 +288,7 @@ ${input.attachmentSections.join('\n\n')}`)
     return sections.join('\n\n')
   }
 
-  return `Input ${input.index + 1}:
-${sections.join('\n\n')}`
+  return `Input ${input.index + 1}:\n${sections.join('\n\n')}`
 }
 
 function buildAssistantAutoReplyAttachmentSections(input: {
@@ -277,7 +303,7 @@ function buildAssistantAutoReplyAttachmentSections(input: {
 }
 
 function renderAttachmentPromptSection(
-  attachment: InboxShowResult['capture']['attachments'][number],
+  attachment: InboxPromptAttachment,
 ): string | null {
   const transcript = normalizeNullableString(attachment.transcriptText)
   const extractedText = normalizeNullableString(attachment.extractedText)
@@ -291,20 +317,16 @@ function renderAttachmentPromptSection(
   const omittedKinds: string[] = []
 
   if (transcript && transcript.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
-    chunks.push(`Transcript:
-${transcript}`)
+    chunks.push(`Transcript:\n${transcript}`)
   } else if (transcript) {
     omittedKinds.push(`transcript (${transcript.length} chars)`)
-    chunks.push(`Transcript excerpt:
-${buildAttachmentTextExcerpt(transcript)}`)
+    chunks.push(`Transcript excerpt:\n${buildAttachmentTextExcerpt(transcript)}`)
   }
   if (extractedText && extractedText.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
-    chunks.push(`Extracted text:
-${extractedText}`)
+    chunks.push(`Extracted text:\n${extractedText}`)
   } else if (extractedText) {
     omittedKinds.push(`extracted text (${extractedText.length} chars)`)
-    chunks.push(`Extracted text excerpt:
-${buildAttachmentTextExcerpt(extractedText)}`)
+    chunks.push(`Extracted text excerpt:\n${buildAttachmentTextExcerpt(extractedText)}`)
   }
 
   if (omittedKinds.length > 0) {
@@ -332,8 +354,8 @@ ${buildAttachmentTextExcerpt(extractedText)}`)
 function buildAssistantAutoReplyContextLines(
   inputs: readonly AssistantAutoReplyPromptInput[],
 ): Array<string | null> {
-  const firstInput = inputs[0]?.capture
-  const lastInput = inputs[inputs.length - 1]?.capture
+  const firstInput = inputs[0]
+  const lastInput = inputs[inputs.length - 1]
   if (!firstInput || !lastInput) {
     return []
   }
@@ -346,8 +368,8 @@ function buildAssistantAutoReplyContextLines(
         ? firstInput.occurredAt
         : `${firstInput.occurredAt} -> ${lastInput.occurredAt}`
     }`,
-    `Thread: ${firstInput.threadId}${firstInput.threadTitle ? ` (${firstInput.threadTitle})` : ''}`,
-    `Actor: ${firstInput.actorName ?? firstInput.actorId ?? 'unknown'} | self=${String(firstInput.actorIsSelf)}`,
+    `Thread: ${firstInput.conversation.threadId ?? 'unknown'}`,
+    `Actor: ${firstInput.conversation.actorId ?? 'unknown'} | self=${String(firstInput.actorIsSelf)}`,
     inputs.length > 1 ? `Grouped inputs: ${inputs.length}` : null,
     mediaGroupId ? 'Telegram media group: present' : null,
   ]
@@ -419,6 +441,25 @@ function renderPreparedAttachmentPromptSection(
   return `${label}\n${sections.join('\n\n')}`
 }
 
+async function buildPromptAttachmentBundlesBestEffort(input: {
+  entry: AssistantAutoReplyPromptInput
+  vaultRoot: string
+}): Promise<InboxModelAttachmentBundle[]> {
+  if (!input.entry.enrichment) {
+    return []
+  }
+
+  try {
+    return await buildInboxModelAttachmentBundles({
+      attachments: input.entry.enrichment.attachments,
+      captureId: input.entry.enrichment.inboxCaptureId,
+      vaultRoot: input.vaultRoot,
+    })
+  } catch {
+    return []
+  }
+}
+
 function normalizeAttachmentDescriptorPromptKind(
   descriptor: AssistantInputAttachmentDescriptor,
 ): string | null {
@@ -451,11 +492,14 @@ function normalizeAttachmentDescriptorPromptKind(
 }
 
 function renderAssistantInputDescriptorEnrichmentStatus(input: {
+  enrichmentAvailable: boolean
   reasonCode: string | null
   status: AssistantInputProjectionStatus | null
 }): string {
   if (input.status === 'succeeded') {
-    return 'parser/search enrichment: succeeded'
+    return input.enrichmentAvailable
+      ? 'parser/search enrichment: succeeded'
+      : 'parser/search enrichment: unavailable'
   }
 
   if (input.status === 'failed' || input.status === 'quarantined') {
@@ -469,9 +513,14 @@ function renderAssistantInputDescriptorEnrichmentStatus(input: {
 }
 
 function renderAssistantInputProjectionPromptNote(input: {
+  enrichmentAvailable: boolean
   reasonCode: string | null
   status: AssistantInputProjectionStatus | null
 }): string | null {
+  if (input.status === 'succeeded' && !input.enrichmentAvailable) {
+    return 'inbox/parser enrichment is unavailable; use the staged message text and available metadata only.'
+  }
+
   if (input.status === 'failed' || input.status === 'quarantined') {
     const reason = normalizeNullableString(input.reasonCode)
     return reason
