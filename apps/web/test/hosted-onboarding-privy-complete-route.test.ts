@@ -46,6 +46,7 @@ describe("hosted onboarding Privy completion route", () => {
       activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
+      member: createHostedMember(),
       memberId: "member_123",
       messagingSetupRequired: false,
       stage: "checkout",
@@ -113,12 +114,17 @@ describe("hosted onboarding Privy completion route", () => {
       memberId: "member_123",
       privyUserId: "did:privy:user_123",
     });
+    expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      authenticatedMember: createHostedMember(),
+      inviteCode: "invite_123",
+    });
   });
 
   it("returns the active stage when the member is already active", async () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
+      member: createHostedMember(),
       memberId: "member_123",
       messagingSetupRequired: false,
       stage: "active",
@@ -218,6 +224,16 @@ describe("hosted onboarding Privy completion route", () => {
     expect(mocks.completeHostedPrivyVerification.mock.calls[0]?.[0]).not.toHaveProperty("timeZone");
   });
 });
+
+function createHostedMember() {
+  return {
+    billingStatus: "active",
+    createdAt: new Date("2026-03-27T12:00:00.000Z"),
+    id: "member_123",
+    suspendedAt: null,
+    updatedAt: new Date("2026-03-27T12:00:00.000Z"),
+  };
+}
 
 function createInviteStatus(stage: "active" | "checkout") {
   return {

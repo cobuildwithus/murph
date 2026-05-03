@@ -29,7 +29,7 @@ export const POST = withJsonError(async (request: Request) => {
       verifiedPrivyUser: auth.verifiedPrivyUser,
     });
     const status = await getHostedInviteStatus({
-      authenticatedSessionIdentity: auth.identity,
+      authenticatedMember: result.member,
       inviteCode: result.inviteCode,
     });
     const appSession = await issueHostedAppSession({

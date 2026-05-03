@@ -15,6 +15,7 @@ import {
 import { isHostedMemberActivationPending } from "./activation-progress";
 import {
   readHostedMemberMessagingSetupState,
+  type HostedMemberCoreState,
   syncHostedMemberVerifiedEmailAuthorization,
   updateHostedMemberPendingActivationTimeZoneIfActivationPending,
 } from "./hosted-member-store";
@@ -52,6 +53,7 @@ export async function completeHostedPrivyVerification(input: {
 }): Promise<{
   inviteCode: string;
   joinUrl: string;
+  member: HostedMemberCoreState;
   memberId: string;
   messagingSetupRequired: boolean;
   stage: HostedPostVerificationStage;
@@ -142,6 +144,7 @@ export async function completeHostedPrivyVerification(input: {
     return {
       inviteCode: activeInvite.inviteCode,
       joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
+      member,
       memberId: member.id,
       messagingSetupRequired,
       stage,

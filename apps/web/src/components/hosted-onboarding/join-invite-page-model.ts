@@ -77,7 +77,6 @@ export async function buildJoinInvitePageModel(input: {
   ]);
   const status = await getHostedInviteStatus({
     authenticatedMember: authSnapshot.authenticatedMember,
-    authenticatedSessionIdentity: freshPrivySession?.identity ?? null,
     inviteCode: input.inviteCode,
   });
   const launchConsent = await resolveJoinInviteLaunchConsent({

@@ -145,6 +145,7 @@ describe("hosted onboarding routes", () => {
       activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      member: createHostedMember(),
       memberId: "member_123",
       messagingSetupRequired: false,
       stage: "checkout",
@@ -259,6 +260,10 @@ describe("hosted onboarding routes", () => {
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",
       privyUserId: "did:privy:user_123",
+    });
+    expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      authenticatedMember: createHostedMember(),
+      inviteCode: "invite-code",
     });
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite-code",
@@ -1013,5 +1018,15 @@ function createInviteStatus(stage: "checkout") {
       matchesInvite: true,
     },
     stage,
+  };
+}
+
+function createHostedMember() {
+  return {
+    billingStatus: "active",
+    createdAt: new Date("2026-03-27T12:00:00.000Z"),
+    id: "member_123",
+    suspendedAt: null,
+    updatedAt: new Date("2026-03-27T12:00:00.000Z"),
   };
 }

@@ -20,11 +20,6 @@ import {
   resolveHostedBillingReady,
 } from "./billing-plans";
 import {
-  createHostedPrivyUserLookupKey,
-  createHostedPrivyUserLookupKeyReadCandidates,
-  createHostedWalletAddressLookupKey,
-  createHostedWalletAddressLookupKeyReadCandidates,
-  hostedPhoneLookupKeyMatchesValue,
   readHostedPhoneHint,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
@@ -39,8 +34,7 @@ import {
   writeHostedMemberSignupPhoneState,
 } from "./hosted-member-identity-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
-import { type HostedPrivyIdentity, hasHostedPrivyPhoneAuthConfig } from "./privy";
-import { normalizeHostedWalletAddress } from "./wallet-address";
+import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
@@ -70,7 +64,6 @@ type HostedInvitePhoneAuthTargetWithNumber =
 
 export async function getHostedInviteStatus(input: {
   authenticatedMember?: HostedMemberCoreState | null;
-  authenticatedSessionIdentity?: HostedPrivyIdentity | null;
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
@@ -114,7 +107,7 @@ export async function getHostedInviteStatus(input: {
       invite: null,
       messagingSetupRequired: false,
       session: {
-        authenticated: Boolean(input.authenticatedSessionIdentity ?? input.authenticatedMember),
+        authenticated: Boolean(input.authenticatedMember),
         expiresAt: null,
         matchesInvite: false,
       },
@@ -123,13 +116,7 @@ export async function getHostedInviteStatus(input: {
   }
 
   const memberMatchesInvite = input.authenticatedMember?.id === invite.memberId;
-  const identityMatchesInvite = input.authenticatedSessionIdentity
-    ? resolveHostedInviteSessionMatchesInvite(
-        input.authenticatedSessionIdentity,
-        invite.member.identity,
-      )
-    : false;
-  const sessionMatchesInvite = memberMatchesInvite || identityMatchesInvite;
+  const sessionMatchesInvite = memberMatchesInvite;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
   const activationPending = sessionMatchesInvite
     ? await isHostedMemberActivationPending({
@@ -181,7 +168,7 @@ export async function getHostedInviteStatus(input: {
       stage,
     }),
     session: {
-      authenticated: Boolean(input.authenticatedSessionIdentity ?? input.authenticatedMember),
+      authenticated: Boolean(input.authenticatedMember),
       expiresAt: null,
       matchesInvite: Boolean(sessionMatchesInvite),
     },
@@ -589,62 +576,6 @@ function resolveHostedInviteMurphPhoneNumber(input: {
     ?? input.routing?.pendingLinqRecipientPhone
     ?? null,
   );
-}
-
-function resolveHostedInviteSessionMatchesInvite(
-  sessionIdentity: HostedPrivyIdentity,
-  inviteIdentity: {
-    phoneLookupKey?: string | null;
-    privyUserId?: string | null;
-    privyUserLookupKey?: string | null;
-    walletAddress?: string | null;
-    walletAddressLookupKey?: string | null;
-  } | null,
-): boolean {
-  if (!inviteIdentity) {
-    return false;
-  }
-
-  const invitePrivyUserLookupKey =
-    inviteIdentity.privyUserLookupKey
-    ?? createHostedPrivyUserLookupKey(inviteIdentity.privyUserId ?? null);
-  const sessionPrivyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(
-    sessionIdentity.userId,
-  );
-  if (
-    invitePrivyUserLookupKey
-    && sessionPrivyUserLookupKeys.includes(invitePrivyUserLookupKey)
-  ) {
-    return true;
-  }
-
-  if (
-    hostedPhoneLookupKeyMatchesValue(
-      sessionIdentity.phone?.number ?? null,
-      inviteIdentity.phoneLookupKey ?? null,
-    )
-  ) {
-    return true;
-  }
-
-  const inviteWalletAddressLookupKey =
-    inviteIdentity.walletAddressLookupKey
-    ?? createHostedWalletAddressLookupKey(inviteIdentity.walletAddress ?? null);
-  const sessionWalletAddress = normalizeHostedWalletAddress(
-    sessionIdentity.wallet?.address ?? null,
-  );
-  const sessionWalletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
-    sessionWalletAddress,
-  );
-
-  if (
-    inviteWalletAddressLookupKey
-    && sessionWalletAddressLookupKeys.includes(inviteWalletAddressLookupKey)
-  ) {
-    return true;
-  }
-
-  return false;
 }
 
 async function findHostedInviteByCode(
