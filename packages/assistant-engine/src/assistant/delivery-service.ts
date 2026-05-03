@@ -2,6 +2,7 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { markAssistantFirstContactSeen } from './first-contact.js'
+import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
@@ -103,6 +104,7 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   await state.diagnostics.recordEvent(plan.diagnostic)
   const firstContactAcceptedForDelivery =
     input.firstContactGuidanceInjected === true &&
+    input.response === ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
     await markAssistantFirstContactSeen({

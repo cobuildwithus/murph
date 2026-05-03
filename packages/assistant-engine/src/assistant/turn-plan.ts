@@ -62,6 +62,10 @@ export async function resolveAssistantOnboardingGuidanceOpenForVault(input: {
   includeOnboardingGuidance: boolean
   vault: string
 }): Promise<boolean> {
+  if (!input.includeOnboardingGuidance) {
+    return false
+  }
+
   return resolveAssistantOnboardingGuidanceOpen({
     includeOnboardingGuidance: input.includeOnboardingGuidance,
     onboardingOpen: await isAssistantOnboardingOpen(input.vault),
