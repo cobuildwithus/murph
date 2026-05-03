@@ -17,6 +17,7 @@ export type AssistantAutoReplyTerminalKind =
   | 'deferred'
   | 'reply_intent_committed'
   | 'replied'
+  | 'retry_exhausted'
   | 'suppressed'
 
 export interface AssistantAutoReplyTerminalEvidence {
@@ -39,10 +40,16 @@ export interface AssistantAutoReplyTerminalEvidence {
         kind: 'deferred' | 'replied' | 'reply_intent_committed'
         sessionId: string
       }
-    | {
-        kind: 'suppressed'
-        reason: string
-      }
+      | {
+          kind: 'suppressed'
+          reason: string
+        }
+      | {
+          failedAttempts: number
+          kind: 'retry_exhausted'
+          maxFailedAttempts: number
+          reason: string
+        }
 }
 
 export async function assistantAutoReplyTerminalEvidenceExists(
@@ -164,6 +171,46 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
         schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,
         terminal: {
           kind: 'suppressed',
+          reason: input.reason,
+        },
+      }),
+    ),
+  )
+}
+
+export async function writeAssistantAutoReplyRetryExhaustedEvidence(input: {
+  captureIds: readonly string[]
+  failedAttempts: number
+  inputIds?: readonly string[]
+  linqMessageIds?: readonly string[]
+  maxFailedAttempts: number
+  reason: string
+  recordedAt?: string
+  vault: string
+}): Promise<void> {
+  const group = normalizeEvidenceGroup({
+    captureIds: input.captureIds,
+    inputIds: input.inputIds,
+  })
+  const providerCleanup = createProviderCleanupState(input.linqMessageIds ?? [])
+
+  await Promise.all(
+    group.evidenceIds.map((evidenceId) =>
+      writeAssistantAutoReplyTerminalEvidence(input.vault, evidenceId, {
+        captureId: evidenceId,
+        groupCaptureIds: group.captureIds,
+        groupId: group.groupId,
+        groupInputIds: group.inputIds,
+        inputId: evidenceId,
+        primaryCaptureId: group.primaryCaptureId,
+        primaryInputId: group.primaryInputId,
+        providerCleanup,
+        recordedAt: input.recordedAt ?? new Date().toISOString(),
+        schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,
+        terminal: {
+          failedAttempts: input.failedAttempts,
+          kind: 'retry_exhausted',
+          maxFailedAttempts: input.maxFailedAttempts,
           reason: input.reason,
         },
       }),
@@ -407,7 +454,9 @@ function parseTerminalEvidence(value: unknown): AssistantAutoReplyTerminalEviden
   }
   const record = value as {
     deliveryIntentId?: unknown
+    failedAttempts?: unknown
     kind?: unknown
+    maxFailedAttempts?: unknown
     outcome?: unknown
     reason?: unknown
     sessionId?: unknown
@@ -415,6 +464,21 @@ function parseTerminalEvidence(value: unknown): AssistantAutoReplyTerminalEviden
   if (record.kind === 'suppressed') {
     const reason = normalizeUnknownNullableString(record.reason)
     return reason ? { kind: 'suppressed', reason } : null
+  }
+  if (record.kind === 'retry_exhausted') {
+    const reason = normalizeUnknownNullableString(record.reason)
+    const failedAttempts = normalizeUnknownNonNegativeInteger(record.failedAttempts)
+    const maxFailedAttempts = normalizeUnknownNonNegativeInteger(
+      record.maxFailedAttempts,
+    )
+    return reason && failedAttempts !== null && maxFailedAttempts !== null
+      ? {
+          failedAttempts,
+          kind: 'retry_exhausted',
+          maxFailedAttempts,
+          reason,
+        }
+      : null
   }
   if (
     record.kind === 'reply_intent_committed' &&
@@ -459,4 +523,10 @@ function isMissingFileError(error: unknown): boolean {
 
 function normalizeUnknownNullableString(value: unknown): string | null {
   return typeof value === 'string' ? normalizeNullableString(value) : null
+}
+
+function normalizeUnknownNonNegativeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : null
 }

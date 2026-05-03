@@ -47,6 +47,7 @@ import {
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence,
+  writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence,
 } from './evidence.js'
 import {
@@ -130,6 +131,10 @@ interface AssistantAutoReplySkipDecision {
   checkpointRequired?: true
   nextWakeAt: string | null
   reason: string
+  retryExhausted?: {
+    failedAttempts: number
+    maxFailedAttempts: number
+  }
   stopScanning: boolean
   terminalSuppression: boolean
 }
@@ -185,6 +190,12 @@ type AssistantAutoReplyOutcomeArtifact =
       kind: 'error'
       error: unknown
       failure: AssistantAutoReplyFailureSnapshot
+    }
+  | {
+      failedAttempts: number
+      kind: 'retry_exhausted'
+      maxFailedAttempts: number
+      reason: string
     }
   | { kind: 'result'; result: AssistantAutoReplySendResult }
 
@@ -275,24 +286,6 @@ export async function processAssistantAutoReplyGroup(input: {
 }): Promise<AssistantAutoReplyProcessResult> {
   let latestContext = input.context
   try {
-    const retryBudget = await loadAssistantAutoReplyRetryBudget({
-      inputIds: latestContext.inputIds,
-      vault: input.vault,
-    })
-    if (!retryBudget.allowed) {
-      return commitAssistantAutoReplyGroupOutcome({
-        context: latestContext,
-        onEvent: input.onEvent,
-        outcome: createSkippedGroupOutcome({
-          inputCount: latestContext.inputCount,
-          reason: formatAssistantAutoReplyRetryLimitReason(retryBudget),
-          stopScanning: false,
-          terminalSuppression: true,
-        }),
-        vault: input.vault,
-      })
-    }
-
     const resolved = await resolveAssistantAutoReplyGroupOutcome({
       ...input,
       onAcceptedContext(context) {
@@ -367,7 +360,7 @@ function formatAssistantAutoReplyRetryLimitReason(input: {
   maxFailedAttempts: number
 }): string {
   const cappedAttempts = Math.max(input.failedAttempts, input.maxFailedAttempts)
-  return `auto-reply retry limit reached after ${cappedAttempts} failed attempt(s); suppressing this input instead of retrying indefinitely.`
+  return `auto-reply retry limit reached after ${cappedAttempts} failed attempt(s); pausing automatic retries instead of retrying indefinitely.`
 }
 
 async function resolveAssistantAutoReplyGroupOutcome(input: {
@@ -556,6 +549,19 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
       })
       return { checkpointRequired: true }
     }
+    case 'retry_exhausted':
+      await writeAssistantAutoReplyRetryExhaustedEvidence({
+        captureIds: input.context.optionalInboxCaptureIds,
+        failedAttempts: input.outcome.artifact.failedAttempts,
+        inputIds: input.context.inputIds,
+        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
+        maxFailedAttempts: input.outcome.artifact.maxFailedAttempts,
+        reason: sanitizeAssistantAutoReplySuppressionReason(
+          input.outcome.artifact.reason,
+        ),
+        vault: input.vault,
+      })
+      return { checkpointRequired: true }
     case 'error':
       await writeAssistantChatErrorArtifacts({
         captureIds: input.context.optionalInboxCaptureIds,
@@ -618,6 +624,16 @@ function createSkippedDecisionOutcome(input: {
   decision: AssistantAutoReplySkipDecision
 }): AssistantAutoReplyGroupOutcome {
   if (input.decision.advanceCursor) {
+    if (input.decision.retryExhausted) {
+      return createRetryExhaustedGroupOutcome({
+        failedAttempts: input.decision.retryExhausted.failedAttempts,
+        inputCount: input.inputCount,
+        maxFailedAttempts: input.decision.retryExhausted.maxFailedAttempts,
+        reason: input.decision.reason,
+        stopScanning: input.decision.stopScanning,
+      })
+    }
+
     const outcome = createSkippedGroupOutcome({
       inputCount: input.inputCount,
       reason: input.decision.reason,
@@ -637,6 +653,37 @@ function createSkippedDecisionOutcome(input: {
     reason: input.decision.reason,
     stopScanning: input.decision.stopScanning,
   })
+}
+
+function createRetryExhaustedGroupOutcome(input: {
+  failedAttempts: number
+  inputCount: number
+  maxFailedAttempts: number
+  reason: string
+  stopScanning?: boolean
+}): AssistantAutoReplyGroupOutcome {
+  return {
+    advanceCursor: true,
+    artifact: {
+      failedAttempts: input.failedAttempts,
+      kind: 'retry_exhausted',
+      maxFailedAttempts: input.maxFailedAttempts,
+      reason: input.reason,
+    },
+    event: {
+      details: input.reason,
+      errorCode: 'ASSISTANT_AUTO_REPLY_RETRY_EXHAUSTED',
+      safeDetails: 'assistant auto-reply retry limit reached',
+      type: 'input.reply-skipped',
+    },
+    kind: 'skipped',
+    nextWakeAt: null,
+    stopScanning: input.stopScanning ?? false,
+    summary: createAssistantAutoReplyOutcomeSummary({
+      skipped: input.inputCount,
+    }),
+    terminalSuppression: false,
+  }
 }
 
 function createSkippedGroupOutcome(input: {
@@ -922,6 +969,14 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
+  const retryBudget = await loadAssistantAutoReplyRetryBudget({
+    inputIds: input.group.inputIds,
+    vault: input.vault,
+  })
+  if (!retryBudget.allowed) {
+    return createRetryExhaustedSkipDecision(retryBudget)
+  }
+
   return {
     deliveryTarget: readAutoReplyDeliveryTarget(input.group),
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
@@ -933,6 +988,24 @@ async function evaluateAssistantAutoReplyGroup(input: {
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
     userMessageContent: preparedInput.userMessageContent,
+  }
+}
+
+function createRetryExhaustedSkipDecision(input: {
+  failedAttempts: number
+  maxFailedAttempts: number
+}): AssistantAutoReplySkipDecision {
+  return {
+    advanceCursor: true,
+    kind: 'skip',
+    nextWakeAt: null,
+    reason: formatAssistantAutoReplyRetryLimitReason(input),
+    retryExhausted: {
+      failedAttempts: input.failedAttempts,
+      maxFailedAttempts: input.maxFailedAttempts,
+    },
+    stopScanning: false,
+    terminalSuppression: false,
   }
 }
 
@@ -2141,7 +2214,24 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence(in
   evidence: AssistantAutoReplyTerminalEvidence
   vault: string
 }): Promise<void> {
-  if (input.evidence.terminal.kind === 'suppressed') {
+  if (
+    input.evidence.terminal.kind === 'suppressed' ||
+    input.evidence.terminal.kind === 'retry_exhausted'
+  ) {
+    if (input.evidence.terminal.kind === 'retry_exhausted') {
+      await writeAssistantAutoReplyRetryExhaustedEvidence({
+        captureIds: input.captureIds,
+        failedAttempts: input.evidence.terminal.failedAttempts,
+        inputIds: input.evidence.groupInputIds,
+        linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
+        maxFailedAttempts: input.evidence.terminal.maxFailedAttempts,
+        reason: input.evidence.terminal.reason,
+        recordedAt: input.evidence.recordedAt,
+        vault: input.vault,
+      })
+      return
+    }
+
     await writeAssistantAutoReplySuppressionEvidence({
       captureIds: input.captureIds,
       linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
