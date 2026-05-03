@@ -67,6 +67,7 @@ export function optionalTrimmedStringSchema(
         value === undefined || value === null || typeof value === "string",
       { error: `${label} must be a string when provided` },
     )
+    .optional()
     .transform((value) => {
       if (typeof value !== "string") {
         return undefined;
@@ -89,6 +90,7 @@ export function optionalStringListSchema(label: string): z.ZodType<string[]> {
           )),
       { error: `${label} must be an array of strings when provided` },
     )
+    .optional()
     .transform((value) =>
       value === undefined || value === null
         ? []
@@ -124,6 +126,7 @@ export function optionalTimestampSchema(
       },
       { error: `${label} must be a valid timestamp` },
     )
+    .optional()
     .transform((value) => {
       if (value === undefined || value === null) {
         return undefined;
