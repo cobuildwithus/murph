@@ -174,6 +174,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:body-fat-percent
   expected: Could trend lower
+  expectedDirection: down
   description: "Amino acids support lean tissue during a deficit, shifting more weight loss toward fat instead of muscle."
   estimatedChange:
     kind: absolute
@@ -187,6 +188,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:lean-mass
   expected: Hold steadier
+  expectedDirection: up_or_stable
   description: "Extra amino acids supply muscle repair and protein turnover, helping lean tissue stay steadier during dieting or training."
   estimatedChange:
     kind: absolute
@@ -200,6 +202,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:subjective-satiety
   expected: Could feel fuller
+  expectedDirection: up
   description: "Protein slows gastric emptying and activates gut satiety signals, reducing hunger after meals."
   estimatedChange:
     kind: absolute
@@ -213,6 +216,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:triglycerides
   expected: Could trend lower
+  expectedDirection: down
   description: "Replacing refined carbohydrates with lean protein and losing body fat reduces liver export of triglyceride-rich VLDL."
   estimatedChange:
     kind: absolute
@@ -226,6 +230,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:ldl-c
   expected: Source-dependent
+  expectedDirection: mixed_or_contextual
   description: "LDL follows source mix: lean or plant proteins lower saturated-fat load, while fatty meats and dairy raise it."
   estimatedChange:
     kind: absolute
@@ -239,6 +244,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:blood-pressure
   expected: Could dip slightly
+  expectedDirection: down_or_stable
   description: "Weight loss, better carbohydrate quality, and lower vascular load reduce pressure; extra sodium or processed meats push the other way."
   estimatedChange:
     kind: absolute
@@ -262,6 +268,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:serum-creatinine
   expected: Should stay stable
+  expectedDirection: up_or_stable
   description: "More protein, meat, creatine, training, and lean mass change creatinine context by increasing renal workload and muscle-derived byproducts."
   estimatedChange:
     kind: absolute
@@ -275,6 +282,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:estimated-gfr
   expected: Should stay stable
+  expectedDirection: mixed_or_contextual
   description: "Protein increases renal blood-flow demand, shifting eGFR through hydration, creatinine production, and lab-equation inputs."
   estimatedChange:
     kind: absolute

@@ -561,6 +561,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:fasting-triglycerides
   description: EPA/DHA reduces hepatic triglyceride output and VLDL export, lowering fasting triglyceride traffic.
   expected: Could trend lower
+  expectedDirection: down_or_stable
   estimatedChange:
     kind: absolute
     low: -30
@@ -574,6 +575,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:ldl-cholesterol
   description: Triglyceride-rich particles shrink and remodel; DHA-heavy and higher-dose patterns raise LDL-C in some lipid contexts.
   expected: May rise or stay flat
+  expectedDirection: up_or_stable
   estimatedChange:
     kind: absolute
     low: 0
@@ -587,6 +589,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:non-hdl-cholesterol
   description: Lower VLDL and remnant cholesterol reduce non-HDL-C, while LDL-C remodeling pushes the opposite direction.
   expected: Could trend lower
+  expectedDirection: down_or_stable
   estimatedChange:
     kind: absolute
     low: -15
@@ -600,6 +603,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:omega-3-index
   description: EPA and DHA replace other fatty acids in red-blood-cell membranes over weeks, raising omega-3 tissue status.
   expected: Should rise
+  expectedDirection: up
   estimatedChange:
     kind: absolute
     low: 1.5

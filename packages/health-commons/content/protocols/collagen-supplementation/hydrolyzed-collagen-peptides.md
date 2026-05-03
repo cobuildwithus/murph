@@ -61,9 +61,6 @@ relations:
   type: secondary_biomarker
   target: biomarker:perceived-recovery-score
 -
-  type: secondary_biomarker
-  target: biomarker:gi-tolerance
--
   type: cites
   target: source_artifact:pmid-33742704
 -
@@ -584,6 +581,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:lean-body-mass
   expected: Training-dependent
+  expectedDirection: up_or_stable
   protocolProminence: context
   description: Collagen supplies recovery substrate but lacks a complete muscle-building amino-acid profile, so lean-mass effects depend on training and total protein.
   estimatedChange:

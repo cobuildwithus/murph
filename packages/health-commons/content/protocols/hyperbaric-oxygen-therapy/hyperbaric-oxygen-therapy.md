@@ -614,6 +614,7 @@ expectedSignalDescriptions:
     biomarkerKey: "biomarker:morning-blood-pressure"
     description: "Pressurized oxygen tightens blood vessels during and after treatment, raising vascular resistance and blood pressure in susceptible users."
     expected: "Watch for post-session rise"
+    expectedDirection: up
     estimatedChange:
       kind: "absolute"
       low: 6

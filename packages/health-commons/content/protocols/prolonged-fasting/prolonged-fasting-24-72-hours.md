@@ -170,6 +170,7 @@ testPlans:
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
   expected: Fuel-switch marker
+  expectedDirection: up
   protocolProminence: focus
   description: "Falling liver glycogen pushes fatty acids into beta-hydroxybutyrate production, showing a deeper fuel switch."
   estimatedChange:
@@ -206,6 +207,7 @@ expectedSignalDescriptions:
     basis: "Approximate short-window scale movement anchored by source_artifact:pmid-23220077 and upper-window fasting physiology. Hydration, sodium, bowel contents, baseline body size, and refeed timing dominate the estimate."
 - biomarkerKey: biomarker:resting-heart-rate
   expected: Can fall early or rise late
+  expectedDirection: mixed_or_contextual
   protocolProminence: focus
   description: "Short fasts raise vagal tone, while longer fasts increase catecholamines, sleep disruption, and cardiac strain."
   estimatedChange:
@@ -218,6 +220,7 @@ expectedSignalDescriptions:
     basis: "Anchored by source_artifact:pmid-35380473, which reported about 4 bpm lower ambulatory heart rate after 24 h, and source_artifact:pmid-17201801, which reported higher heart rate and sympathetic activation after 72 h. Duration, hydration, sleep, caffeine withdrawal, and illness can flip the direction."
 - biomarkerKey: biomarker:hrv-rmssd
   expected: Can rise early or dip late
+  expectedDirection: mixed_or_contextual
   protocolProminence: context
   description: "Short fasting raises vagal modulation; longer fasting shifts autonomic balance toward sympathetic activation and lower RMSSD."
   estimatedChange:
@@ -230,6 +233,7 @@ expectedSignalDescriptions:
     basis: "Anchored by source_artifact:pmid-35380473, source_artifact:pmid-23403876, and source_artifact:pmid-17201801. Same-mechanism 24 h data show increased vagal-cardiac modulation, while 48–72 h sources support HRV/vagal-modulation monitoring; wearable RMSSD is noisy and device-specific."
 - biomarkerKey: biomarker:morning-blood-pressure
   expected: May drift lower or stay stable
+  expectedDirection: down_or_stable
   protocolProminence: context
   description: "Lower insulin and sodium-water shifts reduce vascular load, while lower fluid reserve increases orthostatic stress."
   estimatedChange:

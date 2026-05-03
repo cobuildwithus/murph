@@ -195,6 +195,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:ldl-c"
     expected: "Could trend lower"
+    expectedDirection: down
     description: "Viscous psyllium gel traps bile acids and cholesterol in the gut, forcing the liver to clear more LDL from blood."
     estimatedChange:
       kind: "absolute"
@@ -208,6 +209,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:non-hdl-c"
     expected: "Could trend lower"
+    expectedDirection: down
     description: "Bile-acid loss shifts liver cholesterol handling toward clearing apoB-containing particles, lowering the cholesterol carried in non-HDL fractions."
     estimatedChange:
       kind: "absolute"
@@ -221,6 +223,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
     expected: "Could trend lower"
+    expectedDirection: down
     description: "Each LDL and remnant particle carries one ApoB; increased particle clearance lowers ApoB count."
     estimatedChange:
       kind: "absolute"
@@ -234,6 +237,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:total-cholesterol"
     expected: "Could trend lower"
+    expectedDirection: down
     description: "LDL-C contributes heavily to total cholesterol, so LDL lowering pulls the total value down."
     estimatedChange:
       kind: "absolute"
@@ -247,6 +251,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:triglycerides"
     expected: "Small/no reliable change"
+    expectedDirection: mixed_or_contextual
     description: "Psyllium slows gut mixing and absorption but does not directly target liver triglyceride export."
     estimatedChange:
       kind: "absolute"
@@ -260,6 +265,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:hdl-c"
     expected: "Usually stable"
+    expectedDirection: mixed_or_contextual
     description: "Psyllium mainly changes bile-acid and LDL-particle handling, not HDL remodeling."
     estimatedChange:
       kind: "absolute"

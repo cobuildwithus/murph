@@ -180,6 +180,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:resting-heart-rate
   description: "Immersion raises cardiac load; next-morning resting pulse shows whether the stress response has resolved."
   expected: stable or slightly lower
+  expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: absolute
     low: -2
@@ -204,6 +205,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:morning-blood-pressure
   description: "Cold constricts peripheral vessels and raises pressure during exposure; morning pressure should settle once vascular tone normalizes."
   expected: should stay stable
+  expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: absolute
     low: -3
@@ -216,6 +218,7 @@ expectedSignalDescriptions:
 - biomarkerKey: biomarker:sleep-efficiency
   description: "Late or stressful plunges disrupt thermoregulation and arousal, while earlier well-tolerated sessions preserve sleep continuity."
   expected: no clear change
+  expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: absolute
     low: -2

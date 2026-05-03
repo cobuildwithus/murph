@@ -643,6 +643,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:toe-touch-distance
   expected: Could move closer to floor
+  expectedDirection: down
   protocolProminence: focus
   description: Posterior-chain holds repeatedly load the forward-bend end range, raising stretch tolerance and reducing resistance so fingertips reach closer to the floor.
   estimatedChange:
@@ -656,6 +657,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:sit-and-reach-distance
   expected: Could reach farther
+  expectedDirection: up
   protocolProminence: focus
   description: Seated hamstring holds train hip-flexed reach, raising posterior-chain tolerance so the hands slide farther forward.
   estimatedChange:
@@ -669,6 +671,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:ankle-knee-to-wall-distance
   expected: Could increase
+  expectedDirection: up
   protocolProminence: focus
   description: Calf holds load heel-down dorsiflexion, letting the tibia move farther over the foot before the heel lifts.
   estimatedChange:

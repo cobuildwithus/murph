@@ -202,7 +202,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:sleep-efficiency"
     expected: "Could rise slightly"
-    expectedDirection: "mixed_or_contextual"
+    expectedDirection: "up_or_stable"
     protocolProminence: "context"
     estimatedChange:
       kind: "absolute"

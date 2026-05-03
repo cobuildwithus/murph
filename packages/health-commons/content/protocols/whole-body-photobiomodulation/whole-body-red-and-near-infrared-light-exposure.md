@@ -311,6 +311,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
     expected: Could trend lower
+    expectedDirection: down_or_stable
     estimatedChange:
       kind: absolute
       low: -5
@@ -324,6 +325,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Could rise or stay stable
+    expectedDirection: up_or_stable
     estimatedChange:
       kind: relative_percent
       low: 0
@@ -337,6 +339,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-efficiency
     expected: Small or no clear change
+    expectedDirection: mixed_or_contextual
     estimatedChange:
       kind: absolute
       low: -1
@@ -350,6 +353,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:deep-sleep-minutes
     expected: Background signal
+    expectedDirection: mixed_or_contextual
     estimatedChange:
       kind: absolute
       low: -10

@@ -335,6 +335,7 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:sleep-quality
     description: "Morning outdoor light strengthens day-night contrast and anchors the circadian clock earlier, helping nighttime sleep feel more restorative."
     expected: Could feel more restorative
+    expectedDirection: up
     estimatedChange:
       kind: absolute
       low: 0.5

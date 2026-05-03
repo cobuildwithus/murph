@@ -251,6 +251,7 @@ testPlans:
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:lateral-knee-pain
   expected: Less run pain
+  expectedDirection: down
   description: Reducing provocative running lowers lateral-knee irritation; hip/glute control gives each stride more capacity before pain escalates.
   estimatedChange:
     kind: absolute
@@ -263,6 +264,7 @@ expectedSignalDescriptions:
   protocolProminence: focus
 - biomarkerKey: biomarker:running-tolerance
   expected: More pain-free minutes
+  expectedDirection: up
   description: Short, flat run/walk intervals reload the knee in small steps, rebuilding repeated-stride tolerance without rebound.
   estimatedChange:
     kind: absolute

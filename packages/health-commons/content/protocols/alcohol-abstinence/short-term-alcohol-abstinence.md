@@ -1074,6 +1074,7 @@ expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:body-weight
   expected: May drift lower
+  expectedDirection: down_or_stable
   protocolProminence: context
   estimatedChange:
     kind: relative_percent

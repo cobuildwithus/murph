@@ -209,6 +209,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:hrv-rmssd
     expected: Could improve
+    expectedDirection: up_or_stable
     description: Breathing near resonance amplifies beat-to-breath variability, supporting stronger parasympathetic recovery overnight.
     estimatedChange:
       kind: relative_percent
