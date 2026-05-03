@@ -168,9 +168,12 @@ protocol:
   - Safety gating should take priority over efficacy interpretation.
   - People with diabetes or glucose-lowering medication, pregnancy or breastfeeding, current underweight, unexplained weight loss, eating-disorder history, adolescent status, athlete low-energy-availability risk, CKD/frailty, gallbladder-risk symptoms, or clinician-directed meal timing should not start self-directed 18:6 without clinician guidance.
   tips:
-  - A repeatable later window beats an early window that causes missed days, underfueling, or sleep disruption.
-  - Plan the first meal and protein before the fast; unplanned large meals confound every signal.
-  - 'Compare like with like: analyze target-window days separately from travel, illness, or major disruptions.'
+  - "Baseline 14 days: log first calories, last calories, weight, hunger, sleep, training, caffeine, and alcohol."
+  - "Pick the earliest repeatable 6-hour window; repeatable beats ideal when work, family, or sleep suffer."
+  - "Ramp 12:12, 14:10, 16:8, then 18:6; stay at the last easy tier."
+  - "First meal: protein, fiber, fluids, familiar carbs. No giant catch-up meal or celebratory refeed."
+  - "Skip sauna, hard training, alcohol binges, late caffeine, and long travel during target-window weeks."
+  - "Do not extend fasts for ketones, scale drops, or willpower; log the planned window."
   keepInMind:
   - The direct 6-hour evidence base is relevant but small, short-term, and selected-population; adjacent evidence should remain adjacent rather than being promoted to direct 18:6 proof.
   - Early 6-hour windows have the clearest direct timing-specific rationale, but later 6-hour windows may still affect weight and are not proven ineffective.
