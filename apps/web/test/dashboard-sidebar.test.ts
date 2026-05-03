@@ -74,16 +74,20 @@ vi.mock("@/src/components/ui/sidebar", () => ({
   SidebarMenuItem: ({ children }: { children: ReactNode }) =>
     createElement("li", null, children),
   SidebarMenuButton: ({
+    "aria-label": ariaLabel,
+    children,
     render,
     isActive,
   }: {
-    render: ReactNode;
+    "aria-label"?: string;
+    children?: ReactNode;
+    render?: ReactNode;
     isActive?: boolean;
   }) =>
     createElement(
       "div",
-      { "data-active": isActive ? "true" : "false" },
-      render,
+      { "aria-label": ariaLabel, "data-active": isActive ? "true" : "false" },
+      render ?? children,
     ),
 }));
 
@@ -164,21 +168,23 @@ test("Sidebar keeps the Biomarkers tab active across biomarker section routes", 
   );
 });
 
-test("Sidebar renders account menu with a supplied signed-in user label", () => {
+test("Sidebar ignores supplied signed-in user labels in the account trigger", () => {
   mocks.usePathname.mockReturnValue("/experiments");
 
   const markup = renderToStaticMarkup(
     createElement(Sidebar, {
       initialAuth: {
         authenticated: true,
-        label: "Research profile",
+        label: "initial@example.com",
       },
     }),
   );
 
-  assert.match(markup, /Research profile/);
   assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
   assert.match(markup, /Sign out/);
+  assert.match(markup, /aria-label="Open user menu"/);
+  assert.doesNotMatch(markup, /initial@example\.com/);
+  assert.doesNotMatch(markup, />Account</);
 });
 
 test("Sidebar renders signed-in account controls without a visible fallback label", () => {
@@ -268,9 +274,10 @@ test("Sidebar uses initial server app-session auth", () => {
     }),
   );
 
-  assert.match(markup, /initial@example\.com/);
   assert.match(markup, /Sign out/);
   assert.doesNotMatch(markup, /Log in or sign up/);
+  assert.doesNotMatch(markup, /initial@example\.com/);
+  assert.doesNotMatch(markup, />Account</);
 });
 
 test("Sidebar does not render a hardcoded wearable connection status", () => {
