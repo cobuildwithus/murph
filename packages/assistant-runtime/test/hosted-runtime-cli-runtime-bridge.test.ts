@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { createConnection } from "node:net";
 
 import {
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+  requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import { expect, test, vi } from "vitest";
@@ -57,6 +59,80 @@ test("hosted CLI runtime bridge creates device connect links through the runtime
       connectTarget: "whoop",
     });
     assert.doesNotMatch(JSON.stringify(bridge.env), /opaque/u);
+  } finally {
+    await bridge.stop();
+  }
+});
+
+test("hosted CLI runtime bridge lists device accounts from runtime snapshots", async () => {
+  const deviceSyncPort = {
+    async applyUpdates() {
+      throw new Error("applyUpdates should not be called.");
+    },
+    async createConnectLink() {
+      throw new Error("createConnectLink should not be called.");
+    },
+    fetchSnapshot: vi.fn(async () => ({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-05-04T00:00:00.000Z",
+            connectedAt: "2026-05-03T20:00:00.000Z",
+            createdAt: "2026-05-03T20:00:00.000Z",
+            displayName: "WHOOP",
+            externalAccountId: "external_whoop",
+            id: "dsc_whoop",
+            metadata: {},
+            provider: "whoop",
+            scopes: ["read:recovery"],
+            status: "active" as const,
+            updatedAt: "2026-05-03T21:00:00.000Z",
+          },
+          credential: {
+            kind: "oauth_tokens" as const,
+            tokenBundle: {
+              accessToken: "redacted-token",
+              accessTokenExpiresAt: "2026-05-04T00:00:00.000Z",
+              keyVersion: "test-key",
+              refreshToken: "redacted-refresh",
+              tokenVersion: 1,
+            },
+          },
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: "2026-05-03T21:00:00.000Z",
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: "2026-05-03T21:00:00.000Z",
+            lastWebhookAt: null,
+            nextReconcileAt: "2026-05-04T03:00:00.000Z",
+          },
+        },
+      ],
+      generatedAt: "2026-05-03T21:00:00.000Z",
+      userId: "member_test",
+    })),
+  } satisfies HostedRuntimeDeviceSyncPort;
+  const bridge = await startHostedCliRuntimeBridge({ deviceSyncPort });
+  assert.ok(bridge);
+
+  try {
+    const result = await requestHostedCliDeviceAccountList({
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+      provider: "whoop",
+    });
+
+    expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledWith({
+      provider: "whoop",
+    });
+    assert.equal(result.provider, "whoop");
+    assert.equal(result.accounts.length, 1);
+    assert.equal(result.accounts[0]?.provider, "whoop");
+    assert.equal(result.accounts[0]?.status, "active");
+    assert.doesNotMatch(JSON.stringify(result), /redacted-token|redacted-refresh/u);
   } finally {
     await bridge.stop();
   }
@@ -140,6 +216,19 @@ test("hosted CLI runtime bridge rejects bad tokens and model-owned return metada
     const overrideText = await override.text();
     assert.match(overrideText, /HOSTED_CLI_BRIDGE_REQUEST_INVALID/u);
     assert.doesNotMatch(overrideText, /messagingReturnTarget/u);
+
+    const accountListUnauthorized = await fetch(
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      {
+        body: JSON.stringify({ provider: "whoop" }),
+        headers: {
+          authorization: "Bearer wrong-token",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    assert.equal(accountListUnauthorized.status, 401);
   } finally {
     await bridge.stop();
   }

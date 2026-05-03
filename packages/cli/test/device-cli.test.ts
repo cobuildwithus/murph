@@ -8,6 +8,9 @@ import path from 'node:path'
 
 import { test, vi } from 'vitest'
 
+import {
+  createIntegratedDeviceSyncServices,
+} from '../src/device-services.js'
 import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 
 interface DeviceTestState {
@@ -256,6 +259,96 @@ test('device connect uses hosted CLI bridge in hosted runtime without local daem
     assert.equal(result.state, undefined)
     assert.equal(result.openedBrowser, undefined)
   } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('device account list service uses hosted CLI bridge in hosted runtime without local daemon credentials', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-account-list-'))
+  const bridgeToken = 'bridge-token'
+  let requestPath: string | null = null
+  let requestBody: unknown = null
+  let authorization: string | undefined
+
+  const server = createServer((request, response) => {
+    authorization = request.headers.authorization
+    requestPath = request.url ?? null
+    const chunks: Buffer[] = []
+    request.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    })
+    request.on('end', () => {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({
+        accounts: [
+          {
+            accessTokenExpiresAt: '2026-05-04T00:00:00.000Z',
+            connectedAt: '2026-05-03T20:00:00.000Z',
+            createdAt: '2026-05-03T20:00:00.000Z',
+            displayName: 'WHOOP',
+            externalAccountId: 'external_whoop',
+            id: 'dsc_whoop',
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: '2026-05-03T21:00:00.000Z',
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: '2026-05-03T21:00:00.000Z',
+            lastWebhookAt: null,
+            metadata: {},
+            nextReconcileAt: '2026-05-04T03:00:00.000Z',
+            provider: 'whoop',
+            scopes: ['read:recovery'],
+            setupExpiresAt: null,
+            setupPhase: null,
+            status: 'active',
+            updatedAt: '2026-05-03T21:00:00.000Z',
+          },
+        ],
+        provider: 'whoop',
+      }))
+    })
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted account list test.')
+    }
+
+    vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_TOKEN', bridgeToken)
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_URL', `http://127.0.0.1:${address.port}/`)
+    vi.stubEnv('DEVICE_SYNC_BASE_URL', 'http://127.0.0.1:1')
+    vi.stubEnv('DEVICE_SYNC_CONTROL_TOKEN', 'ambient-local-token')
+
+    const result = await createIntegratedDeviceSyncServices().listAccounts({
+      provider: 'whoop',
+      vault: vaultRoot,
+    })
+
+    assert.equal(authorization, `Bearer ${bridgeToken}`)
+    assert.equal(requestPath, '/device/accounts/list')
+    assert.deepEqual(requestBody, { provider: 'whoop' })
+    assert.equal(result.baseUrl, undefined)
+    assert.equal(result.local, undefined)
+    assert.equal(result.provider, 'whoop')
+    assert.equal(result.accounts.length, 1)
+    assert.equal(result.accounts[0]?.provider, 'whoop')
+    assert.equal(result.accounts[0]?.status, 'active')
+  } finally {
+    vi.unstubAllEnvs()
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {

@@ -3,10 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Socket } from "node:net";
 
 import {
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
+  parseHostedCliDeviceAccountListRequest,
   parseHostedCliDeviceConnectLinkRequest,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 
@@ -111,7 +113,11 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
-    if (input.request.url !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH) {
+    const path = input.request.url ?? "";
+    if (
+      path !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH
+      && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH
+    ) {
       writeHostedCliBridgeError(
         input.response,
         404,
@@ -131,9 +137,30 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
-    const request = parseHostedCliDeviceConnectLinkRequest(
-      await readHostedCliBridgeJsonBody(input.request),
-    );
+    const body = await readHostedCliBridgeJsonBody(input.request);
+
+    if (path === HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH) {
+      const request = parseHostedCliDeviceAccountListRequest(body);
+      try {
+        const snapshot = await input.deviceSyncPort.fetchSnapshot({
+          provider: request.provider ?? null,
+        });
+        writeHostedCliBridgeJson(input.response, 200, {
+          accounts: snapshot.connections.map(hostedDeviceSyncSnapshotToAccount),
+          provider: request.provider ?? null,
+        });
+      } catch {
+        writeHostedCliBridgeError(
+          input.response,
+          502,
+          "HOSTED_DEVICE_ACCOUNT_LIST_FAILED",
+          "Hosted device account list failed.",
+        );
+      }
+      return;
+    }
+
+    const request = parseHostedCliDeviceConnectLinkRequest(body);
 
     if (request.returnTo) {
       writeHostedCliBridgeError(
@@ -173,6 +200,34 @@ async function handleHostedCliBridgeRequest(input: {
       "Hosted CLI bridge request is invalid.",
     );
   }
+}
+
+type HostedDeviceSyncSnapshotEntry =
+  Awaited<ReturnType<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>>["connections"][number];
+
+function hostedDeviceSyncSnapshotToAccount(entry: HostedDeviceSyncSnapshotEntry) {
+  return {
+    accessTokenExpiresAt: entry.connection.accessTokenExpiresAt,
+    connectedAt: entry.connection.connectedAt,
+    createdAt: entry.connection.createdAt,
+    displayName: entry.connection.displayName,
+    externalAccountId: entry.connection.externalAccountId,
+    id: entry.connection.id,
+    lastErrorCode: entry.localState.lastErrorCode,
+    lastErrorMessage: entry.localState.lastErrorMessage,
+    lastSyncCompletedAt: entry.localState.lastSyncCompletedAt,
+    lastSyncErrorAt: entry.localState.lastSyncErrorAt,
+    lastSyncStartedAt: entry.localState.lastSyncStartedAt,
+    lastWebhookAt: entry.localState.lastWebhookAt,
+    metadata: entry.connection.metadata,
+    nextReconcileAt: entry.localState.nextReconcileAt,
+    provider: entry.connection.provider,
+    scopes: entry.connection.scopes,
+    setupExpiresAt: entry.connection.setupExpiresAt ?? null,
+    setupPhase: entry.connection.setupPhase ?? null,
+    status: entry.connection.status,
+    updatedAt: entry.connection.updatedAt ?? entry.connection.createdAt,
+  };
 }
 
 function isHostedCliBridgeAuthorized(request: IncomingMessage, token: string): boolean {

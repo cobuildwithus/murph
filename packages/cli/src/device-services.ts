@@ -13,6 +13,7 @@ import {
   HostedCliBridgeRequestError,
   isHostedRuntimeProcessEnv,
   readHostedCliBridgeEnv,
+  requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
@@ -241,6 +242,23 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       return resolveDeviceConnectAuthority(input).createConnectLink(input)
     },
     async listAccounts(input) {
+      if (hasExplicitInputControlPlaneTarget(input)) {
+        const client = await createControlPlaneClient(input)
+        const result = await client.listAccounts({
+          provider: input.provider,
+        })
+
+        return {
+          baseUrl: client.baseUrl,
+          provider: input.provider ?? null,
+          accounts: result.accounts,
+        }
+      }
+
+      if (isHostedRuntimeProcessEnv(process.env)) {
+        return listAccountsViaHostedBridge(input)
+      }
+
       if (hasExplicitControlPlaneTarget(input)) {
         const client = await createControlPlaneClient(input)
         const result = await client.listAccounts({
@@ -337,6 +355,34 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     },
   } satisfies DeviceSyncServices
 
+  async function listAccountsViaHostedBridge(input: {
+    provider?: string
+  }): Promise<DeviceAccountListResult> {
+    const bridge = readRequiredHostedBridge('account list')
+    const result = await requestHostedCliDeviceAccountList({
+      bridge,
+      provider: input.provider,
+    }).catch((error) => {
+      const bridgeCode = error instanceof HostedCliBridgeRequestError
+        ? error.code
+        : null
+      const cliCode = bridgeCode === 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT'
+        ? 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_REQUEST_TIMEOUT'
+        : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_REQUEST_FAILED'
+      throw new VaultCliError(
+        cliCode,
+        error instanceof Error
+          ? error.message
+          : 'Hosted device account list bridge request failed.',
+      )
+    })
+
+    return {
+      provider: result.provider,
+      accounts: result.accounts,
+    }
+  }
+
   function resolveDeviceConnectAuthority(input: {
     baseUrl?: string
   }): DeviceConnectAuthority {
@@ -352,24 +398,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     }
 
-    let bridge
-    try {
-      bridge = readHostedCliBridgeEnv(process.env)
-    } catch (error) {
-      throw new VaultCliError(
-        'HOSTED_DEVICE_CONNECT_BRIDGE_INVALID',
-        error instanceof Error
-          ? error.message
-          : 'Hosted device-connect bridge configuration is invalid.',
-      )
-    }
-
-    if (!bridge) {
-      throw new VaultCliError(
-        'HOSTED_DEVICE_CONNECT_BRIDGE_UNAVAILABLE',
-        'Hosted device connect is unavailable in this runtime.',
-      )
-    }
+    const bridge = readRequiredHostedBridge('connect')
 
     return {
       async createConnectLink(connectInput) {
@@ -482,6 +511,35 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
           sourceProviderSlug: target.sourceProviderSlug ?? null,
         }
       : { provider: connectTarget }
+  }
+
+  function readRequiredHostedBridge(
+    operation: 'account list' | 'connect',
+  ): NonNullable<ReturnType<typeof readHostedCliBridgeEnv>> {
+    let bridge
+    try {
+      bridge = readHostedCliBridgeEnv(process.env)
+    } catch (error) {
+      throw new VaultCliError(
+        operation === 'connect'
+          ? 'HOSTED_DEVICE_CONNECT_BRIDGE_INVALID'
+          : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_INVALID',
+        error instanceof Error
+          ? error.message
+          : `Hosted device ${operation} bridge configuration is invalid.`,
+      )
+    }
+
+    if (!bridge) {
+      throw new VaultCliError(
+        operation === 'connect'
+          ? 'HOSTED_DEVICE_CONNECT_BRIDGE_UNAVAILABLE'
+          : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_UNAVAILABLE',
+        `Hosted device ${operation} is unavailable in this runtime.`,
+      )
+    }
+
+    return bridge
   }
 }
 

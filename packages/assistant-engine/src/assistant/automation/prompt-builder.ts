@@ -76,24 +76,26 @@ export function buildAssistantAutoReplyPrompt(
   inputs: readonly AssistantAutoReplyPromptInput[],
 ): AssistantAutoReplyPrompt {
   const sections = inputs
-    .map((entry, index) =>
-      renderAssistantAutoReplyInputSection({
-        attachmentSections: buildAssistantAutoReplyAttachmentSections({
-          descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
-            descriptors: entry.attachmentDescriptors,
-            evidenceReasonCode: entry.attachmentEvidence.reasonCode,
-            evidenceStatus: entry.attachmentEvidence.status,
-            projectionReasonCode: entry.projection?.reasonCode ?? null,
-            projectionStatus: entry.projection?.status ?? null,
-          }),
-          includeDescriptorSectionWithEvidence:
-            entry.attachmentEvidence.status === 'partial',
-          renderedAttachmentSections: entry.attachmentEvidence.attachments
-            .map((attachment) => renderAttachmentEvidencePromptSection(attachment))
-            .filter((section): section is string => section !== null),
+    .map((entry, index) => {
+      const attachmentSections = buildAssistantAutoReplyAttachmentSections({
+        descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
+          descriptors: entry.attachmentDescriptors,
+          evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+          evidenceStatus: entry.attachmentEvidence.status,
+          projectionReasonCode: entry.projection?.reasonCode ?? null,
+          projectionStatus: entry.projection?.status ?? null,
         }),
+        includeDescriptorSectionWithEvidence:
+          entry.attachmentEvidence.status === 'partial',
+        renderedAttachmentSections: entry.attachmentEvidence.attachments
+          .map((attachment) => renderAttachmentEvidencePromptSection(attachment))
+          .filter((section): section is string => section !== null),
+      })
+      return renderAssistantAutoReplyInputSection({
+        attachmentSections,
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
+        hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
         inputText: normalizeNullableString(entry.text),
         index,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
@@ -101,8 +103,8 @@ export function buildAssistantAutoReplyPrompt(
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         totalInputs: inputs.length,
-      }),
-    )
+      })
+    })
     .filter((section): section is string => section !== null)
 
   if (sections.length === 0 || inputs.length === 0) {
@@ -136,24 +138,26 @@ export async function prepareAssistantAutoReplyInput(
     })),
   )
   const textualSections = preparedInputs
-    .map((entry, index) =>
-      renderAssistantAutoReplyInputSection({
-        attachmentSections: buildAssistantAutoReplyAttachmentSections({
-          descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
-            descriptors: entry.attachmentDescriptors,
-            evidenceReasonCode: entry.attachmentEvidence.reasonCode,
-            evidenceStatus: entry.attachmentEvidence.status,
-            projectionReasonCode: entry.projection?.reasonCode ?? null,
-            projectionStatus: entry.projection?.status ?? null,
-          }),
-          includeDescriptorSectionWithEvidence:
-            entry.attachmentEvidence.status === 'partial',
-          renderedAttachmentSections: entry.attachmentBundles
-            .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
-            .filter((section): section is string => section !== null),
+    .map((entry, index) => {
+      const attachmentSections = buildAssistantAutoReplyAttachmentSections({
+        descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
+          descriptors: entry.attachmentDescriptors,
+          evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+          evidenceStatus: entry.attachmentEvidence.status,
+          projectionReasonCode: entry.projection?.reasonCode ?? null,
+          projectionStatus: entry.projection?.status ?? null,
         }),
+        includeDescriptorSectionWithEvidence:
+          entry.attachmentEvidence.status === 'partial',
+        renderedAttachmentSections: entry.attachmentBundles
+          .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
+          .filter((section): section is string => section !== null),
+      })
+      return renderAssistantAutoReplyInputSection({
+        attachmentSections,
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
+        hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
         inputText: normalizeNullableString(entry.text),
         index,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
@@ -161,8 +165,8 @@ export async function prepareAssistantAutoReplyInput(
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         totalInputs: preparedInputs.length,
-      }),
-    )
+      })
+    })
     .filter((section): section is string => section !== null)
 
   const hasTextualContent = textualSections.length > 0
@@ -282,6 +286,7 @@ function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
   evidenceReasonCode: string | null
   evidenceStatus: AssistantInputAttachmentEvidence['status']
+  hasAttachmentContext: boolean
   inputText: string | null
   index: number
   promptUnavailableNote: string | null
@@ -294,7 +299,7 @@ function renderAssistantAutoReplyInputSection(input: {
   if (input.replyContext) {
     sections.push(`Reply context:\n${input.replyContext}`)
   }
-  const projectionNote = input.attachmentSections.length === 0
+  const projectionNote = input.hasAttachmentContext && input.attachmentSections.length === 0
     ? renderAssistantInputProjectionPromptNote({
         evidenceReasonCode: input.evidenceReasonCode,
         evidenceStatus: input.evidenceStatus,
@@ -324,6 +329,10 @@ function renderAssistantAutoReplyInputSection(input: {
   }
 
   return `Input ${input.index + 1}:\n${sections.join('\n\n')}`
+}
+
+function hasAssistantInputAttachmentContext(input: AssistantAutoReplyPromptInput): boolean {
+  return input.attachmentDescriptors.length > 0 || input.attachmentEvidence.attachments.length > 0
 }
 
 function buildAssistantAutoReplyAttachmentSections(input: {
