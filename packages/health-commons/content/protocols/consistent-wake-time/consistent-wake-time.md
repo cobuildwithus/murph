@@ -631,7 +631,7 @@ experimentOnboarding:
       - "weekly_digest"
     weeklyDigestDefault: true
     missedLogFollowupCopy: "No problem if the log was missed. Do you want to record the wake time and whether sleep felt safe enough today?"
-    confirmationPrompt: "Confirm the exact protocol key, 7-day baseline, 28-day intervention, target wake window, sleep-opportunity guardrail, measurement method, stop conditions, and reminder policy before creating the run."
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Wake time anchors the clock\n\nFinal wake time sets the next circadian day. Light, movement, meals, and alertness start from that anchor; irregular wake times keep the clock sliding."
   - "## Sleep opportunity protects the mechanism\n\nConsistency only works when bedtime leaves enough sleep. A fixed wake time that cuts sleep creates debt, not rhythm."

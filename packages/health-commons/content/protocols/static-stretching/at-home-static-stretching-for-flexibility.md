@@ -938,7 +938,7 @@ experimentOnboarding:
     - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: Want to log whether yesterday’s stretching happened, or skip that entry?
-    confirmationPrompt: Before I create the run, confirm the protocol reference, target area, measurement, 7-day baseline, 42-day intervention, 5-days-per-week schedule, logging fields, stop rules, safety-screen routing, and reminder preference.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Held tension changes tolerance\n\nStatic stretching works by repeatedly exposing 1 end range to mild, non-painful tension. The nervous system allows more range before guarding; the joint moves farther without forcing tissue."
   - "## Tissue adapts slowly\n\nRepeated low force changes passive resistance in muscle, tendon, and surrounding connective tissue. The dose is boring by design: same position, same target, enough weeks for range to move."

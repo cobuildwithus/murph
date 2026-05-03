@@ -1218,7 +1218,7 @@ experimentOnboarding:
     - daily_check_in
     - daily_check_in_plus_next_day_missing_log_followup
     missedLogFollowupCopy: Did yesterday count as alcohol-free, alcohol-used, or paused? Any answer is useful data for the experiment record.
-    confirmationPrompt: Show the safety route, chosen duration, baseline choice, logging plan, stop conditions, social-friction plan, off-ramp review, and reminder policy before creating the active experiment.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
   safetyScreen:
     cautionLevel: high
     mode: ask_compact_then_expand_if_positive

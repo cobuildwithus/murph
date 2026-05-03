@@ -327,7 +327,7 @@ experimentOnboarding:
       - lab_retest_reminder
     weeklyDigestDefault: true
     missedLogFollowupCopy: Log missed D3 doses as context; do not double up just because a log was missed.
-    confirmationPrompt: Confirm the daily dose, safety screen, supplement stack, and lab-feedback plan before creating the experiment.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Daily D3 feeds the liver conversion that raises 25(OH)D\n\nOral cholecalciferol enters circulation and the liver hydroxylates it into 25-hydroxyvitamin D — the form measured by a standard vitamin D lab. Consistent daily dosing at 800–1000 IU raises serum 25(OH)D by roughly 8–14 ng/mL over 8–12 weeks in trials of healthy adults."
   - "## Response depends on where you start and how you live\n\nBaseline 25(OH)D, body size, season, latitude, sun exposure, skin pigmentation, diet, and adherence all shift the dose-response curve. A person starting low in winter gains more per IU than someone replete in summer. Murph treats this as a logged N-of-1 lab-feedback experiment, not a fixed-dose guarantee."

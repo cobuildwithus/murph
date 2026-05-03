@@ -769,7 +769,7 @@ experimentOnboarding:
     - daily_log_plus_weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you get a chance to log yesterday's added-sugar sources? Totally fine either way — I just want the experiment record to stay accurate.
-    confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, selected testPlanId, baseline and intervention dates, boundary rule, logging method, replacement plan, safety outcome, stop conditions, and reminder policy before creating the active experiment or automations.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Added sugar delivers fast energy with low fullness\n\nSugary drinks, desserts, sauces, and snacks add calories that disappear quickly. Removing them lowers the easiest energy surplus before changing the rest of the diet."
   - "## Label rule cuts repeat sources\n\n0 g added sugar on labels turns a vague goal into a boundary. The mechanism is fewer fast carbohydrate hits and less insulin demand from recurring sources."

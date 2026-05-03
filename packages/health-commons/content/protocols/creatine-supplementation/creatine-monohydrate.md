@@ -1295,7 +1295,7 @@ experimentOnboarding:
       - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: Want to fill in yesterday's creatine dose, symptoms, and training context?
-    confirmationPrompt: Create a creatine monohydrate experiment with the selected dose path, safety boundaries, and logging fields?
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Daily creatine raises muscle phosphocreatine stores\n\n3–5 g/day creatine monohydrate saturates the creatine transporter over weeks, raising intramuscular phosphocreatine. Loading at 20 g/day split into 4 servings reaches saturation faster — roughly 5–7 days versus several weeks — but both paths converge on the same elevated store."
   - "## More phosphocreatine fuels harder repeated efforts\n\nPhosphocreatine donates its phosphate group to regenerate ATP during short, intense contractions. Higher stores let each set, sprint, or rep start with a fuller energy buffer. The effect is strongest in repeated high-intensity work: more reps at a given load, faster recovery between sets, and greater total training volume per session."

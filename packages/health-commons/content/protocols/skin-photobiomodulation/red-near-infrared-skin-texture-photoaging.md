@@ -577,7 +577,7 @@ experimentOnboarding:
     - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: Want to log whether you used the LED mask session and any symptoms?
-    confirmationPrompt: Confirm the exact protocol, device, eye protection, baseline-photo workflow, schedule, logging fields, stop conditions, and reminder preference before creating an active experiment.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Photons hit treated skin\n\nRed and near-infrared light reach facial tissue at the selected geometry. The target is local skin signaling, not whole-body recovery."
   - "## Cell-energy signals shift\n\nPBM affects mitochondrial and nitric-oxide pathways, changing downstream repair and inflammatory signaling. Skin response depends on wavelength, dose, coverage, and consistency."

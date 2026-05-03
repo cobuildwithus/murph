@@ -548,7 +548,7 @@ experimentOnboarding:
       - "dose_reminders_plus_weekly_digest"
     weeklyDigestDefault: true
     missedLogFollowupCopy: "No psyllium dose was logged for the planned window. Should Murph mark it missed, partial, or taken?"
-    confirmationPrompt: "Confirm only after baseline lab status, product dose, full-liquid rule, medication spacing, and stop conditions are clear."
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Viscous gel traps bile acids in the gut\n\nPsyllium forms a thick gel in the intestine that binds bile acids and cholesterol, blocking reabsorption. The liver compensates by pulling LDL particles from the bloodstream to rebuild bile-acid supply. LDL-C and total cholesterol are the most consistent lipid signals across psyllium-specific trials and meta-analyses."
   - "## Daily divided dosing sustains the bile-acid drain\n\nSplitting 7-10.5 g/day of active psyllium husk across meals keeps viscous gel present throughout the day. Each dose renews the bile-acid trapping cycle rather than leaving gaps where reabsorption resumes."

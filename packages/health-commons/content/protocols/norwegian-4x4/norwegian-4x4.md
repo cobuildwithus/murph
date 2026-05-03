@@ -576,7 +576,7 @@ experimentOnboarding:
       - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate."
-    confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, the chosen testPlanId, the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## 4-minute rep is dose\n\nShort sprints end before the aerobic system is fully loaded. 4 min is long enough for heart rate, ventilation, cardiac output, and muscle oxygen extraction to climb and stay high. The work is not a burst; it is sustained pressure on the oxygen-delivery system."
   - "## Recovery keeps next rep useful\n\n3 min easy is not filler. It drops effort enough to repeat the next 4 min rep; heart rate, temperature, and oxygen demand stay elevated. The session creates more total high-oxygen work than 1 continuous effort most people abandon."

@@ -494,7 +494,7 @@ experimentOnboarding:
       - "weekly-review"
     weeklyDigestDefault: true
     missedLogFollowupCopy: "A missed RYR log matters for dose attribution. Please mark taken, missed, or stopped."
-    confirmationPrompt: "Before creating this RYR experiment, confirm: baseline lipid panel is planned or complete, product identity and product-quality/local-law checks are documented, safety screen is negative or clinician guidance is in place, and you understand this is not a replacement for prescribed lipid care or cardiovascular-risk management."
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Monacolin K blocks liver cholesterol synthesis\n\nMonacolin K is chemically identical to lovastatin and inhibits HMG-CoA reductase, the rate-limiting enzyme in cholesterol production. The liver compensates by upregulating LDL receptors, pulling LDL particles out of the bloodstream. This statin-like pharmacology is why the protocol requires high-caution screening rather than treating RYR as a generic food supplement."
   - "## Product identity determines whether the mechanism fires\n\nCommercial RYR products vary widely in monacolin content, contaminant profile, and active-dose documentation. Direct trials show LDL-C and total-cholesterol lowering for documented preparations, but a specific commercial supplement arm in SPORT showed no significant LDL-C change over 28 days. The signal is product-specific, not category-wide."
