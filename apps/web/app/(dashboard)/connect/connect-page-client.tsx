@@ -16,6 +16,13 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/src/components/ui/dialog";
 import { Input } from "@/src/components/ui/input";
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/settings-surface";
 
@@ -76,7 +83,7 @@ export function ConnectSourcesGrid({
     message: string;
     sourceId: string;
   } | null>(null);
-  const [consentRetrySource, setConsentRetrySource] = useState<ConnectSource | null>(null);
+  const [consentSource, setConsentSource] = useState<ConnectSource | null>(null);
   const callbackConnectedSourceId = initialCallback?.status === "connected"
     ? resolveCallbackSourceId(initialCallback, sources)
     : null;
@@ -104,7 +111,7 @@ export function ConnectSourcesGrid({
     setPendingSourceId(source.id);
     setActionError(null);
     setNotice(null);
-    setConsentRetrySource(null);
+    setConsentSource(null);
 
     try {
       const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
@@ -116,16 +123,17 @@ export function ConnectSourcesGrid({
       });
       window.location.assign(readConnectAuthorizationUrl(result));
     } catch (error) {
+      if (isHostedConsentRequiredError(error)) {
+        setConsentSource(source);
+        setPendingSourceId(null);
+        return;
+      }
+
       const message = error instanceof Error ? error.message : "Connection could not be started.";
       setActionError({
         message,
         sourceId: source.id,
       });
-      setConsentRetrySource(
-        error instanceof HostedOnboardingApiError && error.code === "HOSTED_CONSENT_REQUIRED"
-          ? source
-          : null,
-      );
       setPendingSourceId(null);
     }
   }
@@ -151,17 +159,6 @@ export function ConnectSourcesGrid({
             <AlertDescription>{notice.message}</AlertDescription>
           </Alert>
         )
-      ) : null}
-
-      {consentRetrySource ? (
-        <HostedLegalConsentCard
-          mode="compact"
-          preferredScope="feature.connected-health-source"
-          source="connect-page"
-          onAccepted={async () => {
-            await startConnection(consentRetrySource);
-          }}
-        />
       ) : null}
 
       <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -203,6 +200,18 @@ export function ConnectSourcesGrid({
           ))}
         </div>
       )}
+
+      <ConnectConsentDialog
+        source={consentSource}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConsentSource(null);
+          }
+        }}
+        onAccepted={async (source) => {
+          await startConnection(source);
+        }}
+      />
 
     </section>
   );
@@ -305,6 +314,22 @@ function readConnectAuthorizationUrl(response: HostedDeviceSyncConnectResponse):
   }
 
   return response.authorizationUrl;
+}
+
+function isHostedConsentRequiredError(error: unknown): boolean {
+  return readHostedOnboardingErrorCode(error) === "HOSTED_CONSENT_REQUIRED";
+}
+
+function readHostedOnboardingErrorCode(error: unknown): string | null {
+  if (error instanceof HostedOnboardingApiError) {
+    return error.code;
+  }
+
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return null;
+  }
+
+  return typeof error.code === "string" ? error.code : null;
 }
 
 function resolveCallbackSourceLabel(input: {
@@ -469,5 +494,44 @@ function SourceLogo({ source }: { source: ConnectSource }) {
       height={source.logo.height}
       className={source.logo.className}
     />
+  );
+}
+
+function ConnectConsentDialog({
+  source,
+  onAccepted,
+  onOpenChange,
+}: {
+  onAccepted: (source: ConnectSource) => Promise<void>;
+  onOpenChange: (open: boolean) => void;
+  source: ConnectSource | null;
+}) {
+  const open = Boolean(source);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+        <DialogHeader className="pr-10">
+          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+            Connect health sources
+          </DialogTitle>
+          <DialogDescription>
+            {source
+              ? `Review the current health-source consent before connecting ${source.name}.`
+              : "Review the current health-source consent before connecting a source."}
+          </DialogDescription>
+        </DialogHeader>
+        {source ? (
+          <HostedLegalConsentCard
+            mode="compact"
+            preferredScope="feature.connected-health-source"
+            source="connect-page"
+            onAccepted={async () => {
+              await onAccepted(source);
+            }}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }
