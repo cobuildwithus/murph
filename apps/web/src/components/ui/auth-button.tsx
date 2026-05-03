@@ -5,7 +5,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { useAuthDialog } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Button } from "@/src/components/ui/button";
 
 type ButtonComponentProps = ComponentProps<typeof Button>;
@@ -27,7 +27,7 @@ function AuthButton({
   type = "button",
   ...props
 }: AuthButtonProps) {
-  const { authenticated, openAuthDialog } = useAuthDialog();
+  const { authenticated, openAuthDialog } = useAuth();
 
   function handleButtonClick(event: ButtonClickEvent) {
     if (!authenticated) {

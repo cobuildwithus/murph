@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
-import { useAuthDialog } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Button } from "@/src/components/ui/button";
@@ -119,7 +119,7 @@ function BrandMark() {
 }
 
 function SidebarAuthActions() {
-  const { openAuthDialog } = useAuthDialog();
+  const { openAuthDialog } = useAuth();
 
   return (
     <div className="-mx-2 border-t border-white/10 px-4 py-5">

@@ -5,8 +5,9 @@ import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
-import { act } from "react";
+import { act, useState } from "react";
 import { createElement } from "react";
+import type { ReactNode } from "react";
 import { afterEach, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -34,6 +35,7 @@ import {
   useBrowserVault,
   useBrowserVaultSelector,
 } from "@/src/lib/browser-vault/context";
+import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,7 +71,7 @@ test("browser-vault provider rejects not_modified refs that do not match the kno
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
     { requireButton: false },
   );
 
@@ -86,6 +88,92 @@ test("browser-vault provider rejects not_modified refs that do not match the kno
   await rendered.cleanup();
 });
 
+test("browser-vault provider skips the session route when auth context is anonymous", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "empty:none");
+
+  assert.equal(fetchMock.mock.calls.length, 0);
+  assert.equal(mocks.generateHostedUserRecipientKeyPair.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider refresh skips the session route when auth context is anonymous", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "empty:none");
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  await waitForText(rendered.container, "empty:none");
+  assert.equal(fetchMock.mock.calls.length, 0);
+  assert.equal(mocks.generateHostedUserRecipientKeyPair.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider hides ready data immediately when auth context becomes anonymous", async () => {
+  const ref = createReplicaRef();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  function AuthTransitionHarness() {
+    const [authenticated, setAuthenticated] = useState(true);
+
+    return createElement(
+      AuthProvider,
+      { authenticated },
+      createElement(
+        BrowserVaultProvider,
+        null,
+        createElement(BrowserVaultStatusProbe, {
+          onClick: () => setAuthenticated(false),
+        }),
+      ),
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(AuthTransitionHarness),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  assert.equal(rendered.container.textContent, "empty:none");
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
 test("browser-vault provider reuses an in-flight load for repeated refreshes", async () => {
   const response = createDeferred<Response>();
   const fetchMock = vi.fn(() => response.promise);
@@ -94,7 +182,7 @@ test("browser-vault provider reuses an in-flight load for repeated refreshes", a
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
     { requireButton: false },
   );
 
@@ -130,7 +218,7 @@ test("browser-vault selector returns projected data only after the client is rea
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(BrowserVaultProvider, null, createElement(BrowserVaultSelectorProbe)),
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultSelectorProbe)),
     { requireButton: false },
   );
 
@@ -163,7 +251,7 @@ test("browser-vault provider aborts in-flight loads on unmount", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createElement(BrowserVaultProvider, null, createElement(BrowserVaultStatusProbe)),
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
     { requireButton: false },
   );
 
@@ -188,12 +276,20 @@ test("browser-vault provider aborts in-flight loads on unmount", async () => {
   });
 });
 
-function BrowserVaultStatusProbe() {
+function createAuthenticatedBrowserVaultElement(child: ReactNode) {
+  return createElement(
+    AuthProvider,
+    { authenticated: true },
+    createElement(BrowserVaultProvider, null, child),
+  );
+}
+
+function BrowserVaultStatusProbe({ onClick }: { onClick?: () => void }) {
   const vault = useBrowserVault();
 
   return createElement(
     "button",
-    { onClick: () => void vault.refresh() },
+    { onClick: onClick ?? (() => void vault.refresh()) },
     `${vault.status}:${vault.error ?? vault.dataVersion ?? "none"}`,
   );
 }
