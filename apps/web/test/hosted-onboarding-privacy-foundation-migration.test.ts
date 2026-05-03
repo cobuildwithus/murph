@@ -153,6 +153,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAiUsageSanitizedMetadataMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050401_hosted_ai_usage_sanitized_usage_metadata/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -168,6 +175,8 @@ describe("hosted Prisma baseline migration", () => {
       "2026050100_device_connection_credentials_setup",
       "2026050101_device_connection_sources",
       "20260502000000_hosted_web_session",
+      "2026050400_hosted_ai_usage_provider_request_outcome",
+      "2026050401_hosted_ai_usage_sanitized_usage_metadata",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -263,6 +272,21 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceConnectionSourcesMigrationSql).toContain("ON DELETE CASCADE");
     expect(deviceConnectionSourcesMigrationSql).toContain(
       'CONSTRAINT "device_connection_source_resource_summary_shape_check"',
+    );
+    expect(hostedAiUsageSanitizedMetadataMigrationSql).toContain(
+      'ADD COLUMN "provider_request_id" TEXT',
+    );
+    expect(hostedAiUsageSanitizedMetadataMigrationSql).toContain(
+      'ADD COLUMN "raw_usage_json" JSONB',
+    );
+    expect(hostedAiUsageSanitizedMetadataMigrationSql).toContain(
+      'ADD COLUMN "raw_usage_json_hash" TEXT',
+    );
+    expect(hostedAiUsageSanitizedMetadataMigrationSql).toContain(
+      'ADD COLUMN "usage_extraction_version" TEXT NOT NULL DEFAULT \'legacy\'',
+    );
+    expect(hostedAiUsageSanitizedMetadataMigrationSql).toContain(
+      'ADD COLUMN "usage_extraction_source_path" TEXT',
     );
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');

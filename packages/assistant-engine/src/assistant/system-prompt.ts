@@ -74,6 +74,7 @@ export interface AssistantPromptCacheMetadataInput {
 
 export interface AssistantSystemPromptResult {
   cacheMetadata: AssistantPromptCacheMetadata;
+  layers: AssistantSystemPromptLayers;
   prompt: string;
 }
 
@@ -125,6 +126,7 @@ export function buildAssistantSystemPromptWithCacheMetadata(
   const layers = buildAssistantSystemPromptLayers(input);
   return {
     cacheMetadata: buildAssistantPromptCacheMetadata(layers, cacheInput),
+    layers,
     prompt: layers.prompt,
   };
 }
@@ -231,6 +233,7 @@ export function buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
   const layers = buildAssistantNotificationDecisionSystemPromptLayers(input);
   return {
     cacheMetadata: buildAssistantPromptCacheMetadata(layers, cacheInput),
+    layers,
     prompt: layers.prompt,
   };
 }

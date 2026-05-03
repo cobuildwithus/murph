@@ -37,9 +37,12 @@ function createUsageRecord(usageId: string): AssistantUsageRecord {
     outputTokens: 20,
     provider: "codex-cli",
     providerName: "Vercel AI Gateway",
+    providerRequestId: null,
     ...(match.groups.providerRequestOrdinal === undefined
       ? {}
       : { providerRequestOrdinal: Number(match.groups.providerRequestOrdinal) }),
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
     requestedModel: "gpt-test",
@@ -53,6 +56,8 @@ function createUsageRecord(usageId: string): AssistantUsageRecord {
     triggerKind: null,
     turnId: match.groups.turnId,
     usageId,
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "legacy",
   };
 }
 

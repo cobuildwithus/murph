@@ -86,7 +86,200 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
-  it('composes flat prompts from system instructions, binding context, continuity, and the user prompt', () => {
+  it.each([
+    {
+      expected: {
+        cachedInputTokens: null,
+        inputTokens: 17,
+        outputTokens: 9,
+        reasoningTokens: null,
+        totalTokens: 26,
+      },
+      expectedRawUsageJson: {
+        completion_tokens: 9,
+        prompt_tokens: 17,
+        total_tokens: 26,
+      },
+      expectedSourcePath: 'params.usage',
+      name: 'OpenAI chat-completions usage aliases',
+      rawEvents: [
+        {
+          event: 'progress',
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-chat-completions-usage',
+              model: 'gpt-5.4',
+            },
+            usage: {
+              completion_tokens: 9,
+              headers: {
+                authorization: 'redacted-test-header',
+              },
+              prompt: 'redacted test prompt',
+              prompt_tokens: 17,
+              total_tokens: 26,
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cachedInputTokens: 5,
+        inputTokens: 30,
+        outputTokens: 11,
+        reasoningTokens: 7,
+        totalTokens: 41,
+      },
+      expectedRawUsageJson: {
+        input_tokens: 30,
+        input_tokens_details: {
+          cached_tokens: 5,
+        },
+        output_tokens: 11,
+        output_tokens_details: {
+          reasoning_tokens: 7,
+        },
+        total_tokens: 41,
+      },
+      expectedSourcePath: 'params.usage',
+      name: 'OpenAI responses usage detail aliases',
+      rawEvents: [
+        {
+          params: {
+            turn: {
+              id: 'turn-responses-usage',
+              model: 'gpt-5.4',
+            },
+            usage: {
+              input_tokens: 30,
+              input_tokens_details: {
+                cached_tokens: 5,
+              },
+              output_tokens: 11,
+              output_tokens_details: {
+                reasoning_tokens: 7,
+              },
+              total_tokens: 41,
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cacheWriteTokens: 2,
+        cachedInputTokens: 4,
+        inputTokens: 21,
+        outputTokens: 13,
+        reasoningTokens: 8,
+        totalTokens: 34,
+      },
+      expectedRawUsageJson: {
+        cacheWriteTokens: 2,
+        cachedInputTokens: 4,
+        completionTokens: 13,
+        promptTokens: 21,
+        reasoningTokens: 8,
+        totalTokens: 34,
+      },
+      expectedSourcePath: 'params.turn.usage',
+      name: 'camel-case prompt and completion aliases',
+      rawEvents: [
+        {
+          params: {
+            turn: {
+              id: 'turn-camel-usage',
+              model: 'gpt-5.4',
+              usage: {
+                cacheWriteTokens: 2,
+                cachedInputTokens: 4,
+                completionTokens: 13,
+                promptTokens: 21,
+                reasoningTokens: 8,
+                totalTokens: 34,
+              },
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cacheWriteTokens: 3,
+        cachedInputTokens: 6,
+        inputTokens: 22,
+        outputTokens: 10,
+        reasoningTokens: 2,
+        totalTokens: 32,
+      },
+      expectedRawUsageJson: {
+        cache_write_tokens: 3,
+        cached_input_tokens: 6,
+        input_tokens: 22,
+        output_tokens: 10,
+        reasoning_tokens: 2,
+        total_tokens: 32,
+      },
+      expectedSourcePath: 'params.metrics.usage',
+      name: 'snake-case Murph usage aliases',
+      rawEvents: [
+        {
+          params: {
+            metrics: {
+              usage: {
+                cache_write_tokens: 3,
+                cached_input_tokens: 6,
+                input_tokens: 22,
+                output_tokens: 10,
+                reasoning_tokens: 2,
+                total_tokens: 32,
+              },
+            },
+            turn: {
+              id: 'turn-snake-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+  ])('extracts Codex usage from $name', ({
+    expected,
+    expectedRawUsageJson,
+    expectedSourcePath,
+    rawEvents,
+  }) => {
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.4',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents,
+      }),
+    ).toMatchObject({
+      cacheWriteTokens: null,
+      providerName: 'openai',
+      providerRequestId: expect.stringMatching(/^turn-/u),
+      rawUsageJson: expectedRawUsageJson,
+      rawUsageJsonHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      servedModel: 'gpt-5.4',
+      usageExtractionSourcePath: expectedSourcePath,
+      usageExtractionVersion: 'codex-usage-v1',
+      ...expected,
+    })
+  })
+
+  it('composes turn prompts from binding context, continuity, and the user prompt', () => {
     const binding = createAssistantBinding({
       actorId: 'actor-1',
       channel: 'telegram',
@@ -120,8 +313,6 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toBe(
       [
-        'You are Murph.',
-        '',
         'Conversation context:',
         'channel: telegram',
         'identity: identity-1',
@@ -257,8 +448,6 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toBe(
       [
-        'You are Murph.',
-        '',
         'Conversation so far:',
         'Assistant:',
         [
@@ -381,10 +570,13 @@ describe('Codex assistant registry helpers', () => {
         providerName: null,
         providerRequestId: null,
         rawUsageJson: null,
+        rawUsageJsonHash: null,
         reasoningTokens: null,
         requestedModel: null,
         servedModel: null,
         totalTokens: null,
+        usageExtractionSourcePath: null,
+        usageExtractionVersion: 'codex-usage-v1',
       },
     }
     const bubbledEvents: unknown[] = []

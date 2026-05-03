@@ -482,11 +482,18 @@ describe("assistant pending usage seam", () => {
           providerMetadataJson: '{"source":"runtime"}',
           providerName: " Runtime Provider ",
           providerRequestId: "request-42",
-          rawUsageJson: '{"raw":true}',
+          rawUsageJson: {
+            input_tokens: 11,
+            output_tokens: 13,
+            total_tokens: 41,
+          },
+          rawUsageJsonHash: " sha256:runtime-usage-hash ",
           reasoningTokens: 17,
           requestedModel: "gpt-5",
           servedModel: "gpt-5-mini",
           totalTokens: 41,
+          usageExtractionSourcePath: " params.usage ",
+          usageExtractionVersion: " codex-usage-v1 ",
         },
       }),
       turnId: "turn-usage",
@@ -523,7 +530,15 @@ describe("assistant pending usage seam", () => {
         outputTokens: 13,
         provider: "codex-cli",
         providerName: "Runtime Provider",
+        providerRequestId: "request-42",
+        providerRequestOutcome: "succeeded",
         providerRequestOrdinal: 0,
+        rawUsageJson: {
+          input_tokens: 11,
+          output_tokens: 13,
+          total_tokens: 41,
+        },
+        rawUsageJsonHash: "sha256:runtime-usage-hash",
         reasoningTokens: 17,
         reportingUserId: null,
         requestedModel: "gpt-5",
@@ -537,6 +552,8 @@ describe("assistant pending usage seam", () => {
         triggerKind: null,
         turnId: "turn-usage",
         usageId: "turn-usage:0:3",
+        usageExtractionSourcePath: "params.usage",
+        usageExtractionVersion: "codex-usage-v1",
       },
     });
   });
@@ -573,6 +590,41 @@ describe("assistant pending usage seam", () => {
         credentialSource: "hosted-user-env",
         occurredAt: "2026-04-08T10:02:00.000Z",
         turnId: "turn-usage-header-fallback",
+      }),
+    });
+  });
+
+  it("persists failure usage with the provider request outcome", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T10:03:00.000Z"));
+
+    await persistPendingAssistantUsageEvent({
+      executionContext: {
+        hosted: {
+          memberId: "member-42",
+          userEnvKeys: [],
+        },
+      },
+      providerRequestOutcome: "failed",
+      providerResult: createProviderResult({
+        usage: {
+          inputTokens: 21,
+          outputTokens: 0,
+          totalTokens: 21,
+        },
+      }),
+      turnId: "turn-failed-usage",
+      vault: "/vault",
+    });
+
+    expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenCalledWith({
+      vault: "/vault",
+      record: expect.objectContaining({
+        inputTokens: 21,
+        outputTokens: 0,
+        providerRequestOutcome: "failed",
+        totalTokens: 21,
+        turnId: "turn-failed-usage",
       }),
     });
   });
@@ -1278,8 +1330,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-backup" }),
         session,
       }),
+      providerResumeStateAction: "persist-from-provider-turn",
       session,
-      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T13:59:00.000Z",
       turnId: "turn-finalizer-1",
     });
@@ -1360,8 +1412,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-notification" }),
         session,
       }),
+      providerResumeStateAction: "clear",
       session,
-      turnContinuityPolicy: "murph-history-only",
       turnCreatedAt: "2026-04-08T15:29:00.000Z",
       turnId: "turn-finalizer-clear",
     });
@@ -1388,7 +1440,7 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.resumeState).toBeNull();
   });
 
-  it("does not persist new provider resume state for Murph-history-only auto-reply turns", async () => {
+  it("preserves existing provider resume state for isolated provider turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
     runtimeState.sessions.save.mockImplementation(
@@ -1418,8 +1470,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-auto-reply" }),
         session,
       }),
+      providerResumeStateAction: "preserve-existing",
       session,
-      turnContinuityPolicy: "murph-history-only",
       turnCreatedAt: "2026-04-08T15:44:00.000Z",
       turnId: "turn-finalizer-auto-reply",
     });
@@ -1427,12 +1479,16 @@ describe("assistant turn finalizer seam", () => {
     expect(runtimeState.sessions.save).toHaveBeenCalledWith(
       expect.objectContaining({
         lastTurnAt: "2026-04-08T15:45:00.000Z",
-        resumeState: null,
+        resumeState: {
+          providerSessionId: "provider-session-stale",
+          resumeRouteId: "route-existing",
+        },
         turnCount: 3,
         updatedAt: "2026-04-08T15:45:00.000Z",
       })
     );
-    expect(saved.resumeState).toBeNull();
+    expect(saved.resumeState?.providerSessionId).toBe("provider-session-stale");
+    expect(saved.resumeState?.resumeRouteId).toBe("route-existing");
   });
 
   it("does not persist provider resume state after explicit active-turn continuation history", async () => {
@@ -1451,7 +1507,6 @@ describe("assistant turn finalizer seam", () => {
     });
 
     const saved = await persistAssistantTurnAndSession({
-      activeTurnUsedExplicitHistory: true,
       input: {
         prompt: "Late active-turn follow-up.",
         vault: "/vault",
@@ -1465,8 +1520,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-active-continuation" }),
         session,
       }),
+      providerResumeStateAction: "clear",
       session,
-      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T15:49:00.000Z",
       turnId: "turn-finalizer-active-continuation",
     });
@@ -1518,8 +1573,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-tool-audit" }),
         session,
       }),
+      providerResumeStateAction: "persist-from-provider-turn",
       session,
-      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T15:44:00.000Z",
       turnId: "turn-finalizer-tool-audit",
     });
@@ -1577,8 +1632,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-new" }),
         session,
       }),
+      providerResumeStateAction: "persist-from-provider-turn",
       session,
-      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T14:59:00.000Z",
       turnId: "turn-finalizer-2",
     });
@@ -1609,8 +1664,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-fallback" }),
         session,
       }),
+      providerResumeStateAction: "persist-from-provider-turn",
       session,
-      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T15:59:00.000Z",
       turnId: "turn-finalizer-fallback",
     });
@@ -1801,7 +1856,7 @@ function createProviderResult(input?: {
   response?: string;
   route?: CodexThreadIdentity;
   session?: AssistantSession;
-  usage?: AssistantProviderUsage | null;
+  usage?: Partial<AssistantProviderUsage> | null;
 }): ExecutedAssistantProviderTurnResult {
   const session = input?.session ?? createAssistantSession();
   const defaultUsage: AssistantProviderUsage = {

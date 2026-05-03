@@ -69,12 +69,12 @@ export function HostedVerificationCodeStep({
           onChange={onCodeChange}
           onComplete={onSubmit}
         >
-          <InputOTPGroup className="w-full gap-2">
+          <InputOTPGroup className="w-full grid grid-cols-6 gap-2">
             {Array.from({ length: CODE_LENGTH }, (_, index) => (
               <InputOTPSlot
                 key={index}
                 index={index}
-                className={`${size === "compact" ? "h-14 text-lg" : "h-16 text-xl"} flex-1 min-w-0 rounded-lg border bg-card`}
+                className={`${size === "compact" ? "text-lg" : "text-xl"} aspect-square rounded-lg border bg-card`}
               />
             ))}
           </InputOTPGroup>

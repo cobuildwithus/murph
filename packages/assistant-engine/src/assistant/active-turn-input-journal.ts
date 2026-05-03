@@ -44,8 +44,8 @@ export const assistantAcceptedTurnInputSourceValues = [
 
 export const assistantProviderContinuationKindValues = [
   'explicit-structured-history',
-  'flat-prompt-replay',
   'provider-state-optimization',
+  'thread-start',
 ] as const
 
 export const assistantAcceptedTurnInputPromptFallbackReasonValues = [
@@ -104,11 +104,6 @@ const assistantProviderContinuationSchema = z.union([
       kind: z.literal('explicit-structured-history'),
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal('flat-prompt-replay'),
-    })
-    .strict(),
   z.preprocess(
     (value) =>
       value &&
@@ -122,6 +117,11 @@ const assistantProviderContinuationSchema = z.union([
       })
       .strict(),
   ),
+  z
+    .object({
+      kind: z.literal('thread-start'),
+    })
+    .strict(),
 ])
 
 export const assistantAcceptedTurnInputProviderRequestSchema = z

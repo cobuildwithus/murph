@@ -31,6 +31,12 @@ import {
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
+  buildCodexThreadResumeParams,
+  buildCodexThreadStartParams,
+  buildCodexTurnStartParams,
+  type CodexAppServerInputItem,
+} from '../src/assistant-codex/app-server-requests.ts'
+import {
   extractAssistantMessageFallback,
   extractCodexErrorMessage,
   extractCodexProgressEventFromNormalized,
@@ -125,6 +131,68 @@ describe('assistant codex runtime', () => {
         turnId: ' ',
       }),
     ).toThrowError('Codex app-server turnId is required for live turn requests.')
+  })
+
+  it('puts instructions on thread lifecycle requests but keeps turn input user-scoped', () => {
+    const baseInput = {
+      approvalPolicy: 'never',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: 'Stable Murph instructions.',
+      excludeResumeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      prompt: 'User message:\nWhat changed?',
+      reasoningEffort: 'high',
+      refreshThreadInstructions: false,
+      sandbox: 'workspace-write' as const,
+      workingDirectory: '/workspace',
+    }
+
+    expect(buildCodexThreadStartParams(baseInput)).toEqual({
+      approvalPolicy: 'never',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      cwd: '/workspace',
+      developerInstructions: 'Stable Murph instructions.',
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      sandbox: 'workspace-write',
+      serviceName: 'murph',
+    })
+
+    expect(
+      buildCodexThreadResumeParams({
+        input: baseInput,
+        providerSessionId: 'thread-1',
+      }),
+    ).toEqual({
+      approvalPolicy: 'never',
+      cwd: '/workspace',
+      excludeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      sandbox: 'workspace-write',
+      threadId: 'thread-1',
+    })
+
+    const turnStart = buildCodexTurnStartParams({
+      imagePaths: [],
+      input: baseInput,
+      providerSessionId: 'thread-1',
+    })
+    expect(turnStart).toEqual({
+      effort: 'high',
+      input: [
+        {
+          type: 'text',
+          text: 'User message:\nWhat changed?',
+        },
+      ],
+      threadId: 'thread-1',
+    })
+    const firstInputItem = (turnStart.input as CodexAppServerInputItem[])[0]
+    expect(firstInputItem?.type === 'text' ? firstInputItem.text : '').not.toContain(
+      'Stable Murph instructions.',
+    )
   })
 
   it('resolves display options from config files and explicit overrides', async () => {
@@ -971,6 +1039,7 @@ describe('assistant codex runtime', () => {
       const expectedThreadContext = {
         approvalPolicy: 'never',
         cwd: path.resolve(workingDirectory),
+        developerInstructions: 'Stable Murph instructions.',
         model: 'gpt-5',
         modelProvider: 'vercel-ai-gateway',
         sandbox: expectedSandbox,
@@ -1066,6 +1135,7 @@ describe('assistant codex runtime', () => {
           approvalPolicy: 'never',
           model: 'gpt-5',
           modelProvider: 'vercel-ai-gateway',
+          developerInstructions: 'Stable Murph instructions.',
           prompt: 'fresh prompt',
           reasoningEffort: 'high',
           sandbox,
@@ -1080,6 +1150,7 @@ describe('assistant codex runtime', () => {
           approvalPolicy: 'never',
           model: 'gpt-5',
           modelProvider: 'vercel-ai-gateway',
+          developerInstructions: 'Stable Murph instructions.',
           prompt: 'resume prompt',
           reasoningEffort: 'high',
           resumeSessionId: 'thread-resume-request',

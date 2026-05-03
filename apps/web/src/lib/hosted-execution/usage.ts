@@ -81,7 +81,11 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   outputTokens: true,
   provider: true,
   providerName: true,
+  providerRequestId: true,
+  providerRequestOutcome: true,
   providerRequestOrdinal: true,
+  rawUsageJson: true,
+  rawUsageJsonHash: true,
   reasoningTokens: true,
   reportingUserId: true,
   requestedModel: true,
@@ -93,6 +97,8 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   totalTokens: true,
   triggerKind: true,
   turnId: true,
+  usageExtractionSourcePath: true,
+  usageExtractionVersion: true,
 } as const satisfies Prisma.HostedAiUsageSelect;
 
 type StoredHostedAiUsageImmutableFields = Prisma.HostedAiUsageGetPayload<{
@@ -707,6 +713,14 @@ function buildHostedAiUsageCreateData(
     requestedModel: record.requestedModel,
     servedModel: record.servedModel,
     providerName: record.providerName,
+    providerRequestId: record.providerRequestId,
+    rawUsageJson: record.rawUsageJson
+      ? normalizeHostedAiUsageJsonObject(record.rawUsageJson, "rawUsageJson")
+      : undefined,
+    rawUsageJsonHash: record.rawUsageJsonHash,
+    usageExtractionSourcePath: record.usageExtractionSourcePath,
+    usageExtractionVersion: record.usageExtractionVersion,
+    providerRequestOutcome: record.providerRequestOutcome ?? "succeeded",
     baseUrl: record.baseUrl,
     apiKeyEnv: record.apiKeyEnv,
     credentialSource: record.credentialSource,
@@ -766,6 +780,38 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageField("requestedModel", input.storedRecord.requestedModel, expected.requestedModel),
     compareHostedAiUsageField("servedModel", input.storedRecord.servedModel, expected.servedModel),
     compareHostedAiUsageField("providerName", input.storedRecord.providerName, expected.providerName),
+    compareHostedAiUsageField(
+      "providerRequestId",
+      input.storedRecord.providerRequestId,
+      expected.providerRequestId,
+    ),
+    compareHostedAiUsageJsonField(
+      "rawUsageJson",
+      input.storedRecord.rawUsageJson,
+      expected.rawUsageJson
+        ? normalizeHostedAiUsageJsonObject(expected.rawUsageJson, "rawUsageJson")
+        : null,
+    ),
+    compareHostedAiUsageField(
+      "rawUsageJsonHash",
+      input.storedRecord.rawUsageJsonHash,
+      expected.rawUsageJsonHash,
+    ),
+    compareHostedAiUsageField(
+      "usageExtractionSourcePath",
+      input.storedRecord.usageExtractionSourcePath,
+      expected.usageExtractionSourcePath,
+    ),
+    compareHostedAiUsageField(
+      "usageExtractionVersion",
+      input.storedRecord.usageExtractionVersion,
+      expected.usageExtractionVersion,
+    ),
+    compareHostedAiUsageField(
+      "providerRequestOutcome",
+      input.storedRecord.providerRequestOutcome,
+      expected.providerRequestOutcome ?? "succeeded",
+    ),
     compareHostedAiUsageField("baseUrl", input.storedRecord.baseUrl, expected.baseUrl),
     compareHostedAiUsageField("apiKeyEnv", input.storedRecord.apiKeyEnv, expected.apiKeyEnv),
     compareHostedAiUsageField("credentialSource", input.storedRecord.credentialSource, expected.credentialSource),
@@ -876,6 +922,60 @@ function compareHostedAiUsageJsonField(
   expected: Prisma.JsonValue,
 ): string | null {
   return JSON.stringify(actual) === JSON.stringify(expected) ? null : fieldName;
+}
+
+function normalizeHostedAiUsageJsonObject(
+  value: Record<string, unknown>,
+  label: string,
+): Prisma.JsonObject {
+  const normalized: Prisma.JsonObject = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedEntry = normalizeHostedAiUsageJsonValue(entry, `${label}.${key}`);
+
+    if (normalizedEntry !== undefined) {
+      normalized[key] = normalizedEntry;
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeHostedAiUsageJsonValue(
+  value: unknown,
+  label: string,
+): Prisma.JsonValue | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`Hosted AI usage ${label} must be a finite JSON number.`);
+    }
+
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const normalized: Prisma.JsonArray = [];
+
+    for (const [index, entry] of value.entries()) {
+      normalized.push(normalizeHostedAiUsageJsonValue(entry, `${label}[${index}]`) ?? null);
+    }
+
+    return normalized;
+  }
+
+  if (typeof value === "object") {
+    return normalizeHostedAiUsageJsonObject(value as Record<string, unknown>, label);
+  }
+
+  throw new TypeError(`Hosted AI usage ${label} must be JSON-serializable.`);
 }
 
 function normalizeHostedAiUsageDate(value: Date | string, label: string): Date {
