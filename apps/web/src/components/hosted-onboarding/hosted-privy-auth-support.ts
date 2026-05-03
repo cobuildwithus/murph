@@ -41,7 +41,7 @@ export async function runHostedPrivyFinalizationAttempt({
     updateFinalizationState("idle");
     throw error;
   } finally {
-    if (getFinalizationState() !== "running") {
+    if (getFinalizationState() === "idle") {
       setPendingAction(null);
     }
   }
