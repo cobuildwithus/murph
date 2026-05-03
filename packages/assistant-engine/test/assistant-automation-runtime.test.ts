@@ -784,7 +784,7 @@ async function stageInboxCaptureAssistantInputEvent(input: {
 function createAutoReplyContextForTest(
   items: ReadonlyArray<{
     inputCandidate?: AssistantInputCandidate
-    summary: { inputId?: string; projectionCaptureId?: string | null; captureId?: string; occurredAt: string }
+    summary: { inputId?: string; optionalInboxCaptureId?: string | null; captureId?: string; occurredAt: string }
     telegramMetadata: { mediaGroupId: string | null; messageId: string | null; replyContext: string | null } | null
   }>,
 ) {
@@ -805,8 +805,8 @@ function createAutoReplyContextForTest(
     lastInputCursor: lastItem.inputCandidate!.event.cursor,
     firstInputId:
       firstItem.summary.inputId ?? firstItem.inputCandidate!.event.inputId,
-    projectionCaptureIds: items
-      .map((item) => item.summary.projectionCaptureId ?? item.summary.captureId ?? null)
+    optionalInboxCaptureIds: items
+      .map((item) => item.summary.optionalInboxCaptureId ?? item.summary.captureId ?? null)
       .filter((captureId): captureId is string => captureId !== null),
   }
 }
@@ -840,7 +840,7 @@ function createReplyGroupItem(
     inputCandidate,
     summary: {
       inputId: inputCandidate.event.inputId,
-      projectionCaptureId: capture.captureId,
+      optionalInboxCaptureId: capture.captureId,
       source: capture.source,
       conversation: inputCandidate.event.conversation!,
       occurredAt: capture.occurredAt,
@@ -873,7 +873,7 @@ function createCapturelessReplyGroupItem(
       },
       inputId: candidate.event.inputId,
       occurredAt: candidate.event.occurredAt,
-      projectionCaptureId: null,
+      optionalInboxCaptureId: null,
       receivedAt: candidate.event.receivedAt,
       source: candidate.event.source,
       text: candidate.event.transcriptText ?? candidate.event.text,
@@ -1460,8 +1460,8 @@ describe('assistant automation scanner', () => {
     expect(groupingMocks.collectAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         inputSummaries: [
-          expect.objectContaining({ projectionCaptureId: 'capture-1' }),
-          expect.objectContaining({ projectionCaptureId: 'capture-2' }),
+          expect.objectContaining({ optionalInboxCaptureId: 'capture-1' }),
+          expect.objectContaining({ optionalInboxCaptureId: 'capture-2' }),
         ],
       }),
     )
@@ -1469,7 +1469,7 @@ describe('assistant automation scanner', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
-          projectionCaptureIds: ['capture-1', 'capture-2'],
+          optionalInboxCaptureIds: ['capture-1', 'capture-2'],
         }),
       }),
     )
@@ -1820,7 +1820,7 @@ describe('assistant automation scanner', () => {
         inputSummaries: [
           expect.objectContaining({
             inputId: attachmentCandidate.event.inputId,
-            projectionCaptureId: null,
+            optionalInboxCaptureId: null,
           }),
         ],
       }),
@@ -1989,7 +1989,7 @@ describe('assistant auto-reply runtime', () => {
         sourceKind: 'inbox-capture',
         sourcePosition: 'inbox-capture:telegram:capture-2',
       },
-      projectionCaptureIds: ['capture-1', 'capture-2'],
+      optionalInboxCaptureIds: ['capture-1', 'capture-2'],
     })
   })
 
@@ -5066,7 +5066,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('loads projected capture attachments for hosted assistant input prompts', async () => {
-    const projectionCaptureId = 'cap_projected_attachment'
+    const optionalInboxCaptureId = 'cap_projected_attachment'
     const baseHostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_projected',
       inputId: 'ain_abcdabcdabcdabcdabcdabcdabcdabcd',
@@ -5084,7 +5084,7 @@ describe('assistant auto-reply runtime', () => {
       ...baseHostedInput,
       acceptedInput: {
         ...baseHostedInput.acceptedInput,
-        captureIds: [projectionCaptureId],
+        captureIds: [optionalInboxCaptureId],
       },
       event: {
         ...baseHostedInput.event,
@@ -5100,13 +5100,13 @@ describe('assistant auto-reply runtime', () => {
         ],
       },
       projection: {
-        captureId: projectionCaptureId,
+        captureId: optionalInboxCaptureId,
         reasonCode: null,
         status: 'succeeded',
       },
     }
     const projectedCapture = createCaptureDetail({
-      captureId: projectionCaptureId,
+      captureId: optionalInboxCaptureId,
       source: 'linq',
       accountId: 'safe_acct_1',
       actorId: 'safe_actor_1',
@@ -5151,7 +5151,7 @@ describe('assistant auto-reply runtime', () => {
         ...groupItem,
         summary: {
           ...groupItem.summary,
-          projectionCaptureId,
+          optionalInboxCaptureId,
         },
       },
     ])
@@ -5172,7 +5172,7 @@ describe('assistant auto-reply runtime', () => {
 
     expect(result.replied).toBe(1)
     expect(show).toHaveBeenCalledWith({
-      captureId: projectionCaptureId,
+      captureId: optionalInboxCaptureId,
       requestId: null,
       vault: '/tmp/assistant-automation-vault',
     })
@@ -5182,10 +5182,10 @@ describe('assistant auto-reply runtime', () => {
           attachmentDescriptors: hostedInput.event.attachmentDescriptors,
           enrichment: expect.objectContaining({
             attachments: projectedCapture.attachments,
-            inboxCaptureId: projectionCaptureId,
+            inboxCaptureId: optionalInboxCaptureId,
           }),
           projection: expect.objectContaining({
-            inboxCaptureId: projectionCaptureId,
+            inboxCaptureId: optionalInboxCaptureId,
             reasonCode: null,
             status: 'succeeded',
           }),
@@ -6071,7 +6071,7 @@ describe('assistant auto-reply receipt recovery', () => {
         context: expect.objectContaining({
           firstInputId: stored.inputId,
           inputIds: [stored.inputId],
-          projectionCaptureIds: [],
+          optionalInboxCaptureIds: [],
           items: [
             expect.objectContaining({
               inputCandidate: expect.objectContaining({
@@ -6705,7 +6705,7 @@ describe('assistant auto-reply receipt recovery', () => {
       expect.objectContaining({
         context: expect.objectContaining({
           inputIds: [inputIdByCaptureId.get('capture-recover')!],
-          projectionCaptureIds: [],
+          optionalInboxCaptureIds: [],
         }),
       }),
     )

@@ -137,11 +137,11 @@ export async function scanAssistantAutomationOnce(input: {
     if (candidate.summary.attachmentCount === 0) {
       return
     }
-    if (candidate.summary.projectionCaptureId === null) {
+    if (candidate.summary.optionalInboxCaptureId === null) {
       return
     }
 
-    const existing = preservedProjectionResults.get(candidate.summary.projectionCaptureId)
+    const existing = preservedProjectionResults.get(candidate.summary.optionalInboxCaptureId)
     if (existing) {
       return
     }
@@ -150,10 +150,10 @@ export async function scanAssistantAutomationOnce(input: {
       const preserved = await input.inboxServices.preserveDocumentAttachments?.({
         vault: input.vault,
         requestId: input.requestId ?? null,
-        captureId: candidate.summary.projectionCaptureId,
+        captureId: candidate.summary.optionalInboxCaptureId,
       })
       if (preserved) {
-        preservedProjectionResults.set(candidate.summary.projectionCaptureId, preserved)
+        preservedProjectionResults.set(candidate.summary.optionalInboxCaptureId, preserved)
       }
     } catch {
       input.onEvent?.({

@@ -330,7 +330,7 @@ function recoveryItemMatchesInputId(
   inputId: string,
 ): boolean {
   return item?.summary.inputId === inputId ||
-    item?.summary.projectionCaptureId === inputId
+    item?.summary.optionalInboxCaptureId === inputId
 }
 
 async function loadAutoReplyRecoveryGroupItem(input: {

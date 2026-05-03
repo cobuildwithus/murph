@@ -5,7 +5,7 @@ import type {
 
 export interface AssistantAutomationInputSummary {
   inputId: string
-  projectionCaptureId: string | null
+  optionalInboxCaptureId: string | null
   source: string
   conversation: AssistantInputConversationRef
   occurredAt: string
@@ -29,7 +29,7 @@ export function assistantAutomationInputSummaryFromCandidate(
 
   return {
     inputId: input.event.inputId,
-    projectionCaptureId: input.projection.captureId,
+    optionalInboxCaptureId: input.projection.captureId,
     source: input.event.source,
     conversation,
     occurredAt: input.event.occurredAt,

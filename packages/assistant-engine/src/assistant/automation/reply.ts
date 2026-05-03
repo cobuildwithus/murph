@@ -2,10 +2,7 @@ import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
-import {
-  conversationRefFromCapture,
-  type AssistantConversationCaptureRef,
-} from '../conversation-ref.js'
+import { conversationRefFromAssistantInputConversation } from '../conversation-ref.js'
 import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
@@ -34,7 +31,10 @@ import type {
   AssistantInputCandidate,
   AssistantInputSource,
 } from '../input-source.js'
-import { compareAssistantInputCursors } from '../input-store.js'
+import {
+  compareAssistantInputCursors,
+  type AssistantInputConversationRef,
+} from '../input-store.js'
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
@@ -98,7 +98,7 @@ export interface AssistantAutoReplyGroupContext {
   inputIds: string[]
   items: readonly AssistantAutoReplyGroupItem[]
   lastInputCursor: AssistantInputCandidate['event']['cursor']
-  projectionCaptureIds: string[]
+  optionalInboxCaptureIds: string[]
 }
 
 interface AssistantAutoReplyReplyDecision {
@@ -113,7 +113,7 @@ interface AssistantAutoReplyReplyDecision {
 
 interface AssistantAutoReplyPrimaryInput {
   actorIsSelf: boolean
-  conversation: AssistantConversationCaptureRef
+  conversation: AssistantInputConversationRef
   inputId: string
   occurredAt: string
   receivedAt: string | null
@@ -247,8 +247,8 @@ export function createAssistantAutoReplyGroupContext(
     inputIds: items.map((item) => item.inputCandidate!.event.inputId),
     items,
     lastInputCursor: lastItem.inputCandidate!.event.cursor,
-    projectionCaptureIds: items
-      .map((item) => item.summary.projectionCaptureId)
+    optionalInboxCaptureIds: items
+      .map((item) => item.summary.optionalInboxCaptureId)
       .filter((captureId): captureId is string => captureId !== null),
   }
 }
@@ -401,7 +401,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       inputCandidates: context.items.map((item) => item.inputCandidate ?? null),
     }),
     bindingDeliveryTarget: decision.deliveryTarget,
-    captureIds: context.projectionCaptureIds,
+    captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryTarget: decision.deliveryTarget,
@@ -416,7 +416,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     onEvent: input.onEvent,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: decision.operatorAuthority,
-    conversationCaptureRef: decision.primaryInput.conversation,
+    conversationRef: decision.primaryInput.conversation,
     prompt: decision.prompt,
     replyInputId: primaryAutoReplyInputId(context),
     activeTurnInput: activeTurnHooks?.admit,
@@ -474,7 +474,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
     case 'none':
       if (input.outcome.kind === 'skipped' && input.outcome.terminalSuppression) {
         await writeAssistantAutoReplySuppressionEvidence({
-          captureIds: input.context.projectionCaptureIds,
+          captureIds: input.context.optionalInboxCaptureIds,
           inputIds: input.context.inputIds,
           linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
           reason: sanitizeAssistantAutoReplySuppressionReason(
@@ -494,7 +494,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
       }
 
       await writeAssistantAutoReplyReplyIntentEvidence({
-        captureIds: input.context.projectionCaptureIds,
+        captureIds: input.context.optionalInboxCaptureIds,
         inputIds: input.context.inputIds,
         linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
         outcome: 'result',
@@ -507,7 +507,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
     case 'deferred': {
       const queuedAt = new Date().toISOString()
       await writeAssistantAutoReplyReplyIntentEvidence({
-        captureIds: input.context.projectionCaptureIds,
+        captureIds: input.context.optionalInboxCaptureIds,
         inputIds: input.context.inputIds,
         linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
         outcome: 'deferred',
@@ -519,7 +519,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
     }
     case 'error':
       await writeAssistantChatErrorArtifacts({
-        captureIds: input.context.projectionCaptureIds,
+        captureIds: input.context.optionalInboxCaptureIds,
         failure: input.outcome.artifact.failure,
         vault: input.vault,
       })
@@ -776,20 +776,20 @@ async function evaluateAssistantAutoReplyGroup(input: {
           evidence ??
           readAssistantAutoReplyTerminalEvidenceByEvidenceId(
             input.vault,
-            item.summary.projectionCaptureId ?? inputId,
+            item.summary.optionalInboxCaptureId ?? inputId,
           ),
       )
     }),
   )
-  const repairEvidence = input.group.projectionCaptureIds.length === input.group.items.length
+  const repairEvidence = input.group.optionalInboxCaptureIds.length === input.group.items.length
     ? findRepairableTerminalEvidenceForGroup(
-      input.group.projectionCaptureIds,
+      input.group.optionalInboxCaptureIds,
       existingTerminalEvidence,
     )
     : null
   if (repairEvidence) {
     const repairCaptureIds = resolveTerminalEvidenceRepairCaptureIds({
-      captureIds: input.group.projectionCaptureIds,
+      captureIds: input.group.optionalInboxCaptureIds,
       evidence: repairEvidence,
     })
     if (
@@ -839,11 +839,11 @@ async function evaluateAssistantAutoReplyGroup(input: {
   const handledReceipt = await resolveAssistantAutoReplyHandledTurnReceipt(
     input.vault,
     input.group.inputIds,
-    input.group.projectionCaptureIds,
+    input.group.optionalInboxCaptureIds,
   )
   if (handledReceipt) {
     await backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot({
-      captureIds: input.group.projectionCaptureIds,
+      captureIds: input.group.optionalInboxCaptureIds,
       context: input.group,
       snapshot: handledReceipt,
       vault: input.vault,
@@ -1054,14 +1054,16 @@ async function executeAssistantAutoReply(input: {
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority: AssistantOperatorAuthority
-  conversationCaptureRef: AssistantConversationCaptureRef
+  conversationRef: AssistantInputConversationRef
   prompt: string
   replyInputId: string
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
   const watchdog = createAssistantProviderWatchdog(input)
-  const conversation = conversationRefFromCapture(input.conversationCaptureRef)
+  const conversation = conversationRefFromAssistantInputConversation(
+    input.conversationRef,
+  )
 
   try {
     const result = await sendAssistantMessage({
@@ -1125,7 +1127,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
   checkpoint?: AssistantActiveTurnInputCheckpointHook
 } {
   let context = input.context
-  let conversation = readAutoReplyConversationCaptureRef(context)
+  let conversation = readAutoReplyConversationRef(context)
   const pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[] = []
 
   const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
@@ -1140,7 +1142,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     }
 
     const knownProjectionCaptureIds = [
-      ...context.projectionCaptureIds,
+      ...context.optionalInboxCaptureIds,
       ...pendingAcceptances.flatMap((pending) => pending.captureIds),
       ...(admissionInput.knownProjectionCaptureIds ?? []),
     ]
@@ -1176,7 +1178,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         lateInputs: lateCapturelessCandidates,
         onAcceptedContext(nextContext) {
           context = nextContext
-          conversation = readAutoReplyConversationCaptureRef(nextContext)
+          conversation = readAutoReplyConversationRef(nextContext)
           input.onAcceptedContext(nextContext)
         },
         onEvent: input.onEvent,
@@ -1276,7 +1278,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     pendingAcceptances.push({
       acceptedInputIds: acceptedInputs.map((item) => item.id),
       captureIds: lateInputSummaries
-        .map((summary) => summary.projectionCaptureId)
+        .map((summary) => summary.optionalInboxCaptureId)
         .filter((captureId): captureId is string => captureId !== null),
       apply() {
         context = mergeAssistantAutoReplyContextItems({
@@ -1289,7 +1291,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
           ],
           lastInputCursor: lateInputs.nextCursor ?? nextContext.lastInputCursor,
         })
-        conversation = readAutoReplyConversationCaptureRef(context)
+        conversation = readAutoReplyConversationRef(context)
         input.onAcceptedContext(context)
         input.onEvent?.({
           type: 'input.reply-progress',
@@ -1347,7 +1349,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 async function listAutoReplyActiveTurnInputs(input: {
   afterCursor: AssistantInputCandidate['event']['cursor']
   context: AssistantAutoReplyGroupContext
-  conversation: AssistantConversationCaptureRef
+  conversation: AssistantInputConversationRef
   inputSource: AssistantActiveTurnInputSource
   knownProjectionCaptureIds: readonly string[]
   knownInputIds: readonly string[]
@@ -1784,12 +1786,12 @@ function buildAutoReplyAcceptedTurnInputItems(input: {
     }
     const base = candidate.acceptedInput
     const baseCaptureIds = base.captureIds ?? []
-    const projectionCaptureIds = summary.projectionCaptureId
-      ? [summary.projectionCaptureId]
+    const optionalInboxCaptureIds = summary.optionalInboxCaptureId
+      ? [summary.optionalInboxCaptureId]
       : []
     return {
       ...base,
-      captureIds: baseCaptureIds.length > 0 ? baseCaptureIds : projectionCaptureIds,
+      captureIds: baseCaptureIds.length > 0 ? baseCaptureIds : optionalInboxCaptureIds,
       promptFallbackReason: base.promptFallbackReason ?? 'system-input',
       promptFallbackText:
         base.promptFallbackText ??
@@ -1911,9 +1913,9 @@ function readAutoReplyDeliveryTarget(
   return readProviderRouteScalar(replyTarget?.threadId)
 }
 
-function readAutoReplyConversationCaptureRef(
+function readAutoReplyConversationRef(
   context: AssistantAutoReplyGroupContext,
-): AssistantConversationCaptureRef {
+): AssistantInputConversationRef {
   return context.firstItem.summary.conversation
 }
 
@@ -2328,7 +2330,9 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
     resolved = await resolveAssistantSession({
       vault: input.vault,
       createIfMissing: false,
-      conversation: conversationRefFromCapture(input.input.conversation),
+      conversation: conversationRefFromAssistantInputConversation(
+        input.input.conversation,
+      ),
     })
   } catch (error) {
     const code =

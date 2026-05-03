@@ -7,7 +7,7 @@ function createInputSummary(
 ): AssistantAutomationInputSummary {
   return {
     inputId: overrides.inputId ?? 'ain_1',
-    projectionCaptureId: overrides.projectionCaptureId ?? 'cap_1',
+    optionalInboxCaptureId: overrides.optionalInboxCaptureId ?? 'cap_1',
     source: overrides.source ?? 'telegram',
     conversation: overrides.conversation ?? {
       accountId: 'acct_1',
@@ -29,11 +29,11 @@ describe('shouldGroupAdjacentConversationInput', () => {
   it('groups adjacent inputs from the same conversation lane', () => {
     const first = createInputSummary({
       inputId: 'ain_a',
-      projectionCaptureId: 'cap_a',
+      optionalInboxCaptureId: 'cap_a',
     })
     const second = createInputSummary({
       inputId: 'ain_b',
-      projectionCaptureId: 'cap_b',
+      optionalInboxCaptureId: 'cap_b',
       occurredAt: '2026-04-22T10:01:00.000Z',
       text: 'follow up',
     })
@@ -45,7 +45,7 @@ describe('shouldGroupAdjacentConversationInput', () => {
     const first = createInputSummary()
     const differentThread = createInputSummary({
       inputId: 'ain_other_thread',
-      projectionCaptureId: 'cap_other_thread',
+      optionalInboxCaptureId: 'cap_other_thread',
       conversation: {
         accountId: 'acct_1',
         actorId: 'actor_1',
