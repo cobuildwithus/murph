@@ -103,6 +103,38 @@ async function sendHostedContainerJsonRequest(input: {
   });
 }
 
+async function sendHostedContainerGetRequest(input: {
+  path: string;
+  port: number;
+}): Promise<{ json: unknown; status: number }> {
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      headers: {
+        "connection": "close",
+      },
+      host: "127.0.0.1",
+      method: "GET",
+      path: input.path,
+      port: input.port,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        const bodyText = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          json: bodyText.length > 0 ? JSON.parse(bodyText) : null,
+          status: response.statusCode ?? 0,
+        });
+      });
+    });
+
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 async function sendHostedContainerChunkedRequest(input: {
   authorization?: string;
   chunks: string[];
@@ -211,10 +243,13 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+    const response = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    expect(response.json).toMatchObject({
       ok: true,
       service: "cloudflare-hosted-runner-node",
     });
@@ -246,10 +281,13 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+    const response = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    expect(response.json).toMatchObject({
       ok: true,
       runnerBundle: {
         buildSkipped: false,
@@ -657,11 +695,14 @@ describe("startHostedContainerEntrypoint", () => {
       );
     });
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+    const response = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
 
     expect(loadNodeRunner).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    expect(response.json).toMatchObject({
       ok: true,
       service: "cloudflare-hosted-runner-node",
     });
