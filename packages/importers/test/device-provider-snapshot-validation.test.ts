@@ -8,6 +8,23 @@ import {
 } from "@murphai/importers";
 
 describe("prepareDeviceProviderSnapshotImport", () => {
+  it("preserves schema issue details as the cause when top-level input validation fails", async () => {
+    try {
+      await prepareDeviceProviderSnapshotImport({
+        snapshot: {},
+      });
+      expect.unreachable("expected validation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TypeError);
+      expect((error as Error).message).toBe("provider must be a string");
+      expect((error as Error).cause).toBeInstanceOf(ZodError);
+      expect(((error as Error).cause as ZodError).issues[0]).toMatchObject({
+        message: "provider must be a string",
+        path: ["provider"],
+      });
+    }
+  });
+
   it("rejects malformed Oura collection fields instead of silently dropping them", async () => {
     await expect(
       prepareDeviceProviderSnapshotImport({
