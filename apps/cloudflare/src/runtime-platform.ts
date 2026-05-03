@@ -79,6 +79,9 @@ type HostedWebControlTransport =
     mode: "proxy";
   };
 
+const HOSTED_MAILBOX_READ_RETRY_ATTEMPTS = 2;
+const HOSTED_MAILBOX_READ_RETRY_DELAY_MS = 100;
+
 export interface HostedWorkspaceCheckpointBridgeAuthority {
   readCurrentLease():
     | HostedRuntimeBridgeCheckpointLease
@@ -607,7 +610,7 @@ function createHostedWebMailboxPort(input: {
 }) {
   return {
     async fetch(request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0]) {
-      const payload = await fetchHostedWebControlPlaneJson({
+      const payload = await fetchReplaySafeHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
         description: "Hosted mailbox fetch",
@@ -622,7 +625,7 @@ function createHostedWebMailboxPort(input: {
     async fetchPayload(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],
     ) {
-      const payload = await fetchHostedWebControlPlaneJson({
+      const payload = await fetchReplaySafeHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
         description: "Hosted mailbox payload fetch",
@@ -750,6 +753,39 @@ function createHostedWebBillingPort(input: {
       }
     },
   };
+}
+
+async function fetchReplaySafeHostedWebControlPlaneJson(input: {
+  body?: unknown;
+  boundUserId: string;
+  description: string;
+  fetchImpl: typeof fetch;
+  method?: "GET" | "POST";
+  path: string;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}): Promise<unknown> {
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt < HOSTED_MAILBOX_READ_RETRY_ATTEMPTS) {
+    try {
+      return await fetchHostedWebControlPlaneJson(input);
+    } catch (error) {
+      attempt += 1;
+      lastError = error;
+      if (
+        attempt >= HOSTED_MAILBOX_READ_RETRY_ATTEMPTS
+        || !isRetryableHostedWebControlReadError(error)
+      ) {
+        throw error;
+      }
+
+      await sleepHostedMailboxReadRetryDelay();
+    }
+  }
+
+  throw lastError;
 }
 
 async function fetchHostedWebControlPlaneJson(input: {
@@ -1037,6 +1073,51 @@ function formatHostedResponseFetchCause(error: unknown): string {
   }
 
   return "";
+}
+
+function isRetryableHostedWebControlReadError(error: unknown): boolean {
+  const status = readHostedWebControlErrorStatus(error);
+  if (status !== null) {
+    return status === 408 || status === 429 || status === 500 || status === 502
+      || status === 503 || status === 504;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  if (error.name === "AbortError" || error.name === "TimeoutError") {
+    return false;
+  }
+
+  const message = error.message.trim().toLowerCase();
+  return message === "fetch failed"
+    || message.includes(" fetch failed")
+    || message.includes("request failed")
+    || message.includes("network")
+    || message.includes("socket")
+    || message.includes("connection reset");
+}
+
+function readHostedWebControlErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  for (const property of ["status", "statusCode", "responseStatus"] as const) {
+    const value = (error as Partial<Record<typeof property, unknown>>)[property];
+    if (typeof value === "number" && Number.isSafeInteger(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function sleepHostedMailboxReadRetryDelay(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, HOSTED_MAILBOX_READ_RETRY_DELAY_MS);
+  });
 }
 
 function assertHostedOk(response: Response, description: string): void {
