@@ -46,8 +46,48 @@ describe("hosted page auth", () => {
     });
   });
 
+  it("returns an anonymous snapshot when the hosted session table is missing", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(Object.assign(
+      new Error("The table `public.hosted_web_session` does not exist in the current database."),
+      {
+        code: "P2021",
+        name: "PrismaClientKnownRequestError",
+      },
+    ));
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      session: null,
+    });
+  });
+
+  it("returns an anonymous snapshot when the session store is not configured", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(new TypeError(
+      "DATABASE_URL is required for the hosted device-sync control plane.",
+    ));
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      session: null,
+    });
+  });
+
   it("rethrows unexpected app-session failures", async () => {
     const error = new Error("session store unavailable");
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).rejects.toBe(error);
+  });
+
+  it("rethrows generic Prisma driver failures", async () => {
+    const error = Object.assign(new Error("Driver adapter failed while decoding a session row."), {
+      name: "DriverAdapterError",
+    });
     mocks.getHostedAppSession.mockRejectedValue(error);
     const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
 
@@ -84,6 +124,30 @@ describe("hosted sidebar auth", () => {
       authenticated: true,
       label: null,
     });
+  });
+
+  it("returns anonymous sidebar auth when the hosted session store is unreachable", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(Object.assign(
+      new Error("Connection refused while opening a database connection."),
+      {
+        code: "P1001",
+        name: "PrismaClientKnownRequestError",
+      },
+    ));
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      label: null,
+    });
+  });
+
+  it("rethrows unexpected sidebar auth failures", async () => {
+    const error = new Error("session store unavailable");
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).rejects.toBe(error);
   });
 });
 
