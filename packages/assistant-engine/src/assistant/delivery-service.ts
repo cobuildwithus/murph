@@ -1,10 +1,7 @@
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  markAssistantFirstContactSeen,
-  markAssistantOnboardingBootstrapSeen,
-} from './first-contact.js'
+import { markAssistantFirstContactSeen } from './first-contact.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
@@ -88,7 +85,6 @@ export async function deliverAssistantReply(input: {
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   onboardingGuidanceInjected?: boolean
-  onboardingBootstrapStateDocIds?: readonly string[]
   firstContactStateDocIds?: readonly string[]
   outcome: AssistantDeliveryOutcome
   response: string
@@ -105,21 +101,26 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
   await state.diagnostics.recordEvent(plan.diagnostic)
-  const onboardingGuidanceAccepted =
+  const firstContactAcceptedForDelivery =
     input.onboardingGuidanceInjected === true &&
-    (input.outcome.kind === 'sent' || input.outcome.kind === 'not-requested')
-  if (onboardingGuidanceAccepted) {
+    isAssistantFirstContactAcceptedForDelivery(input.outcome)
+  if (firstContactAcceptedForDelivery) {
     await markAssistantFirstContactSeen({
       docIds: input.firstContactStateDocIds ?? [],
       seenAt: completedAt,
       vault: input.vault,
     })
-    await markAssistantOnboardingBootstrapSeen({
-      docIds: input.onboardingBootstrapStateDocIds ?? [],
-      seenAt: completedAt,
-      vault: input.vault,
-    })
   }
+}
+
+function isAssistantFirstContactAcceptedForDelivery(
+  outcome: AssistantDeliveryOutcome,
+): boolean {
+  return (
+    outcome.kind === 'sent' ||
+    outcome.kind === 'queued' ||
+    outcome.kind === 'not-requested'
+  )
 }
 
 export function buildAssistantTurnDeliveryFinalizationPlan(input: {

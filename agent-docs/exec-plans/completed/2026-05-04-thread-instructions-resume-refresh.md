@@ -26,3 +26,6 @@ Stop resending stable Codex thread instructions on every native resume while sti
 ## State
 
 Active.
+Status: completed
+Updated: 2026-05-04
+Completed: 2026-05-04

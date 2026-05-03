@@ -265,12 +265,14 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
     .update('\0')
     .update(JSON.stringify(manifest))
     .digest('hex')
+  const persistedContract = 'Murph CLI Contract:\nPersisted assistant cli contract'
   await writeFile(
     docPath,
     JSON.stringify({
-      contract: 'Persisted assistant cli contract',
+      contract: persistedContract,
       manifestFingerprint,
-      schemaVersion: 'test',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+      sourceDetail: 'full',
     }),
     'utf8',
   )
@@ -289,7 +291,7 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
     vault: vaultRoot,
   })
 
-  assert.equal(contract, 'Persisted assistant cli contract')
+  assert.equal(contract, persistedContract)
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 1)
 })
 
@@ -312,9 +314,10 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites stale persisted contra
   await writeFile(
     docPath,
     JSON.stringify({
-      contract: 'Stale assistant cli contract',
+      contract: 'Murph CLI Contract:\nStale assistant cli contract',
       manifestFingerprint: '0'.repeat(64),
-      schemaVersion: 'test',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+      sourceDetail: 'full',
     }),
     'utf8',
   )
@@ -469,6 +472,214 @@ test('resolveAssistantCliSurfaceBootstrapContext falls back from full to compact
   assert.deepEqual(
     readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
     ['full', 'compact'],
+  )
+})
+
+test('resolveAssistantCliSurfaceBootstrapContext reuses persisted contract when manifest generation fails', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-generation-failed-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const stateDirectory = resolveAssistantStatePaths(vaultRoot).stateDirectory
+  const docPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory,
+    },
+    'sessions/session-generation-failed/cli-surface-bootstrap',
+  )
+  await mkdir(path.dirname(docPath), {
+    recursive: true,
+  })
+  const persistedContract = 'Murph CLI Contract:\nPersisted assistant cli contract'
+  await writeFile(
+    docPath,
+    JSON.stringify({
+      contract: persistedContract,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      manifestFingerprint: '1'.repeat(64),
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+      sourceDetail: 'full',
+    }),
+    'utf8',
+  )
+
+  const readAssistantCliLlmsManifest = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('full manifest unavailable'))
+    .mockRejectedValueOnce(new Error('compact manifest unavailable'))
+
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
+  }))
+  const {
+    resolveAssistantCliSurfaceBootstrapContext,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = await resolveAssistantCliSurfaceBootstrapContext({
+    sessionId: 'session-generation-failed',
+    vault: vaultRoot,
+  })
+
+  assert.equal(contract, persistedContract)
+  assert.deepEqual(
+    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
+    ['full', 'compact'],
+  )
+  assert.deepEqual(JSON.parse(await readFile(docPath, 'utf8')), {
+    contract: persistedContract,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    manifestFingerprint: '1'.repeat(64),
+    schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+    sourceDetail: 'full',
+  })
+})
+
+test('resolveAssistantCliSurfaceBootstrapContext reuses compact persisted contracts when manifest generation fails', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-generation-failed-compact-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const stateDirectory = resolveAssistantStatePaths(vaultRoot).stateDirectory
+  const docPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory,
+    },
+    'sessions/session-generation-failed-compact/cli-surface-bootstrap',
+  )
+  await mkdir(path.dirname(docPath), {
+    recursive: true,
+  })
+  const persistedContract = 'Murph CLI Contract:\nPersisted assistant cli contract'
+  await writeFile(
+    docPath,
+    JSON.stringify({
+      contract: persistedContract,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      manifestFingerprint: '3'.repeat(64),
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+      sourceDetail: 'compact',
+    }),
+    'utf8',
+  )
+
+  const readAssistantCliLlmsManifest = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('full manifest unavailable'))
+    .mockRejectedValueOnce(new Error('compact manifest unavailable'))
+
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
+  }))
+  const {
+    resolveAssistantCliSurfaceBootstrapContext,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = await resolveAssistantCliSurfaceBootstrapContext({
+    sessionId: 'session-generation-failed-compact',
+    vault: vaultRoot,
+  })
+
+  assert.equal(contract, persistedContract)
+  assert.deepEqual(
+    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
+    ['full', 'compact'],
+  )
+})
+
+test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contracts when manifest generation fails', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-invalid-persisted-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const stateDirectory = resolveAssistantStatePaths(vaultRoot).stateDirectory
+  const validPersistedContract = 'Murph CLI Contract:\nPersisted assistant cli contract'
+  const validManifestFingerprint = '2'.repeat(64)
+  const cases: Array<{
+    document: Record<string, unknown>
+    sessionId: string
+  }> = [
+    {
+      sessionId: 'invalid-schema',
+      document: {
+        contract: validPersistedContract,
+        manifestFingerprint: validManifestFingerprint,
+        schemaVersion: 'test',
+        sourceDetail: 'full',
+      },
+    },
+    {
+      sessionId: 'missing-fingerprint',
+      document: {
+        contract: validPersistedContract,
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+        sourceDetail: 'full',
+      },
+    },
+    {
+      sessionId: 'invalid-source-detail',
+      document: {
+        contract: validPersistedContract,
+        manifestFingerprint: validManifestFingerprint,
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+        sourceDetail: 'summary',
+      },
+    },
+    {
+      sessionId: 'invalid-contract-shape',
+      document: {
+        contract: 'Persisted assistant cli contract',
+        manifestFingerprint: validManifestFingerprint,
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+        sourceDetail: 'full',
+      },
+    },
+  ]
+
+  for (const entry of cases) {
+    const docPath = resolveAssistantStateDocumentPath(
+      {
+        stateDirectory,
+      },
+      `sessions/${entry.sessionId}/cli-surface-bootstrap`,
+    )
+    await mkdir(path.dirname(docPath), {
+      recursive: true,
+    })
+    await writeFile(docPath, JSON.stringify(entry.document), 'utf8')
+  }
+
+  const readAssistantCliLlmsManifest = vi.fn(
+    async (_input: { detail: 'compact' | 'full' }) => {
+      throw new Error('manifest unavailable')
+    },
+  )
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
+  }))
+  const {
+    resolveAssistantCliSurfaceBootstrapContext,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  for (const entry of cases) {
+    assert.equal(
+      await resolveAssistantCliSurfaceBootstrapContext({
+        sessionId: entry.sessionId,
+        vault: vaultRoot,
+      }),
+      null,
+      entry.sessionId,
+    )
+  }
+
+  assert.deepEqual(
+    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
+    cases.flatMap(() => ['full', 'compact']),
   )
 })
 

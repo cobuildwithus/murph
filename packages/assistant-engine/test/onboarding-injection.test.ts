@@ -40,7 +40,7 @@ afterEach(async () => {
 })
 
 describe('assistant onboarding prompt injection', () => {
-  it('keeps onboarding eligible after first-contact dedupe until bootstrap guidance has been injected', async () => {
+  it('does not keep onboarding eligible past the first assistant turn when the bootstrap marker is missing', async () => {
     const vault = await createTempVault()
     const route = {
       actorId: 'actor-first',
@@ -79,7 +79,7 @@ describe('assistant onboarding prompt injection', () => {
 
     expect(plan.firstContactStateDocIds).toEqual(stateDocIds)
     expect(plan.onboardingBootstrapStateDocIds).toEqual(bootstrapDocIds)
-    expect(plan.onboardingGuidanceOpen).toBe(true)
+    expect(plan.onboardingGuidanceOpen).toBe(false)
   })
 
   it('stops onboarding eligibility for later routes once the vault bootstrap marker exists', async () => {
@@ -156,7 +156,7 @@ describe('assistant onboarding prompt injection', () => {
     expect(plan.onboardingGuidanceOpen).toBe(false)
   })
 
-  it('uses one turn as the fallback window when no bootstrap marker can be resolved', () => {
+  it('uses one committed assistant turn as the onboarding fallback window', () => {
     expect(
       resolveAssistantOnboardingGuidanceOpen({
         includeOnboardingGuidance: true,
@@ -180,7 +180,7 @@ describe('assistant onboarding prompt injection', () => {
         onboardingBootstrapSeen: false,
         sessionTurnCount: 10,
       }),
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it('preserves native resume while keeping onboarding guidance open on conversation turns', () => {

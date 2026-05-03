@@ -32,6 +32,13 @@ export async function hasAssistantSeenOnboardingBootstrap(input: {
   return hasAssistantSeenStateDocs(input)
 }
 
+export async function hasAssistantOnboardingBootstrapInjected(input: {
+  docIds: readonly string[]
+  vault: string
+}): Promise<boolean> {
+  return hasAssistantSeenOnboardingBootstrap(input)
+}
+
 export async function markAssistantFirstContactSeen(input: {
   docIds: readonly string[]
   seenAt: string
@@ -51,6 +58,18 @@ export async function markAssistantOnboardingBootstrapSeen(input: {
   await markAssistantStateDocsSeen({
     ...input,
     schemaVersion: 'murph.assistant-onboarding-bootstrap.v1',
+  })
+}
+
+export async function markAssistantOnboardingBootstrapInjected(input: {
+  docIds: readonly string[]
+  injectedAt: string
+  vault: string
+}): Promise<void> {
+  await markAssistantOnboardingBootstrapSeen({
+    docIds: input.docIds,
+    seenAt: input.injectedAt,
+    vault: input.vault,
   })
 }
 

@@ -1068,13 +1068,12 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
-  it("finalizes receipts and marks onboarding bootstrap for accepted injected turns", async () => {
+  it("finalizes receipts and marks first contact for accepted injected turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
 
     await finalizeAssistantTurnFromDeliveryOutcome({
       onboardingGuidanceInjected: true,
-      onboardingBootstrapStateDocIds: ["bootstrap-1"],
       firstContactStateDocIds: ["doc-1", "doc-2"],
       outcome: {
         delivery: {
@@ -1120,18 +1119,13 @@ describe("assistant delivery orchestration seam", () => {
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
-    expect(seamMocks.markAssistantOnboardingBootstrapSeen).toHaveBeenCalledWith({
-      docIds: ["bootstrap-1"],
-      seenAt: "2026-04-08T12:30:00.000Z",
-      vault: "/vault",
-    });
+    expect(seamMocks.markAssistantOnboardingBootstrapSeen).not.toHaveBeenCalled();
 
     seamMocks.markAssistantFirstContactSeen.mockClear();
     seamMocks.markAssistantOnboardingBootstrapSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
       onboardingGuidanceInjected: true,
-      onboardingBootstrapStateDocIds: ["bootstrap-queued"],
       firstContactStateDocIds: ["doc-1"],
       outcome: {
         error: null,
@@ -1146,7 +1140,11 @@ describe("assistant delivery orchestration seam", () => {
       vault: "/vault",
     });
 
-    expect(seamMocks.markAssistantFirstContactSeen).not.toHaveBeenCalled();
+    expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
+      docIds: ["doc-1"],
+      seenAt: "2026-04-08T12:30:00.000Z",
+      vault: "/vault",
+    });
     expect(seamMocks.markAssistantOnboardingBootstrapSeen).not.toHaveBeenCalled();
   });
 });

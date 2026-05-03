@@ -319,7 +319,7 @@ test('sendAssistantMessageLocal emits a hosted context trace after session resol
   expect(JSON.stringify(rawEvent)).not.toContain('session-message-trace')
 })
 
-test('sendAssistantMessageLocal forwards onboarding bootstrap metadata to finalization', async () => {
+test('sendAssistantMessageLocal marks onboarding bootstrap after committing the turn', async () => {
   const session = createAssistantSession({
     sessionId: 'session-onboarding-fallback',
   })
@@ -344,12 +344,25 @@ test('sendAssistantMessageLocal forwards onboarding bootstrap metadata to finali
     vault: '/vaults/test',
   })
 
+  expect(mocks.markAssistantOnboardingBootstrapInjected.mock.calls[0]?.[0]).toEqual({
+    docIds: ['bootstrap-1'],
+    injectedAt: expect.any(String),
+    vault: '/vaults/test',
+  })
+  assert.ok(
+    mocks.finalizeAssistantTurnArtifacts.mock.invocationCallOrder[0]
+      < mocks.markAssistantOnboardingBootstrapInjected.mock.invocationCallOrder[0],
+  )
+  assert.ok(
+    mocks.markAssistantOnboardingBootstrapInjected.mock.invocationCallOrder[0]
+      < mocks.dispatchAssistantReply.mock.invocationCallOrder[0],
+  )
+
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
   const [firstFinalizationCall] = mocks.finalizeDeliveredAssistantTurn.mock.calls
   const [finalizationInput] = firstFinalizationCall ?? []
   assert.deepEqual(finalizationInput, {
     firstContactStateDocIds: ['doc-1'],
-    onboardingBootstrapStateDocIds: ['bootstrap-1'],
     onboardingGuidanceInjected: true,
     outcome: {
       delivery: {
@@ -3475,6 +3488,13 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
+    markAssistantOnboardingBootstrapInjected: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/first-contact.js').markAssistantOnboardingBootstrapInjected
+        >[0],
+      ) => undefined,
+    ),
     persistPendingAssistantUsageEvent: vi.fn(
       async (_input: { providerRequestOrdinal?: number }) => undefined,
     ),
@@ -3723,6 +3743,10 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/prompt-attempts.js', () => ({
     persistFailedAssistantPromptAttempt: mocks.persistFailedAssistantPromptAttempt,
+  }))
+  vi.doMock('../src/assistant/first-contact.js', () => ({
+    markAssistantOnboardingBootstrapInjected:
+      mocks.markAssistantOnboardingBootstrapInjected,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,

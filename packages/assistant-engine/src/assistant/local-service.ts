@@ -33,6 +33,7 @@ import {
 import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
+import { markAssistantOnboardingBootstrapInjected } from './first-contact.js'
 import {
   deliverAssistantReply as dispatchAssistantReply,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
@@ -604,6 +605,14 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })
+        await markOnboardingBootstrapInjectedForCommittedTurn({
+          injected: providerResult.onboardingGuidanceInjected,
+          onboardingBootstrapStateDocIds:
+            sharedPlan.onboardingBootstrapStateDocIds,
+          sessionId: session.sessionId,
+          turnId: currentUserTurn.turnId,
+          vault: input.vault,
+        })
         const deliveryOutcome = await dispatchAssistantReply({
           input: currentInput,
           response: providerResult.response,
@@ -615,8 +624,6 @@ export async function sendAssistantMessageLocal(
         await finalizeDeliveredAssistantTurn({
           onboardingGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
-          onboardingBootstrapStateDocIds:
-            sharedPlan.onboardingBootstrapStateDocIds,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: deliveryOutcome,
           response: providerResult.response,
@@ -769,6 +776,42 @@ async function runAssistantTurnBestEffort(
   try {
     await task()
   } catch {}
+}
+
+async function markOnboardingBootstrapInjectedForCommittedTurn(input: {
+  injected?: boolean
+  onboardingBootstrapStateDocIds: readonly string[]
+  sessionId: string
+  turnId: string
+  vault: string
+}): Promise<void> {
+  if (input.injected !== true) {
+    return
+  }
+
+  const injectedAt = new Date().toISOString()
+  try {
+    await markAssistantOnboardingBootstrapInjected({
+      docIds: input.onboardingBootstrapStateDocIds,
+      injectedAt,
+      vault: input.vault,
+    })
+  } catch (error) {
+    const normalizedError = normalizeAssistantDeliveryError(error)
+    await runAssistantTurnBestEffort(() =>
+      recordAssistantDiagnosticEvent({
+        vault: input.vault,
+        component: 'assistant',
+        kind: 'onboarding.bootstrap-marker.failed',
+        level: 'warn',
+        message: normalizedError.message,
+        code: normalizedError.code,
+        sessionId: input.sessionId,
+        turnId: input.turnId,
+        at: injectedAt,
+      }),
+    )
+  }
 }
 
 function resolveProviderResumeStateAction(input: {
