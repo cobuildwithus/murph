@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     })),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
+    startHostedLinqTypingIndicator: vi.fn(),
     startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
       runId: "workflow-run-123",
     })),
@@ -114,6 +115,7 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
     ),
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
     sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
+    startHostedLinqTypingIndicator: mocks.startHostedLinqTypingIndicator,
   };
 });
 
@@ -312,6 +314,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       nextAlarmAtPresent: false,
     });
     mocks.sendHostedLinqReadReceipt.mockResolvedValue({
+      ok: true,
+      status: 204,
+    });
+    mocks.startHostedLinqTypingIndicator.mockResolvedValue({
       ok: true,
       status: 204,
     });
@@ -842,7 +848,7 @@ https://join.example.test/join/code_first_text`);
     expect(JSON.stringify(envelope)).not.toContain("signed-voice-url");
   });
 
-  it("nudges active-member Linq handoff directly and leaves read receipts to fallback workflows", async () => {
+  it("starts Linq typing after active-member direct nudge and leaves read receipts to fallback workflows", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -885,6 +891,10 @@ https://join.example.test/join/code_first_text`);
       userId: "member_123",
     });
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.startHostedLinqTypingIndicator).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 5000,
+    });
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.wake-handoff",
@@ -953,6 +963,7 @@ https://join.example.test/join/code_first_text`);
       mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
       source: "linq",
     });
+    expect(mocks.startHostedLinqTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
