@@ -78,26 +78,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       };
     }
 
-    if (input.source === "linq") {
-      const workflow = await startHostedWebhookNudgeWorkflow({
-        mailboxItemId: input.mailboxItemId,
-        source: input.source,
-      });
-      finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
-        directNudgeAttempted: false,
-        directNudgeConfigured: null,
-        directNudgeErrorCode: null,
-        workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
-      });
-      return {
-        reason: "workflow-started",
-        runId: workflow.runId,
-        runnerNudgeAccepted: false,
-        started: true,
-        workflowStarted: true,
-      };
-    }
-
     const directNudge = await tryNudgeHostedWebhookRunnerDirect(input);
     if (directNudge.accepted) {
       finishHostedOnboardingTiming(handoffTiming, "runner-nudged", {

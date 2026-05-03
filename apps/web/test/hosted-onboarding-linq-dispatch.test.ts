@@ -389,11 +389,12 @@ https://join.example.test/join/code_first_text`);
         }),
       );
       expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-      expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-      expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-        mailboxItemId: "mailbox_evt_123",
-        source: "linq",
+      expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+        context: "webhook:linq:direct",
+        timeoutMs: 5000,
+        userId: "member_123",
       });
+      expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
       expect(response).not.toHaveProperty("wakeUserId");
       expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
       expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
@@ -451,12 +452,11 @@ https://join.example.test/join/code_first_text`);
         expect.objectContaining({
           step: "hosted-onboarding.webhook.linq.wake-handoff",
         }),
-        "workflow-enqueued",
+        "runner-nudged",
         expect.objectContaining({
-          directNudgeAttempted: false,
-          directNudgeConfigured: null,
+          directNudgeAttempted: true,
+          directNudgeConfigured: true,
           directNudgeErrorCode: null,
-          workflowRunIdSuffix: "un-123",
         }),
       );
       expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -531,8 +531,12 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
+    });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("prioritizes active-member Linq text when attachment descriptors arrive first", async () => {
@@ -609,8 +613,12 @@ https://join.example.test/join/code_first_text`);
     expect(serializedEnvelope).not.toContain("cdn.linq.example.test");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
+    });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("compacts active-member Linq messages with oversized content and still appends a wake", async () => {
@@ -678,8 +686,12 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
+    });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("preserves active-member Linq link content when truncation is required", async () => {
@@ -755,8 +767,12 @@ https://join.example.test/join/code_first_text`);
     expect(serializedEnvelope).toContain("some content truncated");
     expect(serializedEnvelope).not.toContain("cdn.example.test");
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
+    });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("omits signed Linq attachment URLs from active-member mailbox wakes", async () => {
@@ -826,7 +842,7 @@ https://join.example.test/join/code_first_text`);
     expect(JSON.stringify(envelope)).not.toContain("signed-voice-url");
   });
 
-  it("starts the pointer workflow for active-member Linq handoff and read receipts", async () => {
+  it("nudges active-member Linq handoff directly and leaves read receipts to fallback workflows", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -863,25 +879,35 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_evt_required_nudge_failed",
-      source: "linq",
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
     });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.wake-handoff",
       }),
-      "workflow-enqueued",
+      "runner-nudged",
       expect.objectContaining({
-        directNudgeAttempted: false,
-        workflowRunIdSuffix: "un-123",
+        directNudgeAttempted: true,
+        directNudgeConfigured: true,
       }),
     );
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("keeps webhook success independent when the Linq handoff workflow cannot start", async () => {
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: false,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     mocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(new Error("workflow unavailable"));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -918,6 +944,11 @@ https://join.example.test/join/code_first_text`);
       reason: "wake-appended-active-member",
     });
 
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
+    });
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
       source: "linq",
@@ -1008,10 +1039,12 @@ https://join.example.test/join/code_first_text`);
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_evt_123",
-      source: "linq",
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
     });
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
