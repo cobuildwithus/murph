@@ -73,6 +73,23 @@ mechanismChain copy guidelines:
 - Use numerals and symbols for density: `4 × (4′ hard · 3′ easy)`, `HR 85–95% HRmax`, `3×/week`.
 - The adaptation step should say what physically changes, not just list body parts. Good: `heart pumps more per beat · more capillaries · muscles build more and stronger mitochondria`. Bad: `stroke volume · capillaries · mitochondria`.
 
+Tips copy guidelines (protocol.tips):
+- Tips is the "Good Practices" section. It is execution advice — what to do so the protocol goes smoothly. It is not evidence summary, safety screening, or generic experiment hygiene.
+- Write up to 6 tips. Not every protocol needs 6; write only as many as the protocol warrants.
+- Every tip must be protocol-specific. If the sentence works for sauna, fasting, creatine, meditation, and sleep, rewrite it.
+- Write for the moment of action. Cover the main phases relevant to the protocol: before → first dose/session → during → exit/recovery → common trap → measurement/logging. Skip phases that add nothing.
+- Keep each tip under 21 words. Short enough to scan, concrete enough to act.
+- Aim for: action + specific examples + boundary. Example: `Break with a small meal: soup, eggs, yogurt, tofu, fish, rice, oats, potatoes, or cooked vegetables.`
+- Prefer concrete examples over concepts. Users remember objects and situations, not abstractions. Bad: `Choose a gentle refeed.` Good: `Break with soup, eggs, yogurt, tofu, fish, rice, oats, potatoes, or cooked vegetables.`
+- Do not restate the safety section. No contraindications, clinician routing, red flags, or full stop rules here.
+- Do not restate the evidence section. No efficacy claims, mechanistic claims, or study caveats unless they directly change behavior. Bad: `Ketones rise as glycogen falls.` Good: `Do not extend for ketones, scale drops, or willpower.`
+- Name the common failure modes for this protocol. The best tips prevent predictable mistakes.
+- Use clean command language: eat, skip, start, stop, log, avoid, break, keep, choose. No soft filler: "try to," "consider," "it may be helpful," "in general," "where possible," "be mindful of."
+- Make "don't stack" advice protocol-specific. Bad: `Avoid other experiments.` Good: `Skip sauna, hard workouts, alcohol, and long travel during the fast.`
+- Include one measurement trap when users are likely to misinterpret a signal. Example: `Do not extend for ketones, scale drops, or willpower.` or `Expect scale weight to rise after creatine; log strength, not just weight.`
+- Do not moralize. No discipline, willpower, detox, punishment, earning, cheating, or "pushing through" framing.
+- Quality check before shipping: (1) Could this exact tip appear on five unrelated protocols? If yes, rewrite. (2) Can a user act on this after reading it once? If no, make it more concrete.
+
 Safety section formatting:
 - `safety.cautionLevel`: use `low`, `high`, or omit (defaults to moderate).
 - `safety.avoidOrGetClinicianGuidance`: a list of short unquoted snake_case tokens, one condition per item. Each token renders as a compact pill in the UI, so it must fit on a single line (~3-6 words, under 50 characters). Never write long prose sentences or comma-separated condition lists here. Split compound conditions into separate tokens.
