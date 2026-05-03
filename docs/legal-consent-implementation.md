@@ -47,7 +47,7 @@ Server-only helpers in `apps/web/src/lib/legal/consent.ts` provide:
 - `assertHostedConsentScopeGranted`;
 - `assertHostedLaunchRequiredConsentGranted`.
 
-Browser-vault session creation requires current launch-required consent before reading hosted vault state. Settings device-sync connection setup requires both current launch-required consent and `feature.connected-health-source` consent before starting a provider OAuth flow. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin.
+Browser-vault session creation requires current launch-required consent before reading hosted vault state. Device-sync connection setup requires current launch-required consent before starting a provider OAuth flow; the user's explicit connect action supplies the feature intent for that source, so the connect flow does not require a second connected-source consent grant. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin and should introduce separate optional scopes only when they cover distinct data use beyond launch consent plus an explicit user action.
 
 ## Privacy Notes
 

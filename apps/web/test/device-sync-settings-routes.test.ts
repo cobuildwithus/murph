@@ -6,7 +6,6 @@ import { createJsonPostRequest, createRouteContext } from "./route-test-helpers"
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
-  assertHostedConsentScopeGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -34,7 +33,6 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
-  assertHostedConsentScopeGranted: mocks.assertHostedConsentScopeGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
 }));
 
@@ -80,7 +78,6 @@ describe("device sync settings routes", () => {
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
-    mocks.assertHostedConsentScopeGranted.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
@@ -228,11 +225,6 @@ describe("device sync settings routes", () => {
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
-    });
-    expect(mocks.assertHostedConsentScopeGranted).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: mocks.prismaClient,
-      scope: "feature.connected-health-source",
     });
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
@@ -504,8 +496,8 @@ describe("device sync settings routes", () => {
     });
   });
 
-  it("requires connected-health-source consent before starting a connect flow", async () => {
-    mocks.assertHostedConsentScopeGranted.mockRejectedValue(hostedOnboardingError({
+  it("requires launch consent before starting a connect flow", async () => {
+    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_CONSENT_REQUIRED",
       httpStatus: 403,
       message: "Accept the current Murph legal consent before continuing.",

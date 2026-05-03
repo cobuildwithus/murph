@@ -7,6 +7,8 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
+
 const mocks = vi.hoisted(() => ({
   describeDeviceSyncCallbackError: vi.fn((provider: string, errorCode: string | null) =>
     `${provider}:${errorCode ?? "unknown"}`,
@@ -17,10 +19,27 @@ const mocks = vi.hoisted(() => ({
       "data-hosted-device-sync-disconnect-dialog": "true",
     }),
   ),
-  HostedDeviceSyncSettingsContent: vi.fn(() =>
-    createElement("div", {
-      "data-hosted-device-sync-settings-content": "true",
-    }),
+  HostedDeviceSyncSettingsContent: vi.fn((props: {
+    onConnect: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
+    sources: HostedDeviceSyncSettingsSource[];
+  }) =>
+    createElement(
+      "div",
+      {
+        "data-hosted-device-sync-settings-content": "true",
+      },
+      props.sources[0]
+        ? createElement(
+          "button",
+          {
+            "data-hosted-device-sync-connect-button": "true",
+            onClick: () => void props.onConnect(props.sources[0]!),
+            type: "button",
+          },
+          "Connect",
+        )
+        : null,
+    ),
   ),
   HostedDeviceSyncSettingsStatusCard: vi.fn((props: { description: string; title: string }) =>
     createElement(
@@ -41,9 +60,14 @@ const mocks = vi.hoisted(() => ({
   toErrorMessage: vi.fn((error: unknown, fallback: string) => fallback),
 }));
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
-}));
+vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/components/hosted-onboarding/client-api")>();
+
+  return {
+    ...actual,
+    requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+  };
+});
 
 vi.mock("@/src/components/settings/hosted-device-sync-settings-sections", () => ({
   HostedDeviceSyncDisconnectDialog: mocks.HostedDeviceSyncDisconnectDialog,
@@ -170,6 +194,97 @@ test("HostedDeviceSyncSettingsClient renders an unavailable state instead of the
     title: "Wearables unavailable",
   }), undefined);
   expect(mocks.HostedDeviceSyncSettingsContent).not.toHaveBeenCalled();
+});
+
+test("HostedDeviceSyncSettingsClient surfaces consent-required connect failures without an inline consent card", async () => {
+  const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
+  const source: HostedDeviceSyncSettingsSource = {
+    connectionId: null,
+    connectedAt: null,
+    detail: "Connect once for ongoing sync.",
+    displayName: null,
+    guidance: "Murph keeps an eye on this in the background and only asks for help when access expires.",
+    headline: "Ready when you are",
+    lastActivityAt: null,
+    lastSuccessfulSyncAt: null,
+    lastWebhookAt: null,
+    nextReconcileAt: null,
+    primaryAction: {
+      kind: "connect",
+      label: "Connect",
+    },
+    provider: "garmin",
+    providerConfigured: true,
+    providerLabel: "Garmin",
+    secondaryAction: null,
+    state: "available",
+    statusLabel: "Not connected",
+    tone: "muted",
+    updatedAt: null,
+    upstreamSources: [],
+  };
+
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      details: {
+        missingScopes: ["launch.health-data"],
+      },
+      message: "Accept the current Murph legal consent before continuing.",
+    }));
+
+  const { document, window } = loadLinkedom().parseHTML(
+    "<html><body><div id='root'></div></body></html>",
+  );
+  installHostedDeviceSyncClientGlobals(window, document);
+  mockWindowLocation(window, "https://app.example.test/settings");
+  const assign = vi.fn();
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      href: "https://app.example.test/settings",
+    },
+  });
+
+  const container = document.getElementById("root");
+  assert.ok(container);
+
+  const root: Root = createRoot(container);
+  cleanupRender = async () => {
+    await act(async () => {
+      root.unmount();
+    });
+  };
+
+  await act(async () => {
+    root.render(
+      createElement(HostedDeviceSyncSettingsClient, {
+        authenticated: true,
+        initialLoadError: null,
+        initialResponse: {
+          generatedAt: "2026-05-01T00:00:00.000Z",
+          ok: true,
+          sources: [source],
+        },
+      }),
+    );
+  });
+
+  const button = container.querySelector("[data-hosted-device-sync-connect-button='true']");
+  assert.ok(button instanceof window.HTMLButtonElement);
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Accept the current Murph legal consent before continuing.");
+  });
+
+  expect(container.querySelector("[data-hosted-legal-consent-card='true']")).toBeNull();
+  expect(assign).not.toHaveBeenCalled();
 });
 
 function loadLinkedom(): {
