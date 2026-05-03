@@ -225,7 +225,7 @@ export const assistantSessionResumeStateSchema = z
   })
   .strict()
 
-export function normalizeAssistantThreadInstructionsFingerprint(
+function normalizeAssistantThreadInstructionsFingerprint(
   value: unknown,
 ): string | null {
   if (typeof value !== 'string') {
