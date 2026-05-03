@@ -74,10 +74,46 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "assistantNotificationCodexConnectionLost",
   "assistantNotificationCodexFailureDetailPresent",
   "assistantNotificationCodexRetryable",
+  "failureAssistantProviderErrorBodyCode",
+  "failureAssistantProviderErrorBodyMessage",
+  "failureAssistantProviderErrorBodyType",
+  "failureAssistantProviderErrorCode",
+  "failureAssistantProviderErrorMessage",
+  "failureAssistantProviderErrorRetryable",
+  "failureAssistantProviderErrorStatus",
+  "failureAssistantProviderErrorStatusText",
+  "failureAssistantProviderErrorType",
+  "failureCodexConnectionLost",
+  "failureCodexExitCode",
+  "failureCodexFailureDetailPresent",
+  "failureCodexFailureStage",
+  "failureCodexRetryable",
+  "failureCodexSignalPresent",
+  "failureCodexStderrPresent",
+  "failureCodexTurnStatus",
+  "failureConnectionLost",
+  "failureInterrupted",
+  "failureProviderActionCount",
+  "failureProviderSessionId",
+  "failureProviderStalled",
+  "failureRecoverableConnectionLoss",
+  "failureRetryAfterSeconds",
+  "failureRetryable",
   "deliveryDispatchMode",
   "notificationChannel",
   "errorCode",
+  "safeErrorMessage",
 ] as const;
+
+const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS = new Set([
+  "failureAssistantProviderErrorBodyMessage",
+  "failureAssistantProviderErrorMessage",
+  "failureAssistantProviderErrorStatusText",
+  "safeErrorMessage",
+]);
+
+const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH = 4096;
+const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
@@ -659,9 +695,9 @@ function buildHostedAssistantAutomationDetailRedactedJson(
     }
 
     if (
-      Object.keys(output).length >= 19
+      Object.keys(output).length >= HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS
       || !isHostedRuntimeRedactedLogKeyAllowed(key)
-      || !isHostedRuntimeRedactedLogValue(value)
+      || !isHostedRuntimeRedactedLogValue(key, value)
     ) {
       continue;
     }
@@ -681,14 +717,14 @@ function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
 ): void {
   if (
     key in output
-    || Object.keys(output).length >= 19
+    || Object.keys(output).length >= HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS
     || !isHostedRuntimeRedactedLogKeyAllowed(key)
   ) {
     return;
   }
 
   const value = input[key];
-  if (isHostedRuntimeRedactedLogValue(value)) {
+  if (isHostedRuntimeRedactedLogValue(key, value)) {
     output[key] = value;
   }
 }
@@ -716,6 +752,10 @@ function readHostedRuntimeRedactedLogString(
 }
 
 function isHostedRuntimeRedactedLogKeyAllowed(key: string): boolean {
+  if (HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS.has(key)) {
+    return true;
+  }
+
   const normalized = key.toLowerCase();
   return ![
     "address",
@@ -736,7 +776,14 @@ function isHostedRuntimeRedactedLogKeyAllowed(key: string): boolean {
   ].some((part) => normalized.includes(part));
 }
 
-function isHostedRuntimeRedactedLogValue(value: unknown): value is HostedRuntimeRedactedJson[string] {
+function isHostedRuntimeRedactedLogValue(
+  key: string,
+  value: unknown,
+): value is HostedRuntimeRedactedJson[string] {
+  if (HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS.has(key)) {
+    return isHostedRuntimeSafeDiagnosticTextValue(value);
+  }
+
   if (Array.isArray(value)) {
     return value.length <= 16 && value.every(isHostedRuntimeRedactedLogScalar);
   }
@@ -759,6 +806,30 @@ function isHostedRuntimeRedactedLogScalar(
 
   return !(
     /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
+    || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
+    || /\+\d[\d().\s-]{7,}\d/u.test(value)
+    || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
+      .test(value)
+    || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
+    || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
+    || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
+  );
+}
+
+function isHostedRuntimeSafeDiagnosticTextValue(value: unknown): value is string {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH
+  ) {
+    return false;
+  }
+
+  return !(
+    /\/Users\/|file:\/\/|[A-Za-z]:\\/u.test(value)
+    || /(^|[\s(])\/[^\s)]+/u.test(
+      value.replace(/<HOME_DIR>(?:\/[^\s)]*)?/gu, ""),
+    )
     || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
     || /\+\d[\d().\s-]{7,}\d/u.test(value)
     || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
