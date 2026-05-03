@@ -92,7 +92,7 @@ import {
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
-const ASSISTANT_AUTO_REPLY_RETRY_BUDGET_RECEIPT_LIMIT = 200
+const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
 
 export interface AssistantAutoReplyGroupContext {
   firstInputId: string
@@ -339,20 +339,6 @@ export async function processAssistantAutoReplyGroup(input: {
       vault: input.vault,
     })
   }
-}
-
-async function loadAssistantAutoReplyRetryBudget(input: {
-  inputIds: readonly string[]
-  vault: string
-}) {
-  const receipts = await listAssistantTurnReceipts(
-    input.vault,
-    ASSISTANT_AUTO_REPLY_RETRY_BUDGET_RECEIPT_LIMIT,
-  )
-  return resolveAssistantAutoReplyRetryBudget({
-    inputIds: input.inputIds,
-    receipts,
-  })
 }
 
 function formatAssistantAutoReplyRetryLimitReason(input: {
@@ -916,8 +902,12 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return { kind: 'ignore' }
   }
   const primaryReplyInput = createAssistantAutoReplyPrimaryInput(primaryInput)
-  const handledReceipt = await resolveAssistantAutoReplyHandledTurnReceipt(
+  const receipts = await listAssistantTurnReceipts(
     input.vault,
+    ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
+  )
+  const handledReceipt = resolveAssistantAutoReplyHandledTurnReceipt(
+    receipts,
     input.group.inputIds,
     input.group.optionalInboxCaptureIds,
   )
@@ -969,9 +959,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
-  const retryBudget = await loadAssistantAutoReplyRetryBudget({
+  const retryBudget = resolveAssistantAutoReplyRetryBudget({
     inputIds: input.group.inputIds,
-    vault: input.vault,
+    receipts,
   })
   if (!retryBudget.allowed) {
     return createRetryExhaustedSkipDecision(retryBudget)
@@ -2272,17 +2262,18 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot(in
   })
 }
 
-async function resolveAssistantAutoReplyHandledTurnReceipt(
-  vault: string,
+function resolveAssistantAutoReplyHandledTurnReceipt(
+  recentReceipts: ReadonlyArray<
+    Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
+  >,
   inputIds: readonly string[],
   legacyProjectionCaptureIds: readonly string[] = [],
-): Promise<AssistantAutoReplyTerminalSnapshot | null> {
+): AssistantAutoReplyTerminalSnapshot | null {
   const primaryInputId = inputIds[0]
   if (!primaryInputId) {
     return null
   }
 
-  const recentReceipts = await listAssistantTurnReceipts(vault, 200)
   for (const receipt of recentReceipts) {
     if (!(receipt.status === 'completed' || receipt.status === 'deferred')) {
       continue
