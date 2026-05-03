@@ -108,6 +108,7 @@ const evidenceMocks = vi.hoisted(() => ({
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
+  writeAssistantAutoReplyRetryExhaustedEvidence: vi.fn(),
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
 }))
 
@@ -126,6 +127,8 @@ vi.mock('../src/assistant/automation/evidence.ts', () => ({
     evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence:
     evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence,
+  writeAssistantAutoReplyRetryExhaustedEvidence:
+    evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence:
     evidenceMocks.writeAssistantAutoReplySuppressionEvidence,
 }))
@@ -457,6 +460,11 @@ function createTerminalEvidence(input: {
     sessionId: string
   } | {
     kind: 'suppressed'
+    reason: string
+  } | {
+    failedAttempts: number
+    kind: 'retry_exhausted'
+    maxFailedAttempts: number
     reason: string
   }
 } = {}) {
@@ -1102,6 +1110,9 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
+    .mockReset()
+    .mockResolvedValue(undefined)
+  evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplySuppressionEvidence
@@ -4528,7 +4539,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('suppresses auto-reply before provider execution when failed attempts hit the retry cap', async () => {
+  it('records retry exhaustion before provider execution when failed attempts hit the cap', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
@@ -4576,19 +4587,83 @@ describe('assistant auto-reply runtime', () => {
       stopScanning: false,
     })
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
-    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
         captureIds: ['capture-retry-cap'],
+        failedAttempts: 3,
         inputIds: [context.firstInputId],
+        maxFailedAttempts: 3,
         reason:
-          'auto-reply retry limit reached after 3 failed attempt(s); suppressing this input instead of retrying indefinitely.',
+          'auto-reply retry limit reached after 3 failed attempt(s); pausing automatic retries instead of retrying indefinitely.',
       }))
     expect(events).toContainEqual(expect.objectContaining({
       details:
-        'auto-reply retry limit reached after 3 failed attempt(s); suppressing this input instead of retrying indefinitely.',
+        'auto-reply retry limit reached after 3 failed attempt(s); pausing automatic retries instead of retrying indefinitely.',
+      errorCode: 'ASSISTANT_AUTO_REPLY_RETRY_EXHAUSTED',
       inputId: context.firstInputId,
       type: 'input.reply-skipped',
     }))
+  })
+
+  it('repairs handled receipts before applying the retry cap', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const item = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-retry-cap-handled',
+    }))
+    const context = reply.createAssistantAutoReplyGroupContext([item])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        turnId: 'turn-retry-cap-handled-success',
+        primaryCaptureId: 'capture-retry-cap-handled',
+        primaryInputId: context.firstInputId,
+        inputIds: [context.firstInputId],
+        status: 'completed',
+      }),
+      ...[1, 2, 3].map((attempt) =>
+        createTurnReceipt({
+          turnId: `turn-retry-cap-handled-failed-${attempt}`,
+          primaryCaptureId: 'capture-retry-cap-handled',
+          primaryInputId: context.firstInputId,
+          inputIds: [context.firstInputId],
+        }),
+      ),
+    ])
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        captureIds: ['capture-retry-cap-handled'],
+        inputIds: [context.firstInputId],
+        outcome: 'result',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
+      .not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
   it('treats connection loss as a deferred retry state', async () => {
