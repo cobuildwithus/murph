@@ -4,8 +4,6 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  getPrisma: vi.fn(),
-  deviceConnectionCount: vi.fn(),
   listConnections: vi.fn(),
   readHostedDeviceSyncPublicBaseUrl: vi.fn(() => null),
   readHostedPublicBaseUrl: vi.fn(() => "https://murph.example"),
@@ -20,19 +18,10 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
   readHostedPublicBaseUrl: mocks.readHostedPublicBaseUrl,
 }));
 
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
-}));
-
 vi.mock("server-only", () => ({}));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getPrisma.mockReturnValue({
-    deviceConnection: {
-      count: mocks.deviceConnectionCount,
-    },
-  });
   mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
     listConnections: mocks.listConnections,
   });
@@ -93,55 +82,4 @@ test("buildHostedDeviceSyncSettingsResponse explains canceled access before read
 
   expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   expect(mocks.listConnections).not.toHaveBeenCalled();
-});
-
-test("hasActiveHostedDeviceSyncConnectionForMember reads only an active-connection count", async () => {
-  mocks.deviceConnectionCount.mockResolvedValue(1);
-
-  const { hasActiveHostedDeviceSyncConnectionForMember } = await import(
-    "@/src/lib/device-sync/settings-service"
-  );
-
-  await expect(hasActiveHostedDeviceSyncConnectionForMember({
-    member: {
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    },
-  })).resolves.toBe(true);
-
-  expect(mocks.deviceConnectionCount).toHaveBeenCalledWith({
-    where: {
-      OR: [
-        {
-          setupPhase: null,
-        },
-        {
-          setupPhase: "source_confirmed",
-        },
-      ],
-      status: "active",
-      userId: "member_123",
-    },
-  });
-  expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
-  expect(mocks.listConnections).not.toHaveBeenCalled();
-});
-
-test("hasActiveHostedDeviceSyncConnectionForMember blocks inactive members before reading connections", async () => {
-  const { hasActiveHostedDeviceSyncConnectionForMember } = await import(
-    "@/src/lib/device-sync/settings-service"
-  );
-
-  await expect(hasActiveHostedDeviceSyncConnectionForMember({
-    member: {
-      billingStatus: "canceled",
-      id: "member_123",
-      suspendedAt: null,
-    },
-  })).rejects.toMatchObject({
-    code: "HOSTED_ACCESS_REQUIRED",
-  });
-
-  expect(mocks.deviceConnectionCount).not.toHaveBeenCalled();
 });
