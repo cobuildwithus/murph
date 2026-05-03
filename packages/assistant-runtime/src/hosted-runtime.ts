@@ -52,6 +52,9 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
+  prepareHostedInboxEnrichmentRuntime,
+} from "./hosted-runtime/context.ts";
+import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
@@ -366,6 +369,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               leaseGeneration: input.request.leaseGeneration,
               workspaceVersion: input.request.workspaceVersion,
             },
+            prepareAssistantEnrichment: () =>
+              prepareHostedInboxEnrichmentRuntime({
+                rebuild: true,
+                requestId,
+                vaultRoot: restored.vaultRoot,
+              }),
             runAssistantPhase: (phaseInput) =>
               (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
                 ...phaseInput,

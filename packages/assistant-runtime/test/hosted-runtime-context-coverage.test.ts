@@ -76,6 +76,7 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 });
 
 import {
+  prepareHostedInboxEnrichmentRuntime,
   prepareHostedWakeContext,
   readHostedAssistantRuntimeState,
   reconcileHostedAssistantChannelState,
@@ -656,6 +657,81 @@ describe("hosted runtime context coverage", () => {
           }),
         ),
       ).resolves.toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("warms hosted inbox enrichment with rebuild enabled by default", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+    mocks.inboxInit.mockResolvedValueOnce({
+      rebuiltCaptures: 3,
+    });
+
+    try {
+      const result = await prepareHostedInboxEnrichmentRuntime({
+        requestId: "request_inbox_enrichment_warmup_success",
+        vaultRoot,
+      });
+
+      expect(result).toMatchObject({
+        errorCode: null,
+        ok: true,
+        rebuiltCaptures: 3,
+        timedOut: false,
+      });
+      expect(mocks.inboxInit).toHaveBeenCalledWith({
+        rebuild: true,
+        requestId: "request_inbox_enrichment_warmup_success",
+        vault: vaultRoot,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("returns a redacted failure status when hosted inbox enrichment warmup fails", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+    mocks.inboxInit.mockRejectedValueOnce(
+      Object.assign(new Error("invalid inbox config"), {
+        code: "INBOX_CONFIG_INVALID",
+      }),
+    );
+
+    try {
+      const result = await prepareHostedInboxEnrichmentRuntime({
+        requestId: "request_inbox_enrichment_warmup_failure",
+        vaultRoot,
+      });
+
+      expect(result).toMatchObject({
+        errorCode: "INBOX_CONFIG_INVALID",
+        ok: false,
+        rebuiltCaptures: null,
+        timedOut: false,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("bounds hosted inbox enrichment warmup latency", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+    mocks.inboxInit.mockImplementationOnce(() => new Promise(() => {}));
+
+    try {
+      const result = await prepareHostedInboxEnrichmentRuntime({
+        requestId: "request_inbox_enrichment_warmup_timeout",
+        timeoutMs: 1,
+        vaultRoot,
+      });
+
+      expect(result).toMatchObject({
+        errorCode: "timeout",
+        ok: false,
+        rebuiltCaptures: null,
+        timedOut: true,
+      });
     } finally {
       await cleanup();
     }

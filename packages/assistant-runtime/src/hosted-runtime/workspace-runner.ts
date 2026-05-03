@@ -119,6 +119,14 @@ export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
   redactedStatus?: HostedRuntimeRedactedJson | null;
 }
 
+export interface HostedWorkspaceRunnerEnrichmentWarmupResult {
+  elapsedMs: number;
+  errorCode: string | null;
+  ok: boolean;
+  rebuiltCaptures: number | null;
+  timedOut: boolean;
+}
+
 export interface HostedWorkspaceRunnerInput {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
@@ -127,6 +135,9 @@ export interface HostedWorkspaceRunnerInput {
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimeLogContext?: HostedRuntimeLogContext | null;
+  prepareAssistantEnrichment?: (
+    input: HostedWorkspaceRunnerAssistantPhaseInput,
+  ) => Promise<HostedWorkspaceRunnerEnrichmentWarmupResult | null | void>;
   runAssistantPhase?: (
     input: HostedWorkspaceRunnerAssistantPhaseInput,
   ) => Promise<HostedWorkspaceRunnerAssistantPhaseResult>;
@@ -263,13 +274,18 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     input,
     platform: input.platform,
   });
+  const assistantPhaseInput = {
+    initialMailboxImport,
+    platform,
+    workspace: input.workspace,
+  };
+  await runHostedAssistantEnrichmentWarmupBestEffort({
+    assistantPhaseInput,
+    input,
+  });
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   try {
-    assistantPhaseResult = await input.runAssistantPhase({
-      initialMailboxImport,
-      platform,
-      workspace: input.workspace,
-    });
+    assistantPhaseResult = await input.runAssistantPhase(assistantPhaseInput);
     await checkpointHostedWorkspaceAssistantPhase({
       assistantPhaseResult,
       checkpointRequestBuilder: checkpointRequestSession,
@@ -391,6 +407,44 @@ async function drainHostedWorkspaceUsageExportBestEffort(input: {
     level: result.failed > 0 || result.invalid > 0 || result.pending > 0 || errorCode
       ? "warn"
       : "info",
+    result,
+    runnerInput: input.input,
+  });
+}
+
+async function runHostedAssistantEnrichmentWarmupBestEffort(input: {
+  assistantPhaseInput: HostedWorkspaceRunnerAssistantPhaseInput;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  if (!input.input.prepareAssistantEnrichment) {
+    return;
+  }
+
+  let result: HostedWorkspaceRunnerEnrichmentWarmupResult | null | void;
+  try {
+    result = await input.input.prepareAssistantEnrichment(input.assistantPhaseInput);
+  } catch (error) {
+    console.warn("Hosted assistant enrichment warmup failed before assistant phase; continuing.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    await writeHostedAssistantEnrichmentWarmupRuntimeLog({
+      result: {
+        elapsedMs: 0,
+        errorCode: readHostedWorkspaceRunnerSafeErrorCode(error),
+        ok: false,
+        rebuiltCaptures: null,
+        timedOut: false,
+      },
+      runnerInput: input.input,
+    });
+    return;
+  }
+
+  if (!result) {
+    return;
+  }
+
+  await writeHostedAssistantEnrichmentWarmupRuntimeLog({
     result,
     runnerInput: input.input,
   });
@@ -559,6 +613,54 @@ async function writeHostedWorkspaceUsageExportRuntimeLog(input: {
     now: input.runnerInput.now,
     platform: input.runnerInput.platform,
   });
+}
+
+async function writeHostedAssistantEnrichmentWarmupRuntimeLog(input: {
+  result: HostedWorkspaceRunnerEnrichmentWarmupResult;
+  runnerInput: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.runnerInput.runtimeLogContext),
+      ...(input.result.errorCode ? { errorCode: input.result.errorCode } : {}),
+      component: "runtime",
+      eventCode: "runtime.inbox_enrichment_warmup_finished",
+      level: input.result.ok ? "info" : "warn",
+      phase: "invoke",
+      redactedJson: {
+        elapsedMs: input.result.elapsedMs,
+        ok: input.result.ok,
+        rebuiltCaptures: input.result.rebuiltCaptures,
+        timedOut: input.result.timedOut,
+      },
+    },
+    now: input.runnerInput.now,
+    platform: input.runnerInput.platform,
+  });
+}
+
+function readHostedWorkspaceRunnerSafeErrorCode(error: unknown): string {
+  if (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && typeof error.code === "string"
+  ) {
+    return toHostedWorkspaceRunnerSafeErrorCode(error.code);
+  }
+
+  if (error instanceof Error && error.name) {
+    return toHostedWorkspaceRunnerSafeErrorCode(error.name);
+  }
+
+  return "unknown";
+}
+
+function toHostedWorkspaceRunnerSafeErrorCode(value: string): string {
+  const normalized = value.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized)
+    ? normalized
+    : "unknown";
 }
 
 function shouldRecordHostedActiveTurnMailboxRefreshResult(
