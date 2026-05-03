@@ -69,7 +69,7 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
   })
 
-  it('keeps thread instructions when using provider-native resume', async () => {
+  it('can skip thread-instruction refresh when using provider-native resume', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
       jsonEvents: [],
@@ -93,6 +93,7 @@ describe('Codex thread instructions', () => {
       }),
       env: {},
       developerInstructions: 'Stable Murph instructions.',
+      refreshThreadInstructions: false,
       resumeProviderSessionId: 'thread-resume',
       systemPrompt: 'Stable Murph instructions.',
       turnContextPrompt: 'Current Murph runtime context.',
@@ -106,6 +107,7 @@ describe('Codex thread instructions', () => {
       'Stable Murph instructions.',
     )
     expect(appServerInput.excludeResumeTurns).toBe(true)
+    expect(appServerInput.refreshThreadInstructions).toBe(false)
     expect(appServerInput.prompt).toBe(
       ['Current Murph runtime context.', 'User message:\nContinue.'].join('\n\n'),
     )

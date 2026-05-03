@@ -19,7 +19,6 @@ import type {
 const seamMocks = vi.hoisted(() => ({
   buildAssistantCliGuidanceText: vi.fn(),
   buildResolveAssistantSessionInput: vi.fn(),
-  completeAssistantOnboarding: vi.fn(),
   createAssistantRuntimeStateService: vi.fn(),
   createAssistantUsageId: vi.fn(),
   isAssistantSessionNotFoundError: vi.fn(),
@@ -30,6 +29,7 @@ const seamMocks = vi.hoisted(() => ({
     updateAssistantSessionOptionsLocal: vi.fn(),
   },
   markAssistantFirstContactSeen: vi.fn(),
+  markAssistantOnboardingBootstrapSeen: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
@@ -86,10 +86,8 @@ vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
 
 vi.mock("../src/assistant/first-contact.js", () => ({
   markAssistantFirstContactSeen: seamMocks.markAssistantFirstContactSeen,
-}));
-
-vi.mock("../src/assistant/onboarding-state.js", () => ({
-  completeAssistantOnboarding: seamMocks.completeAssistantOnboarding,
+  markAssistantOnboardingBootstrapSeen:
+    seamMocks.markAssistantOnboardingBootstrapSeen,
 }));
 
 vi.mock("../src/assistant/outbox.js", async () => {
@@ -146,16 +144,6 @@ beforeEach(() => {
     sessionId: "session-from-builder",
     vault: "/vault",
   });
-  seamMocks.completeAssistantOnboarding
-    .mockReset()
-    .mockResolvedValue({
-      completedAt: "2026-04-08T12:30:00.000Z",
-      completedReason: "concrete_request",
-      createdAt: "2026-04-08T12:30:00.000Z",
-      schemaVersion: "murph.assistant-onboarding.v1",
-      status: "completed",
-      updatedAt: "2026-04-08T12:30:00.000Z",
-    });
   seamMocks.createAssistantUsageId
     .mockReset()
     .mockImplementation(
@@ -1080,13 +1068,13 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
-  it("finalizes receipts, settles fallback onboarding completion, and marks first contact only for injected sent turns", async () => {
+  it("finalizes receipts and marks onboarding bootstrap for accepted injected turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      onboardingCompletionFallbackReason: "concrete_request",
       onboardingGuidanceInjected: true,
+      onboardingBootstrapStateDocIds: ["bootstrap-1"],
       firstContactStateDocIds: ["doc-1", "doc-2"],
       outcome: {
         delivery: {
@@ -1127,22 +1115,23 @@ describe("assistant delivery orchestration seam", () => {
         turnId: "turn-finalize",
       })
     );
-    expect(seamMocks.completeAssistantOnboarding).toHaveBeenCalledWith({
-      completedAt: "2026-04-08T12:30:00.000Z",
-      reason: "concrete_request",
-      vault: "/vault",
-    });
     expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
       docIds: ["doc-1", "doc-2"],
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
+    expect(seamMocks.markAssistantOnboardingBootstrapSeen).toHaveBeenCalledWith({
+      docIds: ["bootstrap-1"],
+      seenAt: "2026-04-08T12:30:00.000Z",
+      vault: "/vault",
+    });
 
-    seamMocks.completeAssistantOnboarding.mockClear();
     seamMocks.markAssistantFirstContactSeen.mockClear();
+    seamMocks.markAssistantOnboardingBootstrapSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
       onboardingGuidanceInjected: true,
+      onboardingBootstrapStateDocIds: ["bootstrap-queued"],
       firstContactStateDocIds: ["doc-1"],
       outcome: {
         error: null,
@@ -1157,8 +1146,8 @@ describe("assistant delivery orchestration seam", () => {
       vault: "/vault",
     });
 
-    expect(seamMocks.completeAssistantOnboarding).not.toHaveBeenCalled();
     expect(seamMocks.markAssistantFirstContactSeen).not.toHaveBeenCalled();
+    expect(seamMocks.markAssistantOnboardingBootstrapSeen).not.toHaveBeenCalled();
   });
 });
 
@@ -1502,7 +1491,7 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.target.model).toBe("gpt-5.5");
   });
 
-  it("does not persist provider resume state after explicit active-turn continuation history", async () => {
+  it("preserves existing provider resume state after active-turn fallback fork", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:50:00.000Z"));
     runtimeState.sessions.save.mockImplementation(
@@ -1531,7 +1520,7 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-active-continuation" }),
         session,
       }),
-      providerResumeStateAction: "clear",
+      providerResumeStateAction: "preserve-existing",
       session,
       turnCreatedAt: "2026-04-08T15:49:00.000Z",
       turnId: "turn-finalizer-active-continuation",
@@ -1540,12 +1529,18 @@ describe("assistant turn finalizer seam", () => {
     expect(runtimeState.sessions.save).toHaveBeenCalledWith(
       expect.objectContaining({
         lastTurnAt: "2026-04-08T15:50:00.000Z",
-        resumeState: null,
+        resumeState: {
+          providerSessionId: "provider-session-existing",
+          resumeRouteId: "route-existing",
+        },
         turnCount: 3,
         updatedAt: "2026-04-08T15:50:00.000Z",
       })
     );
-    expect(saved.resumeState).toBeNull();
+    expect(saved.resumeState?.providerSessionId).toBe(
+      "provider-session-existing"
+    );
+    expect(saved.resumeState?.resumeRouteId).toBe("route-existing");
   });
 
   it("persists successful provider tool audit entries before the assistant transcript", async () => {
@@ -1853,6 +1848,7 @@ function createSharedPlan(input?: {
     },
     onboardingGuidanceOpen: false,
     firstContactStateDocIds: [],
+    onboardingBootstrapStateDocIds: [],
     operatorAuthority: "direct-operator",
     persistUserPromptOnFailure: input?.persistUserPromptOnFailure ?? false,
     requestedWorkingDirectory: "/tmp/assistant-service-runtime",

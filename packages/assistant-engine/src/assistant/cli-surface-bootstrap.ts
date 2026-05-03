@@ -32,8 +32,14 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
 
 const cachedAssistantCliSurfaceContractPromises = new Map<
   string,
-  Promise<string | null>
+  Promise<AssistantCliSurfaceContractSnapshot | null>
 >()
+
+type AssistantCliSurfaceContractSnapshot = {
+  contract: string
+  manifestFingerprint: string
+  sourceDetail: 'compact' | 'full'
+}
 
 export function buildAssistantCliSurfaceBootstrapDocId(sessionId: string): string {
   return `sessions/${sessionId}/cli-surface-bootstrap`
@@ -55,28 +61,32 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
     docId,
   )
   const persistedContract = await readPersistedAssistantCliSurfaceContract(documentPath)
-  if (persistedContract !== null) {
-    return persistedContract
-  }
-
-  const contract = await loadAssistantCliSurfaceContract({
+  const contractSnapshot = await loadAssistantCliSurfaceContract({
     cliEnv: input.cliEnv,
     executionContext: input.executionContext,
     vault: input.vault,
     workingDirectory: input.workingDirectory,
   })
-  if (!contract) {
+  if (!contractSnapshot) {
     return null
+  }
+  if (
+    persistedContract !== null &&
+    persistedContract.manifestFingerprint === contractSnapshot.manifestFingerprint
+  ) {
+    return persistedContract.contract
   }
 
   await ensureAssistantStateDirectory(path.dirname(documentPath))
   await writeJsonFileAtomic(documentPath, {
-    contract,
+    contract: contractSnapshot.contract,
     generatedAt: new Date().toISOString(),
+    manifestFingerprint: contractSnapshot.manifestFingerprint,
     schemaVersion: assistantCliSurfaceBootstrapSchemaVersion,
+    sourceDetail: contractSnapshot.sourceDetail,
   })
 
-  return contract
+  return contractSnapshot.contract
 }
 
 export function buildAssistantCliSurfaceContract(
@@ -114,13 +124,23 @@ export function buildAssistantCliSurfaceContract(
 
 async function readPersistedAssistantCliSurfaceContract(
   documentPath: string,
-): Promise<string | null> {
+): Promise<{
+  contract: string
+  manifestFingerprint: string | null
+} | null> {
   try {
     const raw = await readFile(documentPath, 'utf8')
     const value = JSON.parse(raw) as Record<string, unknown>
     const contract = value.contract
     if (typeof contract === 'string' && contract.trim().length > 0) {
-      return contract.trim()
+      return {
+        contract: contract.trim(),
+        manifestFingerprint:
+          typeof value.manifestFingerprint === 'string' &&
+          value.manifestFingerprint.trim().length > 0
+            ? value.manifestFingerprint.trim()
+            : null,
+      }
     }
 
     return null
@@ -138,7 +158,7 @@ async function loadAssistantCliSurfaceContract(input: {
   executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
-}): Promise<string | null> {
+}): Promise<AssistantCliSurfaceContractSnapshot | null> {
   const cacheKey = createAssistantCliSurfaceContractCacheKey(input)
   let cachedAssistantCliSurfaceContractPromise =
     cachedAssistantCliSurfaceContractPromises.get(cacheKey) ?? null
@@ -198,7 +218,7 @@ async function generateAssistantCliSurfaceContract(input: {
   executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
-}): Promise<string | null> {
+}): Promise<AssistantCliSurfaceContractSnapshot | null> {
   try {
     const manifest = await readAssistantCliLlmsManifest({
       cliEnv: input.cliEnv,
@@ -206,9 +226,19 @@ async function generateAssistantCliSurfaceContract(input: {
       executionContext: input.executionContext,
       workingDirectory: input.workingDirectory,
     })
-    return buildAssistantCliSurfaceContract(manifest, {
+    const contract = buildAssistantCliSurfaceContract(manifest, {
       sourceDetail: 'full',
     })
+    return contract
+      ? {
+          contract,
+          manifestFingerprint: hashAssistantCliSurfaceManifest({
+            manifest,
+            sourceDetail: 'full',
+          }),
+          sourceDetail: 'full',
+        }
+      : null
   } catch {
     const manifest = await readAssistantCliLlmsManifest({
       cliEnv: input.cliEnv,
@@ -216,10 +246,31 @@ async function generateAssistantCliSurfaceContract(input: {
       executionContext: input.executionContext,
       workingDirectory: input.workingDirectory,
     })
-    return buildAssistantCliSurfaceContract(manifest, {
+    const contract = buildAssistantCliSurfaceContract(manifest, {
       sourceDetail: 'compact',
     })
+    return contract
+      ? {
+          contract,
+          manifestFingerprint: hashAssistantCliSurfaceManifest({
+            manifest,
+            sourceDetail: 'compact',
+          }),
+          sourceDetail: 'compact',
+        }
+      : null
   }
+}
+
+function hashAssistantCliSurfaceManifest(input: {
+  manifest: AssistantCliLlmsManifest
+  sourceDetail: 'compact' | 'full'
+}): string {
+  return createHash('sha256')
+    .update(input.sourceDetail)
+    .update('\0')
+    .update(JSON.stringify(input.manifest))
+    .digest('hex')
 }
 
 function normalizeAssistantCliManifestCommands(

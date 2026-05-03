@@ -108,6 +108,7 @@ export async function executeCodexAssistantTurnAttempt(
     profile: providerConfig.target.profile ?? undefined,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
+    refreshThreadInstructions: input.refreshThreadInstructions,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
     workingDirectory: input.workingDirectory,

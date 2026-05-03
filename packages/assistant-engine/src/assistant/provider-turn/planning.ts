@@ -1,5 +1,4 @@
 import type {
-  AssistantOnboardingCompletionReason,
   AssistantSession,
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -68,15 +67,16 @@ export interface AssistantRouteTurnPlan {
   activeTurnMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
   continuityContext: string | null
   diagnosticsPolicy: AssistantDiagnosticsPolicy
-  onboardingCompletionFallbackReason: AssistantOnboardingCompletionReason | null
   onboardingGuidanceInjected: boolean
   providerContinuation: AssistantProviderContinuation
+  refreshThreadInstructions: boolean
   resumeProviderSessionId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
   }
   promptCacheMetadata: AssistantPromptCacheMetadata | null
   systemPrompt: string | null
+  threadInstructionsFingerprint: string | null
   turnContextPrompt: string | null
   workingDirectory: string
 }
@@ -307,9 +307,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const resumeProviderSessionId = threadPlan.resumeProviderSessionId
   const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
-  const shouldPrepareBootstrapContext =
+  const shouldPrepareThreadInstructions =
     shouldInjectBootstrapContext ||
     resumeProviderSessionId !== null
+  const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
+  const storedThreadInstructionsFingerprint = normalizeNullableString(
+    resumeBinding?.threadInstructionsFingerprint,
+  )
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
@@ -322,7 +326,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     executionContext: input.executionContext,
   })
   const assistantCliContract =
-    shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
+    shouldPrepareThreadInstructions && input.profile.promptProfile === 'conversation'
       ? await resolveAssistantCliSurfaceBootstrapContext({
           cliEnv: input.sharedPlan.cliAccess.env,
           executionContext: input.input.executionContext,
@@ -397,6 +401,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const turnContextPrompt = normalizeNullableString(
     systemPromptResult.layers.dynamicTurnContextPrompt,
   )
+  const threadInstructionsFingerprint =
+    buildAssistantThreadInstructionsFingerprint(systemPromptResult.cacheMetadata)
+  const refreshThreadInstructions =
+    resumeProviderSessionId === null ||
+    threadInstructionsFingerprint === null ||
+    storedThreadInstructionsFingerprint !== threadInstructionsFingerprint
 
   return {
     assistantCliContract,
@@ -405,11 +415,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
     continuityContext: null,
     diagnosticsPolicy,
-    onboardingCompletionFallbackReason: null,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
     providerContinuation: resolveAssistantProviderContinuation({
       resumeProviderSessionId,
     }),
+    refreshThreadInstructions,
     resumeProviderSessionId,
     sessionContext: shouldPrepareBootstrapContext
       ? {
@@ -419,8 +429,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     workingDirectory,
     systemPrompt,
+    threadInstructionsFingerprint,
     turnContextPrompt,
   }
+}
+
+export function buildAssistantThreadInstructionsFingerprint(
+  metadata: AssistantPromptCacheMetadata | null,
+): string | null {
+  if (!metadata) {
+    return null
+  }
+
+  return [
+    'thread-instructions-v1',
+    metadata.staticPromptHash,
+    metadata.stableRouteCapabilityPromptHash,
+  ].join(':')
 }
 
 function resolveAssistantSupportedExperimentProtocols() {

@@ -57,10 +57,11 @@ const diagnosticsMocks = vi.hoisted(() => ({
 }))
 
 const turnPlanMocks = vi.hoisted(() => ({
-  isAssistantOnboardingOpen: vi.fn(),
+  hasAssistantSeenOnboardingBootstrap: vi.fn(),
   resolveAssistantCliAccessContext: vi.fn(),
   resolveAssistantConversationPolicy: vi.fn(),
   resolveAssistantFirstContactStateDocIds: vi.fn(),
+  resolveAssistantOnboardingBootstrapStateDocIds: vi.fn(),
   resolveAssistantOperatorAuthority: vi.fn(),
 }))
 
@@ -170,19 +171,12 @@ vi.mock('../src/assistant/first-contact.js', async () => {
 
   return {
     ...actual,
+    hasAssistantSeenOnboardingBootstrap:
+      turnPlanMocks.hasAssistantSeenOnboardingBootstrap,
     resolveAssistantFirstContactStateDocIds:
       turnPlanMocks.resolveAssistantFirstContactStateDocIds,
-  }
-})
-
-vi.mock('../src/assistant/onboarding-state.js', async () => {
-  const actual = await vi.importActual<
-    typeof import('../src/assistant/onboarding-state.ts')
-  >('../src/assistant/onboarding-state.ts')
-
-  return {
-    ...actual,
-    isAssistantOnboardingOpen: turnPlanMocks.isAssistantOnboardingOpen,
+    resolveAssistantOnboardingBootstrapStateDocIds:
+      turnPlanMocks.resolveAssistantOnboardingBootstrapStateDocIds,
   }
 })
 
@@ -797,16 +791,18 @@ describe('assistant turn shared plan', () => {
       },
       onboardingGuidanceOpen: false,
       firstContactStateDocIds: [],
+      onboardingBootstrapStateDocIds: [],
       operatorAuthority: 'direct-operator',
       persistUserPromptOnFailure: true,
       requestedWorkingDirectory: '/tmp/turn-plan-vault',
     })
     expect(turnPlanMocks.resolveAssistantFirstContactStateDocIds).not.toHaveBeenCalled()
+    expect(turnPlanMocks.resolveAssistantOnboardingBootstrapStateDocIds).not.toHaveBeenCalled()
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
-    expect(turnPlanMocks.isAssistantOnboardingOpen).not.toHaveBeenCalled()
+    expect(turnPlanMocks.hasAssistantSeenOnboardingBootstrap).not.toHaveBeenCalled()
   })
 
-  it('derives first-contact state doc ids from the conversation policy audience and session binding fallbacks', async () => {
+  it('derives onboarding state doc ids from the conversation policy audience and session binding fallbacks', async () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
@@ -831,7 +827,10 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([
       'onboarding/first-contact/doc-1',
     ])
-    turnPlanMocks.isAssistantOnboardingOpen.mockResolvedValue(true)
+    turnPlanMocks.resolveAssistantOnboardingBootstrapStateDocIds.mockReturnValue([
+      'onboarding/bootstrap/doc-1',
+    ])
+    turnPlanMocks.hasAssistantSeenOnboardingBootstrap.mockResolvedValue(false)
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue(
       'direct-operator',
     )
@@ -868,13 +867,26 @@ describe('assistant turn shared plan', () => {
       threadId: 'bound-thread',
       threadIsDirect: true,
     })
-    expect(turnPlanMocks.isAssistantOnboardingOpen).toHaveBeenCalledWith(
-      '/tmp/turn-plan-vault',
-    )
+    expect(
+      turnPlanMocks.resolveAssistantOnboardingBootstrapStateDocIds,
+    ).toHaveBeenNthCalledWith(1, {
+      actorId: 'bound-actor',
+      channel: 'telegram',
+      identityId: 'bound-identity',
+      threadId: 'bound-thread',
+      threadIsDirect: true,
+    })
+    expect(turnPlanMocks.hasAssistantSeenOnboardingBootstrap).toHaveBeenCalledWith({
+      docIds: ['onboarding/bootstrap/doc-1'],
+      vault: '/tmp/turn-plan-vault',
+    })
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
     expect(eligiblePlan.onboardingGuidanceOpen).toBe(true)
     expect(eligiblePlan.firstContactStateDocIds).toEqual([
       'onboarding/first-contact/doc-1',
+    ])
+    expect(eligiblePlan.onboardingBootstrapStateDocIds).toEqual([
+      'onboarding/bootstrap/doc-1',
     ])
     expect(eligiblePlan.operatorAuthority).toBe('direct-operator')
     expect(eligiblePlan.persistUserPromptOnFailure).toBe(false)
@@ -904,7 +916,7 @@ describe('assistant turn shared plan', () => {
       operatorAuthority: 'direct-operator',
     })
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([])
-    turnPlanMocks.isAssistantOnboardingOpen.mockResolvedValue(true)
+    turnPlanMocks.resolveAssistantOnboardingBootstrapStateDocIds.mockReturnValue([])
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue('direct-operator')
 
     const plan = await resolveAssistantTurnSharedPlan(
@@ -946,15 +958,21 @@ describe('assistant turn shared plan', () => {
       threadId: null,
       threadIsDirect: null,
     })
-    expect(turnPlanMocks.isAssistantOnboardingOpen).toHaveBeenCalledWith(
-      '/tmp/turn-plan-vault',
-    )
+    expect(turnPlanMocks.resolveAssistantOnboardingBootstrapStateDocIds).toHaveBeenCalledWith({
+      actorId: null,
+      channel: null,
+      identityId: null,
+      threadId: null,
+      threadIsDirect: null,
+    })
+    expect(turnPlanMocks.hasAssistantSeenOnboardingBootstrap).not.toHaveBeenCalled()
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
     expect(plan.onboardingGuidanceOpen).toBe(true)
     expect(plan.firstContactStateDocIds).toEqual([])
+    expect(plan.onboardingBootstrapStateDocIds).toEqual([])
   })
 
-  it('stops onboarding eligibility when the shared onboarding lifecycle is already completed', async () => {
+  it('stops onboarding eligibility when the route bootstrap has already been injected', async () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
@@ -979,7 +997,10 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([
       'onboarding/first-contact/doc-1',
     ])
-    turnPlanMocks.isAssistantOnboardingOpen.mockResolvedValue(false)
+    turnPlanMocks.resolveAssistantOnboardingBootstrapStateDocIds.mockReturnValue([
+      'onboarding/bootstrap/doc-1',
+    ])
+    turnPlanMocks.hasAssistantSeenOnboardingBootstrap.mockResolvedValue(true)
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue('direct-operator')
 
     const plan = await resolveAssistantTurnSharedPlan(
@@ -998,9 +1019,10 @@ describe('assistant turn shared plan', () => {
       },
     )
 
-    expect(turnPlanMocks.isAssistantOnboardingOpen).toHaveBeenCalledWith(
-      '/tmp/turn-plan-vault',
-    )
+    expect(turnPlanMocks.hasAssistantSeenOnboardingBootstrap).toHaveBeenCalledWith({
+      docIds: ['onboarding/bootstrap/doc-1'],
+      vault: '/tmp/turn-plan-vault',
+    })
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
     expect(plan.onboardingGuidanceOpen).toBe(false)
   })

@@ -319,7 +319,7 @@ test('sendAssistantMessageLocal emits a hosted context trace after session resol
   expect(JSON.stringify(rawEvent)).not.toContain('session-message-trace')
 })
 
-test('sendAssistantMessageLocal forwards onboarding fallback completion metadata to finalization', async () => {
+test('sendAssistantMessageLocal forwards onboarding bootstrap metadata to finalization', async () => {
   const session = createAssistantSession({
     sessionId: 'session-onboarding-fallback',
   })
@@ -328,7 +328,6 @@ test('sendAssistantMessageLocal forwards onboarding fallback completion metadata
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
-        onboardingCompletionFallbackReason: 'user_answered',
         onboardingGuidanceInjected: true,
         providerContinuation: {
           kind: 'explicit-structured-history',
@@ -350,7 +349,7 @@ test('sendAssistantMessageLocal forwards onboarding fallback completion metadata
   const [finalizationInput] = firstFinalizationCall ?? []
   assert.deepEqual(finalizationInput, {
     firstContactStateDocIds: ['doc-1'],
-    onboardingCompletionFallbackReason: 'user_answered',
+    onboardingBootstrapStateDocIds: ['bootstrap-1'],
     onboardingGuidanceInjected: true,
     outcome: {
       delivery: {
@@ -369,7 +368,7 @@ test('sendAssistantMessageLocal forwards onboarding fallback completion metadata
   })
 })
 
-test('sendAssistantMessageLocal admits active-turn input and continues inside one receipt', async () => {
+test('sendAssistantMessageLocal preserves resume state when active-turn fallback uses a provider fork', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
     plan: {
       ...createSharedPlan(),
@@ -586,7 +585,7 @@ test('sendAssistantMessageLocal admits active-turn input and continues inside on
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.providerResumeStateAction,
-    'clear',
+    'preserve-existing',
   )
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
@@ -3281,7 +3280,6 @@ async function loadLocalServiceModule(input?: {
     | {
         kind: 'succeeded'
         providerTurn: {
-          onboardingCompletionFallbackReason?: 'concrete_request' | 'user_answered' | 'user_declined' | 'manual' | null
           onboardingGuidanceInjected: boolean
           providerContinuation: AssistantProviderContinuation
           response: string
@@ -3902,6 +3900,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     },
     onboardingGuidanceOpen: false,
     firstContactStateDocIds: ['doc-1'],
+    onboardingBootstrapStateDocIds: ['bootstrap-1'],
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: true,
     requestedWorkingDirectory: '/workspace',

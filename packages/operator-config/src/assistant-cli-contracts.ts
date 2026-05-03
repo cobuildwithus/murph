@@ -111,13 +111,6 @@ export const assistantTurnTimelineEventKindValues = [
   'turn.deferred',
 ] as const
 export const assistantAskResultStatusValues = ['completed'] as const
-export const assistantOnboardingStatusValues = ['open', 'completed'] as const
-export const assistantOnboardingCompletionReasonValues = [
-  'user_answered',
-  'user_declined',
-  'concrete_request',
-  'manual',
-] as const
 export const assistantOutboxStatusValues = [
   'pending',
   'sending',
@@ -212,13 +205,35 @@ export const assistantCodexModelTargetSchema = z
   .strict()
 
 export const assistantModelTargetSchema = assistantCodexModelTargetSchema
+const assistantThreadInstructionsFingerprintPattern =
+  /^thread-instructions-v1:[a-f0-9]{64}:[a-f0-9]{64}$/u
+const assistantThreadInstructionsFingerprintSchema = z
+  .string()
+  .trim()
+  .max(160)
+  .regex(assistantThreadInstructionsFingerprintPattern)
 
 export const assistantSessionResumeStateSchema = z
   .object({
     providerSessionId: z.string().min(1).nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),
+    threadInstructionsFingerprint:
+      assistantThreadInstructionsFingerprintSchema.nullable().optional(),
   })
   .strict()
+
+export function normalizeAssistantThreadInstructionsFingerprint(
+  value: unknown,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  return assistantThreadInstructionsFingerprintPattern.test(normalized)
+    ? normalized
+    : null
+}
 
 function createAssistantOpaqueIdSchema(kind: string) {
   return z.string().trim().refine(
@@ -386,6 +401,10 @@ function normalizeAssistantSessionResumeState(
     typeof value.resumeRouteId === 'string' && value.resumeRouteId.trim().length > 0
       ? value.resumeRouteId.trim()
       : null
+  const threadInstructionsFingerprint =
+    normalizeAssistantThreadInstructionsFingerprint(
+      value.threadInstructionsFingerprint,
+    )
 
   // A stored route id without an upstream provider session id cannot resume
   // anything safely, so greenfield runtime sessions only keep fully resumable
@@ -397,6 +416,9 @@ function normalizeAssistantSessionResumeState(
   return assistantSessionResumeStateSchema.parse({
     providerSessionId,
     resumeRouteId,
+    ...(threadInstructionsFingerprint
+      ? { threadInstructionsFingerprint }
+      : {}),
   })
 }
 
@@ -718,28 +740,6 @@ export const assistantDoctorResultSchema = z
     outboxIntentCount: z.number().int().nonnegative(),
     quarantineCount: z.number().int().nonnegative(),
     checks: z.array(assistantDoctorCheckSchema),
-  })
-  .strict()
-
-export const assistantOnboardingStateSchema = z
-  .object({
-    schemaVersion: z.literal('murph.assistant-onboarding.v1'),
-    status: z.enum(assistantOnboardingStatusValues),
-    createdAt: isoTimestampSchema.nullable(),
-    updatedAt: isoTimestampSchema.nullable(),
-    completedAt: isoTimestampSchema.nullable(),
-    completedReason: z
-      .enum(assistantOnboardingCompletionReasonValues)
-      .nullable(),
-  })
-  .strict()
-
-export const assistantOnboardingResultSchema = z
-  .object({
-    vault: pathSchema,
-    stateRoot: pathSchema,
-    statePath: pathSchema,
-    onboarding: assistantOnboardingStateSchema,
   })
   .strict()
 
@@ -1228,14 +1228,6 @@ export type AssistantSelfDeliveryTargetClearResult = z.infer<
 >
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantStopResult = z.infer<typeof assistantStopResultSchema>
-export type AssistantOnboardingCompletionReason =
-  (typeof assistantOnboardingCompletionReasonValues)[number]
-export type AssistantOnboardingState = z.infer<
-  typeof assistantOnboardingStateSchema
->
-export type AssistantOnboardingResult = z.infer<
-  typeof assistantOnboardingResultSchema
->
 export type AssistantStatusRunLock = z.infer<
   typeof assistantStatusRunLockSchema
 >

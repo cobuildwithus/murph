@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import { parseAssistantSessionRecord } from '../src/assistant-cli-contracts.js'
 
+const threadInstructionsFingerprint =
+  `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`
+
 function createPersistedSessionRecord(overrides: Record<string, unknown> = {}) {
   return {
     schema: 'murph.assistant-session.v1',
@@ -56,11 +59,47 @@ describe('assistant session resume state normalization', () => {
         resumeState: {
           providerSessionId: 'provider-session-123',
           resumeRouteId: 'route-new',
+          threadInstructionsFingerprint,
         },
       }),
     )
 
     expect(session.resumeState).toEqual({
+      providerSessionId: 'provider-session-123',
+      resumeRouteId: 'route-new',
+      threadInstructionsFingerprint,
+    })
+  })
+
+  it('trims and drops blank thread instruction fingerprints', () => {
+    const trimmed = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          providerSessionId: 'provider-session-123',
+          resumeRouteId: 'route-new',
+          threadInstructionsFingerprint:
+            ` ${threadInstructionsFingerprint} `,
+        },
+      }),
+    )
+
+    expect(trimmed.resumeState).toEqual({
+      providerSessionId: 'provider-session-123',
+      resumeRouteId: 'route-new',
+      threadInstructionsFingerprint,
+    })
+
+    const withoutFingerprint = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          providerSessionId: 'provider-session-123',
+          resumeRouteId: 'route-new',
+          threadInstructionsFingerprint: '   ',
+        },
+      }),
+    )
+
+    expect(withoutFingerprint.resumeState).toEqual({
       providerSessionId: 'provider-session-123',
       resumeRouteId: 'route-new',
     })

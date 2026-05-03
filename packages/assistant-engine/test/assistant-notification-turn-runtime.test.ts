@@ -1184,6 +1184,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     },
     onboardingGuidanceOpen: false,
     firstContactStateDocIds: [],
+    onboardingBootstrapStateDocIds: [],
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: false,
     requestedWorkingDirectory: '/tmp/assistant-notification-turn-runtime',

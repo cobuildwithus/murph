@@ -23,6 +23,9 @@ import {
   recoverAssistantSessionAfterProviderFailure,
 } from '../src/assistant/provider-turn-recovery.ts'
 import {
+  resolveAssistantResumeStateFromProviderTurn,
+} from '../src/assistant/turn-finalizer.ts'
+import {
   doesAssistantResumeBindingMatchRoute,
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
@@ -35,12 +38,17 @@ import {
   serializeAssistantSessionForPersistence,
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionProviderSessionId,
+  writeAssistantSessionThreadInstructionsFingerprint,
 } from '../src/assistant/provider-state.ts'
 import type { CodexThreadIdentity } from '../src/assistant/provider-route.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
+const threadInstructionsFingerprint =
+  `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`
+const nextThreadInstructionsFingerprint =
+  `thread-instructions-v1:${'c'.repeat(64)}:${'d'.repeat(64)}`
 
 afterEach(async () => {
   await Promise.all(
@@ -258,11 +266,13 @@ describe('assistant provider seam helpers', () => {
       resumeState: {
         providerSessionId: 'provider_session_resume',
         resumeRouteId: 'route-resume',
+        threadInstructionsFingerprint,
       },
     })
     expect(persisted.resumeState).toEqual({
       providerSessionId: 'provider_session_resume',
       resumeRouteId: 'route-resume',
+      threadInstructionsFingerprint,
     })
 
     expect(normalizeAssistantSessionResumeState(null)).toBeNull()
@@ -276,6 +286,30 @@ describe('assistant provider seam helpers', () => {
         'route-only',
       ),
     ).toBeNull()
+    expect(
+      writeAssistantSessionThreadInstructionsFingerprint(
+        {
+          providerSessionId: 'provider_session_resume',
+          resumeRouteId: 'route-resume',
+        },
+        ` ${nextThreadInstructionsFingerprint} `,
+      ),
+    ).toEqual({
+      providerSessionId: 'provider_session_resume',
+      resumeRouteId: 'route-resume',
+      threadInstructionsFingerprint: nextThreadInstructionsFingerprint,
+    })
+    expect(
+      resolveAssistantResumeStateFromProviderTurn({
+        providerSessionId: 'provider_session_resume',
+        routeId: 'route-resume',
+        threadInstructionsFingerprint,
+      }),
+    ).toEqual({
+      providerSessionId: 'provider_session_resume',
+      resumeRouteId: 'route-resume',
+      threadInstructionsFingerprint,
+    })
 
     const missingTargetSession = createAssistantSession()
     Reflect.set(missingTargetSession, 'target', null)

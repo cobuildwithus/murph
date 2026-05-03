@@ -13,6 +13,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionProviderSessionId,
+  writeAssistantSessionThreadInstructionsFingerprint,
 } from './provider-state.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
@@ -32,10 +33,14 @@ export type AssistantProviderResumeStateAction =
 export function resolveAssistantResumeStateFromProviderTurn(input: {
   providerSessionId: string | null
   routeId: string
+  threadInstructionsFingerprint?: string | null
 }): AssistantSession['resumeState'] {
-  return writeAssistantProviderResumeRouteId(
-    writeAssistantSessionProviderSessionId(null, input.providerSessionId),
-    input.routeId,
+  return writeAssistantSessionThreadInstructionsFingerprint(
+    writeAssistantProviderResumeRouteId(
+      writeAssistantSessionProviderSessionId(null, input.providerSessionId),
+      input.routeId,
+    ),
+    input.threadInstructionsFingerprint,
   )
 }
 
@@ -119,6 +124,7 @@ export async function persistAssistantTurnAndSession(input: {
     providerSessionId: input.providerResult.providerSessionId,
     routeId: input.providerResult.route.routeId,
     sessionResumeState: input.session.resumeState,
+    threadInstructionsFingerprint: input.providerResult.threadInstructionsFingerprint,
   })
 
   const savedSession = await state.sessions.save({
@@ -140,6 +146,7 @@ function resolveAssistantNextResumeState(input: {
   providerSessionId: string | null
   routeId: string
   sessionResumeState: AssistantSession['resumeState']
+  threadInstructionsFingerprint?: string | null
 }): AssistantSession['resumeState'] {
   switch (input.action) {
     case 'clear':
@@ -150,6 +157,7 @@ function resolveAssistantNextResumeState(input: {
       return resolveAssistantResumeStateFromProviderTurn({
         providerSessionId: input.providerSessionId,
         routeId: input.routeId,
+        threadInstructionsFingerprint: input.threadInstructionsFingerprint,
       })
   }
 }
