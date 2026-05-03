@@ -411,6 +411,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("does not retry mutating hosted device-sync connect-link transport failures", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch failed");
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await expect(platform.deviceSyncPort!.createConnectLink({
+      connectTarget: "whoop",
+    })).rejects.toThrow("Hosted device-sync connect link whoop request failed. fetch failed");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("resolves delegated billing Stripe customers through the signed hosted web callback route", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       stripeCustomerId: "cus_123",
@@ -629,6 +646,101 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       limitPerLane: 10,
       requestId: "request_mailbox_1",
     });
+  });
+
+  it("retries replay-safe hosted mailbox fetch transport failures once", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw new Error("fetch failed");
+      }
+
+      return new Response(JSON.stringify({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.mailboxPort!.fetch({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_retry",
+    });
+
+    expect(result.items).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retriedRequest = requireFetchRequest(fetchMock.mock.calls[1], "retried mailbox fetch");
+    expect(retriedRequest.url).toBe("http://web-control.worker/api/internal/hosted-mailbox/fetch");
+    expect(retriedRequest.method).toBe("POST");
+    expect(retriedRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+  });
+
+  it("retries replay-safe hosted mailbox payload fetch transport failures once", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw new Error("socket closed");
+      }
+
+      return new Response(JSON.stringify({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        payload: {
+          createdAt: "2026-04-26T00:00:01.000Z",
+          mailboxItemId: "mailbox_payload_1",
+          payloadCiphertext: "ciphertext",
+          payloadSchema: "murph.hosted-mailbox-payload.v1",
+          userId: "member_123",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.mailboxPort!.fetchPayload({
+      dedupeKey: "dedupe_payload_1",
+      mailboxItemId: "mailbox_payload_1",
+      payloadRef: "hosted-mailbox-payload:mailbox_payload_1",
+      requestId: "request_payload_retry",
+    });
+
+    expect(result.payload?.payloadCiphertext).toBe("ciphertext");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retriedRequest = requireFetchRequest(
+      fetchMock.mock.calls[1],
+      "retried mailbox payload fetch",
+    );
+    expect(retriedRequest.url).toBe(
+      "http://web-control.worker/api/internal/hosted-mailbox/payload/fetch",
+    );
+    expect(retriedRequest.method).toBe("POST");
+    expect(retriedRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
   });
 
   it("threads checkpoint fencing fields through the workspace callback body", async () => {
