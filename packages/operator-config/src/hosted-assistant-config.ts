@@ -68,7 +68,6 @@ const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
 )
 
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
-const HOSTED_ASSISTANT_LOCAL_CODEX_PROVIDER_ID = 'local-codex'
 const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV =
   resolveAssistantCodexModelProviderConfig(
     VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
@@ -196,8 +195,7 @@ export function isHostedAssistantProfileReady(
   }
 
   const providerConfig = hostedAssistantProfileToProviderConfigInput(profile)
-  return providerConfig.modelProvider === null ||
-    resolveAssistantCodexModelProviderConfig(providerConfig.modelProvider) !== null
+  return resolveAssistantCodexModelProviderConfig(providerConfig.modelProvider) !== null
 }
 
 export function resolveReadyHostedAssistantProfile(
@@ -547,16 +545,20 @@ function resolveHostedAssistantCodexModelProvider(providerToken: string): {
     }
   }
 
-  if (providerToken === HOSTED_ASSISTANT_LOCAL_CODEX_PROVIDER_ID) {
-    return {
-      label: HOSTED_ASSISTANT_LOCAL_CODEX_PROVIDER_ID,
-      modelProvider: null,
-    }
+  if (providerToken === 'local-codex') {
+    throw new HostedAssistantConfigurationError(
+      'HOSTED_ASSISTANT_CONFIG_INVALID',
+      [
+        `${HOSTED_ASSISTANT_PROVIDER_ENV}=local-codex is no longer supported for hosted assistant execution.`,
+        `Set ${HOSTED_ASSISTANT_PROVIDER_ENV}=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID}`,
+        `and configure ${HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV}.`,
+      ].join(' '),
+    )
   }
 
   throw new HostedAssistantConfigurationError(
     'HOSTED_ASSISTANT_CONFIG_INVALID',
-    `${HOSTED_ASSISTANT_PROVIDER_ENV} must be ${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID} for hosted assistant execution or ${HOSTED_ASSISTANT_LOCAL_CODEX_PROVIDER_ID} for local hosted Codex bridge execution.`,
+    `${HOSTED_ASSISTANT_PROVIDER_ENV} must be ${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID} for hosted assistant execution.`,
   )
 }
 

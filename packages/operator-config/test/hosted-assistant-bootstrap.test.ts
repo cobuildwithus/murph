@@ -59,21 +59,6 @@ function assertCodexGatewayProfile(
   assert.equal(profile.target.modelProvider, 'vercel-ai-gateway')
 }
 
-function assertLocalCodexProfile(
-  profile: HostedAssistantConfig['profiles'][number] | undefined,
-  expectedModel: string | null = null,
-) {
-  assert.ok(profile)
-  assert.equal(profile.target.adapter, 'codex-cli')
-  if (profile.target.adapter !== 'codex-cli') {
-    throw new Error('expected hosted profile to use Codex')
-  }
-
-  assert.equal(profile.label, 'Codex App Server')
-  assert.equal(profile.target.model, expectedModel)
-  assert.equal(profile.target.modelProvider, null)
-}
-
 test('hosted assistant config parsing and readiness helpers normalize Codex hosted profiles', async () => {
   const hostedConfigModule = await loadHostedAssistantModule()
   const {
@@ -165,21 +150,14 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     updatedAt: '2026-04-08T10:00:00.000Z',
   })
 
-  assert.deepEqual(resolveReadyHostedAssistantProfile(nullModelConfig), nullModelProfile)
-  assert.deepEqual(resolveHostedAssistantProviderConfig(nullModelConfig), {
-    approvalPolicy: null,
-    codexCommand: null,
-    codexHome: null,
-    model: null,
-    modelProvider: null,
-    oss: false,
-    profile: null,
-    provider: 'codex-cli',
-    reasoningEffort: 'medium',
-    sandbox: null,
-  })
+  assert.equal(resolveReadyHostedAssistantProfile(nullModelConfig), null)
+  assert.equal(resolveHostedAssistantProviderConfig(nullModelConfig), null)
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(config), {
     configured: true,
+    provider: 'codex-cli',
+  })
+  assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(nullModelConfig), {
+    configured: false,
     provider: 'codex-cli',
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(null), {
@@ -225,33 +203,30 @@ test('hosted assistant bootstrap maps Vercel AI Gateway env to Codex model provi
   )
 })
 
-test('hosted assistant bootstrap maps local Codex bridge env to host-default Codex provider config', async () => {
+test('hosted assistant bootstrap rejects removed local Codex bridge env', async () => {
   const hostedConfigModule = await loadHostedAssistantModule({
     readOperatorConfigResult: null,
   })
 
-  const seeded = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'local-codex',
-      HOSTED_ASSISTANT_REASONING_EFFORT: 'medium',
-      HOSTED_ASSISTANT_APPROVAL_POLICY: 'never',
-      HOSTED_ASSISTANT_SANDBOX: 'danger-full-access',
-    },
-  })
-
-  assert.deepEqual(seeded, {
-    configured: true,
-    provider: 'codex-cli',
-    seeded: true,
-    source: 'hosted-env',
-  })
-  assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 1)
-
-  const savedProfile = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
-    ?.profiles?.[0]
-  assertLocalCodexProfile(savedProfile)
-  assert.equal(hostedConfigModule.isHostedAssistantProfileReady(savedProfile), true)
+  await assert.rejects(
+    () =>
+      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_PROVIDER: 'local-codex',
+          HOSTED_ASSISTANT_REASONING_EFFORT: 'medium',
+          HOSTED_ASSISTANT_APPROVAL_POLICY: 'never',
+          HOSTED_ASSISTANT_SANDBOX: 'danger-full-access',
+        },
+      }),
+    (error) =>
+      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
+      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
+      error.message.includes('HOSTED_ASSISTANT_PROVIDER=local-codex') &&
+      error.message.includes('HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway') &&
+      error.message.includes('VERCEL_AI_API_KEY'),
+  )
+  assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 0)
 })
 
 test('hosted assistant bootstrap returns missing or invalid states and throws required errors', async () => {
