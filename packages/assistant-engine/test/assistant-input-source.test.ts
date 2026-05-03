@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
@@ -69,6 +70,38 @@ describe('store-backed assistant input source', () => {
         }),
       },
     })
+    await updateAssistantInputAttachmentEvidence({
+      inputId: stored.inputId,
+      vault: vaultRoot,
+      attachmentEvidence: {
+        attachments: [
+          {
+            byteSize: 1234,
+            descriptorAttachmentId: 'att_1',
+            derived: null,
+            fileName: 'voice-note.m4a',
+            inlineFragments: [],
+            kind: 'audio',
+            mime: 'audio/mp4',
+            ordinal: 1,
+            parseState: 'unsupported',
+            raw: {
+              byteSize: 1234,
+              kind: 'vault-relative-file',
+              mediaType: 'audio/mp4',
+              path: 'raw/inbox/cap_1/attachments/voice-note.m4a',
+              sha256: null,
+            },
+            sourceAttachmentId: 'att_source_1',
+          },
+        ],
+        optionalInboxCaptureId: 'cap_1',
+        reasonCode: null,
+        source: 'local-inbox-import',
+        status: 'available',
+        updatedAt: null,
+      },
+    })
     const source = createStoreBackedAssistantInputSource({
       vault: vaultRoot,
     })
@@ -89,6 +122,11 @@ describe('store-backed assistant input source', () => {
       },
       event: {
         attachmentCount: 1,
+        attachmentEvidence: {
+          optionalInboxCaptureId: 'cap_1',
+          source: 'local-inbox-import',
+          status: 'available',
+        },
         attachmentDescriptors: [
           {
             attachmentId: 'att_1',

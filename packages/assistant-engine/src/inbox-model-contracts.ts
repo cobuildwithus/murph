@@ -41,7 +41,7 @@ export const inboxModelAttachmentBundleSchema = z.object({
   fileName: z.string().min(1).nullable(),
   byteSize: z.number().int().nonnegative().nullable().optional(),
   storedPath: pathSchema.nullable(),
-  parseState: z.enum(['pending', 'running', 'succeeded', 'failed']).nullable(),
+  parseState: z.enum(['pending', 'running', 'succeeded', 'failed', 'unsupported']).nullable(),
   routingImage: inboxModelRoutingImageSchema,
   fragments: z.array(inboxModelTextFragmentSchema),
   combinedText: z.string(),

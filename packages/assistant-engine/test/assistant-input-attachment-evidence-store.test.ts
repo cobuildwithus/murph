@@ -1,0 +1,391 @@
+import { readFile, rm, writeFile } from 'node:fs/promises'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  readAssistantInputEvent,
+  resolveAssistantInputEventPath,
+  updateAssistantInputAttachmentEvidence,
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import { createTempVaultContext } from './test-helpers.ts'
+
+const tempRoots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0).map((rootPath) =>
+      rm(rootPath, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  )
+})
+
+describe('assistant input attachment evidence', () => {
+  it('defaults new assistant input events to not_attempted attachment evidence', async () => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-default-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput('evt_default'),
+    })
+
+    expect(input.attachmentEvidence).toEqual({
+      attachments: [],
+      optionalInboxCaptureId: null,
+      reasonCode: null,
+      source: null,
+      status: 'not_attempted',
+      updatedAt: null,
+    })
+  })
+
+  it('defaults legacy assistant input records without attachment evidence', async () => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-legacy-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput('evt_legacy'),
+    })
+    const filePath = resolveAssistantInputEventPath({
+      inputId: input.inputId,
+      paths: resolveAssistantStatePaths(vaultRoot),
+    })
+    const rawEnvelope = JSON.parse(await readFile(filePath, 'utf8')) as {
+      value?: Record<string, unknown>
+    }
+    if (!rawEnvelope.value) {
+      throw new Error('expected assistant input event envelope value')
+    }
+    delete rawEnvelope.value.attachmentEvidence
+    await writeFile(filePath, `${JSON.stringify(rawEnvelope, null, 2)}\n`)
+
+    await expect(
+      readAssistantInputEvent({
+        inputId: input.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: null,
+        reasonCode: null,
+        source: null,
+        status: 'not_attempted',
+        updatedAt: null,
+      },
+    })
+  })
+
+  it('updates event-owned attachment evidence without changing immutable input content', async () => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-update-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput('evt_update'),
+    })
+
+    const updated = await updateAssistantInputAttachmentEvidence({
+      inputId: input.inputId,
+      vault: vaultRoot,
+      now: new Date('2026-04-22T10:01:00.000Z'),
+      attachmentEvidence: {
+        attachments: [
+          {
+            byteSize: 1234,
+            descriptorAttachmentId: 'att_descriptor',
+            derived: {
+              allowedRoot: 'derived/inbox/cap_1/attachments/att_source',
+              kind: 'parser-manifest',
+              manifestPath: 'derived/inbox/cap_1/attachments/att_source/manifest.json',
+            },
+            fileName: 'scan.pdf',
+            inlineFragments: [
+              {
+                kind: 'derived_plain_text',
+                label: 'derived-plain-text',
+                text: 'Parsed PDF excerpt.',
+                truncated: false,
+              },
+            ],
+            kind: 'document',
+            mime: 'application/pdf',
+            ordinal: 1,
+            parseState: 'succeeded',
+            raw: {
+              byteSize: 1234,
+              kind: 'vault-relative-file',
+              mediaType: 'application/pdf',
+              path: 'raw/inbox/cap_1/attachments/01__scan.pdf',
+              sha256: '0'.repeat(64),
+            },
+            sourceAttachmentId: 'att_source',
+          },
+        ],
+        optionalInboxCaptureId: 'cap_1',
+        reasonCode: null,
+        source: 'local-inbox-import',
+        status: 'available',
+        updatedAt: null,
+      },
+    })
+
+    expect(updated.content).toEqual(input.content)
+    expect(updated.attachmentEvidence.status).toBe('available')
+    expect(updated.attachmentEvidence.updatedAt).toBe('2026-04-22T10:01:00.000Z')
+    expect(updated.attachmentEvidence.attachments[0]?.raw?.path).toBe(
+      'raw/inbox/cap_1/attachments/01__scan.pdf',
+    )
+
+    await expect(
+      readAssistantInputEvent({
+        inputId: input.inputId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(updated)
+  })
+
+  it('rejects failed attachment evidence without a reason code', async () => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-failed-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput('evt_failed'),
+    })
+
+    await expect(
+      updateAssistantInputAttachmentEvidence({
+        inputId: input.inputId,
+        vault: vaultRoot,
+        attachmentEvidence: {
+          attachments: [],
+          optionalInboxCaptureId: null,
+          reasonCode: null,
+          source: 'hosted-inbox-projection',
+          status: 'failed',
+          updatedAt: null,
+        },
+      }),
+    ).rejects.toThrow(/reasonCode/u)
+  })
+
+  it.each([
+    '/tmp/scan.pdf',
+    '../raw/inbox/cap_1/attachments/scan.pdf',
+    'file:///tmp/scan.pdf',
+    'https://example.com/scan.pdf',
+    'raw/inbox/cap_1/attachments/scan.pdf?token=secret',
+    'raw/inbox/cap_1/attachments/authorization-header.pdf',
+    'raw/inbox/cap_1/attachments/bearer-token.pdf',
+    'raw/inbox/cap_1/attachments/token-secret.pdf',
+    'raw/inbox/cap_1/attachments/access-token.pdf',
+    'raw/inbox/cap_1/attachments/refresh-token.pdf',
+    'raw/inbox/cap_1/attachments/id-token.pdf',
+    'raw/inbox/cap_1/attachments/api-key.txt',
+    'raw/inbox/cap_1/attachments/x-api-key.txt',
+    'raw/inbox/cap_1/attachments/set-cookie.txt',
+    'raw/inbox/cap_1/attachments/signed-url.pdf',
+    'raw/inbox/cap_1/attachments/https:example.test-token.jpg',
+    'raw/inbox/cap_1/attachments/scan{"token"}.pdf',
+    'raw/inbox/cap_1/tmp/scan.pdf',
+  ])('rejects unsafe artifact path %s', async (unsafePath) => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-unsafe-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput(`evt_unsafe_${unsafePath.length}`),
+    })
+
+    await expect(
+      updateAssistantInputAttachmentEvidence({
+        inputId: input.inputId,
+        vault: vaultRoot,
+        attachmentEvidence: {
+          attachments: [
+            {
+              descriptorAttachmentId: 'att_descriptor',
+              derived: null,
+              fileName: 'scan.pdf',
+              inlineFragments: [],
+              kind: 'document',
+              mime: 'application/pdf',
+              ordinal: 1,
+              parseState: 'failed',
+              raw: {
+                kind: 'vault-relative-file',
+                path: unsafePath,
+                mediaType: 'application/pdf',
+                byteSize: null,
+                sha256: null,
+              },
+              sourceAttachmentId: 'att_source',
+            },
+          ],
+          optionalInboxCaptureId: 'cap_1',
+          reasonCode: null,
+          source: 'manual',
+          status: 'partial',
+          updatedAt: null,
+        },
+      }),
+    ).rejects.toThrow(/artifact path/u)
+  })
+
+  it.each([
+    'Authorization: Bearer secret',
+    'Cookie: session=secret',
+    '{"model":"gpt","messages":[{"role":"user","content":"hello"}]}',
+    'See https://example.test/report for the raw payload.',
+  ])('rejects unsafe inline attachment evidence text %#', async (unsafeText) => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-inline-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput(`evt_inline_${unsafeText.length}`),
+    })
+
+    await expect(
+      updateAssistantInputAttachmentEvidence({
+        inputId: input.inputId,
+        vault: vaultRoot,
+        attachmentEvidence: {
+          attachments: [
+            {
+              descriptorAttachmentId: 'att_descriptor',
+              derived: null,
+              fileName: 'scan.pdf',
+              inlineFragments: [
+                {
+                  kind: 'derived_plain_text',
+                  label: 'derived-plain-text',
+                  text: unsafeText,
+                  truncated: false,
+                },
+              ],
+              kind: 'document',
+              mime: 'application/pdf',
+              ordinal: 1,
+              parseState: 'succeeded',
+              raw: null,
+              sourceAttachmentId: 'att_source',
+            },
+          ],
+          optionalInboxCaptureId: 'cap_1',
+          reasonCode: null,
+          source: 'manual',
+          status: 'partial',
+          updatedAt: null,
+        },
+      }),
+    ).rejects.toThrow(/attachmentEvidence\.inlineFragments\.text/u)
+  })
+
+  it('rejects oversized inline attachment evidence text', async () => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-inline-large-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput('evt_inline_large'),
+    })
+
+    await expect(
+      updateAssistantInputAttachmentEvidence({
+        inputId: input.inputId,
+        vault: vaultRoot,
+        attachmentEvidence: {
+          attachments: [
+            {
+              descriptorAttachmentId: 'att_descriptor',
+              derived: null,
+              fileName: 'scan.pdf',
+              inlineFragments: [
+                {
+                  kind: 'derived_plain_text',
+                  label: 'derived-plain-text',
+                  text: 'x'.repeat(6_001),
+                  truncated: false,
+                },
+              ],
+              kind: 'document',
+              mime: 'application/pdf',
+              ordinal: 1,
+              parseState: 'succeeded',
+              raw: null,
+              sourceAttachmentId: 'att_source',
+            },
+          ],
+          optionalInboxCaptureId: 'cap_1',
+          reasonCode: null,
+          source: 'manual',
+          status: 'partial',
+          updatedAt: null,
+        },
+      }),
+    ).rejects.toThrow(/bounded prompt evidence/u)
+  })
+
+  it('replays an input idempotently after attachment evidence changes', async () => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-replay-',
+    )
+    const event = createHostedMailboxEventInput('evt_replay')
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event,
+    })
+    const updated = await updateAssistantInputAttachmentEvidence({
+      inputId: input.inputId,
+      vault: vaultRoot,
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: null,
+        reasonCode: 'attachment.evidence_unavailable',
+        source: 'hosted-inbox-projection',
+        status: 'failed',
+        updatedAt: null,
+      },
+    })
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event,
+      }),
+    ).resolves.toEqual(updated)
+  })
+})
+
+async function createAssistantInputEvidenceVault(prefix: string) {
+  const context = await createTempVaultContext(prefix)
+  tempRoots.push(context.parentRoot)
+  return context
+}
+
+function createHostedMailboxEventInput(eventId: string) {
+  return {
+    content: {
+      text: 'attachment evidence test',
+    },
+    occurredAt: '2026-04-22T10:00:00.000Z',
+    sourceRef: {
+      dedupeKey: eventId,
+      eventId,
+      itemId: `${eventId}_item`,
+      kind: 'hosted-mailbox' as const,
+      lane: 'conversation' as const,
+      laneSeq: '1',
+      payloadSchema: 'murph.test-payload.v1',
+      payloadSource: 'inline' as const,
+      source: 'hosted-mailbox' as const,
+      wakeSchema: 'murph.hosted-execution-wake.v1',
+    },
+  }
+}

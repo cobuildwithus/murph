@@ -24,6 +24,11 @@ export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
 export const ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH = 20_000
 export const ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT = 32
 const ASSISTANT_INPUT_EVENT_REPLY_TARGET_MAX_LENGTH = 8_192
+const ASSISTANT_INPUT_EVENT_ARTIFACT_PATH_MAX_LENGTH = 1024
+const ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_INLINE_FRAGMENT_MAX_COUNT = 16
+const ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_TEXT_MAX_LENGTH = 6_000
+const ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_LABEL_MAX_LENGTH = 191
+const ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_ALLOWED_ROOT_MAX_LENGTH = 512
 const ASSISTANT_INPUT_EVENT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512
 
 export type { AssistantInputConversationRef } from './conversation-ref.js'
@@ -73,6 +78,54 @@ const assistantInputProjectionStatusValues = [
   'failed',
   'quarantined',
 ] as const satisfies readonly AssistantInputProjectionStatus[]
+
+const assistantInputAttachmentEvidenceStatusValues = [
+  'not_attempted',
+  'available',
+  'partial',
+  'failed',
+] as const
+
+const assistantInputAttachmentEvidenceSourceValues = [
+  'local-inbox-import',
+  'local-parser-drain',
+  'hosted-inbox-projection',
+  'manual',
+] as const
+
+const assistantInputAttachmentEvidenceItemKindValues = [
+  'image',
+  'audio',
+  'video',
+  'document',
+  'other',
+] as const
+
+const assistantInputAttachmentEvidenceParseStateValues = [
+  'pending',
+  'running',
+  'succeeded',
+  'failed',
+  'unsupported',
+] as const
+
+const assistantInputAttachmentEvidenceFragmentKindValues = [
+  'attachment_extracted_text',
+  'attachment_transcript',
+  'derived_plain_text',
+  'derived_markdown',
+  'derived_tables',
+] as const
+
+const ASSISTANT_INPUT_RAW_ARTIFACT_PATH_PREFIXES = [
+  'raw/inbox/',
+  'raw/assistant-input/',
+] as const
+
+const ASSISTANT_INPUT_DERIVED_ARTIFACT_PATH_PREFIXES = [
+  'derived/inbox/',
+  'derived/assistant-input/',
+] as const
 
 const assistantInputSourceRefSchema = z.discriminatedUnion('kind', [
   z
@@ -133,6 +186,98 @@ const assistantInputAttachmentDescriptorSchema = z
     sizeBytes: z.number().int().nonnegative().nullable().default(null),
   })
   .strict()
+
+const assistantInputArtifactRefSchema = z
+  .object({
+    byteSize: z.number().int().nonnegative().nullable().default(null),
+    kind: z.literal('vault-relative-file'),
+    mediaType: safeAttachmentContentTypeSchema(),
+    path: safeAssistantInputArtifactPathSchema(
+      'attachmentEvidence.raw.path',
+      ASSISTANT_INPUT_RAW_ARTIFACT_PATH_PREFIXES,
+    ),
+    sha256: safeNullableAssistantInputSha256Schema(),
+  })
+  .strict()
+
+const assistantInputDerivedArtifactRefSchema = z
+  .object({
+    allowedRoot: safeAssistantInputArtifactRootSchema(
+      'attachmentEvidence.derived.allowedRoot',
+      ASSISTANT_INPUT_DERIVED_ARTIFACT_PATH_PREFIXES,
+    ),
+    kind: z.literal('parser-manifest'),
+    manifestPath: safeAssistantInputArtifactPathSchema(
+      'attachmentEvidence.derived.manifestPath',
+      ASSISTANT_INPUT_DERIVED_ARTIFACT_PATH_PREFIXES,
+    ),
+  })
+  .strict()
+
+const assistantInputAttachmentEvidenceTextFragmentSchema = z
+  .object({
+    kind: z.enum(assistantInputAttachmentEvidenceFragmentKindValues),
+    label: safeAssistantInputAttachmentEvidenceLabelSchema(
+      'attachmentEvidence.inlineFragments.label',
+    ),
+    text: safeAssistantInputAttachmentEvidenceTextSchema(
+      'attachmentEvidence.inlineFragments.text',
+    ),
+    truncated: z.boolean(),
+  })
+  .strict()
+
+const assistantInputAttachmentEvidenceItemSchema = z
+  .object({
+    byteSize: z.number().int().nonnegative().nullable().default(null),
+    derived: assistantInputDerivedArtifactRefSchema.nullable().default(null),
+    descriptorAttachmentId: safeAttachmentTokenSchema(
+      'attachmentEvidence.descriptorAttachmentId',
+    ),
+    fileName: safeAttachmentFileNameSchema(),
+    inlineFragments: z
+      .array(assistantInputAttachmentEvidenceTextFragmentSchema)
+      .max(ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_INLINE_FRAGMENT_MAX_COUNT)
+      .default([]),
+    kind: z.enum(assistantInputAttachmentEvidenceItemKindValues),
+    mime: safeAttachmentContentTypeSchema(),
+    ordinal: z.number().int().positive(),
+    parseState: z
+      .enum(assistantInputAttachmentEvidenceParseStateValues)
+      .nullable()
+      .default(null),
+    raw: assistantInputArtifactRefSchema.nullable().default(null),
+    sourceAttachmentId: safeAttachmentTokenSchema(
+      'attachmentEvidence.sourceAttachmentId',
+    ),
+  })
+  .strict()
+
+const assistantInputAttachmentEvidenceSchema = z
+  .object({
+    attachments: z
+      .array(assistantInputAttachmentEvidenceItemSchema)
+      .max(ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT)
+      .default([]),
+    optionalInboxCaptureId: safeNullableAssistantInputTokenSchema(
+      'attachmentEvidence.optionalInboxCaptureId',
+    ),
+    reasonCode: safeNullableAssistantInputReasonCodeSchema(),
+    source: z.enum(assistantInputAttachmentEvidenceSourceValues).nullable().default(null),
+    status: z.enum(assistantInputAttachmentEvidenceStatusValues),
+    updatedAt: safeNullableAssistantInputTimestampSchema('attachmentEvidence.updatedAt'),
+  })
+  .strict()
+  .superRefine(assertValidAssistantInputAttachmentEvidence)
+
+const DEFAULT_ASSISTANT_INPUT_ATTACHMENT_EVIDENCE = {
+  attachments: [],
+  optionalInboxCaptureId: null,
+  reasonCode: null,
+  source: null,
+  status: 'not_attempted',
+  updatedAt: null,
+} satisfies z.input<typeof assistantInputAttachmentEvidenceSchema>
 
 const assistantInputContentSchema = z
   .object({
@@ -206,6 +351,9 @@ const assistantInputSourceMetadataSchema = z
 
 const assistantInputEventRecordSchema = z
   .object({
+    attachmentEvidence: assistantInputAttachmentEvidenceSchema.default(
+      DEFAULT_ASSISTANT_INPUT_ATTACHMENT_EVIDENCE,
+    ),
     content: assistantInputContentSchema,
     conversation: assistantInputConversationRefSchema.nullable().default(null),
     cursor: assistantInputCursorSchema,
@@ -229,6 +377,9 @@ const assistantInputEventRecordSchema = z
   })
   .strict()
 
+const assistantInputAttachmentEvidenceUpdateSchema =
+  assistantInputAttachmentEvidenceSchema
+
 const assistantInputProjectionUpdateSchema = z
   .object({
     captureId: safeAssistantInputTokenSchema('captureId').nullable().optional(),
@@ -243,6 +394,10 @@ const assistantInputProjectionUpdateSchema = z
   })
   .strict()
 
+export type AssistantInputAttachmentEvidence = z.infer<
+  typeof assistantInputAttachmentEvidenceSchema
+>
+export type AssistantInputAttachmentEvidenceItem = z.infer<typeof assistantInputAttachmentEvidenceItemSchema>
 export type AssistantInputAttachmentDescriptor = z.infer<
   typeof assistantInputAttachmentDescriptorSchema
 >
@@ -511,6 +666,56 @@ export async function updateAssistantInputProjection(input: {
   })
 }
 
+export async function updateAssistantInputAttachmentEvidence(input: {
+  attachmentEvidence: z.input<typeof assistantInputAttachmentEvidenceUpdateSchema>
+  inputId: string
+  now?: Date
+  paths?: AssistantStatePaths
+  vault?: string
+}): Promise<AssistantInputEventRecord> {
+  const context = resolveAssistantInputContext(input)
+  return withAssistantRuntimeWriteLock(context.vault, async () => {
+    const paths = context.paths
+    const existing = await readAssistantInputEventAtPaths({
+      inputId: input.inputId,
+      paths,
+    })
+    if (!existing) {
+      throw new VaultCliError(
+        'ASSISTANT_INPUT_EVENT_NOT_FOUND',
+        'Assistant input event attachment evidence cannot be updated because the input event does not exist.',
+        {
+          inputId: input.inputId,
+        },
+      )
+    }
+
+    const now = resolveTimestamp(input.now)
+    const parsedEvidence = assistantInputAttachmentEvidenceUpdateSchema.parse(
+      input.attachmentEvidence,
+    )
+    const nextEvidence = applyAssistantInputAttachmentEvidenceUpdate({
+      now,
+      update: parsedEvidence,
+    })
+    const updated = assistantInputEventRecordSchema.parse({
+      ...existing,
+      attachmentEvidence: nextEvidence,
+      updatedAt: now,
+    })
+    await writeAssistantStateVersionedJson({
+      filePath: resolveAssistantInputEventPath({
+        inputId: updated.inputId,
+        paths,
+      }),
+      schema: ASSISTANT_INPUT_EVENT_SCHEMA,
+      schemaVersion: ASSISTANT_INPUT_EVENT_SCHEMA_VERSION,
+      value: updated,
+    })
+    return updated
+  })
+}
+
 async function ensureAssistantInputEventStore(
   paths: AssistantStatePaths,
 ): Promise<void> {
@@ -578,6 +783,7 @@ function buildAssistantInputEventRecord(input: {
   })
 
   return assistantInputEventRecordSchema.parse({
+    attachmentEvidence: DEFAULT_ASSISTANT_INPUT_ATTACHMENT_EVIDENCE,
     content: input.event.content ?? {},
     conversation: input.event.conversation ?? null,
     cursor: {
@@ -801,6 +1007,22 @@ function applyAssistantInputProjectionUpdate(input: {
   return assistantInputProjectionSchema.parse(nextProjection)
 }
 
+function applyAssistantInputAttachmentEvidenceUpdate(input: {
+  now: string
+  update: AssistantInputAttachmentEvidence
+}): AssistantInputAttachmentEvidence {
+  if (input.update.status === 'not_attempted') {
+    return assistantInputAttachmentEvidenceSchema.parse(
+      DEFAULT_ASSISTANT_INPUT_ATTACHMENT_EVIDENCE,
+    )
+  }
+
+  return assistantInputAttachmentEvidenceSchema.parse({
+    ...input.update,
+    updatedAt: input.update.updatedAt ?? input.now,
+  })
+}
+
 function assertValidAssistantInputProjection(
   projection: {
     captureId: string | null
@@ -853,6 +1075,57 @@ function assertValidAssistantInputProjection(
       message:
         'projection reasonCode is only valid for failed or quarantined status.',
     })
+  }
+}
+
+function assertValidAssistantInputAttachmentEvidence(
+  evidence: AssistantInputAttachmentEvidence,
+  context: z.RefinementCtx,
+): void {
+  if (evidence.status === 'failed' && !evidence.reasonCode) {
+    context.addIssue({
+      code: 'custom',
+      message: 'failed attachment evidence status requires reasonCode.',
+      path: ['reasonCode'],
+    })
+  }
+
+  if (evidence.status === 'not_attempted') {
+    if (evidence.reasonCode !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'not_attempted attachment evidence must not include reasonCode.',
+        path: ['reasonCode'],
+      })
+    }
+    if (evidence.updatedAt !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'not_attempted attachment evidence must not include updatedAt.',
+        path: ['updatedAt'],
+      })
+    }
+    if (evidence.source !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'not_attempted attachment evidence must not include source.',
+        path: ['source'],
+      })
+    }
+    if (evidence.optionalInboxCaptureId !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'not_attempted attachment evidence must not include optionalInboxCaptureId.',
+        path: ['optionalInboxCaptureId'],
+      })
+    }
+    if (evidence.attachments.length > 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'not_attempted attachment evidence must not include attachments.',
+        path: ['attachments'],
+      })
+    }
   }
 }
 
@@ -960,6 +1233,99 @@ function safeNullableAssistantInputReasonCodeSchema() {
   return safeAssistantInputReasonCodeSchema().nullable().default(null)
 }
 
+function safeNullableAssistantInputSha256Schema() {
+  return z
+    .string()
+    .regex(/^[0-9a-f]{64}$/u)
+    .nullable()
+    .default(null)
+}
+
+function safeAssistantInputArtifactPathSchema(
+  fieldName: string,
+  allowedPrefixes: readonly string[],
+) {
+  return z
+    .string()
+    .min(1)
+    .max(ASSISTANT_INPUT_EVENT_ARTIFACT_PATH_MAX_LENGTH)
+    .transform((value) => normalizeAssistantInputArtifactPath(value) ?? value)
+    .superRefine((value, context) => {
+      assertSafeAssistantInputArtifactPath(value, context, fieldName, allowedPrefixes)
+    })
+}
+
+function safeAssistantInputArtifactRootSchema(
+  fieldName: string,
+  allowedPrefixes: readonly string[],
+) {
+  return z
+    .string()
+    .min(1)
+    .max(ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_ALLOWED_ROOT_MAX_LENGTH)
+    .transform((value) => normalizeAssistantInputArtifactPath(value) ?? value)
+    .superRefine((value, context) => {
+      assertSafeAssistantInputArtifactPath(value, context, fieldName, allowedPrefixes)
+    })
+}
+
+function safeAssistantInputAttachmentEvidenceLabelSchema(fieldName: string) {
+  return z
+    .string()
+    .min(1)
+    .max(ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_LABEL_MAX_LENGTH)
+    .regex(ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN)
+    .superRefine((value, context) => {
+      if (isUnsafeAssistantInputScalar(value)) {
+        context.addIssue({
+          code: 'custom',
+          message: `${fieldName} must be an opaque label, not a path, URL, email, or raw payload.`,
+        })
+      }
+    })
+}
+
+function safeAssistantInputAttachmentEvidenceTextSchema(fieldName: string) {
+  return z
+    .string()
+    .min(1)
+    .max(ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_TEXT_MAX_LENGTH, {
+      message: `${fieldName} must be bounded prompt evidence.`,
+    })
+    .superRefine((value, context) => {
+      assertSafeAssistantInputText(value, context, fieldName)
+    })
+}
+
+function assertSafeAssistantInputArtifactPath(
+  value: string,
+  context: z.RefinementCtx,
+  fieldName: string,
+  allowedPrefixes: readonly string[],
+): void {
+  const normalized = normalizeAssistantInputArtifactPath(value)
+  if (!normalized || normalized !== value) {
+    context.addIssue({
+      code: 'custom',
+      message: `${fieldName} must be a normalized vault-relative artifact path.`,
+    })
+    return
+  }
+  if (!allowedPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+    context.addIssue({
+      code: 'custom',
+      message: `${fieldName} must point to an allowed raw or derived vault artifact root.`,
+    })
+    return
+  }
+  if (hasUnsafeAssistantInputArtifactPathPayload(normalized)) {
+    context.addIssue({
+      code: 'custom',
+      message: `${fieldName} must be a minimized artifact path, not a secret, raw payload, URL, or temp path.`,
+    })
+  }
+}
+
 function safeAssistantInputTextSchema(fieldName: string) {
   return z
     .string()
@@ -1022,6 +1388,66 @@ function safeAttachmentContentTypeSchema() {
     .regex(/^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u)
     .nullable()
     .default(null)
+}
+
+function normalizeAssistantInputArtifactPath(value: string): string | null {
+  const trimmed = value.trim()
+  if (
+    trimmed.length === 0
+    || trimmed.includes('\\')
+    || trimmed.includes('\0')
+    || trimmed.includes('?')
+    || trimmed.includes('#')
+    || trimmed.startsWith('/')
+    || trimmed.startsWith('~/')
+    || /^[A-Za-z]:[\\/]/u.test(trimmed)
+    || /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed)
+  ) {
+    return null
+  }
+
+  const normalized = trimmed
+    .replace(/\/+/gu, '/')
+    .replace(/^\.\//u, '')
+    .replace(/\/+$/u, '')
+  if (normalized.length === 0) {
+    return null
+  }
+  const segments = normalized.split('/')
+  if (
+    segments.some((segment) =>
+      segment.length === 0 || segment === '.' || segment === '..'
+    )
+  ) {
+    return null
+  }
+
+  return normalized
+}
+
+function hasUnsafeAssistantInputArtifactPathPayload(value: string): boolean {
+  if (hasControlCharacters(value)) {
+    return true
+  }
+  if (/[{}"'<>]/u.test(value)) {
+    return true
+  }
+  if (/[a-z][a-z0-9+.-]*:/iu.test(value)) {
+    return true
+  }
+
+  const segments = value.split('/').map((segment) => segment.toLowerCase())
+  return segments.some((segment) =>
+    hasUnsafeArtifactPathSegmentMarker(segment) ||
+    segment === 'tmp' ||
+    segment === 'temp'
+  )
+}
+
+function hasUnsafeArtifactPathSegmentMarker(segment: string): boolean {
+  return /(?:^|[-_.])(?:authorization|bearer|token|access[-_]?token|refresh[-_]?token|id[-_]?token|api[-_]?key|x[-_]?api[-_]?key|set[-_]?cookie|signed[-_]?url)(?:$|[-_.])/u.test(
+    segment,
+  )
 }
 
 function assertSafeAssistantInputText(

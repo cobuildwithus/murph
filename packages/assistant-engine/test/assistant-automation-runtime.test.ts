@@ -39,6 +39,15 @@ function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value))
 }
 
+const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
+  attachments: [],
+  optionalInboxCaptureId: null,
+  reasonCode: null,
+  source: null,
+  status: 'not_attempted',
+  updatedAt: null,
+} satisfies AssistantInputCandidate['event']['attachmentEvidence']
+
 const scannerReplyMocks = vi.hoisted(() => ({
   applyAssistantAutoReplyProcessResult: vi.fn(),
   createAssistantAutoReplyGroupContext: vi.fn(),
@@ -622,6 +631,7 @@ function assistantInputCandidateFromInboxCapture(
     },
     event: {
       attachmentCount: capture.attachmentCount,
+      attachmentEvidence: DEFAULT_TEST_ATTACHMENT_EVIDENCE,
       attachmentDescriptors: [],
       conversation: {
         accountId: capture.accountId,
@@ -691,6 +701,7 @@ function createCapturelessAssistantInputCandidate(input: {
     },
     event: {
       attachmentCount: 0,
+      attachmentEvidence: DEFAULT_TEST_ATTACHMENT_EVIDENCE,
       attachmentDescriptors: [],
       conversation: {
         accountId: 'safe_acct_1',
@@ -1494,6 +1505,7 @@ describe('assistant automation scanner', () => {
       },
       event: {
         attachmentCount: 0,
+        attachmentEvidence: DEFAULT_TEST_ATTACHMENT_EVIDENCE,
         attachmentDescriptors: [],
         conversation: {
           accountId: 'acct_1',
@@ -3252,6 +3264,7 @@ describe('assistant auto-reply runtime', () => {
       },
       event: {
         attachmentCount: 0,
+        attachmentEvidence: DEFAULT_TEST_ATTACHMENT_EVIDENCE,
         attachmentDescriptors: [],
         conversation: context.firstItem.summary.conversation,
         cursor: {

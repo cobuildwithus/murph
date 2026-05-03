@@ -33,6 +33,15 @@ vi.mock('../src/assistant/service.ts', () => ({
 
 const tempRoots: string[] = []
 
+const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
+  attachments: [],
+  optionalInboxCaptureId: null,
+  reasonCode: null,
+  source: null,
+  status: 'not_attempted',
+  updatedAt: null,
+} satisfies AssistantInputCandidate['event']['attachmentEvidence']
+
 beforeEach(() => {
   replyEventPathMocks.listAssistantTurnReceipts.mockReset().mockResolvedValue([])
   replyEventPathMocks.sendAssistantMessage.mockReset().mockResolvedValue({
@@ -252,6 +261,7 @@ function createAssistantInputCandidate(input: {
     },
     event: {
       attachmentCount: 0,
+      attachmentEvidence: DEFAULT_TEST_ATTACHMENT_EVIDENCE,
       attachmentDescriptors: [],
       conversation,
       cursor: {
