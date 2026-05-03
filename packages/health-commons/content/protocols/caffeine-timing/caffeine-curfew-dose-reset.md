@@ -78,11 +78,12 @@ protocol:
     - "Track cutoff adherence, total mg, sleep timing, sleep onset, sleep quality, and withdrawal or excess-caffeine symptoms daily."
     - "Review adherent days against baseline; flag alcohol, illness, stress, travel, late exercise, schedule shifts, and medication changes."
   tips:
-  - Use labels or tables for milligram estimates — cup counts are too crude.
-  - Make the first caffeine deliberate and measured, not automatic refills.
-  - If 10am is unrealistic, try 11am but keep the 8-hour bedtime buffer.
-  - Hold bedtime, wake time, alcohol, late exercise, and screen habits stable during the test.
-  - Small accidental exposure = logged curfew miss, not a failed experiment.
+  - "Run baseline first: log source, milligrams, last caffeine time, bedtime, and sleep onset for 7 days."
+  - "Set cutoff as the earlier of 10–11am or 8 hours before intended bedtime."
+  - "Make morning caffeine measured: coffee, tea, decaf, chocolate, pre-workout, supplements, and medicines all count."
+  - "Avoid front-loading: skip pills, powders, energy shots, pre-workout, or one giant early dose."
+  - "Keep bedtime, wake time, alcohol, late exercise, light, and screen habits unchanged during the test."
+  - "Log small misses honestly; separate withdrawal headaches and fatigue from sleep gains in the first days."
   keepInMind:
   - The exact 14-day 10–11am-or-8-hour rule has not been directly tested as a complete protocol.
   - The strongest direct evidence is for acute or short repeated dose/timing challenges, especially 200–400 mg caffeine near the sleep window.

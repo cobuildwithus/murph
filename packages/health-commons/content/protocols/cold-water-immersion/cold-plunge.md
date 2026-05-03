@@ -101,11 +101,12 @@ protocol:
   - Recent self-harm/suicide risk, severe or unstable mental-health symptoms, or using cold plunging as treatment for depression/anxiety requires a clinician-guided mental-health variant or safer alternative; the default protocol only tracks acute subjective mood as a wellness signal.
   - Pregnancy/postpartum, cold-urticaria/anaphylaxis, alcohol/sedative, and medication-related cautions are safety-screening boundaries rather than efficacy claims.
   tips:
-  - 'First session = easiest: warmer water, shorter duration, no proving toughness.'
-  - Keep time of day, caffeine, exercise, sleep, alcohol, and stress stable across the test window.
-  - Simple same-scale mood before and 30-180 min after — wearables are context, not verdict.
-  - Post-workout soreness goal? Use a recovery-specific CWI protocol instead.
-  - Uncertain supervision, exit, or medical context? Cool shower or skip.
+  - "Set exit before entry: open lid, dry towel, warm layers, clear footing."
+  - "Measure water every session; start at 10–15 °C and 1–3 minutes, warmer and shorter first."
+  - "Enter slowly, keep your head out, and regain calm breathing before judging the session."
+  - "Skip sauna, hard lifting, alcohol, sedatives, open water, breathwork, and face submersion the same day."
+  - "Rewarm gently after exit: towel, dry clothes, warm room, light movement, no immediate hot-cold contrast."
+  - "Log temperature, seconds, breathing control, and mood; do not extend for dopamine claims or wearable blips."
   keepInMind:
   - Evidence is mixed and early. Acute mood signals are plausible, but durable immune, cardiometabolic, sleep, cognition, or performance benefits are not established for this protocol.
   - Reduced discomfort after repeated exposure can mean habituation, not necessarily health improvement.
