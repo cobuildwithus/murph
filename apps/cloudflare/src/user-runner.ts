@@ -235,7 +235,10 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId,
       });
-      await this.scheduleHostedWakeRetryAlarm();
+      await this.scheduleHostedWakeRetryAlarm({
+        respectMaxAttempts: true,
+        userId: record.userId,
+      });
     }
   }
 
@@ -562,7 +565,10 @@ export class HostedUserRunner {
         lease,
       });
       if (failure.failed) {
-        await this.scheduleHostedWakeRetryAlarm();
+        await this.scheduleHostedWakeRetryAlarm({
+          respectMaxAttempts: true,
+          userId: initialRecord.userId,
+        });
       }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -863,10 +869,37 @@ export class HostedUserRunner {
     });
   }
 
-  private async scheduleHostedWakeRetryAlarm(): Promise<void> {
+  private async scheduleHostedWakeRetryAlarm(input: {
+    respectMaxAttempts?: boolean;
+    userId?: string | null;
+  } = {}): Promise<boolean> {
+    if (input.respectMaxAttempts === true) {
+      const record = await this.stateStore.readState();
+      if (record.retryFailureCount >= this.env.maxEventAttempts) {
+        if (record.nextWakeAt !== null) {
+          await this.runtimeAlarmScheduler.syncNextWake({
+            preferredWakeAt: null,
+          });
+        }
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            maxEventAttempts: this.env.maxEventAttempts,
+            retryFailureCount: record.retryFailureCount,
+          },
+          level: "warn",
+          message: "Hosted runner retry attempts exhausted; waiting for a fresh nudge before retrying.",
+          phase: "failed",
+          userId: record.userId ?? input.userId ?? null,
+        });
+        return false;
+      }
+    }
+
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
     });
+    return true;
   }
 
   private startDetachedRunnerDrive(input: {
@@ -892,7 +925,10 @@ export class HostedUserRunner {
         });
 
         try {
-          await this.scheduleHostedWakeRetryAlarm();
+          await this.scheduleHostedWakeRetryAlarm({
+            respectMaxAttempts: true,
+            userId: input.userId,
+          });
         } catch (retryError) {
           emitHostedExecutionStructuredLog({
             component: "hosted.runner",

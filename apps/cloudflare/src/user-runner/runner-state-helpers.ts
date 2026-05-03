@@ -29,6 +29,7 @@ export interface RunnerMetaRow {
   last_invocation_at: string | null;
   next_wake_at: string | null;
   pending_nudge: number;
+  retry_failure_count: number;
   user_id: string;
 }
 
@@ -51,6 +52,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     last_invocation_at: null,
     next_wake_at: null,
     pending_nudge: 0,
+    retry_failure_count: 0,
     user_id: userId,
   };
 }
@@ -74,6 +76,7 @@ export function projectRunnerStateRecord(input: {
       leaseGeneration: input.meta.lease_generation,
       nextWakeAt: input.meta.next_wake_at,
       pendingNudge: input.meta.pending_nudge === 1,
+      retryFailureCount: normalizeRetryFailureCount(input.meta.retry_failure_count),
       userId: input.meta.user_id,
       workspaceInvocation: hasPersistedInvocationLease
         ? {
@@ -87,6 +90,10 @@ export function projectRunnerStateRecord(input: {
         : null,
     },
   };
+}
+
+export function normalizeRetryFailureCount(value: number | null): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 export function resolveRunnerNextWakeAt(input: {

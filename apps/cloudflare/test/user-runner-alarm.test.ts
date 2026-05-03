@@ -1211,6 +1211,139 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it("stops scheduling retry alarms after the configured max event attempts", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      cryptoContextStatus: 403,
+      maxEventAttempts: 2,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
+      name: "HostedUserCryptoRepairNeededError",
+      status: 403,
+    });
+
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: "2026-04-27T00:00:30.000Z",
+      retry_failure_count: 1,
+    }]);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: null,
+      retry_failure_count: 2,
+    }]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          maxEventAttempts: 2,
+          retryFailureCount: 2,
+        }),
+        message: "Hosted runner retry attempts exhausted; waiting for a fresh nudge before retrying.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("stops scheduling retry alarms after repeated container invocation failures", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("Hosted runner container timed out.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      maxEventAttempts: 2,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toThrow(
+      "Hosted runner container timed out.",
+    );
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: null,
+      retry_failure_count: 2,
+    }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          maxEventAttempts: 2,
+          retryFailureCount: 2,
+        }),
+        message: "Hosted runner retry attempts exhausted; waiting for a fresh nudge before retrying.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("resets the retry failure counter after a successful invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner, setCryptoContextStatus, sql } = createRunnerCryptoContextHarness(null, {
+      cryptoContextStatus: 403,
+      maxEventAttempts: 3,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toMatchObject({
+      name: "HostedUserCryptoRepairNeededError",
+      status: 403,
+    });
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{ retry_failure_count: 1 }]);
+
+    setCryptoContextStatus(200);
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: null,
+      retry_failure_count: 0,
+    }]);
+  });
 });
 
 function createRunnerHarness(options: {
@@ -1310,6 +1443,7 @@ function createRunnerCryptoContextHarness(
     cryptoContextCacheMaxAgeMs?: number;
     cryptoContextStatus?: number;
     invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
+    maxEventAttempts?: number;
   } = {},
 ) {
   const sql = createTestSqlStorage();
@@ -1344,14 +1478,15 @@ function createRunnerCryptoContextHarness(
     nextWakeAt: null,
     status: "idle" as const,
   }));
+  let cryptoContextStatus = options.cryptoContextStatus ?? 200;
 
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
     boundUserId?: string;
     path: string;
   }) => {
     if (input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH) {
-      if (options.cryptoContextStatus && options.cryptoContextStatus !== 200) {
-        return Response.json({ error: "Unavailable" }, { status: options.cryptoContextStatus });
+      if (cryptoContextStatus !== 200) {
+        return Response.json({ error: "Unavailable" }, { status: cryptoContextStatus });
       }
       return Response.json({
         ...await createTestHostedRuntimeCryptoContext(input.boundUserId ?? "member_123"),
@@ -1374,6 +1509,9 @@ function createRunnerCryptoContextHarness(
     },
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_WEB_BASE_URL: "https://web.example.test",
+      ...(options.maxEventAttempts === undefined
+        ? {}
+        : { HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: String(options.maxEventAttempts) }),
     })),
     new MemoryEncryptedR2Bucket(),
     {},
@@ -1403,6 +1541,9 @@ function createRunnerCryptoContextHarness(
     alarms,
     invoke,
     runner,
+    setCryptoContextStatus(status: number) {
+      cryptoContextStatus = status;
+    },
     sql,
   };
 }

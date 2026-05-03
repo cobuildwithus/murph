@@ -95,6 +95,11 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
 
+`HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
+invocations for a Durable Object. When the cap is reached, the runner clears the
+retry alarm and waits for fresh nudge/manual input instead of continuing the
+alarm loop. Successful invocations and fresh nudges reset the counter.
+
 Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
