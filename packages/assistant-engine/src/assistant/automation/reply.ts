@@ -1,4 +1,3 @@
-import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
@@ -107,9 +106,20 @@ interface AssistantAutoReplyReplyDecision {
   deliveryReplyToMessageId: string | null
   kind: 'reply'
   operatorAuthority: AssistantOperatorAuthority
-  primaryCapture: InboxShowResult['capture']
+  primaryInput: AssistantAutoReplyPrimaryInput
   prompt: string
   userMessageContent: AssistantUserMessageContentPart[] | null
+}
+
+interface AssistantAutoReplyPrimaryInput {
+  actorIsSelf: boolean
+  conversation: AssistantConversationCaptureRef
+  inputId: string
+  occurredAt: string
+  receivedAt: string | null
+  replyTarget: AssistantAutoReplyPromptInput['replyTarget']
+  source: string
+  text: string | null
 }
 
 interface AssistantAutoReplySkipDecision {
@@ -334,13 +344,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   vault: string
 }): Promise<AssistantAutoReplyResolvedGroupOutcome> {
   let context = input.context
-  const filtered = await suppressEmailBodyUnavailableItemsFromMixedGroup({
-    context,
-    vault: input.vault,
-  })
-  if (filtered) {
-    context = filtered
-  }
 
   const decision = await evaluateAssistantAutoReplyGroup({
     allowSelfAuthored: input.allowSelfAuthored,
@@ -409,8 +412,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     onEvent: input.onEvent,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: decision.operatorAuthority,
-    conversationCaptureRef: readAutoReplyConversationCaptureRef(context),
-    primaryCapture: decision.primaryCapture,
+    conversationCaptureRef: decision.primaryInput.conversation,
     prompt: decision.prompt,
     replyInputId: primaryAutoReplyInputId(context),
     activeTurnInput: activeTurnHooks?.admit,
@@ -848,10 +850,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
-  if (isEmailBodyUnavailableAutoReplyGroup(input.group)) {
-    return createAdvancingSkipDecision('email.body_unavailable')
-  }
-
   const promptInputs = await loadAssistantAutoReplyPromptInputs({
     group: input.group,
     inboxServices: input.inboxServices,
@@ -864,7 +862,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (!primaryInput) {
     return { kind: 'ignore' }
   }
-  const primaryCapture = createSyntheticAutoReplyCapture(primaryInput)
+  const primaryReplyInput = createAssistantAutoReplyPrimaryInput(primaryInput)
   const handledReceipt = await resolveAssistantAutoReplyHandledTurnReceipt(
     input.vault,
     input.group.inputIds,
@@ -883,8 +881,11 @@ async function evaluateAssistantAutoReplyGroup(input: {
     })
   }
 
-  const channelAdapter = getAssistantChannelAdapter(primaryCapture.source)
-  const autoReplySkipReason = channelAdapter?.canAutoReply(primaryCapture) ?? null
+  const channelAdapter = getAssistantChannelAdapter(primaryReplyInput.source)
+  const autoReplySkipReason = channelAdapter?.canAutoReply({
+    source: primaryReplyInput.source,
+    threadIsDirect: primaryReplyInput.conversation.threadIsDirect,
+  }) ?? null
   if (autoReplySkipReason) {
     return createAdvancingSkipDecision(autoReplySkipReason)
   }
@@ -904,7 +905,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     input.group.firstItem.summary.actorIsSelf &&
     (await isRecentSelfAuthoredAssistantEcho({
       vault: input.vault,
-      capture: primaryCapture,
+      input: primaryReplyInput,
     }))
   ) {
     return createAdvancingSkipDecision(
@@ -920,7 +921,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     }),
     kind: 'reply',
     operatorAuthority: 'direct-operator',
-    primaryCapture,
+    primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
     userMessageContent: preparedInput.userMessageContent,
   }

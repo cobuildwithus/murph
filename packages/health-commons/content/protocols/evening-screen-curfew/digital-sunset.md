@@ -412,11 +412,12 @@ protocol:
     - "Log planned exceptions or breaches neutrally; return to the rule the same night."
     - "Next morning, log screen-stop time, bedtime, sleep onset, sleep quality, wiredness, sleepiness, and confounders."
   tips:
-  - Start with 30 minutes. A consistent smaller window beats an ambitious rule that delays bedtime.
-  - Move social/work/entertainment decisions earlier so the curfew window is not empty and tempting.
-  - Hold caffeine, alcohol, exercise, room light, screen filters, bedtime, and sleep supplements stable during the test.
-  - App locks are fine only if they reduce friction without blocking safety functions or increasing anxiety.
-  - Not a blue-light-filter test — Night Shift, dimming, or amber glasses are not equivalent to no screens.
+  - Anchor cutoff to intended bedtime: screens off 30 minutes before, 60 only after easy adherence.
+  - Before cutoff, finish alarms, payments, messages, work handoffs, and test VIP, medical, caregiving, or on-call exceptions.
+  - At cutoff, park phone out of bed and stop feeds, messages, email, gaming, browsing, and streaming.
+  - Keep caffeine, alcohol, late workouts, bright-room changes, sleep aids, and bedtime stable during the run.
+  - Use paper reading, journaling, stretching, prep, quiet conversation, or pre-started audio that does not delay bed.
+  - Log last screen time and breaches; do not count Night Shift, dimming, or amber glasses as no screens.
   keepInMind:
   - The best-fit direct evidence is promising for some high-phone-use or poor-sleeping users, but the overall direct evidence is small, mixed, and population-specific.
   - Screen-stop timing verifies adherence and attribution, but the main outcome signals are easier sleep onset and better sleep efficiency, not a guaranteed wearable sleep-stage, HRV, or resting-heart-rate change.
@@ -470,18 +471,12 @@ protocol:
   - HRV RMSSD
   - sleep-score checking frequency or wearable-related anxiety
   stopConditions:
-  - Stop or shrink the curfew if it delays bedtime or reduces sleep opportunity.
-  - Stop or redesign if pre-curfew task batching, replacement activities, or rebound/compensatory screen use move bedtime later, increase stress, or reduce sleep opportunity.
-  - Stop the experiment if it causes dangerous next-day sleepiness, especially before driving, operating machinery, safety-critical work, or caregiving.
-  - If you feel drowsy before driving, operating machinery, safety-critical work, or caregiving, do not drive or perform the hazardous task while sleepy. Prioritize sleep and safety over protocol adherence.
-  - Stop or redesign the plan if phone separation causes high anxiety, panic, craving, withdrawal-like distress, or repeated rumination.
-  - Stop or remove app locks/reminders if they increase anxiety, panic, resentment, compulsive checking, or interfere with safety functions.
-  - Stop if sleep feels meaningfully worse for three consecutive nights and no obvious outside cause explains it.
-  - Stop immediately and seek appropriate support if suicidal thoughts, self-harm urges, psychosis, crisis-level distress, or rapidly worsening severe depression/anxiety appear or increase.
-  - Stop and seek appropriate support if mood becomes unusually elevated, agitated, severely low, or unstable.
-  - Stop or redesign if Do Not Disturb, silent mode, app locks, phone placement, charger location, headphones, or audio settings block or delay medical, accessibility, emergency, caregiving, on-call, alarm, or safety-critical communication, or if the exception path fails when tested.
-  - Pause the protocol on nights when travel, rotating shift work, acute illness, new medication/supplement/sleep aid, newborn/caregiving disruption, or another major sleep disruptor makes the result uninterpretable or makes sleep opportunity unsafe.
-  - Stop sleep-score tracking, hide the wearable score, or switch to subjective-only logging if the tracker/log becomes compulsive, distressing, or more important than sleep.
+  - Stop or shrink the curfew if bedtime moves later, sleep opportunity shrinks, or sleep worsens for three consecutive nights.
+  - Stop if it causes dangerous next-day sleepiness; do not drive, operate machinery, or do safety-critical tasks while sleepy.
+  - Stop if phone separation causes panic, craving, or withdrawal-like distress, or if app locks interfere with safety functions.
+  - Stop and seek support for suicidal thoughts, self-harm, psychosis, crisis distress, or unstable mood.
+  - Stop or redesign if DND or app settings block medical, emergency, caregiving, or safety-critical communication.
+  - Pause on nights when travel, acute illness, new medication, or caregiving disruption makes the result uninterpretable.
 testPlans:
 -
   planId: digital-sunset-sol-21d
@@ -1331,19 +1326,11 @@ safety:
   - new_infant_or_major_caregiving_load
   - safety_critical_work_or_driving
   stopIf:
-  - curfew_delays_bedtime_or_reduces_sleep_opportunity
-  - dangerous_next_day_sleepiness
-  - drowsy_driving_risk
-  - sleep_worsens_for_three_consecutive_nights
-  - high_phone_separation_anxiety_or_craving
-  - panic_or_withdrawal_like_distress
-  - unusually_elevated_or_unstable_mood
-  - necessary_contact_blocked
-  - suicidal_thoughts_self_harm_psychosis_or_crisis_level_distress
-  - exception_path_or_safety_alerts_fail
-  - app_locks_or_dnd_block_medical_accessibility_alarm_or_emergency_functions
-  - replacement_activity_or_rebound_use_delays_bedtime
-  - sleep_opportunity_worsens_on_nights_before_driving_caregiving_or_safety_critical_work
+  - curfew_delays_bedtime_or_worsens_sleep
+  - dangerous_sleepiness_or_drowsy_driving_risk
+  - phone_separation_anxiety_panic_or_craving
+  - mood_instability_suicidal_thoughts_or_crisis_distress
+  - dnd_or_app_locks_block_safety_or_emergency_functions
   - tracking_anxiety_or_sleep_score_fixation
   notes:
   - Wellness experiment only — not treatment for insomnia, mood disorders, phone addiction, or crisis-level distress.

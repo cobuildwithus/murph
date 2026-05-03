@@ -1348,18 +1348,12 @@ safety:
   - cod_liver_oil_or_retinol_product
   - multiple_omega3_product_stacking
   stopIf:
-  - serious_allergic_symptoms_hives_swelling_wheezing_or_trouble_breathing
-  - chest_pain_fainting_severe_shortness_of_breath_or_stroke_like_symptoms
-  - rapid_or_irregular_heartbeat_with_weakness_dizziness_or_near_syncope
-  - vomiting_blood_coughing_blood_black_tarry_stools_or_blood_in_stool_or_urine
-  - uncontrolled_bleeding_or_severe_headache_neurologic_symptoms_after_head_injury
-  - new_or_worsening_palpitations_irregular_heartbeat_diagnosed_af_flutter_or_recurrent_unexplained_dizziness
-  - unusual_bruising_prolonged_cut_bleeding_recurrent_nosebleeds_bleeding_gums_or_heavier_menses
-  - severe_or_persistent_gi_symptoms_or_inability_to_tolerate_product
-  - new_rash_urticaria_gout_flare_marked_joint_swelling_or_new_edema
-  - dark_urine_jaundice_rising_alt_ast_or_ldl_c_when_clinician_directed
-  - pregnancy_breastfeeding_or_planned_procedure_emerges_during_run
-  - starting_or_increasing_anticoagulants_antiplatelets_regular_nsaids_or_bleeding_relevant_supplements
+  - serious_allergic_reaction_or_trouble_breathing
+  - chest_pain_fainting_palpitations_or_cardiac_symptoms
+  - bleeding_signs_bruising_or_blood_in_stool_urine_or_vomit
+  - severe_gi_symptoms_rash_gout_or_joint_swelling
+  - dark_urine_jaundice_or_concerning_lab_change
+  - pregnancy_planned_procedure_or_anticoagulant_change
   notes:
   - Common doses are well tolerated, but high-dose and CV-risk signals control the screen.
   - Not a substitute for clinician-guided treatment of hypertriglyceridemia, CV disease, pregnancy, allergy, liver/LDL, gout, or prescription omega-3 therapy.
