@@ -140,6 +140,7 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
@@ -221,6 +222,10 @@ Hosted AI usage metering:
 - `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending usage rows each cron drain attempts.
 - `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests only when `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`.
 - `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` must be a Stripe restricted key with billing meter-event write permission only; it is forwarded to hosted execution, never persisted with usage rows, and ignored unless it starts with `rk_`.
+
+Hosted runner cleanup:
+
+- `HOSTED_STALE_RUNNER_USER_IDS` is an operator-only, comma or whitespace separated list of stale hosted member ids whose Cloudflare runner Durable Objects should be cleaned up by the cron path. Leave it unset during normal operation. The cleanup checks `HostedMember` first and skips any candidate id that still exists in Postgres.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 While usage billing is disabled, imported rows keep `stripeMeterSource=murph`
@@ -362,6 +367,7 @@ deploys `apps/web`. Production is the minimum.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
+- Set `HOSTED_STALE_RUNNER_USER_IDS` only during a targeted stale-runner cleanup, then unset it after the Cloudflare runner objects have been cleared.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
@@ -491,6 +497,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/runtime/snapshot`
 - `POST /api/internal/device-sync/runtime/apply`
 - `GET /api/internal/hosted-execution/usage/cron`
+- `GET /api/internal/hosted-execution/stale-runner-cleanup/cron`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-mailbox/fetch`
 - `POST /api/internal/hosted-mailbox/payload/fetch`
