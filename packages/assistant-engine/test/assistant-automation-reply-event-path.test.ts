@@ -68,7 +68,7 @@ afterEach(async () => {
 })
 
 describe('assistant auto-reply event-first path', () => {
-  it('still sends when inbox projection enrichment is stale or missing', async () => {
+  it('sends from the staged assistant input without prompt-time inbox loading', async () => {
     const vault = await createTempVault()
     const onEvent = vi.fn()
     const staleProjectionCaptureId = 'capture_stale_projection'
@@ -102,16 +102,11 @@ describe('assistant auto-reply event-first path', () => {
       replied: 1,
       skipped: 0,
     })
-    expect(show).toHaveBeenCalledWith({
-      captureId: staleProjectionCaptureId,
-      requestId: null,
-      vault,
-    })
-    expect(onEvent).toHaveBeenCalledWith(
+    expect(show).not.toHaveBeenCalled()
+    expect(onEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        details: 'nonblocking inbox projection enrichment failed',
         inputId: candidate.event.inputId,
-        safeDetails: 'inbox_projection_enrichment_failed_nonblocking',
+        safeDetails: expect.stringContaining('inbox_projection'),
         type: 'input.reply-progress',
       }),
     )
@@ -134,7 +129,7 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
-  it('rethrows AbortError from inbox projection enrichment', async () => {
+  it('does not let prompt-time inbox service failures abort event-owned replies', async () => {
     const vault = await createTempVault()
     const candidate = createAssistantInputCandidate({
       optionalInboxCaptureId: 'capture_abort_projection',
@@ -145,19 +140,26 @@ describe('assistant auto-reply event-first path', () => {
     const context = createReplyContext(candidate)
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
+    const show = vi.fn().mockRejectedValue(abortError)
 
-    await expect(processAssistantAutoReplyGroup({
+    const result = await processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context,
       enabledChannels: ['email'],
-      inboxServices: createInboxServices({
-        show: vi.fn().mockRejectedValue(abortError),
-      }),
+      inboxServices: createInboxServices({ show }),
       requestId: null,
       sessionMaxAgeMs: null,
       vault,
-    })).rejects.toBe(abortError)
-    expect(replyEventPathMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(show).not.toHaveBeenCalled()
+    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
   it('sends degraded email body-unavailable prompts to Codex', async () => {

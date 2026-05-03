@@ -75,7 +75,7 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
       attachment: {
         byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
         derivedPath: input.attachment.derived?.manifestPath ?? null,
-        fileName: input.attachment.fileName ?? null,
+        fileName: null,
         mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
         storedPath: rawPath,
       },
@@ -94,7 +94,7 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
     ordinal: input.attachment.ordinal,
     kind: input.attachment.kind,
     mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
-    fileName: input.attachment.fileName ?? null,
+    fileName: null,
     byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
     storedPath: rawPath,
     parseState: normalizeAttachmentEvidenceParseState(input.attachment.parseState),
@@ -212,14 +212,14 @@ function buildMetadataFragment(
   rawPath: string | null,
   routingImage: RoutingImageEligibility,
 ) {
+  const promptStoredPath = renderPromptStoredPath(rawPath)
   const metadataLines = [
     `attachmentId: ${attachment.sourceAttachmentId ?? attachment.descriptorAttachmentId ?? `attachment-${attachment.ordinal}`}`,
     `ordinal: ${attachment.ordinal}`,
     `kind: ${attachment.kind}`,
     `mime: ${attachment.mime ?? attachment.raw?.mediaType ?? 'unknown'}`,
-    `fileName: ${attachment.fileName ?? 'unknown'}`,
     `byteSize: ${attachment.byteSize ?? attachment.raw?.byteSize ?? 'unknown'}`,
-    `storedPath: ${rawPath ?? 'missing'}`,
+    `storedPath: ${promptStoredPath}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
       ? [
@@ -239,6 +239,15 @@ function buildMetadataFragment(
     text,
     truncated: false,
   }
+}
+
+function renderPromptStoredPath(rawPath: string | null): string {
+  if (!rawPath) {
+    return 'missing'
+  }
+  return rawPath.startsWith('raw/assistant-input/')
+    ? rawPath
+    : 'available'
 }
 
 function buildInlineTextSources(
@@ -354,7 +363,7 @@ async function readPreparedRoutingEvidence(input: {
       evidence.push({
         kind: 'image',
         ordinal: attachment.ordinal,
-        fileName: attachment.fileName ?? null,
+            fileName: null,
         mediaType: attachment.routingImage.mediaType ?? null,
         bytes,
       })
@@ -385,7 +394,7 @@ function getAttachmentEvidenceRoutingImageEligibility(input: {
 }): RoutingImageEligibility {
   return getRoutingImageEligibility({
     byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
-    fileName: input.attachment.fileName,
+    fileName: null,
     kind: input.attachment.kind,
     mediaType: input.attachment.raw?.mediaType ?? null,
     mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,

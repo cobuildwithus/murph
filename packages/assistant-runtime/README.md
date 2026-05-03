@@ -26,11 +26,14 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records, checkpoints the mailbox staged
 watermark, and only then makes one best-effort inbox projection attempt while
-the decoded wake is still in memory. Projection status and inbox artifacts are
-checkpointed separately as diagnostic/enrichment state; failed projection is not
-durably retried by hosted runtime. Inbox capture, parser work, attachment
-materialization, and display/search indexes are recovery context; they are not a
-hidden runtime-only admission path for Codex.
+the decoded wake is still in memory. Projection status and event-owned
+`attachmentEvidence` are checkpointed separately as diagnostic/materialization
+state; failed projection is not durably retried by hosted runtime. Inbox
+capture, parser work, attachment materialization, and display/search indexes are
+recovery context; they are not a hidden runtime-only admission path for Codex.
+Prompt construction reads the staged assistant input event and its sanitized
+vault-relative attachment evidence refs; it does not call inbox projection at
+prompt time.
 
 Current non-goals:
 

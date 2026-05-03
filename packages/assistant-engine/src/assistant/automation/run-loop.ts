@@ -35,10 +35,18 @@ import {
   type AssistantInputSource,
 } from '../input-source.js'
 import {
+  listAssistantInputEvents,
+  updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
+  type AssistantInputAttachmentEvidence,
   type UpsertAssistantInputEventInput,
 } from '../input-store.js'
+import {
+  createAssistantInputAttachmentEvidenceFromInboxCapture,
+  materializeAssistantInputAttachmentRawArtifactRefs,
+  type InboxCaptureAttachmentLike,
+} from '../inbox-attachment-evidence.js'
 import { notifyAssistantActiveTurnInputAvailable } from '../active-turn-input-controller.js'
 import {
   errorMessage,
@@ -63,6 +71,9 @@ type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
   'autoReply'
 >
+
+const SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN =
+  /^[A-Za-z0-9_.:-]{1,96}$/u
 
 export interface RunAssistantAutomationInput {
   applyCanonicalWrites?: boolean
@@ -144,6 +155,7 @@ export async function runAssistantAutomation(
             ) {
               stageImportedCaptureAssistantInputEvent({
                 capture: event.capture,
+                onEvent: input.onEvent,
                 persisted: event.persisted,
                 vault: input.vault,
               }).then(() => {
@@ -163,15 +175,33 @@ export async function runAssistantAutomation(
                 controller.abort()
               })
             } else if (
-              (event.type === 'capture.imported' &&
-                (input.allowSelfAuthored || event.capture?.actor?.isSelf !== true)) ||
-              event.type === 'parser.jobs.drained'
+              event.type === 'capture.imported' &&
+              (input.allowSelfAuthored || event.capture?.actor?.isSelf !== true)
             ) {
               wakeController.requestWake()
               notifyImportedCaptureInputAvailable({
                 event,
                 signal: controller.signal,
                 vault: input.vault,
+              })
+            } else if (event.type === 'parser.jobs.drained') {
+              refreshAssistantInputAttachmentEvidenceForParserDrain({
+                captureIds: event.parser?.captureIds ?? [],
+                inboxServices,
+                onEvent: input.onEvent,
+                requestId: input.requestId ?? null,
+                vault: input.vault,
+              }).catch((error) => {
+                input.onEvent?.({
+                  type: 'input.reply-progress',
+                  details: 'nonblocking attachment evidence refresh failed',
+                  errorCode: readSafeAttachmentEvidenceErrorCode(error),
+                  safeDetails: 'attachment_evidence_refresh_failed_nonblocking',
+                  providerKind: 'status',
+                  providerState: 'completed',
+                })
+              }).finally(() => {
+                wakeController.requestWake()
               })
             }
             input.onInboxEvent?.(event)
@@ -294,6 +324,7 @@ export async function runAssistantAutomation(
 
 async function stageImportedCaptureAssistantInputEvent(input: {
   capture: NonNullable<InboxRunEvent['capture']>
+  onEvent?: (event: AssistantRunEvent) => void
   persisted: NonNullable<InboxRunEvent['persisted']>
   vault: string
 }): Promise<void> {
@@ -376,6 +407,185 @@ async function stageImportedCaptureAssistantInputEvent(input: {
     },
     vault: input.vault,
   })
+  await updateAssistantInputAttachmentEvidence({
+    inputId: stored.inputId,
+    vault: input.vault,
+    attachmentEvidence: await createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs({
+      attachments: input.capture.attachments,
+      captureId: input.persisted.captureId,
+      descriptorAttachmentIdForAttachment: (attachment, index) =>
+        hashLocalAssistantInputIdentifier(
+          input.vault,
+          input.capture.source,
+          attachment.externalId,
+          `attachment_${index}`,
+        ),
+      inputId: stored.inputId,
+      source: 'local-inbox-import',
+      vault: input.vault,
+    }),
+  }).then((updated) => {
+    emitAttachmentEvidenceUpdateProgress({
+      attachmentCount: updated.attachmentEvidence.attachments.length,
+      inputId: stored.inputId,
+      onEvent: input.onEvent,
+      safeDetails: 'attachment_evidence_updated',
+      status: updated.attachmentEvidence.status,
+    })
+  }).catch((error) => {
+    input.onEvent?.({
+      type: 'input.reply-progress',
+      inputId: stored.inputId,
+      details: 'nonblocking attachment evidence update failed',
+      errorCode: readSafeAttachmentEvidenceErrorCode(error),
+      safeDetails: 'attachment_evidence_update_failed_nonblocking',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+  })
+}
+
+async function refreshAssistantInputAttachmentEvidenceForParserDrain(input: {
+  captureIds: readonly string[]
+  inboxServices: InboxServices
+  onEvent?: (event: AssistantRunEvent) => void
+  requestId: string | null
+  vault: string
+}): Promise<void> {
+  const captureIds = [...new Set(input.captureIds.filter((captureId) =>
+    typeof captureId === 'string' && captureId.trim().length > 0
+  ))]
+  if (captureIds.length === 0) {
+    return
+  }
+
+  const listed = await listAssistantInputEvents({
+    limit: Number.MAX_SAFE_INTEGER,
+    skipInvalidRecords: true,
+    vault: input.vault,
+  })
+  const eventsByCaptureId = new Map<string, typeof listed.events>()
+  for (const event of listed.events) {
+    const captureId =
+      event.projection.captureId ??
+      (event.sourceRef.kind === 'inbox-capture'
+        ? event.sourceRef.captureId
+        : null)
+    if (!captureId) {
+      continue
+    }
+    const existing = eventsByCaptureId.get(captureId) ?? []
+    existing.push(event)
+    eventsByCaptureId.set(captureId, existing)
+  }
+
+  for (const captureId of captureIds) {
+    const events = eventsByCaptureId.get(captureId) ?? []
+    if (events.length === 0) {
+      continue
+    }
+
+    try {
+      const result = await input.inboxServices.show({
+        captureId,
+        requestId: input.requestId,
+        vault: input.vault,
+      })
+      await Promise.all(
+        events.map(async (event) => {
+          const attachmentEvidence =
+            await createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs({
+              attachments: result.capture.attachments,
+              captureId,
+              inputId: event.inputId,
+              source: 'local-parser-drain',
+              vault: input.vault,
+            })
+          const updated = await updateAssistantInputAttachmentEvidence({
+            attachmentEvidence,
+            inputId: event.inputId,
+            vault: input.vault,
+          })
+          emitAttachmentEvidenceUpdateProgress({
+            attachmentCount: updated.attachmentEvidence.attachments.length,
+            inputId: event.inputId,
+            onEvent: input.onEvent,
+            safeDetails: 'attachment_evidence_refreshed',
+            status: updated.attachmentEvidence.status,
+          })
+        }),
+      )
+    } catch (error) {
+      for (const event of events) {
+        input.onEvent?.({
+          type: 'input.reply-progress',
+          captureId,
+          inputId: event.inputId,
+          details: 'nonblocking attachment evidence refresh failed',
+          errorCode: readSafeAttachmentEvidenceErrorCode(error),
+          safeDetails: 'attachment_evidence_refresh_failed_nonblocking',
+          providerKind: 'status',
+          providerState: 'completed',
+        })
+      }
+    }
+  }
+}
+
+async function createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs(input: {
+  attachments: readonly InboxCaptureAttachmentLike[]
+  captureId: string
+  descriptorAttachmentIdForAttachment?: (
+    attachment: InboxCaptureAttachmentLike,
+    index: number,
+  ) => string | null
+  inputId: string
+  source: NonNullable<AssistantInputAttachmentEvidence['source']>
+  vault: string
+}): Promise<AssistantInputAttachmentEvidence> {
+  const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
+    attachments: input.attachments,
+    inputId: input.inputId,
+    vaultRoot: input.vault,
+  })
+  return createAssistantInputAttachmentEvidenceFromInboxCapture({
+    capture: {
+      attachments: input.attachments,
+      captureId: input.captureId,
+    },
+    descriptorAttachmentIdForAttachment: input.descriptorAttachmentIdForAttachment,
+    rawArtifactPathForAttachment: ({ index }) => rawArtifactRefs.get(index) ?? null,
+    source: input.source,
+  })
+}
+
+function emitAttachmentEvidenceUpdateProgress(input: {
+  attachmentCount: number
+  inputId: string
+  onEvent?: (event: AssistantRunEvent) => void
+  safeDetails: string
+  status: string
+}): void {
+  input.onEvent?.({
+    type: 'input.reply-progress',
+    inputId: input.inputId,
+    details: 'attachment evidence updated',
+    failureContext: {
+      attachmentCount: input.attachmentCount,
+      status: input.status,
+    },
+    safeDetails: input.safeDetails,
+    providerKind: 'status',
+    providerState: 'completed',
+  })
+}
+
+function readSafeAttachmentEvidenceErrorCode(error: unknown): string {
+  const record = asRecord(error)
+  const code = typeof record?.code === 'string' ? record.code.trim() : ''
+  return code && SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN.test(code)
+    ? code
+    : 'attachment_evidence_update_failed'
 }
 
 function createLocalCaptureAssistantInputReplyTarget(

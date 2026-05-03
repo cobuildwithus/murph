@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -179,6 +179,214 @@ describe("hosted mailbox conversation import adapter", () => {
       "conversation-import.projection-failed",
     );
     assert.ok(afterProjection.events[0]?.projection.lastAttemptedAt);
+    assert.equal(afterProjection.events[0]?.attachmentEvidence.status, "failed");
+    assert.equal(
+      afterProjection.events[0]?.attachmentEvidence.reasonCode,
+      "conversation-import.attachment-evidence-failed",
+    );
+    assert.equal(afterProjection.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
+    assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
+  });
+
+  test("records hosted attachment evidence after successful inbox projection", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_evidence_001",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_evidence",
+          from: "+15550100000",
+          isFromMe: false,
+          messageId: "msg_synthetic_evidence",
+          parts: [
+            {
+              attachmentId: "voice_part_1",
+              fileName: "voice-note.m4a",
+              mimeType: "audio/mp4",
+              size: 256,
+              type: "voice_memo",
+              url: "https://signed.example.invalid/voice",
+            },
+          ],
+        },
+        phoneLookupKey: "+15550100000",
+      },
+    });
+    const loadCalls: unknown[] = [];
+    await writeVaultFile(
+      vaultRoot,
+      "raw/inbox/linq/cap_synthetic_evidence_001/attachments/01__voice-note.m4a",
+      Buffer.from("audio bytes"),
+    );
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_evidence_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 1,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        loadCalls.push(input);
+        return {
+          captureId: input.captureId,
+          attachments: [
+            {
+              attachmentId: "att_voice_1",
+              byteSize: 256,
+              derivedPath:
+                "derived/inbox/cap_synthetic_evidence_001/attachments/att_voice_1/manifest.json",
+              extractedText: "Transcribed voice note.",
+              fileName: "voice-note.m4a",
+              kind: "audio",
+              mime: "audio/mp4",
+              ordinal: 1,
+              parseState: "succeeded",
+              sha256: "b".repeat(64),
+              storedPath:
+                "raw/inbox/linq/cap_synthetic_evidence_001/attachments/01__voice-note.m4a",
+              transcriptText: null,
+            },
+          ],
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_evidence_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    await outcome.afterCheckpoint?.();
+
+    assert.deepEqual(loadCalls, [
+      {
+        captureId: "cap_synthetic_evidence_001",
+        requestId: "evt_synthetic_evidence_001",
+        vaultRoot,
+      },
+    ]);
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    const evidence = listed.events[0]?.attachmentEvidence;
+    assert.equal(evidence?.optionalInboxCaptureId, "cap_synthetic_evidence_001");
+    assert.equal(evidence?.reasonCode, null);
+    assert.equal(evidence?.source, "hosted-inbox-projection");
+    assert.equal(evidence?.status, "available");
+    assert.ok(evidence?.updatedAt);
+    assert.deepEqual(evidence?.attachments, [
+      {
+        byteSize: 256,
+        descriptorAttachmentId: "att_voice_1",
+        derived: {
+          allowedRoot:
+            "derived/inbox/cap_synthetic_evidence_001/attachments/att_voice_1",
+          kind: "parser-manifest",
+          manifestPath:
+            "derived/inbox/cap_synthetic_evidence_001/attachments/att_voice_1/manifest.json",
+        },
+        fileName: null,
+        inlineFragments: [
+          {
+            kind: "attachment_extracted_text",
+            label: "attachment-1-extracted-text",
+            text: "Transcribed voice note.",
+            truncated: false,
+          },
+        ],
+        kind: "audio",
+        mime: "audio/mp4",
+        ordinal: 1,
+        parseState: "succeeded",
+        raw: {
+          byteSize: 256,
+          kind: "vault-relative-file",
+          mediaType: "audio/mp4",
+          path: `raw/assistant-input/${listed.events[0]!.inputId}/attachments/001.m4a`,
+          sha256: "b".repeat(64),
+        },
+        sourceAttachmentId: "att_voice_1",
+      },
+    ]);
+    assert.equal(JSON.stringify(listed.events[0]).includes("https://signed.example.invalid"), false);
+  });
+
+  test("keeps hosted attachment evidence hydration failures nonblocking", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-failed-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_evidence_failed_001",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [
+            {
+              fileId: "telegram_photo_file_1",
+              fileName: "private-photo.jpg",
+              fileSize: 2048,
+              kind: "photo",
+              mimeType: "image/jpeg",
+            },
+          ],
+          messageId: "777",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "",
+          threadId: "123456789",
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_evidence_failed_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture() {
+        throw new Error("canonical capture detail unavailable");
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_evidence_failed_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    await outcome.afterCheckpoint?.();
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events[0]?.projection.status, "succeeded");
+    assert.equal(listed.events[0]?.projection.captureId, "cap_synthetic_evidence_failed_001");
+    assert.equal(listed.events[0]?.attachmentEvidence.optionalInboxCaptureId, "cap_synthetic_evidence_failed_001");
+    assert.equal(
+      listed.events[0]?.attachmentEvidence.reasonCode,
+      "conversation-import.attachment-evidence-failed",
+    );
+    assert.equal(listed.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
+    assert.equal(listed.events[0]?.attachmentEvidence.status, "failed");
+    assert.equal(listed.events[0]?.attachmentEvidence.attachments.length, 0);
   });
 
   test("keeps Telegram conversation metadata hashed while replyTarget uses real thread and message ids", async () => {
@@ -1273,6 +1481,16 @@ function createConversationWake(
     userId: TEST_USER_ID,
     ...overrides,
   };
+}
+
+async function writeVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  bytes: Buffer,
+): Promise<void> {
+  const absolutePath = path.join(vaultRoot, relativePath);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, bytes);
 }
 
 function createRuntime(): Pick<

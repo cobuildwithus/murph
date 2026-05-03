@@ -148,6 +148,13 @@ export interface HostedWorkspaceRunnerInput {
 
 type HostedMailboxPostCheckpointEffect = () => Promise<void>;
 
+interface HostedMailboxPostCheckpointEffectsResult {
+  attempted: boolean;
+  errorCodes: readonly string[];
+  failed: number;
+  succeeded: number;
+}
+
 export interface HostedWorkspaceRunnerResult {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
@@ -873,19 +880,27 @@ function createHostedWorkspaceCheckpointRequestSession(
 
 async function runHostedMailboxPostCheckpointEffectsBestEffort(
   effects: readonly HostedMailboxPostCheckpointEffect[],
-): Promise<boolean> {
-  let attempted = false;
+): Promise<HostedMailboxPostCheckpointEffectsResult> {
+  const errorCodes: string[] = [];
+  let failed = 0;
+  let succeeded = 0;
   for (const effect of effects) {
     try {
       await effect();
-      attempted = true;
+      succeeded += 1;
     } catch {
       // Mailbox post-checkpoint effects are enrichment only. They must not roll
       // back durable mailbox or assistant checkpoints.
-      attempted = true;
+      failed += 1;
+      errorCodes.push("post_checkpoint_effect_failed");
     }
   }
-  return attempted;
+  return {
+    attempted: effects.length > 0,
+    errorCodes,
+    failed,
+    succeeded,
+  };
 }
 
 async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(input: {
@@ -899,10 +914,27 @@ async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(inpu
     return;
   }
 
-  const attempted = await runHostedMailboxPostCheckpointEffectsBestEffort(effects);
-  if (!attempted) {
+  const result = await runHostedMailboxPostCheckpointEffectsBestEffort(effects);
+  if (!result.attempted) {
     return;
   }
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
+      component: "mailbox",
+      eventCode: "mailbox.post_checkpoint_effects_finished",
+      level: result.failed > 0 ? "warn" : "info",
+      phase: "import",
+      redactedJson: {
+        attemptedCount: effects.length,
+        errorCodes: compactHostedRuntimeLogCodes(result.errorCodes),
+        failedCount: result.failed,
+        succeededCount: result.succeeded,
+      },
+    },
+    now: input.input.now,
+    platform: input.input.platform,
+  });
 
   try {
     await checkpointHostedWorkspaceMailboxPostCheckpointEffects({

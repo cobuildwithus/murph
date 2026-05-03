@@ -10,30 +10,32 @@ import {
 } from '../src/inbox-model-contracts.ts'
 import type { AssistantUserMessageContentPart } from '../src/assistant/content-types.ts'
 import type {
+  AssistantInputAttachmentEvidence,
+  AssistantInputAttachmentEvidenceItem,
   AssistantInputAttachmentDescriptor,
   AssistantInputProjectionStatus,
   AssistantInputSourceMetadata,
 } from '../src/assistant/input-store.ts'
 
 const promptBuilderMocks = vi.hoisted(() => ({
-  buildInboxModelAttachmentBundles: vi.fn(),
-  hasInboxMultimodalAttachmentEvidenceCandidate: vi.fn(),
-  prepareInboxMultimodalUserMessageContent: vi.fn(),
+  buildAssistantInputAttachmentModelBundles: vi.fn(),
+  hasAssistantInputAttachmentEvidenceCandidate: vi.fn(),
+  prepareAssistantInputMultimodalUserMessageContent: vi.fn(),
 }))
 
-vi.mock('../src/inbox-multimodal.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/inbox-multimodal.ts')>(
-    '../src/inbox-multimodal.ts',
+vi.mock('../src/assistant/attachment-evidence-model.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/assistant/attachment-evidence-model.ts')>(
+    '../src/assistant/attachment-evidence-model.ts',
   )
 
   return {
     ...actual,
-    buildInboxModelAttachmentBundles:
-      promptBuilderMocks.buildInboxModelAttachmentBundles,
-    hasInboxMultimodalAttachmentEvidenceCandidate:
-      promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate,
-    prepareInboxMultimodalUserMessageContent:
-      promptBuilderMocks.prepareInboxMultimodalUserMessageContent,
+    buildAssistantInputAttachmentModelBundles:
+      promptBuilderMocks.buildAssistantInputAttachmentModelBundles,
+    hasAssistantInputAttachmentEvidenceCandidate:
+      promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate,
+    prepareAssistantInputMultimodalUserMessageContent:
+      promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent,
   }
 })
 
@@ -45,9 +47,9 @@ import {
 } from '../src/assistant/automation/prompt-builder.ts'
 
 beforeEach(() => {
-  promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([])
-  promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(false)
-  promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
+  promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([])
+  promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(false)
+  promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
     fallbackError: null,
     inputMode: 'text-only',
     userMessageContent: null,
@@ -107,6 +109,7 @@ function createAttachment(
 }
 
 function createPromptInput(input: {
+  attachmentEvidence?: AssistantInputAttachmentEvidence
   attachmentDescriptors?: readonly AssistantInputAttachmentDescriptor[]
   attachments?: readonly InboxShowResult['capture']['attachments'][number][]
   captureOverrides?: Partial<InboxShowResult['capture']>
@@ -155,6 +158,12 @@ function createPromptInput(input: {
     parsedCapture.attachments.length > 0
   return {
     attachmentDescriptors: input.attachmentDescriptors ?? [],
+    attachmentEvidence:
+      input.attachmentEvidence ??
+      createAttachmentEvidence({
+        attachments: parsedCapture.attachments,
+        captureId: parsedCapture.captureId,
+      }),
     actorIsSelf: parsedCapture.actorIsSelf,
     conversation: {
       accountId: parsedCapture.accountId,
@@ -164,17 +173,11 @@ function createPromptInput(input: {
       threadId: parsedCapture.threadId,
       threadIsDirect: parsedCapture.threadIsDirect,
     },
-    enrichment: parsedCapture.attachments.length > 0
-      ? {
-          attachments: parsedCapture.attachments,
-          inboxCaptureId: parsedCapture.captureId,
-        }
-      : null,
     inputId: parsedCapture.eventId,
     occurredAt: parsedCapture.occurredAt,
     projection: hasProjection
       ? {
-          inboxCaptureId: parsedCapture.captureId,
+          optionalInboxCaptureId: parsedCapture.captureId,
           reasonCode: projectionReasonCode,
           status: projectionStatus ?? 'succeeded',
         }
@@ -185,6 +188,98 @@ function createPromptInput(input: {
     sourceMetadata: input.sourceMetadata ?? null,
     telegramMetadata: input.telegramMetadata ?? null,
     text: parsedCapture.text,
+  }
+}
+
+function createAttachmentEvidence(input: {
+  attachments: readonly InboxShowResult['capture']['attachments'][number][]
+  captureId: string
+}): AssistantInputAttachmentEvidence {
+  if (input.attachments.length === 0) {
+    return {
+      attachments: [],
+      optionalInboxCaptureId: null,
+      reasonCode: null,
+      source: null,
+      status: 'not_attempted',
+      updatedAt: null,
+    }
+  }
+
+  return {
+    attachments: input.attachments.map((attachment) =>
+      createAttachmentEvidenceItem(attachment),
+    ),
+    optionalInboxCaptureId: input.captureId,
+    reasonCode: null,
+    source: 'manual',
+    status: 'available',
+    updatedAt: '2026-04-08T00:00:01.000Z',
+  }
+}
+
+function createAttachmentEvidenceItem(
+  attachment: InboxShowResult['capture']['attachments'][number],
+): AssistantInputAttachmentEvidenceItem {
+  const inlineFragments: AssistantInputAttachmentEvidenceItem['inlineFragments'] = []
+  if (attachment.transcriptText) {
+    inlineFragments.push({
+      kind: 'attachment_transcript',
+      label: `attachment-${attachment.ordinal}-transcript`,
+      text: attachment.transcriptText,
+      truncated: false,
+    })
+  }
+  if (attachment.extractedText) {
+    inlineFragments.push({
+      kind: 'attachment_extracted_text',
+      label: `attachment-${attachment.ordinal}-extracted-text`,
+      text: attachment.extractedText,
+      truncated: false,
+    })
+  }
+
+  return {
+    byteSize: attachment.byteSize ?? null,
+    derived: null,
+    descriptorAttachmentId: attachment.attachmentId ?? `attachment-${attachment.ordinal}`,
+    fileName: attachment.fileName ?? null,
+    inlineFragments,
+    kind: normalizeAttachmentEvidenceItemKind(attachment.kind),
+    mime: attachment.mime ?? null,
+    ordinal: attachment.ordinal,
+    parseState: normalizeAttachmentEvidenceParseState(attachment.parseState),
+    raw: null,
+    sourceAttachmentId: attachment.attachmentId ?? `attachment-${attachment.ordinal}`,
+  }
+}
+
+function normalizeAttachmentEvidenceItemKind(
+  value: InboxShowResult['capture']['attachments'][number]['kind'],
+): AssistantInputAttachmentEvidenceItem['kind'] {
+  switch (value) {
+    case 'image':
+    case 'audio':
+    case 'video':
+    case 'document':
+    case 'other':
+      return value
+    default:
+      return 'other'
+  }
+}
+
+function normalizeAttachmentEvidenceParseState(
+  value: InboxShowResult['capture']['attachments'][number]['parseState'],
+): AssistantInputAttachmentEvidenceItem['parseState'] {
+  switch (value) {
+    case 'pending':
+    case 'running':
+    case 'succeeded':
+    case 'failed':
+      return value
+    default:
+      return null
   }
 }
 
@@ -285,9 +380,9 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain('Message enrichment:')
+    expect(result.prompt).toContain('Message evidence:')
     expect(result.prompt).toContain(
-      'inbox/parser enrichment failed (conversation-import.projection-failed); use the staged message text and available metadata only.',
+      'attachment evidence is unavailable (conversation-import.projection-failed); use the staged message text and available metadata only.',
     )
     expect(result.prompt).toContain(
       'Message text:\nPlease look at the voice memo when it is available.',
@@ -332,7 +427,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('mime types: audio/ogg, image/jpeg')
     expect(result.prompt).toContain('total size: 3072 bytes')
     expect(result.prompt).toContain(
-      'parser/search enrichment: failed (conversation-import.projection-failed)',
+      'attachment evidence: unavailable (conversation-import.projection-failed)',
     )
     expect(result.prompt).not.toContain('private-photo.jpg')
     expect(result.prompt).not.toContain('private-voice.ogg')
@@ -419,8 +514,9 @@ describe('buildAssistantAutoReplyPrompt', () => {
       'Reply context:\nReplying to Alex: Please review the attachment.',
     )
     expect(result.prompt).toContain(
-      'Attachment 1 (audio, voice-note.m4a)',
+      'Attachment 1 (audio)',
     )
+    expect(result.prompt).not.toContain('voice-note.m4a')
     expect(result.prompt).toContain(
       'Large parsed attachment content omitted from prompt to keep context small: transcript (2005 chars).',
     )
@@ -581,11 +677,11 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain(
       'known total size: 1024 bytes (some sizes unknown)',
     )
-    expect(result.prompt).toContain('parser/search enrichment: pending')
+    expect(result.prompt).toContain('attachment evidence: pending')
     expect(result.prompt).not.toContain('private-photo.jpg')
     expect(result.prompt).not.toContain('private-voice.ogg')
     expect(result.userMessageContent).toBeNull()
-    expect(promptBuilderMocks.buildInboxModelAttachmentBundles).not.toHaveBeenCalled()
+    expect(promptBuilderMocks.buildAssistantInputAttachmentModelBundles).not.toHaveBeenCalled()
   })
 
   it('prepares staged text with projection pending context when no attachment bundle is available', async () => {
@@ -606,9 +702,9 @@ describe('prepareAssistantAutoReplyInput', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prepared input.')
     }
-    expect(result.prompt).toContain('Message enrichment:')
+    expect(result.prompt).toContain('Message evidence:')
     expect(result.prompt).toContain(
-      'inbox/parser enrichment is pending; use the staged message text and available metadata only.',
+      'attachment evidence is pending; use the staged message text and available metadata only.',
     )
     expect(result.prompt).toContain('Message text:\nAudio note incoming.')
   })
@@ -641,7 +737,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(descriptorResult.prompt).toContain(
-      'parser/search enrichment: not attempted',
+      'attachment evidence: not attempted',
     )
 
     const messageResult = await prepareAssistantAutoReplyInput(
@@ -662,12 +758,12 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(messageResult.prompt).toContain(
-      'inbox/parser enrichment was not attempted; use the staged message text and available metadata only.',
+      'attachment evidence was not attempted; use the staged message text and available metadata only.',
     )
   })
 
   it('prepares metadata/status input when parser work is still pending', async () => {
-    promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
         parseState: 'pending',
       }),
@@ -692,15 +788,15 @@ describe('prepareAssistantAutoReplyInput', () => {
       ),
       userMessageContent: null,
     })
-    expect(promptBuilderMocks.buildInboxModelAttachmentBundles).toHaveBeenCalled()
+    expect(promptBuilderMocks.buildAssistantInputAttachmentModelBundles).toHaveBeenCalled()
     expect(
-      promptBuilderMocks.prepareInboxMultimodalUserMessageContent,
+      promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent,
     ).toHaveBeenCalled()
   })
 
   it('emits a safe nonblocking event when attachment bundle preparation fails', async () => {
     const onEvent = vi.fn()
-    promptBuilderMocks.buildInboxModelAttachmentBundles.mockRejectedValueOnce(
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockRejectedValueOnce(
       new Error('parser bundle failed for private input'),
     )
 
@@ -725,22 +821,22 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(onEvent).toHaveBeenCalledWith({
       type: 'input.reply-progress',
       inputId: 'event-1',
-      details: 'nonblocking inbox attachment bundle preparation failed',
-      safeDetails: 'inbox_attachment_bundle_preparation_failed_nonblocking',
+      details: 'nonblocking attachment evidence bundle preparation failed',
+      safeDetails: 'attachment_evidence_bundle_preparation_failed_nonblocking',
       providerKind: 'status',
       providerState: 'completed',
     })
   })
 
   it('skips when neither text nor rich evidence can be prepared', async () => {
-    promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
         fileName: null,
         mime: null,
         storedPath: null,
       }),
     ])
-    promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: 'rich evidence unavailable',
       inputMode: 'text-only',
       userMessageContent: null,
@@ -760,7 +856,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       reason: 'rich evidence unavailable',
     })
     expect(
-      promptBuilderMocks.prepareInboxMultimodalUserMessageContent,
+      promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent,
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining('Source: telegram'),
@@ -769,7 +865,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('prepares multimodal user message content when only raw image evidence remains', async () => {
-    promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'image',
         mime: 'image/png',
@@ -793,13 +889,13 @@ describe('prepareAssistantAutoReplyInput', () => {
         combinedText: '[metadata]\nmime: image/png',
       }),
     ])
-    promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
       true,
     )
     const userMessageContent = createRichUserMessageContent(
       'Attachment image 1 (lunch.png).',
     )
-    promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
       inputMode: 'multimodal',
       userMessageContent,
@@ -824,7 +920,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('keeps PDF-only input as stored-path metadata without routed file evidence', async () => {
-    promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'document',
         mime: 'application/pdf',
@@ -847,10 +943,10 @@ describe('prepareAssistantAutoReplyInput', () => {
           '[metadata]\nmime: application/pdf\nstoredPath: inbox/attachments/scan.pdf',
       }),
     ])
-    promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
       false,
     )
-    promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
       inputMode: 'text-only',
       userMessageContent: null,
@@ -882,7 +978,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     const userMessageContent = createRichUserMessageContent(
       'Attachment image 1 (lunch.png).',
     )
-    promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
       inputMode: 'multimodal',
       userMessageContent,

@@ -4,8 +4,6 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
-  normalizeHostedExecutionErrorMessage,
-  normalizeHostedExecutionOperatorMessage,
 } from "@murphai/hosted-execution";
 import {
   resolveHostedEmailSelfAddresses,
@@ -160,9 +158,6 @@ async function drainHostedConversationParsers(input: {
             errorCodes: compactHostedRuntimeLogCodes(
               parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
             ),
-            errorSummaries: compactHostedParserErrorMessages(
-              parserFailures.map((failure) => failure.errorMessage ?? failure.errorCode ?? "Parser job failed."),
-            ),
             parserFailed: parserFailures.length,
             parserObservedFailedJobs: observedFailedJobs.length,
             parserProcessed: results.length,
@@ -174,18 +169,17 @@ async function drainHostedConversationParsers(input: {
     }
     return results.length;
   } catch (error) {
+    const errorCode = deriveHostedExecutionErrorCode(error);
     await writeHostedRuntimeLogBestEffort({
       entry: {
         component: "mailbox",
-        errorCode: deriveHostedExecutionErrorCode(error),
+        errorCode,
         eventCode: "mailbox.parser_drain_failed",
         level: "warn",
         phase: "import",
         redactedJson: {
           captureIdPresent: Boolean(input.captureId),
-          errorMessage: normalizeHostedExecutionOperatorMessage(
-            normalizeHostedExecutionErrorMessage(error),
-          ),
+          errorCode,
         },
       },
       platform: input.platform,
@@ -196,7 +190,6 @@ async function drainHostedConversationParsers(input: {
 
 interface HostedParserFailureLogItem {
   errorCode?: string | null;
-  errorMessage?: string | null;
   jobId: string;
 }
 
@@ -204,7 +197,6 @@ function collectHostedParserFailures(input: {
   failedJobs: readonly HostedParserFailureLogItem[];
   failedResults: ReadonlyArray<{
     errorCode?: string | null;
-    errorMessage?: string | null;
     job: HostedParserFailureLogItem;
   }>;
 }): HostedParserFailureLogItem[] {
@@ -212,7 +204,6 @@ function collectHostedParserFailures(input: {
   for (const result of input.failedResults) {
     failuresByJobId.set(result.job.jobId, {
       errorCode: result.errorCode ?? result.job.errorCode ?? null,
-      errorMessage: result.errorMessage ?? result.job.errorMessage ?? null,
       jobId: result.job.jobId,
     });
   }
@@ -223,10 +214,6 @@ function collectHostedParserFailures(input: {
   }
 
   return [...failuresByJobId.values()];
-}
-
-function compactHostedParserErrorMessages(messages: readonly string[]): string[] {
-  return Array.from(new Set(messages.map(normalizeHostedExecutionOperatorMessage))).slice(0, 8);
 }
 
 async function normalizeHostedConversationMessageWake(input: {

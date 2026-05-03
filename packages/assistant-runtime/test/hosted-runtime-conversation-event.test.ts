@@ -553,7 +553,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         phase: "import",
         redactedJson: {
           captureIdPresent: true,
-          errorMessage: "parser setup failed",
+          errorCode: "runtime_error",
         },
       }),
     ]);
@@ -628,10 +628,6 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         redactedJson: {
           captureIdPresent: true,
           errorCodes: ["ffmpeg_unavailable", "provider_unavailable"],
-          errorSummaries: [
-            "spawn <REDACTED_PATH> ENOENT",
-            "No parser provider found for audio/mp4",
-          ],
           parserFailed: 2,
           parserObservedFailedJobs: 0,
           parserProcessed: 3,
@@ -693,7 +689,6 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         redactedJson: {
           captureIdPresent: true,
           errorCodes: ["ffmpeg_unavailable"],
-          errorSummaries: ["spawn <REDACTED_PATH> ENOENT"],
           parserFailed: 1,
           parserObservedFailedJobs: 1,
           parserProcessed: 0,

@@ -1,6 +1,7 @@
-import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
+  AssistantInputAttachmentEvidence,
+  AssistantInputAttachmentEvidenceItem,
   AssistantInputAttachmentDescriptor,
   AssistantInputConversationRef,
   AssistantInputProjectionStatus,
@@ -9,17 +10,15 @@ import type {
 } from '../input-store.js'
 import type { AssistantRunEvent } from './shared.js'
 import {
-  buildInboxModelAttachmentBundles,
-  hasInboxMultimodalAttachmentEvidenceCandidate,
-  prepareInboxMultimodalUserMessageContent,
-} from '../../inbox-multimodal.js'
-import type { InboxModelAttachmentBundle } from '../../inbox-model-contracts.js'
+  buildAssistantInputAttachmentModelBundles,
+  hasAssistantInputAttachmentEvidenceCandidate,
+  prepareAssistantInputMultimodalUserMessageContent,
+  type AssistantInputAttachmentModelBundle,
+} from '../attachment-evidence-model.js'
 import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
 const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
-
-export type InboxPromptAttachment = InboxShowResult['capture']['attachments'][number]
 
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
@@ -28,21 +27,16 @@ export interface TelegramAutoReplyMetadata {
 }
 
 export interface AssistantAutoReplyPromptProjection {
-  inboxCaptureId: string | null
+  optionalInboxCaptureId: string | null
   reasonCode: string | null
   status: AssistantInputProjectionStatus
-}
-
-export interface AssistantAutoReplyPromptEnrichment {
-  attachments: readonly InboxPromptAttachment[]
-  inboxCaptureId: string
 }
 
 export interface AssistantAutoReplyPromptInput {
   actorIsSelf: boolean
   attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
+  attachmentEvidence: AssistantInputAttachmentEvidence
   conversation: AssistantInputConversationRef
-  enrichment: AssistantAutoReplyPromptEnrichment | null
   inputId: string
   occurredAt: string
   projection: AssistantAutoReplyPromptProjection | null
@@ -77,15 +71,19 @@ export function buildAssistantAutoReplyPrompt(
         attachmentSections: buildAssistantAutoReplyAttachmentSections({
           descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
             descriptors: entry.attachmentDescriptors,
-            enrichmentAvailable: entry.enrichment !== null,
+            evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+            evidenceStatus: entry.attachmentEvidence.status,
             projectionReasonCode: entry.projection?.reasonCode ?? null,
             projectionStatus: entry.projection?.status ?? null,
           }),
-          renderedAttachmentSections: (entry.enrichment?.attachments ?? [])
-            .map((attachment) => renderAttachmentPromptSection(attachment))
+          includeDescriptorSectionWithEvidence:
+            entry.attachmentEvidence.status === 'partial',
+          renderedAttachmentSections: entry.attachmentEvidence.attachments
+            .map((attachment) => renderAttachmentEvidencePromptSection(attachment))
             .filter((section): section is string => section !== null),
         }),
-        enrichmentAvailable: entry.enrichment !== null,
+        evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+        evidenceStatus: entry.attachmentEvidence.status,
         inputText: normalizeNullableString(entry.text),
         index,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
@@ -133,15 +131,19 @@ export async function prepareAssistantAutoReplyInput(
         attachmentSections: buildAssistantAutoReplyAttachmentSections({
           descriptorSection: renderAssistantInputAttachmentDescriptorPromptSection({
             descriptors: entry.attachmentDescriptors,
-            enrichmentAvailable: entry.enrichment !== null,
+            evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+            evidenceStatus: entry.attachmentEvidence.status,
             projectionReasonCode: entry.projection?.reasonCode ?? null,
             projectionStatus: entry.projection?.status ?? null,
           }),
+          includeDescriptorSectionWithEvidence:
+            entry.attachmentEvidence.status === 'partial',
           renderedAttachmentSections: entry.attachmentBundles
             .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
             .filter((section): section is string => section !== null),
         }),
-        enrichmentAvailable: entry.enrichment !== null,
+        evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+        evidenceStatus: entry.attachmentEvidence.status,
         inputText: normalizeNullableString(entry.text),
         index,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
@@ -157,16 +159,8 @@ export async function prepareAssistantAutoReplyInput(
   const nextPrompt = buildAssistantAutoReplyPromptText(inputs, textualSections)
 
   const preparedMultimodalInput =
-    await prepareInboxMultimodalUserMessageContent({
-      attachmentSources: preparedInputs.flatMap((entry) => {
-        const enrichment = entry.enrichment
-        return enrichment
-          ? entry.attachmentBundles.map((attachment) => ({
-              attachment,
-              captureId: enrichment.inboxCaptureId,
-            }))
-          : []
-      }),
+    await prepareAssistantInputMultimodalUserMessageContent({
+      attachmentSources: preparedInputs.flatMap((entry) => entry.attachmentBundles),
       prompt: nextPrompt,
       vaultRoot,
     })
@@ -213,7 +207,8 @@ export function readTelegramAutoReplyMetadataFromAssistantInput(input: {
 
 export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
   descriptors: readonly AssistantInputAttachmentDescriptor[]
-  enrichmentAvailable?: boolean
+  evidenceReasonCode?: string | null
+  evidenceStatus?: AssistantInputAttachmentEvidence['status'] | null
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
 }): string | null {
@@ -247,10 +242,11 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
     kinds.length > 0 ? `kinds: ${kinds.join(', ')}` : null,
     mimeTypes.length > 0 ? `mime types: ${mimeTypes.join(', ')}` : null,
     sizeLine,
-    renderAssistantInputDescriptorEnrichmentStatus({
-      enrichmentAvailable: input.enrichmentAvailable ?? false,
-      reasonCode: input.projectionReasonCode ?? null,
-      status: input.projectionStatus ?? null,
+    renderAssistantInputDescriptorEvidenceStatus({
+      evidenceReasonCode: input.evidenceReasonCode ?? null,
+      evidenceStatus: input.evidenceStatus ?? null,
+      projectionReasonCode: input.projectionReasonCode ?? null,
+      projectionStatus: input.projectionStatus ?? null,
     }),
   ]
     .filter((line): line is string => line !== null)
@@ -259,7 +255,8 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
 
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
-  enrichmentAvailable: boolean
+  evidenceReasonCode: string | null
+  evidenceStatus: AssistantInputAttachmentEvidence['status']
   inputText: string | null
   index: number
   promptUnavailableNote: string | null
@@ -274,13 +271,14 @@ function renderAssistantAutoReplyInputSection(input: {
   }
   const projectionNote = input.attachmentSections.length === 0
     ? renderAssistantInputProjectionPromptNote({
-        enrichmentAvailable: input.enrichmentAvailable,
-        reasonCode: input.projectionReasonCode ?? null,
-        status: input.projectionStatus ?? null,
+        evidenceReasonCode: input.evidenceReasonCode,
+        evidenceStatus: input.evidenceStatus,
+        projectionReasonCode: input.projectionReasonCode ?? null,
+        projectionStatus: input.projectionStatus ?? null,
       })
     : null
   if (projectionNote) {
-    sections.push(`Message enrichment:\n${projectionNote}`)
+    sections.push(`Message evidence:\n${projectionNote}`)
   }
   if (input.promptUnavailableNote) {
     sections.push(`Message availability:\n${input.promptUnavailableNote}`)
@@ -305,22 +303,23 @@ function renderAssistantAutoReplyInputSection(input: {
 
 function buildAssistantAutoReplyAttachmentSections(input: {
   descriptorSection: string | null
+  includeDescriptorSectionWithEvidence: boolean
   renderedAttachmentSections: readonly string[]
 }): string[] {
   if (input.renderedAttachmentSections.length > 0) {
-    return [...input.renderedAttachmentSections]
+    return input.includeDescriptorSectionWithEvidence && input.descriptorSection
+      ? [...input.renderedAttachmentSections, input.descriptorSection]
+      : [...input.renderedAttachmentSections]
   }
 
   return input.descriptorSection ? [input.descriptorSection] : []
 }
 
-function renderAttachmentPromptSection(
-  attachment: InboxPromptAttachment,
+function renderAttachmentEvidencePromptSection(
+  attachment: AssistantInputAttachmentEvidenceItem,
 ): string | null {
-  const transcript = normalizeNullableString(attachment.transcriptText)
-  const extractedText = normalizeNullableString(attachment.extractedText)
   const metadataLines = [
-    attachment.attachmentId ? `attachmentId: ${attachment.attachmentId}` : null,
+    attachment.sourceAttachmentId ? `attachmentId: ${attachment.sourceAttachmentId}` : null,
     attachment.mime ? `mime: ${attachment.mime}` : null,
     typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
     attachment.parseState ? `parseState: ${attachment.parseState}` : null,
@@ -328,17 +327,14 @@ function renderAttachmentPromptSection(
   const chunks: string[] = []
   const omittedKinds: string[] = []
 
-  if (transcript && transcript.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
-    chunks.push(`Transcript:\n${transcript}`)
-  } else if (transcript) {
-    omittedKinds.push(`transcript (${transcript.length} chars)`)
-    chunks.push(`Transcript excerpt:\n${buildAttachmentTextExcerpt(transcript)}`)
-  }
-  if (extractedText && extractedText.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
-    chunks.push(`Extracted text:\n${extractedText}`)
-  } else if (extractedText) {
-    omittedKinds.push(`extracted text (${extractedText.length} chars)`)
-    chunks.push(`Extracted text excerpt:\n${buildAttachmentTextExcerpt(extractedText)}`)
+  for (const fragment of attachment.inlineFragments) {
+    const title = renderInlineAttachmentFragmentTitle(fragment.kind)
+    if (fragment.text.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
+      chunks.push(`${title}:\n${fragment.text}`)
+    } else {
+      omittedKinds.push(`${title.toLowerCase()} (${fragment.text.length} chars)`)
+      chunks.push(`${title} excerpt:\n${buildAttachmentTextExcerpt(fragment.text)}`)
+    }
   }
 
   if (omittedKinds.length > 0) {
@@ -359,8 +355,21 @@ function renderAttachmentPromptSection(
     chunks.unshift(metadataLines.join('\n'))
   }
 
-  const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
+  const label = `Attachment ${attachment.ordinal} (${attachment.kind})`
   return `${label}\n${chunks.join('\n\n')}`
+}
+
+function renderInlineAttachmentFragmentTitle(
+  kind: AssistantInputAttachmentEvidenceItem['inlineFragments'][number]['kind'],
+): string {
+  switch (kind) {
+    case 'attachment_transcript':
+      return 'Transcript'
+    case 'attachment_extracted_text':
+      return 'Extracted text'
+    default:
+      return 'Attachment text'
+  }
 }
 
 function buildAssistantAutoReplyContextLines(
@@ -416,13 +425,13 @@ function buildAssistantAutoReplyPromptText(
 }
 
 function renderPreparedAttachmentPromptSection(
-  attachment: InboxModelAttachmentBundle,
+  attachment: AssistantInputAttachmentModelBundle,
 ): string | null {
   const hasTextFragments = attachment.fragments.some(
     (fragment) => fragment.kind !== 'attachment_metadata',
   )
   const richEvidenceCandidate =
-    hasInboxMultimodalAttachmentEvidenceCandidate(attachment)
+    hasAssistantInputAttachmentEvidenceCandidate(attachment)
   const storedPdfMetadata = hasStoredPdfAttachmentPath(attachment)
   const status = renderAttachmentParserStatus(attachment.parseState ?? null)
   if (
@@ -449,7 +458,7 @@ function renderPreparedAttachmentPromptSection(
     )
   }
 
-  const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
+  const label = `Attachment ${attachment.ordinal} (${attachment.kind})`
   return `${label}\n${sections.join('\n\n')}`
 }
 
@@ -457,23 +466,28 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
   entry: AssistantAutoReplyPromptInput
   onEvent?: (event: AssistantRunEvent) => void
   vaultRoot: string
-}): Promise<InboxModelAttachmentBundle[]> {
-  if (!input.entry.enrichment) {
+}): Promise<AssistantInputAttachmentModelBundle[]> {
+  if (
+    input.entry.attachmentEvidence.status !== 'available' &&
+    input.entry.attachmentEvidence.status !== 'partial'
+  ) {
+    return []
+  }
+  if (input.entry.attachmentEvidence.attachments.length === 0) {
     return []
   }
 
   try {
-    return await buildInboxModelAttachmentBundles({
-      attachments: input.entry.enrichment.attachments,
-      captureId: input.entry.enrichment.inboxCaptureId,
+    return await buildAssistantInputAttachmentModelBundles({
+      attachments: input.entry.attachmentEvidence.attachments,
       vaultRoot: input.vaultRoot,
     })
   } catch {
     input.onEvent?.({
       type: 'input.reply-progress',
       inputId: input.entry.inputId,
-      details: 'nonblocking inbox attachment bundle preparation failed',
-      safeDetails: 'inbox_attachment_bundle_preparation_failed_nonblocking',
+      details: 'nonblocking attachment evidence bundle preparation failed',
+      safeDetails: 'attachment_evidence_bundle_preparation_failed_nonblocking',
       providerKind: 'status',
       providerState: 'completed',
     })
@@ -512,53 +526,76 @@ function normalizeAttachmentDescriptorPromptKind(
   return kind
 }
 
-function renderAssistantInputDescriptorEnrichmentStatus(input: {
-  enrichmentAvailable: boolean
-  reasonCode: string | null
-  status: AssistantInputProjectionStatus | null
+function renderAssistantInputDescriptorEvidenceStatus(input: {
+  evidenceReasonCode: string | null
+  evidenceStatus: AssistantInputAttachmentEvidence['status'] | null
+  projectionReasonCode: string | null
+  projectionStatus: AssistantInputProjectionStatus | null
 }): string {
-  if (input.status === 'succeeded') {
-    return input.enrichmentAvailable
-      ? 'parser/search enrichment: succeeded'
-      : 'parser/search enrichment: unavailable'
+  if (input.evidenceStatus === 'available') {
+    return 'attachment evidence: available'
   }
-
-  if (input.status === 'failed' || input.status === 'quarantined') {
-    const reason = normalizeNullableString(input.reasonCode)
+  if (input.evidenceStatus === 'partial') {
+    const reason = normalizeNullableString(input.evidenceReasonCode)
     return reason
-      ? `parser/search enrichment: failed (${reason})`
-      : 'parser/search enrichment: failed'
+      ? `attachment evidence: partial (${reason})`
+      : 'attachment evidence: partial'
+  }
+  if (input.evidenceStatus === 'failed') {
+    const reason = normalizeNullableString(input.evidenceReasonCode)
+    return reason
+      ? `attachment evidence: failed (${reason})`
+      : 'attachment evidence: failed'
   }
 
-  if (input.status === 'not_attempted') {
-    return 'parser/search enrichment: not attempted'
+  if (input.projectionStatus === 'succeeded') {
+    return 'attachment evidence: unavailable'
   }
 
-  return 'parser/search enrichment: pending'
+  if (input.projectionStatus === 'failed' || input.projectionStatus === 'quarantined') {
+    const reason = normalizeNullableString(input.projectionReasonCode)
+    return reason
+      ? `attachment evidence: unavailable (${reason})`
+      : 'attachment evidence: unavailable'
+  }
+
+  if (input.projectionStatus === 'not_attempted') {
+    return 'attachment evidence: not attempted'
+  }
+
+  return 'attachment evidence: pending'
 }
 
 function renderAssistantInputProjectionPromptNote(input: {
-  enrichmentAvailable: boolean
-  reasonCode: string | null
-  status: AssistantInputProjectionStatus | null
+  evidenceReasonCode: string | null
+  evidenceStatus: AssistantInputAttachmentEvidence['status']
+  projectionReasonCode: string | null
+  projectionStatus: AssistantInputProjectionStatus | null
 }): string | null {
-  if (input.status === 'succeeded' && !input.enrichmentAvailable) {
-    return 'inbox/parser enrichment is unavailable; use the staged message text and available metadata only.'
-  }
-
-  if (input.status === 'failed' || input.status === 'quarantined') {
-    const reason = normalizeNullableString(input.reasonCode)
+  if (input.evidenceStatus === 'failed') {
+    const reason = normalizeNullableString(input.evidenceReasonCode)
     return reason
-      ? `inbox/parser enrichment failed (${reason}); use the staged message text and available metadata only.`
-      : 'inbox/parser enrichment failed; use the staged message text and available metadata only.'
+      ? `attachment evidence failed (${reason}); use the staged message text and available metadata only.`
+      : 'attachment evidence failed; use the staged message text and available metadata only.'
   }
 
-  if (input.status === 'pending') {
-    return 'inbox/parser enrichment is pending; use the staged message text and available metadata only.'
+  if (input.projectionStatus === 'succeeded' && input.evidenceStatus === 'not_attempted') {
+    return 'attachment evidence is unavailable; use the staged message text and available metadata only.'
   }
 
-  if (input.status === 'not_attempted') {
-    return 'inbox/parser enrichment was not attempted; use the staged message text and available metadata only.'
+  if (input.projectionStatus === 'failed' || input.projectionStatus === 'quarantined') {
+    const reason = normalizeNullableString(input.projectionReasonCode)
+    return reason
+      ? `attachment evidence is unavailable (${reason}); use the staged message text and available metadata only.`
+      : 'attachment evidence is unavailable; use the staged message text and available metadata only.'
+  }
+
+  if (input.projectionStatus === 'pending') {
+    return 'attachment evidence is pending; use the staged message text and available metadata only.'
+  }
+
+  if (input.projectionStatus === 'not_attempted') {
+    return 'attachment evidence was not attempted; use the staged message text and available metadata only.'
   }
 
   return null
@@ -588,7 +625,7 @@ function uniqueSortedStrings(values: readonly string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right))
 }
 
-function hasStoredPdfAttachmentPath(attachment: InboxModelAttachmentBundle): boolean {
+function hasStoredPdfAttachmentPath(attachment: AssistantInputAttachmentModelBundle): boolean {
   const storedPath = normalizeNullableString(attachment.storedPath)
   if (!storedPath) {
     return false

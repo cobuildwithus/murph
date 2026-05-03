@@ -237,6 +237,26 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             },
           ],
         },
+        {
+          entries: [
+            {
+              at: TEST_NOW,
+              attemptId: "attempt_synthetic_runner_001",
+              component: "mailbox",
+              eventCode: "mailbox.post_checkpoint_effects_finished",
+              leaseGeneration: "1",
+              level: "info",
+              phase: "import",
+              redactedJson: {
+                attemptedCount: 1,
+                errorCodes: [],
+                failedCount: 0,
+                succeededCount: 1,
+              },
+              workspaceVersion: "0",
+            },
+          ],
+        },
       ]);
     } finally {
       await rm(vaultRoot, {
@@ -1832,6 +1852,80 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxProjectionCheckpoint: true,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("logs mailbox post-checkpoint effect failures without blocking checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_projection_failed_log",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_projection_failed_log",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return {
+            afterCheckpoint: async () => {
+              throw Object.assign(new Error("projection failed"), {
+                code: "PROJECTION_UNAVAILABLE",
+              });
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_projection_failed_log",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_projection_failed_log",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult, null);
+      assert.equal(result.latestWorkspace?.version, "2");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "maintenance",
+      ]);
+      const effectLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
+      assert.equal(effectLog?.level, "warn");
+      assert.deepEqual(effectLog?.redactedJson, {
+        attemptedCount: 1,
+        errorCodes: ["post_checkpoint_effect_failed"],
+        failedCount: 1,
+        succeededCount: 0,
       });
     } finally {
       await rm(vaultRoot, {

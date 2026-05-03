@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -731,6 +731,129 @@ describe("hosted workspace runtime entrypoint", () => {
         "snapshot:4",
         "workspace.checkpoint",
       ]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(sourceVaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("restores raw inbox artifacts from workspace snapshots before mailbox import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-artifact-"));
+    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-source-artifact-"));
+    const artifactGetCalls: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const artifactSpecs = [
+      {
+        bytes: Buffer.from("pdf-binary-artifact\n", "utf8"),
+        path: "raw/inbox/example/scan.pdf",
+      },
+      {
+        bytes: Buffer.from("assistant-input-preview\n", "utf8"),
+        path: "raw/assistant-input/example/preview.txt",
+      },
+      {
+        bytes: Buffer.from("{\"schema\":\"example\"}\n", "utf8"),
+        path: "derived/inbox/example/attachment/manifest.json",
+      },
+      {
+        bytes: Buffer.from("assistant-input-derived-summary\n", "utf8"),
+        path: "derived/assistant-input/example/summary.txt",
+      },
+    ] as const;
+
+    for (const spec of artifactSpecs) {
+      const sourceArtifactPath = path.join(sourceVaultRoot, spec.path);
+      await mkdir(path.dirname(sourceArtifactPath), { recursive: true });
+      await writeFile(sourceArtifactPath, spec.bytes);
+    }
+
+    const artifactHashes = artifactSpecs.map((spec) => sha256HostedBundleHex(spec.bytes));
+    const sourceBundle = await snapshotHostedBundleRoots({
+      externalizeFile: async (file) => {
+        const spec = artifactSpecs.find((entry) => entry.path === file.path);
+        if (!spec) {
+          return null;
+        }
+
+        return {
+          byteSize: file.bytes.byteLength,
+          sha256: sha256HostedBundleHex(file.bytes),
+        };
+      },
+      kind: "vault",
+      roots: [
+        {
+          root: sourceVaultRoot,
+          rootKey: "vault",
+        },
+      ],
+    });
+    assert.ok(sourceBundle);
+    const bundleHash = sha256HostedBundleHex(sourceBundle);
+    const artifactBytesByHash = new Map<string, Uint8Array>(
+      artifactSpecs.map((spec, index) => [artifactHashes[index]!, spec.bytes]),
+    );
+    artifactBytesByHash.set(bundleHash, sourceBundle);
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            workspaceVersion: "9",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/restored-artifact.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            for (const spec of artifactSpecs) {
+              const restoredArtifactPath = path.join(vaultRoot, spec.path);
+              assert.equal(await readFile(restoredArtifactPath, "utf8"), spec.bytes.toString("utf8"));
+            }
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            artifactGetCalls,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_restored_artifact",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: createBundleRef({
+                  hash: bundleHash,
+                  key: "users/bundles/member-synthetic/restored-artifact-before-import.bundle.json",
+                  size: sourceBundle.byteLength,
+                }),
+                version: "9",
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      expect(artifactGetCalls).toHaveLength(artifactSpecs.length + 1);
+      expect(artifactGetCalls).toEqual(
+        expect.arrayContaining([bundleHash, ...artifactHashes]),
+      );
+      assert.equal(checkpointRequests.length, 1);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
       await rm(sourceVaultRoot, { force: true, recursive: true });
