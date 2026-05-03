@@ -107,6 +107,8 @@ describe('assistant Codex failure helpers', () => {
     ).toMatchObject({
       code: 'ASSISTANT_CODEX_FAILED',
       context: {
+        codexFailureDetailPresent: true,
+        codexFailureStage: 'turn_failed',
         providerActionCount: 2,
         providerSessionId: 'thread-1',
         retryable: false,
@@ -125,6 +127,7 @@ describe('assistant Codex failure helpers', () => {
     ).toMatchObject({
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       context: {
+        codexFailureStage: 'interrupted',
         interrupted: true,
         providerSessionId: null,
         retryable: false,
@@ -227,6 +230,10 @@ describe('assistant Codex failure helpers', () => {
       code: 'ASSISTANT_CODEX_FAILED',
       context: {
         connectionLost: false,
+        codexFailureDetailPresent: false,
+        codexFailureStage: 'process_exit',
+        codexSignalPresent: true,
+        codexStderrPresent: false,
         providerActionCount: 3,
         providerSessionId: null,
         retryable: false,

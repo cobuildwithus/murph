@@ -142,6 +142,12 @@ describe("runHostedExecutionChild", () => {
               HOSTED_ASSISTANT_MODEL: "gpt-test",
               HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
               LINQ_API_TOKEN: "linq-token",
+              MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN:
+                "fixture-local-code",
+              MURPH_DEV_CODEX_APP_SERVER_PROXY_URL:
+                "tcp://host.docker.internal:3456",
+              NODE_ENV: "development",
+              VERCEL_AI_API_KEY: "fixture-gateway-code",
             },
           },
         },
@@ -153,6 +159,24 @@ describe("runHostedExecutionChild", () => {
 
     expect(setExitCode).not.toHaveBeenCalled();
     expect(runWorkspaceInProcess).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "child",
+        details: expect.objectContaining({
+          forwardedEnvKeyCount: 7,
+          localCodexAppServerProxyConfigured: true,
+          localCodexAppServerProxyHostKind: "docker-host",
+          localCodexAppServerProxyPortPresent: true,
+          localCodexAppServerProxyScheme: "tcp",
+          localCodexAppServerProxyTokenPresent: true,
+          localCodexAppServerProxyUrlPresent: true,
+          modelCredentialConfigured: true,
+          nodeEnvConfigured: true,
+        }),
+        message: "Hosted node runner child prepared workspace invocation.",
+        phase: "runtime.starting",
+      }),
+    );
     expect(runWorkspaceInProcess.mock.calls[0]?.[0]).toMatchObject({
       kind: "workspace-invocation",
       request: {
@@ -186,10 +210,21 @@ describe("runHostedExecutionChild", () => {
       .join("\n");
     expect(debugOutput).toContain('"hostedAssistantModelConfigured":true');
     expect(debugOutput).toContain('"hostedAssistantProviderConfigured":true');
+    expect(debugOutput).toContain('"localCodexAppServerProxyConfigured":true');
+    expect(debugOutput).toContain('"localCodexAppServerProxyHostKind":"docker-host"');
+    expect(debugOutput).toContain('"localCodexAppServerProxyPortPresent":true');
+    expect(debugOutput).toContain('"localCodexAppServerProxyScheme":"tcp"');
+    expect(debugOutput).toContain('"localCodexAppServerProxyTokenPresent":true');
+    expect(debugOutput).toContain('"localCodexAppServerProxyUrlPresent":true');
     expect(debugOutput).toContain('"linqApiConfigured":true');
+    expect(debugOutput).toContain('"modelCredentialConfigured":true');
+    expect(debugOutput).toContain('"nodeEnvConfigured":true');
     expect(debugOutput).not.toContain("gpt-test");
     expect(debugOutput).not.toContain("vercel-ai-gateway");
     expect(debugOutput).not.toContain("linq-token");
+    expect(debugOutput).not.toContain("fixture-local-code");
+    expect(debugOutput).not.toContain("host.docker.internal");
+    expect(debugOutput).not.toContain("fixture-gateway-code");
   });
 
   it("redacts runtime failure diagnostics before writing the child result payload", async () => {

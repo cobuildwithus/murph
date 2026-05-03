@@ -97,6 +97,8 @@ export function buildCodexTurnFailedError(input: {
   }
 
   return new VaultCliError('ASSISTANT_CODEX_FAILED', parts.join(' '), {
+    codexFailureDetailPresent: detail !== null,
+    codexFailureStage: 'turn_failed',
     codexTurnStatus: input.status,
     providerActionCount: input.providerActionCount,
     providerSessionId: input.providerSessionId,
@@ -112,10 +114,11 @@ export function buildCodexFailure(input: {
   signal: NodeJS.Signals | null
   stderr: string
 }): VaultCliError {
+  const stderrTail = tailText(input.stderr)
   const detail =
-    normalizeStatusText(input.fallback ?? tailText(input.stderr)) ??
+    normalizeStatusText(input.fallback ?? stderrTail) ??
     input.fallback ??
-    tailText(input.stderr)
+    stderrTail
   const connectionLost = detail !== null && isCodexConnectionLossText(detail)
 
   return new VaultCliError(
@@ -131,6 +134,9 @@ export function buildCodexFailure(input: {
         }),
     {
       connectionLost,
+      codexFailureDetailPresent: detail !== null,
+      codexFailureStage: connectionLost ? 'connection_lost' : 'process_exit',
+      codexStderrPresent: stderrTail !== null,
       ...(typeof input.code === 'number' ? { codexExitCode: input.code } : {}),
       ...(input.signal ? { codexSignalPresent: true } : {}),
       providerActionCount: input.providerActionCount,
@@ -206,6 +212,8 @@ export function buildCodexInterruptedError(input: {
     'ASSISTANT_CODEX_INTERRUPTED',
     parts.join(' '),
     {
+      codexFailureStage: 'interrupted',
+      ...(input.signal ? { codexSignalPresent: true } : {}),
       interrupted: true,
       providerActionCount: input.providerActionCount,
       providerSessionId: input.providerSessionId,

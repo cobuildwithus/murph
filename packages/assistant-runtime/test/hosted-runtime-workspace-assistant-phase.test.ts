@@ -585,6 +585,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
           phase: "wake.running",
           redacted: {
+            ...Object.fromEntries(
+              Array.from({ length: 24 }, (_entry, index) => [
+                `diagnosticFiller${index}`,
+                index,
+              ]),
+            ),
+            assistantNotificationCodexConnectionLost: false,
+            assistantNotificationCodexExitCode: 1,
+            assistantNotificationCodexFailureStage: "process_exit",
+            assistantNotificationCodexStderrPresent: true,
+            assistantNotificationErrorCode: "runtime_error",
+            assistantNotificationProviderErrorCode: "ASSISTANT_CODEX_FAILED",
             deliveryDispatchMode: "queue-only",
             errorCode: "assistant_provider_failed",
             localPathPreview: "/tmp/not-allowed",
@@ -611,10 +623,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
+      errorCode: "ASSISTANT_CODEX_FAILED",
       eventCode: "assistant.automation_detail",
       level: "warn",
       phase: "invoke",
       redactedJson: expect.objectContaining({
+        assistantNotificationCodexConnectionLost: false,
+        assistantNotificationCodexExitCode: 1,
+        assistantNotificationCodexFailureStage: "process_exit",
+        assistantNotificationCodexStderrPresent: true,
+        assistantNotificationErrorCode: "runtime_error",
+        assistantNotificationProviderErrorCode: "ASSISTANT_CODEX_FAILED",
         deliveryDispatchMode: "queue-only",
         detailComponent: "runtime",
         detailLabel:

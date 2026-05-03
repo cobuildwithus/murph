@@ -471,6 +471,42 @@ describe("hosted execution observability", () => {
     });
   });
 
+  it("surfaces redacted Codex notification failure context without provider thread ids", () => {
+    const error = Object.assign(
+      new Error("Codex app-server failed. connection refused by local bridge."),
+      {
+        code: "ASSISTANT_CODEX_FAILED",
+        context: {
+          codexExitCode: 1,
+          codexFailureDetailPresent: true,
+          codexFailureStage: "process_exit",
+          codexStderrPresent: true,
+          connectionLost: false,
+          providerActionCount: 2,
+          providerSessionId: "provider-session-fixture",
+          retryable: false,
+        },
+      },
+    );
+
+    const details = extractHostedAssistantNotificationRedactedDetails(error);
+
+    expect(details).toEqual(expect.objectContaining({
+      assistantNotificationCodexConnectionLost: false,
+      assistantNotificationCodexExitCode: 1,
+      assistantNotificationCodexFailureDetailPresent: true,
+      assistantNotificationCodexFailureStage: "process_exit",
+      assistantNotificationCodexRetryable: false,
+      assistantNotificationCodexStderrPresent: true,
+      assistantNotificationErrorCode: "runtime_error",
+      assistantNotificationErrorCodeDetail: "ASSISTANT_CODEX_FAILED",
+      assistantNotificationProviderActionCount: 2,
+      assistantNotificationProviderErrorCode: "ASSISTANT_CODEX_FAILED",
+      assistantNotificationProviderSessionIdPresent: true,
+    }));
+    expect(JSON.stringify(details)).not.toContain("provider-session-fixture");
+  });
+
   it("redacts Telegram identifiers from safe error details when the error code is Telegram-specific", () => {
     const error = Object.assign(new Error("Telegram cleanup failed"), {
       code: "ASSISTANT_TELEGRAM_DELETE_FAILED",

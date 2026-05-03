@@ -9,6 +9,9 @@ Diagnose local hosted Linq reply delivery so the next deterministic failure iden
 - `packages/assistant-engine/src/assistant/automation/reply.ts`
 - `packages/assistant-engine/src/assistant/automation/shared.ts`
 - `packages/assistant-runtime/src/hosted-runtime/maintenance.ts`
+- `packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts`
+- `packages/hosted-execution/src/observability.ts`
+- `apps/cloudflare/src/node-runner-child.ts`
 - `apps/cloudflare/src/user-runner.ts`
 - focused assistant-engine, assistant-runtime, and Cloudflare verification
 
@@ -16,7 +19,7 @@ Diagnose local hosted Linq reply delivery so the next deterministic failure iden
 
 - Do not expose local paths, phone numbers, chat identifiers, tokens, raw model output, or provider payloads in logs/tests.
 - Keep changes diagnostic-only for this pass.
-- Do not add notification-turn diagnostics in this pass; current evidence points at the active reply Codex provider failure path.
+- Do not change notification-turn behavior in this pass; shared Codex failure fields may be surfaced through existing notification redaction.
 
 ## Verification
 

@@ -14,6 +14,7 @@ import {
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
+import { PlanVisual } from "@/src/components/ui/plan-visual";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
@@ -353,7 +354,7 @@ function PricingTierCard({
   return (
     <div className="flex min-w-0 flex-col rounded-xl border border-border bg-background px-7 pt-6 pb-8">
       <div className="flex items-center gap-3">
-        <PricingDots tier={tier} />
+        <PlanVisual tier={tier === "go" ? "pulse" : tier === "plus" ? "edge" : "free"} />
         <h3 className="font-serif text-3xl font-normal tracking-tight text-foreground">
           {name}
         </h3>
@@ -400,37 +401,6 @@ function PricingTierCard({
         ))}
       </ul>
     </div>
-  );
-}
-
-function PricingDots({ tier }: { tier: "free" | "go" | "plus" }) {
-  const width = tier === "plus" ? 32 : 28;
-  const columns = tier === "plus" ? [6, 14, 22, 30] : [7, 17, 27, 37];
-  const rows = [6, 16, 27, 38];
-
-  return (
-    <svg width={width} height="28" viewBox="0 0 44 44" fill="none" aria-hidden>
-      {rows.flatMap((cy, rowIndex) =>
-        columns.map((cx, columnIndex) => {
-          const emphasized =
-            tier === "go"
-              ? columnIndex === 2 && rowIndex >= 1
-              : tier === "plus"
-                ? columnIndex >= 1 && columnIndex <= 2 && rowIndex >= 1
-                : columnIndex === rowIndex % columns.length;
-          return (
-            <circle
-              key={`${cx}-${cy}`}
-              cx={cx}
-              cy={cy}
-              r={emphasized ? 3 : 2}
-              fill={emphasized ? "#8b6840" : "#b5c4a1"}
-              fillOpacity={emphasized ? 0.85 : 0.32}
-            />
-          );
-        }),
-      )}
-    </svg>
   );
 }
 

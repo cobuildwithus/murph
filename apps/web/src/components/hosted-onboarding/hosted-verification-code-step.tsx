@@ -86,7 +86,7 @@ export function HostedVerificationCodeStep({
           type="button"
           onClick={onSubmit}
           disabled={disabled}
-          size="lg"
+          size="xl"
           className="w-full"
         >
           {pendingAction === "verify-code"

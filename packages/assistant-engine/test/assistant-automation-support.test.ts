@@ -421,7 +421,11 @@ describe('assistant auto-reply failure observability', () => {
       {
         code: 'ASSISTANT_CODEX_FAILED',
         context: {
+          codexFailureDetailPresent: true,
+          codexFailureStage: 'process_exit',
+          codexStderrPresent: false,
           ignored: 'drop me',
+          providerActionCount: 2,
           providerSessionId: 'provider-session-1',
           retryable: false,
           status: '429',
@@ -443,7 +447,11 @@ describe('assistant auto-reply failure observability', () => {
         'provider usage limit reached (ASSISTANT_CODEX_FAILED)',
     })
     expect(snapshot.context).toEqual({
+      codexFailureDetailPresent: true,
+      codexFailureStage: 'process_exit',
+      codexStderrPresent: false,
       outboxIntentId: 'outbox-1',
+      providerActionCount: 2,
       providerSessionId: 'provider-session-1',
       retryable: false,
       status: '429',

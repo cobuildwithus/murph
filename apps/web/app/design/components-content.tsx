@@ -34,6 +34,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/src/components/ui/collapsible";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/src/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
+import { PlanVisual } from "@/src/components/ui/plan-visual";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -443,6 +444,23 @@ export function ComponentsContent() {
         </Section>
 
         <Separator />
+
+        <Section title="Plan Visual">
+          <div className="flex items-end gap-8">
+            <div className="flex flex-col items-center gap-2">
+              <PlanVisual tier="free" />
+              <span className="text-xs text-muted-foreground">Free</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <PlanVisual tier="pulse" />
+              <span className="text-xs text-muted-foreground">Pulse</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <PlanVisual tier="edge" />
+              <span className="text-xs text-muted-foreground">Edge</span>
+            </div>
+          </div>
+        </Section>
 
         <Section title="Active Experiment Banner & Profile Stats">
           <div className="flex items-stretch gap-4">

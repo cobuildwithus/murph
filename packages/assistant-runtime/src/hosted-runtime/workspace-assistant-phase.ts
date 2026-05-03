@@ -64,6 +64,21 @@ import type {
   HostedWorkspaceRunnerAssistantPhaseResult,
 } from "./workspace-runner.ts";
 
+const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
+  "assistantNotificationErrorCode",
+  "assistantNotificationProviderErrorCode",
+  "assistantNotificationErrorCodeDetail",
+  "assistantNotificationCodexFailureStage",
+  "assistantNotificationCodexStderrPresent",
+  "assistantNotificationCodexExitCode",
+  "assistantNotificationCodexConnectionLost",
+  "assistantNotificationCodexFailureDetailPresent",
+  "assistantNotificationCodexRetryable",
+  "deliveryDispatchMode",
+  "notificationChannel",
+  "errorCode",
+] as const;
+
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
@@ -607,6 +622,7 @@ async function writeHostedAssistantAutomationDetailRuntimeLogs(input: {
       detailLabel: entry.message,
       detailPhase: entry.phase,
     });
+    const errorCode = resolveHostedAssistantAutomationDetailErrorCode(entry.redacted);
     await writeHostedRuntimeLogBestEffort({
       entry: {
         ...buildHostedRuntimeLogContextFields({
@@ -615,6 +631,7 @@ async function writeHostedAssistantAutomationDetailRuntimeLogs(input: {
           workspaceVersion: input.input.request.workspaceVersion,
         }),
         component: "assistant",
+        ...(errorCode ? { errorCode } : {}),
         eventCode: "assistant.automation_detail",
         level: entry.level,
         phase: "invoke",
@@ -630,7 +647,17 @@ function buildHostedAssistantAutomationDetailRedactedJson(
   detail: HostedRuntimeRedactedJson,
 ): HostedRuntimeRedactedJson {
   const output: HostedRuntimeRedactedJson = {};
-  for (const [key, value] of Object.entries(redacted ?? {})) {
+  const input = redacted ?? {};
+
+  for (const key of HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS) {
+    maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, input, key);
+  }
+
+  for (const [key, value] of Object.entries(input)) {
+    if (key in output) {
+      continue;
+    }
+
     if (
       Object.keys(output).length >= 19
       || !isHostedRuntimeRedactedLogKeyAllowed(key)
@@ -645,6 +672,47 @@ function buildHostedAssistantAutomationDetailRedactedJson(
     ...output,
     ...detail,
   };
+}
+
+function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
+  output: HostedRuntimeRedactedJson,
+  input: Record<string, unknown>,
+  key: string,
+): void {
+  if (
+    key in output
+    || Object.keys(output).length >= 19
+    || !isHostedRuntimeRedactedLogKeyAllowed(key)
+  ) {
+    return;
+  }
+
+  const value = input[key];
+  if (isHostedRuntimeRedactedLogValue(value)) {
+    output[key] = value;
+  }
+}
+
+function resolveHostedAssistantAutomationDetailErrorCode(
+  redacted: Record<string, unknown> | null | undefined,
+): string | null {
+  const candidate =
+    readHostedRuntimeRedactedLogString(redacted, "assistantNotificationProviderErrorCode")
+    ?? readHostedRuntimeRedactedLogString(redacted, "assistantNotificationErrorCodeDetail")
+    ?? readHostedRuntimeRedactedLogString(redacted, "assistantNotificationErrorCode")
+    ?? readHostedRuntimeRedactedLogString(redacted, "errorCode");
+
+  return candidate ? toHostedRuntimeLogCode(candidate) : null;
+}
+
+function readHostedRuntimeRedactedLogString(
+  redacted: Record<string, unknown> | null | undefined,
+  key: string,
+): string | null {
+  const value = redacted?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : null;
 }
 
 function isHostedRuntimeRedactedLogKeyAllowed(key: string): boolean {
