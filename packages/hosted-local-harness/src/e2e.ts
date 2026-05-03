@@ -107,7 +107,11 @@ async function prepareHostedLocalRunnerBundle(input: {
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
 }): Promise<void> {
-  const env: NodeJS.ProcessEnv = { ...input.env };
+  const env: NodeJS.ProcessEnv = {
+    ...input.env,
+    MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
+      input.env.MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
+  };
   if (input.scenarios.some((scenario) => scenario.requiresParserToolchain)) {
     env.MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN = "1";
   }

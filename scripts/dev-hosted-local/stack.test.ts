@@ -453,6 +453,35 @@ describe("hosted local dev stack", () => {
     });
   });
 
+  it("includes the local E2E parser toolchain when preparing a parser-enabled runner bundle", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+          MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "1",
+          MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN: "1",
+        }),
+      }),
+    );
+  });
+
   it("preserves test NODE_ENV for the local E2E Codex app-server stub", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 105 }))

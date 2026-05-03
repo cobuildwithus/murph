@@ -105,6 +105,9 @@ export interface HostedLocalDevStack {
 
 const STRIPE_WEBHOOK_FORWARD_PATH = "/api/hosted-onboarding/stripe/webhook";
 const STRIPE_LISTENER_SECRET_CAPTURE_TIMEOUT_MS = 15_000;
+const HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV = "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN";
+const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
+  "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 
 export async function startHostedLocalDevStack(input: {
   env: NodeJS.ProcessEnv;
@@ -370,8 +373,13 @@ export async function startHostedLocalDevStack(input: {
       if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
         const runnerBundleEnv: NodeJS.ProcessEnv = {
           ...(workerProcessEnv ?? workerRuntimeEnv),
+          MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
+            (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
           MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
         };
+        if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
+          runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
+        }
         await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
           cwd: repoRoot,
           env: runnerBundleEnv,
