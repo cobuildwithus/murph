@@ -1073,7 +1073,7 @@ describe("assistant delivery orchestration seam", () => {
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      onboardingGuidanceInjected: true,
+      firstContactGuidanceInjected: true,
       firstContactStateDocIds: ["doc-1", "doc-2"],
       outcome: {
         delivery: {
@@ -1125,7 +1125,7 @@ describe("assistant delivery orchestration seam", () => {
     seamMocks.markAssistantOnboardingBootstrapSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      onboardingGuidanceInjected: true,
+      firstContactGuidanceInjected: true,
       firstContactStateDocIds: ["doc-1"],
       outcome: {
         error: null,

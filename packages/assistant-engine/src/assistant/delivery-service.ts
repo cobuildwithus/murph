@@ -84,7 +84,7 @@ export async function deliverAssistantReply(input: {
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
-  onboardingGuidanceInjected?: boolean
+  firstContactGuidanceInjected?: boolean
   firstContactStateDocIds?: readonly string[]
   outcome: AssistantDeliveryOutcome
   response: string
@@ -102,7 +102,7 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   await state.turns.finalizeReceipt(plan.receipt)
   await state.diagnostics.recordEvent(plan.diagnostic)
   const firstContactAcceptedForDelivery =
-    input.onboardingGuidanceInjected === true &&
+    input.firstContactGuidanceInjected === true &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
     await markAssistantFirstContactSeen({

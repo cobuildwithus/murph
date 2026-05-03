@@ -362,8 +362,8 @@ test('sendAssistantMessageLocal marks onboarding bootstrap after committing the 
   const [firstFinalizationCall] = mocks.finalizeDeliveredAssistantTurn.mock.calls
   const [finalizationInput] = firstFinalizationCall ?? []
   assert.deepEqual(finalizationInput, {
+    firstContactGuidanceInjected: true,
     firstContactStateDocIds: ['doc-1'],
-    onboardingGuidanceInjected: true,
     outcome: {
       delivery: {
         channel: 'telegram',
