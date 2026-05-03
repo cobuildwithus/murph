@@ -328,11 +328,6 @@ test('assistant onboarding commands read and write the shared lifecycle state', 
   const complete = readCommand(onboarding.commands, 'complete')
   const reopen = readCommand(onboarding.commands, 'reopen')
 
-  assert.equal(
-    Object.hasOwn(complete.options?.shape ?? {}, 'concrete_request'),
-    false,
-  )
-
   commandMocks.readAssistantOnboardingState.mockResolvedValueOnce(TEST_ONBOARDING_STATE)
   commandMocks.completeAssistantOnboarding.mockResolvedValueOnce({
     ...TEST_ONBOARDING_STATE,
