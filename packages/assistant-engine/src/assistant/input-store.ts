@@ -268,6 +268,23 @@ const assistantInputAttachmentEvidenceSchema = z
     updatedAt: safeNullableAssistantInputTimestampSchema('attachmentEvidence.updatedAt'),
   })
   .strict()
+  .superRefine((value, context) => {
+    assertUniqueAssistantInputAttachmentEvidenceField({
+      context,
+      fieldName: 'ordinal',
+      values: value.attachments.map((attachment) => String(attachment.ordinal)),
+    })
+    assertUniqueAssistantInputAttachmentEvidenceField({
+      context,
+      fieldName: 'sourceAttachmentId',
+      values: value.attachments.map((attachment) => attachment.sourceAttachmentId),
+    })
+    assertUniqueAssistantInputAttachmentEvidenceField({
+      context,
+      fieldName: 'descriptorAttachmentId',
+      values: value.attachments.map((attachment) => attachment.descriptorAttachmentId),
+    })
+  })
   .superRefine(assertValidAssistantInputAttachmentEvidence)
 
 const DEFAULT_ASSISTANT_INPUT_ATTACHMENT_EVIDENCE = {
@@ -1358,6 +1375,30 @@ function safeNullableAssistantInputMetadataTextSchema(
 
 function safeAttachmentTokenSchema(fieldName: string) {
   return safeNullableAssistantInputTokenSchema(fieldName)
+}
+
+function assertUniqueAssistantInputAttachmentEvidenceField(input: {
+  context: z.RefinementCtx
+  fieldName: 'descriptorAttachmentId' | 'ordinal' | 'sourceAttachmentId'
+  values: readonly (string | null)[]
+}) {
+  const seen = new Map<string, number>()
+  input.values.forEach((value, index) => {
+    if (value === null) {
+      return
+    }
+    const firstIndex = seen.get(value)
+    if (firstIndex === undefined) {
+      seen.set(value, index)
+      return
+    }
+    input.context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        `attachmentEvidence.attachments ${input.fieldName} values must be unique.`,
+      path: ['attachments', index, input.fieldName],
+    })
+  })
 }
 
 function safeAttachmentFileNameSchema() {

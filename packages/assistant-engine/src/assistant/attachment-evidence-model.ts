@@ -183,6 +183,13 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
     },
   ]
 
+  if (routingEvidence.unavailableImageCount > 0) {
+    content.push({
+      type: 'text',
+      text: 'Some image attachments could not be loaded; only available image evidence was attached.',
+    })
+  }
+
   for (const item of routingEvidence.evidence) {
     content.push({
       type: 'text',
@@ -245,7 +252,9 @@ function renderPromptStoredPath(rawPath: string | null): string {
   if (!rawPath) {
     return 'missing'
   }
-  return rawPath.startsWith('raw/assistant-input/')
+
+  return rawPath.startsWith('raw/assistant-input/') ||
+    rawPath.startsWith('raw/inbox/')
     ? rawPath
     : 'available'
 }
@@ -343,6 +352,7 @@ async function readPreparedRoutingEvidence(input: {
 }): Promise<{
   error: string | null
   evidence: PreparedRoutingEvidence[]
+  unavailableImageCount: number
 }> {
   const evidence: PreparedRoutingEvidence[] = []
   const errors: string[] = []
@@ -363,7 +373,7 @@ async function readPreparedRoutingEvidence(input: {
       evidence.push({
         kind: 'image',
         ordinal: attachment.ordinal,
-            fileName: null,
+        fileName: null,
         mediaType: attachment.routingImage.mediaType ?? null,
         bytes,
       })
@@ -385,6 +395,7 @@ async function readPreparedRoutingEvidence(input: {
       evidence.length === 0 && errors.length > 0
         ? `Falling back to text-only ${input.fallbackContextLabel ?? 'input'} because rich evidence could not be loaded (${errors.join('; ')}).`
         : null,
+    unavailableImageCount: errors.length,
   }
 }
 

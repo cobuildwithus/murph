@@ -497,6 +497,8 @@ async function refreshAssistantInputAttachmentEvidenceForParserDrain(input: {
             await createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs({
               attachments: result.capture.attachments,
               captureId,
+              descriptorAttachmentIdForAttachment: (_attachment, index) =>
+                event.content.attachmentDescriptors[index]?.attachmentId ?? null,
               inputId: event.inputId,
               source: 'local-parser-drain',
               vault: input.vault,

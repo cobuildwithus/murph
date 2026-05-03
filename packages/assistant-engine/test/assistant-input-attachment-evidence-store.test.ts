@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   readAssistantInputEvent,
   resolveAssistantInputEventPath,
+  type AssistantInputAttachmentEvidence,
   updateAssistantInputAttachmentEvidence,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
@@ -172,6 +173,28 @@ describe('assistant input attachment evidence', () => {
         },
       }),
     ).rejects.toThrow(/reasonCode/u)
+  })
+
+  it.each([
+    'ordinal',
+    'sourceAttachmentId',
+    'descriptorAttachmentId',
+  ] as const)('rejects duplicate attachment evidence %s values', async (fieldName) => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      `assistant-input-attachment-evidence-duplicate-${fieldName}-`,
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput(`evt_duplicate_${fieldName}`),
+    })
+
+    await expect(
+      updateAssistantInputAttachmentEvidence({
+        inputId: input.inputId,
+        vault: vaultRoot,
+        attachmentEvidence: createDuplicateAttachmentEvidence(fieldName),
+      }),
+    ).rejects.toThrow(new RegExp(`${fieldName} values must be unique`, 'u'))
   })
 
   it.each([
@@ -387,5 +410,57 @@ function createHostedMailboxEventInput(eventId: string) {
       source: 'hosted-mailbox' as const,
       wakeSchema: 'murph.hosted-execution-wake.v1',
     },
+  }
+}
+
+function createDuplicateAttachmentEvidence(
+  fieldName: 'descriptorAttachmentId' | 'ordinal' | 'sourceAttachmentId',
+): AssistantInputAttachmentEvidence {
+  const first = createEvidenceAttachment({
+    descriptorAttachmentId: 'att_descriptor_1',
+    ordinal: 1,
+    sourceAttachmentId: 'att_source_1',
+  })
+  const second = createEvidenceAttachment({
+    descriptorAttachmentId:
+      fieldName === 'descriptorAttachmentId' ? 'att_descriptor_1' : 'att_descriptor_2',
+    ordinal: fieldName === 'ordinal' ? 1 : 2,
+    sourceAttachmentId:
+      fieldName === 'sourceAttachmentId' ? 'att_source_1' : 'att_source_2',
+  })
+
+  return {
+    attachments: [first, second],
+    optionalInboxCaptureId: 'cap_1',
+    reasonCode: null,
+    source: 'manual',
+    status: 'available',
+    updatedAt: null,
+  }
+}
+
+function createEvidenceAttachment(input: {
+  descriptorAttachmentId: string
+  ordinal: number
+  sourceAttachmentId: string
+}): AssistantInputAttachmentEvidence['attachments'][number] {
+  return {
+    byteSize: 128,
+    descriptorAttachmentId: input.descriptorAttachmentId,
+    derived: null,
+    fileName: null,
+    inlineFragments: [],
+    kind: 'document',
+    mime: 'application/pdf',
+    ordinal: input.ordinal,
+    parseState: 'succeeded',
+    raw: {
+      byteSize: 128,
+      kind: 'vault-relative-file',
+      mediaType: 'application/pdf',
+      path: `raw/inbox/cap_1/attachments/${String(input.ordinal).padStart(2, '0')}__scan.pdf`,
+      sha256: null,
+    },
+    sourceAttachmentId: input.sourceAttachmentId,
   }
 }

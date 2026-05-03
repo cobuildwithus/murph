@@ -32,6 +32,7 @@ import {
 import {
   createAssistantInputEventId,
   compareAssistantInputCursors,
+  type AssistantInputAttachmentDescriptor,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -765,6 +766,7 @@ function createCapturelessAssistantInputCandidate(input: {
 }
 
 async function stageInboxCaptureAssistantInputEvent(input: {
+  attachmentDescriptors?: AssistantInputAttachmentDescriptor[]
   capture: InboxShowResult['capture'] | ReturnType<typeof createCaptureSummary>
   vault: string
 }) {
@@ -772,6 +774,7 @@ async function stageInboxCaptureAssistantInputEvent(input: {
     vault: input.vault,
     event: {
       content: {
+        attachmentDescriptors: input.attachmentDescriptors,
         text: input.capture.text,
         transcriptText: input.capture.text,
         userMessageContent: input.capture.text
@@ -7394,6 +7397,15 @@ describe('assistant automation run loop', () => {
       Buffer.from('image-bytes'),
     )
     await stageInboxCaptureAssistantInputEvent({
+      attachmentDescriptors: [
+        {
+          attachmentId: 'descriptor_image_1',
+          contentType: 'image/png',
+          fileName: null,
+          kind: 'image',
+          sizeBytes: 128,
+        },
+      ],
       capture: createCaptureDetail({
         attachmentCount: 1,
         captureId: 'capture-refresh',
@@ -7550,6 +7562,7 @@ describe('assistant automation run loop', () => {
           path: `raw/assistant-input/${stagedInputs[0]!.event.inputId}/attachments/001.png`,
           sha256: null,
         },
+        descriptorAttachmentId: 'descriptor_image_1',
         sourceAttachmentId: 'att_image_1',
       }),
     ])
