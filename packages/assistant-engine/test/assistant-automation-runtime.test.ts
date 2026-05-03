@@ -1225,6 +1225,52 @@ describe('assistant automation shared helpers', () => {
     localCleanup()
   })
 
+  it('counts failed auto-reply receipts against the retry budget', async () => {
+    const retry = await vi.importActual<
+      typeof import('../src/assistant/automation/auto-reply-retry.ts')
+    >('../src/assistant/automation/auto-reply-retry.ts')
+    const inputId = createAssistantInputEventId({
+      sourceRef: {
+        captureId: 'capture-budget',
+        kind: 'inbox-capture',
+        source: 'telegram',
+        version: null,
+      },
+    })
+
+    const budget = retry.resolveAssistantAutoReplyRetryBudget({
+      inputIds: [inputId],
+      receipts: [
+        createTurnReceipt({
+          turnId: 'turn-budget-1',
+          primaryCaptureId: 'capture-budget',
+          primaryInputId: inputId,
+          inputIds: [inputId],
+        }),
+        createTurnReceipt({
+          turnId: 'turn-budget-2',
+          primaryCaptureId: 'capture-budget',
+          primaryInputId: inputId,
+          inputIds: [inputId],
+        }),
+        createTurnReceipt({
+          turnId: 'turn-budget-completed',
+          primaryCaptureId: 'capture-budget',
+          primaryInputId: inputId,
+          inputIds: [inputId],
+          status: 'completed',
+        }),
+      ],
+      maxFailedAttempts: 2,
+    })
+
+    expect(budget).toEqual({
+      allowed: false,
+      failedAttempts: 2,
+      maxFailedAttempts: 2,
+    })
+  })
+
   it('waits for timeout completion or upstream abort', async () => {
     vi.useFakeTimers()
     const shared = await vi.importActual<typeof import('../src/assistant/automation/shared.ts')>(
@@ -4480,6 +4526,69 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: false,
     })
+  })
+
+  it('suppresses auto-reply before provider execution when failed attempts hit the retry cap', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const item = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-retry-cap',
+    }))
+    const context = reply.createAssistantAutoReplyGroupContext([item])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue(
+      [1, 2, 3].map((attempt) =>
+        createTurnReceipt({
+          turnId: `turn-retry-cap-${attempt}`,
+          primaryCaptureId: 'capture-retry-cap',
+          primaryInputId: context.firstInputId,
+          inputIds: [context.firstInputId],
+        }),
+      ),
+    )
+
+    const events: Array<Record<string, unknown>> = []
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      onEvent: (event) => {
+        events.push(toSnapshotRecord(event))
+      },
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        captureIds: ['capture-retry-cap'],
+        inputIds: [context.firstInputId],
+        reason:
+          'auto-reply retry limit reached after 3 failed attempt(s); suppressing this input instead of retrying indefinitely.',
+      }))
+    expect(events).toContainEqual(expect.objectContaining({
+      details:
+        'auto-reply retry limit reached after 3 failed attempt(s); suppressing this input instead of retrying indefinitely.',
+      inputId: context.firstInputId,
+      type: 'input.reply-skipped',
+    }))
   })
 
   it('treats connection loss as a deferred retry state', async () => {
