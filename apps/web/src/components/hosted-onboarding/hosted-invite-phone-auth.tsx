@@ -73,6 +73,8 @@ export function HostedInvitePhoneAuth({
     && savedPhoneHint !== null;
   const inviteShortcutActive =
     !manualEntryVisible && savedPhoneHint !== null;
+  const inviteShortcutDisabled =
+    sendCodeGated || controller.pendingAction !== null;
 
   useEffect(() => {
     void flushPendingInvitePhoneCodeMutation(inviteCode);
@@ -80,13 +82,6 @@ export function HostedInvitePhoneAuth({
 
   async function handleInviteSendCode() {
     controller.setErrorMessage(null);
-
-    if (!controller.privyReady) {
-      controller.setErrorMessage(
-        "Phone verification is still loading. Try again in a moment.",
-      );
-      return;
-    }
 
     controller.setPendingAction("send-code");
 
@@ -162,9 +157,8 @@ export function HostedInvitePhoneAuth({
       <HostedPrivyCaptcha />
       {showMaskedPhoneHint && savedPhoneHint ? (
           <HostedInviteMaskedPhoneStep
-            disabled={controller.flowDisabled || sendCodeGated}
+            disabled={inviteShortcutDisabled}
             pendingAction={controller.pendingAction}
-            privyReady={controller.privyReady}
             phoneHint={savedPhoneHint}
             onSendCode={handleInviteSendCode}
             onUseDifferentNumber={handleUseDifferentNumber}

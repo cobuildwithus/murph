@@ -679,8 +679,8 @@ describe("HostedPhoneAuth", () => {
 
       if (requestUrl.endsWith("/send-code")) {
         return new Response(JSON.stringify({
-          phoneHint: "*** 2671",
-          phoneNumber: "+14155552671",
+          phoneHint: "*** 0123",
+          phoneNumber: "+12025550123",
           sendAttemptId: "send_attempt_123",
         }), {
           headers: {
@@ -708,7 +708,7 @@ describe("HostedPhoneAuth", () => {
     const { cleanup, container } = await renderClientComponent(
       React.createElement(HostedInvitePhoneAuth, {
         inviteCode: "invite-code",
-        phoneHint: "*** 2671",
+        phoneHint: "*** 0123",
       }),
     );
 
@@ -726,7 +726,7 @@ describe("HostedPhoneAuth", () => {
       });
 
       expect(mocks.sendCode).toHaveBeenCalledWith({
-        phoneNumber: "+14155552671",
+        phoneNumber: "+12025550123",
       });
       const requestedUrls = fetch.mock.calls.map(([url]) =>
         typeof url === "string" ? url : url.toString(),
@@ -736,8 +736,8 @@ describe("HostedPhoneAuth", () => {
         "/api/hosted-onboarding/invites/invite-code/send-code/confirm",
       ]);
       assert.match(container.textContent ?? "", /Verification code/);
-      assert.match(container.textContent ?? "", /\*\*\* 2671/);
-      assert.doesNotMatch(container.textContent ?? "", /\+14155552671/);
+      assert.match(container.textContent ?? "", /\*\*\* 0123/);
+      assert.doesNotMatch(container.textContent ?? "", /\+12025550123/);
     } finally {
       await cleanup();
       vi.doUnmock("@/src/components/hosted-onboarding/hosted-verification-code-step");
@@ -745,31 +745,92 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("keeps saved invite phone verification in setup state while Privy initializes", async () => {
+  it("lets saved invite phone verification send codes while Privy initializes", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-verification-code-step", () => ({
+      HostedVerificationCodeStep({ description }: { description: string }) {
+        return React.createElement(
+          "div",
+          null,
+          React.createElement("p", null, "Verification code"),
+          React.createElement("p", null, description),
+        );
+      },
+    }));
     mocks.usePrivy.mockReturnValue({
       authenticated: false,
       logout: mocks.logout,
       ready: false,
     });
-    const fetch = vi.fn();
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = typeof url === "string" ? url : url.toString();
+
+      if (requestUrl.endsWith("/send-code")) {
+        return new Response(JSON.stringify({
+          phoneHint: "*** 0123",
+          phoneNumber: "+12025550123",
+          sendAttemptId: "send_attempt_123",
+        }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      }
+
+      if (requestUrl.endsWith("/send-code/confirm")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      }
+
+      throw new Error(`Unexpected fetch ${requestUrl}`);
+    });
     vi.stubGlobal("fetch", fetch);
+    mocks.sendCode.mockResolvedValue(undefined);
 
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
     const { cleanup, container } = await renderClientComponent(
       React.createElement(HostedInvitePhoneAuth, {
         inviteCode: "invite-code",
-        phoneHint: "*** 2671",
+        phoneHint: "*** 0123",
       }),
     );
 
     try {
-      assert.match(container.textContent ?? "", /\*\*\* 2671/);
-      assert.match(container.textContent ?? "", /Setting up\.\.\./);
-      assert.doesNotMatch(container.textContent ?? "", /Send verification code/);
+      assert.match(container.textContent ?? "", /\*\*\* 0123/);
+      const sendButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Send verification code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(sendButton);
+      assert.equal(sendButton.disabled, false);
+      assert.doesNotMatch(container.textContent ?? "", /Setting up\.\.\./);
       expect(fetch).not.toHaveBeenCalled();
-      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      await act(async () => {
+        sendButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+12025550123",
+      });
+      assert.deepEqual(fetch.mock.calls.map(([url]) =>
+        typeof url === "string" ? url : url.toString(),
+      ), [
+        "/api/hosted-onboarding/invites/invite-code/send-code",
+        "/api/hosted-onboarding/invites/invite-code/send-code/confirm",
+      ]);
+      assert.match(container.textContent ?? "", /Verification code/);
     } finally {
       await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-verification-code-step");
+      vi.resetModules();
       vi.unstubAllGlobals();
     }
   });
