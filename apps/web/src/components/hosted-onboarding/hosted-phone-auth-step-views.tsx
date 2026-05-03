@@ -34,14 +34,12 @@ export function HostedInviteMaskedPhoneStep({
   disabled,
   pendingAction,
   phoneHint,
-  privyReady = true,
   onSendCode,
   onUseDifferentNumber,
 }: {
   disabled: boolean;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneHint: string;
-  privyReady?: boolean;
   onSendCode: () => void;
   onUseDifferentNumber: () => void;
 }) {
@@ -55,11 +53,9 @@ export function HostedInviteMaskedPhoneStep({
         className="w-full"
         onClick={onSendCode}
       >
-        {!privyReady
-          ? "Setting up..."
-          : pendingAction === "send-code"
-            ? "Sending code..."
-            : "Send verification code"}
+        {pendingAction === "send-code"
+          ? "Sending code..."
+          : "Send verification code"}
       </Button>
       <HostedUseDifferentNumberButton
         disabled={disabled}
