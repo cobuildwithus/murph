@@ -197,7 +197,7 @@ function selectRollingWindowGoalMetricValue(input: {
     if (input.target.targetAt && point.effectiveDate > input.target.targetAt) return false;
     return true;
   });
-  const requestedAnchorDate = input.now ? input.now.slice(0, 10) : candidates.at(-1)?.effectiveDate ?? rawCandidates.at(-1)?.effectiveDate ?? null;
+  const requestedAnchorDate = input.now ? input.now.slice(0, 10) : rawCandidates.at(-1)?.effectiveDate ?? candidates.at(-1)?.effectiveDate ?? null;
   const anchorDate = requestedAnchorDate && input.target.targetAt && requestedAnchorDate > input.target.targetAt
     ? input.target.targetAt
     : requestedAnchorDate;
