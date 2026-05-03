@@ -391,6 +391,130 @@ test('device connect in hosted runtime fails bounded when bridge is unavailable'
   }
 })
 
+test('device connect in hosted runtime reports bridge request timeouts distinctly', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-timeout-'))
+  const bridgeToken = 'bridge-token'
+
+  const server = createServer((_request, response) => {
+    response.writeHead(408, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      error: {
+        code: 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT',
+        message: 'Hosted CLI bridge request timed out.',
+      },
+    }))
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted bridge timeout test.')
+    }
+
+    const result = await runCli([
+      'device',
+      'connect',
+      'whoop',
+      '--vault',
+      vaultRoot,
+    ], {
+      env: {
+        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        MURPH_HOSTED_CLI_BRIDGE_TOKEN: bridgeToken,
+        MURPH_HOSTED_CLI_BRIDGE_URL: `http://127.0.0.1:${address.port}/`,
+        OURA_CLIENT_ID: '',
+        OURA_CLIENT_SECRET: '',
+        STRAVA_CLIENT_ID: '',
+        STRAVA_CLIENT_SECRET: '',
+        WHOOP_CLIENT_ID: '',
+        WHOOP_CLIENT_SECRET: '',
+      },
+    })
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.error.code, 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_TIMEOUT')
+      assert.equal(result.error.message, 'Hosted CLI bridge request timed out.')
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('device connect in hosted runtime preserves generic bridge failures as bounded errors', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-failed-'))
+  const bridgeToken = 'bridge-token'
+
+  const server = createServer((_request, response) => {
+    response.writeHead(502, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      error: {
+        code: 'HOSTED_CLI_BRIDGE_REQUEST_FAILED',
+        message: 'Hosted CLI bridge request failed.',
+      },
+    }))
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted bridge failure test.')
+    }
+
+    const result = await runCli([
+      'device',
+      'connect',
+      'whoop',
+      '--vault',
+      vaultRoot,
+    ], {
+      env: {
+        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        MURPH_HOSTED_CLI_BRIDGE_TOKEN: bridgeToken,
+        MURPH_HOSTED_CLI_BRIDGE_URL: `http://127.0.0.1:${address.port}/`,
+        OURA_CLIENT_ID: '',
+        OURA_CLIENT_SECRET: '',
+        STRAVA_CLIENT_ID: '',
+        STRAVA_CLIENT_SECRET: '',
+        WHOOP_CLIENT_ID: '',
+        WHOOP_CLIENT_SECRET: '',
+      },
+    })
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.error.code, 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_FAILED')
+      assert.equal(result.error.message, 'Hosted CLI bridge request failed.')
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('device provider and account list do not start the managed daemon when local credentials are absent', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-catalog-'))
 

@@ -5,6 +5,7 @@ export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
 export const HOSTED_CLI_BRIDGE_URL_ENV = "MURPH_HOSTED_CLI_BRIDGE_URL";
 export const HOSTED_CLI_BRIDGE_TOKEN_ENV = "MURPH_HOSTED_CLI_BRIDGE_TOKEN";
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
+export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
 export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -45,6 +46,16 @@ export interface HostedCliBridgeClientConfig {
 
 export interface HostedCliBridgeEnvConfig extends HostedCliBridgeClientConfig {
   runtimeProcess: true;
+}
+
+export class HostedCliBridgeRequestError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "HostedCliBridgeRequestError";
+    this.code = code;
+  }
 }
 
 export function isHostedRuntimeProcessEnv(
@@ -91,30 +102,81 @@ export async function requestHostedCliDeviceConnectLink(input: {
   connectTarget: string;
   fetchImpl?: typeof fetch;
   returnTo?: string | null;
+  timeoutMs?: number;
 }): Promise<HostedCliDeviceConnectLinkResponse> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const response = await fetchImpl(
-    new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, ensureTrailingSlash(input.bridge.url)),
-    {
-      body: JSON.stringify({
-        connectTarget: input.connectTarget,
-        ...(input.returnTo ? { returnTo: input.returnTo } : {}),
-      }),
-      headers: {
-        authorization: `Bearer ${input.bridge.token}`,
-        "content-type": "application/json",
+  const signal = AbortSignal.timeout(input.timeoutMs ?? HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, ensureTrailingSlash(input.bridge.url)),
+      {
+        body: JSON.stringify({
+          connectTarget: input.connectTarget,
+          ...(input.returnTo ? { returnTo: input.returnTo } : {}),
+        }),
+        headers: {
+          authorization: `Bearer ${input.bridge.token}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+        signal,
       },
-      method: "POST",
-    },
-  );
-  const payload = await readHostedCliBridgeJsonResponse(response);
+    );
+  } catch (error) {
+    throw createHostedCliBridgeTransportError(error, signal);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await readHostedCliBridgeJsonResponse(response);
+  } catch (error) {
+    if (isHostedCliBridgeTransportError(error, signal)) {
+      throw createHostedCliBridgeTransportError(error, signal);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const error = readHostedCliBridgeError(payload);
-    throw new Error(error.message);
+    throw new HostedCliBridgeRequestError(error.code, error.message);
   }
 
   return parseHostedExecutionDeviceSyncConnectLinkResponse(payload);
+}
+
+function createHostedCliBridgeTransportError(
+  error: unknown,
+  signal: AbortSignal,
+): HostedCliBridgeRequestError {
+  if (signal.aborted || getHostedCliBridgeErrorName(error) === "TimeoutError") {
+    return new HostedCliBridgeRequestError(
+      "HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT",
+      "Hosted CLI bridge request timed out.",
+      { cause: error },
+    );
+  }
+
+  return new HostedCliBridgeRequestError(
+    "HOSTED_CLI_BRIDGE_REQUEST_FAILED",
+    "Hosted CLI bridge request failed.",
+    { cause: error },
+  );
+}
+
+function isHostedCliBridgeTransportError(error: unknown, signal: AbortSignal): boolean {
+  return signal.aborted
+    || getHostedCliBridgeErrorName(error) === "TimeoutError"
+    || error instanceof TypeError;
+}
+
+function getHostedCliBridgeErrorName(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const name = Reflect.get(error, "name");
+  return typeof name === "string" ? name : null;
 }
 
 function readHostedCliBridgeError(value: unknown): {
