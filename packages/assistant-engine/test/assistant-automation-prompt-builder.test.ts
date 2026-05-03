@@ -613,6 +613,59 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('Message text:\nAudio note incoming.')
   })
 
+  it('renders projection not-attempted context distinctly from pending', async () => {
+    const descriptorResult = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachmentDescriptors: [
+            {
+              attachmentId: 'att_photo_1',
+              contentType: 'image/jpeg',
+              fileName: null,
+              kind: 'photo',
+              sizeBytes: null,
+            },
+          ],
+          captureOverrides: {
+            attachments: [],
+            text: 'Photo incoming.',
+          },
+          projectionStatus: 'not_attempted',
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(descriptorResult.kind).toBe('ready')
+    if (descriptorResult.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(descriptorResult.prompt).toContain(
+      'parser/search enrichment: not attempted',
+    )
+
+    const messageResult = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          captureOverrides: {
+            attachments: [],
+            text: 'Photo incoming.',
+          },
+          projectionStatus: 'not_attempted',
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(messageResult.kind).toBe('ready')
+    if (messageResult.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(messageResult.prompt).toContain(
+      'inbox/parser enrichment was not attempted; use the staged message text and available metadata only.',
+    )
+  })
+
   it('prepares metadata/status input when parser work is still pending', async () => {
     promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
       createAttachmentBundle({

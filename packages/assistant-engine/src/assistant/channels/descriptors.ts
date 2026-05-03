@@ -39,8 +39,8 @@ import type {
 
 const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'telegram',
-  canAutoReply(capture) {
-    return capture.threadIsDirect === true
+  canAutoReply(eligibility) {
+    return eligibility.threadIsDirect === true
       ? null
       : 'Telegram auto-reply only runs for direct chats'
   },
@@ -77,8 +77,8 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
 
 const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'linq',
-  canAutoReply(capture) {
-    return capture.threadIsDirect === true
+  canAutoReply(eligibility) {
+    return eligibility.threadIsDirect === true
       ? null
       : 'iMessage auto-reply only runs for direct chats'
   },
@@ -162,8 +162,8 @@ function inferDeliveredLinqTargetKind(
 
 const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'email',
-  canAutoReply(capture) {
-    return capture.threadIsDirect === true
+  canAutoReply(eligibility) {
+    return eligibility.threadIsDirect === true
       ? null
       : 'Email auto-reply only runs for direct threads'
   },

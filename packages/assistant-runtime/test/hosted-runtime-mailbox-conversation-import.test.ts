@@ -358,7 +358,6 @@ describe("hosted mailbox conversation import adapter", () => {
       async importConversationWake() {
         return {
           captureId: "cap_synthetic_email_001",
-          deduped: false,
           metrics: {
             nextWakeAt: null,
             parserProcessed: 0,
@@ -434,7 +433,6 @@ describe("hosted mailbox conversation import adapter", () => {
         importedWakeIds.push(input.wake.eventId);
         return {
           captureId: "cap_synthetic_conversation_001",
-          deduped: false,
           metrics: {
             nextWakeAt: null,
             parserProcessed: 0,
@@ -601,7 +599,6 @@ describe("hosted mailbox conversation import adapter", () => {
       async importConversationWake() {
         return {
           captureId: "cap_synthetic_linq_conversation_001",
-          deduped: false,
           metrics: {
             nextWakeAt: null,
             parserProcessed: 0,
@@ -639,7 +636,6 @@ describe("hosted mailbox conversation import adapter", () => {
       async importConversationWake() {
         return {
           captureId: "cap_synthetic_linq_conversation_001",
-          deduped: false,
           metrics: {
             nextWakeAt: null,
             parserProcessed: 0,
@@ -664,7 +660,6 @@ describe("hosted mailbox conversation import adapter", () => {
       async importConversationWake() {
         return {
           captureId: "cap_synthetic_conversation_001",
-          deduped: true,
           metrics: {
             nextWakeAt: null,
             parserProcessed: 0,
@@ -783,7 +778,6 @@ describe("hosted mailbox conversation import adapter", () => {
         importCalls += 1;
         return {
           captureId: "cap_synthetic_conversation_001",
-          deduped: false,
           metrics: {
             nextWakeAt: null,
             parserProcessed: 0,
@@ -811,7 +805,6 @@ describe("hosted mailbox conversation import adapter", () => {
       importCalls += 1;
       return {
         captureId: "cap_synthetic_conversation_001",
-        deduped: false,
         metrics: {
           nextWakeAt: null,
           parserProcessed: 0,

@@ -114,7 +114,9 @@ describe('assistant auto-reply event-first path', () => {
           directness: 'direct',
           threadId: 'thread-1',
         }),
-        prompt: expect.stringContaining('Email subject - status check'),
+        prompt: expect.stringMatching(
+          /Received an email message\.[\s\S]*Email subject - status check/,
+        ),
         receiptMetadata: {
           autoReplyInputId: candidate.event.inputId,
           autoReplyInputIds: candidate.event.inputId,

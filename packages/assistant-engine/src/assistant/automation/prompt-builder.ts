@@ -49,7 +49,7 @@ export interface AssistantAutoReplyPromptInput {
   receivedAt: string | null
   replyTarget: AssistantInputReplyTarget | null
   source: string
-  sourceMetadata?: AssistantInputSourceMetadata | null
+  sourceMetadata: AssistantInputSourceMetadata | null
   telegramMetadata: TelegramAutoReplyMetadata | null
   text: string | null
 }
@@ -530,6 +530,10 @@ function renderAssistantInputDescriptorEnrichmentStatus(input: {
       : 'parser/search enrichment: failed'
   }
 
+  if (input.status === 'not_attempted') {
+    return 'parser/search enrichment: not attempted'
+  }
+
   return 'parser/search enrichment: pending'
 }
 
@@ -551,6 +555,10 @@ function renderAssistantInputProjectionPromptNote(input: {
 
   if (input.status === 'pending') {
     return 'inbox/parser enrichment is pending; use the staged message text and available metadata only.'
+  }
+
+  if (input.status === 'not_attempted') {
+    return 'inbox/parser enrichment was not attempted; use the staged message text and available metadata only.'
   }
 
   return null
