@@ -10,6 +10,7 @@ import {
   DEVICE_SYNC_BASE_URL_ENV,
 } from '@murphai/operator-config/device-sync-client'
 import {
+  HostedCliBridgeRequestError,
   isHostedRuntimeProcessEnv,
   readHostedCliBridgeEnv,
   requestHostedCliDeviceConnectLink,
@@ -398,8 +399,14 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       bridge: input.bridge,
       connectTarget: input.provider,
     }).catch((error) => {
+      const bridgeCode = error instanceof HostedCliBridgeRequestError
+        ? error.code
+        : null
+      const cliCode = bridgeCode === 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT'
+        ? 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_TIMEOUT'
+        : 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_FAILED'
       throw new VaultCliError(
-        'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_FAILED',
+        cliCode,
         error instanceof Error
           ? error.message
           : 'Hosted device-connect bridge request failed.',

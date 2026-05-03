@@ -4,6 +4,7 @@ import type { Socket } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+  HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   parseHostedCliDeviceConnectLinkRequest,
@@ -14,7 +15,6 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_CLI_BRIDGE_BODY_LIMIT_BYTES = 8192;
-const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface HostedCliRuntimeBridge {
   env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
