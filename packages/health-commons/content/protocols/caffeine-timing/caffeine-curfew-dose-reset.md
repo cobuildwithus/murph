@@ -460,7 +460,6 @@ experimentOnboarding:
     - pre_curfew_plus_next_morning_check
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you end up having any caffeine after your cutoff yesterday? Totally fine either way—I just want the experiment record to be accurate.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Caffeine blocks sleep pressure\n\nAdenosine builds across the day; caffeine blocks that signal. Late caffeine keeps the brain chemically less ready for sleep even when the clock says bedtime."
   - "## Earlier cutoff clears the blockade\n\nMoving caffeine earlier gives clearance time. Less residual stimulant load means sleep pressure, melatonin timing, and quiet wakefulness stop fighting as hard."

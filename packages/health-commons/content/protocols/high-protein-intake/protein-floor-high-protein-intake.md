@@ -608,7 +608,6 @@ experimentOnboarding:
     - daily_log_plus_weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you get a protein log for today? Totally fine either way — I just want the experiment record to reflect what happened.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Amino acids set repair floor\n\nProtein supplies essential amino acids, especially leucine, for muscle protein synthesis. A daily floor prevents low-intake days from starving repair."
   - "## Protein slows the meal\n\nHigher-protein meals empty more slowly and trigger stronger satiety signals. Hunger drops when protein replaces lower-satiety calories instead of just adding more food."

@@ -959,7 +959,6 @@ experimentOnboarding:
     - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: You missed an EPA/DHA log. Did you take the planned serving, skip it, or change the dose/product?
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## EPA and DHA replace other fatty acids in cell membranes\n\nPreformed EPA and DHA enter red-blood-cell membranes over weeks of consistent intake, raising omega-3 index proportionally to dose, duration, and baseline status. A 12-week window with same-matrix retesting separates real tissue change from acute plasma noise."
   - "## Triglycerides fall when liver export slows\n\nEPA and DHA reduce hepatic VLDL assembly and triglyceride secretion. Fasting triglycerides are the most consistent lipid signal, especially from an elevated baseline. LDL-C and non-HDL-C move in different directions depending on dose, EPA/DHA ratio, and starting phenotype."

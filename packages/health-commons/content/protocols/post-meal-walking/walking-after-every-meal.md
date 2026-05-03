@@ -783,7 +783,6 @@ experimentOnboarding:
     - missed_log_check
     weeklyDigestDefault: true
     missedLogFollowupCopy: No judgment—just record whether the meal walk happened, why it was missed, and whether the plan needs to be easier.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Muscle contraction opens a glucose sink\n\nWalking makes leg muscle take up glucose without waiting for insulin. The contraction itself moves glucose transporters to the cell surface."
   - "## Timing hits the meal curve\n\nThe walk starts while digestion sends glucose into blood. Disposal rises during the same window as the peak, so the curve blunts."

@@ -981,7 +981,6 @@ experimentOnboarding:
     - weekly_checkin
     weeklyDigestDefault: true
     missedLogFollowupCopy: Want to mark whether you took collagen yesterday and note any symptoms or confounders?
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
 - “## Collagen peptides survive digestion and reach target tissues\n\nHydrolysis breaks collagen into low-molecular-weight peptides (Pro-Hyp, Hyp-Gly, and others) that survive gastric acid and appear in blood within hours. These peptide fragments accumulate in skin, cartilage, and connective tissue, where they act as both building blocks and signaling molecules for local matrix turnover.”
 - “## Skin outcomes have the strongest direct signal\n\nAcross RCTs and meta-analyses, daily HCP intake improves dermal hydration, elasticity, and wrinkle depth over 6–12 weeks. The peptides stimulate fibroblast collagen synthesis and glycosaminoglycan production in the dermis. Results remain product-, dose-, and population-specific rather than universal.”
