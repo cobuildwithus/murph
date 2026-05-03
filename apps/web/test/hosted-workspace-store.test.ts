@@ -217,6 +217,55 @@ describe("hosted runtime log store", () => {
     });
   });
 
+  it("allows bounded sanitized device-sync failure summaries", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+    const failureSummary = [
+      "Device provider snapshot import input is invalid.",
+      `validationIssues=${"collectionTypeMismatch ".repeat(40).trim()}`,
+    ].join(" | ");
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "device-sync",
+      errorCode: "SYNC_JOB_FAILED",
+      eventCode: "device-sync.job_failed",
+      level: "warn",
+      phase: "invoke",
+      redacted: {
+        failureCode: "SYNC_JOB_FAILED",
+        failureSummary,
+        provider: "whoop",
+      },
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(failureSummary.length).toBeGreaterThan(128);
+    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        component: "device-sync",
+        errorCode: "SYNC_JOB_FAILED",
+        eventCode: "device-sync.job_failed",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: {
+          failureCode: "SYNC_JOB_FAILED",
+          failureSummary,
+          provider: "whoop",
+        },
+      }),
+    });
+    expect(result.redactedJson).toEqual({
+      failureCode: "SYNC_JOB_FAILED",
+      failureSummary,
+      provider: "whoop",
+    });
+  });
+
   it("rejects unsafe or oversized redacted log metadata before persistence", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({
@@ -244,11 +293,24 @@ describe("hosted runtime log store", () => {
       level: "warn",
       phase: "import",
       redacted: Object.fromEntries(
-        Array.from({ length: 25 }, (_, index) => [`count${index}`, index]),
+        Array.from({ length: 49 }, (_, index) => [`count${index}`, index]),
       ),
       tx,
       userId: "member_workspace_1",
-    })).rejects.toThrow(/at most 24 fields/u);
+    })).rejects.toThrow(/at most 48 fields/u);
+
+    await expect(recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "device-sync",
+      eventCode: "device-sync.job_failed",
+      level: "warn",
+      phase: "invoke",
+      redacted: {
+        failureSummary: "x".repeat(2049),
+      },
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/at most 2048 characters/u);
 
     expect(hostedRuntimeLog.create).not.toHaveBeenCalled();
   });

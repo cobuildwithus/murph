@@ -91,6 +91,10 @@ export interface CodexAppServerTurnInput {
   codexCommand?: string
   codexHome?: string | null
   env?: NodeJS.ProcessEnv
+  baseInstructions?: string | null
+  developerInstructions?: string | null
+  excludeResumeTurns?: boolean
+  refreshThreadInstructions?: boolean
   model?: string | null
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
@@ -104,6 +108,45 @@ export interface CodexAppServerTurnInput {
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
   workingDirectory: string
+}
+
+export interface CodexAppServerTurnFailureContext {
+  jsonEvents: unknown[]
+  providerActionCount: number
+  providerSessionId: string | null
+  providerTurnId: string | null
+}
+
+const CODEX_APP_SERVER_TURN_FAILURE_CONTEXT =
+  Symbol('codexAppServerTurnFailureContext')
+const codexAppServerTurnFailureContexts =
+  new WeakMap<object, CodexAppServerTurnFailureContext>()
+
+export function readCodexAppServerTurnFailureContext(
+  error: unknown,
+): CodexAppServerTurnFailureContext | null {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const context =
+    codexAppServerTurnFailureContexts.get(error) ??
+    (error as {
+    [CODEX_APP_SERVER_TURN_FAILURE_CONTEXT]?:
+      | CodexAppServerTurnFailureContext
+      | undefined
+  })[CODEX_APP_SERVER_TURN_FAILURE_CONTEXT]
+
+  if (!context) {
+    return null
+  }
+
+  return {
+    jsonEvents: [...context.jsonEvents],
+    providerActionCount: context.providerActionCount,
+    providerSessionId: context.providerSessionId,
+    providerTurnId: context.providerTurnId,
+  }
 }
 
 export interface CodexAppServerTurnResult {
@@ -269,11 +312,35 @@ async function runCodexAppServerTurn(
   void turnCompleted.catch(() => undefined)
   let cleanupAbortListener = () => {}
 
+  const annotateTurnFailureContext = (error: unknown) => {
+    if (!error || typeof error !== 'object') {
+      return
+    }
+
+    const context = {
+      jsonEvents: [...jsonEvents],
+      providerActionCount,
+      providerSessionId,
+      providerTurnId: turnId,
+    } satisfies CodexAppServerTurnFailureContext
+    codexAppServerTurnFailureContexts.set(error, context)
+    try {
+      Object.defineProperty(error, CODEX_APP_SERVER_TURN_FAILURE_CONTEXT, {
+        configurable: true,
+        enumerable: false,
+        value: context,
+      })
+    } catch {
+      // Frozen provider errors should still preserve the original failure.
+    }
+  }
+
   const rejectOnce = (error: unknown) => {
     if (settled) {
       return
     }
 
+    annotateTurnFailureContext(error)
     settled = true
     closeLiveTurn()
     cleanupAbortListener()
@@ -714,6 +781,7 @@ async function runCodexAppServerTurn(
       throw stdinFailure
     }
   } catch (error) {
+    annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true
     await stopCodexAppServerChild({

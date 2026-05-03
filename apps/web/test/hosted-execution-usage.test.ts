@@ -23,20 +23,30 @@ const BASE_USAGE_RECORD = {
   outputTokens: 45,
   provider: "codex-cli",
   providerMetadataJson: {
+    headers: {
+      authorization: "redacted-test-header",
+    },
     nested: {
       ignored: undefined,
     },
+    prompt: "redacted test prompt",
     provider: "vercel-ai-gateway",
   },
   providerName: "vercel-ai-gateway",
   providerRequestId: "req_123",
   providerSessionId: "session_123",
   rawUsageJson: {
-    nested: {
-      ignored: undefined,
+    input_tokens: 120,
+    input_tokens_details: {
+      cached_tokens: 12,
     },
-    totalTokens: 165,
+    output_tokens: 45,
+    output_tokens_details: {
+      reasoning_tokens: 8,
+    },
+    total_tokens: 165,
   },
+  rawUsageJsonHash: "sha256:hosted-usage-hash",
   reasoningTokens: 8,
   requestedModel: "gpt-5.4-mini",
   routeId: "primary",
@@ -47,10 +57,12 @@ const BASE_USAGE_RECORD = {
   totalTokens: 165,
   turnId: "turn_123",
   usageId: "turn_123.attempt-1",
+  usageExtractionSourcePath: "params.usage",
+  usageExtractionVersion: "codex-usage-v1",
 } as const;
 
 describe("importHostedAiUsageRecords", () => {
-  it("never persists provider debug fields", async () => {
+  it("persists sanitized usage metadata without provider debug fields", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const findUnique = vi.fn(async () => ({
       memberId: "member_123",
@@ -85,12 +97,28 @@ describe("importHostedAiUsageRecords", () => {
       create: expect.objectContaining({
         id: "turn_123.attempt-1",
         memberId: "member_123",
+        providerRequestId: "req_123",
+        providerRequestOutcome: "succeeded",
         providerRequestOrdinal: 0,
+        rawUsageJson: {
+          input_tokens: 120,
+          input_tokens_details: {
+            cached_tokens: 12,
+          },
+          output_tokens: 45,
+          output_tokens_details: {
+            reasoning_tokens: 8,
+          },
+          total_tokens: 165,
+        },
+        rawUsageJsonHash: "sha256:hosted-usage-hash",
         stripeMeterError:
           "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
         stripeMeterSource: "murph",
         stripeMeterStatus: "skipped",
         totalTokens: 165,
+        usageExtractionSourcePath: "params.usage",
+        usageExtractionVersion: "codex-usage-v1",
       }),
       select: expect.any(Object),
       update: {},
@@ -98,9 +126,9 @@ describe("importHostedAiUsageRecords", () => {
     const upsertCall = hostedAiUsageUpsert.mock.calls[0]?.[0] as { create?: Record<string, unknown> } | undefined;
     expect(upsertCall?.create).toBeDefined();
     expect(upsertCall?.create).not.toHaveProperty("providerSessionId");
-    expect(upsertCall?.create).not.toHaveProperty("providerRequestId");
     expect(upsertCall?.create).not.toHaveProperty("providerMetadataJson");
-    expect(upsertCall?.create).not.toHaveProperty("rawUsageJson");
+    expect(JSON.stringify(upsertCall?.create?.rawUsageJson)).not.toContain("prompt");
+    expect(JSON.stringify(upsertCall?.create?.rawUsageJson)).not.toContain("authorization");
   });
 
   it("does not delegate Vercel AI Gateway rows or read billing refs while usage billing is disabled", async () => {
@@ -142,6 +170,40 @@ describe("importHostedAiUsageRecords", () => {
           "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
         stripeMeterSource: "murph",
         stripeMeterStatus: "skipped",
+      }),
+    }));
+  });
+
+  it("persists failed provider request outcomes for hosted usage imports", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => null),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [
+          {
+            ...BASE_USAGE_RECORD,
+            providerRequestOutcome: "failed",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        providerRequestOutcome: "failed",
       }),
     }));
   });

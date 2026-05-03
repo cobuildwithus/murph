@@ -61,8 +61,8 @@ describe('assistant protocol index planning', () => {
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
+      threadScope: 'session-thread',
       toolProfile: 'provider-turn',
-      turnContinuityPolicy: 'continuous-provider-thread',
     }
 
     const plan = await resolveAssistantRouteTurnPlan({

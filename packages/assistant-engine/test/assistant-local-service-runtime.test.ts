@@ -16,6 +16,7 @@ import {
   AssistantActiveTurnInputUnavailableError,
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.js'
+import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -128,7 +129,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(stopTyping.mock.calls.length, 1)
 })
 
-test('sendAssistantMessageLocal keeps manual chat on continuous provider-thread continuity', async () => {
+test('sendAssistantMessageLocal keeps manual chat on the session provider thread', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -141,16 +142,17 @@ test('sendAssistantMessageLocal keeps manual chat on continuous provider-thread 
   assert.deepEqual(
     mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
     {
-      turnContinuityPolicy: 'continuous-provider-thread',
+      threadScope: 'session-thread',
     },
   )
   assert.equal(
-    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.turnContinuityPolicy,
-    'continuous-provider-thread',
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.providerResumeStateAction,
+    'persist-from-provider-turn',
   )
 })
 
-test('sendAssistantMessageLocal keeps auto-reply turns on Murph history only', async () => {
+test('sendAssistantMessageLocal keeps auto-reply turns on the session provider thread', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -163,16 +165,17 @@ test('sendAssistantMessageLocal keeps auto-reply turns on Murph history only', a
   assert.deepEqual(
     mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
     {
-      turnContinuityPolicy: 'murph-history-only',
+      threadScope: 'session-thread',
     },
   )
   assert.equal(
-    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.turnContinuityPolicy,
-    'murph-history-only',
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.providerResumeStateAction,
+    'persist-from-provider-turn',
   )
 })
 
-test('sendAssistantMessageLocal keeps automation cron turns on Murph history only', async () => {
+test('sendAssistantMessageLocal runs automation cron turns on isolated provider threads', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -185,12 +188,13 @@ test('sendAssistantMessageLocal keeps automation cron turns on Murph history onl
   assert.deepEqual(
     mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
     {
-      turnContinuityPolicy: 'murph-history-only',
+      threadScope: 'isolated-thread',
     },
   )
   assert.equal(
-    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.turnContinuityPolicy,
-    'murph-history-only',
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.providerResumeStateAction,
+    'preserve-existing',
   )
 })
 
@@ -392,7 +396,7 @@ test('sendAssistantMessageLocal admits active-turn input and continues inside on
         providerTurn: {
           onboardingGuidanceInjected: true,
           providerContinuation: {
-            kind: 'flat-prompt-replay',
+            kind: 'thread-start',
           },
           response: 'final after late input',
           session,
@@ -541,7 +545,7 @@ test('sendAssistantMessageLocal admits active-turn input and continues inside on
         kind: 'explicit-structured-history',
       },
       {
-        kind: 'flat-prompt-replay',
+        kind: 'thread-start',
       },
     ],
   )
@@ -581,8 +585,8 @@ test('sendAssistantMessageLocal admits active-turn input and continues inside on
   )
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
-      ?.activeTurnUsedExplicitHistory,
-    true,
+      ?.providerResumeStateAction,
+    'clear',
   )
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
@@ -751,7 +755,7 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
         providerTurn: {
           onboardingGuidanceInjected: true,
           providerContinuation: {
-            kind: 'flat-prompt-replay',
+            kind: 'thread-start',
           },
           response: 'final after late input',
           session,
@@ -1128,7 +1132,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
       providerTurn: {
         onboardingGuidanceInjected: true,
         providerContinuation: {
-          kind: 'flat-prompt-replay',
+          kind: 'thread-start',
         },
         response: 'final after steered input',
         session,
@@ -1471,7 +1475,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
         providerTurn: {
           onboardingGuidanceInjected: true,
           providerContinuation: {
-            kind: 'flat-prompt-replay',
+            kind: 'thread-start',
           },
           response: 'final after steered input',
           session,
@@ -2610,11 +2614,29 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
       persistUserPromptOnFailure: false,
     },
     providerOutcome: {
+      attemptCount: 1,
       error: terminalError,
       kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
       providerContinuation: {
         kind: 'explicit-structured-history',
       },
+      providerSessionId: 'provider-session-failed',
+      providerTurnId: 'provider-turn-failed',
+      rawEvents: [{ method: 'turn/completed' }],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session: recoveredSession,
+      usage: createProviderUsage({
+        inputTokens: 9,
+        outputTokens: 0,
+        totalTokens: 9,
+      }),
+      usageAttribution: null,
     },
     recoveredSession,
   })
@@ -2669,6 +2691,36 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   )
   assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls.length, 1)
   assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]?.status, 'failed')
+  assert.deepEqual(
+    mocks.persistPendingAssistantUsageEvent.mock.calls[0]?.[0],
+    {
+      executionContext: null,
+      providerRequestOrdinal: 0,
+      providerRequestOutcome: 'failed',
+      providerResult: {
+        attemptCount: 1,
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+        route: {
+          provider: 'codex-cli',
+          providerOptions: {
+            model: 'gpt-5.4',
+          },
+        },
+        session: recoveredSession,
+        usage: createProviderUsage({
+          inputTokens: 9,
+          outputTokens: 0,
+          totalTokens: 9,
+        }),
+        usageAttribution: null,
+      },
+      turnId: 'turn-1',
+      vault: '/vaults/test',
+    },
+  )
   assert.deepEqual(
     mocks.runtimeState.turns.acceptedInputs.recordProviderRequest.mock.calls.map(
       (call) => call[0]?.continuation,
@@ -3209,8 +3261,22 @@ async function loadLocalServiceModule(input?: {
   providerOutcome?:
     | {
         kind: 'failed_terminal'
+        attemptCount: number
         error: Error
+        providerRequestOutcome: 'aborted' | 'failed' | 'partial'
         providerContinuation: AssistantProviderContinuation
+        providerSessionId: string | null
+        providerTurnId: string | null
+        rawEvents: unknown[]
+        route: {
+          provider: string
+          providerOptions: {
+            model?: string | null
+          }
+        }
+        session: AssistantSession
+        usage: AssistantProviderUsage | null
+        usageAttribution: null
       }
     | {
         kind: 'succeeded'
@@ -3646,12 +3712,11 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
-    resolveAssistantProviderTurnContinuityPolicy: vi.fn(
+    resolveAssistantProviderThreadScope: vi.fn(
       (input: { turnTrigger?: string | null }) =>
-        input.turnTrigger === 'automation-auto-reply' ||
         input.turnTrigger === 'automation-cron'
-          ? 'murph-history-only'
-          : 'continuous-provider-thread',
+          ? 'isolated-thread'
+          : 'session-thread',
     ),
   }))
   vi.doMock('../src/assistant/service-result.js', () => ({
@@ -3715,6 +3780,28 @@ function isTraceEventWithRawType(
     !Array.isArray(rawEvent) &&
     (rawEvent as { type?: unknown }).type === type
   )
+}
+
+function createProviderUsage(
+  overrides: Partial<AssistantProviderUsage> = {},
+): AssistantProviderUsage {
+  return {
+    apiKeyEnv: null,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    inputTokens: 5,
+    outputTokens: 8,
+    providerMetadataJson: null,
+    providerName: null,
+    providerRequestId: null,
+    rawUsageJson: null,
+    reasoningTokens: null,
+    requestedModel: null,
+    servedModel: null,
+    totalTokens: 13,
+    ...overrides,
+  }
 }
 
 function createAssistantSession(input?: {

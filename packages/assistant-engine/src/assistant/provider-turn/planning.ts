@@ -42,9 +42,6 @@ import type {
   AssistantActiveTurnLiveProviderSteering,
 } from '../turn-input.js'
 import {
-  listAssistantTranscriptEntries,
-} from '../store.js'
-import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   type AssistantPromptCacheMetadata,
@@ -63,6 +60,7 @@ import { normalizeNullableString } from '../shared.js'
 export interface AssistantRouteTurnPlan {
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
+  developerInstructions: string | null
   conversationMessages?: ReadonlyArray<{
     content: string | AssistantActiveTurnProviderHistoryMessage['content']
     role: 'assistant' | 'user'
@@ -79,6 +77,7 @@ export interface AssistantRouteTurnPlan {
   }
   promptCacheMetadata: AssistantPromptCacheMetadata | null
   systemPrompt: string | null
+  turnContextPrompt: string | null
   workingDirectory: string
 }
 
@@ -101,9 +100,9 @@ export type AssistantProviderTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
 
-export type AssistantProviderTurnContinuityPolicy =
-  | 'continuous-provider-thread'
-  | 'murph-history-only'
+export type AssistantProviderThreadScope =
+  | 'session-thread'
+  | 'isolated-thread'
 
 export type AssistantProviderTurnNativeResumePolicy =
   | 'default'
@@ -112,20 +111,17 @@ export type AssistantProviderTurnNativeResumePolicy =
 export interface AssistantProviderTurnExecutionProfile {
   nativeResumePolicy?: AssistantProviderTurnNativeResumePolicy
   promptProfile?: AssistantProviderTurnPromptProfile
+  threadScope?: AssistantProviderThreadScope
   toolProfile?: AssistantProviderTurnToolProfile
 }
 
-export interface AssistantProviderTurnContinuityProfile
-  extends AssistantProviderTurnExecutionProfile {
-  turnContinuityPolicy?: AssistantProviderTurnContinuityPolicy
-}
+export interface AssistantProviderTurnThreadScopeProfile
+  extends AssistantProviderTurnExecutionProfile {}
 
 export type AssistantProviderTurnResolvedExecutionProfile =
-  Required<Omit<AssistantProviderTurnExecutionProfile, 'nativeResumePolicy'>> & {
-    turnContinuityPolicy: AssistantProviderTurnContinuityPolicy
-  }
+  Required<Omit<AssistantProviderTurnExecutionProfile, 'nativeResumePolicy'>>
 
-export interface AssistantProviderTurnContinuityPlan {
+export interface AssistantProviderThreadPlan {
   onboardingGuidanceInjected: boolean
   resumeProviderSessionId: string | null
   shouldInjectBootstrapContext: boolean
@@ -151,13 +147,11 @@ export interface AssistantProviderAttemptPlan {
   session: AssistantSession
 }
 
-const ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 100
-
-export function resolveAssistantProviderTurnContinuityPlan(input: {
+export function resolveAssistantProviderThreadPlan(input: {
   candidateResumeProviderSessionId: string | null
   onboardingGuidanceOpen: boolean
   promptProfile: AssistantProviderTurnPromptProfile
-}): AssistantProviderTurnContinuityPlan {
+}): AssistantProviderThreadPlan {
   const resumeProviderSessionId = input.candidateResumeProviderSessionId
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const onboardingGuidanceInjected =
@@ -173,42 +167,41 @@ export function resolveAssistantProviderTurnContinuityPlan(input: {
 
 function resolveAssistantProviderTurnExecutionProfile(
   input: {
-    profile: AssistantProviderTurnContinuityProfile | null | undefined
+    profile: AssistantProviderTurnThreadScopeProfile | null | undefined
     turnTrigger: AssistantTurnTrigger | null | undefined
   },
 ): AssistantProviderTurnResolvedExecutionProfile {
-  const turnContinuityPolicy = resolveAssistantProviderTurnContinuityPolicy({
+  const threadScope = resolveAssistantProviderThreadScope({
     profile: input.profile,
     turnTrigger: input.turnTrigger,
   })
 
   return {
     promptProfile: input.profile?.promptProfile ?? 'conversation',
+    threadScope,
     toolProfile: input.profile?.toolProfile ?? 'provider-turn',
-    turnContinuityPolicy,
   }
 }
 
-export function resolveAssistantProviderTurnContinuityPolicy(input: {
-  profile?: AssistantProviderTurnContinuityProfile | null
+export function resolveAssistantProviderThreadScope(input: {
+  profile?: AssistantProviderTurnThreadScopeProfile | null
   turnTrigger?: AssistantTurnTrigger | null
-}): AssistantProviderTurnContinuityPolicy {
+}): AssistantProviderThreadScope {
   if (
     input.profile?.promptProfile === 'notification-decision' ||
-    input.turnTrigger === 'automation-auto-reply' ||
     input.turnTrigger === 'automation-cron'
   ) {
-    return 'murph-history-only'
+    return 'isolated-thread'
   }
 
   if (
-    input.profile?.turnContinuityPolicy === 'murph-history-only' ||
+    input.profile?.threadScope === 'isolated-thread' ||
     input.profile?.nativeResumePolicy === 'disabled'
   ) {
-    return 'murph-history-only'
+    return 'isolated-thread'
   }
 
-  return 'continuous-provider-thread'
+  return 'session-thread'
 }
 
 export async function buildAssistantProviderTurnExecutionPlan(input: {
@@ -216,7 +209,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
-  profile?: AssistantProviderTurnContinuityProfile | null
+  profile?: AssistantProviderTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   turnCreatedAt: string
@@ -295,7 +288,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const activeTurnHistoryPresent =
     hasAssistantActiveTurnProviderHistory(activeTurnHistory)
   const nativeResumeEnabled =
-    input.profile.turnContinuityPolicy === 'continuous-provider-thread' &&
+    input.profile.threadScope === 'session-thread' &&
     !activeTurnHistoryPresent
   const candidateResumeProviderSessionId =
     nativeResumeEnabled &&
@@ -307,13 +300,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }),
         })
       : null
-  const continuityPlan = resolveAssistantProviderTurnContinuityPlan({
+  const threadPlan = resolveAssistantProviderThreadPlan({
     candidateResumeProviderSessionId,
     onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
     promptProfile: input.profile.promptProfile,
   })
-  const resumeProviderSessionId = continuityPlan.resumeProviderSessionId
-  const shouldInjectBootstrapContext = continuityPlan.shouldInjectBootstrapContext
+  const resumeProviderSessionId = threadPlan.resumeProviderSessionId
+  const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
   const shouldPrepareBootstrapContext =
     shouldInjectBootstrapContext ||
     resumeProviderSessionId !== null
@@ -323,25 +316,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     executionContext: input.input.executionContext,
   })
   const shouldInjectOnboardingGuidance =
-    continuityPlan.onboardingGuidanceInjected
+    threadPlan.onboardingGuidanceInjected
   const assistantToolNameAliases = null
-  const transcriptReplayLimit = shouldPrepareBootstrapContext && !activeTurnHistoryPresent
-    ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
-    : null
-  const transcriptConversationMessages = transcriptReplayLimit
-    ? removeTrailingCurrentUserPrompt(
-        await loadAssistantConversationMessages({
-          limit: transcriptReplayLimit,
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-        }),
-        input.input.prompt,
-      )
-    : undefined
-  const conversationMessages =
-    transcriptConversationMessages && transcriptConversationMessages.length > 0
-      ? transcriptConversationMessages
-      : undefined
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -412,11 +388,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
             toolSchemaHash,
           })
   const systemPrompt = systemPromptResult.prompt
+  const developerInstructions = [
+    systemPromptResult.layers.staticCacheableCorePrompt,
+    systemPromptResult.layers.stableRouteCapabilityPrompt,
+  ]
+    .filter((section): section is string => Boolean(normalizeNullableString(section)))
+    .join('\n\n')
+  const turnContextPrompt = normalizeNullableString(
+    systemPromptResult.layers.dynamicTurnContextPrompt,
+  )
 
   return {
     assistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
-    conversationMessages,
+    developerInstructions: normalizeNullableString(developerInstructions),
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
     continuityContext: null,
     diagnosticsPolicy,
@@ -434,6 +419,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     workingDirectory,
     systemPrompt,
+    turnContextPrompt,
   }
 }
 
@@ -505,27 +491,6 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
   }
 }
 
-function removeTrailingCurrentUserPrompt(
-  messages: ReadonlyArray<{
-    content: string
-    role: 'assistant' | 'user'
-  }>,
-  currentPrompt: string,
-): ReadonlyArray<{
-  content: string
-  role: 'assistant' | 'user'
-}> {
-  const lastMessage = messages.at(-1)
-  if (
-    lastMessage?.role === 'user' &&
-    lastMessage.content === currentPrompt
-  ) {
-    return messages.slice(0, -1)
-  }
-
-  return messages
-}
-
 function resolveAssistantProviderContinuation(input: {
   resumeProviderSessionId: string | null
 }): AssistantProviderContinuation {
@@ -536,7 +501,7 @@ function resolveAssistantProviderContinuation(input: {
   }
 
   return {
-    kind: 'flat-prompt-replay',
+    kind: 'thread-start',
   }
 }
 
@@ -544,22 +509,6 @@ function resolveAssistantEffectiveProviderResumeSessionId(input: {
   resumeProviderSessionId: string | null
 }): string | null {
   return normalizeNullableString(input.resumeProviderSessionId)
-}
-
-export async function loadAssistantConversationMessages(input: {
-  limit: number
-  sessionId: string
-  vault: string
-}): Promise<Array<{
-  content: string
-  role: 'assistant' | 'user'
-}>> {
-  const transcript = await listAssistantTranscriptEntries(
-    input.vault,
-    input.sessionId,
-  )
-
-  return selectAssistantReplayMessages(transcript, input.limit)
 }
 
 export function selectAssistantReplayMessages(
