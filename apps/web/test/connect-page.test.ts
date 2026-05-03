@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import type { HTMLAttributes, ReactNode } from "react";
 import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, test, vi } from "vitest";
@@ -23,6 +24,43 @@ vi.mock("next/image", () => ({
       src: props.src,
       width: props.width,
   }),
+}));
+
+vi.mock("@/src/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+    open ? createElement("div", { "data-dialog-open": "true" }, children) : null,
+  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", {
+      className,
+      "data-dialog-content": "true",
+    }, children),
+  DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+    createElement("p", props),
+  DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
+  DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+    createElement("h2", props),
+}));
+
+vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
+  HostedLegalConsentCard: (props: {
+    mode?: string;
+    onAccepted?: () => void | Promise<void>;
+    preferredScope?: string;
+    source: string;
+  }) =>
+    createElement(
+      "button",
+      {
+        "data-consent-mode": props.mode,
+        "data-consent-scope": props.preferredScope,
+        "data-consent-source": props.source,
+        "data-hosted-legal-consent-card": "true",
+        onClick: () => void props.onAccepted?.(),
+        type: "button",
+      },
+      "Accept consent",
+    ),
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -625,6 +663,90 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
     keepalive: false,
   });
   assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/garmin");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid opens the consent dialog when connect start needs consent", async () => {
+  let connectAttempts = 0;
+  const fetch = vi.fn(async (
+    input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _init;
+    if (input === "/api/connect-sources/garmin/start") {
+      connectAttempts += 1;
+      if (connectAttempts > 1) {
+        return Response.json({
+          authorizationUrl: "https://junction.example.test/link/garmin",
+        });
+      }
+
+      return Response.json({
+        error: {
+          code: "HOSTED_CONSENT_REQUIRED",
+          details: {
+            scope: "feature.connected-health-source",
+          },
+          message: "Accept the current Murph legal consent before continuing.",
+        },
+      }, { status: 403 });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(input)}`);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "garmin",
+        description: "Workouts, sleep, stress, heart rate, and body battery.",
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+      },
+    ],
+  }));
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Connect health sources/);
+  });
+
+  assert.equal(rendered.assign.mock.calls.length, 0);
+  assert.match(
+    rendered.container.innerHTML,
+    /data-dialog-content="true"[^>]*class="max-w-md gap-6 p-6 md:p-7"/u,
+  );
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Review the current health-source consent before connecting Garmin\./,
+  );
+  const consentButton = rendered.container.querySelector("[data-hosted-legal-consent-card='true']");
+  assert.ok(consentButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(consentButton.getAttribute("data-consent-mode"), "compact");
+  assert.equal(consentButton.getAttribute("data-consent-scope"), "feature.connected-health-source");
+  assert.equal(consentButton.getAttribute("data-consent-source"), "connect-page");
+
+  await act(async () => {
+    consentButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 2);
+    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/garmin");
+  });
 
   await rendered.cleanup();
 });
