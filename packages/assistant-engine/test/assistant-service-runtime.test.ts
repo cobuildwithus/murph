@@ -15,6 +15,7 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from "../src/assistant/service-contracts.ts";
+import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "../src/assistant/first-contact-welcome.ts";
 
 const seamMocks = vi.hoisted(() => ({
   buildAssistantCliGuidanceText: vi.fn(),
@@ -1089,7 +1090,7 @@ describe("assistant delivery orchestration seam", () => {
           sessionId: "session-sent",
         }),
       },
-      response: "reply",
+      response: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       turnId: "turn-finalize",
       vault: "/vault",
     });
@@ -1130,7 +1131,7 @@ describe("assistant delivery orchestration seam", () => {
           sessionId: "session-queued",
         }),
       },
-      response: "reply",
+      response: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       turnId: "turn-queued-finalize",
       vault: "/vault",
     });
@@ -1140,6 +1141,35 @@ describe("assistant delivery orchestration seam", () => {
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
+
+    seamMocks.markAssistantFirstContactSeen.mockClear();
+
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      firstContactGuidanceInjected: true,
+      firstContactStateDocIds: ["doc-not-welcome"],
+      outcome: {
+        delivery: {
+          channel: "telegram",
+          idempotencyKey: null,
+          messageLength: 16,
+          providerMessageId: "provider-not-welcome",
+          providerThreadId: null,
+          sentAt: "2026-04-08T12:30:00.000Z",
+          target: "thread-1",
+          targetKind: "thread",
+        },
+        intentId: "intent-not-welcome",
+        kind: "sent",
+        session: createAssistantSession({
+          sessionId: "session-not-welcome",
+        }),
+      },
+      response: "Happy to help.",
+      turnId: "turn-not-welcome-finalize",
+      vault: "/vault",
+    });
+
+    expect(seamMocks.markAssistantFirstContactSeen).not.toHaveBeenCalled();
   });
 });
 
