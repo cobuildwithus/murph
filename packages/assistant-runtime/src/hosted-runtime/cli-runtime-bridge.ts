@@ -11,10 +11,17 @@ import {
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 
 import type {
+  HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
 
 const HOSTED_CLI_BRIDGE_BODY_LIMIT_BYTES = 8192;
+
+export type HostedCliRuntimeBridgeMessagingReturnTargetSource =
+  | HostedRuntimeDeviceSyncMessagingReturnTarget
+  | null
+  | undefined
+  | (() => HostedRuntimeDeviceSyncMessagingReturnTarget | null | undefined);
 
 export interface HostedCliRuntimeBridge {
   env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
@@ -23,6 +30,7 @@ export interface HostedCliRuntimeBridge {
 
 export async function startHostedCliRuntimeBridge(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
 }): Promise<HostedCliRuntimeBridge | null> {
   const deviceSyncPort = input.deviceSyncPort ?? null;
   if (!deviceSyncPort) {
@@ -34,6 +42,7 @@ export async function startHostedCliRuntimeBridge(input: {
   const server = createServer((request, response) => {
     void handleHostedCliBridgeRequest({
       deviceSyncPort,
+      messagingReturnTarget: input.messagingReturnTarget,
       request,
       response,
       token,
@@ -74,6 +83,7 @@ export async function startHostedCliRuntimeBridge(input: {
 
 async function handleHostedCliBridgeRequest(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
   request: IncomingMessage;
   response: ServerResponse;
   token: string;
@@ -136,8 +146,12 @@ async function handleHostedCliBridgeRequest(input: {
     }
 
     try {
+      const messagingReturnTarget = resolveHostedCliBridgeMessagingReturnTarget(
+        input.messagingReturnTarget,
+      );
       const result = await input.deviceSyncPort.createConnectLink({
         connectTarget: request.connectTarget,
+        ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
       });
       writeHostedCliBridgeJson(input.response, 200, result);
     } catch {
@@ -164,6 +178,13 @@ async function handleHostedCliBridgeRequest(input: {
 function isHostedCliBridgeAuthorized(request: IncomingMessage, token: string): boolean {
   const authorization = request.headers.authorization ?? "";
   return authorization === `Bearer ${token}`;
+}
+
+function resolveHostedCliBridgeMessagingReturnTarget(
+  source: HostedCliRuntimeBridgeMessagingReturnTargetSource,
+): HostedRuntimeDeviceSyncMessagingReturnTarget | null {
+  const value = typeof source === "function" ? source() : source;
+  return value === "imessage" || value === "telegram" ? value : null;
 }
 
 async function readHostedCliBridgeJsonBody(request: IncomingMessage): Promise<unknown> {

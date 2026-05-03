@@ -5,17 +5,19 @@ import {
   enqueueHostedSystemMailboxItem,
   normalizeHostedAssistantRuntimeConfig,
   type HostedAssistantRuntimeConfig,
+  type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedExecutionSystemWake,
-  HostedExecutionWake,
-} from "@murphai/hosted-execution/contracts";
-import type {
-  HostedExecutionBundleRef,
+import {
+  isHostedLinqConversationMessageWake,
+  isHostedTelegramConversationMessageWake,
+  type HostedExecutionBundleRef,
+  type HostedExecutionConversationMessageWake,
+  type HostedExecutionSystemWake,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedWorkspaceCheckpointRequest,
@@ -276,50 +278,57 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
   } & Pick<HostedRuntimeBridgeNormalizedRuntime, "commitTimeoutMs" | "resolvedConfig" | "userEnv">;
   vaultRoot: string;
 }): HostedWorkspaceRuntimeBridgeImportItem {
-  const importConversationItem = createHostedConversationMailboxImportItem({
-    decodePayload: {
-      decode: async (decodeInput) => {
-        const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
-          ciphertext: decodeInput.payloadCiphertext,
-          environment: await input.readEncryptionEnvironment({
-            userId: decodeInput.itemRef.userId,
-          }),
-          metadata: {
-            dedupeKey: decodeInput.itemRef.dedupeKey,
-            itemId: decodeInput.itemRef.id,
-            kind: decodeInput.itemRef.kind,
-            lane: decodeInput.itemRef.lane,
-            laneSeq: decodeInput.itemRef.laneSeq,
-            occurredAt: decodeInput.itemRef.occurredAt,
-            payloadSchema: decodeInput.payloadSchema,
-            payloadStorage: decodeInput.payloadSource === "inline" ? "inline" : "sidecar",
-            userId: decodeInput.itemRef.userId,
-          },
-        });
-        const wake = parseHostedExecutionWake(decodedPayload);
-        if (wake.kind !== "conversation.message") {
+  return async (item, context) => {
+    const importConversationItem = createHostedConversationMailboxImportItem({
+      decodePayload: {
+        decode: async (decodeInput) => {
+          const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
+            ciphertext: decodeInput.payloadCiphertext,
+            environment: await input.readEncryptionEnvironment({
+              userId: decodeInput.itemRef.userId,
+            }),
+            metadata: {
+              dedupeKey: decodeInput.itemRef.dedupeKey,
+              itemId: decodeInput.itemRef.id,
+              kind: decodeInput.itemRef.kind,
+              lane: decodeInput.itemRef.lane,
+              laneSeq: decodeInput.itemRef.laneSeq,
+              occurredAt: decodeInput.itemRef.occurredAt,
+              payloadSchema: decodeInput.payloadSchema,
+              payloadStorage: decodeInput.payloadSource === "inline" ? "inline" : "sidecar",
+              userId: decodeInput.itemRef.userId,
+            },
+          });
+          const wake = parseHostedExecutionWake(decodedPayload);
+          if (wake.kind !== "conversation.message") {
+            return {
+              reasonCode: "payload.decode_mismatch",
+              retryable: false,
+              status: "blocked",
+            };
+          }
+
           return {
-            reasonCode: "payload.decode_mismatch",
-            retryable: false,
-            status: "blocked",
+            status: "decoded",
+            wake,
           };
-        }
-
-        return {
-          status: "decoded",
-          wake,
-        };
+        },
       },
-    },
-    runtime: input.runtime,
-    vaultRoot: input.vaultRoot,
-  });
+      onDecodedConversationWake: (wake) => {
+        context?.recordMessagingReturnTarget?.(
+          resolveHostedCliBridgeMessagingReturnTarget(wake),
+        );
+      },
+      runtime: input.runtime,
+      vaultRoot: input.vaultRoot,
+    });
 
-  return async (item) => importHostedWorkspaceBridgeMailboxItem({
-    ...input,
-    importConversationItem,
-    item,
-  });
+    return importHostedWorkspaceBridgeMailboxItem({
+      ...input,
+      importConversationItem,
+      item,
+    });
+  };
 }
 
 async function importHostedWorkspaceBridgeMailboxItem(input: {
@@ -385,6 +394,20 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake,
   });
+}
+
+function resolveHostedCliBridgeMessagingReturnTarget(
+  wake: HostedExecutionConversationMessageWake,
+): HostedRuntimeDeviceSyncMessagingReturnTarget | null {
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return "telegram";
+  }
+
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return "imessage";
+  }
+
+  return null;
 }
 
 function decodedSystemWakeMatchesMailboxItem(

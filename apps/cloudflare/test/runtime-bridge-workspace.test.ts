@@ -15,6 +15,9 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  buildHostedExecutionTelegramConversationMessageWake,
+} from "@murphai/hosted-execution";
 
 import {
   createHostedMailboxEncryptionEnvironmentFromIngressRoot,
@@ -210,6 +213,112 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "imported",
     });
     expect(readEncryptionUsers).toEqual([item.userId]);
+  });
+
+  it("captures server-owned return targets from decoded conversation wakes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const rootKeyId = "udrk:ingress:bridge-return-target";
+    const wake = buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "evt_bridge_return_target",
+      occurredAt: "2026-05-01T00:00:00.000Z",
+      telegramMessage: {
+        messageId: "msg_bridge_return_target",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello",
+        threadId: "thread_bridge_return_target",
+      },
+      userId: "member_bridge_return_target",
+    });
+    const item = {
+      createdAt: wake.occurredAt,
+      dedupeKey: wake.eventId,
+      expiresAt: null,
+      id: "mailbox_item_bridge_return_target",
+      kind: "conversation.message" as const,
+      lane: "conversation" as const,
+      laneSeq: "1",
+      occurredAt: wake.occurredAt,
+      payloadBytes: 256,
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_bridge_return_target",
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      updatedAt: wake.occurredAt,
+      userId: wake.userId,
+    };
+    const route = {
+      action: "import-conversation-message",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    } as const;
+    const payloadCiphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
+      aad: buildHostedSecureBoxAad({
+        ...buildHostedMailboxPayloadSecureBoxAad({
+          dedupeKey: item.dedupeKey,
+          itemId: item.id,
+          kind: item.kind,
+          lane: item.lane,
+          laneSeq: item.laneSeq,
+          occurredAt: item.occurredAt,
+          payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+          payloadStorage: "inline",
+          userId: item.userId,
+        }),
+        domain: "ingress",
+        lane: "mailbox-payload",
+        scope: buildHostedMailboxPayloadScope("inline"),
+        userId: item.userId,
+      }),
+      domain: "ingress",
+      lane: "mailbox-payload",
+      plaintext: new TextEncoder().encode(JSON.stringify(wake)),
+      rootKey,
+      rootKeyId,
+      scope: buildHostedMailboxPayloadScope("inline"),
+    }));
+    const recordedReturnTargets: Array<"imessage" | "telegram" | null> = [];
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({ putArtifact: async () => {} }),
+      readEncryptionEnvironment: () =>
+        createHostedMailboxEncryptionEnvironmentFromIngressRoot({
+          rootKey,
+          rootKeyId,
+        }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: item.userId,
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.importItem({
+      item,
+      payload: {
+        payloadCiphertext,
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        requestId: "request_bridge_return_target",
+        source: "inline",
+        status: "resolved",
+      },
+      route,
+    }, {
+      recordMessagingReturnTarget(target) {
+        recordedReturnTargets.push(target);
+      },
+    })).rejects.toThrow();
+
+    expect(recordedReturnTargets).toEqual(["telegram"]);
   });
 
 });
