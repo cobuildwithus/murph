@@ -1,8 +1,15 @@
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/provider-label";
+import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
+import {
+  buildMurphSmsHref,
+  MURPH_TELEGRAM_BOT_USERNAME,
+} from "@/src/lib/murph-contact-routing";
 
 type HostedDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
 
-const TELEGRAM_FALLBACK_URL = "https://t.me";
+const TELEGRAM_FALLBACK_USERNAME = MURPH_TELEGRAM_BOT_USERNAME;
+const MURPH_LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
+  "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
 
 export function GET(request: Request): Response {
   const url = new URL(request.url);
@@ -14,9 +21,16 @@ export function GET(request: Request): Response {
     return htmlResponse(buildInvalidTargetHtml(), 400);
   }
 
+  const providerLabel = resolveProviderLabel(url.searchParams.get("deviceSyncProvider"));
+  const messageBody = buildMessagingReturnMessageBody(providerLabel);
+
   return htmlResponse(buildMessagingReturnHtml({
-    destinationUrl: resolveMessagingReturnDestination(target),
-    providerLabel: resolveProviderLabel(url.searchParams.get("deviceSyncProvider")),
+    destinationUrl: resolveMessagingReturnDestination({
+      messageBody,
+      recipient: url.searchParams.get("recipient"),
+      target,
+    }),
+    providerLabel,
     serviceLabel: target === "imessage" ? "Messages" : "Telegram",
     status: resolveDeviceSyncStatus(url.searchParams.get("deviceSyncStatus")),
   }));
@@ -36,21 +50,63 @@ function readHostedDeviceSyncMessagingReturnTarget(
   return null;
 }
 
-function resolveMessagingReturnDestination(
-  target: HostedDeviceSyncMessagingReturnTarget,
-): string {
-  if (target === "imessage") {
-    return "sms:";
+function resolveMessagingReturnDestination(input: {
+  messageBody: string;
+  recipient: string | null;
+  target: HostedDeviceSyncMessagingReturnTarget;
+}): string {
+  if (input.target === "imessage") {
+    return buildMurphSmsHref({
+      body: input.messageBody,
+      murphPhoneNumber: resolveMessagingReturnPhoneRecipient(input.recipient),
+    });
   }
 
+  const query = new URLSearchParams({
+    text: input.messageBody,
+  });
+
+  return `https://t.me/${resolveMessagingReturnTelegramUsername()}?${query.toString()}`;
+}
+
+function resolveMessagingReturnPhoneRecipient(value: string | null): string | null {
+  const configuredRecipients = readConfiguredMurphPhoneNumbers();
+  const recipient = normalizePhoneNumber(value);
+
+  if (recipient && configuredRecipients.includes(recipient)) {
+    return recipient;
+  }
+
+  return configuredRecipients[0] ?? null;
+}
+
+function readConfiguredMurphPhoneNumbers(): string[] {
+  const configured = process.env[MURPH_LINQ_CONVERSATION_PHONE_NUMBERS_ENV];
+
+  if (!configured) {
+    return [];
+  }
+
+  const recipientPhones: string[] = [];
+
+  for (const value of configured.split(/[\n,]+/u)) {
+    const recipientPhone = normalizePhoneNumber(value);
+
+    if (recipientPhone && !recipientPhones.includes(recipientPhone)) {
+      recipientPhones.push(recipientPhone);
+    }
+  }
+
+  return recipientPhones;
+}
+
+function resolveMessagingReturnTelegramUsername(): string {
   const rawUsername = process.env.TELEGRAM_BOT_USERNAME?.trim() ?? "";
   const username = rawUsername.startsWith("@") ? rawUsername.slice(1) : rawUsername;
 
-  if (/^[A-Za-z0-9_]{5,32}$/u.test(username)) {
-    return `https://t.me/${username}`;
-  }
-
-  return TELEGRAM_FALLBACK_URL;
+  return /^[A-Za-z0-9_]{5,32}$/u.test(username)
+    ? username
+    : TELEGRAM_FALLBACK_USERNAME;
 }
 
 function resolveProviderLabel(value: string | null): string | null {
@@ -67,6 +123,10 @@ function resolveDeviceSyncStatus(value: string | null): "connected" | "error" | 
   }
 
   return null;
+}
+
+function buildMessagingReturnMessageBody(providerLabel: string | null): string {
+  return providerLabel ? `Just connected ${providerLabel}` : "Just connected my device";
 }
 
 function buildMessagingReturnHtml(input: {
@@ -93,7 +153,10 @@ function buildMessagingReturnHtml(input: {
     <p class="eyebrow">Device connection</p>
     <h1>${escapeHtml(title)}</h1>
     <p>Returning you to ${escapedService}. If it does not open automatically, use the button below.</p>
-    <a href="${escapedDestination}" rel="noreferrer">Open ${escapedService}</a>
+    <div class="actions">
+      <a href="${escapedDestination}" rel="noreferrer">Text Murph</a>
+      <a href="https://www.withmurph.ai" class="secondary">Go home</a>
+    </div>
   </main>
 </body>
 </html>`;
@@ -193,6 +256,11 @@ function pageStyle(): string {
       font-size: 15px;
       line-height: 1.55;
     }
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
     a {
       display: inline-flex;
       min-height: 44px;
@@ -212,6 +280,14 @@ function pageStyle(): string {
     a:focus-visible {
       outline: 2px solid #7a8c6e;
       outline-offset: 2px;
+    }
+    a.secondary {
+      background: transparent;
+      color: #5a6e32;
+      border: 1px solid #5a6e32;
+    }
+    a.secondary:hover {
+      background: rgba(90, 110, 50, 0.08);
     }
   </style>`;
 }
