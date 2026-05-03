@@ -1652,6 +1652,28 @@ describe("HostedPhoneAuth", () => {
     assert.deepEqual(pendingActions, ["continue", null]);
   });
 
+  it("keeps the pending action after successful finalization until the route changes", async () => {
+    const { runHostedPrivyFinalizationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+    let finalizationState: "idle" | "running" | "completed" = "idle";
+    const pendingActions: Array<string | null> = [];
+
+    await runHostedPrivyFinalizationAttempt({
+      action: "verify-code",
+      finalize: async () => {},
+      getFinalizationState: () => finalizationState,
+      setPendingAction(action) {
+        pendingActions.push(action);
+      },
+      updateFinalizationState(nextState) {
+        finalizationState = nextState;
+      },
+    });
+
+    assert.equal(finalizationState, "completed");
+    assert.deepEqual(pendingActions, ["verify-code"]);
+  });
+
   it("writes a queued confirm mutation when invite confirmation does not finish inline", async () => {
     const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
