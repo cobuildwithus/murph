@@ -832,7 +832,7 @@ experimentOnboarding:
     - pre_curfew_plus_next_morning_missing_log_check
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you end up doing the screen cutoff last night? Totally fine either way — I just want the experiment record to be accurate.
-    confirmationPrompt: Show the protocol key, bedtime anchor, curfew window, phone-location plan, exceptions, logging expectations, stop conditions, test plan, and reminder policy before creating the active experiment or any automations.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Screens keep the brain engaged\n\nPhones and laptops deliver light, novelty, decisions, messages, and social threat checks. Those inputs keep arousal up when sleep needs boring conditions."
   - "## Curfew removes 3 inputs\n\nNo screens cuts melanopic light, interactive content, and notification loops together. The mechanism is not blue light alone; it is lower sensory and cognitive activation."

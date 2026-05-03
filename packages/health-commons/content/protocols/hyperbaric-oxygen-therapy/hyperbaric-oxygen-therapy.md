@@ -849,7 +849,7 @@ experimentOnboarding:
       - "weekly_digest"
     weeklyDigestDefault: true
     missedLogFollowupCopy: "Did you complete today's prescribed HBOT session, and were there any ear, sinus, vision, anxiety, glucose, blood-pressure, or other safety notes to log?"
-    confirmationPrompt: "Show the protocol key, chosen testPlanId, safety-screen outcome, clinician/facility status, prescribed dose fields, baseline/intervention dates, session target/minimum, log fields, and reminder policy before creating the tracking experiment."
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Pressure dissolves oxygen\n\nHBOT raises pressure while oxygen fraction stays high. Hemoglobin is already near full; the extra dose comes from oxygen dissolving directly into plasma."
   - "## Gradient drives tissue delivery\n\nHigher plasma oxygen steepens the diffusion gradient into tissue. That matters most where ordinary delivery is limited, injured, or clinically targeted."

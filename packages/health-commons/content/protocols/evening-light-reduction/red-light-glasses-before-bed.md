@@ -453,7 +453,7 @@ experimentOnboarding:
     - pre_window_plus_next_morning_missing_log_check
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you end up wearing the glasses before bed last night? Totally fine either way; I just want the experiment record to be accurate.
-    confirmationPrompt: Summarize the exact protocol key, current page revision, run-spec revision, selected test plan, baseline/intervention dates, safety screen outcome, bedtime anchor, wear-window target, lens-confidence choice, logging expectations, stop conditions, and reminder policy before creating any active experiment or automation.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Blue-green light signals daytime\n\nEvening short-wavelength light hits melanopsin pathways and tells the clock to stay alert. Melatonin suppression is the signal glasses are trying to reduce."
   - "## Lens blocks retinal input\n\nAmber or red lenses work only when they meaningfully reduce melanopic light reaching the eye. Color alone is not dose; spectrum and fit matter."

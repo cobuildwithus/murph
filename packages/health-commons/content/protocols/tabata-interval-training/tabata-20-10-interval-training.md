@@ -823,7 +823,7 @@ experimentOnboarding:
       - reminder_policy
     weeklyDigestDefault: true
     missedLogFollowupCopy: You missed a Tabata log. Record whether the session happened, completed rounds, symptoms, and recovery rather than guessing later.
-    confirmationPrompt: Create a 7-day baseline plus 6-week Tabata 20/10 experiment with one conservative 8-round block twice weekly, safety stop rules, and recovery logging?
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## 20/10 compresses oxygen debt\n\n20 sec hard work spikes demand; 10 sec rest is too short to reset. Heart, lungs, and muscle chase a load that keeps stacking."
   - "## Rest fidelity is the protocol\n\nTrue rest preserves the contrast. Adding movements during rest turns the session into a different workout with different fatigue and safety profile."

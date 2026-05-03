@@ -481,7 +481,7 @@ experimentOnboarding:
     - session_reminders_plus_next_day_check
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did knee pain stay mild after the last rehab or run/walk session, and how did it feel the next morning?
-    confirmationPrompt: Before creating the experiment, show the safety screen outcome, starting branch, pain ceiling, weekly rehab/run windows, logging fields, stop conditions, and reminder policy.
+    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Irritation drops before capacity returns\n\nITBS rehab starts by reducing the running dose that keeps the lateral knee irritated. Pain falls when the tissue stops getting the same provocative stride load."
   - "## Hip control changes the stride\n\nGlute and hip-abductor work improves pelvis and femur control. Better lateral-hip control reduces how much load each stride dumps into the outer knee."
