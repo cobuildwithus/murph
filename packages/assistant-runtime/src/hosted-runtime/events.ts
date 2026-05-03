@@ -134,6 +134,7 @@ async function executeHostedSystemWake(input: {
     case "device-sync.wake":
       await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+        runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.vaultRoot,
