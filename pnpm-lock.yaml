@@ -270,6 +270,9 @@ importers:
       '@murphai/health-commons':
         specifier: workspace:*
         version: link:../health-commons
+      '@murphai/hosted-execution':
+        specifier: workspace:*
+        version: link:../hosted-execution
       '@murphai/inbox-services':
         specifier: workspace:*
         version: link:../inbox-services

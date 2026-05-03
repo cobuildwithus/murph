@@ -326,7 +326,7 @@ function buildHostedAssistantStubEnvClearances(): NodeJS.ProcessEnv {
 export function buildHostedLocalDeviceSyncProviderEnvClearances(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS) {
-    env[key] = undefined;
+    env[key] = "";
   }
   return env;
 }

@@ -348,8 +348,8 @@ describe("hosted local Linq webhook e2e", () => {
         : [];
     });
     expect(inputFiles).toEqual([]);
-    expect(assistantProviderRequests[0]?.body).toContain("raw/inbox/");
-    expect(assistantProviderRequests[0]?.body).toContain("lab-results.pdf");
+    expect(assistantProviderRequests[0]?.body).toContain("raw/assistant-input/");
+    expect(assistantProviderRequests[0]?.body).toContain("attachments/001.pdf");
     expect(assistantProviderRequests[0]?.body).toContain("storedPath");
     expectNoNativeAttachmentLeaks(assistantProviderRequests[0]?.body, [
       attachmentId,
