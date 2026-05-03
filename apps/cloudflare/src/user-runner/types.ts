@@ -44,6 +44,7 @@ export interface RunnerStateRecord {
   leaseGeneration: number;
   nextWakeAt: string | null;
   pendingNudge: boolean;
+  retryFailureCount: number;
   userId: string;
   workspaceInvocation: {
     attemptId: string;

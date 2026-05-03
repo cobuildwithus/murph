@@ -82,7 +82,8 @@ function initializeSchema(database: DatabaseSync): void {
       last_error_code TEXT,
       last_invocation_at TEXT,
       next_wake_at TEXT,
-      pending_nudge INTEGER NOT NULL DEFAULT 0
+      pending_nudge INTEGER NOT NULL DEFAULT 0,
+      retry_failure_count INTEGER NOT NULL DEFAULT 0
     );
   `);
 }

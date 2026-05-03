@@ -8,6 +8,7 @@ import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   createDefaultRunnerMetaRow,
   projectRunnerStateRecord,
+  normalizeRetryFailureCount,
   resolveRunnerNextWakeAt,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
@@ -194,6 +195,7 @@ export class RunnerStateStore {
       };
     }
     this.clearLastErrorMetaSync(meta);
+    meta.retry_failure_count = 0;
     meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
 
@@ -220,6 +222,7 @@ export class RunnerStateStore {
     }
     meta.last_error_at = input.finishedAt ?? new Date().toISOString();
     meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
+    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
     this.writeMetaRowSync(meta);
 
     return {
@@ -233,6 +236,7 @@ export class RunnerStateStore {
   } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     meta.pending_nudge = 1;
+    meta.retry_failure_count = 0;
     meta.next_wake_at = resolveRunnerNextWakeAt({
       preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
     });
@@ -418,6 +422,7 @@ export class RunnerStateStore {
     meta.last_error_code = deriveHostedExecutionErrorCode(
       new Error("Hosted workspace invocation timed out."),
     );
+    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
     this.writeMetaRowSync(meta);
 
     return {
@@ -496,7 +501,8 @@ export class RunnerStateStore {
         last_error_code,
         last_invocation_at,
         next_wake_at,
-        pending_nudge
+        pending_nudge,
+        retry_failure_count
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -525,8 +531,9 @@ export class RunnerStateStore {
         last_error_code,
         last_invocation_at,
         next_wake_at,
-        pending_nudge
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pending_nudge,
+        retry_failure_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
@@ -542,6 +549,7 @@ export class RunnerStateStore {
       meta.last_invocation_at,
       meta.next_wake_at,
       meta.pending_nudge,
+      normalizeRetryFailureCount(meta.retry_failure_count),
     );
   }
 

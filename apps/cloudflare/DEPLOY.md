@@ -88,6 +88,10 @@ Core execution tuning:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 
+`CF_MAX_EVENT_ATTEMPTS` renders to `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` and is
+the per-user Durable Object consecutive failure cap. Exhausted runners stop
+scheduling retry alarms until fresh nudge/manual input resets the counter.
+
 Observability:
 
 - `CF_LOG_HEAD_SAMPLING_RATE` defaults to `1`

@@ -23,7 +23,8 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       last_error_code TEXT,
       last_invocation_at TEXT,
       next_wake_at TEXT,
-      pending_nudge INTEGER NOT NULL DEFAULT 0
+      pending_nudge INTEGER NOT NULL DEFAULT 0,
+      retry_failure_count INTEGER NOT NULL DEFAULT 0
     )
   `);
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_id", "TEXT");
@@ -44,6 +45,12 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     "pending_nudge",
     "INTEGER NOT NULL DEFAULT 0",
   );
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
+    "retry_failure_count",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
   assertRunnerStateTableAbsent(sql, "runner_bundle_slots");
   assertRunnerStateTableColumns(sql, "runner_meta", {
     requiredColumns: [
@@ -62,6 +69,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "last_invocation_at",
       "next_wake_at",
       "pending_nudge",
+      "retry_failure_count",
     ],
   });
 }
