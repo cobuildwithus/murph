@@ -101,7 +101,7 @@ test("activating success page explains when vault and assistant setup is still r
   assert.match(markup, /We&#x27;ll keep checking automatically/);
 });
 
-test("checkout-stage success page stays blank while the returned session reconciles", () => {
+test("checkout-stage success page stays blank before redirecting returned sessions", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("checkout"),
@@ -140,7 +140,39 @@ test("checkout-stage success page reconciles the returned session once and redir
   await view.cleanup();
 });
 
-test("activating success page reconciles the returned session when webhooks won the race", async () => {
+test("checkout-stage success page redirects home before returned session reconciliation completes", async () => {
+  let resolveFetch!: (response: Response) => void;
+  const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+    () =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("checkout"),
+  });
+  await act(async () => {});
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.container.textContent ?? "").toBe("");
+
+  resolveFetch(
+    new Response(JSON.stringify(createStatus("active")), {
+      status: 200,
+    }),
+  );
+
+  await act(async () => {});
+
+  expect(view.routerReplace).toHaveBeenCalledTimes(1);
+
+  await view.cleanup();
+});
+
+test("activating success page reconciles the returned session and redirects home", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify(createStatus("activating")), {
       status: 200,
@@ -161,7 +193,7 @@ test("activating success page reconciles the returned session when webhooks won 
     }),
     method: "POST",
   }));
-  expect(view.routerReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -192,7 +224,7 @@ test("active success page reconciles the returned session when the invite is alr
   await view.cleanup();
 });
 
-test("active success page waits for the returned session reconciliation before redirecting home", async () => {
+test("active success page redirects home without waiting for returned session reconciliation", async () => {
   let resolveFetch!: (response: Response) => void;
   const fetchMock = vi.fn<typeof fetch>().mockImplementation(
     () =>
@@ -208,7 +240,7 @@ test("active success page waits for the returned session reconciliation before r
   await act(async () => {});
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.routerReplace).not.toHaveBeenCalled();
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.container.textContent ?? "").toBe("");
 
   resolveFetch(
@@ -219,7 +251,7 @@ test("active success page waits for the returned session reconciliation before r
 
   await act(async () => {});
 
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledTimes(1);
 
   await view.cleanup();
 });
@@ -249,7 +281,7 @@ test("pending success page shows email support after the setup delay", async () 
   vi.stubGlobal("fetch", fetchMock);
 
   const view = await renderJoinInviteSuccessClientForEffects({
-    initialStatus: createStatus("activating"),
+    initialStatus: createUnmatchedStatus("activating"),
   });
   await act(async () => {});
 
@@ -389,6 +421,21 @@ function createStatus(
     },
     messagingSetupRequired: false,
     stage,
+  };
+}
+
+function createUnmatchedStatus(
+  stage: HostedInviteStatusPayload["stage"],
+): HostedInviteStatusPayload {
+  const status = createStatus(stage);
+
+  return {
+    ...status,
+    session: {
+      ...status.session,
+      authenticated: false,
+      matchesInvite: false,
+    },
   };
 }
 
