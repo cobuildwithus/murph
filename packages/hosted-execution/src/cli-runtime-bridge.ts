@@ -1,3 +1,4 @@
+import type { DeviceSyncAccountRecord } from "@murphai/device-syncd/client";
 import { parseHostedExecutionDeviceSyncConnectLinkResponse } from "@murphai/device-syncd/hosted-runtime";
 import { z } from "zod";
 
@@ -5,6 +6,7 @@ export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
 export const HOSTED_CLI_BRIDGE_URL_ENV = "MURPH_HOSTED_CLI_BRIDGE_URL";
 export const HOSTED_CLI_BRIDGE_TOKEN_ENV = "MURPH_HOSTED_CLI_BRIDGE_TOKEN";
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
+export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
 export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
 export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
@@ -29,14 +31,67 @@ const hostedCliDeviceConnectLinkRequestSchema = z.object({
   returnTo: z.string().trim().min(1).nullable().optional(),
 }).strict();
 
+const hostedCliDeviceAccountListRequestSchema = z.object({
+  provider: z.string().trim().min(1).nullable().optional(),
+}).strict();
+
+const hostedCliDeviceSyncAccountStatusSchema = z.enum([
+  "active",
+  "reauthorization_required",
+  "disconnected",
+]);
+
+const hostedCliDeviceSyncAccountSetupPhaseSchema = z.enum([
+  "pending_link",
+  "link_returned",
+  "source_confirmed",
+  "failed",
+]);
+
+const hostedCliDeviceSyncAccountSchema = z.object({
+  accessTokenExpiresAt: z.string().min(1).nullable().optional(),
+  connectedAt: z.string().min(1),
+  createdAt: z.string().min(1),
+  displayName: z.string().min(1).nullable(),
+  externalAccountId: z.string().min(1),
+  id: z.string().min(1),
+  lastErrorCode: z.string().min(1).nullable(),
+  lastErrorMessage: z.string().min(1).nullable(),
+  lastSyncCompletedAt: z.string().min(1).nullable(),
+  lastSyncErrorAt: z.string().min(1).nullable(),
+  lastSyncStartedAt: z.string().min(1).nullable(),
+  lastWebhookAt: z.string().min(1).nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  nextReconcileAt: z.string().min(1).nullable(),
+  provider: z.string().min(1),
+  scopes: z.array(z.string().min(1)),
+  setupExpiresAt: z.string().min(1).nullable().optional(),
+  setupPhase: hostedCliDeviceSyncAccountSetupPhaseSchema.nullable().optional(),
+  status: hostedCliDeviceSyncAccountStatusSchema,
+  updatedAt: z.string().min(1),
+}).strict();
+
+const hostedCliDeviceAccountListResponseSchema = z.object({
+  accounts: z.array(hostedCliDeviceSyncAccountSchema),
+  provider: z.string().min(1).nullable(),
+}).strict();
+
 export type HostedCliDeviceConnectLinkRequest =
   z.infer<typeof hostedCliDeviceConnectLinkRequestSchema>;
+
+export type HostedCliDeviceAccountListRequest =
+  z.infer<typeof hostedCliDeviceAccountListRequestSchema>;
 
 export interface HostedCliDeviceConnectLinkResponse {
   authorizationUrl: string;
   expiresAt: string;
   provider: string;
   providerLabel: string;
+}
+
+export interface HostedCliDeviceAccountListResponse {
+  accounts: DeviceSyncAccountRecord[];
+  provider: string | null;
 }
 
 export interface HostedCliBridgeClientConfig {
@@ -97,6 +152,12 @@ export function parseHostedCliDeviceConnectLinkRequest(
   return hostedCliDeviceConnectLinkRequestSchema.parse(value);
 }
 
+export function parseHostedCliDeviceAccountListRequest(
+  value: unknown,
+): HostedCliDeviceAccountListRequest {
+  return hostedCliDeviceAccountListRequestSchema.parse(value);
+}
+
 export async function requestHostedCliDeviceConnectLink(input: {
   bridge: HostedCliBridgeClientConfig;
   connectTarget: string;
@@ -104,17 +165,52 @@ export async function requestHostedCliDeviceConnectLink(input: {
   returnTo?: string | null;
   timeoutMs?: number;
 }): Promise<HostedCliDeviceConnectLinkResponse> {
+  const payload = await requestHostedCliBridgeJson({
+    body: {
+      connectTarget: input.connectTarget,
+      ...(input.returnTo ? { returnTo: input.returnTo } : {}),
+    },
+    bridge: input.bridge,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return parseHostedExecutionDeviceSyncConnectLinkResponse(payload);
+}
+
+export async function requestHostedCliDeviceAccountList(input: {
+  bridge: HostedCliBridgeClientConfig;
+  fetchImpl?: typeof fetch;
+  provider?: string | null;
+  timeoutMs?: number;
+}): Promise<HostedCliDeviceAccountListResponse> {
+  const payload = await requestHostedCliBridgeJson({
+    body: input.provider ? { provider: input.provider } : {},
+    bridge: input.bridge,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return hostedCliDeviceAccountListResponseSchema.parse(payload);
+}
+
+async function requestHostedCliBridgeJson(input: {
+  body: Record<string, unknown>;
+  bridge: HostedCliBridgeClientConfig;
+  fetchImpl?: typeof fetch;
+  path: string;
+  timeoutMs?: number;
+}): Promise<unknown> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const signal = AbortSignal.timeout(input.timeoutMs ?? HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetchImpl(
-      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, ensureTrailingSlash(input.bridge.url)),
+      new URL(input.path, ensureTrailingSlash(input.bridge.url)),
       {
-        body: JSON.stringify({
-          connectTarget: input.connectTarget,
-          ...(input.returnTo ? { returnTo: input.returnTo } : {}),
-        }),
+        body: JSON.stringify(input.body),
         headers: {
           authorization: `Bearer ${input.bridge.token}`,
           "content-type": "application/json",
@@ -142,7 +238,7 @@ export async function requestHostedCliDeviceConnectLink(input: {
     throw new HostedCliBridgeRequestError(error.code, error.message);
   }
 
-  return parseHostedExecutionDeviceSyncConnectLinkResponse(payload);
+  return payload;
 }
 
 function createHostedCliBridgeTransportError(

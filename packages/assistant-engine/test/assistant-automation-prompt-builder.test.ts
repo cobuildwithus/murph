@@ -437,7 +437,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     )
   })
 
-  it('renders projection failure context when inbox enrichment is unavailable', () => {
+  it('does not render attachment evidence context for text-only projection failures', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: {
@@ -453,13 +453,11 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain('Message evidence:')
-    expect(result.prompt).toContain(
-      'attachment evidence is unavailable (conversation-import.projection-failed); use the staged message text and available metadata only.',
-    )
     expect(result.prompt).toContain(
       'Message text:\nPlease look at the voice memo when it is available.',
     )
+    expect(result.prompt).not.toContain('Message evidence:')
+    expect(result.prompt).not.toContain('attachment evidence')
   })
 
   it('renders minimized assistant-input attachment descriptors without inbox projection', () => {
@@ -757,7 +755,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(promptBuilderMocks.buildAssistantInputAttachmentModelBundles).not.toHaveBeenCalled()
   })
 
-  it('prepares staged text with projection pending context when no attachment bundle is available', async () => {
+  it('prepares staged text without attachment context for text-only pending projections', async () => {
     const result = await prepareAssistantAutoReplyInput(
       [
         createPromptInput({
@@ -775,11 +773,9 @@ describe('prepareAssistantAutoReplyInput', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prepared input.')
     }
-    expect(result.prompt).toContain('Message evidence:')
-    expect(result.prompt).toContain(
-      'attachment evidence is pending; use the staged message text and available metadata only.',
-    )
     expect(result.prompt).toContain('Message text:\nAudio note incoming.')
+    expect(result.prompt).not.toContain('Message evidence:')
+    expect(result.prompt).not.toContain('attachment evidence')
   })
 
   it('renders projection not-attempted context distinctly from pending', async () => {
@@ -830,9 +826,9 @@ describe('prepareAssistantAutoReplyInput', () => {
     if (messageResult.kind !== 'ready') {
       throw new Error('Expected a ready prepared input.')
     }
-    expect(messageResult.prompt).toContain(
-      'attachment evidence was not attempted; use the staged message text and available metadata only.',
-    )
+    expect(messageResult.prompt).toContain('Message text:\nPhoto incoming.')
+    expect(messageResult.prompt).not.toContain('Message evidence:')
+    expect(messageResult.prompt).not.toContain('attachment evidence')
   })
 
   it('prepares metadata/status input when parser work is still pending', async () => {
