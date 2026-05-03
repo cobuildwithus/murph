@@ -91,6 +91,12 @@ export interface LoadGeneratedHealthCommonsWebArtifactOptions {
   generatedWebRoot?: string | URL;
 }
 
+export interface HealthCommonsAssistantProtocolIndexEntry {
+  category: string;
+  routeId: string;
+  title: string;
+}
+
 export interface HealthCommonsCompactProtocol {
   cautionLevel: string | null;
   doseSignature: string;
@@ -393,6 +399,18 @@ export function getGeneratedHealthCommonsWebExperimentIndex(
 
   cachedGeneratedWebExperimentIndex ??= loadGeneratedHealthCommonsWebExperimentIndex();
   return cachedGeneratedWebExperimentIndex;
+}
+
+export function listGeneratedAssistantProtocolIndexEntries(
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsAssistantProtocolIndexEntry[] {
+  return getGeneratedHealthCommonsWebExperimentIndex(options).experiments
+    .filter((entry) => entry.status !== "deprecated")
+    .map((entry) => ({
+      category: entry.category,
+      routeId: entry.routeId,
+      title: entry.title,
+    }));
 }
 
 export function getGeneratedHealthCommonsWebBiomarkerIndex(

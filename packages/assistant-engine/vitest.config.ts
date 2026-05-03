@@ -7,6 +7,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
   "@murphai/gateway-core": "../gateway-core/src/index.ts",
   "@murphai/gateway-local": "../gateway-local/src/index.ts",
+  "@murphai/health-commons": "../health-commons/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",
   "@murphai/inboxd": "../inboxd/src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/package.json",

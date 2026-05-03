@@ -92,7 +92,7 @@ describe("health commons catalog", () => {
     }
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:9e0132d352b6e4020386bf2110962364a43e781675b40597fa0325faf997a725",
+      "sha256:adba9e327a9841a382e1572dfa083395558174487031a5564d35fa015caa6c68",
     );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
@@ -123,7 +123,7 @@ describe("health commons catalog", () => {
       },
       revision: {
         runSpecRevisionId:
-          "sha256:7e68367d96fa788d2e6e01890be358b983775b4d996870668a35998c0d0c8afd",
+          "sha256:388cfa7a6ab36b500684fce89694590458a152e3e23d51bf4b8bea61187e5041",
       },
     });
     expect(redLightProtocol?.expectedSignalDescriptions?.map((signal) => signal.biomarkerKey)).toEqual(expect.arrayContaining([
