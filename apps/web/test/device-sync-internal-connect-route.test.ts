@@ -4,7 +4,9 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
+  getPrisma: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
   startConnection: vi.fn(),
 }));
 
@@ -14,6 +16,14 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 type InternalDeviceSyncConnectLinkRouteModule = typeof import(
@@ -41,7 +51,9 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("OURA_CLIENT_SECRET", "");
     vi.stubEnv("STRAVA_CLIENT_ID", "");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "");
+    mocks.getPrisma.mockReturnValue({ hostedMemberRouting: {} });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       startConnection: mocks.startConnection,
     });
@@ -143,7 +155,7 @@ describe("device sync internal connect-link route", () => {
 
   it.each([
     {
-      expectedReturnTo: "/api/device-sync/messaging-return?target=imessage",
+      expectedReturnTo: "/api/device-sync/messaging-return?target=imessage&recipient=%2B15550100001",
       messagingReturnTarget: "imessage",
     },
     {
@@ -153,6 +165,10 @@ describe("device sync internal connect-link route", () => {
   ] as const)(
     "uses the $messagingReturnTarget messaging return route when requested by the signed callback",
     async ({ expectedReturnTo, messagingReturnTarget }) => {
+      mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
+        linqRecipientPhone: "+15550100001",
+      });
+
       const response = await internalDeviceSyncConnectLinkRoute.POST(
         new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
           body: JSON.stringify({ messagingReturnTarget }),
@@ -175,6 +191,14 @@ describe("device sync internal connect-link route", () => {
         expectedReturnTo,
         { sourceProviderSlug: null },
       );
+      if (messagingReturnTarget === "imessage") {
+        expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+          memberId: "member_123",
+          prisma: { hostedMemberRouting: {} },
+        });
+      } else {
+        expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+      }
     },
   );
 

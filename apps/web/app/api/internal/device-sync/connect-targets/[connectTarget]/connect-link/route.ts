@@ -7,11 +7,13 @@ import {
 } from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO = "/settings?tab=wearables";
 const HOSTED_ASSISTANT_DEVICE_CONNECT_MESSAGING_RETURN_TO = {
@@ -146,7 +148,7 @@ async function startHostedDeviceConnection(
     return await controlPlane.startConnection(
       userId,
       provider,
-      resolveHostedDeviceConnectReturnTo(messagingReturnTarget),
+      await resolveHostedDeviceConnectReturnTo(userId, messagingReturnTarget),
       { sourceProviderSlug },
     );
   } catch (error) {
@@ -214,12 +216,30 @@ function readHostedDeviceConnectMessagingReturnTarget(
   });
 }
 
-function resolveHostedDeviceConnectReturnTo(
+async function resolveHostedDeviceConnectReturnTo(
+  userId: string,
   messagingReturnTarget: HostedAssistantDeviceConnectMessagingReturnTarget | null,
-): string {
-  return messagingReturnTarget
+): Promise<string> {
+  const returnTo = messagingReturnTarget
     ? HOSTED_ASSISTANT_DEVICE_CONNECT_MESSAGING_RETURN_TO[messagingReturnTarget]
     : HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO;
+
+  if (messagingReturnTarget !== "imessage") {
+    return returnTo;
+  }
+
+  const routing = await readHostedMemberRoutingState({
+    memberId: userId,
+    prisma: getPrisma(),
+  });
+
+  if (!routing?.linqRecipientPhone) {
+    return returnTo;
+  }
+
+  const url = new URL(returnTo, "https://murph.internal");
+  url.searchParams.set("recipient", routing.linqRecipientPhone);
+  return `${url.pathname}${url.search}`;
 }
 
 function remapHostedDeviceConnectBackendSetupError(

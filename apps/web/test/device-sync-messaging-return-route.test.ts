@@ -2,10 +2,19 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { GET } from "../app/api/device-sync/messaging-return/route";
 
+const originalLinqConversationPhoneNumbers =
+  process.env.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS;
 const originalTelegramBotUsername = process.env.TELEGRAM_BOT_USERNAME;
 
 describe("device sync messaging return route", () => {
   afterEach(() => {
+    if (originalLinqConversationPhoneNumbers === undefined) {
+      delete process.env.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS;
+    } else {
+      process.env.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS =
+        originalLinqConversationPhoneNumbers;
+    }
+
     if (originalTelegramBotUsername === undefined) {
       delete process.env.TELEGRAM_BOT_USERNAME;
     } else {
@@ -13,7 +22,10 @@ describe("device sync messaging return route", () => {
     }
   });
 
-  it("attempts to return Linq/iMessage-originated device links to Messages", async () => {
+  it("returns Linq/iMessage-originated device links to the Murph Messages line with a prefilled status", async () => {
+    process.env.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS =
+      "+15550100001,+15550100002";
+
     const response = GET(new Request(
       "https://join.example.test/api/device-sync/messaging-return?target=imessage&deviceSyncStatus=connected&deviceSyncProvider=whoop",
     ));
@@ -22,14 +34,44 @@ describe("device sync messaging return route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     const html = await response.text();
-    expect(html).toContain('<meta http-equiv="refresh" content="0;url=sms:">');
-    expect(html).toContain('href="sms:"');
+    expect(html).toContain(
+      '<meta http-equiv="refresh" content="0;url=sms:+15550100001?body=Just%20connected%20WHOOP">',
+    );
+    expect(html).toContain('href="sms:+15550100001?body=Just%20connected%20WHOOP"');
     expect(html).toContain("WHOOP is connected");
-    expect(html).toContain("Open Messages");
     expect(html).not.toContain("<script");
   });
 
-  it("attempts to return Telegram-originated device links to the configured bot", async () => {
+  it("uses the member-specific Murph Messages line when the signed connect-link route provides it", async () => {
+    process.env.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS =
+      "+15550100001,+15550100999";
+
+    const response = GET(new Request(
+      "https://join.example.test/api/device-sync/messaging-return?target=imessage&recipient=%2B15550100999&deviceSyncStatus=connected&deviceSyncProvider=oura",
+    ));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain(
+      '<meta http-equiv="refresh" content="0;url=sms:+15550100999?body=Just%20connected%20Oura">',
+    );
+    expect(html).toContain('href="sms:+15550100999?body=Just%20connected%20Oura"');
+  });
+
+  it("ignores arbitrary Messages recipients that are not configured Murph lines", async () => {
+    process.env.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS = "+15550100001";
+
+    const response = GET(new Request(
+      "https://join.example.test/api/device-sync/messaging-return?target=imessage&recipient=%2B15550999999&deviceSyncProvider=oura",
+    ));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('href="sms:+15550100001?body=Just%20connected%20Oura"');
+    expect(html).not.toContain("+15550999999");
+  });
+
+  it("attempts to return Telegram-originated device links to the configured bot with a prefilled status", async () => {
     process.env.TELEGRAM_BOT_USERNAME = "@murph_bot";
 
     const response = GET(new Request(
@@ -38,13 +80,12 @@ describe("device sync messaging return route", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('content="0;url=https://t.me/murph_bot"');
-    expect(html).toContain('href="https://t.me/murph_bot"');
+    expect(html).toContain('content="0;url=https://t.me/murph_bot?text=Just+connected+Oura"');
+    expect(html).toContain('href="https://t.me/murph_bot?text=Just+connected+Oura"');
     expect(html).toContain("Oura is connected");
-    expect(html).toContain("Open Telegram");
   });
 
-  it("falls back to Telegram when a configured bot username is unavailable", async () => {
+  it("falls back to the Murph Telegram bot when a configured bot username is unavailable", async () => {
     delete process.env.TELEGRAM_BOT_USERNAME;
 
     const response = GET(new Request(
@@ -53,8 +94,8 @@ describe("device sync messaging return route", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('content="0;url=https://t.me"');
-    expect(html).toContain('href="https://t.me"');
+    expect(html).toContain('content="0;url=https://t.me/withmurph_bot?text=Just+connected+my+device"');
+    expect(html).toContain('href="https://t.me/withmurph_bot?text=Just+connected+my+device"');
   });
 
   it("ignores unsafe provider display values on supported targets", async () => {
