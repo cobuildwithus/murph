@@ -333,78 +333,77 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...(hostedCliBridge?.env ?? {}),
     };
 
-    const result = await raceHostedRuntimeLiveness(
-      (async () => {
-        try {
-          return await withHostedProcessEnvironment(
-            {
-              envOverrides: runtimeEnv,
-              operatorHomeRoot: restored.operatorHomeRoot,
-              vaultRoot: restored.vaultRoot,
-            },
-            async () =>
-              runHostedWorkspaceUntilIdleOrBudget({
-                checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-                  createSnapshot: createLivenessGuardedCheckpointSnapshot,
-                  metadata: {
-                    attemptId: input.request.attemptId,
-                    expectedWorkspaceVersion: input.request.workspaceVersion,
-                    leaseGeneration: input.request.leaseGeneration,
-                    nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
-                    nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
-                  },
-                }),
-                expectedUserId: input.request.userId,
-                importItem: (item) =>
-                  mailboxBudget.importItem(
-                    item,
-                    async (importItem, context) => {
-                      assertRuntimeLiveness();
-                      const outcome = await options.importItem(importItem, context);
-                      assertRuntimeLiveness();
-                      return outcome;
-                    },
-                    {
-                      signal: livenessAbortController.signal,
-                    },
-                  ),
-                limitPerLane: mailboxBudget.fetchLimitPerLane,
-                platform: {
-                  ...guardedRuntime.platform,
-                  mailboxPort: guardedMailboxPort,
-                  workspacePort: guardedWorkspacePort,
-                },
-                requestId,
-                runtimeLogContext: {
+    let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
+    try {
+      result = await raceHostedRuntimeLiveness(
+        withHostedProcessEnvironment(
+          {
+            envOverrides: runtimeEnv,
+            operatorHomeRoot: restored.operatorHomeRoot,
+            vaultRoot: restored.vaultRoot,
+          },
+          async () =>
+            runHostedWorkspaceUntilIdleOrBudget({
+              checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+                createSnapshot: createLivenessGuardedCheckpointSnapshot,
+                metadata: {
                   attemptId: input.request.attemptId,
+                  expectedWorkspaceVersion: input.request.workspaceVersion,
                   leaseGeneration: input.request.leaseGeneration,
-                  workspaceVersion: input.request.workspaceVersion,
+                  nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
+                  nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
                 },
-                prepareAssistantEnrichment: () =>
-                  prepareHostedInboxEnrichmentRuntime({
-                    rebuild: true,
-                    requestId,
-                    vaultRoot: restored.vaultRoot,
-                  }),
-                runAssistantPhase: (phaseInput) =>
-                  (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-                    ...phaseInput,
-                    request: input.request,
-                    restored,
-                    runtime: guardedRuntime,
-                    runtimeEnv,
-                    signal: livenessAbortController.signal,
-                  }),
-                vaultRoot: restored.vaultRoot,
-                workspace: workspaceRead.workspace,
               }),
-          );
-        } finally {
-          await hostedCliBridge?.stop();
-        }
-      })(),
-      livenessAbortController.signal,
-    );
+              expectedUserId: input.request.userId,
+              importItem: (item) =>
+                mailboxBudget.importItem(
+                  item,
+                  async (importItem, context) => {
+                    assertRuntimeLiveness();
+                    const outcome = await options.importItem(importItem, context);
+                    assertRuntimeLiveness();
+                    return outcome;
+                  },
+                  {
+                    signal: livenessAbortController.signal,
+                  },
+                ),
+              limitPerLane: mailboxBudget.fetchLimitPerLane,
+              platform: {
+                ...guardedRuntime.platform,
+                mailboxPort: guardedMailboxPort,
+                workspacePort: guardedWorkspacePort,
+              },
+              requestId,
+              runtimeLogContext: {
+                attemptId: input.request.attemptId,
+                leaseGeneration: input.request.leaseGeneration,
+                workspaceVersion: input.request.workspaceVersion,
+              },
+              prepareAssistantEnrichment: () =>
+                prepareHostedInboxEnrichmentRuntime({
+                  rebuild: true,
+                  requestId,
+                  vaultRoot: restored.vaultRoot,
+                }),
+              runAssistantPhase: (phaseInput) =>
+                (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                  ...phaseInput,
+                  request: input.request,
+                  restored,
+                  runtime: guardedRuntime,
+                  runtimeEnv,
+                  signal: livenessAbortController.signal,
+                }),
+              vaultRoot: restored.vaultRoot,
+              workspace: workspaceRead.workspace,
+            }),
+        ),
+        livenessAbortController.signal,
+      );
+    } finally {
+      await hostedCliBridge?.stop();
+    }
     assertRuntimeLiveness();
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace

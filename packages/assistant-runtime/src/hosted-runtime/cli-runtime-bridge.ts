@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
@@ -13,6 +14,7 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_CLI_BRIDGE_BODY_LIMIT_BYTES = 8192;
+const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface HostedCliRuntimeBridge {
   env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
@@ -28,12 +30,22 @@ export async function startHostedCliRuntimeBridge(input: {
   }
 
   const token = randomBytes(32).toString("base64url");
+  const sockets = new Set<Socket>();
   const server = createServer((request, response) => {
     void handleHostedCliBridgeRequest({
       deviceSyncPort,
       request,
       response,
       token,
+    });
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.setTimeout(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS, () => {
+      socket.destroy();
+    });
+    socket.once("close", () => {
+      sockets.delete(socket);
     });
   });
 
@@ -47,7 +59,7 @@ export async function startHostedCliRuntimeBridge(input: {
 
   const address = server.address();
   if (!address || typeof address === "string") {
-    await closeHostedCliBridgeServer(server);
+    await closeHostedCliBridgeServer(server, sockets);
     throw new TypeError("Hosted CLI bridge failed to bind a loopback TCP port.");
   }
 
@@ -56,7 +68,7 @@ export async function startHostedCliRuntimeBridge(input: {
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
       [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
     },
-    stop: () => closeHostedCliBridgeServer(server),
+    stop: () => closeHostedCliBridgeServer(server, sockets),
   };
 }
 
@@ -66,6 +78,18 @@ async function handleHostedCliBridgeRequest(input: {
   response: ServerResponse;
   token: string;
 }): Promise<void> {
+  let requestTimedOut = false;
+  input.request.setTimeout(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS, () => {
+    requestTimedOut = true;
+    writeHostedCliBridgeError(
+      input.response,
+      408,
+      "HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT",
+      "Hosted CLI bridge request timed out.",
+    );
+    input.request.destroy();
+  });
+
   try {
     if (input.request.method !== "POST") {
       writeHostedCliBridgeError(
@@ -125,11 +149,14 @@ async function handleHostedCliBridgeRequest(input: {
       );
     }
   } catch (error) {
+    if (requestTimedOut || input.response.writableEnded) {
+      return;
+    }
     writeHostedCliBridgeError(
       input.response,
       400,
       "HOSTED_CLI_BRIDGE_REQUEST_INVALID",
-      error instanceof Error ? error.message : "Hosted CLI bridge request is invalid.",
+      "Hosted CLI bridge request is invalid.",
     );
   }
 }
@@ -169,6 +196,10 @@ function writeHostedCliBridgeJson(
   statusCode: number,
   payload: unknown,
 ): void {
+  if (response.writableEnded) {
+    return;
+  }
+
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
   });
@@ -189,7 +220,14 @@ function writeHostedCliBridgeError(
   });
 }
 
-function closeHostedCliBridgeServer(server: ReturnType<typeof createServer>): Promise<void> {
+function closeHostedCliBridgeServer(
+  server: ReturnType<typeof createServer>,
+  sockets: Set<Socket>,
+): Promise<void> {
+  for (const socket of sockets) {
+    socket.destroy();
+  }
+
   if (!server.listening) {
     return Promise.resolve();
   }
