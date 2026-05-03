@@ -83,7 +83,7 @@ export function HostedInvitePhoneAuth({
   const inviteShortcutActive =
     !manualEntryVisible && savedPhoneHint !== null;
   const inviteShortcutDisabled =
-    sendCodeGated || controller.pendingAction !== null;
+    sendCodeGated || controller.pendingAction !== null || queuedInvitePhoneCodeSend !== null;
 
   useEffect(() => {
     void flushPendingInvitePhoneCodeMutation(inviteCode);
@@ -230,7 +230,7 @@ export function HostedInvitePhoneAuth({
       {showMaskedPhoneHint && savedPhoneHint ? (
           <HostedInviteMaskedPhoneStep
             disabled={inviteShortcutDisabled}
-            pendingAction={controller.pendingAction}
+            pendingAction={queuedInvitePhoneCodeSend ? "send-code" : controller.pendingAction}
             phoneHint={savedPhoneHint}
             onSendCode={handleInviteSendCode}
             onUseDifferentNumber={handleUseDifferentNumber}
