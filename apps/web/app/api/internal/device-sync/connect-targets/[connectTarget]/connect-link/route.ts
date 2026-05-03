@@ -7,22 +7,17 @@ import {
 } from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
-import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { getPrisma } from "@/src/lib/prisma";
 
-const HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO = "/settings?tab=wearables";
-const HOSTED_ASSISTANT_DEVICE_CONNECT_MESSAGING_RETURN_TO = {
-  imessage: "/api/device-sync/messaging-return?target=imessage",
-  telegram: "/api/device-sync/messaging-return?target=telegram",
-} as const;
+const HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO =
+  "/device-sync/connect/complete?source=assistant";
 
 type HostedAssistantDeviceConnectMessagingReturnTarget =
-  keyof typeof HOSTED_ASSISTANT_DEVICE_CONNECT_MESSAGING_RETURN_TO;
+  "imessage" | "telegram";
 
 const HOSTED_ASSISTANT_DEVICE_CONNECT_UNAVAILABLE_ERROR = {
   code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
@@ -90,9 +85,10 @@ export const POST = withJsonError(async (
     const result = await startHostedDeviceConnection(
       request,
       userId,
+      target.connectSourceId,
+      target.connectTarget,
       target.provider,
       target.sourceProviderSlug ?? null,
-      messagingReturnTarget,
     );
     logHostedDeviceConnectRouteDiagnostic({
       expiresAtPresent: Boolean(result.expiresAt),
@@ -139,17 +135,18 @@ async function requireHostedDeviceConnectCallbackRequest(request: Request): Prom
 async function startHostedDeviceConnection(
   request: Request,
   userId: string,
+  connectSourceId: string,
+  connectTarget: string,
   provider: string,
   sourceProviderSlug: string | null,
-  messagingReturnTarget: HostedAssistantDeviceConnectMessagingReturnTarget | null,
 ) {
   try {
     const controlPlane = createHostedDeviceSyncControlPlane(request);
     return await controlPlane.startConnection(
       userId,
       provider,
-      await resolveHostedDeviceConnectReturnTo(userId, messagingReturnTarget),
-      { sourceProviderSlug },
+      buildHostedDeviceConnectCompletionReturnTo({ connectSourceId, connectTarget }),
+      { connectSourceId, connectTarget, sourceProviderSlug },
     );
   } catch (error) {
     remapHostedDeviceConnectBackendSetupError(error, "control_plane_setup");
@@ -216,29 +213,13 @@ function readHostedDeviceConnectMessagingReturnTarget(
   });
 }
 
-async function resolveHostedDeviceConnectReturnTo(
-  userId: string,
-  messagingReturnTarget: HostedAssistantDeviceConnectMessagingReturnTarget | null,
-): Promise<string> {
-  const returnTo = messagingReturnTarget
-    ? HOSTED_ASSISTANT_DEVICE_CONNECT_MESSAGING_RETURN_TO[messagingReturnTarget]
-    : HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO;
-
-  if (messagingReturnTarget !== "imessage") {
-    return returnTo;
-  }
-
-  const routing = await readHostedMemberRoutingState({
-    memberId: userId,
-    prisma: getPrisma(),
-  });
-
-  if (!routing?.linqRecipientPhone) {
-    return returnTo;
-  }
-
-  const url = new URL(returnTo, "https://murph.internal");
-  url.searchParams.set("recipient", routing.linqRecipientPhone);
+function buildHostedDeviceConnectCompletionReturnTo(input: {
+  connectSourceId: string;
+  connectTarget: string;
+}): string {
+  const url = new URL(HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO, "https://murph.internal");
+  url.searchParams.set("connectSource", input.connectSourceId);
+  url.searchParams.set("connectTarget", input.connectTarget);
   return `${url.pathname}${url.search}`;
 }
 

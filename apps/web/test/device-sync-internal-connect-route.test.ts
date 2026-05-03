@@ -4,9 +4,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  getPrisma: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  readHostedMemberRoutingState: vi.fn(),
   startConnection: vi.fn(),
 }));
 
@@ -16,14 +14,6 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
-}));
-
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
 }));
 
 type InternalDeviceSyncConnectLinkRouteModule = typeof import(
@@ -51,9 +41,7 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("OURA_CLIENT_SECRET", "");
     vi.stubEnv("STRAVA_CLIENT_ID", "");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "");
-    mocks.getPrisma.mockReturnValue({ hostedMemberRouting: {} });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
-    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       startConnection: mocks.startConnection,
     });
@@ -89,8 +77,12 @@ describe("device sync internal connect-link route", () => {
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
       "whoop",
-      "/settings?tab=wearables",
-      { sourceProviderSlug: null },
+      "/device-sync/connect/complete?source=assistant&connectSource=whoop&connectTarget=whoop",
+      {
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        sourceProviderSlug: null,
+      },
     );
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
@@ -142,8 +134,12 @@ describe("device sync internal connect-link route", () => {
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
       "junction",
-      "/settings?tab=wearables",
-      { sourceProviderSlug: "fitbit" },
+      "/device-sync/connect/complete?source=assistant&connectSource=fitbit&connectTarget=fitbit",
+      {
+        connectSourceId: "fitbit",
+        connectTarget: "fitbit",
+        sourceProviderSlug: "fitbit",
+      },
     );
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://link.junction.example.test/session/link-token",
@@ -155,20 +151,14 @@ describe("device sync internal connect-link route", () => {
 
   it.each([
     {
-      expectedReturnTo: "/api/device-sync/messaging-return?target=imessage&recipient=%2B15550100001",
       messagingReturnTarget: "imessage",
     },
     {
-      expectedReturnTo: "/api/device-sync/messaging-return?target=telegram",
       messagingReturnTarget: "telegram",
     },
   ] as const)(
-    "uses the $messagingReturnTarget messaging return route when requested by the signed callback",
-    async ({ expectedReturnTo, messagingReturnTarget }) => {
-      mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
-        linqRecipientPhone: "+15550100001",
-      });
-
+    "keeps $messagingReturnTarget as an optional diagnostic hint only",
+    async ({ messagingReturnTarget }) => {
       const response = await internalDeviceSyncConnectLinkRoute.POST(
         new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
           body: JSON.stringify({ messagingReturnTarget }),
@@ -188,17 +178,13 @@ describe("device sync internal connect-link route", () => {
       expect(mocks.startConnection).toHaveBeenCalledWith(
         "member_123",
         "whoop",
-        expectedReturnTo,
-        { sourceProviderSlug: null },
+        "/device-sync/connect/complete?source=assistant&connectSource=whoop&connectTarget=whoop",
+        {
+          connectSourceId: "whoop",
+          connectTarget: "whoop",
+          sourceProviderSlug: null,
+        },
       );
-      if (messagingReturnTarget === "imessage") {
-        expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
-          memberId: "member_123",
-          prisma: { hostedMemberRouting: {} },
-        });
-      } else {
-        expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
-      }
     },
   );
 

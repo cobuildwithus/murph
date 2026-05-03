@@ -1,132 +1,34 @@
-import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/provider-label";
-import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
-  buildMurphSmsHref,
-  MURPH_TELEGRAM_BOT_USERNAME,
-} from "@/src/lib/murph-contact-routing";
-
-type HostedDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
-
-const TELEGRAM_FALLBACK_USERNAME = MURPH_TELEGRAM_BOT_USERNAME;
-const MURPH_LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
-  "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
+  buildHostedDeviceSyncMessagingReturnMessageBody,
+  readHostedDeviceSyncMessagingReturnTarget,
+  resolveHostedDeviceSyncCallbackStatus,
+  resolveHostedDeviceSyncMessagingReturnDestination,
+  resolveHostedDeviceSyncProviderLabel,
+} from "@/src/lib/device-sync/messaging-return-destination";
 
 export function GET(request: Request): Response {
   const url = new URL(request.url);
-  const target = readHostedDeviceSyncMessagingReturnTarget(
-    url.searchParams.get("target"),
-  );
+  const target = readHostedDeviceSyncMessagingReturnTarget(url.searchParams.get("target"));
 
   if (!target) {
     return htmlResponse(buildInvalidTargetHtml(), 400);
   }
 
-  const providerLabel = resolveProviderLabel(url.searchParams.get("deviceSyncProvider"));
-  const messageBody = buildMessagingReturnMessageBody(providerLabel);
+  const providerLabel = resolveHostedDeviceSyncProviderLabel(
+    url.searchParams.get("deviceSyncProvider"),
+  );
+  const messageBody = buildHostedDeviceSyncMessagingReturnMessageBody(providerLabel);
 
   return htmlResponse(buildMessagingReturnHtml({
-    destinationUrl: resolveMessagingReturnDestination({
+    destinationUrl: resolveHostedDeviceSyncMessagingReturnDestination({
       messageBody,
       recipient: url.searchParams.get("recipient"),
       target,
     }),
     providerLabel,
     serviceLabel: target === "imessage" ? "Messages" : "Telegram",
-    status: resolveDeviceSyncStatus(url.searchParams.get("deviceSyncStatus")),
+    status: resolveHostedDeviceSyncCallbackStatus(url.searchParams.get("deviceSyncStatus")),
   }));
-}
-
-function readHostedDeviceSyncMessagingReturnTarget(
-  value: string | null,
-): HostedDeviceSyncMessagingReturnTarget | null {
-  if (value === null) {
-    return null;
-  }
-
-  if (value === "imessage" || value === "telegram") {
-    return value;
-  }
-
-  return null;
-}
-
-function resolveMessagingReturnDestination(input: {
-  messageBody: string;
-  recipient: string | null;
-  target: HostedDeviceSyncMessagingReturnTarget;
-}): string {
-  if (input.target === "imessage") {
-    return buildMurphSmsHref({
-      body: input.messageBody,
-      murphPhoneNumber: resolveMessagingReturnPhoneRecipient(input.recipient),
-    });
-  }
-
-  const query = new URLSearchParams({
-    text: input.messageBody,
-  });
-
-  return `https://t.me/${resolveMessagingReturnTelegramUsername()}?${query.toString()}`;
-}
-
-function resolveMessagingReturnPhoneRecipient(value: string | null): string | null {
-  const configuredRecipients = readConfiguredMurphPhoneNumbers();
-  const recipient = normalizePhoneNumber(value);
-
-  if (recipient && configuredRecipients.includes(recipient)) {
-    return recipient;
-  }
-
-  return configuredRecipients[0] ?? null;
-}
-
-function readConfiguredMurphPhoneNumbers(): string[] {
-  const configured = process.env[MURPH_LINQ_CONVERSATION_PHONE_NUMBERS_ENV];
-
-  if (!configured) {
-    return [];
-  }
-
-  const recipientPhones: string[] = [];
-
-  for (const value of configured.split(/[\n,]+/u)) {
-    const recipientPhone = normalizePhoneNumber(value);
-
-    if (recipientPhone && !recipientPhones.includes(recipientPhone)) {
-      recipientPhones.push(recipientPhone);
-    }
-  }
-
-  return recipientPhones;
-}
-
-function resolveMessagingReturnTelegramUsername(): string {
-  const rawUsername = process.env.TELEGRAM_BOT_USERNAME?.trim() ?? "";
-  const username = rawUsername.startsWith("@") ? rawUsername.slice(1) : rawUsername;
-
-  return /^[A-Za-z0-9_]{5,32}$/u.test(username)
-    ? username
-    : TELEGRAM_FALLBACK_USERNAME;
-}
-
-function resolveProviderLabel(value: string | null): string | null {
-  if (!value || !/^[A-Za-z0-9_-]{1,40}$/u.test(value)) {
-    return null;
-  }
-
-  return formatHostedDeviceSyncProviderLabel(value);
-}
-
-function resolveDeviceSyncStatus(value: string | null): "connected" | "error" | null {
-  if (value === "connected" || value === "error") {
-    return value;
-  }
-
-  return null;
-}
-
-function buildMessagingReturnMessageBody(providerLabel: string | null): string {
-  return providerLabel ? `Just connected my ${providerLabel}` : "Just connected my device";
 }
 
 function buildMessagingReturnHtml(input: {
