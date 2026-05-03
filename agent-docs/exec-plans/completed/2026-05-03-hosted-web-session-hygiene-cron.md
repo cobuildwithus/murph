@@ -1,6 +1,6 @@
 # Add hosted web session hygiene cron
 
-Status: active
+Status: completed
 Created: 2026-05-03
 Updated: 2026-05-03
 
@@ -56,3 +56,4 @@ Updated: 2026-05-03
 - Expected outcomes:
   - Focused tests pass and prove the retention cutoff/filter.
   - Broader checks either pass or any unrelated existing blocker is named with evidence.
+Completed: 2026-05-03
