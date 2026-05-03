@@ -456,11 +456,12 @@ protocol:
     - "Keep every 10-sec break true rest or unloaded recovery; add no extra movements."
     - "Stop for any stop condition; log rounds, modality, intensity, symptoms, environment, and 24–72h recovery."
   tips:
-    - At least 48 hours between sessions in the first experiment.
-    - One block only — no stacked WODs, circuits, or finishers in the first run.
-    - A low-impact machine is easier to dose and safer to stop than jumping or loaded movements.
-    - Keep other training, caffeine, alcohol, supplements, diet, and sleep stable.
-    - Same wearable or HR setup across baseline and intervention; chest strap if HR fidelity matters.
+    - "Schedule two sessions at least 48 hours apart; put no hard legs, races, or sauna on those days."
+    - "Use a bike, rower, or elliptical first; avoid sprints, stairs, burpees, jump squats, and loaded lifts."
+    - "Warm up 5-10 minutes, then run one timer: 8 rounds of 20 seconds work, 10 seconds rest."
+    - "Keep every 10-second rest empty: no pushups, pedaling hard, jumping jacks, or bonus reps."
+    - "End after one block. Skip stacked WODs, circuits, finishers, and extra intervals in the first run."
+    - "Log completed rounds, modality, RPE, peak HR, symptoms, heat, and 24-72 hour soreness."
   keepInMind:
     - The strongest direct evidence is small, supervised, and cycle-ergometer-based; this protocol is not a generic guarantee for every workout labeled Tabata.
     - The historical supramaximal intensity reference is not a home prescription. Repeatable completion, safe mechanics, and recovery are the first fidelity targets.

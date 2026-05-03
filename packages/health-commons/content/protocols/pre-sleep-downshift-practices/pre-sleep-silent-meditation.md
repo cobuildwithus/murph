@@ -85,12 +85,12 @@ protocol:
     - "Stop when timer ends; do not repeat or extend the session to chase sleep."
     - "Log minutes, pre-bed wiredness, estimated sleep onset, and any adverse or activating effects."
   tips:
-    - Keep caffeine, alcohol, exercise, screens, bedtime, and sleep environment stable across baseline and intervention.
-    - Neutral timer only; skip sleep-score checks during the session window.
-    - "If effort or sleep worsens, shorten, pause, or stop."
-    - "In-bed practice confusing wearable sleep-onset? Switch to a chair and log the change."
-    - "Never force sleep; after the timer, stop or do a quiet low-light activity."
-    - "Pain, shortness of breath, dizziness, or chest symptoms — stop and do not restart that night."
+    - "Before bedtime, choose chair, bed edge, or floor cushion. Keep the same spot for the 14 nights."
+    - "Set one quiet 10-minute timer in the last 30 minutes before intended lights-out."
+    - "Use one silent anchor: breath, hands, feet, room sound, or soft open-eye gaze."
+    - "Skip guided audio, music, breath pacing, sleep apps, melatonin changes, and new wind-down rituals."
+    - "When the timer ends, stop. Do not repeat the session to chase sleep."
+    - "If in-bed practice confuses sleep onset, move to a chair and log the switch."
   keepInMind:
     - "The direct evidence base for unguided silent meditation immediately before bed is not established; this is a low-burden personal experiment, not a treatment claim."
     - "Guided apps, CBT-I, sleep hygiene, breathwork, progressive muscle relaxation, yoga nidra, mindfulness courses, and commercial sleep programs are adjacent variants and should not be merged into this protocol’s efficacy claim."
