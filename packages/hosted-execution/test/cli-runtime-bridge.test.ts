@@ -182,4 +182,54 @@ describe("hosted CLI runtime bridge client", () => {
     assert.equal(result.accounts[0]?.provider, "whoop");
     assert.equal(result.accounts[0]?.status, "active");
   });
+
+  it("rejects hosted device account metadata in bridge responses", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          accounts: [
+            {
+              accessTokenExpiresAt: "2026-05-04T00:00:00.000Z",
+              connectedAt: "2026-05-03T20:00:00.000Z",
+              createdAt: "2026-05-03T20:00:00.000Z",
+              displayName: "WHOOP",
+              externalAccountId: "external_whoop",
+              id: "dsc_whoop",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: "2026-05-03T21:00:00.000Z",
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: "2026-05-03T21:00:00.000Z",
+              lastWebhookAt: null,
+              metadata: {
+                providerUserId: "provider_user_that_must_not_cross_bridge",
+              },
+              nextReconcileAt: "2026-05-04T03:00:00.000Z",
+              provider: "whoop",
+              scopes: ["read:recovery"],
+              setupExpiresAt: null,
+              setupPhase: null,
+              status: "active",
+              updatedAt: "2026-05-03T21:00:00.000Z",
+            },
+          ],
+          provider: "whoop",
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        },
+      );
+
+    await assert.rejects(
+      requestHostedCliDeviceAccountList({
+        bridge: {
+          token: "bridge-token",
+          url: "http://127.0.0.1:8787/",
+        },
+        fetchImpl,
+        provider: "whoop",
+      }),
+    );
+  });
 });

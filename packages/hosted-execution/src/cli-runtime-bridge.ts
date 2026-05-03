@@ -61,7 +61,7 @@ const hostedCliDeviceSyncAccountSchema = z.object({
   lastSyncErrorAt: z.string().min(1).nullable(),
   lastSyncStartedAt: z.string().min(1).nullable(),
   lastWebhookAt: z.string().min(1).nullable(),
-  metadata: z.record(z.string(), z.unknown()),
+  metadata: z.object({}).strict(),
   nextReconcileAt: z.string().min(1).nullable(),
   provider: z.string().min(1),
   scopes: z.array(z.string().min(1)),
