@@ -38,6 +38,12 @@ describe("check-no-js hygiene guards", () => {
     expect(
       isAllowedDeclarationArtifactContents(
         "apps/web/next-env.d.ts",
+        buildNextEnvDeclarationArtifact("./.next/types/routes.d.ts"),
+      ),
+    ).toBe(true);
+    expect(
+      isAllowedDeclarationArtifactContents(
+        "apps/web/next-env.d.ts",
         buildNextEnvDeclarationArtifact("./.next-smoke/dev/types/routes.d.ts"),
       ),
     ).toBe(true);

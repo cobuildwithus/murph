@@ -1658,7 +1658,7 @@ exit 64
       expect(zipEntries).toContain("agent-docs/product-specs/experiment-onboarding.md");
       expect(zipEntries).toContain("packages/contracts/src/health-commons.ts");
       expect(zipEntries).toContain(
-        "packages/health-commons/content/protocols/red-light-glasses-before-bed/red-light-glasses-before-bed.md",
+        "packages/health-commons/content/protocols/evening-light-reduction/red-light-glasses-before-bed.md",
       );
       expect(zipEntries).toContain("packages/health-commons/content/biomarkers/hrv-rmssd.md");
       expect(zipEntries).toContain(
