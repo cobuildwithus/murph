@@ -57,6 +57,21 @@ import type {
 
 export { SqliteDeviceSyncStore } from "./store.ts";
 
+const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
+const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
+const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
+  /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
+const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
+  "expected",
+  "received",
+  "origin",
+  "format",
+  "minimum",
+  "maximum",
+  "inclusive",
+  "exact",
+] as const);
+
 class DeviceSyncJobExecutionCancelledError extends Error {
   constructor(readonly accountId: string, readonly jobId: string) {
     super(`Device sync job ${jobId} is no longer active for account ${accountId}.`);
@@ -994,38 +1009,84 @@ function summarizeExecutionErrorMessage(error: Error): string {
 }
 
 function summarizeValidationIssues(error: Error): string | null {
-  const issueSummaries = [
-    ...readZodLikeIssueSummaries(error),
-    ...readVaultLikeErrorSummaries(error),
-  ];
-  const uniqueSummaries = [...new Set(issueSummaries)].slice(0, 3);
+  const issueSummaries = collectValidationIssueSummaries(error);
+  const uniqueSummaries = [...new Set(issueSummaries)].slice(0, DEVICE_SYNC_VALIDATION_ISSUE_LIMIT);
 
   return uniqueSummaries.length > 0
     ? `validationIssues=${uniqueSummaries.join("; ")}`
     : null;
 }
 
-function readZodLikeIssueSummaries(error: Error): string[] {
-  const issues = readRecordArray((error as { issues?: unknown }).issues);
+function collectValidationIssueSummaries(error: unknown): string[] {
+  const seen = new Set<unknown>();
+
+  return collectValidationIssueSummariesInternal(error, seen, 0);
+}
+
+function collectValidationIssueSummariesInternal(
+  error: unknown,
+  seen: Set<unknown>,
+  depth: number,
+): string[] {
+  if (!error || seen.has(error) || depth > DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT) {
+    return [];
+  }
+
+  if (typeof error === "object") {
+    seen.add(error);
+  }
+
+  const record = toPlainRecord(error);
+  const aggregateErrors = error instanceof AggregateError ? error.errors : [];
+  const nestedErrors = readUnknownArray(record?.errors)
+    .filter((entry) => entry instanceof Error || Boolean(toPlainRecord(entry)?.issues));
+
+  return [
+    ...readZodLikeIssueSummaries(record?.issues),
+    ...readZodLikeIssueSummaries(record?.errors),
+    ...readVaultLikeErrorSummaries(record),
+    ...collectValidationIssueSummariesInternal(record?.cause, seen, depth + 1),
+    ...aggregateErrors.flatMap((entry) =>
+      collectValidationIssueSummariesInternal(entry, seen, depth + 1)
+    ),
+    ...nestedErrors.flatMap((entry) =>
+      collectValidationIssueSummariesInternal(entry, seen, depth + 1)
+    ),
+  ];
+}
+
+function readZodLikeIssueSummaries(value: unknown): string[] {
+  const issues = readRecordArray(value);
 
   return issues.flatMap((issue) => {
     const record = toPlainRecord(issue);
 
-    if (!record) {
+    if (!record || !hasValidationIssueShape(record)) {
       return [];
     }
 
     const path = formatValidationPath(record.path);
     const code = formatValidationToken(record.code) ?? "validation";
     const message = sanitizeHostedRuntimeErrorText(String(record.message ?? "")) ?? "";
-    const parts = [path, code, message].filter(Boolean);
+    const metadata = formatValidationIssueMetadata(record);
+    const parts = [path, code, message, metadata].filter(Boolean);
 
     return parts.length > 0 ? [parts.join(" ")] : [];
   });
 }
 
-function readVaultLikeErrorSummaries(error: Error): string[] {
-  const details = toPlainRecord((error as { details?: unknown }).details);
+function hasValidationIssueShape(record: Record<string, unknown>): boolean {
+  return (
+    "code" in record ||
+    "path" in record ||
+    DEVICE_SYNC_VALIDATION_METADATA_FIELDS.some((field) =>
+      Object.prototype.hasOwnProperty.call(record, field)
+    )
+  );
+}
+
+function readVaultLikeErrorSummaries(error: Record<string, unknown> | null): string[] {
+  const details = toPlainRecord(error?.details);
   const errors = readStringArray(details?.errors);
 
   return errors.flatMap((entry) => {
@@ -1037,6 +1098,10 @@ function readVaultLikeErrorSummaries(error: Error): string[] {
 
     return [sanitizeValidationIssueText(sanitized)];
   });
+}
+
+function readUnknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? [...value] : [];
 }
 
 function readRecordArray(value: unknown): Record<string, unknown>[] {
@@ -1091,7 +1156,43 @@ function formatValidationToken(value: unknown): string | null {
   }
 
   const trimmed = value.trim();
-  return /^[A-Za-z_][A-Za-z0-9_-]{0,80}$/u.test(trimmed) ? trimmed : null;
+  if (!/^[A-Za-z_][A-Za-z0-9_-]{0,80}$/u.test(trimmed)) {
+    return null;
+  }
+
+  return DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN.test(trimmed)
+    ? "<redacted-field>"
+    : trimmed;
+}
+
+function formatValidationIssueMetadata(record: Record<string, unknown>): string | null {
+  const metadata = DEVICE_SYNC_VALIDATION_METADATA_FIELDS.flatMap((field) => {
+    if (!Object.prototype.hasOwnProperty.call(record, field)) {
+      return [];
+    }
+
+    const value = formatValidationMetadataValue(field, record[field]);
+    return value ? [`${field}=${value}`] : [];
+  });
+
+  return metadata.length > 0 ? `[${metadata.join(" ")}]` : null;
+}
+
+function formatValidationMetadataValue(field: string, value: unknown): string | null {
+  if (DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN.test(field)) {
+    return "<redacted>";
+  }
+
+  if (typeof value === "string") {
+    const token = formatValidationToken(value);
+    return token ?? sanitizeHostedRuntimeErrorText(value)?.replace(/\s+/gu, "_") ?? null;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return null;
 }
 
 function sanitizeValidationIssueText(value: string): string {
@@ -1117,7 +1218,8 @@ function sanitizeValidationIssueText(value: string): string {
         return segments;
       }
 
-      return [...segments, `${arrayMatch[1]}${arrayMatch[2]}`];
+      const token = formatValidationToken(arrayMatch[1]) ?? "<field>";
+      return [...segments, `${token}${arrayMatch[2]}`];
     }, [])
     .join(".");
 
