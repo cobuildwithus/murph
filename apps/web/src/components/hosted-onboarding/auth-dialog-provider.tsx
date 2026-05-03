@@ -11,26 +11,26 @@ import {
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 
-interface AuthDialogContextValue {
+interface AuthContextValue {
   authenticated: boolean;
   openAuthDialog: () => void;
 }
 
-const AuthDialogContext = createContext<AuthDialogContextValue>({
+const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
   openAuthDialog: () => {},
 });
 
-export function useAuthDialog() {
-  return useContext(AuthDialogContext);
+export function useAuth() {
+  return useContext(AuthContext);
 }
 
-export function AuthDialogProvider({
+export function AuthProvider({
   authenticated,
   children,
 }: {
   authenticated: boolean;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -44,7 +44,7 @@ export function AuthDialogProvider({
   );
 
   return (
-    <AuthDialogContext.Provider value={value}>
+    <AuthContext.Provider value={value}>
       {children}
       {!authenticated ? (
         <AuthDialog
@@ -53,6 +53,6 @@ export function AuthDialogProvider({
           requireLaunchConsentOnCompletion
         />
       ) : null}
-    </AuthDialogContext.Provider>
+    </AuthContext.Provider>
   );
 }

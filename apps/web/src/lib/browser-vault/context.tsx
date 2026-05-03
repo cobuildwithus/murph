@@ -13,6 +13,8 @@ import {
 import { type BrowserVaultQueryClient } from "@murphai/query/browser";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+
 import {
   isBrowserVaultAbortError,
   loadBrowserVaultReplica,
@@ -39,6 +41,7 @@ export interface BrowserVaultContextValue {
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
 
 export function BrowserVaultProvider({ children }: { children: ReactNode }) {
+  const { authenticated } = useAuth();
   const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
@@ -56,6 +59,20 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     setClient(nextClient);
     setRef(nextRef);
   }, []);
+
+  const cancelActiveLoad = useCallback(() => {
+    activeLoadIdRef.current += 1;
+    activeAbortControllerRef.current?.abort();
+    activeAbortControllerRef.current = null;
+    inFlightLoadRef.current = null;
+  }, []);
+
+  const resetAnonymousVaultState = useCallback(() => {
+    cancelActiveLoad();
+    commitClientAndRef(null, null);
+    setStatus("empty");
+    setError(null);
+  }, [cancelActiveLoad, commitClientAndRef]);
 
   const commitLoadResult = useCallback((result: BrowserVaultSessionLoadResult) => {
     if (result.state === "not_modified") {
@@ -82,6 +99,11 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   }, [commitClientAndRef]);
 
   const load = useCallback(async () => {
+    if (!authenticated) {
+      resetAnonymousVaultState();
+      return;
+    }
+
     if (inFlightLoadRef.current) {
       return inFlightLoadRef.current;
     }
@@ -125,7 +147,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
     inFlightLoadRef.current = loadPromise;
     return loadPromise;
-  }, [commitLoadResult]);
+  }, [authenticated, commitLoadResult, resetAnonymousVaultState]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -133,21 +155,18 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mountedRef.current = false;
-      activeLoadIdRef.current += 1;
-      activeAbortControllerRef.current?.abort();
-      activeAbortControllerRef.current = null;
-      inFlightLoadRef.current = null;
+      cancelActiveLoad();
     };
-  }, [load]);
+  }, [cancelActiveLoad, load]);
 
   const value = useMemo<BrowserVaultContextValue>(() => ({
-    client,
-    dataVersion: ref?.dataVersion ?? null,
-    error,
-    ref,
+    client: authenticated ? client : null,
+    dataVersion: authenticated ? ref?.dataVersion ?? null : null,
+    error: authenticated ? error : null,
+    ref: authenticated ? ref : null,
     refresh: load,
-    status,
-  }), [client, error, load, ref, status]);
+    status: authenticated ? status : "empty",
+  }), [authenticated, client, error, load, ref, status]);
 
   return (
     <BrowserVaultContext.Provider value={value}>

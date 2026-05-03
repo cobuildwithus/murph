@@ -3,7 +3,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import Script from "next/script";
 
-import { AuthDialogProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { PhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/phone-country-code-provider";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
@@ -44,14 +44,14 @@ export default async function RootLayout(input: { children: React.ReactNode }) {
   return (
     <html lang="en" className={cn(fraunces.variable, dmSans.variable, dmMono.variable)}>
       <body className="bg-background text-foreground font-sans antialiased">
-        <AuthDialogProvider authenticated={authenticated}>
+        <AuthProvider authenticated={authenticated}>
           <PhoneCountryCodeProvider>
             <div className="flex min-h-screen flex-col">
               <div className="flex-1">{input.children}</div>
               <SiteFooter />
             </div>
           </PhoneCountryCodeProvider>
-        </AuthDialogProvider>
+        </AuthProvider>
         <Analytics />
         <SpeedInsights />
         {process.env.NODE_ENV === "development" ? (

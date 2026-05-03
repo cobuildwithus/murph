@@ -10,19 +10,19 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   openAuthDialog: vi.fn(),
-  useAuthDialog: vi.fn(),
+  useAuth: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
-  useAuthDialog: mocks.useAuthDialog,
+  useAuth: mocks.useAuth,
 }));
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   mocks.openAuthDialog.mockReset();
-  mocks.useAuthDialog.mockReset();
-  mocks.useAuthDialog.mockReturnValue({
+  mocks.useAuth.mockReset();
+  mocks.useAuth.mockReturnValue({
     authenticated: true,
     openAuthDialog: mocks.openAuthDialog,
   });
@@ -39,7 +39,7 @@ test("AuthButton opens the auth dialog for unauthenticated clicks", async () => 
   const onClick = vi.fn();
   const onConnect = vi.fn();
   const openAuthDialog = vi.fn();
-  mocks.useAuthDialog.mockReturnValue({
+  mocks.useAuth.mockReturnValue({
     authenticated: false,
     openAuthDialog,
   });
