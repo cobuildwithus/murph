@@ -535,7 +535,6 @@ experimentOnboarding:
       - pre-bed-plus-morning-missing-log
     weeklyDigestDefault: true
     missedLogFollowupCopy: You missed last night’s silent-meditation log. Add a quick estimate only if it is easy.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Attention stops chasing thoughts\n\nSilent sitting trains repeated return to breath, body contact, or room sounds. Planning and worry lose momentum because they stop getting followed."
   - "## Grounding lowers threat checks\n\nOpen, simple attention reduces internal negotiation before sleep. The useful mechanism is lower arousal, not a perfect blank mind."

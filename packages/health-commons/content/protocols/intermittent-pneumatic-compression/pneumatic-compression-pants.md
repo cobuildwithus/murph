@@ -573,7 +573,6 @@ experimentOnboarding:
     - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you use the compression pants session today? Totally fine either way — I just want the experiment record and symptoms to be accurate.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Mechanical squeeze moves fluid\n\nSequential compression empties veins and interstitial fluid from the legs during inflation. Deflation allows refill; each cycle moves blood and fluid through tissue."
   - "## Comfort is the practical endpoint\n\nThe best signal is how the legs feel after a matched trigger: soreness, heaviness, and fatigue. It is not proof that muscle damage reversed."

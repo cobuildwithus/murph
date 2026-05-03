@@ -569,7 +569,6 @@ experimentOnboarding:
     - reminder_policy
     weeklyDigestDefault: true
     missedLogFollowupCopy: I can remind you to log temperature, duration, mood, symptoms, and rewarming after planned cold-plunge sessions.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Cold shock defends core\n\nCold water hits skin thermoreceptors fast. Breathing spikes, vessels clamp down, heart rate and pressure shift; blood moves inward to defend core temperature."
   - "## Rewarming is part of the dose\n\nThe session is not over at exit. Shivering, vasoconstriction release, and rewarming decide whether the stress resolves cleanly or carries into recovery."

@@ -480,7 +480,6 @@ experimentOnboarding:
     - evening_log_prompt
     weeklyDigestDefault: true
     missedLogFollowupCopy: Would you like to log yesterday’s steps and whether anything affected walking or device data?
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Visible floor raises exposure\n\nA step floor turns activity into a daily threshold. The number changes behavior first; downstream fitness, blood pressure, sleep, and pain depend on the added load being real and recoverable."
   - "## Low-grade load accumulates\n\nWalking adds circulation, weight bearing, and muscle contractions without a formal workout. Repeated daily volume replaces sitting with enough movement for small cardiovascular and tissue signals."

@@ -563,7 +563,6 @@ experimentOnboarding:
       - pre_session_plus_same_day_missing_log_check
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you end up doing today's sauna session? Totally fine either way, I just want the experiment record to be accurate.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Heat stacks on workout stress\n\nPost-workout sauna is not passive rest. Exercise already raises heat, catecholamines, heart rate, and fluid loss; 93 °C dry heat adds another circulatory load before recovery is complete."
   - "## Cooling tactics change dose\n\nGroin, face, or neck cooling changes local temperature and thermal feedback. It does not make the routine universally safe; it changes what heat signal the body receives."

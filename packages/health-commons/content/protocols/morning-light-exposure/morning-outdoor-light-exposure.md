@@ -590,7 +590,6 @@ experimentOnboarding:
       - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you get outside for your morning-light session today? Totally fine if not — I just want the experiment record to be accurate.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Morning light resets clock timing\n\nBright outdoor light hits retinal clock pathways soon after waking. That signal anchors the circadian day more strongly than dim indoor light."
   - "## Early cue shapes evening biology\n\nMorning phase signals help melatonin and alertness shift earlier. Sleep pressure still builds through the day; light tells the clock when the day started."

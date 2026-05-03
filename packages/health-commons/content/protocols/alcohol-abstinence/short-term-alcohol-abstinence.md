@@ -1218,7 +1218,6 @@ experimentOnboarding:
     - daily_check_in
     - daily_check_in_plus_next_day_missing_log_followup
     missedLogFollowupCopy: Did yesterday count as alcohol-free, alcohol-used, or paused? Any answer is useful data for the experiment record.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
   safetyScreen:
     cautionLevel: high
     mode: ask_compact_then_expand_if_positive

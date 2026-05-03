@@ -672,7 +672,6 @@ experimentOnboarding:
       - weekly_digest_only
     weeklyDigestDefault: true
     missedLogFollowupCopy: Did you complete or intentionally skip the whole-body red/NIR PBM session today? Either answer is useful — I just want the experiment record to be accurate.
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Light is dose, not color\n\nRed/NIR PBM depends on wavelength, irradiance, fluence, duration, distance, and coverage. Marketing color names do not define the biological exposure."
   - "## Cells shift signaling\n\nPhotons affect mitochondrial, nitric-oxide, inflammatory, and oxidative-stress pathways. The effect is nonthermal; heat turns it into a different protocol."

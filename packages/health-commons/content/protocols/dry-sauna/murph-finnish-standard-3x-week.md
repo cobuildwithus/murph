@@ -631,7 +631,6 @@ experimentOnboarding:
       - "pre_session_plus_same_day_missing_log_check"
     weeklyDigestDefault: true
     missedLogFollowupCopy: "Did you end up doing today’s sauna session? Totally fine either way, I just want the experiment record to be accurate."
-    confirmationPrompt: "If anything is unclear or needs adjusting, just say — otherwise I'll set this up."
 whyItWorks:
   - "## Heat forces redistribution\n\nDry sauna loads the body without muscle work. Skin vessels open; sweat carries heat out; heart rate rises; blood shifts outward. The stress is circulation and thermoregulation, not fitness effort."
   - "## Cooldown makes dose usable\n\n5–20 min works because heat stress needs an exit. Gentle cooldown restores pressure, temperature, fluid balance, and alertness; rushing into driving, exercise, cold plunge, or bed turns heat into strain."
