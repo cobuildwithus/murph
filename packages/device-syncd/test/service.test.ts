@@ -2434,6 +2434,94 @@ test("device sync service preserves sanitized validation issue paths for unexpec
   close();
 });
 
+test("device sync service preserves nested sanitized validation metadata for unexpected job errors", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-nested-validation-error");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          const cause = new Error("Nested validation failed") as Error & {
+            issues: Array<{
+              code: string;
+              expected?: string;
+              message: string;
+              origin?: string;
+              path: Array<number | string>;
+              received?: string;
+            }>;
+          };
+          cause.name = "ZodError";
+          cause.issues = [
+            {
+              code: "invalid_type",
+              expected: "nonoptional",
+              message: "Invalid input: expected nonoptional, received undefined",
+              origin: "object",
+              path: ["snapshot", "sleeps", 0, "score"],
+              received: "undefined",
+            },
+            {
+              code: "invalid_type",
+              expected: "string",
+              message: "Invalid input: access_token=provider-secret",
+              path: ["snapshot", "profile", "access_token"],
+              received: "undefined",
+            },
+          ];
+
+          const error = new Error("Import failed", { cause }) as Error & {
+            errors: Array<{
+              code: string;
+              inclusive: boolean;
+              message: string;
+              minimum: number;
+              path: Array<number | string>;
+            }>;
+          };
+          error.errors = [
+            {
+              code: "too_small",
+              inclusive: true,
+              message: "Too small",
+              minimum: 0,
+              path: ["snapshot", "workouts", 0, "score", "strain"],
+            },
+          ];
+          throw error;
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "nested-validation-error",
+  });
+
+  await service.runWorkerOnce();
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobStatus = readJobsForAccountForTesting(store, connected.account.id)[0];
+  const expectedMessage =
+    "Import failed | validationIssues=$.snapshot.workouts[0].score.strain too_small Too small [minimum=0 inclusive=true]; $.snapshot.sleeps[0].score invalid_type Invalid input: expected nonoptional, received undefined [expected=nonoptional received=undefined origin=object]; $.snapshot.profile.<redacted-field> invalid_type Invalid input: access_token=[redacted] [expected=string received=undefined]";
+
+  assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
+  assert.equal(storedAccount?.lastErrorMessage, expectedMessage);
+  assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
+  assert.equal(jobStatus.last_error_message, expectedMessage);
+
+  close();
+});
+
 test("device sync service preserves sanitized vault validation details for unexpected job errors", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-job-vault-validation-error");
   const { service, store, close } = createServiceFixture({

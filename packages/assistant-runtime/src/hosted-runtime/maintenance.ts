@@ -49,7 +49,7 @@ import {
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
-const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 512;
+const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
 
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
