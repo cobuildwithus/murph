@@ -1,5 +1,10 @@
 import path from "node:path";
 
+import {
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,6 +15,10 @@ import {
 } from "../src/assistant-cli-access.js";
 
 describe("prepareAssistantDirectCliEnv", () => {
+  it("aliases the hosted runtime marker from the bridge owner", () => {
+    expect(HOSTED_RUNTIME_PROCESS_ENV_MARKER).toBe(HOSTED_RUNTIME_PROCESS_ENV);
+  });
+
   it("returns the canonical raw and setup command names", () => {
     expect(
       resolveAssistantCliAccessContext({
@@ -64,8 +73,8 @@ describe("prepareAssistantDirectCliEnv", () => {
       CODEX_HOME: "/tmp/murph-home/.codex-hosted",
       HOME: "/tmp/murph-home",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
-      MURPH_HOSTED_CLI_BRIDGE_TOKEN: "bridge-token",
-      MURPH_HOSTED_CLI_BRIDGE_URL: "http://127.0.0.1:43123/",
+      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
+      [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
       DEVICE_SYNC_BASE_URL: "http://127.0.0.1:8788",
       DEVICE_SYNC_CONTROL_TOKEN: "device-token",
       LINQ_API_TOKEN: "linq-secret",
@@ -83,8 +92,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.CODEX_HOME).toBe("/tmp/murph-home/.codex-hosted");
     expect(env.HOME).toBe("/tmp/murph-home");
     expect(env.VAULT).toBe("/tmp/murph-vault");
-    expect(env.MURPH_HOSTED_CLI_BRIDGE_TOKEN).toBe("bridge-token");
-    expect(env.MURPH_HOSTED_CLI_BRIDGE_URL).toBe("http://127.0.0.1:43123/");
+    expect(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBe("bridge-token");
+    expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
     expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
     expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
     expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");

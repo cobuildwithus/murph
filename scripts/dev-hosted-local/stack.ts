@@ -9,6 +9,7 @@ import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
@@ -203,6 +204,10 @@ export async function startHostedLocalDevStack(input: {
       ...localStripeEnv,
       ...initialEnv,
     };
+    const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
+    const shouldPreserveTestNodeEnvForE2EStub =
+      inputNodeEnv === "test"
+      && Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim());
     const vercelEnv = shouldUseRemoteHostedCryptoKeys(rawVercelEnv)
       ? rawVercelEnv
       : stripHostedCryptoMaterialEnv(rawVercelEnv);
@@ -231,6 +236,7 @@ export async function startHostedLocalDevStack(input: {
       overrides: {
         ...vercelEnv,
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: localInternalProxyBaseUrl,
+        ...(shouldPreserveTestNodeEnvForE2EStub ? { NODE_ENV: "test" } : {}),
       },
     });
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);

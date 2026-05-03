@@ -73,7 +73,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
       expect.arrayContaining(["JUNCTION_API_KEY", "JUNCTION_ENV", "WHOOP_CLIENT_SECRET"]),
     );
     for (const key of HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS) {
-      expect(env[key]).toBeUndefined();
+      expect(env[key]).toBe("");
     }
   });
 

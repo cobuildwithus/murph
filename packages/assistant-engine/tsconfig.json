@@ -23,6 +23,9 @@
       "path": "../gateway-core"
     },
     {
+      "path": "../hosted-execution"
+    },
+    {
       "path": "../operator-config"
     },
     {

@@ -70,15 +70,6 @@ const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelStat
   telegramAutoReplyEnabled: false,
 };
 const DEFAULT_HOSTED_MEMBER_TIME_ZONE = "America/New_York";
-export const DEFAULT_HOSTED_INBOX_ENRICHMENT_WARMUP_TIMEOUT_MS = 2_000;
-
-export interface HostedInboxEnrichmentRuntimeWarmupResult {
-  elapsedMs: number;
-  errorCode: string | null;
-  ok: boolean;
-  rebuiltCaptures: number | null;
-  timedOut: boolean;
-}
 
 export async function prepareHostedWakeContext(
   vaultRoot: string,
@@ -534,96 +525,4 @@ export async function prepareHostedInboxProjectionRuntime(
     requestId,
     vault: vaultRoot,
   });
-}
-
-export async function prepareHostedInboxEnrichmentRuntime(input: {
-  rebuild?: boolean;
-  requestId: string;
-  timeoutMs?: number;
-  vaultRoot: string;
-}): Promise<HostedInboxEnrichmentRuntimeWarmupResult> {
-  const startedAt = Date.now();
-  const timeoutMs = normalizeHostedInboxEnrichmentWarmupTimeoutMs(input.timeoutMs);
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
-  const warmup = (async (): Promise<HostedInboxEnrichmentRuntimeWarmupResult> => {
-    try {
-      const inboxServices = createIntegratedInboxServices();
-      const result = await inboxServices.init({
-        rebuild: input.rebuild ?? true,
-        requestId: input.requestId,
-        vault: input.vaultRoot,
-      });
-      return {
-        elapsedMs: Date.now() - startedAt,
-        errorCode: null,
-        ok: true,
-        rebuiltCaptures: normalizeHostedInboxEnrichmentRebuiltCaptures(result.rebuiltCaptures),
-        timedOut: false,
-      };
-    } catch (error) {
-      return {
-        elapsedMs: Date.now() - startedAt,
-        errorCode: readHostedInboxEnrichmentWarmupErrorCode(error),
-        ok: false,
-        rebuiltCaptures: null,
-        timedOut: false,
-      };
-    }
-  })();
-
-  const timeout = new Promise<HostedInboxEnrichmentRuntimeWarmupResult>((resolve) => {
-    timeoutHandle = setTimeout(() => {
-      resolve({
-        elapsedMs: Date.now() - startedAt,
-        errorCode: "timeout",
-        ok: false,
-        rebuiltCaptures: null,
-        timedOut: true,
-      });
-    }, timeoutMs);
-  });
-
-  const result = await Promise.race([warmup, timeout]);
-  if (timeoutHandle) {
-    clearTimeout(timeoutHandle);
-  }
-  return result;
-}
-
-function normalizeHostedInboxEnrichmentWarmupTimeoutMs(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_HOSTED_INBOX_ENRICHMENT_WARMUP_TIMEOUT_MS;
-  }
-  return Math.max(1, Math.floor(value));
-}
-
-function normalizeHostedInboxEnrichmentRebuiltCaptures(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? Math.floor(value)
-    : null;
-}
-
-function readHostedInboxEnrichmentWarmupErrorCode(error: unknown): string {
-  if (
-    typeof error === "object"
-    && error !== null
-    && "code" in error
-    && typeof error.code === "string"
-  ) {
-    return normalizeHostedInboxEnrichmentWarmupErrorCode(error.code);
-  }
-
-  if (error instanceof Error && error.name) {
-    return normalizeHostedInboxEnrichmentWarmupErrorCode(error.name);
-  }
-
-  return "unknown";
-}
-
-function normalizeHostedInboxEnrichmentWarmupErrorCode(value: string): string {
-  const normalized = value.trim();
-  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized)
-    ? normalized
-    : "unknown";
 }
