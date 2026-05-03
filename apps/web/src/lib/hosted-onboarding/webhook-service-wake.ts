@@ -2,7 +2,7 @@ import {
   startHostedWebhookNudgeWorkflow,
 } from "./webhook-workflow-start";
 import {
-  startHostedLinqTypingIndicator,
+  sendHostedLinqReadReceipt,
 } from "./linq";
 import {
   nudgeHostedRunnerUserBestEffortResult,
@@ -18,7 +18,7 @@ import {
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 
-const HOSTED_WEBHOOK_LINQ_DIRECT_TYPING_TIMEOUT_MS = 5_000;
+const HOSTED_WEBHOOK_LINQ_DIRECT_READ_RECEIPT_TIMEOUT_MS = 5_000;
 
 export type HostedWebhookWakeHandoffResult =
   | {
@@ -87,7 +87,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     const directNudge = await tryNudgeHostedWebhookRunnerDirect(input);
     if (directNudge.accepted) {
       if (input.source === "linq") {
-        await startHostedLinqTypingIndicatorBestEffort({
+        await sendHostedLinqDirectReadReceiptBestEffort({
           chatId: input.linqChatId ?? null,
           eventId: input.eventId,
         });
@@ -164,18 +164,18 @@ async function tryNudgeHostedWebhookRunnerDirect(input: {
   };
 }
 
-async function startHostedLinqTypingIndicatorBestEffort(input: {
+async function sendHostedLinqDirectReadReceiptBestEffort(input: {
   chatId: string | null;
   eventId: string;
 }): Promise<void> {
   const chatId = input.chatId?.trim() ?? "";
   const chatIdPresent = chatId.length > 0;
   const timing = startHostedOnboardingTiming(
-    "hosted-onboarding.webhook.linq.direct-typing",
+    "hosted-onboarding.webhook.linq.direct-read-receipt",
     {
       chatIdPresent,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_TYPING_TIMEOUT_MS,
+      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_READ_RECEIPT_TIMEOUT_MS,
     },
   );
 
@@ -187,9 +187,9 @@ async function startHostedLinqTypingIndicatorBestEffort(input: {
   }
 
   try {
-    const result = await startHostedLinqTypingIndicator({
+    const result = await sendHostedLinqReadReceipt({
       chatId,
-      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_TYPING_TIMEOUT_MS,
+      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_READ_RECEIPT_TIMEOUT_MS,
     });
     finishHostedOnboardingTiming(timing, result.ok ? "sent" : "failed", {
       chatIdPresent: true,

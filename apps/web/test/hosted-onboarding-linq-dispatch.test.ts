@@ -72,6 +72,13 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
+function expectDirectLinqReadReceiptSent(chatId = "chat_123"): void {
+  expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+    chatId,
+    timeoutMs: 5000,
+  });
+}
+
 vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
     "@/src/lib/hosted-mailbox/store",
@@ -405,7 +412,7 @@ https://join.example.test/join/code_first_text`);
       expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
       expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
       expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-      expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+      expectDirectLinqReadReceiptSent();
       expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
         memberId: "member_123",
         occurredAt: "2026-03-26T12:00:00.000Z",
@@ -536,7 +543,7 @@ https://join.example.test/join/code_first_text`);
     expect(serializedEnvelope).not.toContain("LINQ_MESSAGE_PARTS_TOO_MANY");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectDirectLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:linq:direct",
       timeoutMs: 5000,
@@ -618,7 +625,7 @@ https://join.example.test/join/code_first_text`);
     expect(serializedEnvelope).not.toContain("file-32.jpg");
     expect(serializedEnvelope).not.toContain("cdn.linq.example.test");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectDirectLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:linq:direct",
       timeoutMs: 5000,
@@ -691,7 +698,7 @@ https://join.example.test/join/code_first_text`);
     }));
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectDirectLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:linq:direct",
       timeoutMs: 5000,
@@ -772,7 +779,7 @@ https://join.example.test/join/code_first_text`);
     }));
     expect(serializedEnvelope).toContain("some content truncated");
     expect(serializedEnvelope).not.toContain("cdn.example.test");
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectDirectLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:linq:direct",
       timeoutMs: 5000,
@@ -848,7 +855,7 @@ https://join.example.test/join/code_first_text`);
     expect(JSON.stringify(envelope)).not.toContain("signed-voice-url");
   });
 
-  it("starts Linq typing after active-member direct nudge and leaves read receipts to fallback workflows", async () => {
+  it("sends a Linq read receipt after active-member direct nudge without starting fallback workflow", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -891,10 +898,11 @@ https://join.example.test/join/code_first_text`);
       userId: "member_123",
     });
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
-    expect(mocks.startHostedLinqTypingIndicator).toHaveBeenCalledWith({
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
       chatId: "chat_123",
       timeoutMs: 5000,
     });
+    expect(mocks.startHostedLinqTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.wake-handoff",
@@ -905,7 +913,6 @@ https://join.example.test/join/code_first_text`);
         directNudgeConfigured: true,
       }),
     );
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("keeps webhook success independent when the Linq handoff workflow cannot start", async () => {
@@ -1049,7 +1056,7 @@ https://join.example.test/join/code_first_text`);
     expect(transactionReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectDirectLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:linq:direct",
       timeoutMs: 5000,
