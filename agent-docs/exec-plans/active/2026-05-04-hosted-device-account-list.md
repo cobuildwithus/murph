@@ -17,13 +17,14 @@ Done:
 - Confirmed local Postgres has one active WHOOP device connection with token material and a recent completed sync.
 - Confirmed hosted runtime logs show device-connect context available and device-sync wake processed.
 - Identified root cause: hosted CLI bridge supports connect links only; `device account list` falls back to local daemon availability in hosted runtime.
+- Added hosted CLI bridge account-list support, hosted runtime snapshot routing, and CLI hosted account-list routing.
+- Security audit found hosted account-list metadata leakage; bridge mapping now redacts metadata and client schema rejects non-empty metadata.
 
 Now:
-- Add hosted CLI bridge account-list support and route CLI hosted account listing through it.
+- Re-run focused verification after audit fixes and complete final audit.
 
 Next:
-- Add focused tests for hosted account-list routing and bridge behavior.
-- Run focused verification, required audits, and commit through repo workflow if unblocked.
+- Commit audit follow-up changes through repo workflow if unblocked.
 
 ## Working Set
 

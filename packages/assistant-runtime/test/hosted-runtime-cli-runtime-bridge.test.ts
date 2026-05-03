@@ -82,7 +82,12 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
             displayName: "WHOOP",
             externalAccountId: "external_whoop",
             id: "dsc_whoop",
-            metadata: {},
+            metadata: {
+              connectState: "state_that_must_not_cross_bridge",
+              profile: {
+                providerUserId: "provider_user_that_must_not_cross_bridge",
+              },
+            },
             provider: "whoop",
             scopes: ["read:recovery"],
             status: "active" as const,
@@ -132,7 +137,11 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
     assert.equal(result.accounts.length, 1);
     assert.equal(result.accounts[0]?.provider, "whoop");
     assert.equal(result.accounts[0]?.status, "active");
-    assert.doesNotMatch(JSON.stringify(result), /redacted-token|redacted-refresh/u);
+    assert.deepEqual(result.accounts[0]?.metadata, {});
+    assert.doesNotMatch(
+      JSON.stringify(result),
+      /redacted-token|redacted-refresh|state_that_must_not_cross_bridge|provider_user_that_must_not_cross_bridge/u,
+    );
   } finally {
     await bridge.stop();
   }

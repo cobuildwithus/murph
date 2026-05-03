@@ -362,6 +362,83 @@ test('device account list service uses hosted CLI bridge in hosted runtime witho
   }
 })
 
+test('device account list honors an explicit base URL in hosted runtime', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-account-list-base-url-'))
+  let requestPath: string | null = null
+  let requestQuery: string | null = null
+  let authorization: string | undefined
+
+  const server = createServer((request, response) => {
+    authorization = request.headers.authorization
+    const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1:8788')
+    requestPath = requestUrl.pathname
+    requestQuery = requestUrl.search
+    respondJson(response, 200, {
+      accounts: [connectedAccount],
+    })
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted account list base URL test.')
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`
+    const accounts = requireData(
+      await runCli<{
+        baseUrl: string
+        provider: string | null
+        accounts: Array<{ id: string }>
+      }>([
+        'device',
+        'account',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--base-url',
+        baseUrl,
+        '--provider',
+        'whoop',
+      ], {
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          OURA_CLIENT_ID: '',
+          OURA_CLIENT_SECRET: '',
+          STRAVA_CLIENT_ID: '',
+          STRAVA_CLIENT_SECRET: '',
+          WHOOP_CLIENT_ID: '',
+          WHOOP_CLIENT_SECRET: '',
+        },
+      }),
+    )
+
+    assert.equal(accounts.baseUrl, baseUrl)
+    assert.equal(accounts.provider, 'whoop')
+    assert.deepEqual(accounts.accounts.map((account) => account.id), [
+      'acct_whoop_01',
+    ])
+    assert.equal(authorization, 'Bearer control-token-for-tests')
+    assert.equal(requestPath, '/accounts')
+    assert.equal(requestQuery, '?provider=whoop')
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 deviceControlPlaneTest(
   'local daemon connect reports the requested mapped connect target',
   async () => {

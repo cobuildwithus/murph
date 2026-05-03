@@ -219,7 +219,7 @@ function hostedDeviceSyncSnapshotToAccount(entry: HostedDeviceSyncSnapshotEntry)
     lastSyncErrorAt: entry.localState.lastSyncErrorAt,
     lastSyncStartedAt: entry.localState.lastSyncStartedAt,
     lastWebhookAt: entry.localState.lastWebhookAt,
-    metadata: entry.connection.metadata,
+    metadata: {},
     nextReconcileAt: entry.localState.nextReconcileAt,
     provider: entry.connection.provider,
     scopes: entry.connection.scopes,
