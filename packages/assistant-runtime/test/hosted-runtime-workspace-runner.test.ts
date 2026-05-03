@@ -25,6 +25,9 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   listPendingAssistantUsageRecords,
@@ -1746,10 +1749,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
+      assert.ok(effectLog);
+      assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [effectLog] }));
       assert.equal(effectLog?.level, "warn");
       assert.deepEqual(effectLog?.redactedJson, {
         attemptedCount: 1,
-        errorCodes: ["post_checkpoint_effect_failed"],
+        errorCodes: ["post_checkpoint_effect_failed", "runtime_error"],
+        failureCodeDetails: ["PROJECTION_UNAVAILABLE"],
+        failureNames: ["Error"],
+        failureSummaries: ["projection failed"],
         failedCount: 1,
         succeededCount: 0,
       });
