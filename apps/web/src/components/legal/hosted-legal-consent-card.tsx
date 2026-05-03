@@ -21,7 +21,6 @@ type HostedLegalConsentCardMode = "compact" | "panel";
 interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
   className?: string;
-  keepVisibleAfterAccepted?: boolean;
   initialStatus?: HostedConsentStatus | null;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
@@ -33,7 +32,6 @@ interface HostedLegalConsentCardProps {
 export function HostedLegalConsentCard({
   acceptedPendingLabel = "Continuing...",
   className,
-  keepVisibleAfterAccepted = false,
   initialStatus = null,
   mode = "panel",
   onAccepted,
@@ -141,18 +139,9 @@ export function HostedLegalConsentCard({
           });
         }
       }
-      if (keepVisibleAfterAccepted && onAccepted) {
-        setAcceptedHandoffPending(true);
-        await onAccepted(latestStatus);
-        return;
-      }
-      setStatus(latestStatus);
-      setLegalAccepted(false);
-      setHealthDataAccepted(false);
-      setFeatureAccepted(false);
+      setAcceptedHandoffPending(true);
       if (onAccepted) {
         await onAccepted(latestStatus);
-        return;
       }
     } catch (error) {
       setAcceptedHandoffPending(false);

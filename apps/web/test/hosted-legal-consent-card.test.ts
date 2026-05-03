@@ -43,7 +43,7 @@ test("HostedLegalConsentCard uses tokenized flat card styling while loading", ()
   const compactMarkup = renderToStaticMarkup(
     createElement(HostedLegalConsentCard, {
       mode: "compact",
-      source: "settings-device-sync",
+      source: "test-device-sync",
     }),
   );
 
@@ -81,7 +81,7 @@ test("HostedLegalConsentCard can render server-provided launch consent status wi
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 });
 
-test("HostedLegalConsentCard gates acceptance on the checkbox and posts current settings consent versions", async () => {
+test("HostedLegalConsentCard gates acceptance on the checkbox and holds the UI during handoff", async () => {
   const currentStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: true,
@@ -99,7 +99,7 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and posts current 
     createElement(HostedLegalConsentCard, {
       mode: "compact",
       preferredScope: "feature.connected-health-source",
-      source: "settings-device-sync",
+      source: "test-device-sync",
       onAccepted: mocks.onAccepted,
     }),
     { requireButton: false },
@@ -145,15 +145,18 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and posts current 
           "privacy-policy": "2026-04-29",
         },
         scope: "feature.connected-health-source",
-        source: "settings-device-sync",
+        source: "test-device-sync",
       },
       url: "/api/legal/consent/accept",
     });
     expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
   });
 
-  expect(container.textContent).not.toContain("Connect health sources");
-  expect(container.querySelector("button")).toBeNull();
+  expect(container.textContent).toContain("Murph Privacy Policy");
+  expect(container.textContent).toContain("Murph Consumer Health Data Notice");
+  expect(container.textContent).toContain("Continuing...");
+  expect(acceptButton.getAttribute("aria-busy")).toBe("true");
+  expect(acceptButton.disabled).toBe(true);
 });
 
 test("HostedLegalConsentCard records launch consent only after both checkboxes and Continue", async () => {
@@ -269,7 +272,7 @@ test("HostedLegalConsentCard marks the accept action busy while consent is recor
     createElement(HostedLegalConsentCard, {
       mode: "compact",
       preferredScope: "feature.connected-health-source",
-      source: "settings-device-sync",
+      source: "test-device-sync",
       onAccepted: mocks.onAccepted,
     }),
     { requireButton: false },
@@ -309,7 +312,7 @@ test("HostedLegalConsentCard marks the accept action busy while consent is recor
   });
 });
 
-test("HostedLegalConsentCard can keep accepted consent visible during a route handoff", async () => {
+test("HostedLegalConsentCard keeps accepted consent visible during a route handoff", async () => {
   const currentStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: false,
@@ -332,7 +335,6 @@ test("HostedLegalConsentCard can keep accepted consent visible during a route ha
     createElement(HostedLegalConsentCard, {
       acceptedPendingLabel: "Continuing...",
       initialStatus: currentStatus,
-      keepVisibleAfterAccepted: true,
       mode: "compact",
       source: "join-invite-phone-verify",
       onAccepted: mocks.onAccepted,
@@ -386,7 +388,7 @@ test("HostedLegalConsentCard keeps a retryable error visible when consent status
     createElement(HostedLegalConsentCard, {
       mode: "compact",
       preferredScope: "feature.connected-health-source",
-      source: "settings-device-sync",
+      source: "test-device-sync",
       onRequirementChange: () => {},
     }),
     { requireButton: false },
