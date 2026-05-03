@@ -19,23 +19,23 @@ export function PlanVisual({ tier }: { tier: PlanTier }) {
 
   if (tier === "pulse") {
     return (
-      <svg width="28" height="24" viewBox="0 0 42 38" fill="none" aria-hidden>
+      <svg width="28" height="28" viewBox="0 0 40 40" fill="none" aria-hidden>
         <circle cx="5" cy="5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
         <circle cx="15" cy="5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
-        <circle cx="25" cy="5" r="2.5" fill="#c4956a" fillOpacity={0.55} />
-        <circle cx="37" cy="5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
-        <circle cx="4" cy="14" r="2" fill="#b5c4a1" fillOpacity={0.3} />
-        <circle cx="14" cy="14" r="3" fill="#a07a4e" />
-        <circle cx="26" cy="14" r="3" fill="#a07a4e" />
-        <circle cx="38" cy="14" r="2" fill="#b5c4a1" fillOpacity={0.3} />
-        <circle cx="3" cy="24" r="2" fill="#b5c4a1" fillOpacity={0.3} />
-        <circle cx="13" cy="24" r="2.5" fill="#c4956a" fillOpacity={0.55} />
-        <circle cx="25" cy="24" r="3.5" fill="#8b6840" />
-        <circle cx="38" cy="24" r="2.5" fill="#c4956a" fillOpacity={0.55} />
-        <circle cx="5" cy="33" r="2" fill="#b5c4a1" fillOpacity={0.3} />
-        <circle cx="15" cy="33" r="2" fill="#b5c4a1" fillOpacity={0.3} />
-        <circle cx="25" cy="33" r="2.5" fill="#c4956a" fillOpacity={0.55} />
-        <circle cx="37" cy="33" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="25" cy="5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="35" cy="5" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="5" cy="15" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="15" cy="15" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="25" cy="15" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="35" cy="15" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="5" cy="25" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="15" cy="25" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="25" cy="25" r="2.5" fill="#c4956a" fillOpacity={0.55} />
+        <circle cx="35" cy="25" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="5" cy="35" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="15" cy="35" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="25" cy="35" r="2" fill="#b5c4a1" fillOpacity={0.3} />
+        <circle cx="35" cy="35" r="2" fill="#b5c4a1" fillOpacity={0.3} />
       </svg>
     );
   }

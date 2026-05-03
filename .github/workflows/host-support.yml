@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - blacksmith-4vcpu-ubuntu-2404
+          - ubuntu-24.04
           - macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -63,7 +63,7 @@ jobs:
 
   release-build-typecheck-linux:
     name: Release build/typecheck (ubuntu)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
@@ -102,7 +102,7 @@ jobs:
 
   release-package-coverage-linux:
     name: Release package coverage (${{ matrix.shard }})
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -159,7 +159,7 @@ jobs:
 
   release-app-verification-linux:
     name: Release app verification (ubuntu)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     env:
       MURPH_APP_VERIFY_PARALLEL: "1"
       MURPH_VERIFY_STEP_PARALLEL: "1"
@@ -183,7 +183,7 @@ jobs:
 
   release-fixture-coverage-linux:
     name: Release fixture coverage (ubuntu)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
@@ -204,7 +204,7 @@ jobs:
 
   release-checks-linux:
     name: Release checks (ubuntu)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     needs:
       - release-build-typecheck-linux
       - release-package-coverage-linux
