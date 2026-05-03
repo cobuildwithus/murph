@@ -95,19 +95,25 @@ export async function persistAssistantTurnAndSession(input: {
   }
 
   const updatedAt = new Date().toISOString()
-  const nextTarget =
-    createAssistantModelTarget({
-      ...assistantBackendTargetToProviderConfigInput(input.session.target),
-      ...(compactAssistantProviderConfigInput(input.input) ?? {}),
-    }) ?? input.session.target
+  const shouldApplyProviderConfigToSession =
+    input.providerResumeStateAction !== 'preserve-existing'
+  const nextTarget = shouldApplyProviderConfigToSession
+    ? createAssistantModelTarget({
+        ...assistantBackendTargetToProviderConfigInput(input.session.target),
+        ...(compactAssistantProviderConfigInput(input.input) ?? {}),
+      }) ?? input.session.target
+    : input.session.target
   if (nextTarget.adapter !== 'codex-cli') {
     throw new VaultCliError(
       'ASSISTANT_PROVIDER_UNSUPPORTED',
       'Assistant turn finalization only supports Codex app-server targets.',
     )
   }
-  const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
-  const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
+  const nextProviderOptions = shouldApplyProviderConfigToSession
+    ? serializeAssistantProviderSessionOptions(
+        assistantBackendTargetToProviderConfigInput(nextTarget),
+      )
+    : input.session.providerOptions
   const nextResumeState = resolveAssistantNextResumeState({
     action: input.providerResumeStateAction,
     providerSessionId: input.providerResult.providerSessionId,
