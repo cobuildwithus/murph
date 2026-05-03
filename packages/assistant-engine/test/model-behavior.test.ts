@@ -103,8 +103,9 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'Supported connect-link requests must come from explicit hosted runtime context or helper results',
+      'For supported wearable connection requests, use `vault-cli device connect <provider> --format json`',
     )
+    expect(prompt).not.toContain('Do not route supported hosted connect flows through local `device connect`')
     expect(prompt).toContain(
       'Python is available for small local scripts when it makes the task easier',
     )
@@ -112,13 +113,10 @@ describe('assistant local PDF evidence guidance', () => {
       'prefer canonical `vault-cli ... --format json` commands for Murph reads and writes',
     )
     expect(prompt).toContain(
-      'If no real link is present in the current turn, say you cannot create one right now instead of fabricating a URL',
-    )
-    expect(prompt).toContain(
       'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
     )
     expect(prompt).toContain(
-      'Only send a wearable connect link when it is present in the current turn as an actual runtime or helper result',
+      'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
     )
     expect(prompt).toContain(
       'offer to send a connection link',
@@ -139,7 +137,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
     )
     expect(prompt).toContain(
-      'Only send a wearable connect link when it is present in the current turn as an actual runtime or helper result',
+      'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
     )
   })
 
@@ -244,7 +242,7 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '5e0d3bc2e5d46f4960385370ed5c76295d8ea43669d228fa81129ade5bd6242f',
+      'f8092ae196bf4bf8687e14caa7e09a8ec0296363998b57c8c07005d8f83d2b61',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

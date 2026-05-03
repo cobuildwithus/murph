@@ -112,6 +112,9 @@ function createDeviceCommandServices() {
   }
 
   const connectResult: DeviceConnectResult = {
+    status: 'ok',
+    kind: 'device_connect_link',
+    backend: 'local-daemon',
     baseUrl: deviceBaseUrl,
     provider: 'oura',
     state: 'state_oura_01',
@@ -295,6 +298,7 @@ test('device commands route every verb through the registered device service gro
   ])
   assert.equal(connect.exitCode, null)
   assert.equal(connect.envelope.ok, true)
+  assert.equal(connect.envelope.data.backend, 'local-daemon')
   assert.equal(connect.envelope.data.openedBrowser, true)
   assert.deepEqual(calls.connect, {
     vault: vaultRoot,

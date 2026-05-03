@@ -109,7 +109,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
 
   assert.ok(contract)
   assert.match(contract, /^Murph CLI Contract:/u)
-  assert.match(contract, /Use `vault-cli` directly from the local process/u)
+  assert.match(contract, /Use `vault-cli` directly from the current runtime process/u)
   assert.match(contract, /Family Index:/u)
   assert.match(contract, /- search \(1\): docs/u)
   assert.match(contract, /- root \(1\): search/u)

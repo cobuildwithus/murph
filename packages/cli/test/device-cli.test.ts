@@ -180,6 +180,124 @@ test('device connect rejects Junction as a public connect target', async () => {
   }
 })
 
+test('device connect uses hosted CLI bridge in hosted runtime without local daemon credentials', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-connect-'))
+  const bridgeToken = 'bridge-token'
+  let requestBody: unknown = null
+  let authorization: string | undefined
+
+  const server = createServer((request, response) => {
+    authorization = request.headers.authorization
+    const chunks: Buffer[] = []
+    request.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    })
+    request.on('end', () => {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({
+        authorizationUrl: 'https://connect.example.test/whoop?state=opaque_state',
+        expiresAt: '2026-05-03T20:15:00.000Z',
+        provider: 'whoop',
+        providerLabel: 'WHOOP',
+      }))
+    })
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted bridge test.')
+    }
+
+    const result = requireData(
+      await runCli<{
+        status: 'ok'
+        kind: 'device_connect_link'
+        backend: 'hosted'
+        provider: string
+        providerLabel: string
+        authorizationUrl: string
+        expiresAt: string
+        baseUrl?: string
+        state?: string
+        openedBrowser?: boolean
+      }>(['device', 'connect', 'whoop', '--vault', vaultRoot], {
+        env: {
+          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          MURPH_HOSTED_CLI_BRIDGE_TOKEN: bridgeToken,
+          MURPH_HOSTED_CLI_BRIDGE_URL: `http://127.0.0.1:${address.port}/`,
+          OURA_CLIENT_ID: '',
+          OURA_CLIENT_SECRET: '',
+          STRAVA_CLIENT_ID: '',
+          STRAVA_CLIENT_SECRET: '',
+          WHOOP_CLIENT_ID: '',
+          WHOOP_CLIENT_SECRET: '',
+        },
+      }),
+    )
+
+    assert.equal(authorization, `Bearer ${bridgeToken}`)
+    assert.deepEqual(requestBody, { connectTarget: 'whoop' })
+    assert.equal(result.status, 'ok')
+    assert.equal(result.kind, 'device_connect_link')
+    assert.equal(result.backend, 'hosted')
+    assert.equal(result.provider, 'whoop')
+    assert.equal(result.providerLabel, 'WHOOP')
+    assert.equal(result.authorizationUrl, 'https://connect.example.test/whoop?state=opaque_state')
+    assert.equal(result.baseUrl, undefined)
+    assert.equal(result.state, undefined)
+    assert.equal(result.openedBrowser, undefined)
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('device connect in hosted runtime fails bounded when bridge is unavailable', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-missing-bridge-'))
+
+  try {
+    const result = await runCli([
+      'device',
+      'connect',
+      'whoop',
+      '--vault',
+      vaultRoot,
+    ], {
+      env: {
+        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        OURA_CLIENT_ID: '',
+        OURA_CLIENT_SECRET: '',
+        STRAVA_CLIENT_ID: '',
+        STRAVA_CLIENT_SECRET: '',
+        WHOOP_CLIENT_ID: '',
+        WHOOP_CLIENT_SECRET: '',
+      },
+    })
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.error.code, 'HOSTED_DEVICE_CONNECT_BRIDGE_UNAVAILABLE')
+      assert.doesNotMatch(result.error.message ?? '', /DEVICE_SYNC_PROVIDER_CONFIG_REQUIRED/u)
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('device provider and account list do not start the managed daemon when local credentials are absent', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-catalog-'))
 
