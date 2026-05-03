@@ -19,12 +19,15 @@ Ported the remaining production hunks and adapted focused health-metrics/query t
 Generated contract JSON schema artifacts from `packages/contracts`.
 Focused package tests and coverage passed for contracts, health-metrics, and query.
 Root `pnpm typecheck` passed touched package typechecks, then failed on unrelated dirty `apps/web/app/design/components-content.tsx` `HeartbeatButton` props.
+Security/privacy review found and fixed raw metric-sample display-qualifier promotion; targeted security re-review found no issues.
+Coverage-write added focused tests for normalized between, daily aggregate policy, and raw metric-sample exclusion.
+Task-finish reviews found and fixed current-value and rolling-window unsupported-unit comparison gaps.
 
 Now:
-Run required security/privacy, coverage-write, and task-finish audit passes.
+Run final scoped finish checks and commit.
 
 Next:
-Address audit findings if any, run final diff/redaction checks, and create a scoped commit.
+Archive this plan and create a scoped commit.
 
 Open questions (UNCONFIRMED if needed):
 None.
@@ -50,3 +53,8 @@ pnpm --dir packages/contracts test:coverage
 pnpm --dir packages/{contracts,health-metrics,query} typecheck
 pnpm test:smoke
 pnpm typecheck (blocked by unrelated apps/web HeartbeatButton onSuccess dirty state)
+pnpm --dir packages/health-metrics test:coverage (rerun after audit fixes)
+pnpm --dir packages/health-metrics typecheck (rerun after audit fixes)
+Status: completed
+Updated: 2026-05-03
+Completed: 2026-05-03

@@ -1197,6 +1197,41 @@ test("goal progress rejects rolling windows with unnormalized canonical metric p
     "metric-point:body-weight:2026-04-28:stone:0",
     "metric-point:body-weight:2026-04-29:kg:0",
   ]);
+
+  const latestUnsupported = selectMetricGoalProgress({
+    goalId: "goal_weight",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-28",
+        id: "metric-point:body-weight:2026-04-28:kg:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-28T07:00:00.000Z",
+        recordId: "weight_kg_previous",
+        sourceKind: "measurement",
+        unit: "kg",
+        value: 81,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:body-weight:2026-04-29:stone:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "weight_stone_latest",
+        sourceKind: "measurement",
+        unit: "stone",
+        value: 12,
+      }),
+    ],
+    target,
+  });
+
+  assert.equal(latestUnsupported.status, "unsupported");
+  assert.equal(latestUnsupported.currentValue, null);
+  assert.equal(latestUnsupported.deltaToTarget, null);
+  assert.deepEqual(latestUnsupported.selectedPointIds.sort(), [
+    "metric-point:body-weight:2026-04-28:kg:0",
+    "metric-point:body-weight:2026-04-29:stone:0",
+  ]);
 });
 
 test("goal progress surfaces rolling-window stale and low-sample warnings", () => {
