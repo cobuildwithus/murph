@@ -136,17 +136,11 @@ protocol:
   - planned driving, operating machinery, heat, or sauna during fast
   - prior fast adverse symptoms or refeed symptoms
   stopConditions:
-  - Stop the fast and seek appropriate care for fainting, near-fainting, confusion, neurologic symptoms, chest pain or pressure, unusual shortness of breath, significant palpitations, severe weakness, or severe or persistent dizziness.
-  - Stop or do not start if fever, acute illness, vomiting, diarrhea, dehydration, or inability to keep fluids down occurs.
-  - If glucose monitoring is part of a clinician-directed plan, follow that plan; clinically significant low glucose, very high glucose, ketones, or symptoms of hypoglycemia or ketoacidosis are not self-experiment problems.
+  - Stop the fast and seek care for fainting, confusion, seizure, neurologic symptoms, chest pain, breathing difficulty, palpitations, irregular heartbeat, severe weakness, or severe dizziness.
+  - Stop if fever, vomiting, diarrhea, or inability to keep fluids occurs.
+  - Follow any clinician-defined glucose, ketone, or lab stop threshold; stop for hypoglycemia, ketoacidosis symptoms, severe cramps, or electrolyte warning signs.
   - After refeeding, seek care for confusion, ataxia, severe weakness, new swelling, breathlessness, palpitations, or other severe symptoms.
-  - End the experiment if fasting increases restriction urges, binge/restrict cycling, compensatory motives, anxiety, or fixation around food or body weight.
-  - Stop the fast and seek urgent care for seizure, severe headache with confusion or repeated vomiting, new irregular heartbeat, severe or persistent muscle cramps/spasms with weakness, or any concern for electrolyte disturbance.
-  - Stop or do not start if you have known low sodium, potassium, phosphate, or magnesium; abnormal kidney or liver results; or a clinician lab concern before the fast or during the fast.
-  - Stop and seek care for new double vision, trouble walking, gait instability, ataxia, eye-movement symptoms, or new confusion during the fast or after refeeding.
-  - Stop and seek care for one-sided leg swelling or pain, sudden chest pain, or shortness of breath, especially after long travel or prolonged immobility.
-  - 'Stop or postpone if safe logistics fail: no fluid access, no rest access, dizziness or confusion while needing to drive, operate machinery, supervise dependents alone, unavoidable heat exposure, or no practical way to stop early.'
-  - Stop and seek clinician guidance for new severe gout-like joint pain or a severe suspected gout flare.
+  - End the experiment if fasting triggers restriction urges, binge/restrict cycling, or compensatory motives.
 testPlans:
 - planId: acute-fast-tolerance-14d
   durationDays: 14
@@ -1355,28 +1349,15 @@ safety:
   - prolonged_immobility
   stopIf:
   - fainting_or_near_fainting
-  - confusion_or_neurologic_symptoms
-  - chest_pain_or_pressure
-  - unusual_shortness_of_breath
-  - significant_palpitations
-  - severe_weakness
-  - severe_or_persistent_dizziness
-  - fever_vomiting_diarrhea_or_dehydration
-  - inability_to_keep_fluids_down
-  - clinician_defined_glucose_or_ketone_stop_threshold
-  - hypoglycemia_or_ketoacidosis_symptoms
+  - confusion_seizure_or_neurologic_symptoms
+  - chest_pain_palpitations_or_breathing_difficulty
+  - severe_weakness_or_persistent_dizziness
+  - fever_vomiting_or_cannot_keep_fluids
+  - hypoglycemia_ketoacidosis_or_clinician_threshold
+  - severe_cramps_or_electrolyte_warning_signs
   - severe_symptoms_after_refeeding
-  - new_swelling_breathlessness_ataxia_or_palpitations_after_refeed
-  - restriction_urges_binge_restrict_cycle_or_compensatory_fasting_motives
-  - seizure_or_severe_headache_with_confusion_or_repeated_vomiting
-  - new_irregular_heartbeat
-  - severe_muscle_cramps_spasms_or_electrolyte_warning_symptoms
-  - known_low_sodium_potassium_phosphate_or_magnesium
-  - abnormal_kidney_liver_or_clinician_lab_concern
-  - double_vision_gait_instability_ataxia_or_eye_movement_symptoms
-  - one_sided_leg_swelling_or_pain
-  - unsafe_logistics_no_fluids_rest_transport_or_heat_escape
-  - new_severe_gout_like_joint_pain
+  - restriction_urges_or_compensatory_fasting
+  - unsafe_logistics_or_lost_fluid_access
   notes:
   - Not a treatment for diabetes, hypertension, obesity, cancer, or any medical condition.
   - Do not change medication, override clinician instructions, or self-manage glucose-lowering drugs.
@@ -1385,6 +1366,8 @@ safety:
   - High-risk refeeding is clinical care — no Murph electrolyte, thiamine, or calorie prescriptions.
   - Hydrated means drinking to thirst — not fluid restriction or forced water-loading.
   - Wearables, CGM, BP, and labs never override symptoms, red flags, or clinician guidance.
+  - One-sided leg swelling or pain after immobility or travel — seek care.
+  - New severe joint pain may signal gout flare — seek care.
 researchCoverage:
   corpusStats:
     canonicalLedgerRecords: 334

@@ -1,7 +1,6 @@
 import type {
   AgentmailFetch,
 } from '@murphai/operator-config/agentmail-runtime'
-import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type { TelegramFetchImplementation } from '@murphai/operator-config/telegram-runtime'
 import {
@@ -100,9 +99,14 @@ export interface AssistantDeliveryCandidate {
   target: string
 }
 
+export interface AssistantChannelAutoReplyEligibility {
+  source: string | null
+  threadIsDirect: boolean | null
+}
+
 export interface AssistantChannelAdapter {
   channel: 'telegram' | 'linq' | 'email'
-  canAutoReply: (capture: InboxShowResult['capture']) => string | null
+  canAutoReply: (input: AssistantChannelAutoReplyEligibility) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef
     deliveryKind?: AssistantBindingDeliveryKind | null

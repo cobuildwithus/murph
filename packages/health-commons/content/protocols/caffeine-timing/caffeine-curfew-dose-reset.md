@@ -113,13 +113,11 @@ protocol:
   - late exercise
   - illness, travel, or unusual stress
   stopConditions:
-  - Stop the experiment and return to a previously tolerated pattern, or taper with guidance, if headache, fatigue, low mood, sleepiness, or concentration problems become severe or impair driving, work, caregiving, or safety-critical tasks.
-  - Do not drive, operate machinery, provide safety-critical care, or do other high-risk tasks when withdrawal, sleepiness, anxiety, or poor sleep is impairing alertness.
-  - Stop and seek urgent medical guidance for chest pain, fainting, rapid or erratic heartbeat, severe palpitations, seizure, severe vomiting or diarrhea, confusion, disorientation, neurologic symptoms, thunderclap headache, or suspected caffeine overdose.
-  - Do not run this as an unsupervised experiment during pregnancy, while trying to conceive, during lactation, for children or adolescents, or when managing persistent insomnia, suspected sleep apnea, or another sleep disorder without clinician guidance.
-  - Pause and get clinician or pharmacist guidance if panic symptoms, severe anxiety, mania or hypomania symptoms, uncontrolled hypertension, arrhythmia, concerning blood-pressure readings, lithium treatment, fluvoxamine, ciprofloxacin or other quinolone antibiotics, caffeine-containing medicines, or other medication interactions are present.
-  - Pause or end the experiment if sleep is clearly worsening after the initial withdrawal period, if symptoms are impairing daytime safety or functioning, or if tracking caffeine creates distress or rumination.
-  - If a clinician-guided lactation variant is being used, pause and get guidance if the infant develops unusual fussiness, jitteriness, or poor sleep.
+  - Stop or taper if withdrawal symptoms impair driving, work, caregiving, or safety-critical tasks; do not drive or operate machinery while impaired.
+  - Stop and seek urgent care for chest pain, fainting, seizure, severe palpitations, confusion, neurologic symptoms, thunderclap headache, or suspected caffeine overdose.
+  - Do not run unsupervised during pregnancy, lactation, for children, or with persistent insomnia or sleep apnea without clinician guidance.
+  - Pause for clinician guidance if panic, mania, hypertension, arrhythmia, or medication interactions are present.
+  - End the experiment if sleep worsens after the withdrawal period, daytime function is impaired, or tracking creates distress.
 testPlans:
 - planId: caffeine-curfew-21d
   durationDays: 21
@@ -1067,19 +1065,13 @@ safety:
   - energy_drinks_or_stimulant_blends
   - pure_or_concentrated_caffeine_products
   stopIf:
-  - chest_pain_fainting_rapid_or_erratic_heartbeat_or_severe_palpitations
-  - seizure_confusion_disorientation_or_stupor
-  - severe_vomiting_or_diarrhea_after_caffeine_or_suspected_overdose
-  - thunderclap_headache_or_neurologic_symptoms
-  - severe_or_impairing_withdrawal_symptoms
-  - unsafe_daytime_sleepiness_or_safety_critical_alertness_impairment
-  - panic_symptoms_or_severe_anxiety
-  - new_or_worsening_mania_hypomania_agitation_or_unusually_elevated_mood
-  - blood_pressure_symptoms_or_readings_outside_user_specific_safe_range
-  - medication_interaction_or_new_caffeine_containing_medicine
-  - sleep_clearly_worsens_after_initial_withdrawal_period_or_daytime_function_is_impaired
-  - persistent_insomnia_worsening_with_daytime_impairment
-  - experiment_creates_tracking_anxiety_or_rumination
+  - chest_pain_fainting_seizure_or_neurologic_symptoms
+  - severe_vomiting_or_suspected_caffeine_overdose
+  - severe_withdrawal_or_unsafe_daytime_sleepiness
+  - panic_severe_anxiety_mania_or_unstable_mood
+  - blood_pressure_concern_or_medication_interaction
+  - sleep_worsens_or_daytime_function_impaired
+  - tracking_anxiety_or_rumination
   notes:
   - Wellness experiment — not treatment for insomnia, sleep apnea, or caffeine dependence.
   - Pure caffeine powder, concentrate, pills, energy shots, and pre-workouts are excluded.

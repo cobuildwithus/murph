@@ -87,12 +87,12 @@ protocol:
     - "Log protein grams, g/kg, energy if available, fiber, saturated fat, source mix, satiety, GI comfort, and training changes."
     - "Review first 2 weeks; lower or pause if target crowds out fiber, worsens GI symptoms, or feels unsustainable."
   tips:
-  - Start at the lower end of the band when baseline intake is unknown.
-  - Spread protein across meals only if it helps adherence or satiety — distribution is not mandatory.
-  - Keep fiber, plants, legumes, whole grains, vegetables, fruit, and fluids visible in the plan.
-  - Lean toward lower-saturated-fat sources when lipids are a concern.
-  - Same tracking app or logging method throughout baseline and intervention.
-  - No new training program, deficit, supplement stack, or weight-loss plan unless intentionally part of the experiment.
+  - Choose denominator first: actual, adjusted, goal, or clinician-specified body weight; then calculate grams.
+  - Start at 1.5–1.6 g/kg/day unless you have a clear reason for 1.8–2.0.
+  - Build meals around eggs, Greek yogurt, fish, poultry, tofu, tempeh, beans, lentils, lean meat, and protein powder only for gaps.
+  - Keep fiber visible: legumes, whole grains, vegetables, fruit, seeds, and fluids in the daily plan.
+  - Do not stack new training, calorie deficit, creatine, meal replacements, keto, or supplement-heavy shakes unless declared.
+  - Do not treat assigned target as exposure; log actual grams, g/kg, fiber, source mix, and GI comfort.
   keepInMind:
   - This protocol tests achieved daily protein intake; an assigned target that is not reached is not the same exposure.
   - The best-supported body-composition signals come mainly from energy-restriction or adjacent training contexts, so weight-stable users should keep expectations conservative.
@@ -1373,23 +1373,14 @@ safety:
   - under_18_or_pediatric
   - target_above_2_g_per_kg_per_day
   stopIf:
-  - new_or_worsening_flank_pain
-  - blood_in_urine
-  - gout_flare_symptoms
+  - flank_pain_blood_in_urine_or_urinary_symptoms
+  - gout_flare_or_sudden_hot_swollen_joint
   - severe_or_persistent_digestive_symptoms
   - dehydration_or_unusual_weakness
-  - concerning_kidney_liver_uric_acid_or_lipid_lab_change
-  - restrictive_eating_distress_or_disordered_eating_return
-  - clinician_advises_against_high_protein
-  - fiber_or_plant_food_displacement_required_to_hit_target
-  - supplement_stacking_or_intake_above_2_0_g_per_kg_day
-  - painful_urination_marked_urinary_change_or_fever_with_urinary_symptoms
-  - sudden_hot_swollen_painful_joint_or_gout_flare
-  - severe_or_persistent_constipation_diarrhea_nausea_vomiting_reflux_bloating_or_abdominal_pain
-  - new_reduced_egfr_rising_creatinine_bun_or_urea_new_albuminuria_or_proteinuria
-  - concerning_uric_acid_ldl_triglyceride_liver_enzyme_or_bilirubin_change
-  - new_pregnancy_possible_pregnancy_lactation_or_postpartum_nutrition_context
-  - new_clinician_prescribed_diet_or_protein_limit
+  - concerning_kidney_liver_or_lipid_lab_change
+  - restrictive_eating_or_disordered_eating_return
+  - clinician_advises_against_or_prescribes_protein_limit
+  - supplement_stacking_or_intake_above_2_g_per_kg_day
   notes:
   - Wellness experiment only — not treatment for obesity, diabetes, CKD, gout, stones, liver disease, or cardiovascular risk.
   - Safety boundaries are stricter than efficacy claims — direct evidence is mixed and population-specific.
@@ -1397,6 +1388,8 @@ safety:
   - Use 1.8–2.0 g/kg/day only with a negative screen, appropriate denominator, preserved fiber, and documented rationale — never exceed 2.0.
   - Eating-disorder, lactation/postpartum, trying-to-conceive, and under-18 contexts route to clinician guidance.
   - Supplement-heavy, ketogenic, bodybuilding/cutting, bariatric, and frailty contexts are separate variants, not this base protocol.
+  - Pregnancy, lactation, or postpartum nutrition context routes to clinician guidance.
+  - Do not displace fiber, plants, legumes, whole grains, or fruit to hit the target.
 researchCoverage:
   bibliographyKey: source_artifact:high-protein-intake-bibliography
   corpusStats:

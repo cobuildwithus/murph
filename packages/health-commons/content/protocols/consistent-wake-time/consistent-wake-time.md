@@ -292,11 +292,12 @@ protocol:
     - "Review weekly: wake variability, days inside window, sleep duration, sleepiness, naps, and confounders."
     - "Stop or redesign if the target creates sleep debt, unsafe sleepiness, or mood destabilization."
   tips:
-    - "Realistic beats aspirational — a later consistent window is safer than one that creates sleep debt."
-    - "Pair wake target with a bedtime guardrail so consistency does not become sleep restriction."
-    - "Wearable for convenience, but keep a diary field for final wake time and time out of bed."
-    - "Hold caffeine, alcohol, screens, naps, training, stress, and travel stable during the test."
-    - "Weekends can match, but recovery sleep wins when weekday sleep was too short."
+    - "Start with a 60-minute wake window you can keep after a normal bedtime."
+    - "Plan lights-out backward from wake time; move bedtime earlier before tightening the morning window."
+    - "On waking, get out of bed, start light, movement, and breakfast cues within the window."
+    - "After short sleep, illness, caregiving, or jet lag, protect recovery sleep and log a safety override."
+    - "Skip late caffeine, alcohol, naps, hard training, long travel, and new sleep aids during the run."
+    - "Do not celebrate lower wake variability if sleep duration, sleepiness, or mood worsens."
   keepInMind:
     - "This is not a treatment for chronic insomnia, sleep apnea, narcolepsy, circadian rhythm sleep-wake disorders, bipolar mood destabilization, or shift-work fatigue."
     - "The strongest direct source used both bedtime and wake-time windows, so evidence for wake-time-only effects is limited."

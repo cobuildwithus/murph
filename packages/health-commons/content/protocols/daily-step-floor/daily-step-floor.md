@@ -71,11 +71,12 @@ protocol:
     - "Log steps, floor hit, device gaps, intentional walking, pain, symptoms, recovery, sleep, illness, terrain, and confounders."
     - "Review weekly; lower, slow, or stop if pain, recovery, safety, sleep, or life friction worsens."
   tips:
-  - First floor should be repeatable, not heroic — a sustainable number beats pushing through symptoms.
-  - Use weekly median plus floor-hit days; one outlier day is not a signal.
-  - Same device throughout. Switched or forgot it? Flag the day, do not compare the number.
-  - This tests total daily steps, not cadence, MVPA, or a public guideline threshold.
-  - Hold exercise programs, diet efforts, meds, travel, and illness stable where feasible.
+  - Baseline first: wear the same tracker 7–14 days before raising your floor.
+  - Set a floor from baseline: baseline-only, +1,000–2,000, 6k, 8k, 10k, 12k, or a ramp.
+  - Fill gaps early with errands, indoor laps, walking breaks, commute walks, or one easy planned walk.
+  - Use fallback days for poor sleep, illness, pain, heat, travel, unsafe routes, or recovery debt.
+  - Do not turn the floor into cadence, MVPA, races, social challenges, or a new training plan.
+  - Compare weekly median and floor-hit days; flag device gaps, switched devices, or phone-left-behind days.
   safetyNotes:
   - 'For low baseline activity, frailty, injury recovery, pregnancy/postpartum status, acute illness, pain, or cardiopulmonary symptoms, use baseline-only observation, a lower floor, a slower ramp, or clinician-guided adaptation rather than forcing a fixed public target. Source keys: source_artifact:pmid-29961442; source_artifact:healthgov-physical-activity-guidelines-americans-2018-11-12; source_artifact:govuk-physical-activity-guidelines-2019-09-07; source_artifact:who-physical-activity-guidelines-2020-11-25.'
   keepInMind:
