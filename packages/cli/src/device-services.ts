@@ -128,6 +128,12 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     )
   }
 
+  function hasExplicitInputControlPlaneTarget(input: {
+    baseUrl?: string
+  }): boolean {
+    return typeof input.baseUrl === 'string' && input.baseUrl.trim().length > 0
+  }
+
   function readLocalProviderConfig() {
     try {
       const configs = readConfiguredDeviceSyncProviderConfigs(process.env)
@@ -333,7 +339,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
   function resolveDeviceConnectAuthority(input: {
     baseUrl?: string
   }): DeviceConnectAuthority {
-    if (hasExplicitControlPlaneTarget(input)) {
+    if (hasExplicitInputControlPlaneTarget(input)) {
       return {
         createConnectLink: connectViaLocalDaemon,
       }
@@ -434,7 +440,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       kind: 'device_connect_link',
       backend: 'local-daemon',
       baseUrl: client.baseUrl,
-      provider: result.provider,
+      provider: input.provider,
       state: result.state,
       expiresAt: result.expiresAt,
       authorizationUrl: result.authorizationUrl,

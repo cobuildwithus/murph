@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createConnection } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -96,8 +97,60 @@ test("hosted CLI runtime bridge rejects bad tokens and model-owned return metada
       },
     );
     assert.equal(override.status, 400);
-    assert.match(await override.text(), /Unrecognized key/u);
+    const overrideText = await override.text();
+    assert.match(overrideText, /HOSTED_CLI_BRIDGE_REQUEST_INVALID/u);
+    assert.doesNotMatch(overrideText, /messagingReturnTarget/u);
   } finally {
+    await bridge.stop();
+  }
+});
+
+test("hosted CLI runtime bridge stop destroys partial authenticated requests", async () => {
+  const bridge = await startHostedCliRuntimeBridge({
+    deviceSyncPort: createDeviceSyncPortStub(),
+  });
+  assert.ok(bridge);
+  const bridgeUrl = new URL(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]);
+  const socket = createConnection({
+    host: bridgeUrl.hostname,
+    port: Number(bridgeUrl.port),
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    socket.on("error", () => {});
+    socket.write([
+      `POST ${HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH} HTTP/1.1`,
+      `Host: ${bridgeUrl.host}`,
+      `Authorization: Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+      "Content-Type: application/json",
+      "Content-Length: 8192",
+      "",
+      "{\"connectTarget\":\"whoop\"",
+    ].join("\r\n"));
+
+    const socketClosed = new Promise<void>((resolve) => {
+      socket.once("close", () => resolve());
+      socket.once("error", () => resolve());
+    });
+    await Promise.race([
+      bridge.stop(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out stopping hosted CLI bridge.")), 1_000)
+      ),
+    ]);
+    await Promise.race([
+      socketClosed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out closing hosted CLI bridge socket.")), 1_000)
+      ),
+    ]);
+    assert.equal(socket.destroyed, true);
+  } finally {
+    socket.destroy();
     await bridge.stop();
   }
 });

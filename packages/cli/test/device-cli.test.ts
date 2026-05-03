@@ -65,6 +65,8 @@ const supportsLoopbackListen = (() => {
   return probe.status === 0
 })()
 
+const deviceControlPlaneTest = supportsLoopbackListen ? test.sequential : test.skip
+
 test.sequential('device daemon commands stay in the generated CLI schema', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-'))
 
@@ -230,6 +232,8 @@ test('device connect uses hosted CLI bridge in hosted runtime without local daem
           MURPH_HOSTED_RUNTIME_PROCESS: '1',
           MURPH_HOSTED_CLI_BRIDGE_TOKEN: bridgeToken,
           MURPH_HOSTED_CLI_BRIDGE_URL: `http://127.0.0.1:${address.port}/`,
+          DEVICE_SYNC_BASE_URL: 'http://127.0.0.1:1',
+          DEVICE_SYNC_CONTROL_TOKEN: 'ambient-local-token',
           OURA_CLIENT_ID: '',
           OURA_CLIENT_SECRET: '',
           STRAVA_CLIENT_ID: '',
@@ -264,6 +268,95 @@ test('device connect uses hosted CLI bridge in hosted runtime without local daem
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
+
+deviceControlPlaneTest(
+  'local daemon connect reports the requested mapped connect target',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-mapped-connect-'))
+    let connectBody: Record<string, unknown> | null = null
+    const server = createServer(async (request, response) => {
+      const requestUrl = new URL(
+        request.url ?? '/',
+        'http://127.0.0.1:8788',
+      )
+
+      if (
+        request.method === 'POST' &&
+        requestUrl.pathname === '/providers/junction/connect'
+      ) {
+        connectBody = await readJsonBody(request)
+        respondJson(response, 200, {
+          provider: 'junction',
+          state: 'state_garmin_01',
+          expiresAt: '2026-03-17T13:00:00.000Z',
+          authorizationUrl: 'https://junction.test/connect/garmin?state=state_garmin_01',
+        })
+        return
+      }
+
+      respondJson(response, 404, {
+        error: {
+          code: 'NOT_FOUND',
+          message: `Unexpected route ${request.method ?? 'GET'} ${requestUrl.pathname}`,
+        },
+      })
+    })
+
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for mapped connect test.')
+    }
+
+    try {
+      const connect = requireData(
+        await runCli<{
+          backend: 'local-daemon'
+          baseUrl: string
+          provider: string
+          authorizationUrl: string
+        }>([
+          'device',
+          'connect',
+          'garmin',
+          '--vault',
+          vaultRoot,
+          '--base-url',
+          `http://127.0.0.1:${address.port}`,
+        ], {
+          env: {
+            JUNCTION_API_KEY: 'sk_us_junction-test',
+            JUNCTION_CLIENT_USER_ID_SECRET: 'junction-client-user-id-secret',
+            JUNCTION_ENV: 'sandbox',
+            JUNCTION_PROVIDER_FILTER: 'garmin',
+            JUNCTION_REGION: 'us',
+            MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+          },
+        }),
+      )
+
+      assert.equal(connect.backend, 'local-daemon')
+      assert.equal(connect.provider, 'garmin')
+      assert.equal(connect.authorizationUrl.includes('state_garmin_01'), true)
+      assert.deepEqual(connectBody, {
+        sourceProviderSlug: 'garmin',
+      })
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
 
 test('device connect in hosted runtime fails bounded when bridge is unavailable', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-missing-bridge-'))
@@ -596,8 +689,6 @@ test('device provider and account list reuse a healthy managed daemon without an
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
-
-const deviceControlPlaneTest = supportsLoopbackListen ? test.sequential : test.skip
 
 deviceControlPlaneTest(
   'device CLI commands route through the local device sync control plane',
