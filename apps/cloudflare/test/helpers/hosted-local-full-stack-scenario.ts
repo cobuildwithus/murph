@@ -160,6 +160,7 @@ export async function startHostedLocalFullStackScenario(input: {
     );
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
+    const usePreparedRunnerBundle = baseEnvironment.MURPH_DEV_SKIP_RUNNER_BUNDLE === "1";
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...baseEnvironment,
       ...hostedAssistantDevEnv,
@@ -179,7 +180,7 @@ export async function startHostedLocalFullStackScenario(input: {
       HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
       MURPH_DEV_FORCE_RESET_LOCAL_DB: "1",
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
-      MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
+      ...(usePreparedRunnerBundle ? { MURPH_DEV_SKIP_RUNNER_BUNDLE: "1" } : {}),
       MURPH_DEV_WEB_PORT: String(webPort),
       MURPH_DEV_WORKER_HOST: "0.0.0.0",
       MURPH_DEV_WORKER_PORT: String(workerPort),

@@ -4,6 +4,7 @@ import {
   rawImportManifestSchema,
   safeParseContract,
   type ContractSchema,
+  type RawImportManifest,
   type VaultFamilyId,
   type VaultFrontmatterFamilyDescriptor,
   type VaultJsonValidationFamilyDescriptor,
@@ -767,7 +768,7 @@ async function validateRawManifestFile(
   const isInboxAttachmentRecoveryManifest =
     isEnvelopeBasedInboxRawPath(relativePath)
     && expectedRawDirectory.endsWith("/attachments");
-  const contractResult = safeParseContract(rawImportManifestSchema, manifest);
+  const contractResult = safeParseContract<RawImportManifest>(rawImportManifestSchema, manifest);
 
   if (!contractResult.success && !isInboxAttachmentRecoveryManifest) {
     issues.push(
