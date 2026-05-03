@@ -41,8 +41,6 @@ import {
   HostedRawEmailMessageMissingError,
 } from "./events/email.ts";
 
-const CONVERSATION_CAPTURE_PERSIST_FAILED_REASON =
-  "conversation-import.capture-persist-failed";
 const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
@@ -84,7 +82,6 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 
 export interface HostedConversationMailboxLocalImportResult {
   captureId: string | null;
-  deduped: boolean;
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -132,13 +129,6 @@ export type HostedConversationMailboxImportOutcome =
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
       status: "imported";
-    }
-  | {
-      afterCheckpoint?: (() => Promise<void>) | null;
-      captureId: string | null;
-      metrics: HostedConversationWakeMetrics;
-      reasonCode: "capture.deduped";
-      status: "skipped";
     }
   | {
       reasonCode: string;
@@ -313,7 +303,6 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
   return {
     captureId: result.capture.captureId,
-    deduped: result.capture.deduped,
     metrics: result.metrics,
   };
 }

@@ -863,11 +863,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return createAdvancingSkipDecision(autoReplySkipReason)
   }
 
-  const preparedInput = await prepareAssistantAutoReplyInputWithEvents({
-    inputs: promptInputs,
-    onEvent: input.onEvent,
-    vault: input.vault,
-  })
+  const preparedInput = await (
+    input.onEvent
+      ? prepareAssistantAutoReplyInput(promptInputs, input.vault, {
+          onEvent: input.onEvent,
+        })
+      : prepareAssistantAutoReplyInput(promptInputs, input.vault)
+  )
   if (preparedInput.kind === 'defer') {
     return createDeferredSkipDecision(preparedInput.reason)
   }
@@ -1031,18 +1033,6 @@ function createAssistantAutoReplyPrimaryInput(
     source: input.source,
     text: input.text,
   }
-}
-
-function prepareAssistantAutoReplyInputWithEvents(input: {
-  inputs: readonly AssistantAutoReplyPromptInput[]
-  onEvent?: (event: AssistantRunEvent) => void
-  vault: string
-}): Promise<Awaited<ReturnType<typeof prepareAssistantAutoReplyInput>>> {
-  return input.onEvent
-    ? prepareAssistantAutoReplyInput(input.inputs, input.vault, {
-        onEvent: input.onEvent,
-      })
-    : prepareAssistantAutoReplyInput(input.inputs, input.vault)
 }
 
 async function executeAssistantAutoReply(input: {
@@ -1238,11 +1228,13 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       signal: admissionInput.signal,
       vault: input.vault,
     })
-    const preparedInput = await prepareAssistantAutoReplyInputWithEvents({
-      inputs: shownAcceptedInput,
-      onEvent: input.onEvent,
-      vault: input.vault,
-    })
+    const preparedInput = await (
+      input.onEvent
+        ? prepareAssistantAutoReplyInput(shownAcceptedInput, input.vault, {
+            onEvent: input.onEvent,
+          })
+        : prepareAssistantAutoReplyInput(shownAcceptedInput, input.vault)
+    )
     if (preparedInput.kind !== 'ready') {
       throw new AssistantActiveTurnInputBudgetExceededError(
         preparedInput.reason,

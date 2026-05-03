@@ -351,6 +351,7 @@ function createPromptInput(input: {
     receivedAt: parsedCapture.receivedAt,
     replyTarget: null,
     source: parsedCapture.source,
+    sourceMetadata: null,
     telegramMetadata: input.telegramMetadata ?? null,
     text: parsedCapture.text,
   }
